@@ -40,3 +40,18 @@ def git_reset(workspace_path: Path) -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+def git_get_hash(workspace_path: Path, short: bool = True) -> str:
+    """获取当前 commit hash。"""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short" if short else "HEAD"],
+            cwd=str(workspace_path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return ""

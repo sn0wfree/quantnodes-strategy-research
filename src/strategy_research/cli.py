@@ -429,6 +429,188 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """执行 run 命令 - 运行回测。"""
+    path = Path(args.path).resolve()
+
+    # 检查工作区
+    if not (path / "config.yaml").exists():
+        print(f"❌ 不是有效的工作区: {path}")
+        return 1
+
+    # 读取 config.yaml
+    try:
+        import yaml
+    except ImportError:
+        print("❌ 需要安装 pyyaml: pip install pyyaml")
+        return 1
+
+    config_path = path / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    strategy_name = args.strategy
+    if not strategy_name:
+        strategy_name = config.get("workspace", {}).get("default_strategy")
+        if not strategy_name:
+            print("❌ 未指定策略名称，请使用 --strategy <name>")
+            return 1
+
+    from strategy_research.core.backtest import run_backtest
+    result = run_backtest(
+        workspace_path=path,
+        strategy_name=strategy_name,
+        action=args.action or "manual",
+        description=args.description or "",
+        timeout=args.timeout,
+    )
+
+    if result["success"]:
+        print(f"✅ 回测完成: {result['run']}")
+        metrics = result["metrics"]
+        print(f"   calmar: {metrics.get('calmar', 'N/A')}")
+        print(f"   sharpe: {metrics.get('sharpe', 'N/A')}")
+        print(f"   max_dd: {metrics.get('max_dd', 'N/A')}")
+        print(f"   ann_return: {metrics.get('ann_return', 'N/A')}")
+    else:
+        print(f"❌ 回测失败: {result['error'][:200]}")
+        return 1
+
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """执行 validate 命令 - 验证因子。"""
+    path = Path(args.path).resolve()
+
+    # 检查工作区
+    if not (path / "config.yaml").exists():
+        print(f"❌ 不是有效的工作区: {path}")
+        return 1
+
+    # 读取 config.yaml
+    try:
+        import yaml
+    except ImportError:
+        print("❌ 需要安装 pyyaml: pip install pyyaml")
+        return 1
+
+    config_path = path / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    strategy_name = args.strategy
+    if not strategy_name:
+        strategy_name = config.get("workspace", {}).get("default_strategy")
+        if not strategy_name:
+            print("❌ 未指定策略名称，请使用 --strategy <name>")
+            return 1
+
+    factor_code = args.factor
+    if not factor_code:
+        print("❌ 请指定因子表达式，例如: --factor 'ts_return(close, 20)'")
+        return 1
+
+    import pandas as pd
+    from strategy_research.core.factor_validate import validate_factor
+
+    # 加载价格数据 (简单示例: 从 CSV 加载)
+    prices_file = path / "data" / "prices.csv"
+    if not prices_file.exists():
+        print(f"❌ 价格数据不存在: {prices_file}")
+        print("   请将价格数据保存到 data/prices.csv (index=date, columns=assets)")
+        return 1
+
+    prices = pd.read_csv(prices_file, index_col=0, parse_dates=True)
+
+    # 验证因子
+    result = validate_factor(
+        factor_code=factor_code,
+        prices=prices,
+        strategy_name=strategy_name,
+        source=args.source or "cli",
+    )
+
+    print(f"\n📊 因子验证结果: {factor_code}")
+    print(f"   通过: {'✓' if result['passed'] else '❌'}")
+    print(f"   IC mean: {result['ic_mean']:.4f}")
+    print(f"   IR: {result['ir']:.4f}")
+    print(f"   Rank IC: {result['rank_ic_mean']:.4f}")
+    print(f"   综合评分: {result['overall_score']:.4f}")
+
+    if result["fail_reasons"]:
+        print(f"\n   失败原因:")
+        for reason in result["fail_reasons"]:
+            print(f"     - {reason}")
+
+    if result["scores"]:
+        print(f"\n   6 维评分:")
+        for k, v in result["scores"].items():
+            print(f"     {k}: {v:.4f}")
+
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    """执行 list 命令 - 列出实验。"""
+    path = Path(args.path).resolve()
+
+    # 检查工作区
+    if not (path / "config.yaml").exists():
+        print(f"❌ 不是有效的工作区: {path}")
+        return 1
+
+    # 读取 config.yaml
+    try:
+        import yaml
+    except ImportError:
+        print("❌ 需要安装 pyyaml: pip install pyyaml")
+        return 1
+
+    config_path = path / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    strategy_name = args.strategy
+    if not strategy_name:
+        strategy_name = config.get("workspace", {}).get("default_strategy")
+        if not strategy_name:
+            print("❌ 未指定策略名称，请使用 --strategy <name>")
+            return 1
+
+    from strategy_research.core.backtest import get_experiment_history, get_best_experiment
+
+    experiments = get_experiment_history(path, strategy_name, limit=args.limit)
+
+    if not experiments:
+        print(f"📭 没有实验记录")
+        return 0
+
+    print(f"\n📋 实验记录 ({strategy_name}):")
+    print(f"{'run':<12} {'action':<20} {'calmar':<10} {'sharpe':<10} {'status':<10} {'description'}")
+    print("-" * 80)
+
+    for exp in experiments:
+        run = exp.get("run", "")
+        action = exp.get("action", "")
+        calmar = exp.get("calmar", "N/A")
+        sharpe = exp.get("sharpe", "N/A")
+        status = exp.get("status", "")
+        desc = exp.get("description", "")
+
+        # 状态标记
+        status_mark = "✓" if status == "keep" else "✗" if status == "discard" else "○"
+
+        print(f"{run:<12} {action:<20} {calmar:<10} {sharpe:<10} {status_mark} {desc}")
+
+    # 显示最佳实验
+    best = get_best_experiment(path, strategy_name)
+    if best:
+        print(f"\n🏆 最佳实验: {best.get('run')} (calmar={best.get('calmar')})")
+
+    return 0
+
+
 # ============================================================
 # Main CLI
 # ============================================================
@@ -456,6 +638,27 @@ def main() -> int:
     reproduce_parser.add_argument("run", nargs="?", help="Run 名称 (例如: run_0001)")
     reproduce_parser.add_argument("--strategy", "-s", help="策略名称")
 
+    # run
+    run_parser = subparsers.add_parser("run", help="运行回测")
+    run_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    run_parser.add_argument("--strategy", "-s", help="策略名称")
+    run_parser.add_argument("--action", "-a", help="行动类型")
+    run_parser.add_argument("--description", "-d", help="描述")
+    run_parser.add_argument("--timeout", "-t", type=int, default=300, help="超时时间 (秒)")
+
+    # validate
+    validate_parser = subparsers.add_parser("validate", help="验证因子")
+    validate_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    validate_parser.add_argument("--strategy", "-s", help="策略名称")
+    validate_parser.add_argument("--factor", "-f", help="因子表达式")
+    validate_parser.add_argument("--source", help="因子来源")
+
+    # list
+    list_parser = subparsers.add_parser("list", help="列出实验")
+    list_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    list_parser.add_argument("--strategy", "-s", help="策略名称")
+    list_parser.add_argument("--limit", "-l", type=int, default=20, help="显示数量")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -464,6 +667,12 @@ def main() -> int:
         return cmd_status(args)
     elif args.command == "reproduce":
         return cmd_reproduce(args)
+    elif args.command == "run":
+        return cmd_run(args)
+    elif args.command == "validate":
+        return cmd_validate(args)
+    elif args.command == "list":
+        return cmd_list(args)
     else:
         parser.print_help()
         return 0
