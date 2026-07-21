@@ -140,13 +140,13 @@
 | 抗过拟合 | 6/6 全 pass |
 | 因子池覆盖 | ≥ 80% (5/6 维) |
 | 连续无改善轮数 | ≥ 10 轮 |
-| 总轮数 | ≤ 50 轮 |
+| 总轮数 | ≤ 99999 轮 (永远不停) |
 
 **紧急停止条件** (任一命中 → 立即停):
 
 | 条件 | 说明 |
 |------|------|
-| 总轮数 = 50 | 硬上限 |
+| 总轮数 = 99999 | 硬上限 (实际永不触发) |
 | 用户 Ctrl+C | 手动中断 |
 | 所有 Agent 都被 interrupt 过且无改善 | 全部卡死 |
 | DuckDB 写满 / 磁盘满 | 基础设施故障 |
@@ -460,7 +460,48 @@ FACTOR_WEIGHT_METHOD = "equal"
 
 详见 §3.1 Main Agent 的停止条件。
 
-## 8. 文件结构
+## 8. 速度控制
+
+每轮之间需要控制节奏,不能太快也不能太慢。
+
+### 8.1 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `round_cooldown` | 30s | 两轮之间最少间隔 (秒) |
+| `analysis_timeout` | 120s | 单个 Agent 分析超时 (秒) |
+| `stuck_threshold` | 3 | 连续相同输出次数判定卡住 |
+
+### 8.2 节奏规则
+
+- **改善中**: 正常速度 (cooldown 秒)
+- **连续 3 轮无改善**: 减速 (cooldown × 2)
+- **连续 5 轮无改善**: 再减速 (cooldown × 4)
+- **卡住检测到**: interrupt + 重启 Agent
+
+### 8.3 实现
+
+Orchestrator 在每轮结束时检查:
+```python
+import time
+
+# 计算本轮耗时
+round_time = time.time() - round_start
+
+# 根据连续无改善轮数调整 cooldown
+if consecutive_no_improve >= 5:
+    cooldown = base_cooldown * 4
+elif consecutive_no_improve >= 3:
+    cooldown = base_cooldown * 2
+else:
+    cooldown = base_cooldown
+
+# 如果本轮太快,等待
+if round_time < cooldown:
+    time.sleep(cooldown - round_time)
+```
+
+## 9. 文件结构
 
 ### 8.1 工作区结构
 
