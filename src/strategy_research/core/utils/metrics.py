@@ -133,12 +133,16 @@ def _profit_loss_ratio(nav: pd.Series) -> float:
 
 
 def _max_monthly_loss(nav: pd.Series) -> float:
+    """最大月度损失 (worst negative monthly return)."""
     if nav.empty:
         return 0.0
     monthly = nav.resample("M").last().pct_change(fill_method=None).dropna()
     if monthly.empty:
         return 0.0
-    return float(monthly.min())
+    losses = monthly[monthly < 0]
+    if losses.empty:
+        return 0.0  # 无亏损月
+    return float(losses.min())
 
 
 def _profit_months_ratio(nav: pd.Series) -> float:

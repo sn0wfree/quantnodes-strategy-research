@@ -116,8 +116,8 @@ def test_alpha_no_inf(alpha_meta, panel):
 def test_alpha_nan_ratio(alpha_meta, panel):
     """结果 NaN 比例应根据 warmup_bars 自适应放宽."""
     aid = alpha_meta["id"]
-    if aid.startswith(("fundamental_", "academic_")):
-        pytest.xfail(f"{aid} requires external market/fundamental data")
+    if aid.startswith("fundamental_"):
+        pytest.xfail(f"{aid}: requires external fund:* data")
 
     try:
         result = compute_alpha(aid, panel)
@@ -128,7 +128,7 @@ def test_alpha_nan_ratio(alpha_meta, panel):
         n_nan = np.isnan(result.values).sum()
         total = result.size
         nan_ratio = n_nan / total if total > 0 else 0
-        # 自适应阈值: warmup 越长允许越多 NaN（最多 90%）
+        # 自适应阈值: warmup 越长允许越多 NaN（最多 100%）
         n_days = len(panel["close"])
         try:
             import yaml as yamllib
@@ -137,22 +137,25 @@ def test_alpha_nan_ratio(alpha_meta, panel):
             warmup = cfg.get("min_warmup_bars", 0)
         except Exception:
             warmup = 0
-        if warmup >= 0.8 * n_days:
+        if warmup >= 0.99 * n_days:
+            # warmup == n_days → 全 NaN 是正常的
+            thresh = 1.0
+        elif warmup >= 0.8 * n_days:
             thresh = 0.999
         elif warmup >= 0.4 * n_days:
             thresh = 0.95
         elif warmup >= 0.15 * n_days:
             thresh = 0.85
         else:
-            thresh = 0.80  # 宽松 — 一些 alpha 的实际窗口未在 min_warmup 中声明
+            thresh = 0.80
         assert nan_ratio <= thresh, f"alpha [{aid}]: {nan_ratio:.1%} NaN (warmup={warmup}, threshold={thresh:.0%})"
 
 
 def test_alpha_index_matches(panel, alpha_meta):
     """结果的 index/columns 应与输入一致。"""
     aid = alpha_meta["id"]
-    if aid.startswith(("fundamental_", "academic_")):
-        pytest.xfail(f"{aid} requires external data")
+    if aid.startswith("fundamental_"):
+        pytest.xfail(f"{aid}: requires external fund:* data")
 
     try:
         result = compute_alpha(aid, panel)
@@ -213,9 +216,11 @@ def test_alpha_yaml_py_consistency(alpha_meta, panel):
     aid = alpha_meta["id"]
     if aid.startswith("fundamental_"):
         pytest.xfail(f"{aid}: requires external fund:* data")
+    # academic alphas 只有 .py, 没有 YAML, 跳过 cross-validation
     if aid.startswith("academic_"):
-        # academic alpha 需要截面 benchmark (SMB/HML/Mkt-RF 等)
-        pytest.xfail(f"{aid}: requires external market benchmark data")
+        if alpha_meta["format"] != "yaml":
+            pytest.skip(f"{aid}: only .py fallback (no YAML)")
+        # 如果有 YAML 版, 跑测试
 
     yaml_res = None
     py_res = None
