@@ -555,6 +555,122 @@ def test_ts_huber_mean_robust_to_outliers():
     assert abs(huber - 0.5) < abs(plain - 0.5) * 0.5
 
 
+# ============================================================
+# 滚动回归算子
+# ============================================================
+
+@pytest.fixture
+def s_y() -> pd.Series:
+    """y = 2*x + 0.5 + noise(0.5)."""
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal(100)
+    y = 2.0 * x + 0.5 + rng.standard_normal(100) * 0.5
+    return pd.Series(y, index=pd.bdate_range("2024-01-01", periods=100))
+
+
+@pytest.fixture
+def s_x() -> pd.Series:
+    """normalized x series."""
+    rng = np.random.default_rng(42)
+    return pd.Series(rng.standard_normal(100), index=pd.bdate_range("2024-01-01", periods=100))
+
+
+def test_ts_regression_beta_recovers_true(s_y, s_x):
+    """y = 2*x + 0.5 + noise, beta 应 ≈ 2."""
+    fn = OPERATORS["ts_regression_beta"]
+    r = fn(s_y, s_x, 30)
+    # 尾部 5 个值的均值应接近 2
+    avg = r.dropna().iloc[-10:].mean()
+    assert abs(avg - 2.0) < 0.3, f"beta avg={avg}, expected ~2.0"
+
+
+def test_ts_regression_beta_returns_series(s_y, s_x):
+    """基本返回类型."""
+    fn = OPERATORS["ts_regression_beta"]
+    r = fn(s_y, s_x, 30)
+    assert isinstance(r, pd.Series)
+    assert r.shape == s_y.shape
+
+
+def test_ts_regression_beta_no_inf(s_y, s_x):
+    """常数 x 时 var=0 应输出 nan, 不是 inf."""
+    fn = OPERATORS["ts_regression_beta"]
+    const_x = pd.Series(1.0, index=s_x.index)  # 方差为 0
+    r = fn(s_y, const_x, 30)
+    assert not np.isinf(r.values).any(), "beta produced inf on constant x"
+
+
+def test_ts_regression_beta_first_n_nan(s_y, s_x):
+    """前 window-1 行应 NaN."""
+    fn = OPERATORS["ts_regression_beta"]
+    r = fn(s_y, s_x, 30)
+    # rolling(30, min_periods=30): row 0..27 NaN, row 29 之后才有 30 个
+    assert pd.isna(r.iloc[0]), "row 0 should be NaN"
+    assert pd.isna(r.iloc[27]), "row 27 should be NaN"
+    # row 29 是第 30 个, 有效
+    assert not pd.isna(r.iloc[29]), "row 29 should be valid (30th element)"
+    assert not pd.isna(r.iloc[50]), "row 50 should be valid"
+
+
+def test_ts_regression_alpha_recovers_true(s_y, s_x):
+    """alpha 应 ≈ 0.5 (截距)."""
+    fn = OPERATORS["ts_regression_alpha"]
+    r = fn(s_y, s_x, 30)
+    avg = r.dropna().iloc[-10:].mean()
+    assert abs(avg - 0.5) < 0.5, f"alpha avg={avg}, expected ~0.5"
+
+
+def test_ts_regression_alpha_returns_series(s_y, s_x):
+    fn = OPERATORS["ts_regression_alpha"]
+    r = fn(s_y, s_x, 30)
+    assert isinstance(r, pd.Series)
+    assert r.shape == s_y.shape
+
+
+def test_ts_regression_resid_is_noise(s_y, s_x):
+    """残差应 ≈ noise. mean ≈ 0, std ≈ noise std (0.5)."""
+    fn = OPERATORS["ts_regression_resid"]
+    r = fn(s_y, s_x, 30)
+    valid = r.dropna()
+    assert abs(valid.mean()) < 0.1, f"resid mean {valid.mean()}, expected ~0"
+    assert 0.3 < valid.std() < 0.7, f"resid std {valid.std()}, expected ~0.5"
+
+
+def test_ts_regression_resid_uncorrelated_with_x(s_y, s_x):
+    """残差应与 x 不相关 (已去除 x 暴露)."""
+    fn = OPERATORS["ts_regression_resid"]
+    r = fn(s_y, s_x, 30).dropna()
+    x_aligned = s_x.loc[r.index]
+    corr = r.corr(x_aligned)
+    assert abs(corr) < 0.3, f"resid-x corr {corr}, expected near 0"
+
+
+def test_ts_regression_r2_range(s_y, s_x):
+    """R² 应在 [0, 1] 之间."""
+    fn = OPERATORS["ts_regression_r2"]
+    r = fn(s_y, s_x, 30)
+    valid = r.dropna()
+    assert valid.between(0, 1 + 1e-9).all()
+
+
+def test_ts_regression_r2_high_for_strong_signal(s_y, s_x):
+    """y=2*x+0.5+noise(0.5), R² 高 (因信号 vs 噪声比大)."""
+    fn = OPERATORS["ts_regression_r2"]
+    r = fn(s_y, s_x, 30)
+    avg = r.dropna().iloc[-10:].mean()
+    assert avg > 0.7, f"r2 avg={avg}, expected > 0.7 for strong signal"
+
+
+def test_ts_regression_r2_zero_for_no_relation(s_x):
+    """R² 应接近 0 当 y 与 x 无关."""
+    rng = np.random.default_rng(123)  # 不同种子以避免隐含相关
+    y = pd.Series(rng.standard_normal(100), index=s_x.index)  # 独立
+    fn = OPERATORS["ts_regression_r2"]
+    r = fn(y, s_x, 50)
+    avg = r.dropna().mean()
+    assert abs(avg) < 0.15, f"r2 {avg} for uncorrelated y,x, expected ~0"
+
+
 
 
 def test_eq_produces_boolean(s_a):

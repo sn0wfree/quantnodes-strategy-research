@@ -446,6 +446,53 @@ def ts_huber_mean(series: pd.Series, window: int, k: float = 1.345) -> pd.Series
 
 
 # ============================================================
+# 滚动回归算子
+# ============================================================
+
+def ts_regression_beta(y: pd.Series, x: pd.Series, window: int) -> pd.Series:
+    """滚动回归 beta = rolling_cov(x, y) / rolling_var(x).
+
+    即对每窗口拟合 y = alpha + beta * x, 返回斜率。
+    """
+    cov_xy = y.rolling(window, min_periods=window).cov(x)
+    var_x = x.rolling(window, min_periods=window).var()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        beta = cov_xy / var_x
+    beta = beta.replace([np.inf, -np.inf], np.nan)
+    return beta
+
+
+def ts_regression_alpha(y: pd.Series, x: pd.Series, window: int) -> pd.Series:
+    """滚动回归 alpha = rolling_mean(y) - beta * rolling_mean(x)."""
+    beta = ts_regression_beta(y, x, window)
+    mean_y = y.rolling(window, min_periods=window).mean()
+    mean_x = x.rolling(window, min_periods=window).mean()
+    return mean_y - beta * mean_x
+
+
+def ts_regression_resid(y: pd.Series, x: pd.Series, window: int) -> pd.Series:
+    """滚动回归残差: y - alpha - beta * x.
+
+    残差是去 beta 暴露后的纯特质收益 (idiosyncratic returns)。
+    """
+    beta = ts_regression_beta(y, x, window)
+    alpha = ts_regression_alpha(y, x, window)
+    # 残差: y_t - (alpha + beta * x_t)
+    pred = alpha + beta * x
+    resid = y - pred
+    # 仅在窗口有效时返回残差
+    valid_idx = beta.notna()
+    resid = resid.where(valid_idx, np.nan)
+    return resid
+
+
+def ts_regression_r2(y: pd.Series, x: pd.Series, window: int) -> pd.Series:
+    """滚动 R² = rolling_corr(x, y)². 在 [0, 1] 之间."""
+    corr = x.rolling(window, min_periods=window).corr(y)
+    return corr ** 2
+
+
+# ============================================================
 # 数学算子
 # ============================================================
 
@@ -591,6 +638,12 @@ OPERATORS = {
     "ts_median_abs_dev": ts_median_abs_dev,
     "ts_trim_mean": ts_trim_mean,
     "ts_huber_mean": ts_huber_mean,
+
+    # 滚动回归算子
+    "ts_regression_beta": ts_regression_beta,
+    "ts_regression_alpha": ts_regression_alpha,
+    "ts_regression_resid": ts_regression_resid,
+    "ts_regression_r2": ts_regression_r2,
 
     # 截面算子 (新增高级)
     "cs_quantile_clip": cs_quantile_clip,
