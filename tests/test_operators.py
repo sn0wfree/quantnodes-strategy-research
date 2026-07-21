@@ -127,7 +127,12 @@ def _args(op, s_a, s_b, df_a, const_5):
     if op == "to_numpy":
         return [s_a]
     if op == "to_df":
-        return [s_a.values, pd.DataFrame({"A": s_a.values})]  # matching shape
+        return [s_a.values, pd.DataFrame({"A": s_a.values})]
+    # Lambda 滚动算子 (compute_factor.py:455-464) - 处理 (series, window)
+    if op in {"sum", "mean", "std", "var", "min", "max",
+              "median", "skew", "kurt", "quantile"}:
+        return [s_a, 5]
+    if op == "clip_upper":
         return [s_a, 45.0]
     if op == "clip_lower":
         return [s_a, 15.0]

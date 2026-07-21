@@ -114,12 +114,10 @@ def test_alpha_no_inf(alpha_meta, panel):
 
 
 def test_alpha_nan_ratio(alpha_meta, panel):
-    """结果 NaN 比例应根据 warmup_bars 自适应放宽。"""
+    """结果 NaN 比例应根据 warmup_bars 自适应放宽."""
     aid = alpha_meta["id"]
-    if aid.startswith("fundamental_"):
-        pytest.skip(f"{aid} requires fund:* data")
-    if aid.startswith("academic_"):
-        pytest.skip(f"{aid} requires market/sector data")
+    if aid.startswith(("fundamental_", "academic_")):
+        pytest.skip(f"{aid} requires external market/fundamental data")
 
     try:
         result = compute_alpha(aid, panel)
@@ -204,8 +202,7 @@ def test_alpha_yaml_py_consistency(alpha_meta, panel):
     aid = alpha_meta["id"]
     if aid.startswith("fundamental_"):
         pytest.skip(f"{aid} requires fund:* data")
-    if aid.startswith(("qlib158_", "academic_")):
-        pytest.skip(f"{aid}: no .py fallback to compare against")
+    # qlib158 / academic 都有 .py fallback, 让测试尝试运行
 
     yaml_res = None
     py_res = None
