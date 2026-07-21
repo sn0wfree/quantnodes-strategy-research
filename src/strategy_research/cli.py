@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS backtest_results (
     run VARCHAR NOT NULL,
     commit_hash VARCHAR,
     action VARCHAR,
+    action_type VARCHAR,
     goal_metric DOUBLE,
     calmar DOUBLE,
     sharpe DOUBLE,
@@ -84,6 +85,12 @@ CREATE TABLE IF NOT EXISTS backtest_results (
     params_changed INTEGER,
     status VARCHAR,
     description VARCHAR,
+    hypothesis VARCHAR,
+    verdict VARCHAR,
+    risk_rating VARCHAR,
+    attribution_alpha DOUBLE,
+    attribution_beta_mkt DOUBLE,
+    overfit_passed BOOLEAN,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (strategy_name, run)
 );
@@ -191,6 +198,34 @@ def _init_git(path: Path) -> None:
         print("⚠️  Git 初始化失败，请手动执行: git init")
 
 
+
+
+def _run_baseline_backtest(workspace_path: Path, strategy_name: str, strategy_dir: Path) -> None:
+    """运行 baseline 回测 (buy and hold HS300)。"""
+    import json
+    from .data_import import generate_sample_data, import_dataframe
+    from .backtest import run_backtest_script
+
+    # 生成 HS300 模拟数据
+    prices = generate_sample_data(n_assets=1, n_days=600, start_date="2020-01-01")
+    prices.columns = ["hs300"]
+
+    # 灌入 DuckDB
+    import_dataframe(workspace_path, strategy_name, prices)
+
+    # 运行回测
+    result = run_backtest_script(
+        workspace_path=workspace_path,
+        strategy_name=strategy_name,
+        action="baseline",
+        description="HS300 buy-and-hold baseline",
+    )
+
+    if result.get("success"):
+        print(f"  baseline: Calmar={result['metrics'].get('calmar', 0):.2f}")
+    else:
+        print(f"  baseline 回测失败: {result.get('error', 'unknown')}")
+
 def cmd_init(args: argparse.Namespace) -> int:
     """执行 init 命令。"""
     path = Path(args.path).resolve()
@@ -251,11 +286,29 @@ strategies:
     # .prompts/
     prompts_dir = path / ".prompts"
     prompts_dir.mkdir(exist_ok=True)
-    for prompt_name in ["researcher.md", "factor_analyst.md", "strategist.md", "critic.md"]:
+    for prompt_name in [
+        "orchestrator.md", "data_quality.md", "researcher.md", "factor_analyst.md",
+        "strategist.md", "portfolio_construction.md", "risk_controller.md",
+        "attribution_analyst.md", "anti_overfit_analyst.md", "backtest_diagnostics.md",
+    ]:
         prompt_content = _load_template(f".prompts/{prompt_name}")
         if prompt_content:
             (prompts_dir / prompt_name).write_text(prompt_content, encoding="utf-8")
-    print("✓ 创建 .prompts/ (4 个提示词)")
+    print("✓ 创建 .prompts/ (10 个提示词)")
+
+    # .skills/
+    skills_dir = path / ".skills"
+    skills_dir.mkdir(exist_ok=True)
+    for skill_name in [
+        "data-routing.md", "factor-research.md", "backtest-diagnose.md",
+        "correlation-analysis.md", "ml-strategy.md", "performance-attribution.md",
+        "quant-statistics.md", "risk-analysis.md", "sector-rotation.md",
+        "research-discipline.md",
+    ]:
+        skill_content = _load_template(f".skills/{skill_name}")
+        if skill_content:
+            (skills_dir / skill_name).write_text(skill_content, encoding="utf-8")
+    print("✓ 创建 .skills/ (10 份方法论)")
 
     # 策略目录
     _create_strategy(path, strategy_name, strategy_type, goal_metric)
@@ -266,6 +319,14 @@ strategies:
 
     # Git
     _init_git(path)
+
+    # Baseline 回测 (buy and hold HS300)
+    try:
+        strategy_dir = path / "strategies" / strategy_name
+        _run_baseline_backtest(path, strategy_name, strategy_dir)
+        print("✓ 运行 baseline 回测 (buy and hold HS300)")
+    except Exception as e:
+        print(f"⚠️  baseline 回测失败: {e}")
 
     print(f"\n✅ 工作区初始化完成!")
     print(f"   请阅读 {path / 'README.md'} 开始研究。")

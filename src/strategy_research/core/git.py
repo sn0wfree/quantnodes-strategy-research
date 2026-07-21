@@ -55,3 +55,31 @@ def git_get_hash(workspace_path: Path, short: bool = True) -> str:
         return result.stdout.strip()
     except subprocess.CalledProcessError:
         return ""
+
+
+def git_commit_rich(
+    workspace_path: Path,
+    strategy_name: str,
+    run_name: str,
+    status: str,
+    metrics: dict,
+    action: str = "",
+    hypothesis: str = "",
+) -> bool:
+    """提交当前更改 (rich format)。
+
+    Commit message 格式:
+    {status}: {strategy_name}/{run_name} | Calmar={X.XX} Sharpe={X.XX} MaxDD={X.XX%} | {action}: {hypothesis}
+    """
+    calmar = metrics.get("calmar", 0)
+    sharpe = metrics.get("sharpe", 0)
+    max_dd = metrics.get("max_dd", 0)
+
+    message = f"{status}: {strategy_name}/{run_name} | Calmar={calmar:.2f} Sharpe={sharpe:.2f} MaxDD={max_dd:.1%}"
+    if action:
+        message += f" | {action}"
+    if hypothesis:
+        message += f": {hypothesis}"
+
+    return git_commit(workspace_path, message)
+

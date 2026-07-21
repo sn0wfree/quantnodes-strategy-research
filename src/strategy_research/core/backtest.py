@@ -18,7 +18,7 @@ from .db import (
     save_backtest_result, get_backtest_results,
     save_weight_history, save_nav_history,
 )
-from .git import git_commit, git_get_hash
+from .git import git_commit, git_commit_rich, git_get_hash
 from .run_card import write_run_card
 
 
@@ -412,8 +412,16 @@ def evaluate_experiment(
         except Exception:
             pass
 
-    if status == "keep":
-        git_commit(workspace_path, f"keep: {strategy_name}/{run_name}")
+    # Git-as-log: 每次 run 都 commit (不只是 keep)
+    git_commit_rich(
+        workspace_path=workspace_path,
+        strategy_name=strategy_name,
+        run_name=run_name,
+        status=status,
+        metrics=metrics,
+        action=metrics.get("action", ""),
+        hypothesis=metrics.get("hypothesis", ""),
+    )
 
     return True
 

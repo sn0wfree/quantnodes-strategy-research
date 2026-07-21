@@ -75,18 +75,15 @@ ls strategies/{strategy_name}/runs/ | tail -1
 ### 每轮实验步骤
 
 #### 1. 读取当前状态
-```python
-# 读取 strategy.py
-with open("strategies/{strategy_name}/strategy.py") as f:
-    content = f.read()
+```bash
+# 读取当前策略配置
+cat strategies/{strategy_name}/strategy.py
 
-# 解析当前因子池
-# FACTOR_EXPRS = [...]
+# 读取最近 5 个实验
+tail -5 strategies/{strategy_name}/runs/results.tsv
 
-# 读取历史实验
-with open("strategies/{strategy_name}/runs/results.tsv") as f:
-    lines = f.readlines()
-# 最后一行是最新实验
+# 查看最近 3 个 run 目录
+ls strategies/{strategy_name}/runs/ | tail -3
 ```
 
 #### 2. 决策下一步行动
