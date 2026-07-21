@@ -28,12 +28,6 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: make_one
-  expr:
-    value: 1.0
-- name: where_ternary
-  expr:
-    op: where
 - name: d7
   expr:
     op: delta
@@ -60,7 +54,7 @@ steps:
       - ref: d7
 - name: out
   expr:
-    op: where_ternary
+    op: where
     args:
     - op: lt
       args:
@@ -72,7 +66,7 @@ steps:
       - op: neg
         args:
         - value: 1.0
-      - op: make_one
+      - op: fill_null
         args:
         - ref: close
 final:

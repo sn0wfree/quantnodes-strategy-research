@@ -22,14 +22,12 @@ steps:
     args:
     - ref: c
     - value: 13
-    - value: 2
 - name: s2
   expr:
     op: ts_mean
     args:
     - ref: s1
     - value: 13
-    - value: 2
 - name: s3
   expr:
     op: ts_mean
@@ -42,11 +40,8 @@ steps:
           args:
           - ref: c
         - value: 13
-        - value: 2
       - value: 13
-      - value: 2
     - value: 13
-    - value: 2
 - name: out
   expr:
     op: add

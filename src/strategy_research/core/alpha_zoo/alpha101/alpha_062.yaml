@@ -41,9 +41,6 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: lhs
   expr:
     op: rank
@@ -51,7 +48,7 @@ steps:
     - op: ts_corr
       args:
       - ref: vwap
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: adv20
         - value: 22

@@ -17,9 +17,6 @@ steps:
 - name: close
   expr:
     column: close
-- name: where_ternary
-  expr:
-    op: where
 - name: d1
   expr:
     op: delta
@@ -46,11 +43,11 @@ steps:
     - value: 0
 - name: inner
   expr:
-    op: where_ternary
+    op: where
     args:
     - ref: cond1
     - ref: d1
-    - op: where_ternary
+    - op: where
       args:
       - ref: cond2
       - ref: d1

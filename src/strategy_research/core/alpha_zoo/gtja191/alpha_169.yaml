@@ -30,7 +30,6 @@ steps:
           - ref: c
           - value: 1
       - value: 9
-      - value: 1
     - value: 1
 - name: out
   expr:
@@ -47,6 +46,5 @@ steps:
         - ref: s
         - value: 26
     - value: 10
-    - value: 1
 final:
   ref: out

@@ -34,12 +34,6 @@ steps:
 - name: vwap
   expr:
     column: vwap
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
 - name: rng_avg
   expr:
     op: safe_div
@@ -50,7 +44,7 @@ steps:
       - ref: low
     - op: div
       args:
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: close
         - value: 5

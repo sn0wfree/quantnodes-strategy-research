@@ -21,9 +21,6 @@ steps:
 - name: open_
   expr:
     column: open
-- name: delay
-  expr:
-    op: delay
 - name: out
   expr:
     op: add

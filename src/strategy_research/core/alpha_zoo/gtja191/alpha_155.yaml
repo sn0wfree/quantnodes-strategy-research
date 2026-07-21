@@ -25,12 +25,10 @@ steps:
       args:
       - ref: v
       - value: 13
-      - value: 2
     - op: ts_mean
       args:
       - ref: v
       - value: 27
-      - value: 2
 - name: out
   expr:
     op: sub
@@ -40,6 +38,5 @@ steps:
       args:
       - ref: m
       - value: 10
-      - value: 2
 final:
   ref: out

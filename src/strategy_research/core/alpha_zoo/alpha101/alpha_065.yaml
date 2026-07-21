@@ -32,9 +32,6 @@ steps:
     args:
     - ref: volume
     - value: 60
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: mix
   expr:
     op: add
@@ -57,7 +54,7 @@ steps:
     - op: ts_corr
       args:
       - ref: mix
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: adv60
         - value: 9

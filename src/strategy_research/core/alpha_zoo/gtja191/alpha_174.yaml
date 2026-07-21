@@ -40,6 +40,5 @@ steps:
         - value: 20
       - ref: cond
     - value: 20
-    - value: 1
 final:
   ref: out

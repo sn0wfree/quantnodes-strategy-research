@@ -37,7 +37,6 @@ steps:
     args:
     - ref: ret
     - value: 61
-    - value: 2
 - name: dev
   expr:
     op: sub
@@ -62,7 +61,6 @@ steps:
       - ref: dev
       - value: 2
     - value: 60
-    - value: 2
 - name: out
   expr:
     op: safe_div

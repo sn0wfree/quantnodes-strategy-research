@@ -33,7 +33,6 @@ steps:
     args:
     - ref: hl
     - value: 11
-    - value: 2
 - name: out
   expr:
     op: mul

@@ -36,15 +36,6 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
-- name: make_one
-  expr:
-    value: 1.0
 - name: t1
   expr:
     op: safe_div
@@ -55,7 +46,7 @@ steps:
         args:
         - op: safe_div
           args:
-          - op: make_one
+          - op: fill_null
             args:
             - ref: close
           - ref: close
@@ -76,7 +67,7 @@ steps:
           - ref: close
     - op: div
       args:
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: high
         - value: 5

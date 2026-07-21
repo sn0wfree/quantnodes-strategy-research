@@ -22,9 +22,6 @@ steps:
 - name: volume
   expr:
     column: volume
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: out
   expr:
     op: mul
@@ -32,7 +29,7 @@ steps:
     - op: neg
       args:
       - value: 1.0
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - op: rank
         args:

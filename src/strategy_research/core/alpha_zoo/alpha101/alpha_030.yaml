@@ -22,12 +22,6 @@ steps:
 - name: volume
   expr:
     column: volume
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
 - name: s
   expr:
     op: add
@@ -79,11 +73,11 @@ steps:
         - op: rank
           args:
           - ref: s
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: volume
         - value: 5
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - ref: volume
       - value: 20

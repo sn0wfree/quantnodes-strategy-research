@@ -17,15 +17,6 @@ steps:
 - name: close
   expr:
     column: close
-- name: delay
-  expr:
-    op: delay
-- name: make_one
-  expr:
-    value: 1.0
-- name: where_ternary
-  expr:
-    op: where
 - name: x
   expr:
     op: sub
@@ -55,12 +46,12 @@ steps:
       - value: 10.0
 - name: one
   expr:
-    op: make_one
+    op: fill_null
     args:
     - ref: close
 - name: out
   expr:
-    op: where_ternary
+    op: where
     args:
     - op: lt
       args:

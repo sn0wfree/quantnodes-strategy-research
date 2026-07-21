@@ -28,11 +28,8 @@ steps:
           args:
           - ref: c
         - value: 13
-        - value: 2
       - value: 13
-      - value: 2
     - value: 13
-    - value: 2
 - name: out
   expr:
     op: safe_div

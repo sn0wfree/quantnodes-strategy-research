@@ -21,12 +21,6 @@ steps:
 - name: vwap
   expr:
     column: vwap
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
 - name: out
   expr:
     op: add
@@ -37,7 +31,7 @@ steps:
         args:
         - op: div
           args:
-          - op: rolling_sum
+          - op: ts_sum
             args:
             - ref: close
             - value: 7

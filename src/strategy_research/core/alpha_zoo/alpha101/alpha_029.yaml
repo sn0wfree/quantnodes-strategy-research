@@ -24,15 +24,9 @@ steps:
     op: pct_change
     args:
     - ref: close
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: rolling_prod
   expr:
     ref: _rolling_prod
-- name: delay
-  expr:
-    op: delay
 - name: inner
   expr:
     op: rolling_prod

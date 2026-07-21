@@ -33,14 +33,12 @@ steps:
     args:
     - ref: hl
     - value: 10
-    - value: 2
 - name: den
   expr:
     op: ts_mean
     args:
     - ref: num
     - value: 10
-    - value: 2
 - name: out
   expr:
     op: safe_div

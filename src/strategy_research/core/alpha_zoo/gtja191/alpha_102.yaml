@@ -34,7 +34,6 @@ steps:
       args:
       - ref: dv
     - value: 6
-    - value: 1
 - name: den
   expr:
     op: ts_mean
@@ -43,7 +42,6 @@ steps:
       args:
       - ref: dv
     - value: 6
-    - value: 1
 - name: out
   expr:
     op: mul

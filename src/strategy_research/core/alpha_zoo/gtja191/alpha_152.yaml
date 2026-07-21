@@ -33,7 +33,6 @@ steps:
             - value: 9
         - value: 1
       - value: 9
-      - value: 1
     - value: 1
 - name: left
   expr:
@@ -56,6 +55,5 @@ steps:
       - ref: left
       - ref: right
     - value: 9
-    - value: 1
 final:
   ref: out

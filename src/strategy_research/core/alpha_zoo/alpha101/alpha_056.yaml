@@ -22,28 +22,22 @@ steps:
     op: pct_change
     args:
     - ref: close
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: make_one
-  expr:
-    value: 1.0
 - name: cap
   expr:
-    op: make_one
+    op: fill_null
     args:
     - ref: close
 - name: num
   expr:
-    op: rolling_sum
+    op: ts_sum
     args:
     - ref: returns
     - value: 10
 - name: denom
   expr:
-    op: rolling_sum
+    op: ts_sum
     args:
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - ref: returns
       - value: 2

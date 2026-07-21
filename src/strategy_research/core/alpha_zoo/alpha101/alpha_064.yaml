@@ -41,9 +41,6 @@ steps:
     args:
     - ref: volume
     - value: 120
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: a
   expr:
     op: add
@@ -86,11 +83,11 @@ steps:
     args:
     - op: ts_corr
       args:
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: a
         - value: 13
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - ref: adv120
         - value: 13

@@ -201,16 +201,23 @@ def analyze_compute_function(py_path: Path) -> dict:
 # 表达式转换: Python AST -> YAML AST
 # ============================================================
 
-def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
+def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = None) -> dict | None:
     """将 Python AST 分析结果转换为 YAML AST。
 
     Args:
         expr: Python AST 分析结果
         panel_keys: 可用的 panel 键集合
+        func_refs: 函数引用映射 (var_name -> helper function name)
 
     Returns:
         YAML AST 节点，或 None (如果无法转换)
     """
+    if func_refs is None:
+        func_refs = {}
+
+    # 使用内部函数进行递归调用，自动传递 func_refs
+    def _convert(e):
+        return python_ast_to_yaml_ast(e, panel_keys, func_refs)
     if expr["_type"] == "panel_ref":
         key = expr["key"]
         if key in panel_keys:
@@ -225,10 +232,29 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
         # 忽略 numpy 前缀
         if name == "np":
             return None
+        # 检查是否是函数引用
+        if name in func_refs:
+            helper_name = func_refs[name]
+            # 映射到正确的算子名
+            op_map = {
+                "_rolling_sum": "ts_sum",
+                "_rolling_mean": "ts_mean",
+                "_rolling_std": "ts_std",
+                "_rolling_var": "ts_var",
+                "_rolling_min": "ts_min",
+                "_rolling_max": "ts_max",
+                "_rolling_rank": "ts_rank",
+                "_rolling_corr": "ts_corr",
+                "_rolling_cov": "ts_cov",
+                "_where_ternary": "where",
+                "_sma": "ts_mean",
+                "_make_one": "fill_null",
+            }
+            return {"op": op_map.get(helper_name, helper_name)}
         # 处理辅助函数引用
         helper_map = {
             "_delay": {"op": "delay"},
-            "_make_one": {"value": 1.0},
+            "_make_one": {"op": "fill_null"},
             "_rolling_sum": {"op": "ts_sum"},
             "_rolling_mean": {"op": "ts_mean"},
             "_rolling_std": {"op": "ts_std"},
@@ -240,10 +266,10 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
             "_rolling_cov": {"op": "ts_cov"},
             "_where_ternary": {"op": "where"},
             "_sma": {"op": "ts_mean"},
-            "_ind_neutralize": None,  # 跳过行业中心化
-            "_bench_close": None,  # 跳过基准收盘价
-            "panel": None,  # 跳过 panel 引用
-            "pick": None,  # 跳过 pick 函数
+            "_ind_neutralize": None,
+            "_bench_close": None,
+            "panel": None,
+            "pick": None,
         }
         if name in helper_map:
             return helper_map[name]
@@ -255,7 +281,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
         obj = expr.get("obj")
         window = expr.get("window", {"value": 20})
         if obj:
-            obj_yaml = python_ast_to_yaml_ast(obj, panel_keys)
+            obj_yaml = _convert(obj)
             if obj_yaml is not None:
                 # 返回一个占位符，实际的合并会在 method_call 中处理
                 return {"_type": "rolling", "obj": obj_yaml, "window": window}
@@ -266,7 +292,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
         obj = expr.get("obj")
         span = expr.get("span", {"value": 20})
         if obj:
-            obj_yaml = python_ast_to_yaml_ast(obj, panel_keys)
+            obj_yaml = _convert(obj)
             if obj_yaml is not None:
                 # 返回一个占位符，实际的合并会在 method_call 中处理
                 return {"_type": "ewm", "obj": obj_yaml, "span": span}
@@ -282,7 +308,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
             # np.log(volume) -> log(volume)
             yaml_args = []
             for arg in args:
-                arg_yaml = python_ast_to_yaml_ast(arg, panel_keys)
+                arg_yaml = _convert(arg)
                 if arg_yaml is None:
                     return None
                 yaml_args.append(arg_yaml)
@@ -310,7 +336,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
             return {"_type": "ewm", "obj": obj, "span": span}
 
         # 链式调用合并: 先转换 obj，再检查是否为 rolling/ewm
-        converted_obj = python_ast_to_yaml_ast(obj, panel_keys)
+        converted_obj = _convert(obj)
         if isinstance(converted_obj, dict) and converted_obj.get("_type") in ("rolling", "ewm"):
             rolling_info = converted_obj
             rolling_type = rolling_info["_type"]
@@ -342,14 +368,14 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
 
                 if method == "corr":
                     if args:
-                        arg_yaml = python_ast_to_yaml_ast(args[0], panel_keys)
+                        arg_yaml = _convert(args[0])
                         if arg_yaml is None:
                             return None
                         yaml_args.append(arg_yaml)
                     yaml_args.append(rolling_info["window"])
                 elif method == "cov":
                     if args:
-                        arg_yaml = python_ast_to_yaml_ast(args[0], panel_keys)
+                        arg_yaml = _convert(args[0])
                         if arg_yaml is None:
                             return None
                         yaml_args.append(arg_yaml)
@@ -360,7 +386,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
                 return {"op": op_name, "args": yaml_args}
 
             if method == "quantile":
-                q_val = python_ast_to_yaml_ast(args[0], panel_keys) if args else {"value": 0.5}
+                q_val = _convert(args[0]) if args else {"value": 0.5}
                 return {"op": "ts_rank", "args": [inner_obj, rolling_info["window"]]}
 
             if method == "apply":
@@ -374,7 +400,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
         for arg in args:
             if isinstance(arg, dict) and arg.get("_type") == "kwarg":
                 continue
-            arg_yaml = python_ast_to_yaml_ast(arg, panel_keys)
+            arg_yaml = _convert(arg)
             if arg_yaml is None:
                 return None
             yaml_args.append(arg_yaml)
@@ -384,13 +410,32 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
         func = expr["func"]
         args = expr["args"]
 
+        # 检查是否是函数引用
+        if func in func_refs:
+            helper_name = func_refs[func]
+            op_map = {
+                "_rolling_sum": "ts_sum",
+                "_rolling_mean": "ts_mean",
+                "_rolling_std": "ts_std",
+                "_rolling_var": "ts_var",
+                "_rolling_min": "ts_min",
+                "_rolling_max": "ts_max",
+                "_rolling_rank": "ts_rank",
+                "_rolling_corr": "ts_corr",
+                "_rolling_cov": "ts_cov",
+                "_where_ternary": "where",
+                "_sma": "ts_mean",
+                "_make_one": "fill_null",
+            }
+            func = op_map.get(helper_name, helper_name)
+
         # 处理参数 (过滤关键字参数)
         yaml_args = []
         for arg in args:
             if isinstance(arg, dict) and arg.get("_type") == "kwarg":
                 # 跳过关键字参数
                 continue
-            yaml_arg = python_ast_to_yaml_ast(arg, panel_keys)
+            yaml_arg = _convert(arg)
             if yaml_arg is None:
                 return None
             yaml_args.append(yaml_arg)
@@ -431,9 +476,12 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str]) -> dict | None:
         # 特殊处理 _where_ternary -> where
         elif func == "_where_ternary":
             func = "where"
-        # 特殊处理 _sma -> ts_mean
+        # 特殊处理 _sma -> ts_mean (drop min_periods parameter)
         elif func == "_sma":
             func = "ts_mean"
+            # _sma(x, n, m) -> ts_mean(x, n) - drop the m parameter
+            if len(yaml_args) > 2:
+                yaml_args = yaml_args[:2]
         # 特殊处理 _ind_neutralize -> 忽略行业中心化
         elif func == "_ind_neutralize":
             # 返回第一个参数
@@ -556,10 +604,30 @@ def convert_py_to_yaml(py_path: Path) -> dict | None:
     # 收集所有需要的列
     columns_required = meta.get("columns_required", list(panel_keys))
 
+    # 辅助函数映射 (用于识别函数引用)
+    helper_names = {
+        "_delay", "_make_one", "_rolling_sum", "_rolling_mean", "_rolling_std",
+        "_rolling_var", "_rolling_min", "_rolling_max", "_rolling_rank",
+        "_rolling_corr", "_rolling_cov", "_where_ternary", "_sma",
+        "_ind_neutralize", "_bench_close", "_cross_sectional_zscore",
+    }
+
     # 将 assignments 转换为 steps
+    # 首先识别函数引用 (如 rolling_sum = _rolling_sum)
+    func_refs = {}  # var_name -> helper function name
+    for var_name, expr in analyzer.assignments.items():
+        if expr["_type"] == "ref" and expr["name"] in helper_names:
+            func_refs[var_name] = expr["name"]
+
     steps = []
     for var_name, expr in analyzer.assignments.items():
-        yaml_expr = python_ast_to_yaml_ast(expr, panel_keys | {k for k in analyzer.assignments})
+        # 跳过函数引用 (如 rolling_sum = _rolling_sum)
+        if var_name in func_refs:
+            continue
+
+        yaml_expr = python_ast_to_yaml_ast(
+            expr, panel_keys | {k for k in analyzer.assignments}, func_refs
+        )
         if yaml_expr is None:
             return None  # 无法转换的复杂表达式
 
@@ -577,7 +645,9 @@ def convert_py_to_yaml(py_path: Path) -> dict | None:
     if analyzer.return_expr is None:
         return None
 
-    final_expr = python_ast_to_yaml_ast(analyzer.return_expr, panel_keys | {k for k in analyzer.assignments})
+    final_expr = python_ast_to_yaml_ast(
+        analyzer.return_expr, panel_keys | {k for k in analyzer.assignments}, func_refs
+    )
     if final_expr is None:
         return None
 

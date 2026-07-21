@@ -22,12 +22,6 @@ steps:
     op: pct_change
     args:
     - ref: close
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
 - name: out
   expr:
     op: mul
@@ -60,7 +54,7 @@ steps:
         - op: add
           args:
           - value: 1.0
-          - op: rolling_sum
+          - op: ts_sum
             args:
             - ref: returns
             - value: 250

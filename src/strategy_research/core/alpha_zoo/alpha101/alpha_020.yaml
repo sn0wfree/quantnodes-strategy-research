@@ -29,9 +29,6 @@ steps:
 - name: low
   expr:
     column: low
-- name: delay
-  expr:
-    op: delay
 - name: out
   expr:
     op: mul

@@ -30,7 +30,6 @@ steps:
     args:
     - ref: c
     - value: 15
-    - value: 2
 - name: out
   expr:
     op: safe_div

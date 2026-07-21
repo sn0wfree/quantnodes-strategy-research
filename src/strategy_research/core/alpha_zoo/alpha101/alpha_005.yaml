@@ -25,9 +25,6 @@ steps:
 - name: vwap
   expr:
     column: vwap
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: out
   expr:
     op: mul
@@ -39,7 +36,7 @@ steps:
         - ref: open_
         - op: div
           args:
-          - op: rolling_sum
+          - op: ts_sum
             args:
             - ref: vwap
             - value: 10

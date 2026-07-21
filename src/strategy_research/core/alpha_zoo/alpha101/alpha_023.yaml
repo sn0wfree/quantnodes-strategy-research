@@ -21,24 +21,18 @@ steps:
 - name: high
   expr:
     column: high
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: where_ternary
-  expr:
-    op: where
 - name: mh
   expr:
     op: div
     args:
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - ref: high
       - value: 20
     - value: 20.0
 - name: out
   expr:
-    op: where_ternary
+    op: where
     args:
     - op: lt
       args:

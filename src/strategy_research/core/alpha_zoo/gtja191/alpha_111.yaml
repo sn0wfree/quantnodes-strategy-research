@@ -59,11 +59,9 @@ steps:
       args:
       - ref: ratio
       - value: 11
-      - value: 2
     - op: ts_mean
       args:
       - ref: ratio
       - value: 4
-      - value: 2
 final:
   ref: out

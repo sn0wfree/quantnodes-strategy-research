@@ -17,20 +17,11 @@ steps:
 - name: close
   expr:
     column: close
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
-- name: where_ternary
-  expr:
-    op: where
 - name: m100
   expr:
     op: div
     args:
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - ref: close
       - value: 100
@@ -80,7 +71,7 @@ steps:
       - value: 3
 - name: out
   expr:
-    op: where_ternary
+    op: where
     args:
     - ref: cond
     - ref: left

@@ -28,20 +28,11 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: make_one
-  expr:
-    value: 1.0
-- name: where_ternary
-  expr:
-    op: where
 - name: m8
   expr:
     op: div
     args:
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - ref: close
       - value: 8
@@ -56,7 +47,7 @@ steps:
   expr:
     op: div
     args:
-    - op: rolling_sum
+    - op: ts_sum
       args:
       - ref: close
       - value: 2
@@ -93,12 +84,12 @@ steps:
     - value: 1.0
 - name: one
   expr:
-    op: make_one
+    op: fill_null
     args:
     - ref: close
 - name: out
   expr:
-    op: where_ternary
+    op: where
     args:
     - ref: cond_a
     - op: mul
@@ -107,11 +98,11 @@ steps:
         args:
         - value: 1.0
       - ref: one
-    - op: where_ternary
+    - op: where
       args:
       - ref: cond_b
       - ref: one
-      - op: where_ternary
+      - op: where
         args:
         - ref: cond_c
         - ref: one

@@ -33,9 +33,6 @@ steps:
     op: pct_change
     args:
     - ref: close
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: out
   expr:
     op: mul
@@ -70,7 +67,7 @@ steps:
       - value: 1.0
       - op: rank
         args:
-        - op: rolling_sum
+        - op: ts_sum
           args:
           - ref: returns
           - value: 250

@@ -25,22 +25,13 @@ steps:
 - name: vwap
   expr:
     column: vwap
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: make_one
-  expr:
-    value: 1.0
-- name: where_ternary
-  expr:
-    op: where
 - name: x
   expr:
     op: rank
     args:
     - op: div
       args:
-      - op: rolling_sum
+      - op: ts_sum
         args:
         - op: ts_corr
           args:
@@ -55,7 +46,7 @@ steps:
       - value: 2.0
 - name: out
   expr:
-    op: where_ternary
+    op: where
     args:
     - op: gt
       args:
@@ -66,10 +57,10 @@ steps:
       - op: neg
         args:
         - value: 1.0
-      - op: make_one
+      - op: fill_null
         args:
         - ref: close
-    - op: make_one
+    - op: fill_null
       args:
       - ref: close
 final:

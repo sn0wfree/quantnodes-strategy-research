@@ -36,9 +36,6 @@ steps:
     args:
     - ref: volume
     - value: 40
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: lhs
   expr:
     op: rank

@@ -29,9 +29,6 @@ steps:
     args:
     - ref: volume
     - value: 10
-- name: rolling_sum
-  expr:
-    op: ts_sum
 - name: rolling_prod
   expr:
     ref: _rolling_prod

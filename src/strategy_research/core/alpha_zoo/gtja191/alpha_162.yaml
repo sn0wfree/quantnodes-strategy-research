@@ -37,14 +37,12 @@ steps:
           args:
           - ref: dc
         - value: 12
-        - value: 1
       - op: ts_mean
         args:
         - op: abs
           args:
           - ref: dc
         - value: 12
-        - value: 1
     - value: 100.0
 - name: out
   expr:
