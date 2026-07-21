@@ -100,8 +100,7 @@ steps:
 final:
   op: astype
   args:
-  - op: DataFrame
+  - op: to_df
     args:
-    - ref: pd
     - ref: res
-  - ref: float
+  - value: float

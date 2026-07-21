@@ -70,9 +70,8 @@ steps:
         - value: 3
 - name: t3
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: sign
       args:
       - op: to_numpy
@@ -84,6 +83,7 @@ steps:
             - ref: adv20
             - ref: low
             - value: 12
+    - ref: close
 - name: out
   expr:
     op: add

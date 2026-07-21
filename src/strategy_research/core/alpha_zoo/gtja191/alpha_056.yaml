@@ -84,4 +84,4 @@ final:
     args:
     - ref: lhs
     - ref: rhs
-  - ref: float
+  - value: float

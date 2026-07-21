@@ -31,7 +31,7 @@ steps:
       args:
       - ref: returns
       - value: 0
-    - ref: float
+    - value: float
 - name: x
   expr:
     op: add

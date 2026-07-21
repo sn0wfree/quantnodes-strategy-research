@@ -37,9 +37,6 @@ steps:
     args:
     - ref: volume
     - value: 10
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: mix
   expr:
     op: add
@@ -59,23 +56,20 @@ steps:
   expr:
     op: delta
     args:
-    - op: ind_neutralize
-      args:
-      - ref: mix
-      - ref: panel
+    - ref: mix
     - value: 4
 - name: lhs
   expr:
     op: rank
     args:
-    - op: DataFrame
+    - op: to_df
       args:
-      - ref: pd
       - op: sign
         args:
         - op: to_numpy
           args:
           - ref: lhs_inner
+      - ref: close
 - name: rhs
   expr:
     op: ts_rank

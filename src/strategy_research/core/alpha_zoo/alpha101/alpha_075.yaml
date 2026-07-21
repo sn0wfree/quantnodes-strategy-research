@@ -68,6 +68,6 @@ steps:
       args:
       - ref: lhs
       - ref: rhs
-    - ref: float
+    - value: float
 final:
   ref: out

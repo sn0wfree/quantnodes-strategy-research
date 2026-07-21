@@ -33,9 +33,6 @@ steps:
     args:
     - ref: volume
     - value: 60
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: mix
   expr:
     op: add
@@ -59,10 +56,7 @@ steps:
       args:
       - op: delta
         args:
-        - op: ind_neutralize
-          args:
-          - ref: mix
-          - ref: panel
+        - ref: mix
         - value: 3
       - value: 20
 - name: b

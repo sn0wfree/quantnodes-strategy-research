@@ -37,9 +37,6 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: money_flow
   expr:
     op: mul
@@ -68,37 +65,28 @@ steps:
     - value: 1.5
     - op: scale
       args:
-      - op: ind_neutralize
+      - op: rank
         args:
-        - op: ind_neutralize
-          args:
-          - op: rank
-            args:
-            - ref: money_flow
-          - ref: panel
-        - ref: panel
+        - ref: money_flow
 - name: t2
   expr:
     op: scale
     args:
-    - op: ind_neutralize
+    - op: sub
       args:
-      - op: sub
+      - op: ts_corr
         args:
-        - op: ts_corr
-          args:
-          - ref: close
-          - op: rank
-            args:
-            - ref: adv20
-          - value: 5
+        - ref: close
         - op: rank
           args:
-          - op: ts_argmin
-            args:
-            - ref: close
-            - value: 30
-      - ref: panel
+          - ref: adv20
+        - value: 5
+      - op: rank
+        args:
+        - op: ts_argmin
+          args:
+          - ref: close
+          - value: 30
 - name: out
   expr:
     op: sub

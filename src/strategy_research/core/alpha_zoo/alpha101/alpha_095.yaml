@@ -49,6 +49,27 @@ steps:
         - value: 13
 - name: inner
   expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: ts_sum
+        args:
+        - op: div
+          args:
+          - op: add
+            args:
+            - ref: high
+            - ref: low
+          - value: 2.0
+        - value: 19
+      - op: ts_sum
+        args:
+        - ref: adv40
+        - value: 19
+      - value: 13
+- name: inner_2
+  expr:
     op: signed_power
     args:
     - ref: inner
@@ -67,6 +88,6 @@ steps:
       args:
       - ref: lhs
       - ref: rhs
-    - ref: float
+    - value: float
 final:
   ref: out

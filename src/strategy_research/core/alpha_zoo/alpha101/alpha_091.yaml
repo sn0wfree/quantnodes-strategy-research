@@ -32,9 +32,6 @@ steps:
     args:
     - ref: volume
     - value: 30
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: a
   expr:
     op: ts_rank
@@ -45,10 +42,7 @@ steps:
         args:
         - op: ts_corr
           args:
-          - op: ind_neutralize
-            args:
-            - ref: close
-            - ref: panel
+          - ref: close
           - ref: volume
           - value: 10
         - value: 16

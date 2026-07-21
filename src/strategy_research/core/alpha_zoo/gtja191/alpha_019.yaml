@@ -42,9 +42,8 @@ steps:
     - ref: pc
 - name: out
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: where
       args:
       - ref: dn

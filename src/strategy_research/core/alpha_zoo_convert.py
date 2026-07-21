@@ -34,8 +34,59 @@ class ComputeFunctionAnalyzer(ast.NodeVisitor):
             if isinstance(target, ast.Name):
                 var_name = target.id
                 value = self._analyze_expr(node.value)
-                self.assignments[var_name] = value
+                # 处理变量重赋值: 创建新步骤名
+                if var_name in self.assignments:
+                    i = 2
+                    while f"{var_name}_{i}" in self.assignments:
+                        i += 1
+                    new_name = f"{var_name}_{i}"
+                    self.assignments[new_name] = value
+                else:
+                    self.assignments[var_name] = value
         self.generic_visit(node)
+
+    def _post_process_refs(self):
+        """后处理: 将重赋值变量链化。
+
+        例如: inner=a, inner_2=b(inner), inner_3=c(inner_2) 
+        -> 保持原样，因为转换时已经通过序号链化了引用。
+        但需要确保 inner_7 引用的是 inner_6，不是 inner_7 本身。
+        """
+        # 找到所有重赋值组 (如 inner, inner_2, inner_3, ...)
+        groups = {}  # base_name -> [name, name_2, name_3, ...]
+        for var_name in list(self.assignments.keys()):
+            if '_' in var_name:
+                parts = var_name.rsplit('_', 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    base = parts[0]
+                    if base not in groups:
+                        groups[base] = []
+                    groups[base].append(var_name)
+
+        # 对每组重赋值，更新内部引用
+        for base, chain in groups.items():
+            chain.sort(key=lambda x: int(x.rsplit('_', 1)[1]))
+            # 确保第一个重赋值引用 base (原始变量)
+            # 确保每个后续重赋值引用前一个
+            for i, name in enumerate(chain):
+                expr = self.assignments[name]
+                # 找到表达式中对 base 的引用，更新为前一个版本
+                prev = base if i == 0 else chain[i - 1]
+                self._update_refs_in_expr(expr, base, prev)
+
+    def _update_refs_in_expr(self, expr, old_name, new_name):
+        """递归更新表达式中的引用。"""
+        if not isinstance(expr, dict):
+            return
+        if expr.get("_type") == "ref" and expr.get("name") == old_name:
+            expr["name"] = new_name
+        for key, val in expr.items():
+            if isinstance(val, dict):
+                self._update_refs_in_expr(val, old_name, new_name)
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, dict):
+                        self._update_refs_in_expr(item, old_name, new_name)
 
     def visit_Return(self, node):
         """处理 return 语句"""
@@ -105,6 +156,11 @@ class ComputeFunctionAnalyzer(ast.NodeVisitor):
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
             operand = self._analyze_expr(node.operand)
             return {"_type": "call", "func": "neg", "args": [operand]}
+
+        # 一元取反: ~x, not x
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.Invert, ast.Not)):
+            operand = self._analyze_expr(node.operand)
+            return {"_type": "call", "func": "not_", "args": [operand]}
 
         # 二元运算: a + b, a * b
         if isinstance(node, ast.BinOp):
@@ -194,6 +250,7 @@ def analyze_compute_function(py_path: Path) -> dict:
     if analyzer is None:
         return {"meta": meta, "analyzer": None, "complexity": 2, "error": "No compute() found"}
 
+    analyzer._post_process_refs()
     return {"meta": meta, "analyzer": analyzer, "complexity": analyzer.complexity, "error": None}
 
 
@@ -232,6 +289,10 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
         # 忽略 numpy 前缀
         if name == "np":
             return None
+        # 处理 Python 内置类型引用 (float, int, bool 等) -> value
+        builtin_types = {"float", "int", "bool", "str", "complex", "list", "dict", "set", "tuple"}
+        if name in builtin_types:
+            return {"value": name}
         # 检查是否是函数引用
         if name in func_refs:
             helper_name = func_refs[name]
@@ -264,6 +325,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             "_rolling_rank": {"op": "ts_rank"},
             "_rolling_corr": {"op": "ts_corr"},
             "_rolling_cov": {"op": "ts_cov"},
+            "_rolling_prod": {"op": "ts_prod"},
             "_where_ternary": {"op": "where"},
             "_sma": {"op": "ts_mean"},
             "_ind_neutralize": None,
@@ -288,14 +350,13 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
         return None
 
     if expr["_type"] == "ewm":
-        # ewm 节点作为参数时，尝试转换为对应的算子
+        # ewm 节点作为参数时，转换为 ewm_mean
         obj = expr.get("obj")
         span = expr.get("span", {"value": 20})
         if obj:
             obj_yaml = _convert(obj)
             if obj_yaml is not None:
-                # 返回一个占位符，实际的合并会在 method_call 中处理
-                return {"_type": "ewm", "obj": obj_yaml, "span": span}
+                return {"op": "ewm_mean", "args": [obj_yaml, span]}
         return None
 
     if expr["_type"] == "method_call":
@@ -314,6 +375,18 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
                 yaml_args.append(arg_yaml)
             return {"op": method, "args": yaml_args}
 
+        # 特殊处理 pd.DataFrame() 调用 -> to_df()
+        if isinstance(obj, dict) and obj.get("_type") == "ref" and obj.get("name") == "pd" and method == "DataFrame":
+            yaml_args = []
+            for arg in args:
+                if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+                    continue
+                arg_yaml = _convert(arg)
+                if arg_yaml is None:
+                    return None
+                yaml_args.append(arg_yaml)
+            return {"op": "to_df", "args": yaml_args}
+
         # 特殊处理 rolling 方法
         if method == "rolling":
             window = {"value": 20}
@@ -329,18 +402,51 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             span = {"value": 20}
             for kw in args:
                 if isinstance(kw, dict) and kw.get("_type") == "kwarg":
-                    if kw.get("name") == "span":
+                    kw_name = kw.get("name")
+                    if kw_name == "span":
                         span = kw.get("value")
+                    elif kw_name == "alpha":
+                        # alpha -> span: span = 2/alpha - 1
+                        alpha_val = kw.get("value", {})
+                        if isinstance(alpha_val, dict):
+                            if alpha_val.get("_type") == "value":
+                                alpha = alpha_val.get("value", 0.1)
+                                if isinstance(alpha, (int, float)) and alpha > 0:
+                                    span = {"value": round(2.0 / alpha - 1.0)}
+                            elif alpha_val.get("_type") == "call" and alpha_val.get("func") == "div":
+                                # alpha = 1.0/3.0 -> eval directly
+                                div_args = alpha_val.get("args", [])
+                                if len(div_args) == 2:
+                                    a = div_args[0].get("value") if div_args[0].get("_type") == "value" else None
+                                    b = div_args[1].get("value") if div_args[1].get("_type") == "value" else None
+                                    if a is not None and b is not None and b != 0:
+                                        alpha = a / b
+                                        if alpha > 0:
+                                            span = {"value": round(2.0 / alpha - 1.0)}
                 elif isinstance(kw, dict) and kw.get("_type") == "value":
                     span = kw
-            return {"_type": "ewm", "obj": obj, "span": span}
+            obj_yaml = _convert(obj)
+            if obj_yaml is None:
+                return None
+            return {"op": "ewm_mean", "args": [obj_yaml, span]}
 
         # 链式调用合并: 先转换 obj，再检查是否为 rolling/ewm
         converted_obj = _convert(obj)
-        if isinstance(converted_obj, dict) and converted_obj.get("_type") in ("rolling", "ewm"):
-            rolling_info = converted_obj
-            rolling_type = rolling_info["_type"]
-            inner_obj = rolling_info["obj"]
+        # 链式调用合并: 检查是否为 rolling/ewm 节点
+        if isinstance(converted_obj, dict):
+            # rolling 节点: {_type: rolling, obj: ..., window: ...}
+            # ewm 节点 (已转换): {op: ewm_mean, args: [obj, span]}
+            rolling_type = None
+            inner_obj = None
+            rolling_span_or_window = None
+            if converted_obj.get("_type") == "rolling":
+                rolling_type = "rolling"
+                inner_obj = converted_obj.get("obj")
+                rolling_span_or_window = converted_obj.get("window")
+            elif converted_obj.get("op") == "ewm_mean" and converted_obj.get("args"):
+                rolling_type = "ewm"
+                inner_obj = converted_obj["args"][0] if len(converted_obj["args"]) > 0 else None
+                rolling_span_or_window = converted_obj["args"][1] if len(converted_obj["args"]) > 1 else {"value": 20}
 
             rolling_method_map = {
                 "mean": "ts_mean" if rolling_type == "rolling" else "ewm_mean",
@@ -372,22 +478,22 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
                         if arg_yaml is None:
                             return None
                         yaml_args.append(arg_yaml)
-                    yaml_args.append(rolling_info["window"])
+                    yaml_args.append(rolling_span_or_window)
                 elif method == "cov":
                     if args:
                         arg_yaml = _convert(args[0])
                         if arg_yaml is None:
                             return None
                         yaml_args.append(arg_yaml)
-                    yaml_args.append(rolling_info["window"])
+                    yaml_args.append(rolling_span_or_window)
                 else:
-                    yaml_args.append(rolling_info["window"])
+                    yaml_args.append(rolling_span_or_window)
 
                 return {"op": op_name, "args": yaml_args}
 
             if method == "quantile":
                 q_val = _convert(args[0]) if args else {"value": 0.5}
-                return {"op": "ts_rank", "args": [inner_obj, rolling_info["window"]]}
+                return {"op": "ts_rank", "args": [inner_obj, rolling_span_or_window]}
 
             if method == "apply":
                 return None
@@ -423,11 +529,26 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
                 "_rolling_rank": "ts_rank",
                 "_rolling_corr": "ts_corr",
                 "_rolling_cov": "ts_cov",
+                "_rolling_prod": "ts_prod",
                 "_where_ternary": "where",
                 "_sma": "ts_mean",
                 "_make_one": "fill_null",
+                "_ind_neutralize": "__SKIP__",
+                "_bench_close": "__SKIP__",
             }
-            func = op_map.get(helper_name, helper_name)
+            mapped = op_map.get(helper_name)
+            if mapped == "__SKIP__":
+                # 忽略 _ind_neutralize/_bench_close，返回第一个参数
+                yaml_args_temp = []
+                for arg in args:
+                    if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+                        continue
+                    arg_yaml = _convert(arg)
+                    if arg_yaml is not None:
+                        yaml_args_temp.append(arg_yaml)
+                return yaml_args_temp[0] if yaml_args_temp else None
+            elif mapped is not None:
+                func = mapped
 
         # 处理参数 (过滤关键字参数)
         yaml_args = []
@@ -473,6 +594,9 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
         # 特殊处理 _rolling_cov -> ts_cov
         elif func == "_rolling_cov":
             func = "ts_cov"
+        # 特殊处理 _rolling_prod -> ts_prod
+        elif func == "_rolling_prod":
+            func = "ts_prod"
         # 特殊处理 _where_ternary -> where
         elif func == "_where_ternary":
             func = "where"
@@ -608,7 +732,7 @@ def convert_py_to_yaml(py_path: Path) -> dict | None:
     helper_names = {
         "_delay", "_make_one", "_rolling_sum", "_rolling_mean", "_rolling_std",
         "_rolling_var", "_rolling_min", "_rolling_max", "_rolling_rank",
-        "_rolling_corr", "_rolling_cov", "_where_ternary", "_sma",
+        "_rolling_corr", "_rolling_cov", "_rolling_prod", "_where_ternary", "_sma",
         "_ind_neutralize", "_bench_close", "_cross_sectional_zscore",
     }
 

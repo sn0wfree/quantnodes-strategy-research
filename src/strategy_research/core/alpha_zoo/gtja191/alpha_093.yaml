@@ -28,9 +28,8 @@ steps:
     - value: 1
 - name: move
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: maximum
       args:
       - op: to_numpy

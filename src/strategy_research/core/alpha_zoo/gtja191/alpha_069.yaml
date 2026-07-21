@@ -32,9 +32,8 @@ steps:
     - value: 1
 - name: dtm
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: where
       args:
       - op: lte
@@ -58,9 +57,8 @@ steps:
             - ref: po
 - name: dbm
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: where
       args:
       - op: gte
@@ -96,9 +94,8 @@ steps:
     - 20
 - name: res
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: where
       args:
       - op: gt

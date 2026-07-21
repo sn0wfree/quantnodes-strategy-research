@@ -82,7 +82,7 @@ steps:
         args:
         - ref: lhs
         - ref: rhs
-      - ref: float
+      - value: float
     - op: neg
       args:
       - value: 1.0

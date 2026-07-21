@@ -22,9 +22,6 @@ steps:
 - name: vwap
   expr:
     column: vwap
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: out
   expr:
     op: mul
@@ -38,10 +35,7 @@ steps:
         args:
         - op: ts_corr
           args:
-          - op: ind_neutralize
-            args:
-            - ref: vwap
-            - ref: panel
+          - ref: vwap
           - ref: volume
           - value: 4
         - value: 8

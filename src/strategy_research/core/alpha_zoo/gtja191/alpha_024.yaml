@@ -17,16 +17,10 @@ steps:
   expr:
     column: close
 final:
-  op: mean
+  op: ewm_mean
   args:
-  - _type: ewm
-    obj:
-      _type: call
-      func: delta
-      args:
-      - _type: ref
-        name: c
-      - _type: value
-        value: 5
-    span:
-      value: 20
+  - op: delta
+    args:
+    - ref: c
+    - 5
+  - value: 20

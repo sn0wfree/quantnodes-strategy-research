@@ -95,9 +95,8 @@ steps:
     - ref: b
 - name: out
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: fmin
       args:
       - ref: arr_a

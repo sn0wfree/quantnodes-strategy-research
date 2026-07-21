@@ -97,9 +97,8 @@ steps:
       - ref: right
 - name: out
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - ref: arr
 final:
   ref: out

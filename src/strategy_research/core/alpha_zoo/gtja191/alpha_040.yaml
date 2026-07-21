@@ -49,7 +49,9 @@ steps:
     - op: where
       args:
       - ref: v
-      - null
+      - op: not_
+        args:
+        - ref: up
       - 0.0
     - 26
 final:

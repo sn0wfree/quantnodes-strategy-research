@@ -66,9 +66,8 @@ steps:
         - value: 1
 - name: out
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: where
       args:
       - op: lt

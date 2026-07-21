@@ -21,7 +21,7 @@ steps:
     op: sub
     args:
     - ref: c
-    - op: delay
+    - op: shift
       args:
       - ref: c
       - value: 1
@@ -37,24 +37,16 @@ steps:
     - ref: diff
 - name: u
   expr:
-    op: mean
+    op: ewm_mean
     args:
-    - _type: ewm
-      obj:
-        _type: ref
-        name: up_part
-      span:
-        value: 20
+    - ref: up_part
+    - value: 20
 - name: a
   expr:
-    op: mean
+    op: ewm_mean
     args:
-    - _type: ewm
-      obj:
-        _type: ref
-        name: abs_part
-      span:
-        value: 20
+    - ref: abs_part
+    - value: 20
 final:
   op: mul
   args:

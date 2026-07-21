@@ -34,9 +34,8 @@ steps:
     - value: 1
 - name: lo
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: minimum
       args:
       - op: to_numpy
@@ -45,11 +44,11 @@ steps:
       - op: to_numpy
         args:
         - ref: prev
+    - ref: c
 - name: hi
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: maximum
       args:
       - op: to_numpy
@@ -58,59 +57,138 @@ steps:
       - op: to_numpy
         args:
         - ref: prev
+    - ref: c
+- name: lo_hi_diff
+  expr:
+    op: sub
+    args:
+    - ref: hi
+    - ref: lo
+- name: t6_num
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: ts_sum
+      args:
+      - ref: lo
+      - value: 6
+- name: t6_den
+  expr:
+    op: ts_sum
+    args:
+    - ref: lo_hi_diff
+    - value: 6
+- name: t6
+  expr:
+    op: safe_div
+    args:
+    - ref: t6_num
+    - ref: t6_den
+- name: t12_num
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: ts_sum
+      args:
+      - ref: lo
+      - value: 12
+- name: t12_den
+  expr:
+    op: ts_sum
+    args:
+    - ref: lo_hi_diff
+    - value: 12
+- name: t12
+  expr:
+    op: safe_div
+    args:
+    - ref: t12_num
+    - ref: t12_den
+- name: t24_num
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: ts_sum
+      args:
+      - ref: lo
+      - value: 24
+- name: t24_den
+  expr:
+    op: ts_sum
+    args:
+    - ref: lo_hi_diff
+    - value: 24
+- name: t24
+  expr:
+    op: safe_div
+    args:
+    - ref: t24_num
+    - ref: t24_den
+- name: t6_part
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - ref: t6
+      - value: 12.0
+    - value: 24.0
+- name: t12_part
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - ref: t12
+      - value: 6.0
+    - value: 24.0
+- name: t24_part
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - ref: t24
+      - value: 6.0
+    - value: 12.0
+- name: numerator
+  expr:
+    op: add
+    args:
+    - op: add
+      args:
+      - ref: t6_part
+      - ref: t12_part
+    - ref: t24_part
+- name: denominator
+  expr:
+    op: add
+    args:
+    - op: add
+      args:
+      - op: mul
+        args:
+        - value: 6.0
+        - value: 12.0
+      - op: mul
+        args:
+        - value: 6.0
+        - value: 24.0
+    - op: mul
+      args:
+      - value: 12.0
+      - value: 24.0
 - name: out
   expr:
     op: mul
     args:
     - op: div
       args:
-      - op: add
-        args:
-        - op: add
-          args:
-          - op: mul
-            args:
-            - op: mul
-              args:
-              - op: _term
-                args:
-                - value: 6
-              - value: 12.0
-            - value: 24.0
-          - op: mul
-            args:
-            - op: mul
-              args:
-              - op: _term
-                args:
-                - value: 12
-              - value: 6.0
-            - value: 24.0
-        - op: mul
-          args:
-          - op: mul
-            args:
-            - op: _term
-              args:
-              - value: 24
-            - value: 6.0
-          - value: 12.0
-      - op: add
-        args:
-        - op: add
-          args:
-          - op: mul
-            args:
-            - value: 6.0
-            - value: 12.0
-          - op: mul
-            args:
-            - value: 6.0
-            - value: 24.0
-        - op: mul
-          args:
-          - value: 12.0
-          - value: 24.0
+      - ref: numerator
+      - ref: denominator
     - value: 100.0
 final:
   ref: out

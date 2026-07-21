@@ -38,9 +38,6 @@ steps:
     args:
     - ref: volume
     - value: 50
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: lhs
   expr:
     op: rank
@@ -55,10 +52,7 @@ steps:
     args:
     - op: ts_corr
       args:
-      - op: ind_neutralize
-        args:
-        - ref: close
-        - ref: panel
+      - ref: close
       - ref: adv50
       - value: 18
     - value: 18

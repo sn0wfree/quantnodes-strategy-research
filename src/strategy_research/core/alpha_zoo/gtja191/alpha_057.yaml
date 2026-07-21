@@ -52,11 +52,7 @@ steps:
         - ref: lo9
     - value: 100.0
 final:
-  op: mean
+  op: ewm_mean
   args:
-  - _type: ewm
-    obj:
-      _type: ref
-      name: raw
-    span:
-      value: 20
+  - ref: raw
+  - value: 20

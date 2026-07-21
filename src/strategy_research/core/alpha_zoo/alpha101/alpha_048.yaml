@@ -18,24 +18,37 @@ steps:
 - name: close
   expr:
     column: close
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: delay
-  expr:
-    op: delay
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: num
   expr:
-    op: ind_neutralize
+    op: div
     args:
-    - ref: num
-    - ref: panel
+    - op: mul
+      args:
+      - op: ts_corr
+        args:
+        - op: delta
+          args:
+          - ref: close
+          - value: 1
+        - op: delta
+          args:
+          - op: delay
+            args:
+            - ref: close
+            - value: 1
+          - value: 1
+        - value: 250
+      - op: delta
+        args:
+        - ref: close
+        - value: 1
+    - ref: close
+- name: num_2
+  expr:
+    ref: num
 - name: denom
   expr:
-    op: rolling_sum
+    op: ts_sum
     args:
     - op: pow
       args:

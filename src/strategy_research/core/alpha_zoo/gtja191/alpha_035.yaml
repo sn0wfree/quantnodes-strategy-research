@@ -62,9 +62,8 @@ final:
   - op: neg
     args:
     - value: 1.0
-  - op: DataFrame
+  - op: to_df
     args:
-    - ref: pd
     - op: minimum
       args:
       - op: to_numpy

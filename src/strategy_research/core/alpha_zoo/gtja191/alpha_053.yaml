@@ -27,7 +27,7 @@ steps:
         args:
         - ref: c
         - value: 1
-    - ref: float
+    - value: float
 final:
   op: mul
   args:

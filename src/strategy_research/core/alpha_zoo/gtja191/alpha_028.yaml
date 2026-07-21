@@ -53,24 +53,16 @@ steps:
     - value: 100.0
 - name: s1
   expr:
-    op: mean
+    op: ewm_mean
     args:
-    - _type: ewm
-      obj:
-        _type: ref
-        name: raw
-      span:
-        value: 20
+    - ref: raw
+    - value: 20
 - name: s2
   expr:
-    op: mean
+    op: ewm_mean
     args:
-    - _type: ewm
-      obj:
-        _type: ref
-        name: s1
-      span:
-        value: 20
+    - ref: s1
+    - value: 20
 final:
   op: sub
   args:

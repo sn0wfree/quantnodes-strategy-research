@@ -43,9 +43,6 @@ steps:
     args:
     - ref: volume
     - value: 150
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: mix
   expr:
     op: add
@@ -67,10 +64,7 @@ steps:
     args:
     - op: delta
       args:
-      - op: ind_neutralize
-        args:
-        - ref: mix
-        - ref: panel
+      - ref: mix
       - value: 1
 - name: rhs
   expr:
@@ -89,13 +83,12 @@ steps:
       - value: 15
 - name: out
   expr:
-    op: where
+    op: astype
     args:
     - op: lt
       args:
       - ref: lhs
       - ref: rhs
-    - value: 1.0
-    - value: 0.0
+    - value: float
 final:
   ref: out

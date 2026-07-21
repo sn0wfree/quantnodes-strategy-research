@@ -32,9 +32,6 @@ steps:
     args:
     - ref: volume
     - value: 81
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: a
   expr:
     op: ts_rank
@@ -43,10 +40,7 @@ steps:
       args:
       - op: ts_corr
         args:
-        - op: ind_neutralize
-          args:
-          - ref: vwap
-          - ref: panel
+        - ref: vwap
         - ref: adv81
         - value: 17
       - value: 20

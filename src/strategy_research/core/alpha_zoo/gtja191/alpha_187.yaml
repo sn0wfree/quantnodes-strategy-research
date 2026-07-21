@@ -53,13 +53,13 @@ steps:
       - ref: prev
 - name: mx
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - op: maximum
       args:
       - ref: arr_a
       - ref: arr_b
+    - ref: o
 - name: val
   expr:
     op: mul

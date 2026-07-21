@@ -69,9 +69,8 @@ steps:
     - ref: d
 - name: tr_df
   expr:
-    op: DataFrame
+    op: to_df
     args:
-    - ref: pd
     - ref: tr
 - name: out
   expr:

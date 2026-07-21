@@ -32,9 +32,6 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: lhs
   expr:
     op: rank
@@ -43,10 +40,7 @@ steps:
       args:
       - op: delta
         args:
-        - op: ind_neutralize
-          args:
-          - ref: vwap
-          - ref: panel
+        - ref: vwap
         - value: 3
       - value: 5
 - name: mix

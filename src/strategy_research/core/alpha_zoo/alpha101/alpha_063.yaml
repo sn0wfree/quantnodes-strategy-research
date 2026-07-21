@@ -37,12 +37,6 @@ steps:
     args:
     - ref: volume
     - value: 180
-- name: rolling_sum
-  expr:
-    op: ts_sum
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: left
   expr:
     op: rank
@@ -51,10 +45,7 @@ steps:
       args:
       - op: delta
         args:
-        - op: ind_neutralize
-          args:
-          - ref: close
-          - ref: panel
+        - ref: close
         - value: 2
       - value: 8
 - name: mix
@@ -81,7 +72,7 @@ steps:
       - op: ts_corr
         args:
         - ref: mix
-        - op: rolling_sum
+        - op: ts_sum
           args:
           - ref: adv180
           - value: 37

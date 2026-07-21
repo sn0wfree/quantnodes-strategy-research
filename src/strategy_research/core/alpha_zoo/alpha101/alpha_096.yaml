@@ -85,9 +85,8 @@ steps:
   expr:
     op: mul
     args:
-    - op: DataFrame
+    - op: to_df
       args:
-      - ref: pd
       - op: fmax
         args:
         - ref: arr_a

@@ -48,35 +48,14 @@ steps:
           - ref: l
           - value: 9
     - value: 100.0
+- name: first_ewm
+  expr:
+    op: ewm_mean
+    args:
+    - ref: raw
+    - value: 5
 final:
-  op: mean
+  op: ewm_mean
   args:
-  - _type: ewm
-    obj:
-      _type: method_call
-      obj:
-        _type: method_call
-        obj:
-          _type: ref
-          name: raw
-        method: ewm
-        args:
-        - _type: kwarg
-          name: alpha
-          value:
-            _type: call
-            func: div
-            args:
-            - _type: value
-              value: 1.0
-            - _type: value
-              value: 3.0
-        - _type: kwarg
-          name: adjust
-          value:
-            _type: value
-            value: false
-      method: mean
-      args: []
-    span:
-      value: 20
+  - ref: first_ewm
+  - value: 5

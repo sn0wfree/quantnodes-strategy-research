@@ -32,9 +32,6 @@ steps:
     args:
     - ref: volume
     - value: 81
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: mix
   expr:
     op: add
@@ -71,10 +68,7 @@ steps:
         args:
         - op: ts_corr
           args:
-          - op: ind_neutralize
-            args:
-            - ref: adv81
-            - ref: panel
+          - ref: adv81
           - ref: close
           - value: 13
       - value: 5
@@ -93,9 +87,8 @@ steps:
   expr:
     op: mul
     args:
-    - op: DataFrame
+    - op: to_df
       args:
-      - ref: pd
       - op: fmax
         args:
         - ref: arr_a

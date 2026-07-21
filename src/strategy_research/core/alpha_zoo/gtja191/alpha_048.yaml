@@ -23,9 +23,47 @@ steps:
     column: volume
 - name: s
   expr:
-    op: DataFrame
+    op: add
     args:
-    - ref: pd
+    - op: add
+      args:
+      - op: sign
+        args:
+        - op: sub
+          args:
+          - ref: c
+          - op: shift
+            args:
+            - ref: c
+            - value: 1
+      - op: sign
+        args:
+        - op: sub
+          args:
+          - op: shift
+            args:
+            - ref: c
+            - value: 1
+          - op: shift
+            args:
+            - ref: c
+            - value: 2
+    - op: sign
+      args:
+      - op: sub
+        args:
+        - op: shift
+          args:
+          - ref: c
+          - value: 2
+        - op: shift
+          args:
+          - ref: c
+          - value: 3
+- name: s_2
+  expr:
+    op: to_df
+    args:
     - ref: s
 - name: sv5
   expr:

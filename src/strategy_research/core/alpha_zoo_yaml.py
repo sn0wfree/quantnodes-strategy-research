@@ -68,6 +68,9 @@ def load_alpha_yaml_from_string(yaml_str: str) -> dict:
 
 def _get_operator(op_name: str):
     """获取算子函数，优先使用 Alpha Zoo 算子。"""
+    # 算子别名
+    aliases = {"ewm": "ewm_mean"}
+    op_name = aliases.get(op_name, op_name)
     # 优先使用 Alpha Zoo 算子 (支持 DataFrame)
     if op_name in ALPHA_ZOO_OPS:
         return ALPHA_ZOO_OPS[op_name]
@@ -132,7 +135,13 @@ def evaluate_node(
 
     # 常量: {value: 20}
     if "value" in node:
-        return node["value"]
+        val = node["value"]
+        # 特殊处理 Python 内置类型名称
+        if isinstance(val, str):
+            type_map = {"float": float, "int": int, "bool": bool, "complex": complex}
+            if val in type_map:
+                return type_map[val]
+        return val
 
     # 步骤引用: {ref: name}
     if "ref" in node:
@@ -143,6 +152,13 @@ def evaluate_node(
         # 然后检查是否是环境变量
         if ref in env:
             return env[ref]
+        # 特殊处理 panel 引用 -> 返回 panel dict 本身
+        if ref == "panel":
+            return data
+        # 特殊处理 pd 引用 -> 返回 pandas 模块
+        if ref == "pd":
+            import pandas as _pd
+            return _pd
         raise ValueError(f"未知的步骤引用: {ref}")
 
     # 算子调用: {op: ts_mean, args: [...]}
@@ -186,6 +202,10 @@ def evaluate_node(
         try:
             # 特殊处理 where 算子 (使用 DataFrame 版本)
             if op_name == "where":
+                # 2-arg where: pandas .where(cond) -> where(cond, value, NaN)
+                if len(args) == 2:
+                    cond, val = args
+                    return _where_df(cond, val, np.nan)
                 result = _where_df(*args)
             else:
                 result = op_func(*args)

@@ -33,9 +33,6 @@ steps:
     args:
     - ref: volume
     - value: 20
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: lhs
   expr:
     op: rank
@@ -53,16 +50,27 @@ steps:
     args:
     - op: ts_corr
       args:
-      - op: ind_neutralize
-        args:
-        - ref: vwap
-        - ref: panel
-      - op: ind_neutralize
-        args:
-        - ref: adv20
-        - ref: panel
+      - ref: vwap
+      - ref: adv20
       - value: 6
 - name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: signed_power
+        args:
+        - ref: lhs
+        - value: 1.0
+      - op: signed_power
+        args:
+        - ref: rhs
+        - value: 1.0
+    - op: neg
+      args:
+      - value: 1.0
+- name: out_2
   expr:
     op: mul
     args:

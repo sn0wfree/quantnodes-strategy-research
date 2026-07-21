@@ -29,17 +29,32 @@ steps:
     args:
     - ref: volume
     - value: 10
-- name: rolling_prod
-  expr:
-    ref: _rolling_prod
 - name: inner
   expr:
     op: rank
     args:
+    - op: ts_corr
+      args:
+      - ref: vwap
+      - op: ts_sum
+        args:
+        - ref: adv10
+        - value: 50
+      - value: 8
+- name: inner_2
+  expr:
+    op: signed_power
+    args:
     - ref: inner
+    - value: 4.0
+- name: inner_3
+  expr:
+    op: rank
+    args:
+    - ref: inner_2
 - name: prod
   expr:
-    op: rolling_prod
+    op: ts_prod
     args:
     - ref: inner
     - value: 15
@@ -79,7 +94,7 @@ steps:
         args:
         - ref: lhs
         - ref: rhs
-      - ref: float
+      - value: float
     - op: neg
       args:
       - value: 1.0

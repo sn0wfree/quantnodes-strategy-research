@@ -24,14 +24,66 @@ steps:
     op: pct_change
     args:
     - ref: close
-- name: rolling_prod
-  expr:
-    ref: _rolling_prod
 - name: inner
   expr:
-    op: rolling_prod
+    op: rank
+    args:
+    - op: rank
+      args:
+      - op: mul
+        args:
+        - op: neg
+          args:
+          - value: 1.0
+        - op: rank
+          args:
+          - op: delta
+            args:
+            - op: sub
+              args:
+              - ref: close
+              - value: 1.0
+            - value: 5
+- name: inner_2
+  expr:
+    op: ts_min
     args:
     - ref: inner
+    - value: 2
+- name: inner_3
+  expr:
+    op: ts_sum
+    args:
+    - ref: inner_2
+    - value: 1
+- name: inner_4
+  expr:
+    op: log
+    args:
+    - op: where
+      args:
+      - ref: inner_3
+      - op: gt
+        args:
+        - ref: inner_3
+        - value: 0
+- name: inner_5
+  expr:
+    op: scale
+    args:
+    - ref: inner_4
+- name: inner_6
+  expr:
+    op: rank
+    args:
+    - op: rank
+      args:
+      - ref: inner_5
+- name: inner_7
+  expr:
+    op: ts_prod
+    args:
+    - ref: inner_6
     - value: 1
 - name: term1
   expr:

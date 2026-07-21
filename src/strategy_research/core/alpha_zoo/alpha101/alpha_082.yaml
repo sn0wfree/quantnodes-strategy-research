@@ -26,9 +26,6 @@ steps:
 - name: volume
   expr:
     column: volume
-- name: ind_neutralize
-  expr:
-    ref: _ind_neutralize
 - name: a
   expr:
     op: rank
@@ -63,10 +60,7 @@ steps:
       args:
       - op: ts_corr
         args:
-        - op: ind_neutralize
-          args:
-          - ref: volume
-          - ref: panel
+        - ref: volume
         - ref: mix
         - value: 17
       - value: 7
@@ -85,9 +79,8 @@ steps:
   expr:
     op: mul
     args:
-    - op: DataFrame
+    - op: to_df
       args:
-      - ref: pd
       - op: fmin
         args:
         - ref: arr_a
