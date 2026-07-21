@@ -439,6 +439,48 @@ OPERATORS = {
     "combine": combine,
     "signed_power": signed_power,
     "safe_div": safe_div,
+
+    # 比较算子
+    "lt": lambda a, b: a < b,
+    "lte": lambda a, b: a <= b,
+    "gt": lambda a, b: a > b,
+    "gte": lambda a, b: a >= b,
+    "eq": lambda a, b: a == b,
+    "neq": lambda a, b: a != b,
+
+    # 一元运算
+    "neg": lambda a: -a,
+
+    # pandas/numpy 兼容算子
+    "sum": lambda series, window: series.rolling(window).sum(),
+    "mean": lambda series, window: series.rolling(window).mean(),
+    "std": lambda series, window: series.rolling(window).std(),
+    "var": lambda series, window: series.rolling(window).var(),
+    "min": lambda series, window: series.rolling(window).min(),
+    "max": lambda series, window: series.rolling(window).max(),
+    "median": lambda series, window: series.rolling(window).median(),
+    "skew": lambda series, window: series.rolling(window).skew(),
+    "kurt": lambda series, window: series.rolling(window).kurt(),
+    "quantile": lambda series, window: series.rolling(window).quantile(0.5),
+    "cumsum": lambda series: series.cumsum(),
+    "cumprod": lambda series: series.cumprod(),
+    "cummax": lambda series: series.cummax(),
+    "cummin": lambda series: series.cummin(),
+    "log1p": lambda series: np.log1p(series),
+    "exp": lambda series: np.exp(series),
+    "pow": lambda a, b: a ** b,
+    "power": lambda a, b: a ** b,
+    "minimum": lambda a, b: pd.DataFrame(np.minimum(a, b), index=a.index, columns=a.columns) if isinstance(a, pd.DataFrame) else np.minimum(a, b),
+    "maximum": lambda a, b: pd.DataFrame(np.maximum(a, b), index=a.index, columns=a.columns) if isinstance(a, pd.DataFrame) else np.maximum(a, b),
+    "clip_upper": lambda series, upper: series.clip(upper=upper),
+    "clip_lower": lambda series, lower: series.clip(lower=lower),
+    "shift": lambda series, periods: series.shift(periods),
+    "diff": lambda series, periods: series.diff(periods),
+    "pct_change": lambda series, periods=1: series.pct_change(periods, fill_method=None),
+    "fillna": lambda series, value: series.fillna(value),
+    "replace": lambda series, old, new: series.replace(old, new),
+    "astype": lambda series, dtype: series.astype(dtype),
+    "to_numpy": lambda series: series.to_numpy(),
 }
 
 

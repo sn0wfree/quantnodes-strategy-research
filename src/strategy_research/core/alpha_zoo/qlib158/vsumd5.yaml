@@ -1,0 +1,84 @@
+id: qlib158_vsumd5
+zoo: qlib158
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: \\mathrm{VSUMP}_w - \\mathrm{VSUMN}_w
+columns_required:
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: v
+  expr:
+    column: volume
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: v
+    - op: shift
+      args:
+      - ref: v
+      - value: 1
+- name: pos
+  expr:
+    op: where
+    args:
+    - ref: diff
+    - op: gt
+      args:
+      - ref: diff
+      - value: 0
+    - value: 0.0
+- name: neg
+  expr:
+    op: where
+    args:
+    - op: neg
+      args:
+      - ref: diff
+    - op: lt
+      args:
+      - ref: diff
+      - value: 0
+    - value: 0.0
+- name: absd
+  expr:
+    op: abs
+    args:
+    - ref: diff
+- name: num_p
+  expr:
+    op: ts_sum
+    args:
+    - ref: pos
+    - 5
+- name: num_n
+  expr:
+    op: ts_sum
+    args:
+    - ref: neg
+    - 5
+- name: den
+  expr:
+    op: ts_sum
+    args:
+    - ref: absd
+    - 5
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - ref: num_p
+    - ref: num_n
+  - ref: den

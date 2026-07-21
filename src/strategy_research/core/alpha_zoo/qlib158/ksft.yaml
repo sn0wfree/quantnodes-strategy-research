@@ -1,0 +1,47 @@
+id: qlib158_ksft
+zoo: qlib158
+nickname: ''
+theme:
+- microstructure
+formula_latex: (2\\,\\mathrm{close} - \\mathrm{high} - \\mathrm{low}) / \\mathrm{open}
+columns_required:
+- open
+- high
+- low
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 1
+steps:
+- name: o
+  expr:
+    column: open
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: lo
+  expr:
+    column: low
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - op: sub
+      args:
+      - op: mul
+        args:
+        - value: 2.0
+        - ref: c
+      - ref: h
+    - ref: lo
+  - ref: o

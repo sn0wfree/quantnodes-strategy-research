@@ -1,0 +1,57 @@
+id: gtja191_102
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: sma(max(volume-delay(volume,1),0),6,1)/sma(abs(volume-delay(volume,1)),6,1)*100
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 6
+min_warmup_bars: 7
+steps:
+- name: v
+  expr:
+    column: volume
+- name: dv
+  expr:
+    op: sub
+    args:
+    - ref: v
+    - op: shift
+      args:
+      - ref: v
+      - value: 1
+- name: num
+  expr:
+    op: ts_mean
+    args:
+    - op: clip
+      args:
+      - ref: dv
+    - value: 6
+    - value: 1
+- name: den
+  expr:
+    op: ts_mean
+    args:
+    - op: abs
+      args:
+      - ref: dv
+    - value: 6
+    - value: 1
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - ref: num
+      - ref: den
+    - value: 100.0
+final:
+  ref: out

@@ -1,0 +1,47 @@
+id: qlib158_kup
+zoo: qlib158
+nickname: ''
+theme:
+- microstructure
+formula_latex: (\\mathrm{high} - \\max(\\mathrm{open}, \\mathrm{close})) / \\mathrm{open}
+columns_required:
+- open
+- high
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 1
+steps:
+- name: o
+  expr:
+    column: open
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: upper
+  expr:
+    op: where
+    args:
+    - ref: o
+    - op: gte
+      args:
+      - ref: o
+      - ref: c
+    - ref: c
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - ref: h
+    - ref: upper
+  - ref: o

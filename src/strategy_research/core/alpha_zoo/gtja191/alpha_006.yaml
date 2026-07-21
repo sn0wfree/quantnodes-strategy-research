@@ -1,0 +1,48 @@
+id: gtja191_006
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (RANK(SIGN(DELTA((OPEN*0.85+HIGH*0.15), 4))) * -1)
+columns_required:
+- open
+- high
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 4
+min_warmup_bars: 5
+steps:
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: x
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: o
+      - value: 0.85
+    - op: mul
+      args:
+      - ref: h
+      - value: 0.15
+final:
+  op: mul
+  args:
+  - op: neg
+    args:
+    - value: 1.0
+  - op: rank
+    args:
+    - op: sign
+      args:
+      - op: delta
+        args:
+        - ref: x
+        - value: 4

@@ -1,0 +1,71 @@
+id: gtja191_098
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: '((((DELTA((SUM(CLOSE,100)/100),100)/DELAY(CLOSE,100))<0.05) || ((DELTA((SUM(CLOSE,100)/100),100)/DELAY(CLOSE,100))==0.05))
+  ? (-1*(CLOSE-TSMIN(CLOSE,100))) : (-1*DELTA(CLOSE,3)))'
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 30
+min_warmup_bars: 60
+steps:
+- name: c
+  expr:
+    column: close
+- name: ma
+  expr:
+    op: ts_mean
+    args:
+    - ref: c
+    - value: 30
+- name: cond_a
+  expr:
+    op: lte
+    args:
+    - op: safe_div
+      args:
+      - op: delta
+        args:
+        - ref: ma
+        - value: 30
+      - op: shift
+        args:
+        - ref: c
+        - value: 30
+    - value: 0.05
+- name: branch1
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: sub
+      args:
+      - ref: c
+      - op: ts_min
+        args:
+        - ref: c
+        - value: 30
+- name: branch2
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: delta
+      args:
+      - ref: c
+      - value: 3
+final:
+  op: where
+  args:
+  - ref: branch1
+  - ref: cond_a
+  - ref: branch2

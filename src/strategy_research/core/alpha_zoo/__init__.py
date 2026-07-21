@@ -6,6 +6,8 @@
 - qlib158: 微软 Qlib 158 个 ML 因子
 - academic: 11 个学术因子 (Fama-French, Carhart 等)
 - fundamental: 4 个基本面因子
+
+加载优先级: YAML 优先，.py 作为 fallback。
 """
 
 import importlib
@@ -24,27 +26,112 @@ ALPHA_ZOOS = {
 _zoo_root = Path(__file__).parent
 
 
+def _resolve_alpha_name(zoo_name: str, alpha_id: str) -> str:
+    """解析 alpha_name，处理 alpha101_001 -> 001 的映射。"""
+    # 去掉 zoo 前缀
+    prefix = f"{zoo_name}_"
+    if alpha_id.startswith(prefix):
+        return alpha_id[len(prefix):]
+
+    # 尝试直接用完整 ID
+    return alpha_id
+
+
+def _find_yaml_file(zoo_name: str, alpha_name: str) -> Optional[Path]:
+    """查找 YAML 配置文件。"""
+    zoo_dir = _zoo_root / zoo_name
+
+    # 尝试直接匹配 (如 alpha_001.yaml)
+    yaml_file = zoo_dir / f"{alpha_name}.yaml"
+    if yaml_file.exists():
+        return yaml_file
+
+    # 尝试带 alpha_ 前缀的匹配 (如 alpha_001.yaml)
+    yaml_file = zoo_dir / f"alpha_{alpha_name}.yaml"
+    if yaml_file.exists():
+        return yaml_file
+
+    # 尝试带 zoo 前缀的匹配 (如 alpha101_001.yaml)
+    yaml_file = zoo_dir / f"{zoo_name}_{alpha_name}.yaml"
+    if yaml_file.exists():
+        return yaml_file
+
+    return None
+
+
+def _find_py_file(zoo_name: str, alpha_name: str) -> Optional[Path]:
+    """查找 .py 因子文件。"""
+    zoo_dir = _zoo_root / zoo_name
+
+    # 尝试直接匹配 (如 001.py)
+    py_file = zoo_dir / f"{alpha_name}.py"
+    if py_file.exists():
+        return py_file
+
+    # 尝试带 alpha_ 前缀的匹配 (如 alpha_001.py)
+    py_file = zoo_dir / f"alpha_{alpha_name}.py"
+    if py_file.exists():
+        return py_file
+
+    # 尝试带 zoo 前缀的匹配 (如 alpha101_001.py)
+    py_file = zoo_dir / f"{zoo_name}_{alpha_name}.py"
+    if py_file.exists():
+        return py_file
+
+    return None
+
+
 def list_alphas(zoo: Optional[str] = None) -> list[dict]:
-    """列出可用因子。"""
+    """列出可用因子。
+
+    同时列出 .py 和 .yaml 因子，去重后返回。
+    """
+    import json
+
     results = []
+    seen = set()
+
     for zoo_name in ALPHA_ZOOS:
         if zoo and zoo_name != zoo:
             continue
         zoo_dir = _zoo_root / zoo_name
+
+        # 列出 .yaml 因子
+        for f in sorted(zoo_dir.glob("*.yaml")):
+            alpha_id = f"{zoo_name}_{f.stem}"
+            if alpha_id not in seen:
+                results.append({
+                    "id": alpha_id,
+                    "zoo": zoo_name,
+                    "file": str(f),
+                    "format": "yaml",
+                })
+                seen.add(alpha_id)
+
+        # 列出 .py 因子 (跳过已有 YAML 的)
         for f in sorted(zoo_dir.glob("*.py")):
             if f.name.startswith("_"):
                 continue
-            results.append({
-                "id": f"{zoo_name}_{f.stem}",
-                "zoo": zoo_name,
-                "file": str(f),
-            })
+            alpha_id = f"{zoo_name}_{f.stem}"
+            if alpha_id not in seen:
+                results.append({
+                    "id": alpha_id,
+                    "zoo": zoo_name,
+                    "file": str(f),
+                    "format": "py",
+                })
+                seen.add(alpha_id)
+
     return results
 
 
 def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
-    """计算单个因子。"""
+    """计算单个因子。
+
+    加载优先级: YAML 优先，.py 作为 fallback。
+    """
     import pandas as pd
+    import numpy as np
 
     parts = alpha_id.split("_", 1)
     if len(parts) != 2:
@@ -60,26 +147,51 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
                 alpha_name = alpha_id[len(z) + 1:]
                 break
 
-    module_path = f"strategy_research.core.alpha_zoo.{zoo_name}.{alpha_name}"
-    try:
-        mod = importlib.import_module(module_path)
-    except ImportError as e:
-        raise ImportError(f"Cannot load alpha {alpha_id}: {e}")
+    # 优先加载 YAML
+    yaml_file = _find_yaml_file(zoo_name, alpha_name)
+    if yaml_file:
+        try:
+            from .alpha_zoo_yaml import load_alpha_yaml, compute_alpha_from_yaml
+            config = load_alpha_yaml(yaml_file)
+            result = compute_alpha_from_yaml(config, panel)
 
-    if not hasattr(mod, "compute"):
-        raise AttributeError(f"Alpha {alpha_id} has no compute() function")
+            # Validate output
+            if not isinstance(result, pd.DataFrame):
+                raise TypeError(f"Alpha {alpha_id} must return DataFrame, got {type(result)}")
+            if result.shape != panel["close"].shape:
+                raise ValueError(f"Shape mismatch: {result.shape} != {panel['close'].shape}")
+            if np.any(np.isinf(result.values)):
+                raise ValueError(f"Alpha {alpha_id} contains inf values")
 
-    result = mod.compute(panel)
+            return result
+        except Exception as e:
+            # YAML 加载失败，尝试 fallback 到 .py
+            pass
 
-    # Validate output
-    if not isinstance(result, pd.DataFrame):
-        raise TypeError(f"Alpha {alpha_id} must return DataFrame, got {type(result)}")
+    # Fallback: 加载 .py
+    py_file = _find_py_file(zoo_name, alpha_name)
+    if py_file:
+        # 从文件路径提取模块名
+        module_name = py_file.stem  # 如 "alpha_001"
+        module_path = f"strategy_research.core.alpha_zoo.{zoo_name}.{module_name}"
+        try:
+            mod = importlib.import_module(module_path)
+        except ImportError as e:
+            raise ImportError(f"Cannot load alpha {alpha_id}: {e}")
 
-    if result.shape != panel["close"].shape:
-        raise ValueError(f"Shape mismatch: {result.shape} != {panel['close'].shape}")
+        if not hasattr(mod, "compute"):
+            raise AttributeError(f"Alpha {alpha_id} has no compute() function")
 
-    import numpy as np
-    if np.any(np.isinf(result.values)):
-        raise ValueError(f"Alpha {alpha_id} contains inf values")
+        result = mod.compute(panel)
 
-    return result
+        # Validate output
+        if not isinstance(result, pd.DataFrame):
+            raise TypeError(f"Alpha {alpha_id} must return DataFrame, got {type(result)}")
+        if result.shape != panel["close"].shape:
+            raise ValueError(f"Shape mismatch: {result.shape} != {panel['close'].shape}")
+        if np.any(np.isinf(result.values)):
+            raise ValueError(f"Alpha {alpha_id} contains inf values")
+
+        return result
+
+    raise FileNotFoundError(f"Alpha {alpha_id} not found (no .yaml or .py in {zoo_name}/)")

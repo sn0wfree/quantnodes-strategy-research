@@ -1,0 +1,108 @@
+id: alpha101_062
+zoo: alpha101
+nickname: 'Kakushadze Alpha #62'
+theme:
+- volume
+formula_latex: (rank(correlation(vwap, sum(adv20,22), 10)) < rank(((rank(open)+rank(open)) < (rank((high+low)/2)+rank(high)))))
+  * -1
+columns_required:
+- open
+- high
+- low
+- volume
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 35
+steps:
+- name: open_
+  expr:
+    column: open
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: vwap
+      - op: rolling_sum
+        args:
+        - ref: adv20
+        - value: 22
+      - value: 10
+- name: inner
+  expr:
+    op: astype
+    args:
+    - op: lt
+      args:
+      - op: add
+        args:
+        - op: rank
+          args:
+          - ref: open_
+        - op: rank
+          args:
+          - ref: open_
+      - op: add
+        args:
+        - op: rank
+          args:
+          - op: div
+            args:
+            - op: add
+              args:
+              - ref: high
+              - ref: low
+            - value: 2.0
+        - op: rank
+          args:
+          - ref: high
+    - ref: float
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - ref: inner
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: astype
+      args:
+      - op: lt
+        args:
+        - ref: lhs
+        - ref: rhs
+      - ref: float
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

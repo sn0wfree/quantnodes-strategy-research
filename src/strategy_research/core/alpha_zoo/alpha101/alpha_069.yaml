@@ -1,0 +1,89 @@
+id: alpha101_069
+zoo: alpha101
+nickname: 'Kakushadze Alpha #69'
+theme:
+- volume
+formula_latex: (rank(ts_max(delta(IndNeutralize(vwap, industry), 3), 5))^Ts_Rank(correlation(0.49*close+0.51*vwap, adv20,
+  5), 9)) * -1
+columns_required:
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 32
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: ts_max
+      args:
+      - op: delta
+        args:
+        - op: ind_neutralize
+          args:
+          - ref: vwap
+          - ref: panel
+        - value: 3
+      - value: 5
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: close
+      - value: 0.490655
+    - op: mul
+      args:
+      - ref: vwap
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.490655
+- name: rhs
+  expr:
+    op: ts_rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: mix
+      - ref: adv20
+      - value: 5
+    - value: 9
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - ref: lhs
+      - ref: rhs
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

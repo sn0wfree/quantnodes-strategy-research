@@ -1,0 +1,42 @@
+id: gtja191_005
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: (-1 * TSMAX(CORR(TSRANK(VOLUME,5), TSRANK(HIGH,5), 5), 3))
+columns_required:
+- volume
+- high
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 13
+steps:
+- name: v
+  expr:
+    column: volume
+- name: h
+  expr:
+    column: high
+final:
+  op: mul
+  args:
+  - op: neg
+    args:
+    - value: 1.0
+  - op: ts_max
+    args:
+    - op: ts_corr
+      args:
+      - op: ts_rank
+        args:
+        - ref: v
+        - value: 5
+      - op: ts_rank
+        args:
+        - ref: h
+        - value: 5
+      - value: 5
+    - value: 3

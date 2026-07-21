@@ -1,0 +1,61 @@
+id: alpha101_023
+zoo: alpha101
+nickname: 'Kakushadze Alpha #23'
+theme:
+- momentum
+formula_latex: '((sum(high,20)/20) < high) ? (-1*delta(high,2)) : 0'
+columns_required:
+- high
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 20
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: where_ternary
+  expr:
+    op: where
+- name: mh
+  expr:
+    op: div
+    args:
+    - op: rolling_sum
+      args:
+      - ref: high
+      - value: 20
+    - value: 20.0
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - op: lt
+      args:
+      - ref: mh
+      - ref: high
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: delta
+        args:
+        - ref: high
+        - value: 2
+    - op: mul
+      args:
+      - value: 0.0
+      - ref: close
+final:
+  ref: out

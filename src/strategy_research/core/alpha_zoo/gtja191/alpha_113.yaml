@@ -1,0 +1,74 @@
+id: gtja191_113
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: -1*(rank(mean(delay(c,5),20))*corr(c,v,2))*rank(corr(sum(c,5),sum(c,20),2))
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 27
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: m1
+  expr:
+    op: rank
+    args:
+    - op: div
+      args:
+      - op: ts_sum
+        args:
+        - op: shift
+          args:
+          - ref: c
+          - 5
+        - 20
+      - value: 20.0
+- name: m2
+  expr:
+    op: ts_corr
+    args:
+    - ref: c
+    - ref: v
+    - value: 2
+- name: m3
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: ts_sum
+        args:
+        - ref: c
+        - 5
+      - op: ts_sum
+        args:
+        - ref: c
+        - 20
+      - value: 2
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: mul
+        args:
+        - ref: m1
+        - ref: m2
+    - ref: m3
+final:
+  ref: out

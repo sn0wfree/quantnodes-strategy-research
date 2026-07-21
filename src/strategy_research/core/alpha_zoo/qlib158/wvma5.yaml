@@ -1,0 +1,63 @@
+id: qlib158_wvma5
+zoo: qlib158
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: \\mathrm{ts\\_std}(\\mathrm{ret}\\cdot v, 5) / \\mathrm{ts\\_mean}(|\\mathrm{ret}|\\cdot v, 5)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: ret
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: 1.0
+- name: rv
+  expr:
+    op: mul
+    args:
+    - ref: ret
+    - ref: v
+- name: arv
+  expr:
+    op: mul
+    args:
+    - op: abs
+      args:
+      - ref: ret
+    - ref: v
+final:
+  op: safe_div
+  args:
+  - op: ts_std
+    args:
+    - ref: rv
+    - value: 5
+  - op: ts_mean
+    args:
+    - ref: arv
+    - value: 5

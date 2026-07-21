@@ -1,0 +1,102 @@
+id: alpha101_063
+zoo: alpha101
+nickname: 'Kakushadze Alpha #63'
+theme:
+- volume
+- momentum
+formula_latex: (rank(decay_linear(delta(IndNeutralize(close, industry), 2), 8)) - rank(decay_linear(correlation(0.318*vwap+0.682*open,
+  sum(adv180,37), 14), 12))) * -1
+columns_required:
+- open
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 204
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv180
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 180
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: left
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: delta
+        args:
+        - op: ind_neutralize
+          args:
+          - ref: close
+          - ref: panel
+        - value: 2
+      - value: 8
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: vwap
+      - value: 0.318108
+    - op: mul
+      args:
+      - ref: open_
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.318108
+- name: right
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_corr
+        args:
+        - ref: mix
+        - op: rolling_sum
+          args:
+          - ref: adv180
+          - value: 37
+        - value: 14
+      - value: 12
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: sub
+      args:
+      - ref: left
+      - ref: right
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

@@ -1,0 +1,61 @@
+id: alpha101_061
+zoo: alpha101
+nickname: 'Kakushadze Alpha #61'
+theme:
+- volume
+formula_latex: rank(vwap - ts_min(vwap,16)) < rank(correlation(vwap, adv180, 18))
+columns_required:
+- volume
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 197
+steps:
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv180
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 180
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: sub
+      args:
+      - ref: vwap
+      - op: ts_min
+        args:
+        - ref: vwap
+        - value: 16
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: vwap
+      - ref: adv180
+      - value: 18
+- name: out
+  expr:
+    op: astype
+    args:
+    - op: lt
+      args:
+      - ref: lhs
+      - ref: rhs
+    - ref: float
+final:
+  ref: out

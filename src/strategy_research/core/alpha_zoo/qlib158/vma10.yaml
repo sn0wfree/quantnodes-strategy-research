@@ -1,0 +1,33 @@
+id: qlib158_vma10
+zoo: qlib158
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: \\mathrm{ts\\_mean}(\\mathrm{volume}, 10) / \\mathrm{volume}
+columns_required:
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 10
+steps:
+- name: v
+  expr:
+    column: volume
+final:
+  op: safe_div
+  args:
+  - op: ts_mean
+    args:
+    - ref: v
+    - value: 10
+  - op: add
+    args:
+    - ref: v
+    - value: 1.0e-12

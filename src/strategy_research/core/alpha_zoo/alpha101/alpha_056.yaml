@@ -1,0 +1,71 @@
+id: alpha101_056
+zoo: alpha101
+nickname: 'Kakushadze Alpha #56'
+theme:
+- momentum
+formula_latex: 0 - 1*(rank(sum(returns,10)/sum(sum(returns,2),3)) * rank((returns * cap)))  [cap unavailable -> 1]
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: make_one
+  expr:
+    value: 1.0
+- name: cap
+  expr:
+    op: make_one
+    args:
+    - ref: close
+- name: num
+  expr:
+    op: rolling_sum
+    args:
+    - ref: returns
+    - value: 10
+- name: denom
+  expr:
+    op: rolling_sum
+    args:
+    - op: rolling_sum
+      args:
+      - ref: returns
+      - value: 2
+    - value: 3
+- name: out
+  expr:
+    op: sub
+    args:
+    - value: 0.0
+    - op: mul
+      args:
+      - op: rank
+        args:
+        - op: safe_div
+          args:
+          - ref: num
+          - ref: denom
+      - op: rank
+        args:
+        - op: mul
+          args:
+          - ref: returns
+          - ref: cap
+final:
+  ref: out

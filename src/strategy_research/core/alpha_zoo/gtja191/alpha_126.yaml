@@ -1,0 +1,40 @@
+id: gtja191_126
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (c+h+l)/3
+columns_required:
+- close
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 1
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: out
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - op: add
+        args:
+        - ref: c
+        - ref: h
+      - ref: l
+    - value: 3.0
+final:
+  ref: out

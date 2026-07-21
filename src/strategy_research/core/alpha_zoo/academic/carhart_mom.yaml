@@ -1,0 +1,52 @@
+id: academic_carhart_mom
+zoo: academic
+nickname: Carhart 1997 momentum — 12m-1m return
+theme:
+- momentum
+formula_latex: \mathrm{zscore}_{x}\bigl((\mathrm{close}_t - \mathrm{close}_{t-252})/\mathrm{close}_{t-252} - (\mathrm{close}_t
+  - \mathrm{close}_{t-21})/\mathrm{close}_{t-21}\bigr)
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 252
+steps:
+- name: close
+  expr:
+    column: close
+- name: ret_long
+  expr:
+    op: safe_div
+    args:
+    - op: delta
+      args:
+      - ref: close
+      - value: 252
+    - op: shift
+      args:
+      - ref: close
+      - value: 252
+- name: ret_short
+  expr:
+    op: safe_div
+    args:
+    - op: delta
+      args:
+      - ref: close
+      - value: 21
+    - op: shift
+      args:
+      - ref: close
+      - value: 21
+final:
+  op: zscore
+  args:
+  - op: sub
+    args:
+    - ref: ret_long
+    - ref: ret_short

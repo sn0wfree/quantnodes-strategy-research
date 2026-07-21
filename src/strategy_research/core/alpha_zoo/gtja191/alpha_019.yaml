@@ -1,0 +1,68 @@
+id: gtja191_019
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (CLOSE<DELAY(CLOSE,5)?(CLOSE-DELAY(CLOSE,5))/DELAY(CLOSE,5):(CLOSE=DELAY(CLOSE,5)?0:(CLOSE-DELAY(CLOSE,5))/CLOSE))
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 6
+steps:
+- name: c
+  expr:
+    column: close
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 5
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - ref: pc
+- name: up
+  expr:
+    op: gt
+    args:
+    - ref: c
+    - ref: pc
+- name: dn
+  expr:
+    op: lt
+    args:
+    - ref: c
+    - ref: pc
+- name: out
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: where
+      args:
+      - ref: dn
+      - op: to_numpy
+        args:
+        - op: safe_div
+          args:
+          - ref: diff
+          - ref: pc
+      - op: where
+        args:
+        - ref: up
+        - op: to_numpy
+          args:
+          - op: safe_div
+            args:
+            - ref: diff
+            - ref: c
+        - value: 0.0
+final:
+  ref: out

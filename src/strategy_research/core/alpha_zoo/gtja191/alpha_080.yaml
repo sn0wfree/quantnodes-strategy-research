@@ -1,0 +1,35 @@
+id: gtja191_080
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: (VOLUME-DELAY(VOLUME,5))/DELAY(VOLUME,5)*100
+columns_required:
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 6
+steps:
+- name: v
+  expr:
+    column: volume
+- name: pv
+  expr:
+    op: shift
+    args:
+    - ref: v
+    - value: 5
+final:
+  op: mul
+  args:
+  - op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: v
+      - ref: pv
+    - ref: pv
+  - value: 100.0

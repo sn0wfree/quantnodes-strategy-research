@@ -1,0 +1,47 @@
+id: academic_retskew
+zoo: academic
+nickname: Harvey-Siddique 2000 return skewness — inverse 60d skew
+theme:
+- volatility
+formula_latex: \mathrm{zscore}_{x}\bigl(-\mathrm{skew}_{60}(r_t)\bigr)
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 61
+steps:
+- name: close
+  expr:
+    column: close
+- name: daily_ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: close
+      - op: shift
+        args:
+        - ref: close
+        - value: 1
+    - op: shift
+      args:
+      - ref: close
+      - value: 1
+- name: skew
+  expr:
+    op: ts_skew
+    args:
+    - ref: daily_ret
+    - 60
+final:
+  op: zscore
+  args:
+  - op: neg
+    args:
+    - ref: skew

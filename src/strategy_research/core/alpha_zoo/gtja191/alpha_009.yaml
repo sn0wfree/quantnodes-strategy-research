@@ -1,0 +1,75 @@
+id: gtja191_009
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- microstructure
+formula_latex: SMA(((HIGH+LOW)/2-(DELAY(HIGH,1)+DELAY(LOW,1))/2)*(HIGH-LOW)/VOLUME,7,2)
+columns_required:
+- high
+- low
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 7
+min_warmup_bars: 8
+steps:
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: mid
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - ref: h
+      - ref: l
+    - value: 2.0
+- name: pmid
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - op: delay
+        args:
+        - ref: h
+        - value: 1
+      - op: delay
+        args:
+        - ref: l
+        - value: 1
+    - value: 2.0
+- name: x
+  expr:
+    op: mul
+    args:
+    - op: sub
+      args:
+      - ref: mid
+      - ref: pmid
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: h
+        - ref: l
+      - ref: v
+final:
+  op: mean
+  args:
+  - _type: ewm
+    obj:
+      _type: ref
+      name: x
+    span:
+      value: 20

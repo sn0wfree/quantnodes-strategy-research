@@ -1,0 +1,70 @@
+id: gtja191_107
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: -1*rank(open-delay(high,1))*rank(open-delay(close,1))*rank(open-delay(low,1))
+columns_required:
+- open
+- high
+- low
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 2
+steps:
+- name: c
+  expr:
+    column: close
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: mul
+        args:
+        - op: neg
+          args:
+          - value: 1.0
+        - op: rank
+          args:
+          - op: sub
+            args:
+            - ref: o
+            - op: shift
+              args:
+              - ref: h
+              - value: 1
+      - op: rank
+        args:
+        - op: sub
+          args:
+          - ref: o
+          - op: shift
+            args:
+            - ref: c
+            - value: 1
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: o
+        - op: shift
+          args:
+          - ref: l
+          - value: 1
+final:
+  ref: out

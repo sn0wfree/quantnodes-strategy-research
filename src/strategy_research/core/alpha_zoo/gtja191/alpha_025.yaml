@@ -1,0 +1,90 @@
+id: gtja191_025
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+- volume
+formula_latex: ((-1*RANK((DELTA(CLOSE,7)*(1-RANK(DECAYLINEAR((VOLUME/MEAN(VOLUME,20)),9))))))*(1+RANK(SUM(RET,250))))
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 9
+min_warmup_bars: 61
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: pc
+    - ref: pc
+- name: vmean20
+  expr:
+    op: ts_mean
+    args:
+    - ref: v
+    - value: 20
+- name: decayed
+  expr:
+    op: decay_linear
+    args:
+    - op: safe_div
+      args:
+      - ref: v
+      - ref: vmean20
+    - value: 9
+- name: term1
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rank
+      args:
+      - op: mul
+        args:
+        - op: delta
+          args:
+          - ref: c
+          - value: 7
+        - op: sub
+          args:
+          - value: 1.0
+          - op: rank
+            args:
+            - ref: decayed
+- name: long_sum
+  expr:
+    op: ts_sum
+    args:
+    - ref: ret
+    - 60
+final:
+  op: mul
+  args:
+  - ref: term1
+  - op: add
+    args:
+    - value: 1.0
+    - op: rank
+      args:
+      - ref: long_sum

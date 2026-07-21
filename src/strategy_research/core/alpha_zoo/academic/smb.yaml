@@ -1,0 +1,50 @@
+id: academic_smb
+zoo: academic
+nickname: '[PRICE PROXY] FF1993 SMB — small-minus-big via inverse dollar-volume'
+theme:
+- quality
+formula_latex: \mathrm{zscore}_{x}\bigl(-\log(\mathrm{ts\_mean}(\mathrm{volume} \cdot \mathrm{close},\,60) + 1)\bigr)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 60
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: dollar_volume
+  expr:
+    op: mul
+    args:
+    - ref: volume
+    - ref: close
+- name: avg
+  expr:
+    op: ts_mean
+    args:
+    - ref: dollar_volume
+    - value: 60
+- name: log_size
+  expr:
+    op: log
+    args:
+    - op: add
+      args:
+      - ref: avg
+      - value: 1.0
+final:
+  op: zscore
+  args:
+  - op: neg
+    args:
+    - ref: log_size

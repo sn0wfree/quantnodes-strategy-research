@@ -1,0 +1,62 @@
+id: qlib158_cntd20
+zoo: qlib158
+nickname: ''
+theme:
+- reversal
+formula_latex: \\mathrm{CNTP}_20 - \\mathrm{CNTN}_20
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: c
+  expr:
+    column: close
+- name: up
+  expr:
+    op: astype
+    args:
+    - op: gt
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: float64
+- name: dn
+  expr:
+    op: astype
+    args:
+    - op: lt
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: float64
+- name: up_w
+  expr:
+    op: ts_mean
+    args:
+    - ref: up
+    - 20
+- name: dn_w
+  expr:
+    op: ts_mean
+    args:
+    - ref: dn
+    - 20
+final:
+  op: sub
+  args:
+  - ref: up_w
+  - ref: dn_w

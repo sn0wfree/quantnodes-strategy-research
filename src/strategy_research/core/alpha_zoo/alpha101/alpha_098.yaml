@@ -1,0 +1,89 @@
+id: alpha101_098
+zoo: alpha101
+nickname: 'Kakushadze Alpha #98'
+theme:
+- volume
+formula_latex: rank(decay_linear(correlation(vwap, sum(adv5,26), 5), 7)) - rank(decay_linear(Ts_Rank(Ts_ArgMin(correlation(rank(open),
+  rank(adv15), 21), 9), 7), 8))
+columns_required:
+- open
+- volume
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 56
+steps:
+- name: open_
+  expr:
+    column: open
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv5
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 5
+- name: adv15
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 15
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: a
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_corr
+        args:
+        - ref: vwap
+        - op: rolling_sum
+          args:
+          - ref: adv5
+          - value: 26
+        - value: 5
+      - value: 7
+- name: b
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_rank
+        args:
+        - op: ts_argmin
+          args:
+          - op: ts_corr
+            args:
+            - op: rank
+              args:
+              - ref: open_
+            - op: rank
+              args:
+              - ref: adv15
+            - value: 21
+          - value: 9
+        - value: 7
+      - value: 8
+- name: out
+  expr:
+    op: sub
+    args:
+    - ref: a
+    - ref: b
+final:
+  ref: out

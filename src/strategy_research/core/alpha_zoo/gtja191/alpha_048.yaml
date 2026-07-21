@@ -1,0 +1,56 @@
+id: gtja191_048
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- momentum
+formula_latex: -1*((RANK((SIGN((CLOSE-DELAY(CLOSE,1)))+SIGN((DELAY(CLOSE,1)-DELAY(CLOSE,2)))+SIGN((DELAY(CLOSE,2)-DELAY(CLOSE,3))))))*SUM(VOLUME,5))/SUM(VOLUME,20)
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: s
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - ref: s
+- name: sv5
+  expr:
+    op: ts_sum
+    args:
+    - ref: v
+    - 5
+- name: sv20
+  expr:
+    op: ts_sum
+    args:
+    - ref: v
+    - 20
+final:
+  op: mul
+  args:
+  - op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rank
+      args:
+      - ref: s
+  - op: safe_div
+    args:
+    - ref: sv5
+    - ref: sv20

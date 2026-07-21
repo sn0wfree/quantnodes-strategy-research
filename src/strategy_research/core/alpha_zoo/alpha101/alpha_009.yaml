@@ -1,0 +1,64 @@
+id: alpha101_009
+zoo: alpha101
+nickname: 'Kakushadze Alpha #9'
+theme:
+- momentum
+formula_latex: (0<ts_min(delta(close,1),5))?delta(close,1):((ts_max(delta(close,1),5)<0)?delta(close,1):(-1*delta(close,1)))
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 6
+steps:
+- name: close
+  expr:
+    column: close
+- name: where_ternary
+  expr:
+    op: where
+- name: d1
+  expr:
+    op: delta
+    args:
+    - ref: close
+    - value: 1
+- name: cond1
+  expr:
+    op: gt
+    args:
+    - op: ts_min
+      args:
+      - ref: d1
+      - value: 5
+    - value: 0
+- name: cond2
+  expr:
+    op: lt
+    args:
+    - op: ts_max
+      args:
+      - ref: d1
+      - value: 5
+    - value: 0
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - ref: cond1
+    - ref: d1
+    - op: where_ternary
+      args:
+      - ref: cond2
+      - ref: d1
+      - op: mul
+        args:
+        - op: neg
+          args:
+          - value: 1.0
+        - ref: d1
+final:
+  ref: out

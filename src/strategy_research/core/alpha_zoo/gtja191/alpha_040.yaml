@@ -1,0 +1,62 @@
+id: gtja191_040
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: SUM((CLOSE>DELAY(CLOSE,1)?VOLUME:0),26)/SUM((CLOSE<=DELAY(CLOSE,1)?VOLUME:0),26)*100
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 26
+min_warmup_bars: 27
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: up
+  expr:
+    op: gt
+    args:
+    - ref: c
+    - ref: pc
+- name: up_v
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - ref: v
+      - ref: up
+      - 0.0
+    - 26
+- name: dn_v
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - ref: v
+      - null
+      - 0.0
+    - 26
+final:
+  op: mul
+  args:
+  - op: safe_div
+    args:
+    - ref: up_v
+    - ref: dn_v
+  - value: 100.0

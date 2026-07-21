@@ -1,0 +1,32 @@
+id: qlib158_beta20
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: (\\mathrm{close}_t - \\mathrm{close}_{{t-20}}) / (20\\,\\mathrm{close})
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: div
+  args:
+  - op: safe_div
+    args:
+    - op: delta
+      args:
+      - ref: c
+      - value: 20
+    - ref: c
+  - value: 20.0

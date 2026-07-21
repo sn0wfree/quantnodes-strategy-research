@@ -1,0 +1,29 @@
+id: qlib158_ma30
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{ts\\_mean}(\\mathrm{close}, 30) / \\mathrm{close}
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 30
+min_warmup_bars: 30
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: safe_div
+  args:
+  - op: ts_mean
+    args:
+    - ref: c
+    - value: 30
+  - ref: c

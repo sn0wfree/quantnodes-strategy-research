@@ -1,0 +1,97 @@
+id: alpha101_031
+zoo: alpha101
+nickname: 'Kakushadze Alpha #31'
+theme:
+- momentum
+formula_latex: rank(rank(rank(decay_linear(-1*rank(rank(delta(close,10))),10)))) + rank(-1*delta(close,3)) + sign(scale(correlation(adv20,low,12)))
+columns_required:
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 25
+steps:
+- name: close
+  expr:
+    column: close
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: t1
+  expr:
+    op: rank
+    args:
+    - op: rank
+      args:
+      - op: rank
+        args:
+        - op: decay_linear
+          args:
+          - op: mul
+            args:
+            - op: neg
+              args:
+              - value: 1.0
+            - op: rank
+              args:
+              - op: rank
+                args:
+                - op: delta
+                  args:
+                  - ref: close
+                  - value: 10
+          - value: 10
+- name: t2
+  expr:
+    op: rank
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: delta
+        args:
+        - ref: close
+        - value: 3
+- name: t3
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: sign
+      args:
+      - op: to_numpy
+        args:
+        - op: scale
+          args:
+          - op: ts_corr
+            args:
+            - ref: adv20
+            - ref: low
+            - value: 12
+- name: out
+  expr:
+    op: add
+    args:
+    - op: add
+      args:
+      - ref: t1
+      - ref: t2
+    - ref: t3
+final:
+  ref: out

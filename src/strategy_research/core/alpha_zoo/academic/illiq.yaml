@@ -1,0 +1,60 @@
+id: academic_illiq
+zoo: academic
+nickname: Amihud 2002 illiquidity — |return| per dollar volume
+theme:
+- liquidity
+formula_latex: \mathrm{zscore}_{x}\bigl(\mathrm{ts\_mean}(|r_t| / (\mathrm{close}_t \cdot \mathrm{volume}_t),\,21)\bigr)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 21
+min_warmup_bars: 22
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: daily_ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: close
+      - op: shift
+        args:
+        - ref: close
+        - value: 1
+    - op: shift
+      args:
+      - ref: close
+      - value: 1
+- name: dollar_volume
+  expr:
+    op: mul
+    args:
+    - ref: close
+    - ref: volume
+- name: illiq
+  expr:
+    op: safe_div
+    args:
+    - op: abs
+      args:
+      - ref: daily_ret
+    - ref: dollar_volume
+final:
+  op: zscore
+  args:
+  - op: ts_mean
+    args:
+    - ref: illiq
+    - value: 21

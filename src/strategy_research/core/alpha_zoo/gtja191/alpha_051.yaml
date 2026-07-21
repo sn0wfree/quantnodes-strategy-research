@@ -1,0 +1,113 @@
+id: gtja191_051
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: SUM(up_move,12)/(SUM(up_move,12)+SUM(dn_move,12))
+columns_required:
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 13
+steps:
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: hl
+  expr:
+    op: add
+    args:
+    - ref: h
+    - ref: l
+- name: phl
+  expr:
+    op: add
+    args:
+    - op: shift
+      args:
+      - ref: h
+      - value: 1
+    - op: shift
+      args:
+      - ref: l
+      - value: 1
+- name: move
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: maximum
+      args:
+      - op: abs
+        args:
+        - op: sub
+          args:
+          - op: to_numpy
+            args:
+            - ref: h
+          - op: to_numpy
+            args:
+            - op: shift
+              args:
+              - ref: h
+              - value: 1
+      - op: abs
+        args:
+        - op: sub
+          args:
+          - op: to_numpy
+            args:
+            - ref: l
+          - op: to_numpy
+            args:
+            - op: shift
+              args:
+              - ref: l
+              - value: 1
+- name: up
+  expr:
+    op: where
+    args:
+    - ref: move
+    - op: gt
+      args:
+      - ref: hl
+      - ref: phl
+    - value: 0.0
+- name: dn
+  expr:
+    op: where
+    args:
+    - ref: move
+    - op: lt
+      args:
+      - ref: hl
+      - ref: phl
+    - value: 0.0
+- name: s_up
+  expr:
+    op: ts_sum
+    args:
+    - ref: up
+    - 12
+- name: s_dn
+  expr:
+    op: ts_sum
+    args:
+    - ref: dn
+    - 12
+final:
+  op: safe_div
+  args:
+  - ref: s_up
+  - op: add
+    args:
+    - ref: s_up
+    - ref: s_dn

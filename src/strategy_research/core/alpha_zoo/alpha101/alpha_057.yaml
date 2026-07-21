@@ -1,0 +1,45 @@
+id: alpha101_057
+zoo: alpha101
+nickname: 'Kakushadze Alpha #57'
+theme:
+- reversal
+formula_latex: 0 - 1 * ((close-vwap) / decay_linear(rank(ts_argmax(close,30)), 2))
+columns_required:
+- close
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 32
+steps:
+- name: close
+  expr:
+    column: close
+- name: vwap
+  expr:
+    column: vwap
+- name: out
+  expr:
+    op: sub
+    args:
+    - value: 0.0
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: close
+        - ref: vwap
+      - op: decay_linear
+        args:
+        - op: rank
+          args:
+          - op: ts_argmax
+            args:
+            - ref: close
+            - value: 30
+        - value: 2
+final:
+  ref: out

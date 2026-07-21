@@ -1,0 +1,60 @@
+id: alpha101_032
+zoo: alpha101
+nickname: 'Kakushadze Alpha #32'
+theme:
+- momentum
+formula_latex: scale(sum(close,7)/7 - close) + 20*scale(correlation(vwap, delay(close,5), 230))
+columns_required:
+- close
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 235
+steps:
+- name: close
+  expr:
+    column: close
+- name: vwap
+  expr:
+    column: vwap
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: out
+  expr:
+    op: add
+    args:
+    - op: scale
+      args:
+      - op: sub
+        args:
+        - op: div
+          args:
+          - op: rolling_sum
+            args:
+            - ref: close
+            - value: 7
+          - value: 7.0
+        - ref: close
+    - op: mul
+      args:
+      - value: 20.0
+      - op: scale
+        args:
+        - op: ts_corr
+          args:
+          - ref: vwap
+          - op: delay
+            args:
+            - ref: close
+            - value: 5
+          - value: 230
+final:
+  ref: out

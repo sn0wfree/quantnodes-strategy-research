@@ -1,0 +1,44 @@
+id: gtja191_038
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (((SUM(HIGH,20)/20)<HIGH)?(-1*DELTA(HIGH,2)):0)
+columns_required:
+- high
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: h
+  expr:
+    column: high
+- name: m20
+  expr:
+    op: ts_mean
+    args:
+    - ref: h
+    - value: 20
+- name: cond
+  expr:
+    op: lt
+    args:
+    - ref: m20
+    - ref: h
+final:
+  op: where
+  args:
+  - op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: delta
+      args:
+      - ref: h
+      - value: 2
+  - ref: cond
+  - value: 0.0

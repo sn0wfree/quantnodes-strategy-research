@@ -1,0 +1,90 @@
+id: gtja191_033
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+- volume
+formula_latex: ((((-1*TSMIN(LOW,5))+DELAY(TSMIN(LOW,5),5))*RANK(((SUM(RET,240)-SUM(RET,20))/220)))*TSRANK(VOLUME,5))
+columns_required:
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 61
+steps:
+- name: l
+  expr:
+    column: low
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: pc
+    - ref: pc
+- name: tmin5
+  expr:
+    op: ts_min
+    args:
+    - ref: l
+    - value: 5
+- name: a
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - ref: tmin5
+    - op: shift
+      args:
+      - ref: tmin5
+      - value: 5
+- name: long_diff
+  expr:
+    op: div
+    args:
+    - op: sub
+      args:
+      - op: ts_sum
+        args:
+        - ref: ret
+        - 60
+      - op: ts_sum
+        args:
+        - ref: ret
+        - 20
+    - value: 40.0
+final:
+  op: mul
+  args:
+  - op: mul
+    args:
+    - ref: a
+    - op: rank
+      args:
+      - ref: long_diff
+  - op: ts_rank
+    args:
+    - ref: v
+    - value: 5

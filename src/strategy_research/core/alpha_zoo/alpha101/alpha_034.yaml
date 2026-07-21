@@ -1,0 +1,56 @@
+id: alpha101_034
+zoo: alpha101
+nickname: 'Kakushadze Alpha #34'
+theme:
+- volatility
+formula_latex: rank((1-rank(stddev(returns,2)/stddev(returns,5))) + (1-rank(delta(close,1))))
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 6
+steps:
+- name: close
+  expr:
+    column: close
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: out
+  expr:
+    op: rank
+    args:
+    - op: add
+      args:
+      - op: sub
+        args:
+        - value: 1.0
+        - op: rank
+          args:
+          - op: safe_div
+            args:
+            - op: ts_std
+              args:
+              - ref: returns
+              - value: 2
+            - op: ts_std
+              args:
+              - ref: returns
+              - value: 5
+      - op: sub
+        args:
+        - value: 1.0
+        - op: rank
+          args:
+          - op: delta
+            args:
+            - ref: close
+            - value: 1
+final:
+  ref: out

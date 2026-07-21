@@ -1,0 +1,118 @@
+id: alpha101_100
+zoo: alpha101
+nickname: 'Kakushadze Alpha #100'
+theme:
+- volume
+- momentum
+formula_latex: 0 - 1*((1.5*scale(IN(IN(rank(((close-low)-(high-close))/(high-low)*volume), subind), subind)) - scale(IN(correlation(close,
+  rank(adv20), 5) - rank(ts_argmin(close,30)), subind))) * (volume/adv20))
+columns_required:
+- high
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 30
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: money_flow
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - op: sub
+          args:
+          - ref: close
+          - ref: low
+        - op: sub
+          args:
+          - ref: high
+          - ref: close
+      - op: sub
+        args:
+        - ref: high
+        - ref: low
+    - ref: volume
+- name: t1
+  expr:
+    op: mul
+    args:
+    - value: 1.5
+    - op: scale
+      args:
+      - op: ind_neutralize
+        args:
+        - op: ind_neutralize
+          args:
+          - op: rank
+            args:
+            - ref: money_flow
+          - ref: panel
+        - ref: panel
+- name: t2
+  expr:
+    op: scale
+    args:
+    - op: ind_neutralize
+      args:
+      - op: sub
+        args:
+        - op: ts_corr
+          args:
+          - ref: close
+          - op: rank
+            args:
+            - ref: adv20
+          - value: 5
+        - op: rank
+          args:
+          - op: ts_argmin
+            args:
+            - ref: close
+            - value: 30
+      - ref: panel
+- name: out
+  expr:
+    op: sub
+    args:
+    - value: 0.0
+    - op: mul
+      args:
+      - op: sub
+        args:
+        - ref: t1
+        - ref: t2
+      - op: safe_div
+        args:
+        - ref: volume
+        - ref: adv20
+final:
+  ref: out

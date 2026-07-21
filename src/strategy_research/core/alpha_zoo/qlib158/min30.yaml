@@ -1,0 +1,33 @@
+id: qlib158_min30
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{ts\\_min}(\\mathrm{low}, 30) / \\mathrm{close}
+columns_required:
+- low
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 30
+min_warmup_bars: 30
+steps:
+- name: lo
+  expr:
+    column: low
+- name: c
+  expr:
+    column: close
+final:
+  op: safe_div
+  args:
+  - op: ts_min
+    args:
+    - ref: lo
+    - value: 30
+  - ref: c

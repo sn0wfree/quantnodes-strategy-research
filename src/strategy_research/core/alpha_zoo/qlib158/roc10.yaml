@@ -1,0 +1,32 @@
+id: qlib158_roc10
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{close}_t / \\mathrm{close}_{{t-10}} - 1
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 10
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: sub
+  args:
+  - op: safe_div
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 10
+  - value: 1.0

@@ -1,0 +1,62 @@
+id: gtja191_027
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: WMA((CLOSE-DELAY(CLOSE,3))/DELAY(CLOSE,3)*100 + (CLOSE-DELAY(CLOSE,6))/DELAY(CLOSE,6)*100, 12)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 18
+steps:
+- name: c
+  expr:
+    column: close
+- name: r3
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - op: shift
+          args:
+          - ref: c
+          - value: 3
+      - op: shift
+        args:
+        - ref: c
+        - value: 3
+    - value: 100.0
+- name: r6
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - op: shift
+          args:
+          - ref: c
+          - value: 6
+      - op: shift
+        args:
+        - ref: c
+        - value: 6
+    - value: 100.0
+final:
+  op: decay_linear
+  args:
+  - op: add
+    args:
+    - ref: r3
+    - ref: r6
+  - value: 12

@@ -1,0 +1,99 @@
+id: gtja191_170
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: v
+  expr:
+    column: volume
+- name: vw
+  expr:
+    op: vwap
+    args:
+    - ref: panel
+    - value: equity_cn
+- name: a
+  expr:
+    op: safe_div
+    args:
+    - op: mul
+      args:
+      - op: rank
+        args:
+        - op: safe_div
+          args:
+          - op: DataFrame
+            args:
+            - ref: pd
+            - value: 1.0
+          - ref: c
+      - ref: v
+    - op: ts_mean
+      args:
+      - ref: v
+      - value: 20
+- name: b
+  expr:
+    op: safe_div
+    args:
+    - op: mul
+      args:
+      - ref: h
+      - op: rank
+        args:
+        - op: sub
+          args:
+          - ref: h
+          - ref: c
+    - op: div
+      args:
+      - op: sum
+        args:
+        - op: rolling
+          args:
+          - ref: c
+          - value: 5
+      - value: 5.0
+- name: d
+  expr:
+    op: rank
+    args:
+    - op: sub
+      args:
+      - ref: vw
+      - op: delay
+        args:
+        - ref: vw
+        - value: 5
+- name: out
+  expr:
+    op: sub
+    args:
+    - op: mul
+      args:
+      - ref: a
+      - ref: b
+    - ref: d
+final:
+  ref: out

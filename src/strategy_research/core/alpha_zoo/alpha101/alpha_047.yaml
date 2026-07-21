@@ -1,0 +1,102 @@
+id: alpha101_047
+zoo: alpha101
+nickname: 'Kakushadze Alpha #47'
+theme:
+- volume
+- momentum
+formula_latex: ((rank(1/close)*volume/adv20) * (high*rank(high-close)/(sum(high,5)/5))) - rank(vwap-delay(vwap,5))
+columns_required:
+- high
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 25
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: make_one
+  expr:
+    value: 1.0
+- name: t1
+  expr:
+    op: safe_div
+    args:
+    - op: mul
+      args:
+      - op: rank
+        args:
+        - op: safe_div
+          args:
+          - op: make_one
+            args:
+            - ref: close
+          - ref: close
+      - ref: volume
+    - ref: adv20
+- name: t2
+  expr:
+    op: safe_div
+    args:
+    - op: mul
+      args:
+      - ref: high
+      - op: rank
+        args:
+        - op: sub
+          args:
+          - ref: high
+          - ref: close
+    - op: div
+      args:
+      - op: rolling_sum
+        args:
+        - ref: high
+        - value: 5
+      - value: 5.0
+- name: out
+  expr:
+    op: sub
+    args:
+    - op: mul
+      args:
+      - ref: t1
+      - ref: t2
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: vwap
+        - op: delay
+          args:
+          - ref: vwap
+          - value: 5
+final:
+  ref: out

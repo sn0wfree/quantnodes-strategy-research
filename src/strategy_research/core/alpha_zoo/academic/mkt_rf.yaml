@@ -1,0 +1,36 @@
+id: academic_mkt_rf
+zoo: academic
+nickname: '[PRICE PROXY] Market factor (Sharpe 1964) — 21d demeaned return'
+theme:
+- momentum
+formula_latex: \mathrm{zscore}_{x}\bigl((\mathrm{close}_t - \mathrm{close}_{t-21}) / \mathrm{close}_{t-21}\bigr)
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 21
+min_warmup_bars: 21
+steps:
+- name: close
+  expr:
+    column: close
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: delta
+      args:
+      - ref: close
+      - value: 21
+    - op: shift
+      args:
+      - ref: close
+      - value: 21
+final:
+  op: zscore
+  args:
+  - ref: ret

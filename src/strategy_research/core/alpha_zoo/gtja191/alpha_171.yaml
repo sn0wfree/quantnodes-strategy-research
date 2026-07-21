@@ -1,0 +1,61 @@
+id: gtja191_171
+zoo: gtja191
+nickname: ''
+theme:
+- microstructure
+formula_latex: -1*((l-c)*(o^5))/((c-h)*(c^5))
+columns_required:
+- open
+- high
+- low
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 1
+steps:
+- name: c
+  expr:
+    column: close
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: mul
+        args:
+        - op: sub
+          args:
+          - ref: l
+          - ref: c
+        - op: signed_power
+          args:
+          - ref: o
+          - value: 5
+    - op: mul
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - ref: h
+      - op: signed_power
+        args:
+        - ref: c
+        - value: 5
+final:
+  ref: out

@@ -1,0 +1,107 @@
+id: gtja191_004
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+- volume
+formula_latex: ((((SUM(CLOSE,8)/8)+STD(CLOSE,8))<(SUM(CLOSE,2)/2))?(-1):((SUM(CLOSE,2)/2<(SUM(CLOSE,8)/8-STD(CLOSE,8)))?1:((1<(VOLUME/MEAN(VOLUME,20)))?1:(-1))))
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 8
+min_warmup_bars: 20
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: ma8
+  expr:
+    op: ts_mean
+    args:
+    - ref: c
+    - value: 8
+- name: ma2
+  expr:
+    op: ts_mean
+    args:
+    - ref: c
+    - value: 2
+- name: sd8
+  expr:
+    op: ts_std
+    args:
+    - ref: c
+    - value: 8
+- name: vmean20
+  expr:
+    op: ts_mean
+    args:
+    - ref: v
+    - value: 20
+- name: upper
+  expr:
+    op: add
+    args:
+    - ref: ma8
+    - ref: sd8
+- name: lower
+  expr:
+    op: sub
+    args:
+    - ref: ma8
+    - ref: sd8
+- name: cond_top
+  expr:
+    op: lt
+    args:
+    - ref: upper
+    - ref: ma2
+- name: cond_bot
+  expr:
+    op: lt
+    args:
+    - ref: ma2
+    - ref: lower
+- name: vol_strong
+  expr:
+    op: gt
+    args:
+    - op: div
+      args:
+      - ref: v
+      - ref: vmean20
+    - value: 1.0
+- name: res
+  expr:
+    op: where
+    args:
+    - ref: cond_top
+    - op: neg
+      args:
+      - value: 1.0
+    - op: where
+      args:
+      - ref: cond_bot
+      - value: 1.0
+      - op: where
+        args:
+        - ref: vol_strong
+        - value: 1.0
+        - op: neg
+          args:
+          - value: 1.0
+final:
+  op: astype
+  args:
+  - op: DataFrame
+    args:
+    - ref: pd
+    - ref: res
+  - ref: float

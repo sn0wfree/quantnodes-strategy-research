@@ -1,0 +1,60 @@
+id: alpha101_028
+zoo: alpha101
+nickname: 'Kakushadze Alpha #28'
+theme:
+- volume
+formula_latex: scale((correlation(adv20,low,5) + (high+low)/2) - close)
+columns_required:
+- high
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 25
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: out
+  expr:
+    op: scale
+    args:
+    - op: sub
+      args:
+      - op: add
+        args:
+        - op: ts_corr
+          args:
+          - ref: adv20
+          - ref: low
+          - value: 5
+        - op: div
+          args:
+          - op: add
+            args:
+            - ref: high
+            - ref: low
+          - value: 2.0
+      - ref: close
+final:
+  ref: out

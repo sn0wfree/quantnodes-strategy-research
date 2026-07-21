@@ -1,0 +1,29 @@
+id: qlib158_imax20
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{ts\\_argmax}(\\mathrm{high}, 20) / 20
+columns_required:
+- high
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: h
+  expr:
+    column: high
+final:
+  op: div
+  args:
+  - op: ts_argmax
+    args:
+    - ref: h
+    - value: 20
+  - value: 20.0

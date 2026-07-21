@@ -1,0 +1,68 @@
+id: alpha101_054
+zoo: alpha101
+nickname: 'Kakushadze Alpha #54'
+theme:
+- reversal
+formula_latex: -1 * ((low-close)*(open^5)) / ((low-high)*(close^5))
+columns_required:
+- open
+- high
+- low
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 1
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: num
+  expr:
+    op: mul
+    args:
+    - op: sub
+      args:
+      - ref: low
+      - ref: close
+    - op: pow
+      args:
+      - ref: open_
+      - value: 5
+- name: denom
+  expr:
+    op: mul
+    args:
+    - op: sub
+      args:
+      - ref: low
+      - ref: high
+    - op: pow
+      args:
+      - ref: close
+      - value: 5
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: safe_div
+      args:
+      - ref: num
+      - ref: denom
+final:
+  ref: out

@@ -1,0 +1,72 @@
+id: gtja191_112
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: (sum_up(12)-sum_down(12))/(sum_up(12)+sum_down(12))*100
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 13
+steps:
+- name: c
+  expr:
+    column: close
+- name: dc
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: up
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - ref: dc
+      - op: gt
+        args:
+        - ref: dc
+        - 0
+      - 0.0
+    - 12
+- name: down
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - op: neg
+        args:
+        - ref: dc
+      - op: lt
+        args:
+        - ref: dc
+        - 0
+      - 0.0
+    - 12
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: up
+        - ref: down
+      - op: add
+        args:
+        - ref: up
+        - ref: down
+    - value: 100.0
+final:
+  ref: out

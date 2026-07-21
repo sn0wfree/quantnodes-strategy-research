@@ -1,0 +1,29 @@
+id: qlib158_ma5
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{ts\\_mean}(\\mathrm{close}, 5) / \\mathrm{close}
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: safe_div
+  args:
+  - op: ts_mean
+    args:
+    - ref: c
+    - value: 5
+  - ref: c

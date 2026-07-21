@@ -1,0 +1,85 @@
+id: alpha101_049
+zoo: alpha101
+nickname: 'Kakushadze Alpha #49'
+theme:
+- momentum
+formula_latex: '(((delay(close,20)-delay(close,10))/10 - (delay(close,10)-close)/10) < -0.1) ? 1 : -1*(close-delay(close,1))'
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 21
+steps:
+- name: close
+  expr:
+    column: close
+- name: delay
+  expr:
+    op: delay
+- name: make_one
+  expr:
+    value: 1.0
+- name: where_ternary
+  expr:
+    op: where
+- name: x
+  expr:
+    op: sub
+    args:
+    - op: div
+      args:
+      - op: sub
+        args:
+        - op: delay
+          args:
+          - ref: close
+          - value: 20
+        - op: delay
+          args:
+          - ref: close
+          - value: 10
+      - value: 10.0
+    - op: div
+      args:
+      - op: sub
+        args:
+        - op: delay
+          args:
+          - ref: close
+          - value: 10
+        - ref: close
+      - value: 10.0
+- name: one
+  expr:
+    op: make_one
+    args:
+    - ref: close
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - op: lt
+      args:
+      - ref: x
+      - op: neg
+        args:
+        - value: 0.1
+    - ref: one
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: sub
+        args:
+        - ref: close
+        - op: delay
+          args:
+          - ref: close
+          - value: 1
+final:
+  ref: out

@@ -1,0 +1,76 @@
+id: gtja191_146
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: see body
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 81
+steps:
+- name: c
+  expr:
+    column: close
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: ewm_ret
+  expr:
+    op: ts_mean
+    args:
+    - ref: ret
+    - value: 61
+    - value: 2
+- name: dev
+  expr:
+    op: sub
+    args:
+    - ref: ret
+    - ref: ewm_ret
+- name: left
+  expr:
+    op: ts_mean
+    args:
+    - ref: dev
+    - value: 20
+- name: right
+  expr:
+    ref: dev
+- name: den
+  expr:
+    op: ts_mean
+    args:
+    - op: signed_power
+      args:
+      - ref: dev
+      - value: 2
+    - value: 60
+    - value: 2
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - op: mul
+      args:
+      - ref: left
+      - ref: right
+    - ref: den
+final:
+  ref: out

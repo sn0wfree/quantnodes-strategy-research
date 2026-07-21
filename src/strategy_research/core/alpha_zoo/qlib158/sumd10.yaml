@@ -1,0 +1,83 @@
+id: qlib158_sumd10
+zoo: qlib158
+nickname: ''
+theme:
+- reversal
+formula_latex: \\mathrm{SUMP}_w - \\mathrm{SUMN}_w
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 10
+steps:
+- name: c
+  expr:
+    column: close
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: pos
+  expr:
+    op: where
+    args:
+    - ref: diff
+    - op: gt
+      args:
+      - ref: diff
+      - value: 0
+    - value: 0.0
+- name: neg
+  expr:
+    op: where
+    args:
+    - op: neg
+      args:
+      - ref: diff
+    - op: lt
+      args:
+      - ref: diff
+      - value: 0
+    - value: 0.0
+- name: absd
+  expr:
+    op: abs
+    args:
+    - ref: diff
+- name: num_p
+  expr:
+    op: ts_sum
+    args:
+    - ref: pos
+    - 10
+- name: num_n
+  expr:
+    op: ts_sum
+    args:
+    - ref: neg
+    - 10
+- name: den
+  expr:
+    op: ts_sum
+    args:
+    - ref: absd
+    - 10
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - ref: num_p
+    - ref: num_n
+  - ref: den

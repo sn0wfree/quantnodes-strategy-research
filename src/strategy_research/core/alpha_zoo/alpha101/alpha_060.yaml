@@ -1,0 +1,77 @@
+id: alpha101_060
+zoo: alpha101
+nickname: 'Kakushadze Alpha #60'
+theme:
+- volume
+formula_latex: 0 - (2*scale(rank((((close-low)-(high-close))/(high-low))*volume)) - scale(rank(ts_argmax(close,10))))
+columns_required:
+- high
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: x
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - op: sub
+          args:
+          - ref: close
+          - ref: low
+        - op: sub
+          args:
+          - ref: high
+          - ref: close
+      - op: sub
+        args:
+        - ref: high
+        - ref: low
+    - ref: volume
+- name: out
+  expr:
+    op: sub
+    args:
+    - value: 0.0
+    - op: sub
+      args:
+      - op: mul
+        args:
+        - value: 2.0
+        - op: scale
+          args:
+          - op: rank
+            args:
+            - ref: x
+      - op: scale
+        args:
+        - op: rank
+          args:
+          - op: ts_argmax
+            args:
+            - ref: close
+            - value: 10
+final:
+  ref: out

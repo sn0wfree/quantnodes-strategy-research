@@ -1,0 +1,104 @@
+id: gtja191_128
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 14
+min_warmup_bars: 16
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: tp
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - op: add
+        args:
+        - ref: h
+        - ref: l
+      - ref: c
+    - value: 3.0
+- name: dtp
+  expr:
+    op: sub
+    args:
+    - ref: tp
+    - op: shift
+      args:
+      - ref: tp
+      - value: 1
+- name: up
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - op: mul
+        args:
+        - ref: tp
+        - ref: v
+      - op: gt
+        args:
+        - ref: dtp
+        - 0
+      - 0.0
+    - 14
+- name: down
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - op: mul
+        args:
+        - ref: tp
+        - ref: v
+      - op: lt
+        args:
+        - ref: dtp
+        - 0
+      - 0.0
+    - 14
+- name: ratio
+  expr:
+    op: safe_div
+    args:
+    - ref: up
+    - ref: down
+- name: out
+  expr:
+    op: sub
+    args:
+    - value: 100.0
+    - op: div
+      args:
+      - value: 100.0
+      - op: add
+        args:
+        - value: 1.0
+        - ref: ratio
+final:
+  ref: out

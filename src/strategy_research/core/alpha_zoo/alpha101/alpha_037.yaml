@@ -1,0 +1,51 @@
+id: alpha101_037
+zoo: alpha101
+nickname: 'Kakushadze Alpha #37'
+theme:
+- momentum
+formula_latex: rank(correlation(delay(open-close,1),close,200)) + rank(open-close)
+columns_required:
+- open
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 201
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: delay
+  expr:
+    op: delay
+- name: out
+  expr:
+    op: add
+    args:
+    - op: rank
+      args:
+      - op: ts_corr
+        args:
+        - op: delay
+          args:
+          - op: sub
+            args:
+            - ref: open_
+            - ref: close
+          - value: 1
+        - ref: close
+        - value: 200
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: open_
+        - ref: close
+final:
+  ref: out

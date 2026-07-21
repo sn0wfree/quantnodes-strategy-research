@@ -1,0 +1,37 @@
+id: qlib158_klen
+zoo: qlib158
+nickname: ''
+theme:
+- microstructure
+formula_latex: (\\mathrm{high} - \\mathrm{low}) / \\mathrm{open}
+columns_required:
+- open
+- high
+- low
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 1
+steps:
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: lo
+  expr:
+    column: low
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - ref: h
+    - ref: lo
+  - ref: o

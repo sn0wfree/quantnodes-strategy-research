@@ -1,0 +1,92 @@
+id: gtja191_086
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: '((0.25 < (((DELAY(CLOSE,20)-DELAY(CLOSE,10))/10) - ((DELAY(CLOSE,10)-CLOSE)/10))) ? -1 : (((((DELAY(CLOSE,20)-DELAY(CLOSE,10))/10)
+  - ((DELAY(CLOSE,10)-CLOSE)/10)) < 0) ? 1 : (-1*(CLOSE-DELAY(CLOSE,1)))))'
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 22
+steps:
+- name: c
+  expr:
+    column: close
+- name: a
+  expr:
+    op: div
+    args:
+    - op: sub
+      args:
+      - op: shift
+        args:
+        - ref: c
+        - value: 20
+      - op: shift
+        args:
+        - ref: c
+        - value: 10
+    - value: 10.0
+- name: b
+  expr:
+    op: div
+    args:
+    - op: sub
+      args:
+      - op: shift
+        args:
+        - ref: c
+        - value: 10
+      - ref: c
+    - value: 10.0
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: a
+    - ref: b
+- name: last
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: sub
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+- name: out
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: where
+      args:
+      - op: lt
+        args:
+        - value: 0.25
+        - ref: diff
+      - op: neg
+        args:
+        - value: 1.0
+      - op: where
+        args:
+        - op: lt
+          args:
+          - ref: diff
+          - value: 0
+        - value: 1.0
+        - op: to_numpy
+          args:
+          - ref: last
+final:
+  ref: out

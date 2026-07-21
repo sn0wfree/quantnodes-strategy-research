@@ -1,0 +1,110 @@
+id: alpha101_092
+zoo: alpha101
+nickname: 'Kakushadze Alpha #92'
+theme:
+- volume
+formula_latex: min(Ts_Rank(decay_linear(((high+low)/2 + close < low+open), 15), 19), Ts_Rank(decay_linear(correlation(rank(low),
+  rank(adv30), 8), 7), 7))
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 49
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: adv30
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 30
+- name: cond
+  expr:
+    op: astype
+    args:
+    - op: lt
+      args:
+      - op: add
+        args:
+        - op: div
+          args:
+          - op: add
+            args:
+            - ref: high
+            - ref: low
+          - value: 2.0
+        - ref: close
+      - op: add
+        args:
+        - ref: low
+        - ref: open_
+    - ref: float
+- name: a
+  expr:
+    op: ts_rank
+    args:
+    - op: decay_linear
+      args:
+      - ref: cond
+      - value: 15
+    - value: 19
+- name: b
+  expr:
+    op: ts_rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_corr
+        args:
+        - op: rank
+          args:
+          - ref: low
+        - op: rank
+          args:
+          - ref: adv30
+        - value: 8
+      - value: 7
+    - value: 7
+- name: arr_a
+  expr:
+    op: to_numpy
+    args:
+    - ref: a
+- name: arr_b
+  expr:
+    op: to_numpy
+    args:
+    - ref: b
+- name: out
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: fmin
+      args:
+      - ref: arr_a
+      - ref: arr_b
+final:
+  ref: out

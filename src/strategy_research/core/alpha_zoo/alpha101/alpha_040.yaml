@@ -1,0 +1,47 @@
+id: alpha101_040
+zoo: alpha101
+nickname: 'Kakushadze Alpha #40'
+theme:
+- volatility
+- volume
+formula_latex: (-1*rank(stddev(high,10))) * correlation(high,volume,10)
+columns_required:
+- high
+- volume
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: rank
+        args:
+        - op: ts_std
+          args:
+          - ref: high
+          - value: 10
+    - op: ts_corr
+      args:
+      - ref: high
+      - ref: volume
+      - value: 10
+final:
+  ref: out

@@ -1,0 +1,87 @@
+id: gtja191_056
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: (RANK(OPEN-TSMIN(OPEN,12)) < RANK((RANK(CORR(SUM(((HIGH+LOW)/2),19),SUM(MEAN(VOLUME,40),19),13))^5)))
+columns_required:
+- open
+- high
+- low
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 19
+min_warmup_bars: 60
+steps:
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: sub
+      args:
+      - ref: o
+      - op: ts_min
+        args:
+        - ref: o
+        - value: 12
+- name: mid
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - ref: h
+      - ref: l
+    - value: 2.0
+- name: sumA
+  expr:
+    op: ts_sum
+    args:
+    - ref: mid
+    - 19
+- name: sumB
+  expr:
+    op: ts_sum
+    args:
+    - op: ts_mean
+      args:
+      - ref: v
+      - 30
+    - 19
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - op: signed_power
+      args:
+      - op: rank
+        args:
+        - op: ts_corr
+          args:
+          - ref: sumA
+          - ref: sumB
+          - value: 13
+      - value: 5
+final:
+  op: astype
+  args:
+  - op: lt
+    args:
+    - ref: lhs
+    - ref: rhs
+  - ref: float

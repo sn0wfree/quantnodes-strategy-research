@@ -1,0 +1,95 @@
+id: alpha101_046
+zoo: alpha101
+nickname: 'Kakushadze Alpha #46'
+theme:
+- momentum
+formula_latex: complex piecewise; see paper
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 21
+steps:
+- name: close
+  expr:
+    column: close
+- name: delay
+  expr:
+    op: delay
+- name: make_one
+  expr:
+    value: 1.0
+- name: where_ternary
+  expr:
+    op: where
+- name: x
+  expr:
+    op: sub
+    args:
+    - op: div
+      args:
+      - op: sub
+        args:
+        - op: delay
+          args:
+          - ref: close
+          - value: 20
+        - op: delay
+          args:
+          - ref: close
+          - value: 10
+      - value: 10.0
+    - op: div
+      args:
+      - op: sub
+        args:
+        - op: delay
+          args:
+          - ref: close
+          - value: 10
+        - ref: close
+      - value: 10.0
+- name: one
+  expr:
+    op: make_one
+    args:
+    - ref: close
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - op: lt
+      args:
+      - value: 0.25
+      - ref: x
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - ref: one
+    - op: where_ternary
+      args:
+      - op: lt
+        args:
+        - ref: x
+        - value: 0.0
+      - ref: one
+      - op: mul
+        args:
+        - op: neg
+          args:
+          - value: 1.0
+        - op: sub
+          args:
+          - ref: close
+          - op: delay
+            args:
+            - ref: close
+            - value: 1
+final:
+  ref: out

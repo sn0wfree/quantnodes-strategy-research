@@ -1,0 +1,41 @@
+id: gtja191_030
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: WMA((REGRESI(CLOSE/DELAY(CLOSE,1)-1, MKT_RET, SMB, HML, 60))^2, 20)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: pc
+    - ref: pc
+final:
+  op: decay_linear
+  args:
+  - op: mul
+    args:
+    - ref: ret
+    - ref: ret
+  - value: 20

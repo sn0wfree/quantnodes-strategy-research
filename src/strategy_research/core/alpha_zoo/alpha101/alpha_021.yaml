@@ -1,0 +1,125 @@
+id: alpha101_021
+zoo: alpha101
+nickname: 'Kakushadze Alpha #21'
+theme:
+- momentum
+- volatility
+formula_latex: complex piecewise; see paper
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 20
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: make_one
+  expr:
+    value: 1.0
+- name: where_ternary
+  expr:
+    op: where
+- name: m8
+  expr:
+    op: div
+    args:
+    - op: rolling_sum
+      args:
+      - ref: close
+      - value: 8
+    - value: 8.0
+- name: s8
+  expr:
+    op: ts_std
+    args:
+    - ref: close
+    - value: 8
+- name: m2
+  expr:
+    op: div
+    args:
+    - op: rolling_sum
+      args:
+      - ref: close
+      - value: 2
+    - value: 2.0
+- name: v_adv
+  expr:
+    op: safe_div
+    args:
+    - ref: volume
+    - ref: adv20
+- name: cond_a
+  expr:
+    op: lt
+    args:
+    - op: add
+      args:
+      - ref: m8
+      - ref: s8
+    - ref: m2
+- name: cond_b
+  expr:
+    op: lt
+    args:
+    - ref: m2
+    - op: sub
+      args:
+      - ref: m8
+      - ref: s8
+- name: cond_c
+  expr:
+    op: gte
+    args:
+    - ref: v_adv
+    - value: 1.0
+- name: one
+  expr:
+    op: make_one
+    args:
+    - ref: close
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - ref: cond_a
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - ref: one
+    - op: where_ternary
+      args:
+      - ref: cond_b
+      - ref: one
+      - op: where_ternary
+        args:
+        - ref: cond_c
+        - ref: one
+        - op: mul
+          args:
+          - op: neg
+            args:
+            - value: 1.0
+          - ref: one
+final:
+  ref: out

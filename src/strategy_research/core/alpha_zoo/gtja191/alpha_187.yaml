@@ -1,0 +1,79 @@
+id: gtja191_187
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: see body
+columns_required:
+- open
+- high
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: prev
+  expr:
+    op: shift
+    args:
+    - ref: o
+    - value: 1
+- name: cond
+  expr:
+    op: astype
+    args:
+    - op: lte
+      args:
+      - ref: o
+      - ref: prev
+    - value: float64
+- name: arr_a
+  expr:
+    op: to_numpy
+    args:
+    - op: sub
+      args:
+      - ref: h
+      - ref: o
+- name: arr_b
+  expr:
+    op: to_numpy
+    args:
+    - op: sub
+      args:
+      - ref: o
+      - ref: prev
+- name: mx
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: maximum
+      args:
+      - ref: arr_a
+      - ref: arr_b
+- name: val
+  expr:
+    op: mul
+    args:
+    - ref: mx
+    - op: sub
+      args:
+      - value: 1.0
+      - ref: cond
+- name: out
+  expr:
+    op: ts_sum
+    args:
+    - ref: val
+    - 20
+final:
+  ref: out

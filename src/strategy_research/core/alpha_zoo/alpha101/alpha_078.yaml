@@ -1,0 +1,89 @@
+id: alpha101_078
+zoo: alpha101
+nickname: 'Kakushadze Alpha #78'
+theme:
+- volume
+formula_latex: rank(correlation(sum(0.352*low+0.648*vwap, 20), sum(adv40,20), 7))^rank(correlation(rank(vwap), rank(volume),
+  6))
+columns_required:
+- low
+- volume
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 46
+steps:
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv40
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 40
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: low
+      - value: 0.352233
+    - op: mul
+      args:
+      - ref: vwap
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.352233
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: rolling_sum
+        args:
+        - ref: mix
+        - value: 20
+      - op: rolling_sum
+        args:
+        - ref: adv40
+        - value: 20
+      - value: 7
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: rank
+        args:
+        - ref: vwap
+      - op: rank
+        args:
+        - ref: volume
+      - value: 6
+- name: out
+  expr:
+    op: mul
+    args:
+    - ref: lhs
+    - ref: rhs
+final:
+  ref: out

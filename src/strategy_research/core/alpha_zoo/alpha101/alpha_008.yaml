@@ -1,0 +1,64 @@
+id: alpha101_008
+zoo: alpha101
+nickname: 'Kakushadze Alpha #8'
+theme:
+- reversal
+formula_latex: -1 * rank((sum(open,5)*sum(returns,5)) - delay(sum(open,5)*sum(returns,5),10))
+columns_required:
+- open
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 15
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: s
+  expr:
+    op: mul
+    args:
+    - op: rolling_sum
+      args:
+      - ref: open_
+      - value: 5
+    - op: rolling_sum
+      args:
+      - ref: returns
+      - value: 5
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: s
+        - op: delay
+          args:
+          - ref: s
+          - value: 10
+final:
+  ref: out

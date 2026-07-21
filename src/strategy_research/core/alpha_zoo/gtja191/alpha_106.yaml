@@ -1,0 +1,26 @@
+id: gtja191_106
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: close-delay(close,20)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: out
+  expr:
+    op: delta
+    args:
+    - ref: c
+    - value: 20
+final:
+  ref: out

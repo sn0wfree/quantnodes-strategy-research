@@ -1,0 +1,62 @@
+id: gtja191_047
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: SMA((TSMAX(HIGH,6)-CLOSE)/(TSMAX(HIGH,6)-TSMIN(LOW,6))*100,9,1)
+columns_required:
+- close
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 9
+min_warmup_bars: 10
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: hi6
+  expr:
+    op: ts_max
+    args:
+    - ref: h
+    - value: 6
+- name: lo6
+  expr:
+    op: ts_min
+    args:
+    - ref: l
+    - value: 6
+- name: raw
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: hi6
+        - ref: c
+      - op: sub
+        args:
+        - ref: hi6
+        - ref: lo6
+    - value: 100.0
+final:
+  op: mean
+  args:
+  - _type: ewm
+    obj:
+      _type: ref
+      name: raw
+    span:
+      value: 20

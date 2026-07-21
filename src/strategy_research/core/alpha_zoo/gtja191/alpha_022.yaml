@@ -1,0 +1,51 @@
+id: gtja191_022
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: SMA(((CLOSE-MEAN(CLOSE,6))/MEAN(CLOSE,6) - DELAY((CLOSE-MEAN(CLOSE,6))/MEAN(CLOSE,6),3)),12,1)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 10
+steps:
+- name: c
+  expr:
+    column: close
+- name: ma6
+  expr:
+    op: ts_mean
+    args:
+    - ref: c
+    - value: 6
+- name: z
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: ma6
+    - ref: ma6
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: z
+    - op: delay
+      args:
+      - ref: z
+      - value: 3
+final:
+  op: mean
+  args:
+  - _type: ewm
+    obj:
+      _type: ref
+      name: diff
+    span:
+      value: 20

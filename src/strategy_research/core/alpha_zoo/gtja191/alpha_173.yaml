@@ -1,0 +1,66 @@
+id: gtja191_173
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: 3*sma(c,13,2)-2*sma(sma(c,13,2),13,2)+sma(sma(sma(log(c),13,2),13,2),13,2)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 13
+min_warmup_bars: 40
+steps:
+- name: c
+  expr:
+    column: close
+- name: s1
+  expr:
+    op: ts_mean
+    args:
+    - ref: c
+    - value: 13
+    - value: 2
+- name: s2
+  expr:
+    op: ts_mean
+    args:
+    - ref: s1
+    - value: 13
+    - value: 2
+- name: s3
+  expr:
+    op: ts_mean
+    args:
+    - op: ts_mean
+      args:
+      - op: ts_mean
+        args:
+        - op: log
+          args:
+          - ref: c
+        - value: 13
+        - value: 2
+      - value: 13
+      - value: 2
+    - value: 13
+    - value: 2
+- name: out
+  expr:
+    op: add
+    args:
+    - op: sub
+      args:
+      - op: mul
+        args:
+        - value: 3.0
+        - ref: s1
+      - op: mul
+        args:
+        - value: 2.0
+        - ref: s2
+    - ref: s3
+final:
+  ref: out

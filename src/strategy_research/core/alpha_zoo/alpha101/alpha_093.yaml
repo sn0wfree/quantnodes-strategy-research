@@ -1,0 +1,87 @@
+id: alpha101_093
+zoo: alpha101
+nickname: 'Kakushadze Alpha #93'
+theme:
+- volume
+formula_latex: Ts_Rank(decay_linear(correlation(IndNeutralize(vwap, industry), adv81, 17), 20), 8) / rank(decay_linear(delta(0.524*close+0.476*vwap,
+  3), 16))
+columns_required:
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 123
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv81
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 81
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: a
+  expr:
+    op: ts_rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_corr
+        args:
+        - op: ind_neutralize
+          args:
+          - ref: vwap
+          - ref: panel
+        - ref: adv81
+        - value: 17
+      - value: 20
+    - value: 8
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: close
+      - value: 0.524434
+    - op: mul
+      args:
+      - ref: vwap
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.524434
+- name: b
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: delta
+        args:
+        - ref: mix
+        - value: 3
+      - value: 16
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: a
+    - ref: b
+final:
+  ref: out

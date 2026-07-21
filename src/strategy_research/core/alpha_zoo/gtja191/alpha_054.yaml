@@ -1,0 +1,53 @@
+id: gtja191_054
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+- microstructure
+formula_latex: ((-1*RANK((STD(ABS(CLOSE-OPEN),10)+(CLOSE-OPEN))+CORR(CLOSE,OPEN,10))))
+columns_required:
+- close
+- open
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 11
+steps:
+- name: c
+  expr:
+    column: close
+- name: o
+  expr:
+    column: open
+final:
+  op: mul
+  args:
+  - op: neg
+    args:
+    - value: 1.0
+  - op: rank
+    args:
+    - op: add
+      args:
+      - op: add
+        args:
+        - op: ts_std
+          args:
+          - op: abs
+            args:
+            - op: sub
+              args:
+              - ref: c
+              - ref: o
+          - value: 10
+        - op: sub
+          args:
+          - ref: c
+          - ref: o
+      - op: ts_corr
+        args:
+        - ref: c
+        - ref: o
+        - value: 10

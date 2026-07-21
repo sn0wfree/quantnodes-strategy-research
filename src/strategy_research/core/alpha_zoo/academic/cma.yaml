@@ -1,0 +1,43 @@
+id: academic_cma
+zoo: academic
+nickname: '[PRICE PROXY] FF2015 CMA — investment via inverse volume growth'
+theme:
+- quality
+formula_latex: \mathrm{zscore}_{x}\bigl(-\Delta_{60}\log(\mathrm{ts\_mean}(\mathrm{volume},\,60) + 1)\bigr)
+columns_required:
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 120
+steps:
+- name: volume
+  expr:
+    column: volume
+- name: log_avg_vol
+  expr:
+    op: log
+    args:
+    - op: add
+      args:
+      - op: ts_mean
+        args:
+        - ref: volume
+        - value: 60
+      - value: 1.0
+- name: growth
+  expr:
+    op: delta
+    args:
+    - ref: log_avg_vol
+    - value: 60
+final:
+  op: zscore
+  args:
+  - op: neg
+    args:
+    - ref: growth

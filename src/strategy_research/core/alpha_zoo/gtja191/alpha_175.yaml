@@ -1,0 +1,83 @@
+id: gtja191_175
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: mean(true_range,6)
+columns_required:
+- close
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 6
+min_warmup_bars: 7
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: prev
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: a
+  expr:
+    op: to_numpy
+    args:
+    - op: sub
+      args:
+      - ref: h
+      - ref: l
+- name: b
+  expr:
+    op: to_numpy
+    args:
+    - op: abs
+      args:
+      - op: sub
+        args:
+        - ref: prev
+        - ref: h
+- name: d
+  expr:
+    op: to_numpy
+    args:
+    - op: abs
+      args:
+      - op: sub
+        args:
+        - ref: prev
+        - ref: l
+- name: tr
+  expr:
+    op: maximum
+    args:
+    - op: maximum
+      args:
+      - ref: a
+      - ref: b
+    - ref: d
+- name: tr_df
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - ref: tr
+- name: out
+  expr:
+    op: ts_mean
+    args:
+    - ref: tr_df
+    - value: 6
+final:
+  ref: out

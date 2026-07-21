@@ -1,0 +1,101 @@
+id: alpha101_080
+zoo: alpha101
+nickname: 'Kakushadze Alpha #80'
+theme:
+- momentum
+- volume
+formula_latex: (rank(Sign(delta(IndNeutralize(0.868*open+0.132*high, subindustry),4)))^Ts_Rank(correlation(high,adv10,5),6))
+  * -1
+columns_required:
+- open
+- high
+- volume
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 19
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: adv10
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 10
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: open_
+      - value: 0.868128
+    - op: mul
+      args:
+      - ref: high
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.868128
+- name: lhs_inner
+  expr:
+    op: delta
+    args:
+    - op: ind_neutralize
+      args:
+      - ref: mix
+      - ref: panel
+    - value: 4
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: DataFrame
+      args:
+      - ref: pd
+      - op: sign
+        args:
+        - op: to_numpy
+          args:
+          - ref: lhs_inner
+- name: rhs
+  expr:
+    op: ts_rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: high
+      - ref: adv10
+      - value: 5
+    - value: 6
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - ref: lhs
+      - ref: rhs
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

@@ -1,0 +1,76 @@
+id: alpha101_027
+zoo: alpha101
+nickname: 'Kakushadze Alpha #27'
+theme:
+- volume
+formula_latex: (0.5<rank((sum(correlation(rank(volume),rank(vwap),6),2)/2.0)))?(-1):1
+columns_required:
+- volume
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: make_one
+  expr:
+    value: 1.0
+- name: where_ternary
+  expr:
+    op: where
+- name: x
+  expr:
+    op: rank
+    args:
+    - op: div
+      args:
+      - op: rolling_sum
+        args:
+        - op: ts_corr
+          args:
+          - op: rank
+            args:
+            - ref: volume
+          - op: rank
+            args:
+            - ref: vwap
+          - value: 6
+        - value: 2
+      - value: 2.0
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - op: gt
+      args:
+      - ref: x
+      - value: 0.5
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: make_one
+        args:
+        - ref: close
+    - op: make_one
+      args:
+      - ref: close
+final:
+  ref: out

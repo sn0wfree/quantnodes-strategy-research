@@ -1,0 +1,42 @@
+id: alpha101_041
+zoo: alpha101
+nickname: 'Kakushadze Alpha #41'
+theme:
+- reversal
+formula_latex: (high*low)^0.5 - vwap
+columns_required:
+- high
+- low
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 1
+steps:
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: vwap
+  expr:
+    column: vwap
+- name: out
+  expr:
+    op: sub
+    args:
+    - op: pow
+      args:
+      - op: mul
+        args:
+        - ref: high
+        - ref: low
+      - value: 0.5
+    - ref: vwap
+final:
+  ref: out

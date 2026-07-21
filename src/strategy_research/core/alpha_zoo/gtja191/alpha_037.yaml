@@ -1,0 +1,64 @@
+id: gtja191_037
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: (-1*RANK(((SUM(OPEN,5)*SUM(RET,5))-DELAY((SUM(OPEN,5)*SUM(RET,5)),10))))
+columns_required:
+- open
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 16
+steps:
+- name: o
+  expr:
+    column: open
+- name: c
+  expr:
+    column: close
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: pc
+    - ref: pc
+- name: prod
+  expr:
+    op: mul
+    args:
+    - op: ts_sum
+      args:
+      - ref: o
+      - 5
+    - op: ts_sum
+      args:
+      - ref: ret
+      - 5
+final:
+  op: mul
+  args:
+  - op: neg
+    args:
+    - value: 1.0
+  - op: rank
+    args:
+    - op: sub
+      args:
+      - ref: prod
+      - op: shift
+        args:
+        - ref: prod
+        - value: 10

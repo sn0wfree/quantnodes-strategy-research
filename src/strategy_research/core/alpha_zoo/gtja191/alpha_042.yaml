@@ -1,0 +1,42 @@
+id: gtja191_042
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: ((-1*RANK(STD(HIGH,10)))*CORR(HIGH,VOLUME,10))
+columns_required:
+- high
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 11
+steps:
+- name: h
+  expr:
+    column: high
+- name: v
+  expr:
+    column: volume
+final:
+  op: mul
+  args:
+  - op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rank
+      args:
+      - op: ts_std
+        args:
+        - ref: h
+        - value: 10
+  - op: ts_corr
+    args:
+    - ref: h
+    - ref: v
+    - value: 10

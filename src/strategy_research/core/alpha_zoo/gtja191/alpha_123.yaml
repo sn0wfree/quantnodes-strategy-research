@@ -1,0 +1,77 @@
+id: gtja191_123
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 90
+steps:
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: left
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: ts_sum
+        args:
+        - op: div
+          args:
+          - op: add
+            args:
+            - ref: h
+            - ref: l
+          - 2.0
+        - 20
+      - op: ts_sum
+        args:
+        - op: ts_mean
+          args:
+          - ref: v
+          - 60
+        - 20
+      - value: 9
+- name: right
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: l
+      - ref: v
+      - value: 6
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: astype
+      args:
+      - op: lt
+        args:
+        - ref: left
+        - ref: right
+      - value: float64
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

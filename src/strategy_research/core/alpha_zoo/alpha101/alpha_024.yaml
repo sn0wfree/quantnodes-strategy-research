@@ -1,0 +1,89 @@
+id: alpha101_024
+zoo: alpha101
+nickname: 'Kakushadze Alpha #24'
+theme:
+- momentum
+formula_latex: complex piecewise; see paper
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 200
+steps:
+- name: close
+  expr:
+    column: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: where_ternary
+  expr:
+    op: where
+- name: m100
+  expr:
+    op: div
+    args:
+    - op: rolling_sum
+      args:
+      - ref: close
+      - value: 100
+    - value: 100.0
+- name: x
+  expr:
+    op: safe_div
+    args:
+    - op: delta
+      args:
+      - ref: m100
+      - value: 100
+    - op: delay
+      args:
+      - ref: close
+      - value: 100
+- name: cond
+  expr:
+    op: lte
+    args:
+    - ref: x
+    - value: 0.05
+- name: left
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: sub
+      args:
+      - ref: close
+      - op: ts_min
+        args:
+        - ref: close
+        - value: 100
+- name: right
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: delta
+      args:
+      - ref: close
+      - value: 3
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - ref: cond
+    - ref: left
+    - ref: right
+final:
+  ref: out

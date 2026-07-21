@@ -1,0 +1,57 @@
+id: gtja191_104
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: -1*delta(corr(high,volume,5),5)*rank(std(close,20))
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 25
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: v
+  expr:
+    column: volume
+- name: corr_hv
+  expr:
+    op: ts_corr
+    args:
+    - ref: h
+    - ref: v
+    - value: 5
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: mul
+      args:
+      - op: delta
+        args:
+        - ref: corr_hv
+        - value: 5
+      - op: rank
+        args:
+        - op: ts_std
+          args:
+          - ref: c
+          - value: 20
+final:
+  ref: out

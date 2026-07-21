@@ -1,0 +1,50 @@
+id: gtja191_127
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: sqrt(mean((100*(c-tsmax(c,12))/tsmax(c,12))^2,12))
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 24
+steps:
+- name: c
+  expr:
+    column: close
+- name: ratio
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - op: ts_max
+          args:
+          - ref: c
+          - value: 12
+      - op: ts_max
+        args:
+        - ref: c
+        - value: 12
+    - value: 100.0
+- name: out
+  expr:
+    op: signed_power
+    args:
+    - op: ts_mean
+      args:
+      - op: signed_power
+        args:
+        - ref: ratio
+        - value: 2
+      - value: 12
+    - value: 0.5
+final:
+  ref: out

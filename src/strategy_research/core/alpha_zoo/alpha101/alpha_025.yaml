@@ -1,0 +1,67 @@
+id: alpha101_025
+zoo: alpha101
+nickname: 'Kakushadze Alpha #25'
+theme:
+- momentum
+- volume
+formula_latex: rank((((-1*returns)*adv20)*vwap)*(high-close))
+columns_required:
+- high
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 21
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: out
+  expr:
+    op: rank
+    args:
+    - op: mul
+      args:
+      - op: mul
+        args:
+        - op: mul
+          args:
+          - op: mul
+            args:
+            - op: neg
+              args:
+              - value: 1.0
+            - ref: returns
+          - ref: adv20
+        - ref: vwap
+      - op: sub
+        args:
+        - ref: high
+        - ref: close
+final:
+  ref: out

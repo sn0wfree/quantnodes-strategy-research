@@ -1,0 +1,34 @@
+id: gtja191_189
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: mean(abs(c-mean(c,6)),6)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 6
+min_warmup_bars: 12
+steps:
+- name: c
+  expr:
+    column: close
+- name: out
+  expr:
+    op: ts_mean
+    args:
+    - op: abs
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - op: ts_mean
+          args:
+          - ref: c
+          - value: 6
+    - value: 6
+final:
+  ref: out

@@ -1,0 +1,51 @@
+id: gtja191_085
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- momentum
+formula_latex: (TSRANK((VOLUME/MEAN(VOLUME,20)),20)*TSRANK((-1*DELTA(CLOSE,7)),8))
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 39
+steps:
+- name: v
+  expr:
+    column: volume
+- name: c
+  expr:
+    column: close
+- name: vol_ratio
+  expr:
+    op: safe_div
+    args:
+    - ref: v
+    - op: ts_mean
+      args:
+      - ref: v
+      - value: 20
+final:
+  op: mul
+  args:
+  - op: ts_rank
+    args:
+    - ref: vol_ratio
+    - value: 20
+  - op: ts_rank
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: delta
+        args:
+        - ref: c
+        - value: 7
+    - value: 8

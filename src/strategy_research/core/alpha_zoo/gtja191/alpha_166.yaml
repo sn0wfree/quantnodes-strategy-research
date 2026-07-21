@@ -1,0 +1,91 @@
+id: gtja191_166
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: see body
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 40
+steps:
+- name: c
+  expr:
+    column: close
+- name: ret
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: 1.0
+- name: m
+  expr:
+    op: ts_mean
+    args:
+    - ref: ret
+    - value: 20
+- name: num
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: ts_sum
+        args:
+        - op: sub
+          args:
+          - ref: ret
+          - ref: m
+        - 20
+      - op: neg
+        args:
+        - value: 20.0
+    - op: signed_power
+      args:
+      - op: sub
+        args:
+        - value: 20.0
+        - value: 1.0
+      - value: 1.5
+- name: den
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: sub
+        args:
+        - value: 20.0
+        - value: 1.0
+      - op: sub
+        args:
+        - value: 20.0
+        - value: 2.0
+    - op: signed_power
+      args:
+      - op: ts_sum
+        args:
+        - op: pow
+          args:
+          - ref: ret
+          - 2
+        - 20
+      - value: 1.5
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: num
+    - ref: den
+final:
+  ref: out

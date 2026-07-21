@@ -1,0 +1,63 @@
+id: qlib158_vsump60
+zoo: qlib158
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: \\sum \\max(\\Delta v, 0) / \\sum |\\Delta v|
+columns_required:
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 60
+steps:
+- name: v
+  expr:
+    column: volume
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: v
+    - op: shift
+      args:
+      - ref: v
+      - value: 1
+- name: pos
+  expr:
+    op: where
+    args:
+    - ref: diff
+    - op: gt
+      args:
+      - ref: diff
+      - value: 0
+    - value: 0.0
+- name: absd
+  expr:
+    op: abs
+    args:
+    - ref: diff
+- name: num
+  expr:
+    op: ts_sum
+    args:
+    - ref: pos
+    - 60
+- name: den
+  expr:
+    op: ts_sum
+    args:
+    - ref: absd
+    - 60
+final:
+  op: safe_div
+  args:
+  - ref: num
+  - ref: den

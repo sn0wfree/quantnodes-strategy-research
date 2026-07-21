@@ -1,0 +1,33 @@
+id: academic_high52w
+zoo: academic
+nickname: George-Hwang 2004 52-week-high momentum
+theme:
+- momentum
+formula_latex: \mathrm{zscore}_{x}\bigl(\mathrm{close}_t / \mathrm{ts\_max}(\mathrm{close},\,252)\bigr)
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 252
+steps:
+- name: close
+  expr:
+    column: close
+- name: ratio
+  expr:
+    op: safe_div
+    args:
+    - ref: close
+    - op: ts_max
+      args:
+      - ref: close
+      - value: 252
+final:
+  op: zscore
+  args:
+  - ref: ratio

@@ -1,0 +1,36 @@
+id: gtja191_177
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: ((20-highday(h,20))/20)*100
+columns_required:
+- close
+- high
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: h
+  expr:
+    column: high
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: div
+      args:
+      - op: sub
+        args:
+        - value: 20.0
+        - op: ts_argmax
+          args:
+          - ref: h
+          - value: 20
+      - value: 20.0
+    - value: 100.0
+final:
+  ref: out

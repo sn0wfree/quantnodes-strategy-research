@@ -1,0 +1,65 @@
+id: gtja191_067
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: SMA(MAX(CLOSE-DELAY(CLOSE,1),0),24,1)/SMA(ABS(CLOSE-DELAY(CLOSE,1)),24,1)*100
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 24
+min_warmup_bars: 25
+steps:
+- name: c
+  expr:
+    column: close
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: delay
+      args:
+      - ref: c
+      - value: 1
+- name: up_part
+  expr:
+    op: clip
+    args:
+    - ref: diff
+- name: abs_part
+  expr:
+    op: abs
+    args:
+    - ref: diff
+- name: u
+  expr:
+    op: mean
+    args:
+    - _type: ewm
+      obj:
+        _type: ref
+        name: up_part
+      span:
+        value: 20
+- name: a
+  expr:
+    op: mean
+    args:
+    - _type: ewm
+      obj:
+        _type: ref
+        name: abs_part
+      span:
+        value: 20
+final:
+  op: mul
+  args:
+  - op: safe_div
+    args:
+    - ref: u
+    - ref: a
+  - value: 100.0

@@ -1,0 +1,61 @@
+id: gtja191_136
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+- volume
+formula_latex: -1*rank(delta(ret,3))*corr(open,volume,10)
+columns_required:
+- open
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 11
+steps:
+- name: c
+  expr:
+    column: close
+- name: o
+  expr:
+    column: open
+- name: v
+  expr:
+    column: volume
+- name: ret
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: 1.0
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: rank
+        args:
+        - op: delta
+          args:
+          - ref: ret
+          - value: 3
+    - op: ts_corr
+      args:
+      - ref: o
+      - ref: v
+      - value: 10
+final:
+  ref: out

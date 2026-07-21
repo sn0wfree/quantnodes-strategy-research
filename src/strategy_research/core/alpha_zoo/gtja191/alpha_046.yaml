@@ -1,0 +1,50 @@
+id: gtja191_046
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (MEAN(CLOSE,3)+MEAN(CLOSE,6)+MEAN(CLOSE,12)+MEAN(CLOSE,24))/(4*CLOSE)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 24
+min_warmup_bars: 25
+steps:
+- name: c
+  expr:
+    column: close
+- name: s
+  expr:
+    op: add
+    args:
+    - op: add
+      args:
+      - op: add
+        args:
+        - op: ts_mean
+          args:
+          - ref: c
+          - value: 3
+        - op: ts_mean
+          args:
+          - ref: c
+          - value: 6
+      - op: ts_mean
+        args:
+        - ref: c
+        - value: 12
+    - op: ts_mean
+      args:
+      - ref: c
+      - value: 24
+final:
+  op: safe_div
+  args:
+  - ref: s
+  - op: mul
+    args:
+    - value: 4.0
+    - ref: c

@@ -1,0 +1,41 @@
+id: alpha101_042
+zoo: alpha101
+nickname: 'Kakushadze Alpha #42'
+theme:
+- reversal
+formula_latex: rank(vwap-close) / rank(vwap+close)
+columns_required:
+- close
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 1
+steps:
+- name: close
+  expr:
+    column: close
+- name: vwap
+  expr:
+    column: vwap
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: vwap
+        - ref: close
+    - op: rank
+      args:
+      - op: add
+        args:
+        - ref: vwap
+        - ref: close
+final:
+  ref: out

@@ -1,0 +1,46 @@
+id: alpha101_038
+zoo: alpha101
+nickname: 'Kakushadze Alpha #38'
+theme:
+- reversal
+formula_latex: (-1*rank(ts_rank(close,10))) * rank(close/open)
+columns_required:
+- open
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: rank
+        args:
+        - op: ts_rank
+          args:
+          - ref: close
+          - value: 10
+    - op: rank
+      args:
+      - op: safe_div
+        args:
+        - ref: close
+        - ref: open_
+final:
+  ref: out

@@ -1,0 +1,74 @@
+id: alpha101_020
+zoo: alpha101
+nickname: 'Kakushadze Alpha #20'
+theme:
+- reversal
+formula_latex: (((-1*rank(open-delay(high,1)))*rank(open-delay(close,1)))*rank(open-delay(low,1)))
+columns_required:
+- open
+- high
+- low
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 2
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: delay
+  expr:
+    op: delay
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: mul
+        args:
+        - op: neg
+          args:
+          - value: 1.0
+        - op: rank
+          args:
+          - op: sub
+            args:
+            - ref: open_
+            - op: delay
+              args:
+              - ref: high
+              - value: 1
+      - op: rank
+        args:
+        - op: sub
+          args:
+          - ref: open_
+          - op: delay
+            args:
+            - ref: close
+            - value: 1
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: open_
+        - op: delay
+          args:
+          - ref: low
+          - value: 1
+final:
+  ref: out

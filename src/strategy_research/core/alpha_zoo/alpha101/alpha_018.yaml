@@ -1,0 +1,56 @@
+id: alpha101_018
+zoo: alpha101
+nickname: 'Kakushadze Alpha #18'
+theme:
+- volatility
+formula_latex: -1 * rank(stddev(abs(close-open),5) + (close-open) + correlation(close,open,10))
+columns_required:
+- open
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: close
+    - ref: open_
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rank
+      args:
+      - op: add
+        args:
+        - op: add
+          args:
+          - op: ts_std
+            args:
+            - op: abs
+              args:
+              - ref: diff
+            - value: 5
+          - ref: diff
+        - op: ts_corr
+          args:
+          - ref: close
+          - ref: open_
+          - value: 10
+final:
+  ref: out

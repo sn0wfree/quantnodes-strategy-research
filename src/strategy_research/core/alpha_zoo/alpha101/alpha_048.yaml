@@ -1,0 +1,61 @@
+id: alpha101_048
+zoo: alpha101
+nickname: 'Kakushadze Alpha #48'
+theme:
+- momentum
+- volatility
+formula_latex: indneutralize(...subindustry...) / sum((delta(close,1)/delay(close,1))^2, 250)
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 251
+steps:
+- name: close
+  expr:
+    column: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: num
+  expr:
+    op: ind_neutralize
+    args:
+    - ref: num
+    - ref: panel
+- name: denom
+  expr:
+    op: rolling_sum
+    args:
+    - op: pow
+      args:
+      - op: safe_div
+        args:
+        - op: delta
+          args:
+          - ref: close
+          - value: 1
+        - op: delay
+          args:
+          - ref: close
+          - value: 1
+      - value: 2
+    - value: 250
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: num
+    - ref: denom
+final:
+  ref: out

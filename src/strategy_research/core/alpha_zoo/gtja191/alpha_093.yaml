@@ -1,0 +1,62 @@
+id: gtja191_093
+zoo: gtja191
+nickname: ''
+theme:
+- microstructure
+formula_latex: SUM((OPEN>=DELAY(OPEN,1)?0:MAX(OPEN-LOW,OPEN-DELAY(OPEN,1))),20)
+columns_required:
+- open
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 22
+steps:
+- name: o
+  expr:
+    column: open
+- name: l
+  expr:
+    column: low
+- name: po
+  expr:
+    op: shift
+    args:
+    - ref: o
+    - value: 1
+- name: move
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: maximum
+      args:
+      - op: to_numpy
+        args:
+        - op: sub
+          args:
+          - ref: o
+          - ref: l
+      - op: to_numpy
+        args:
+        - op: sub
+          args:
+          - ref: o
+          - ref: po
+- name: keep
+  expr:
+    op: where
+    args:
+    - ref: move
+    - op: lt
+      args:
+      - ref: o
+      - ref: po
+    - value: 0.0
+final:
+  op: ts_sum
+  args:
+  - ref: keep
+  - 20

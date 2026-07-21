@@ -1,0 +1,71 @@
+id: gtja191_162
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: see body
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 24
+steps:
+- name: c
+  expr:
+    column: close
+- name: dc
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: rsi
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: ts_mean
+        args:
+        - op: clip
+          args:
+          - ref: dc
+        - value: 12
+        - value: 1
+      - op: ts_mean
+        args:
+        - op: abs
+          args:
+          - ref: dc
+        - value: 12
+        - value: 1
+    - value: 100.0
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: rsi
+      - op: ts_min
+        args:
+        - ref: rsi
+        - value: 12
+    - op: sub
+      args:
+      - op: ts_max
+        args:
+        - ref: rsi
+        - value: 12
+      - op: ts_min
+        args:
+        - ref: rsi
+        - value: 12
+final:
+  ref: out

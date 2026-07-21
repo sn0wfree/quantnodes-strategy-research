@@ -1,0 +1,37 @@
+id: gtja191_139
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: -1*corr(open,volume,10)
+columns_required:
+- open
+- volume
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 10
+steps:
+- name: o
+  expr:
+    column: open
+- name: v
+  expr:
+    column: volume
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: ts_corr
+      args:
+      - ref: o
+      - ref: v
+      - value: 10
+final:
+  ref: out

@@ -1,0 +1,78 @@
+id: alpha101_039
+zoo: alpha101
+nickname: 'Kakushadze Alpha #39'
+theme:
+- momentum
+- volume
+formula_latex: (-1*rank(delta(close,7)*(1-rank(decay_linear(volume/adv20,9))))) * (1+rank(sum(returns,250)))
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 250
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: rank
+        args:
+        - op: mul
+          args:
+          - op: delta
+            args:
+            - ref: close
+            - value: 7
+          - op: sub
+            args:
+            - value: 1.0
+            - op: rank
+              args:
+              - op: decay_linear
+                args:
+                - op: safe_div
+                  args:
+                  - ref: volume
+                  - ref: adv20
+                - value: 9
+    - op: add
+      args:
+      - value: 1.0
+      - op: rank
+        args:
+        - op: rolling_sum
+          args:
+          - ref: returns
+          - value: 250
+final:
+  ref: out

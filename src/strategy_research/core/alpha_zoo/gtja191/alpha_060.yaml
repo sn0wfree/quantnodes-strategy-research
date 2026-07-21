@@ -1,0 +1,57 @@
+id: gtja191_060
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- microstructure
+formula_latex: SUM(((CLOSE-LOW)-(HIGH-CLOSE))/(HIGH-LOW)*VOLUME, 20)
+columns_required:
+- close
+- high
+- low
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: mfm
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - ref: l
+      - op: sub
+        args:
+        - ref: h
+        - ref: c
+    - op: sub
+      args:
+      - ref: h
+      - ref: l
+final:
+  op: ts_sum
+  args:
+  - op: mul
+    args:
+    - ref: mfm
+    - ref: v
+  - 20

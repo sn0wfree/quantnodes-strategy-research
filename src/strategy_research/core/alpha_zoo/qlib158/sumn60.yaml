@@ -1,0 +1,64 @@
+id: qlib158_sumn60
+zoo: qlib158
+nickname: ''
+theme:
+- reversal
+formula_latex: \\sum \\max(-\\Delta\\mathrm{close}, 0) / \\sum |\\Delta\\mathrm{close}|
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 60
+steps:
+- name: c
+  expr:
+    column: close
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: neg
+  expr:
+    op: where
+    args:
+    - op: neg
+      args:
+      - ref: diff
+    - op: lt
+      args:
+      - ref: diff
+      - value: 0
+    - value: 0.0
+- name: absd
+  expr:
+    op: abs
+    args:
+    - ref: diff
+- name: num
+  expr:
+    op: ts_sum
+    args:
+    - ref: neg
+    - 60
+- name: den
+  expr:
+    op: ts_sum
+    args:
+    - ref: absd
+    - 60
+final:
+  op: safe_div
+  args:
+  - ref: num
+  - ref: den

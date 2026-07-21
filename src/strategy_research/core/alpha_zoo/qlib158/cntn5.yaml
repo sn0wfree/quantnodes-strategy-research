@@ -1,0 +1,38 @@
+id: qlib158_cntn5
+zoo: qlib158
+nickname: ''
+theme:
+- reversal
+formula_latex: \\mathrm{rolling\\_mean}(\\mathrm{1}[\\mathrm{close}<\\mathrm{close}_{{-1}}], 5)
+columns_required:
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: c
+  expr:
+    column: close
+- name: dn
+  expr:
+    op: astype
+    args:
+    - op: lt
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: float64
+final:
+  op: ts_mean
+  args:
+  - ref: dn
+  - 5

@@ -1,0 +1,73 @@
+id: alpha101_045
+zoo: alpha101
+nickname: 'Kakushadze Alpha #45'
+theme:
+- momentum
+- volume
+formula_latex: -1 * (rank(sum(delay(close,5),20)/20)*correlation(close,volume,2)*rank(correlation(sum(close,5),sum(close,20),2)))
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 25
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: mul
+      args:
+      - op: mul
+        args:
+        - op: rank
+          args:
+          - op: div
+            args:
+            - op: rolling_sum
+              args:
+              - op: delay
+                args:
+                - ref: close
+                - value: 5
+              - value: 20
+            - value: 20.0
+        - op: ts_corr
+          args:
+          - ref: close
+          - ref: volume
+          - value: 2
+      - op: rank
+        args:
+        - op: ts_corr
+          args:
+          - op: rolling_sum
+            args:
+            - ref: close
+            - value: 5
+          - op: rolling_sum
+            args:
+            - ref: close
+            - value: 20
+          - value: 2
+final:
+  ref: out

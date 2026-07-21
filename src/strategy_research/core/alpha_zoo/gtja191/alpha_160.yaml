@@ -1,0 +1,45 @@
+id: gtja191_160
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: sma((c<=delay(c,1)?std(c,20):0),20,1)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 22
+steps:
+- name: c
+  expr:
+    column: close
+- name: cond
+  expr:
+    op: astype
+    args:
+    - op: lte
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: float64
+- name: out
+  expr:
+    op: ts_mean
+    args:
+    - op: mul
+      args:
+      - op: ts_std
+        args:
+        - ref: c
+        - value: 20
+      - ref: cond
+    - value: 20
+    - value: 1
+final:
+  ref: out

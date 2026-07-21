@@ -1,0 +1,75 @@
+id: gtja191_035
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: (MIN(RANK(DECAYLINEAR(DELTA(OPEN,1),15)), RANK(DECAYLINEAR(CORR(VOLUME,((OPEN*0.65)+(OPEN*0.35)),17),7))) *
+  -1)
+columns_required:
+- open
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 15
+min_warmup_bars: 25
+steps:
+- name: o
+  expr:
+    column: open
+- name: v
+  expr:
+    column: volume
+- name: p1
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: delta
+        args:
+        - ref: o
+        - value: 1
+      - value: 15
+- name: weighted
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: o
+      - value: 0.65
+    - op: mul
+      args:
+      - ref: o
+      - value: 0.35
+- name: p2
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_corr
+        args:
+        - ref: v
+        - ref: weighted
+        - value: 17
+      - value: 7
+final:
+  op: mul
+  args:
+  - op: neg
+    args:
+    - value: 1.0
+  - op: DataFrame
+    args:
+    - ref: pd
+    - op: minimum
+      args:
+      - op: to_numpy
+        args:
+        - ref: p1
+      - op: to_numpy
+        args:
+        - ref: p2

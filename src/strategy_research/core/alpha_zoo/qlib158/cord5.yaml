@@ -1,0 +1,62 @@
+id: qlib158_cord5
+zoo: qlib158
+nickname: ''
+theme:
+- volume
+- microstructure
+formula_latex: \\mathrm{ts\\_corr}(\\mathrm{close}/\\mathrm{close}_{{-1}}, \\log((\\mathrm{volume}+1)/(\\mathrm{volume}_{{-1}}+1)),
+  5)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: c_ret
+  expr:
+    op: safe_div
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: v_ret
+  expr:
+    op: safe_div
+    args:
+    - op: add
+      args:
+      - ref: v
+      - value: 1.0
+    - op: add
+      args:
+      - op: shift
+        args:
+        - ref: v
+        - value: 1
+      - value: 1.0
+- name: logvr
+  expr:
+    op: log
+    args:
+    - ref: v_ret
+final:
+  op: ts_corr
+  args:
+  - ref: c_ret
+  - ref: logvr
+  - value: 5

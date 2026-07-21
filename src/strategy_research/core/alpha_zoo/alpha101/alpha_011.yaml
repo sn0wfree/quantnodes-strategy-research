@@ -1,0 +1,60 @@
+id: alpha101_011
+zoo: alpha101
+nickname: 'Kakushadze Alpha #11'
+theme:
+- volume
+- reversal
+formula_latex: (rank(ts_max(vwap-close,3))+rank(ts_min(vwap-close,3)))*rank(delta(volume,3))
+columns_required:
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: diff
+  expr:
+    op: sub
+    args:
+    - ref: vwap
+    - ref: close
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: add
+      args:
+      - op: rank
+        args:
+        - op: ts_max
+          args:
+          - ref: diff
+          - value: 3
+      - op: rank
+        args:
+        - op: ts_min
+          args:
+          - ref: diff
+          - value: 3
+    - op: rank
+      args:
+      - op: delta
+        args:
+        - ref: volume
+        - value: 3
+final:
+  ref: out

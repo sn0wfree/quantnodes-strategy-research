@@ -1,0 +1,51 @@
+id: gtja191_076
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+- volume
+formula_latex: STD(ABS((CLOSE/DELAY(CLOSE,1)-1))/VOLUME,20)/MEAN(ABS((CLOSE/DELAY(CLOSE,1)-1))/VOLUME,20)
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 22
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: x
+  expr:
+    op: safe_div
+    args:
+    - op: abs
+      args:
+      - op: sub
+        args:
+        - op: safe_div
+          args:
+          - ref: c
+          - op: shift
+            args:
+            - ref: c
+            - value: 1
+        - value: 1.0
+    - ref: v
+final:
+  op: safe_div
+  args:
+  - op: ts_std
+    args:
+    - ref: x
+    - value: 20
+  - op: ts_mean
+    args:
+    - ref: x
+    - value: 20

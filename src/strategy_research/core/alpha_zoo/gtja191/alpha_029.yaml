@@ -1,0 +1,40 @@
+id: gtja191_029
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+- volume
+formula_latex: (CLOSE-DELAY(CLOSE,6))/DELAY(CLOSE,6)*VOLUME
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 6
+min_warmup_bars: 7
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+final:
+  op: mul
+  args:
+  - op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 6
+    - op: shift
+      args:
+      - ref: c
+      - value: 6
+  - ref: v

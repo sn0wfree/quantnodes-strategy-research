@@ -1,0 +1,35 @@
+id: gtja191_168
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: -1*volume/mean(volume,20)
+columns_required:
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: v
+  expr:
+    column: volume
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: safe_div
+      args:
+      - ref: v
+      - op: ts_mean
+        args:
+        - ref: v
+        - value: 20
+final:
+  ref: out

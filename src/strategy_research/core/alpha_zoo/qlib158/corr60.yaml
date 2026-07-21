@@ -1,0 +1,37 @@
+id: qlib158_corr60
+zoo: qlib158
+nickname: ''
+theme:
+- volume
+- microstructure
+formula_latex: \\mathrm{ts\\_corr}(\\mathrm{close}, \\log(\\mathrm{volume}+1), 60)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 60
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: logv
+  expr:
+    op: log1p
+    args:
+    - ref: v
+final:
+  op: ts_corr
+  args:
+  - ref: c
+  - ref: logv
+  - value: 60

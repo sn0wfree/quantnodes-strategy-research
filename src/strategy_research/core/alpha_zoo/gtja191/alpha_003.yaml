@@ -1,0 +1,80 @@
+id: gtja191_003
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: SUM((CLOSE=DELAY(CLOSE,1)?0:CLOSE-(CLOSE>DELAY(CLOSE,1)?MIN(LOW,DELAY(CLOSE,1)):MAX(HIGH,DELAY(CLOSE,1)))),6)
+columns_required:
+- close
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 6
+min_warmup_bars: 7
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: pc
+  expr:
+    op: delay
+    args:
+    - ref: c
+    - value: 1
+- name: up
+  expr:
+    op: gt
+    args:
+    - ref: c
+    - ref: pc
+- name: dn
+  expr:
+    op: lt
+    args:
+    - ref: c
+    - ref: pc
+- name: ref
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: where
+      args:
+      - ref: up
+      - op: minimum
+        args:
+        - ref: l
+        - ref: pc
+      - op: where
+        args:
+        - ref: dn
+        - op: maximum
+          args:
+          - ref: h
+          - ref: pc
+        - ref: c
+- name: move
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - ref: ref
+final:
+  op: sum
+  args:
+  - _type: rolling
+    obj:
+      _type: ref
+      name: move
+    window:
+      _type: value
+      value: 6

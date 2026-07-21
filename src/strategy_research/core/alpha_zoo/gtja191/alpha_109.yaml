@@ -1,0 +1,51 @@
+id: gtja191_109
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: sma(high-low,10,2)/sma(sma(high-low,10,2),10,2)
+columns_required:
+- close
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 20
+steps:
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: hl
+  expr:
+    op: sub
+    args:
+    - ref: h
+    - ref: l
+- name: num
+  expr:
+    op: ts_mean
+    args:
+    - ref: hl
+    - value: 10
+    - value: 2
+- name: den
+  expr:
+    op: ts_mean
+    args:
+    - ref: num
+    - value: 10
+    - value: 2
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: num
+    - ref: den
+final:
+  ref: out

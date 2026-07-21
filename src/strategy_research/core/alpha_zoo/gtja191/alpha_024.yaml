@@ -1,0 +1,32 @@
+id: gtja191_024
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: SMA(CLOSE-DELAY(CLOSE,5),5,1)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 6
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: mean
+  args:
+  - _type: ewm
+    obj:
+      _type: call
+      func: delta
+      args:
+      - _type: ref
+        name: c
+      - _type: value
+        value: 5
+    span:
+      value: 20

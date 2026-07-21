@@ -1,0 +1,99 @@
+id: alpha101_066
+zoo: alpha101
+nickname: 'Kakushadze Alpha #66'
+theme:
+- momentum
+formula_latex: (rank(decay_linear(delta(vwap,4), 7)) + Ts_Rank(decay_linear(((0.966*low+0.034*low - vwap)/(open-(high+low)/2)),
+  11), 7)) * -1
+columns_required:
+- open
+- high
+- low
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 18
+steps:
+- name: open_
+  expr:
+    column: open
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: vwap
+  expr:
+    column: vwap
+- name: t1
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: delta
+        args:
+        - ref: vwap
+        - value: 4
+      - value: 7
+- name: num
+  expr:
+    op: sub
+    args:
+    - op: add
+      args:
+      - op: mul
+        args:
+        - ref: low
+        - value: 0.96633
+      - op: mul
+        args:
+        - ref: low
+        - op: sub
+          args:
+          - value: 1.0
+          - value: 0.96633
+    - ref: vwap
+- name: denom
+  expr:
+    op: sub
+    args:
+    - ref: open_
+    - op: div
+      args:
+      - op: add
+        args:
+        - ref: high
+        - ref: low
+      - value: 2.0
+- name: t2
+  expr:
+    op: ts_rank
+    args:
+    - op: decay_linear
+      args:
+      - op: safe_div
+        args:
+        - ref: num
+        - ref: denom
+      - value: 11
+    - value: 7
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: add
+      args:
+      - ref: t1
+      - ref: t2
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

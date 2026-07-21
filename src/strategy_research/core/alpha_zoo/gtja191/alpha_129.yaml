@@ -1,0 +1,44 @@
+id: gtja191_129
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: sum(abs(c-delay(c,1)) if dc<0 else 0,12)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 13
+steps:
+- name: c
+  expr:
+    column: close
+- name: dc
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: out
+  expr:
+    op: ts_sum
+    args:
+    - op: where
+      args:
+      - op: neg
+        args:
+        - ref: dc
+      - op: lt
+        args:
+        - ref: dc
+        - 0
+      - 0.0
+    - 12
+final:
+  ref: out

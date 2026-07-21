@@ -1,0 +1,61 @@
+id: alpha101_005
+zoo: alpha101
+nickname: 'Kakushadze Alpha #5'
+theme:
+- reversal
+formula_latex: rank((open - sum(vwap,10)/10)) * (-1 * abs(rank((close - vwap))))
+columns_required:
+- open
+- close
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: vwap
+  expr:
+    column: vwap
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: rank
+      args:
+      - op: sub
+        args:
+        - ref: open_
+        - op: div
+          args:
+          - op: rolling_sum
+            args:
+            - ref: vwap
+            - value: 10
+          - value: 10.0
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: abs
+        args:
+        - op: rank
+          args:
+          - op: sub
+            args:
+            - ref: close
+            - ref: vwap
+final:
+  ref: out

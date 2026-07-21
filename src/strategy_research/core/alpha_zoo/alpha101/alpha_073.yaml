@@ -1,0 +1,107 @@
+id: alpha101_073
+zoo: alpha101
+nickname: 'Kakushadze Alpha #73'
+theme:
+- volume
+formula_latex: max(rank(decay_linear(delta(vwap,5), 3)), Ts_Rank(decay_linear(-1*(delta(0.147*open+0.853*low,2)/(0.147*open+0.853*low)),
+  3), 17)) * -1
+columns_required:
+- open
+- low
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 21
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: low
+  expr:
+    column: low
+- name: vwap
+  expr:
+    column: vwap
+- name: a
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: delta
+        args:
+        - ref: vwap
+        - value: 5
+      - value: 3
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: open_
+      - value: 0.147155
+    - op: mul
+      args:
+      - ref: low
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.147155
+- name: b_inner
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: delta
+        args:
+        - ref: mix
+        - value: 2
+      - ref: mix
+    - op: neg
+      args:
+      - value: 1.0
+- name: b
+  expr:
+    op: ts_rank
+    args:
+    - op: decay_linear
+      args:
+      - ref: b_inner
+      - value: 3
+    - value: 17
+- name: arr_a
+  expr:
+    op: to_numpy
+    args:
+    - ref: a
+- name: arr_b
+  expr:
+    op: to_numpy
+    args:
+    - ref: b
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: DataFrame
+      args:
+      - ref: pd
+      - op: fmax
+        args:
+        - ref: arr_a
+        - ref: arr_b
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

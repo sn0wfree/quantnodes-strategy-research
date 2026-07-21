@@ -1,0 +1,26 @@
+id: gtja191_065
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: MEAN(CLOSE,6)/CLOSE
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 6
+min_warmup_bars: 7
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: safe_div
+  args:
+  - op: ts_mean
+    args:
+    - ref: c
+    - value: 6
+  - ref: c

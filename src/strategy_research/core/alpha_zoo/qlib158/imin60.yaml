@@ -1,0 +1,29 @@
+id: qlib158_imin60
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{ts\\_argmin}(\\mathrm{low}, 60) / 60
+columns_required:
+- low
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 60
+steps:
+- name: lo
+  expr:
+    column: low
+final:
+  op: div
+  args:
+  - op: ts_argmin
+    args:
+    - ref: lo
+    - value: 60
+  - value: 60.0

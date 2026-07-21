@@ -1,0 +1,33 @@
+id: qlib158_max10
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: \\mathrm{ts\\_max}(\\mathrm{high}, 10) / \\mathrm{close}
+columns_required:
+- high
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 10
+min_warmup_bars: 10
+steps:
+- name: h
+  expr:
+    column: high
+- name: c
+  expr:
+    column: close
+final:
+  op: safe_div
+  args:
+  - op: ts_max
+    args:
+    - ref: h
+    - value: 10
+  - ref: c

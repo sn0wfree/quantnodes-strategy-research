@@ -1,0 +1,67 @@
+id: gtja191_110
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: sum(max(0,high-delay(close,1)),20)/sum(max(0,delay(close,1)-low),20)*100
+columns_required:
+- close
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: prev_c
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: num
+  expr:
+    op: ts_sum
+    args:
+    - op: clip
+      args:
+      - op: sub
+        args:
+        - ref: h
+        - ref: prev_c
+      - 0.0
+    - 20
+- name: den
+  expr:
+    op: ts_sum
+    args:
+    - op: clip
+      args:
+      - op: sub
+        args:
+        - ref: prev_c
+        - ref: l
+      - 0.0
+    - 20
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - ref: num
+      - ref: den
+    - value: 100.0
+final:
+  ref: out

@@ -1,0 +1,44 @@
+id: alpha101_016
+zoo: alpha101
+nickname: 'Kakushadze Alpha #16'
+theme:
+- volume
+formula_latex: -1 * rank(covariance(rank(high), rank(volume), 5))
+columns_required:
+- high
+- volume
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 5
+steps:
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rank
+      args:
+      - op: ts_cov
+        args:
+        - op: rank
+          args:
+          - ref: high
+        - op: rank
+          args:
+          - ref: volume
+        - value: 5
+final:
+  ref: out

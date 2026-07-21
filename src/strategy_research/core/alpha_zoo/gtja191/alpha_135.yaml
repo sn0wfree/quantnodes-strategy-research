@@ -1,0 +1,39 @@
+id: gtja191_135
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: sma(delay(c/delay(c,20),1),20,1)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 22
+steps:
+- name: c
+  expr:
+    column: close
+- name: ratio
+  expr:
+    op: shift
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 20
+    - value: 1
+- name: out
+  expr:
+    op: ts_mean
+    args:
+    - ref: ratio
+    - value: 20
+    - value: 1
+final:
+  ref: out

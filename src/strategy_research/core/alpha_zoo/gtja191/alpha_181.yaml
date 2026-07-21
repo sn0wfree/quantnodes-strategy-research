@@ -1,0 +1,100 @@
+id: gtja191_181
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: see body
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 40
+steps:
+- name: c
+  expr:
+    column: close
+- name: bench
+  expr:
+    op: _bench_close
+    args: []
+- name: br
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: bench
+      - op: delay
+        args:
+        - ref: bench
+        - value: 1
+    - value: 1.0
+- name: cr
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: delay
+        args:
+        - ref: c
+        - value: 1
+    - value: 1.0
+- name: diff
+  expr:
+    op: sub
+    args:
+    - op: sub
+      args:
+      - ref: cr
+      - op: ts_mean
+        args:
+        - ref: cr
+        - value: 20
+    - op: pow
+      args:
+      - op: sub
+        args:
+        - ref: br
+        - op: ts_mean
+          args:
+          - ref: br
+          - value: 20
+      - value: 2
+- name: num
+  expr:
+    op: sum
+    args:
+    - op: rolling
+      args:
+      - ref: diff
+      - value: 20
+- name: den
+  expr:
+    op: sum
+    args:
+    - op: rolling
+      args:
+      - op: pow
+        args:
+        - op: sub
+          args:
+          - ref: br
+          - op: ts_mean
+            args:
+            - ref: br
+            - value: 20
+        - value: 3
+      - value: 20
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: num
+    - ref: den
+final:
+  ref: out

@@ -1,0 +1,134 @@
+id: gtja191_069
+zoo: gtja191
+nickname: ''
+theme:
+- microstructure
+formula_latex: (SUM(DTM,20)>SUM(DBM,20)?(SUM(DTM,20)-SUM(DBM,20))/SUM(DTM,20):(SUM(DTM,20)=SUM(DBM,20)?0:(SUM(DTM,20)-SUM(DBM,20))/SUM(DBM,20)))
+columns_required:
+- open
+- high
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 22
+steps:
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: po
+  expr:
+    op: shift
+    args:
+    - ref: o
+    - value: 1
+- name: dtm
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: where
+      args:
+      - op: lte
+        args:
+        - ref: o
+        - ref: po
+      - value: 0.0
+      - op: maximum
+        args:
+        - op: to_numpy
+          args:
+          - op: sub
+            args:
+            - ref: h
+            - ref: o
+        - op: to_numpy
+          args:
+          - op: sub
+            args:
+            - ref: o
+            - ref: po
+- name: dbm
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: where
+      args:
+      - op: gte
+        args:
+        - ref: o
+        - ref: po
+      - value: 0.0
+      - op: maximum
+        args:
+        - op: to_numpy
+          args:
+          - op: sub
+            args:
+            - ref: o
+            - ref: l
+        - op: to_numpy
+          args:
+          - op: sub
+            args:
+            - ref: o
+            - ref: po
+- name: sd
+  expr:
+    op: ts_sum
+    args:
+    - ref: dtm
+    - 20
+- name: sb
+  expr:
+    op: ts_sum
+    args:
+    - ref: dbm
+    - 20
+- name: res
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: where
+      args:
+      - op: gt
+        args:
+        - ref: sd
+        - ref: sb
+      - op: to_numpy
+        args:
+        - op: safe_div
+          args:
+          - op: sub
+            args:
+            - ref: sd
+            - ref: sb
+          - ref: sd
+      - op: where
+        args:
+        - op: lt
+          args:
+          - ref: sd
+          - ref: sb
+        - op: to_numpy
+          args:
+          - op: safe_div
+            args:
+            - op: sub
+              args:
+              - ref: sd
+              - ref: sb
+            - ref: sb
+        - value: 0.0
+final:
+  ref: res

@@ -1,0 +1,116 @@
+id: gtja191_159
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 24
+min_warmup_bars: 25
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: prev
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: lo
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: minimum
+      args:
+      - op: to_numpy
+        args:
+        - ref: l
+      - op: to_numpy
+        args:
+        - ref: prev
+- name: hi
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - op: maximum
+      args:
+      - op: to_numpy
+        args:
+        - ref: h
+      - op: to_numpy
+        args:
+        - ref: prev
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: div
+      args:
+      - op: add
+        args:
+        - op: add
+          args:
+          - op: mul
+            args:
+            - op: mul
+              args:
+              - op: _term
+                args:
+                - value: 6
+              - value: 12.0
+            - value: 24.0
+          - op: mul
+            args:
+            - op: mul
+              args:
+              - op: _term
+                args:
+                - value: 12
+              - value: 6.0
+            - value: 24.0
+        - op: mul
+          args:
+          - op: mul
+            args:
+            - op: _term
+              args:
+              - value: 24
+            - value: 6.0
+          - value: 12.0
+      - op: add
+        args:
+        - op: add
+          args:
+          - op: mul
+            args:
+            - value: 6.0
+            - value: 12.0
+          - op: mul
+            args:
+            - value: 6.0
+            - value: 24.0
+        - op: mul
+          args:
+          - value: 12.0
+          - value: 24.0
+    - value: 100.0
+final:
+  ref: out

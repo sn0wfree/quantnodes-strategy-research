@@ -1,0 +1,35 @@
+id: alpha101_004
+zoo: alpha101
+nickname: 'Kakushadze Alpha #4'
+theme:
+- reversal
+formula_latex: -1 * Ts_Rank(rank(low), 9)
+columns_required:
+- low
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 9
+steps:
+- name: low
+  expr:
+    column: low
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: ts_rank
+      args:
+      - op: rank
+        args:
+        - ref: low
+      - value: 9
+final:
+  ref: out

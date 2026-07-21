@@ -1,0 +1,50 @@
+id: gtja191_118
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: sum(h-o,20)/sum(o-l,20)*100
+columns_required:
+- open
+- high
+- low
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: safe_div
+      args:
+      - op: ts_sum
+        args:
+        - op: sub
+          args:
+          - ref: h
+          - ref: o
+        - 20
+      - op: ts_sum
+        args:
+        - op: sub
+          args:
+          - ref: o
+          - ref: l
+        - 20
+    - value: 100.0
+final:
+  ref: out

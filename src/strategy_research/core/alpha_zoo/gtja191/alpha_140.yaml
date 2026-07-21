@@ -1,0 +1,105 @@
+id: gtja191_140
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 100
+steps:
+- name: c
+  expr:
+    column: close
+- name: o
+  expr:
+    column: open
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: left
+  expr:
+    op: rank
+    args:
+    - op: decay_linear
+      args:
+      - op: sub
+        args:
+        - op: add
+          args:
+          - op: rank
+            args:
+            - ref: o
+          - op: rank
+            args:
+            - ref: l
+        - op: add
+          args:
+          - op: rank
+            args:
+            - ref: h
+          - op: rank
+            args:
+            - ref: c
+      - value: 8
+- name: inner
+  expr:
+    op: ts_corr
+    args:
+    - op: ts_rank
+      args:
+      - ref: c
+      - value: 8
+    - op: ts_rank
+      args:
+      - op: ts_mean
+        args:
+        - ref: v
+        - value: 60
+      - value: 20
+    - value: 8
+- name: right
+  expr:
+    op: ts_rank
+    args:
+    - op: decay_linear
+      args:
+      - op: ts_rank
+        args:
+        - ref: inner
+        - value: 7
+      - value: 7
+    - value: 3
+- name: arr
+  expr:
+    op: minimum
+    args:
+    - op: to_numpy
+      args:
+      - ref: left
+    - op: to_numpy
+      args:
+      - ref: right
+- name: out
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - ref: arr
+final:
+  ref: out

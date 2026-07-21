@@ -1,0 +1,75 @@
+id: gtja191_117
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- momentum
+formula_latex: tsrank(v,32)*(1-tsrank(c+h-l,16))*(1-tsrank(ret,32))
+columns_required:
+- close
+- high
+- low
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 32
+min_warmup_bars: 33
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: ret
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: 1.0
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: ts_rank
+        args:
+        - ref: v
+        - value: 32
+      - op: sub
+        args:
+        - value: 1.0
+        - op: ts_rank
+          args:
+          - op: sub
+            args:
+            - op: add
+              args:
+              - ref: c
+              - ref: h
+            - ref: l
+          - value: 16
+    - op: sub
+      args:
+      - value: 1.0
+      - op: ts_rank
+        args:
+        - ref: ret
+        - value: 32
+final:
+  ref: out

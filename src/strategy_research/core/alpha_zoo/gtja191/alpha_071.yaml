@@ -1,0 +1,35 @@
+id: gtja191_071
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (CLOSE-MEAN(CLOSE,24))/MEAN(CLOSE,24)*100
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 24
+min_warmup_bars: 25
+steps:
+- name: c
+  expr:
+    column: close
+- name: m24
+  expr:
+    op: ts_mean
+    args:
+    - ref: c
+    - value: 24
+final:
+  op: mul
+  args:
+  - op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: m24
+    - ref: m24
+  - value: 100.0

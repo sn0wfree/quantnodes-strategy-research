@@ -1,0 +1,91 @@
+id: gtja191_115
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: rank(corr(0.9h+0.1c,mean(v,30),10))^rank(corr(tsrank((h+l)/2,4),tsrank(v,10),7))
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 30
+min_warmup_bars: 40
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: left
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: add
+        args:
+        - op: mul
+          args:
+          - ref: h
+          - value: 0.9
+        - op: mul
+          args:
+          - ref: c
+          - value: 0.1
+      - op: ts_mean
+        args:
+        - ref: v
+        - value: 30
+      - value: 10
+- name: right
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: ts_rank
+        args:
+        - op: div
+          args:
+          - op: add
+            args:
+            - ref: h
+            - ref: l
+          - value: 2.0
+        - value: 4
+      - op: ts_rank
+        args:
+        - ref: v
+        - value: 10
+      - value: 7
+- name: arr
+  expr:
+    op: power
+    args:
+    - op: to_numpy
+      args:
+      - ref: left
+    - op: to_numpy
+      args:
+      - ref: right
+- name: out
+  expr:
+    op: DataFrame
+    args:
+    - ref: pd
+    - ref: arr
+final:
+  ref: out

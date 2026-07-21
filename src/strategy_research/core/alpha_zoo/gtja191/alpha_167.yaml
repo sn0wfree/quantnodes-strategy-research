@@ -1,0 +1,35 @@
+id: gtja191_167
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: sum(max(0,c-delay(c,1)),12)
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 13
+steps:
+- name: c
+  expr:
+    column: close
+- name: out
+  expr:
+    op: ts_sum
+    args:
+    - op: clip
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - op: shift
+          args:
+          - ref: c
+          - 1
+      - 0.0
+    - 12
+final:
+  ref: out

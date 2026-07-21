@@ -1,0 +1,78 @@
+id: gtja191_101
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- momentum
+formula_latex: ((rank(ts\_corr(close, sum(ts\_mean(volume,30),37), 15)) < rank(ts\_corr(rank(high), rank(ts\_mean(volume,10)),
+  11))) * -1)
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 15
+min_warmup_bars: 80
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: v
+  expr:
+    column: volume
+- name: left
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: c
+      - op: ts_sum
+        args:
+        - op: ts_mean
+          args:
+          - ref: v
+          - 30
+        - 37
+      - value: 15
+- name: right
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: rank
+        args:
+        - ref: h
+      - op: rank
+        args:
+        - op: ts_mean
+          args:
+          - ref: v
+          - value: 10
+      - value: 11
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: astype
+      args:
+      - op: lt
+        args:
+        - ref: left
+        - ref: right
+      - value: float64
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

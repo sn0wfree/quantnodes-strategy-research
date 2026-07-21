@@ -1,0 +1,101 @@
+id: alpha101_079
+zoo: alpha101
+nickname: 'Kakushadze Alpha #79'
+theme:
+- volume
+- momentum
+formula_latex: rank(delta(IndNeutralize(0.607*close+0.393*open, sector), 1)) < rank(correlation(Ts_Rank(vwap,4), Ts_Rank(adv150,9),
+  15))
+columns_required:
+- open
+- close
+- volume
+- vwap
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 172
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv15
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 15
+- name: adv150
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 150
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: close
+      - value: 0.60733
+    - op: mul
+      args:
+      - ref: open_
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.60733
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: delta
+      args:
+      - op: ind_neutralize
+        args:
+        - ref: mix
+        - ref: panel
+      - value: 1
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: ts_rank
+        args:
+        - ref: vwap
+        - value: 4
+      - op: ts_rank
+        args:
+        - ref: adv150
+        - value: 9
+      - value: 15
+- name: out
+  expr:
+    op: where
+    args:
+    - op: lt
+      args:
+      - ref: lhs
+      - ref: rhs
+    - value: 1.0
+    - value: 0.0
+final:
+  ref: out

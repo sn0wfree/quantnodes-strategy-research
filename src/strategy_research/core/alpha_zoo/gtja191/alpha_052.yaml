@@ -1,0 +1,74 @@
+id: gtja191_052
+zoo: gtja191
+nickname: ''
+theme:
+- microstructure
+formula_latex: SUM(MAX(0,HIGH-DELAY((HIGH+LOW+CLOSE)/3,1)),26) / SUM(MAX(0,DELAY((HIGH+LOW+CLOSE)/3,1)-LOW),26) * 100
+columns_required:
+- high
+- low
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 26
+min_warmup_bars: 27
+steps:
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: c
+  expr:
+    column: close
+- name: typ
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - op: add
+        args:
+        - ref: h
+        - ref: l
+      - ref: c
+    - value: 3.0
+- name: p_typ
+  expr:
+    op: shift
+    args:
+    - ref: typ
+    - value: 1
+- name: bull
+  expr:
+    op: clip
+    args:
+    - op: sub
+      args:
+      - ref: h
+      - ref: p_typ
+- name: bear
+  expr:
+    op: clip
+    args:
+    - op: sub
+      args:
+      - ref: p_typ
+      - ref: l
+final:
+  op: mul
+  args:
+  - op: safe_div
+    args:
+    - op: ts_sum
+      args:
+      - ref: bull
+      - 26
+    - op: ts_sum
+      args:
+      - ref: bear
+      - 26
+  - value: 100.0

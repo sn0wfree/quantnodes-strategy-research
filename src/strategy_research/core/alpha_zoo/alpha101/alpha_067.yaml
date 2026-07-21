@@ -1,0 +1,77 @@
+id: alpha101_067
+zoo: alpha101
+nickname: 'Kakushadze Alpha #67'
+theme:
+- volume
+formula_latex: (rank(high-ts_min(high,2))^rank(correlation(IndNeutralize(vwap,sector), IndNeutralize(adv20,subindustry), 6)))
+  * -1
+columns_required:
+- high
+- volume
+- vwap
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 25
+steps:
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: vwap
+  expr:
+    column: vwap
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: ind_neutralize
+  expr:
+    ref: _ind_neutralize
+- name: lhs
+  expr:
+    op: rank
+    args:
+    - op: sub
+      args:
+      - ref: high
+      - op: ts_min
+        args:
+        - ref: high
+        - value: 2
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - op: ts_corr
+      args:
+      - op: ind_neutralize
+        args:
+        - ref: vwap
+        - ref: panel
+      - op: ind_neutralize
+        args:
+        - ref: adv20
+        - ref: panel
+      - value: 6
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - ref: lhs
+      - ref: rhs
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

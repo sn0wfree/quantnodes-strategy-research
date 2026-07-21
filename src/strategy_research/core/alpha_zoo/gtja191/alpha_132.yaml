@@ -1,0 +1,27 @@
+id: gtja191_132
+zoo: gtja191
+nickname: ''
+theme:
+- liquidity
+formula_latex: mean(amount,20)
+columns_required:
+- close
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: amt
+  expr:
+    column: amount
+- name: out
+  expr:
+    op: ts_mean
+    args:
+    - ref: amt
+    - value: 20
+final:
+  ref: out

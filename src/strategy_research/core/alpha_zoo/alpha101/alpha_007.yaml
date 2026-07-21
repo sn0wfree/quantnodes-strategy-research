@@ -1,0 +1,79 @@
+id: alpha101_007
+zoo: alpha101
+nickname: 'Kakushadze Alpha #7'
+theme:
+- momentum
+- volume
+formula_latex: (adv20<volume)?((-1*ts_rank(abs(delta(close,7)),60))*sign(delta(close,7))):(-1)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 67
+steps:
+- name: close
+  expr:
+    column: close
+- name: volume
+  expr:
+    column: volume
+- name: adv20
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 20
+- name: make_one
+  expr:
+    value: 1.0
+- name: where_ternary
+  expr:
+    op: where
+- name: d7
+  expr:
+    op: delta
+    args:
+    - ref: close
+    - value: 7
+- name: expr
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: ts_rank
+        args:
+        - op: abs
+          args:
+          - ref: d7
+        - value: 60
+    - op: sign
+      args:
+      - ref: d7
+- name: out
+  expr:
+    op: where_ternary
+    args:
+    - op: lt
+      args:
+      - ref: adv20
+      - ref: volume
+    - ref: expr
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: make_one
+        args:
+        - ref: close
+final:
+  ref: out

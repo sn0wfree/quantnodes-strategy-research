@@ -1,0 +1,66 @@
+id: gtja191_078
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: ((HIGH+LOW+CLOSE)/3-MA((HIGH+LOW+CLOSE)/3,12))/(0.015*MEAN(ABS(CLOSE-MA((HIGH+LOW+CLOSE)/3,12)),12))
+columns_required:
+- high
+- low
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 23
+steps:
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: c
+  expr:
+    column: close
+- name: typ
+  expr:
+    op: div
+    args:
+    - op: add
+      args:
+      - op: add
+        args:
+        - ref: h
+        - ref: l
+      - ref: c
+    - value: 3.0
+- name: ma
+  expr:
+    op: ts_mean
+    args:
+    - ref: typ
+    - value: 12
+- name: md
+  expr:
+    op: ts_mean
+    args:
+    - op: abs
+      args:
+      - op: sub
+        args:
+        - ref: c
+        - ref: ma
+    - value: 12
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - ref: typ
+    - ref: ma
+  - op: mul
+    args:
+    - value: 0.015
+    - ref: md

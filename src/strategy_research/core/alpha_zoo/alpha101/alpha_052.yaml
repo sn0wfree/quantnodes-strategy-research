@@ -1,0 +1,83 @@
+id: alpha101_052
+zoo: alpha101
+nickname: 'Kakushadze Alpha #52'
+theme:
+- momentum
+formula_latex: ((-1*ts_min(low,5)+delay(ts_min(low,5),5)) * rank((sum(returns,240)-sum(returns,20))/220)) * ts_rank(volume,5)
+columns_required:
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 240
+steps:
+- name: close
+  expr:
+    column: close
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: add
+        args:
+        - op: mul
+          args:
+          - op: neg
+            args:
+            - value: 1.0
+          - op: ts_min
+            args:
+            - ref: low
+            - value: 5
+        - op: delay
+          args:
+          - op: ts_min
+            args:
+            - ref: low
+            - value: 5
+          - value: 5
+      - op: rank
+        args:
+        - op: div
+          args:
+          - op: sub
+            args:
+            - op: rolling_sum
+              args:
+              - ref: returns
+              - value: 240
+            - op: rolling_sum
+              args:
+              - ref: returns
+              - value: 20
+          - value: 220.0
+    - op: ts_rank
+      args:
+      - ref: volume
+      - value: 5
+final:
+  ref: out

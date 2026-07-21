@@ -1,0 +1,69 @@
+id: alpha101_029
+zoo: alpha101
+nickname: 'Kakushadze Alpha #29'
+theme:
+- reversal
+- volume
+formula_latex: min(product(rank(rank(scale(log(sum(ts_min(rank(rank(-1*rank(delta(close-1,5)))),2),1))))),1),5) + ts_rank(delay(-1*returns,6),5)
+columns_required:
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 12
+steps:
+- name: close
+  expr:
+    column: close
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: rolling_prod
+  expr:
+    ref: _rolling_prod
+- name: delay
+  expr:
+    op: delay
+- name: inner
+  expr:
+    op: rolling_prod
+    args:
+    - ref: inner
+    - value: 1
+- name: term1
+  expr:
+    op: ts_min
+    args:
+    - ref: inner
+    - value: 5
+- name: term2
+  expr:
+    op: ts_rank
+    args:
+    - op: delay
+      args:
+      - op: mul
+        args:
+        - op: neg
+          args:
+          - value: 1.0
+        - ref: returns
+      - value: 6
+    - value: 5
+- name: out
+  expr:
+    op: add
+    args:
+    - ref: term1
+    - ref: term2
+final:
+  ref: out

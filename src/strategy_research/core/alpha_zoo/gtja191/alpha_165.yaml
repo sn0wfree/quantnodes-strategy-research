@@ -1,0 +1,53 @@
+id: gtja191_165
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+formula_latex: see body
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 48
+min_warmup_bars: 142
+steps:
+- name: c
+  expr:
+    column: close
+- name: dev
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: ts_mean
+      args:
+      - ref: c
+      - value: 48
+- name: csum
+  expr:
+    op: ts_sum
+    args:
+    - ref: dev
+    - 48
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - op: ts_max
+        args:
+        - ref: csum
+        - value: 48
+      - op: ts_min
+        args:
+        - ref: csum
+        - value: 48
+    - op: ts_std
+      args:
+      - ref: c
+      - value: 48
+final:
+  ref: out

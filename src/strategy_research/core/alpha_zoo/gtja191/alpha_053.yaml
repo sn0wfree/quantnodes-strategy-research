@@ -1,0 +1,41 @@
+id: gtja191_053
+zoo: gtja191
+nickname: ''
+theme:
+- momentum
+formula_latex: COUNT(CLOSE>DELAY(CLOSE,1),12)/12*100
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 13
+steps:
+- name: c
+  expr:
+    column: close
+- name: up
+  expr:
+    op: astype
+    args:
+    - op: gt
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - ref: float
+final:
+  op: mul
+  args:
+  - op: div
+    args:
+    - op: ts_sum
+      args:
+      - ref: up
+      - 12
+    - value: 12.0
+  - value: 100.0

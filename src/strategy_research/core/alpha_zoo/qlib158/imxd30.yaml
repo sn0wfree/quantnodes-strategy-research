@@ -1,0 +1,39 @@
+id: qlib158_imxd30
+zoo: qlib158
+nickname: ''
+theme:
+- momentum
+formula_latex: (\\mathrm{ts\\_argmax}(\\mathrm{high}, 30) - \\mathrm{ts\\_argmin}(\\mathrm{low}, 30)) / 30
+columns_required:
+- high
+- low
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 30
+min_warmup_bars: 30
+steps:
+- name: h
+  expr:
+    column: high
+- name: lo
+  expr:
+    column: low
+final:
+  op: div
+  args:
+  - op: sub
+    args:
+    - op: ts_argmax
+      args:
+      - ref: h
+      - value: 30
+    - op: ts_argmin
+      args:
+      - ref: lo
+      - value: 30
+  - value: 30.0

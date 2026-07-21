@@ -1,0 +1,90 @@
+id: alpha101_068
+zoo: alpha101
+nickname: 'Kakushadze Alpha #68'
+theme:
+- volume
+formula_latex: (Ts_Rank(correlation(rank(high), rank(adv15), 9), 14) < rank(delta(0.518*close+0.482*low, 1))) * -1
+columns_required:
+- high
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 36
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: adv15
+  expr:
+    op: ts_mean
+    args:
+    - ref: volume
+    - value: 15
+- name: lhs
+  expr:
+    op: ts_rank
+    args:
+    - op: ts_corr
+      args:
+      - op: rank
+        args:
+        - ref: high
+      - op: rank
+        args:
+        - ref: adv15
+      - value: 9
+    - value: 14
+- name: mix
+  expr:
+    op: add
+    args:
+    - op: mul
+      args:
+      - ref: close
+      - value: 0.518371
+    - op: mul
+      args:
+      - ref: low
+      - op: sub
+        args:
+        - value: 1.0
+        - value: 0.518371
+- name: rhs
+  expr:
+    op: rank
+    args:
+    - op: delta
+      args:
+      - ref: mix
+      - value: 1
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: astype
+      args:
+      - op: lt
+        args:
+        - ref: lhs
+        - ref: rhs
+      - ref: float
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

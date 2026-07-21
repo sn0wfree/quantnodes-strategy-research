@@ -1,0 +1,68 @@
+id: alpha101_019
+zoo: alpha101
+nickname: 'Kakushadze Alpha #19'
+theme:
+- momentum
+formula_latex: (-1*sign((close-delay(close,7))+delta(close,7))) * (1+rank(1+sum(returns,250)))
+columns_required:
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 250
+steps:
+- name: close
+  expr:
+    column: close
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: delay
+  expr:
+    op: delay
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: neg
+        args:
+        - value: 1.0
+      - op: sign
+        args:
+        - op: add
+          args:
+          - op: sub
+            args:
+            - ref: close
+            - op: delay
+              args:
+              - ref: close
+              - value: 7
+          - op: delta
+            args:
+            - ref: close
+            - value: 7
+    - op: add
+      args:
+      - value: 1.0
+      - op: rank
+        args:
+        - op: add
+          args:
+          - value: 1.0
+          - op: rolling_sum
+            args:
+            - ref: returns
+            - value: 250
+final:
+  ref: out

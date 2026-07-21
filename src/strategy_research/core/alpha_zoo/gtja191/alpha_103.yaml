@@ -1,0 +1,39 @@
+id: gtja191_103
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: ((20-lowday(low,20))/20)*100
+columns_required:
+- close
+- low
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 20
+steps:
+- name: l
+  expr:
+    column: low
+- name: am
+  expr:
+    op: ts_argmin
+    args:
+    - ref: l
+    - value: 20
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: div
+      args:
+      - op: sub
+        args:
+        - value: 20.0
+        - ref: am
+      - value: 20.0
+    - value: 100.0
+final:
+  ref: out

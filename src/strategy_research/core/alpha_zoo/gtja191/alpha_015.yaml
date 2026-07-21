@@ -1,0 +1,36 @@
+id: gtja191_015
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: (OPEN/DELAY(CLOSE,1) - 1)
+columns_required:
+- open
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 2
+steps:
+- name: o
+  expr:
+    column: open
+- name: c
+  expr:
+    column: close
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+final:
+  op: sub
+  args:
+  - op: safe_div
+    args:
+    - ref: o
+    - ref: pc
+  - value: 1.0

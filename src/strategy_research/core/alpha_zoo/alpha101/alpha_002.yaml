@@ -1,0 +1,57 @@
+id: alpha101_002
+zoo: alpha101
+nickname: 'Kakushadze Alpha #2'
+theme:
+- volume
+- reversal
+formula_latex: -1 * correlation(rank(delta(log(volume), 2)), rank(((close-open)/open)), 6)
+columns_required:
+- open
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 10
+steps:
+- name: close
+  expr:
+    column: close
+- name: open_
+  expr:
+    column: open
+- name: volume
+  expr:
+    column: volume
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: ts_corr
+      args:
+      - op: rank
+        args:
+        - op: delta
+          args:
+          - op: log
+            args:
+            - ref: volume
+          - value: 2
+      - op: rank
+        args:
+        - op: div
+          args:
+          - op: sub
+            args:
+            - ref: close
+            - ref: open_
+          - ref: open_
+      - value: 6
+final:
+  ref: out

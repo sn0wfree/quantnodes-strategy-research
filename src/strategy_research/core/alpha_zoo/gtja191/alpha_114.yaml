@@ -1,0 +1,88 @@
+id: gtja191_114
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+- volatility
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 7
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: l
+  expr:
+    column: low
+- name: v
+  expr:
+    column: volume
+- name: vw
+  expr:
+    op: vwap
+    args:
+    - ref: panel
+    - value: equity_cn
+- name: hl_ratio
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: h
+      - ref: l
+    - op: div
+      args:
+      - op: sum
+        args:
+        - op: rolling
+          args:
+          - ref: c
+          - value: 5
+      - value: 5.0
+- name: num
+  expr:
+    op: mul
+    args:
+    - op: rank
+      args:
+      - op: delay
+        args:
+        - ref: hl_ratio
+        - value: 2
+    - op: rank
+      args:
+      - op: rank
+        args:
+        - ref: v
+- name: den
+  expr:
+    op: safe_div
+    args:
+    - ref: hl_ratio
+    - op: sub
+      args:
+      - ref: vw
+      - ref: c
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: num
+    - ref: den
+final:
+  ref: out

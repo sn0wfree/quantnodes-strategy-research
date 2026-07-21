@@ -1,0 +1,50 @@
+id: alpha101_015
+zoo: alpha101
+nickname: 'Kakushadze Alpha #15'
+theme:
+- volume
+formula_latex: -1 * sum(rank(correlation(rank(high), rank(volume), 3)), 3)
+columns_required:
+- high
+- volume
+- close
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 6
+steps:
+- name: high
+  expr:
+    column: high
+- name: volume
+  expr:
+    column: volume
+- name: rolling_sum
+  expr:
+    op: ts_sum
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: neg
+      args:
+      - value: 1.0
+    - op: rolling_sum
+      args:
+      - op: rank
+        args:
+        - op: ts_corr
+          args:
+          - op: rank
+            args:
+            - ref: high
+          - op: rank
+            args:
+            - ref: volume
+          - value: 3
+      - value: 3
+final:
+  ref: out

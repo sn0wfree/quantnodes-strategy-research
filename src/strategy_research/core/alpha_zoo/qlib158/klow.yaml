@@ -1,0 +1,47 @@
+id: qlib158_klow
+zoo: qlib158
+nickname: ''
+theme:
+- microstructure
+formula_latex: (\\min(\\mathrm{open}, \\mathrm{close}) - \\mathrm{low}) / \\mathrm{open}
+columns_required:
+- open
+- low
+- close
+universe:
+- equity_us
+- equity_cn
+- equity_hk
+- equity_in
+frequency:
+- 1d
+decay_horizon: 1
+min_warmup_bars: 1
+steps:
+- name: o
+  expr:
+    column: open
+- name: c
+  expr:
+    column: close
+- name: lo
+  expr:
+    column: low
+- name: lower
+  expr:
+    op: where
+    args:
+    - ref: o
+    - op: lte
+      args:
+      - ref: o
+      - ref: c
+    - ref: c
+final:
+  op: safe_div
+  args:
+  - op: sub
+    args:
+    - ref: lower
+    - ref: lo
+  - ref: o

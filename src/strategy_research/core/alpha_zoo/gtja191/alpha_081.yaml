@@ -1,0 +1,24 @@
+id: gtja191_081
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: SMA(VOLUME,21,2)
+columns_required:
+- volume
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 21
+min_warmup_bars: 22
+steps: []
+final:
+  op: mean
+  args:
+  - _type: ewm
+    obj:
+      _type: panel_ref
+      key: volume
+    span:
+      value: 20

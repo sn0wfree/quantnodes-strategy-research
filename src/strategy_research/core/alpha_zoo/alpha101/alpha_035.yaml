@@ -1,0 +1,69 @@
+id: alpha101_035
+zoo: alpha101
+nickname: 'Kakushadze Alpha #35'
+theme:
+- volume
+- momentum
+formula_latex: ts_rank(volume,32) * (1 - ts_rank((close+high-low),16)) * (1 - ts_rank(returns,32))
+columns_required:
+- high
+- low
+- close
+- volume
+universe:
+- equity_us
+- equity_in
+frequency:
+- 1D
+decay_horizon: 5
+min_warmup_bars: 33
+steps:
+- name: close
+  expr:
+    column: close
+- name: high
+  expr:
+    column: high
+- name: low
+  expr:
+    column: low
+- name: volume
+  expr:
+    column: volume
+- name: returns
+  expr:
+    op: pct_change
+    args:
+    - ref: close
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: mul
+      args:
+      - op: ts_rank
+        args:
+        - ref: volume
+        - value: 32
+      - op: sub
+        args:
+        - value: 1.0
+        - op: ts_rank
+          args:
+          - op: sub
+            args:
+            - op: add
+              args:
+              - ref: close
+              - ref: high
+            - ref: low
+          - value: 16
+    - op: sub
+      args:
+      - value: 1.0
+      - op: ts_rank
+        args:
+        - ref: returns
+        - value: 32
+final:
+  ref: out

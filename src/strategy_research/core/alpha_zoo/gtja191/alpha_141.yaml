@@ -1,0 +1,46 @@
+id: gtja191_141
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: rank(corr(rank(high),rank(mean(v,15)),9))*-1
+columns_required:
+- high
+- volume
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 15
+min_warmup_bars: 24
+steps:
+- name: h
+  expr:
+    column: high
+- name: v
+  expr:
+    column: volume
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: rank
+      args:
+      - op: ts_corr
+        args:
+        - op: rank
+          args:
+          - ref: h
+        - op: rank
+          args:
+          - op: ts_mean
+            args:
+            - ref: v
+            - value: 15
+        - value: 9
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

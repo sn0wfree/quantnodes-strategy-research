@@ -1,0 +1,26 @@
+id: gtja191_034
+zoo: gtja191
+nickname: ''
+theme:
+- reversal
+formula_latex: MEAN(CLOSE,12)/CLOSE
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 12
+min_warmup_bars: 13
+steps:
+- name: c
+  expr:
+    column: close
+final:
+  op: safe_div
+  args:
+  - op: ts_mean
+    args:
+    - ref: c
+    - value: 12
+  - ref: c
