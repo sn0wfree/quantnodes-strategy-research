@@ -671,6 +671,206 @@ def test_ts_regression_r2_zero_for_no_relation(s_x):
     assert abs(avg) < 0.15, f"r2 {avg} for uncorrelated y,x, expected ~0"
 
 
+# ============================================================
+# 量化专用算子
+# ============================================================
+
+@pytest.fixture
+def s_ohlcv():
+    """构造 OHLCV 风格数据."""
+    rng = np.random.default_rng(42)
+    N = 60
+    dates = pd.bdate_range("2024-01-01", periods=N)
+    open_ = pd.Series(rng.uniform(20, 50, N), index=dates, name="open")
+    high = open_ * (1 + np.abs(rng.normal(0, 0.01, N)))
+    low = open_ * (1 - np.abs(rng.normal(0, 0.01, N)))
+    close = (high + low + open_) / 3 + rng.normal(0, 0.5, N)
+    high = pd.Series(np.maximum(high.values, close.values), index=dates, name="high")
+    low = pd.Series(np.minimum(low.values, close.values), index=dates, name="low")
+    close = pd.Series(close, index=dates, name="close")
+    volume = pd.Series(rng.uniform(1e6, 5e6, N), index=dates, name="volume")
+    vwap = close * (1 + rng.normal(0, 0.002, N))
+    returns = close.pct_change().fillna(0)
+    return {
+        "open": open_, "high": high, "low": low,
+        "close": close, "volume": volume, "vwap": vwap,
+        "returns": returns,
+    }
+
+
+def test_vwap_dev_basic(s_ohlcv):
+    """vwap_dev = close - vwap. 当 close > vwap 应为正."""
+    fn = OPERATORS["vwap_dev"]
+    r = fn(s_ohlcv["close"], s_ohlcv["vwap"])
+    assert isinstance(r, pd.Series)
+    # 校验: 每一行 r.iloc[i] = close.iloc[i] - vwap.iloc[i]
+    expected = s_ohlcv["close"] - s_ohlcv["vwap"]
+    np.testing.assert_array_almost_equal(r.values, expected.values)
+
+
+def test_vwap_dev_no_inf(s_ohlcv):
+    fn = OPERATORS["vwap_dev"]
+    r = fn(s_ohlcv["close"], s_ohlcv["vwap"])
+    assert not np.isinf(r.values).any()
+
+
+def test_hl_range_positive(s_ohlcv):
+    """(high - low) / close 应 >= 0."""
+    fn = OPERATORS["hl_range"]
+    r = fn(s_ohlcv["high"], s_ohlcv["low"], s_ohlcv["close"])
+    assert (r.dropna() >= 0).all(), "hl_range should be non-negative"
+
+
+def test_hl_range_default_close(s_ohlcv):
+    """close 参数可选, 默认用 (high+low)/2."""
+    fn = OPERATORS["hl_range"]
+    r1 = fn(s_ohlcv["high"], s_ohlcv["low"], s_ohlcv["close"])
+    r2 = fn(s_ohlcv["high"], s_ohlcv["low"])  # 用 (h+l)/2 当 close
+    # 应都非负, 但数值不等
+    assert (r2.dropna() >= 0).all()
+
+
+def test_hl_range_no_inf(s_ohlcv):
+    """close=0 时应产 nan, 不是 inf."""
+    fn = OPERATORS["hl_range"]
+    zero_close = pd.Series(0.0, index=s_ohlcv["close"].index)
+    r = fn(s_ohlcv["high"], s_ohlcv["low"], zero_close)
+    assert not np.isinf(r.values).any()
+
+
+def test_oc_change_basic(s_ohlcv):
+    """(close - open) / open. 涨跌信号."""
+    fn = OPERATORS["oc_change"]
+    r = fn(s_ohlcv["open"], s_ohlcv["close"])
+    assert isinstance(r, pd.Series)
+    # close=open → 0
+    flat = pd.Series([10.0]*5, index=range(5))
+    assert (fn(flat, flat) == 0).all()
+
+
+def test_oc_change_positive_when_rally(s_ohlcv):
+    """close > open 应得正值."""
+    fn = OPERATORS["oc_change"]
+    open_ = pd.Series([10.0, 10.0], index=[0, 1])
+    close = pd.Series([11.0, 9.0], index=[0, 1])  # 一涨一跌
+    r = fn(open_, close)
+    assert r.iloc[0] > 0
+    assert r.iloc[1] < 0
+
+
+def test_oc_change_handles_zero_open(s_ohlcv):
+    """open=0 应产 nan, 不是 inf."""
+    fn = OPERATORS["oc_change"]
+    zero_open = pd.Series(0.0, index=s_ohlcv["close"].index)
+    r = fn(zero_open, s_ohlcv["close"])
+    assert not np.isinf(r.values).any()
+
+
+def test_close_to_high_in_range(s_ohlcv):
+    """close / rolling_max(high) 应在 (0, 1.0+] 范围."""
+    fn = OPERATORS["close_to_high"]
+    r = fn(s_ohlcv["close"], s_ohlcv["high"], 10)
+    valid = r.dropna()
+    assert (valid > 0).all(), "close < 0 not possible"
+    # 可超过 1 当 close 是 N 日最高
+    assert (valid <= 5.0).all()
+
+
+def test_close_to_high_basic(s_ohlcv):
+    """若 close 是 10 日内最高, 比值 = 1.0."""
+    fn = OPERATORS["close_to_high"]
+    # 构造: close 永为 10 日最高
+    high = pd.Series([1.0]*5 + [2.0]*5, index=range(10))
+    close = pd.Series([3.0]*5 + [2.0]*5, index=range(10))  # 前 5 行 close > high (理论上不可能)
+    # 简化: 让 high = close
+    high2 = pd.Series([10.0]*10, index=range(10))
+    close2 = pd.Series([10.0]*10, index=range(10))
+    r = fn(close2, high2, 10)
+    # 当 close == high 时, ratio = 1.0
+    valid = r.dropna()
+    np.testing.assert_array_almost_equal(valid.values, np.ones_like(valid.values))
+
+
+def test_close_to_high_no_inf(s_ohlcv):
+    """滚动最高=0 时应产 nan, 不是 inf."""
+    fn = OPERATORS["close_to_high"]
+    zero_high = pd.Series(0.0, index=s_ohlcv["close"].index)
+    r = fn(s_ohlcv["close"], zero_high, 5)
+    assert not np.isinf(r.values).any()
+
+
+def test_close_to_low_in_range(s_ohlcv):
+    """close / rolling_min(low) 应 >= 1.0 (close 总是 >= 最低)."""
+    fn = OPERATORS["close_to_low"]
+    r = fn(s_ohlcv["close"], s_ohlcv["low"], 10)
+    valid = r.dropna()
+    # low <= close 永远成立, 故 ratio >= 1
+    assert (valid >= 1.0 - 1e-9).all()
+
+
+def test_close_to_low_basic(s_ohlcv):
+    """若 close = 10 日最低, ratio = 1.0."""
+    fn = OPERATORS["close_to_low"]
+    low = pd.Series([10.0]*10, index=range(10))
+    close = pd.Series([10.0]*10, index=range(10))
+    r = fn(close, low, 10)
+    valid = r.dropna()
+    np.testing.assert_array_almost_equal(valid.values, np.ones_like(valid.values))
+
+
+def test_returns_vol_adj_vol_normalized(s_ohlcv):
+    """波动调整后, 标准差应~1.0."""
+    fn = OPERATORS["returns_vol_adj"]
+    r = fn(s_ohlcv["returns"], 20)
+    valid = r.dropna()
+    # rolling std of standardized returns ≈ 1
+    assert 0.5 < valid.std() < 2.0
+
+
+def test_returns_vol_adj_no_inf(s_ohlcv):
+    """std=0 (平稳序列) 应产 nan, 不是 inf."""
+    fn = OPERATORS["returns_vol_adj"]
+    const_returns = pd.Series(0.001, index=s_ohlcv["close"].index)
+    r = fn(const_returns, 10)
+    assert not np.isinf(r.values).any()
+
+
+def test_returns_vol_adj_zero_vol(s_ohlcv):
+    """0 收益序列: nan (因 std=0)."""
+    fn = OPERATORS["returns_vol_adj"]
+    zero_returns = pd.Series(0.0, index=s_ohlcv["close"].index)
+    r = fn(zero_returns, 10)
+    # std=0 → ratio inf → 替换为 nan
+    inf_count = np.isinf(r.values).sum()
+    assert inf_count == 0
+
+
+def test_dollar_volume_n_basic(s_ohlcv):
+    """dollar_volume_n(5) 应等于 (close*volume).rolling(5).sum()."""
+    fn = OPERATORS["dollar_volume_n"]
+    r = fn(s_ohlcv["close"], s_ohlcv["volume"], 5)
+    expected = (s_ohlcv["close"] * s_ohlcv["volume"]).rolling(5, min_periods=5).sum()
+    diff = (r - expected).abs()
+    assert diff.max() < 1e-6
+
+
+def test_dollar_volume_n_first_n_nan(s_ohlcv):
+    """前 (window-1) 行应为 NaN."""
+    fn = OPERATORS["dollar_volume_n"]
+    r = fn(s_ohlcv["close"], s_ohlcv["volume"], 5)
+    assert pd.isna(r.iloc[0])
+    assert pd.isna(r.iloc[3])
+    assert not pd.isna(r.iloc[4])
+
+
+def test_dollar_volume_n_positive(s_ohlcv):
+    """成交额应总是正数 (close>0, volume>0)."""
+    fn = OPERATORS["dollar_volume_n"]
+    r = fn(s_ohlcv["close"], s_ohlcv["volume"], 5)
+    valid = r.dropna()
+    assert (valid > 0).all()
+
+
 
 
 def test_eq_produces_boolean(s_a):

@@ -493,6 +493,60 @@ def ts_regression_r2(y: pd.Series, x: pd.Series, window: int) -> pd.Series:
 
 
 # ============================================================
+# 量化专用算子 (price-volume features)
+# ============================================================
+
+def vwap_dev(close: pd.Series, vwap: pd.Series) -> pd.Series:
+    """VWAP 偏离度: close - vwap. 正值表示高于 VWAP (强势)."""
+    return close - vwap
+
+
+def hl_range(high: pd.Series, low: pd.Series, close: pd.Series = None) -> pd.Series:
+    """日内振幅: (high - low) / close. close 可选, 缺省用 (high+low)/2."""
+    if close is None:
+        close = (high + low) / 2.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = (high - low) / close
+    return r.replace([np.inf, -np.inf], np.nan)
+
+
+def oc_change(open_: pd.Series, close: pd.Series) -> pd.Series:
+    """日内收益: (close - open) / open. 涨跌信号."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = (close - open_) / open_
+    return r.replace([np.inf, -np.inf], np.nan)
+
+
+def close_to_high(close: pd.Series, high: pd.Series, window: int) -> pd.Series:
+    """收盘价相对 N 日最高: close / rolling_max(high, window)."""
+    high_n = high.rolling(window, min_periods=window).max()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = close / high_n
+    return r.replace([np.inf, -np.inf], np.nan)
+
+
+def close_to_low(close: pd.Series, low: pd.Series, window: int) -> pd.Series:
+    """收盘价相对 N 日最低: close / rolling_min(low, window)."""
+    low_n = low.rolling(window, min_periods=window).min()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = close / low_n
+    return r.replace([np.inf, -np.inf], np.nan)
+
+
+def returns_vol_adj(returns: pd.Series, window: int) -> pd.Series:
+    """波动调整收益: returns / ts_std(returns, window). 类似 Sharpe 量级."""
+    std = returns.rolling(window, min_periods=window).std()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = returns / std
+    return r.replace([np.inf, -np.inf], np.nan)
+
+
+def dollar_volume_n(close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
+    """N 期累计成交额: (close * volume).rolling(window).sum()."""
+    return (close * volume).rolling(window, min_periods=window).sum()
+
+
+# ============================================================
 # 数学算子
 # ============================================================
 
@@ -644,6 +698,15 @@ OPERATORS = {
     "ts_regression_alpha": ts_regression_alpha,
     "ts_regression_resid": ts_regression_resid,
     "ts_regression_r2": ts_regression_r2,
+
+    # 量化专用算子
+    "vwap_dev": vwap_dev,
+    "hl_range": hl_range,
+    "oc_change": oc_change,
+    "close_to_high": close_to_high,
+    "close_to_low": close_to_low,
+    "returns_vol_adj": returns_vol_adj,
+    "dollar_volume_n": dollar_volume_n,
 
     # 截面算子 (新增高级)
     "cs_quantile_clip": cs_quantile_clip,
