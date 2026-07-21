@@ -292,14 +292,14 @@ def test_yaml_vs_py_consistency(alpha_num, long_panel):
     b = py_res.values.flatten()
     mask = ~(np.isnan(a) | np.isnan(b))
     if mask.sum() < 20:
-        pytest.skip(f"{aid}: too few valid points ({mask.sum()})")
+        pytest.xfail(f"{aid}: too few valid points ({mask.sum()})")
 
     try:
         corr = np.corrcoef(a[mask], b[mask])[0, 1]
     except Exception:
-        pytest.skip(f"{aid}: cannot compute correlation")
+        pytest.xfail(f"{aid}: cannot compute correlation (data quality)")
     if np.isnan(corr):
-        pytest.skip(f"{aid}: correlation is NaN")
+        pytest.xfail(f"{aid}: correlation is NaN (known data quality issue)")
 
     # 已知 converter bug — 标记为 xfail 但仍记录相关系数
     if alpha_num in _KNOWN_CONVERTER_BUGS:

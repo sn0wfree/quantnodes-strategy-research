@@ -140,6 +140,59 @@ def _args(op, s_a, s_b, df_a, const_5):
         return [s_a]
     if op == "ones_like":
         return [s_a]
+    # -------- 新增高级算子 (compute_factor.py) --------
+    # 截面高级
+    if op == "cs_quantile_clip":
+        return [df_a, 0.05, 0.95]
+    if op == "cs_pct_pos":
+        return [df_a]
+    # 时序高级
+    if op == "ts_centralization":
+        return [s_a, 5]
+    if op == "ts_standardization":
+        return [s_a, 5]
+    if op == "ts_entropy":
+        return [s_a, 5, 5]  # series, window, bins
+    if op == "ts_pct_pos":
+        return [s_a, 5]
+    if op == "ts_count_pos":
+        return [s_a, 5]
+    if op == "ts_count_neg":
+        return [s_a, 5]
+    if op == "ts_max_min_diff":
+        return [s_a, 5]
+    if op == "ts_quantile_range":
+        return [s_a, 0.25, 0.75, 5]  # series, q_low, q_high, window
+    if op == "ts_decay_custom":
+        return [s_a, 5, np.array([1.0, 2.0, 3.0, 4.0, 5.0])]
+    # 稳健统计
+    if op == "ts_iqr":
+        return [s_a, 5]
+    if op == "ts_median_abs_dev":
+        return [s_a, 5]
+    if op == "ts_trim_mean":
+        return [s_a, 5, 0.1]  # series, window, pct
+    if op == "ts_huber_mean":
+        return [s_a, 5]
+    # 滚动回归
+    if op in {"ts_regression_beta", "ts_regression_alpha",
+              "ts_regression_resid", "ts_regression_r2"}:
+        return [s_a, s_b, 5]  # y, x, window
+    # 量化专用
+    if op == "vwap_dev":
+        return [s_a, s_b]
+    if op == "hl_range":
+        return [s_a, s_b, s_a]  # high, low, close
+    if op == "oc_change":
+        return [s_b, s_a]  # open_, close
+    if op == "close_to_high":
+        return [s_a, s_b, 5]  # close, high, window
+    if op == "close_to_low":
+        return [s_a, s_b, 5]
+    if op == "returns_vol_adj":
+        return [s_a, 5]
+    if op == "dollar_volume_n":
+        return [s_a, s_b, 5]
     raise ValueError(f"No arg builder for {op}")
 
 
