@@ -194,6 +194,9 @@ def zscore(series: pd.Series) -> pd.Series:
     """截面 z-score。"""
     mean = series.mean()
     std = series.std()
+    if isinstance(std, pd.Series):
+        # 处理 std 是 Series 的情况 (zscore 用于 DataFrame 时可能)
+        std = std.iloc[0] if len(std) == 1 else float("nan")
     if std == 0:
         return pd.Series(0.0, index=series.index)
     return (series - mean) / std
