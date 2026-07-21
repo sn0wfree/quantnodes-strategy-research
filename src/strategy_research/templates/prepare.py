@@ -35,8 +35,17 @@ def load_data() -> dict:
             - "prices": 价格数据 (DataFrame, index=date, columns=assets)
     """
     # 自动检测路径
-    strategy_dir = Path(__file__).parent
-    workspace_dir = strategy_dir.parent.parent.parent  # strategies/{name}/../../.. -> workspace
+    strategy_dir = Path(__file__).parent.resolve()
+    # 向上查找包含 config.yaml 的目录作为 workspace
+    workspace_dir = strategy_dir
+    for _ in range(5):  # 最多向上查找 5 层
+        if (workspace_dir / "config.yaml").exists():
+            break
+        workspace_dir = workspace_dir.parent
+    else:
+        # 如果找不到，使用默认路径
+        workspace_dir = strategy_dir.parent.parent.parent
+
     strategy_name = strategy_dir.name
 
     # 尝试从 DuckDB 加载
@@ -45,9 +54,10 @@ def load_data() -> dict:
         from strategy_research.core.db import load_price_data
         prices = load_price_data(workspace_dir, strategy_name)
         if not prices.empty:
+            print(f"✓ 从 DuckDB 加载: {prices.shape[1]} 个资产, {prices.shape[0]} 个日期")
             return {"prices": prices}
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️  DuckDB 加载失败: {e}")
 
     # 尝试从 CSV 加载
     csv_path = strategy_dir / "data" / "prices.csv"
@@ -55,21 +65,20 @@ def load_data() -> dict:
         prices = pd.read_csv(csv_path, index_col=0, parse_dates=True)
         return {"prices": prices}
 
-    # 生成示例数据 (用于测试)
-    print("⚠️  未找到数据，生成示例数据...")
-    return {"prices": _generate_sample_data()}
+    print("❌ 未找到数据，请先导入数据")
+    return {"prices": pd.DataFrame()}
 
 
 def _generate_sample_data(n_assets: int = 10, n_days: int = 504) -> pd.DataFrame:
     """生成示例价格数据"""
-    dates = pd.date_range("2020-01-01", periods=n_assets, freq="D")
+    dates = pd.date_range("2020-01-01", periods=n_days, freq="D")
     assets = [f"asset_{i:03d}" for i in range(n_assets)]
 
     np.random.seed(42)
     returns = np.random.randn(n_days, n_assets) * 0.02
     prices = np.exp(np.cumsum(returns, axis=0))
 
-    return pd.DataFrame(prices, index=dates[:n_days], columns=assets)
+    return pd.DataFrame(prices, index=dates, columns=assets)
 
 
 # ============================================================

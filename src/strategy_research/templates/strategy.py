@@ -18,7 +18,7 @@ PARAMS = {
 FACTOR_EXPRS = [
     {"factor_name": "momentum_20d", "factor_code": "ts_return(close, 20)", "weight": 0.5, "category": "momentum"},
     {"factor_name": "vol_20d", "factor_code": "ts_std(ts_return(close, 1), 20)", "weight": -0.3, "category": "volatility"},
-    {"factor_name": "ma_ratio", "factor_code": "close / ts_mean(close, 20) - 1", "weight": 0.2, "category": "trend"},
+    {"factor_name": "reversal_5d", "factor_code": "ts_return(close, 5)", "weight": 0.2, "category": "reversal"},
 ]
 
 # ============================================================
@@ -30,8 +30,11 @@ FACTOR_WEIGHT_METHOD = "inv_vol"  # "equal" | "inv_vol"
 # 以下不改
 # ============================================================
 if __name__ == "__main__":
-    import importlib
-    prepare = importlib.import_module(".prepare", package=__package__)
+    import sys
+    from pathlib import Path
+    # 将当前目录添加到 sys.path 以便导入 prepare
+    sys.path.insert(0, str(Path(__file__).parent))
+    import prepare
     data = prepare.load_data()
     metrics = prepare.evaluate(PARAMS, FACTOR_EXPRS, FACTOR_WEIGHT_METHOD, data)
     print("---")
