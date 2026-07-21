@@ -6,9 +6,31 @@ strategy:
   type: {strategy_type}        # rotation/selection/timing/industry
 
 data:
-  source: duckdb               # duckdb (统一使用 DuckDB)
-  # start_date: 2020-01-01     # 可选: 开始日期
-  # end_date: 2025-12-31       # 可选: 结束日期
+  source: auto                   # auto / duckdb / tushare / ifind / fred / akshare / csv / parquet
+  incremental: true              # 增量更新 (API 数据源)
+  # start_date: 2020-01-01       # 可选: 开始日期
+  # end_date: 2025-12-31         # 可选: 结束日期
+
+  # API 数据源配置 (token 从 .env 读取)
+  # tushare:
+  #   # token: 从 .env 读取 TUSHARE_TOKEN
+  #
+  # ifind:
+  #   # token: 从 .env 读取 IFIND_MCP_TOKEN
+  #
+  # fred:
+  #   # api_key: 从 .env 读取 FRED_API_KEY
+  #   series:                     # FRED 系列 (留空则导入核心系列)
+  #     - DGS10                   # 10 年国债
+  #     - CPIAUCSL                # CPI
+  #     - UNRATE                  # 失业率
+  #     - VIXCLS                  # VIX
+
+  # 资产列表 (API 数据源)
+  codes:
+    - 000001.SZ                  # 平安银行
+    - 600519.SH                  # 贵州茅台
+    - 000300.SH                  # 沪深 300
 
 rebalance:
   freq: M                      # M=月度, W=周度, Q=季度
