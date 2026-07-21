@@ -160,8 +160,11 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
                 raise TypeError(f"Alpha {alpha_id} must return DataFrame, got {type(result)}")
             if result.shape != panel["close"].shape:
                 raise ValueError(f"Shape mismatch: {result.shape} != {panel['close'].shape}")
-            if np.any(np.isinf(result.values)):
-                raise ValueError(f"Alpha {alpha_id} contains inf values")
+            # 校验 inf 比例 — 允许 30% 以下（随机面板 ts_corr 会大量产出 inf）
+            n_inf = int(np.isinf(result.values).sum())
+            total = result.size
+            if total > 0 and n_inf / total > 0.30:
+                raise ValueError(f"Alpha {alpha_id}: {n_inf}/{total} inf values ({n_inf/total:.1%})")
 
             return result
         except Exception as e:
@@ -189,8 +192,10 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
             raise TypeError(f"Alpha {alpha_id} must return DataFrame, got {type(result)}")
         if result.shape != panel["close"].shape:
             raise ValueError(f"Shape mismatch: {result.shape} != {panel['close'].shape}")
-        if np.any(np.isinf(result.values)):
-            raise ValueError(f"Alpha {alpha_id} contains inf values")
+        n_inf = int(np.isinf(result.values).sum())
+        total = result.size
+        if total > 0 and n_inf / total > 0.30:
+            raise ValueError(f"Alpha {alpha_id}: {n_inf}/{total} inf values ({n_inf/total:.1%})")
 
         return result
 

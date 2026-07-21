@@ -360,8 +360,12 @@ def signed_power(series: pd.Series, p: float) -> pd.Series:
 
 
 def safe_div(a: pd.Series, b: pd.Series, eps: float = 1e-12) -> pd.Series:
-    """安全除法: a / (b + eps * sign(b)), 除零 → NaN。"""
-    return a / (b + eps * np.sign(b))
+    """安全除法: |b|<eps → NaN, 否则 a/b。"""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = np.where(np.abs(b) < eps, np.nan, a / np.where(np.abs(b) < eps, 1.0, b))
+    if isinstance(a, pd.Series):
+        result = pd.Series(result, index=a.index)
+    return result
 
 
 # ============================================================
@@ -487,8 +491,8 @@ OPERATORS = {
     "abs": lambda x: x.abs() if hasattr(x, 'abs') else np.abs(x),
     "not_": lambda x: ~x if hasattr(x, '__invert__') else (not x),
     "sign": lambda x: x.apply(np.sign) if isinstance(x, pd.DataFrame) else np.sign(x),
-    "or_": lambda a, b: a | b if hasattr(a, '__or__') else np.logical_or(a, b),
-    "and_": lambda a, b: a & b if hasattr(a, '__and__') else np.logical_and(a, b),
+    "or_": lambda a, b: (a | b) if (hasattr(a, 'dtype') and a.dtype.kind == 'b' and hasattr(b, 'dtype') and b.dtype.kind == 'b') else np.logical_or(a, b),
+    "and_": lambda a, b: (a & b) if (hasattr(a, 'dtype') and a.dtype.kind == 'b' and hasattr(b, 'dtype') and b.dtype.kind == 'b') else np.logical_and(a, b),
     "copy": lambda x: x.copy() if hasattr(x, 'copy') else x,
     "ones_like": lambda x: pd.DataFrame(np.ones_like(x.values), index=x.index, columns=x.columns) if isinstance(x, pd.DataFrame) else np.ones_like(x),
 }
