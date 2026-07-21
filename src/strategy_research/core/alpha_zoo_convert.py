@@ -331,7 +331,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             "_ind_neutralize": None,
             "_bench_close": None,
             "panel": None,
-            "pick": None,
+            "vwap": {"op": "safe_div", "args": [{"column": "amount"}, {"column": "volume"}]},
         }
         if name in helper_map:
             return helper_map[name]
@@ -369,8 +369,13 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             # np.log(volume) -> log(volume)
             yaml_args = []
             for arg in args:
+                if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+                    continue  # 跳过关键字参数
                 arg_yaml = _convert(arg)
                 if arg_yaml is None:
+                    # 对于 ones_like 等已知函数，允许 arg 为 None
+                    if method in ("ones_like", "full_like"):
+                        continue
                     return None
                 yaml_args.append(arg_yaml)
             return {"op": method, "args": yaml_args}
@@ -498,6 +503,50 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             if method == "apply":
                 return None
 
+        # 特殊处理 .where(lambda/complex, val) -> where(obj, condition, val)
+        if method == "where" and len(args) >= 1:
+            arg = args[0]
+            if isinstance(arg, dict) and arg.get("_type") == "complex":
+                source = arg.get("source", "")
+                # Parse lambda from AST source: Lambda(..., body=Compare(..., ops=[Gt()], comparators=[Constant(value=0)]))
+                import re
+                op_pattern = r"ops=\[(Gt|Lt|GtE|LtE|Eq|NotEq)\(\)\].*?comparators=\[Constant\(value=(\d+\.?\d*)\)\]"
+                m = re.search(op_pattern, source)
+                if m:
+                    op_map = {"Gt": "gt", "Lt": "lt", "GtE": "gte", "LtE": "lte", "Eq": "eq", "NotEq": "neq"}
+                    cmp_op = op_map.get(m.group(1), "gt")
+                    cmp_val = float(m.group(2))
+                    return {"op": "where", "args": [
+                        converted_obj,
+                        {"op": cmp_op, "args": [converted_obj, {"value": cmp_val}]}
+                    ]}
+                # Handle ~(ret < 0) -> Not(Compare(...)) pattern
+                not_pattern = r"Not\(Compare\(left=Name\(id='(\w+)'\).*?ops=\[(Gt|Lt|GtE|LtE|Eq|NotEq)\(\)\].*?comparators=\[Constant\(value=(\d+\.?\d*)\)\]\)"
+                m2 = re.search(not_pattern, source)
+                if m2:
+                    op_map = {"Gt": "lte", "Lt": "gte", "GtE": "lt", "LtE": "gt", "Eq": "neq", "NotEq": "eq"}
+                    cmp_op = op_map.get(m2.group(2), "lte")
+                    cmp_val = float(m2.group(3))
+                    inner_ref = {"ref": m2.group(1)}
+                    return {"op": "where", "args": [
+                        converted_obj,
+                        {"op": cmp_op, "args": [inner_ref, {"value": cmp_val}]},
+                        args[1] if len(args) > 1 else converted_obj
+                    ]}
+                # Handle (a | b) -> or_(a, b) pattern
+                or_pattern = r"BinOp\(left=Name\(id='(\w+)'.*?op=BitOr\(\).*?right=Name\(id='(\w+)'"
+                m3 = re.search(or_pattern, source)
+                if m3:
+                    a_ref = {"ref": m3.group(1)}
+                    b_ref = {"ref": m3.group(2)}
+                    # Get the second arg (value to fill)
+                    fill_val = _convert(args[1]) if len(args) > 1 else converted_obj
+                    return {"op": "where", "args": [
+                        converted_obj,
+                        {"op": "or_", "args": [a_ref, b_ref]},
+                        fill_val
+                    ]}
+
         # 其他方法调用
         yaml_args = []
         if converted_obj is None:
@@ -550,14 +599,20 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             elif mapped is not None:
                 func = mapped
 
-        # 处理参数 (过滤关键字参数)
+        # 处理参数 (过滤关键字参数和 panel 引用)
         yaml_args = []
         for arg in args:
             if isinstance(arg, dict) and arg.get("_type") == "kwarg":
                 # 跳过关键字参数
                 continue
+            # 跳过 panel 引用 (vwap(panel, ...) 中的 panel 不需要传递)
+            if isinstance(arg, dict) and arg.get("_type") == "ref" and arg.get("name") == "panel":
+                continue
             yaml_arg = _convert(arg)
             if yaml_arg is None:
+                # 对于 vwap/ones_like 等已知函数，允许 arg 为 None
+                if func in ("vwap", "ones_like", "full_like", "_bench_close", "_ind_neutralize"):
+                    continue
                 return None
             yaml_args.append(yaml_arg)
 
@@ -612,12 +667,21 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
             if yaml_args:
                 return yaml_args[0]
             return None
-        # 特殊处理 _bench_close -> 忽略基准收盘价
+        # 特殊处理 _bench_close -> 截面均值 (cross-sectional mean of close)
         elif func == "_bench_close":
-            # 返回第一个参数
+            # _bench_close() -> {column: close} (fallback to close)
+            return {"column": "close"}
+        # 特殊处理 vwap -> amount / volume
+        elif func == "vwap":
+            return {"op": "safe_div", "args": [{"column": "amount"}, {"column": "volume"}]}
+        # 特殊处理 ones_like -> constant 1.0
+        elif func == "ones_like":
+            return {"value": 1.0}
+        # 特殊处理 full_like -> constant
+        elif func == "full_like":
             if yaml_args:
-                return yaml_args[0]
-            return None
+                return yaml_args[0] if len(yaml_args) > 1 else {"value": 1.0}
+            return {"value": 1.0}
         # 特殊处理 sum -> ts_sum
         elif func == "sum":
             func = "ts_sum"

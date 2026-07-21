@@ -481,12 +481,16 @@ OPERATORS = {
     "replace": lambda series, old, new: series.replace(old, new),
     "astype": lambda series, dtype: series.astype(dtype),
     "to_numpy": lambda series: series.to_numpy(),
-    "to_df": lambda data, ref=None: data if isinstance(data, (pd.DataFrame, pd.Series)) else pd.DataFrame(data, index=ref.index, columns=ref.columns) if isinstance(ref, pd.DataFrame) else pd.DataFrame(data),
+    "to_df": lambda data, ref=None: data if isinstance(data, (pd.DataFrame, pd.Series)) else pd.DataFrame(data, index=ref.index, columns=ref.columns) if isinstance(ref, pd.DataFrame) and hasattr(data, 'shape') else pd.DataFrame(np.full(ref.shape, float(data)), index=ref.index, columns=ref.columns) if isinstance(ref, pd.DataFrame) else pd.DataFrame(data) if hasattr(data, '__len__') else pd.DataFrame(np.full((1,1), data)),
     "fmax": lambda a, b: pd.DataFrame(np.fmax(a, b), index=a.index, columns=a.columns) if isinstance(a, pd.DataFrame) else np.fmax(a, b),
     "fmin": lambda a, b: pd.DataFrame(np.fmin(a, b), index=a.index, columns=a.columns) if isinstance(a, pd.DataFrame) else np.fmin(a, b),
     "abs": lambda x: x.abs() if hasattr(x, 'abs') else np.abs(x),
     "not_": lambda x: ~x if hasattr(x, '__invert__') else (not x),
     "sign": lambda x: x.apply(np.sign) if isinstance(x, pd.DataFrame) else np.sign(x),
+    "or_": lambda a, b: a | b if hasattr(a, '__or__') else np.logical_or(a, b),
+    "and_": lambda a, b: a & b if hasattr(a, '__and__') else np.logical_and(a, b),
+    "copy": lambda x: x.copy() if hasattr(x, 'copy') else x,
+    "ones_like": lambda x: pd.DataFrame(np.ones_like(x.values), index=x.index, columns=x.columns) if isinstance(x, pd.DataFrame) else np.ones_like(x),
 }
 
 

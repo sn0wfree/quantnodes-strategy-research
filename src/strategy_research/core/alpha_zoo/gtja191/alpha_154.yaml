@@ -1,0 +1,64 @@
+id: gtja191_154
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: see body
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 60
+min_warmup_bars: 198
+steps:
+- name: v
+  expr:
+    column: volume
+- name: vw
+  expr:
+    op: safe_div
+    args:
+    - column: amount
+    - column: volume
+- name: left
+  expr:
+    op: sub
+    args:
+    - ref: vw
+    - op: ts_min
+      args:
+      - ref: vw
+      - value: 16
+- name: right
+  expr:
+    op: ts_corr
+    args:
+    - ref: vw
+    - op: ts_mean
+      args:
+      - ref: v
+      - value: 180
+    - value: 18
+- name: out
+  expr:
+    op: mul
+    args:
+    - op: astype
+      args:
+      - op: lt
+        args:
+        - ref: left
+        - ref: right
+      - value: float64
+    - op: neg
+      args:
+      - value: 1.0
+final:
+  ref: out

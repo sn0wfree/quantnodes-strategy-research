@@ -1,0 +1,77 @@
+id: gtja191_010
+zoo: gtja191
+nickname: ''
+theme:
+- volatility
+- reversal
+formula_latex: RANK(MAX(((RET<0)?STD(RET,20):CLOSE)^2,5))
+columns_required:
+- close
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 5
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: pc
+  expr:
+    op: shift
+    args:
+    - ref: c
+    - value: 1
+- name: ret
+  expr:
+    op: safe_div
+    args:
+    - op: sub
+      args:
+      - ref: c
+      - ref: pc
+    - ref: pc
+- name: s20
+  expr:
+    op: ts_std
+    args:
+    - ref: ret
+    - value: 20
+- name: pick
+  expr:
+    op: copy
+    args:
+    - ref: ret
+- name: pick_2
+  expr:
+    op: where
+    args:
+    - ref: pick
+    - op: lt
+      args:
+      - ref: ret
+      - value: 0
+    - ref: c
+- name: pick_3
+  expr:
+    op: where
+    args:
+    - ref: pick_2
+    - op: not_
+      args:
+      - op: lt
+        args:
+        - ref: ret
+        - value: 0
+    - ref: s20
+final:
+  op: rank
+  args:
+  - op: ts_max
+    args:
+    - op: mul
+      args:
+      - ref: pick
+      - ref: pick
+    - value: 5

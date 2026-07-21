@@ -1,0 +1,89 @@
+id: gtja191_144
+zoo: gtja191
+nickname: ''
+theme:
+- liquidity
+formula_latex: see body
+columns_required:
+- close
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: amt
+  expr:
+    column: amount
+- name: dc
+  expr:
+    op: sub
+    args:
+    - ref: c
+    - op: shift
+      args:
+      - ref: c
+      - value: 1
+- name: cond
+  expr:
+    op: astype
+    args:
+    - op: lt
+      args:
+      - ref: dc
+      - value: 0
+    - value: float64
+- name: x
+  expr:
+    op: safe_div
+    args:
+    - op: abs
+      args:
+      - op: sub
+        args:
+        - op: safe_div
+          args:
+          - ref: c
+          - op: shift
+            args:
+            - ref: c
+            - value: 1
+        - value: 1.0
+    - ref: amt
+- name: sumif
+  expr:
+    op: ts_sum
+    args:
+    - op: mul
+      args:
+      - ref: x
+      - ref: cond
+    - 20
+- name: cnt
+  expr:
+    op: where
+    args:
+    - op: ts_sum
+      args:
+      - ref: cond
+      - 20
+    - op: gt
+      args:
+      - op: ts_sum
+        args:
+        - ref: cond
+        - 20
+      - value: 0.0
+- name: out
+  expr:
+    op: safe_div
+    args:
+    - ref: sumif
+    - ref: cnt
+final:
+  ref: out

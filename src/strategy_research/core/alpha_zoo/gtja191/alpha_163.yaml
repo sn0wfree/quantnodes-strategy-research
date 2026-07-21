@@ -1,0 +1,74 @@
+id: gtja191_163
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: rank(((-1*ret)*mean(v,20))*vwap*(high-close))
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 20
+min_warmup_bars: 21
+steps:
+- name: c
+  expr:
+    column: close
+- name: h
+  expr:
+    column: high
+- name: v
+  expr:
+    column: volume
+- name: vw
+  expr:
+    op: safe_div
+    args:
+    - column: amount
+    - column: volume
+- name: ret
+  expr:
+    op: sub
+    args:
+    - op: safe_div
+      args:
+      - ref: c
+      - op: shift
+        args:
+        - ref: c
+        - value: 1
+    - value: 1.0
+- name: out
+  expr:
+    op: rank
+    args:
+    - op: mul
+      args:
+      - op: mul
+        args:
+        - op: mul
+          args:
+          - op: mul
+            args:
+            - op: neg
+              args:
+              - value: 1.0
+            - ref: ret
+          - op: ts_mean
+            args:
+            - ref: v
+            - value: 20
+        - ref: vw
+      - op: sub
+        args:
+        - ref: h
+        - ref: c
+final:
+  ref: out

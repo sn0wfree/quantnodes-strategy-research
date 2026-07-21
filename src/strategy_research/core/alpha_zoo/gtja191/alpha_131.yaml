@@ -1,0 +1,70 @@
+id: gtja191_131
+zoo: gtja191
+nickname: ''
+theme:
+- volume
+formula_latex: rank(delta(vwap,1))^tsrank(corr(close,mean(v,50),18),18)
+columns_required:
+- open
+- high
+- low
+- close
+- volume
+- amount
+universe:
+- equity_cn
+frequency:
+- 1d
+decay_horizon: 50
+min_warmup_bars: 84
+steps:
+- name: c
+  expr:
+    column: close
+- name: v
+  expr:
+    column: volume
+- name: vw
+  expr:
+    op: safe_div
+    args:
+    - column: amount
+    - column: volume
+- name: left
+  expr:
+    op: rank
+    args:
+    - op: delta
+      args:
+      - ref: vw
+      - value: 1
+- name: right
+  expr:
+    op: ts_rank
+    args:
+    - op: ts_corr
+      args:
+      - ref: c
+      - op: ts_mean
+        args:
+        - ref: v
+        - value: 50
+      - value: 18
+    - value: 18
+- name: arr
+  expr:
+    op: power
+    args:
+    - op: to_numpy
+      args:
+      - ref: left
+    - op: to_numpy
+      args:
+      - ref: right
+- name: out
+  expr:
+    op: to_df
+    args:
+    - ref: arr
+final:
+  ref: out
