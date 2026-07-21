@@ -443,11 +443,256 @@ OPERATORS = {
 
 
 # ============================================================
-# 表达式解析
+# 表达式解析 (Pratt Parser)
+# ============================================================
+
+# Token 类型
+TOKEN_NUMBER = "NUMBER"
+TOKEN_IDENT = "IDENT"
+TOKEN_LPAREN = "("
+TOKEN_RPAREN = ")"
+TOKEN_COMMA = ","
+TOKEN_PLUS = "+"
+TOKEN_MINUS = "-"
+TOKEN_STAR = "*"
+TOKEN_SLASH = "/"
+TOKEN_POWER = "**"
+TOKEN_EOF = "EOF"
+
+
+class Token:
+    """词法单元"""
+    def __init__(self, type_: str, value: str):
+        self.type = type_
+        self.value = value
+
+    def __repr__(self):
+        return f"Token({self.type}, {self.value!r})"
+
+
+def _tokenize(expr: str) -> list[Token]:
+    """将表达式字符串分词为 Token 列表。"""
+    tokens = []
+    i = 0
+    n = len(expr)
+
+    while i < n:
+        ch = expr[i]
+
+        # 跳过空白
+        if ch.isspace():
+            i += 1
+            continue
+
+        # 数字 (整数或浮点数)
+        if ch.isdigit() or (ch == '.' and i + 1 < n and expr[i + 1].isdigit()):
+            start = i
+            while i < n and (expr[i].isdigit() or expr[i] == '.'):
+                i += 1
+            # 科学计数法
+            if i < n and expr[i] in ('e', 'E'):
+                i += 1
+                if i < n and expr[i] in ('+', '-'):
+                    i += 1
+                while i < n and expr[i].isdigit():
+                    i += 1
+            tokens.append(Token(TOKEN_NUMBER, expr[start:i]))
+            continue
+
+        # 标识符 (算子名或列名)
+        if ch.isalpha() or ch == '_':
+            start = i
+            while i < n and (expr[i].isalnum() or expr[i] == '_'):
+                i += 1
+            tokens.append(Token(TOKEN_IDENT, expr[start:i]))
+            continue
+
+        # 运算符和标点
+        if ch == '(':
+            tokens.append(Token(TOKEN_LPAREN, ch))
+            i += 1
+        elif ch == ')':
+            tokens.append(Token(TOKEN_RPAREN, ch))
+            i += 1
+        elif ch == ',':
+            tokens.append(Token(TOKEN_COMMA, ch))
+            i += 1
+        elif ch == '+':
+            tokens.append(Token(TOKEN_PLUS, ch))
+            i += 1
+        elif ch == '-':
+            tokens.append(Token(TOKEN_MINUS, ch))
+            i += 1
+        elif ch == '*':
+            if i + 1 < n and expr[i + 1] == '*':
+                tokens.append(Token(TOKEN_POWER, '**'))
+                i += 2
+            else:
+                tokens.append(Token(TOKEN_STAR, ch))
+                i += 1
+        elif ch == '/':
+            tokens.append(Token(TOKEN_SLASH, ch))
+            i += 1
+        else:
+            raise ValueError(f"未知字符: {ch!r} (位置 {i})")
+
+    tokens.append(Token(TOKEN_EOF, ""))
+    return tokens
+
+
+class _Parser:
+    """递归下降解析器 (Pratt Parser 风格)"""
+
+    def __init__(self, tokens: list[Token], data: pd.DataFrame):
+        self.tokens = tokens
+        self.data = data
+        self.pos = 0
+
+    def peek(self) -> Token:
+        return self.tokens[self.pos]
+
+    def consume(self) -> Token:
+        tok = self.tokens[self.pos]
+        self.pos += 1
+        return tok
+
+    def expect(self, type_: str) -> Token:
+        tok = self.consume()
+        if tok.type != type_:
+            raise ValueError(f"期望 {type_}, 得到 {tok.type} ({tok.value!r})")
+        return tok
+
+    # expression := term (('+' | '-') term)*
+    def parse_expression(self) -> pd.Series:
+        left = self.parse_term()
+        while self.peek().type in (TOKEN_PLUS, TOKEN_MINUS):
+            op = self.consume()
+            right = self.parse_term()
+            if op.type == TOKEN_PLUS:
+                left = left + right
+            else:
+                left = left - right
+        return left
+
+    # term := factor (('*' | '/') factor)*
+    def parse_term(self) -> pd.Series:
+        left = self.parse_factor()
+        while self.peek().type in (TOKEN_STAR, TOKEN_SLASH):
+            op = self.consume()
+            right = self.parse_factor()
+            if op.type == TOKEN_STAR:
+                left = left * right
+            else:
+                left = safe_div(left, right) if 'safe_div' in OPERATORS else left / right
+        return left
+
+    # factor := ('+' | '-') factor | power
+    def parse_factor(self) -> pd.Series:
+        if self.peek().type == TOKEN_MINUS:
+            self.consume()
+            factor = self.parse_factor()
+            return -factor
+        if self.peek().type == TOKEN_PLUS:
+            self.consume()
+            return self.parse_factor()
+        return self.parse_power()
+
+    # power := primary ('**' factor)?
+    def parse_power(self) -> pd.Series:
+        left = self.parse_primary()
+        if self.peek().type == TOKEN_POWER:
+            self.consume()
+            right = self.parse_factor()
+            return left ** right
+        return left
+
+    # primary := NUMBER | IDENT | function_call | '(' expression ')'
+    def parse_primary(self) -> pd.Series:
+        tok = self.peek()
+
+        # 数字
+        if tok.type == TOKEN_NUMBER:
+            self.consume()
+            val = float(tok.value)
+            # 如果是整数，转换为 int (用于窗口参数)
+            if val == int(val):
+                val = int(val)
+            # 返回与数据同形状的常量 Series
+            if not self.data.empty:
+                return pd.Series(val, index=self.data.index, dtype=float if isinstance(val, float) else int)
+            return pd.Series(val, dtype=float if isinstance(val, float) else int)
+
+        # 括号表达式
+        if tok.type == TOKEN_LPAREN:
+            self.consume()
+            result = self.parse_expression()
+            self.expect(TOKEN_RPAREN)
+            return result
+
+        # 标识符 (函数调用或列名)
+        if tok.type == TOKEN_IDENT:
+            self.consume()
+            name = tok.value
+
+            # 检查是否是函数调用
+            if self.peek().type == TOKEN_LPAREN:
+                return self.parse_function_call(name)
+
+            # 列名
+            if name in self.data.columns:
+                return self.data[name]
+
+            raise ValueError(f"未知标识符: {name}")
+
+        raise ValueError(f"意外的 token: {tok}")
+
+    # function_call := IDENT '(' arg_list ')'
+    def parse_function_call(self, name: str) -> pd.Series:
+        self.expect(TOKEN_LPAREN)
+
+        # 解析参数列表
+        args = []
+        if self.peek().type != TOKEN_RPAREN:
+            args.append(self.parse_expression())
+            while self.peek().type == TOKEN_COMMA:
+                self.consume()
+                args.append(self.parse_expression())
+
+        self.expect(TOKEN_RPAREN)
+
+        # 检查算子是否存在
+        if name not in OPERATORS:
+            raise ValueError(f"未知算子: {name}")
+
+        op_func = OPERATORS[name]
+
+        # 转换参数: 常量 Series -> 标量
+        converted_args = []
+        for arg in args:
+            if isinstance(arg, pd.Series) and len(arg.unique()) == 1:
+                # 常量 Series，提取标量值
+                val = arg.iloc[0]
+                if isinstance(val, (int, float)) and val == int(val):
+                    converted_args.append(int(val))
+                else:
+                    converted_args.append(val)
+            else:
+                converted_args.append(arg)
+
+        # 调用算子
+        try:
+            result = op_func(*converted_args)
+            return result
+        except Exception as e:
+            raise ValueError(f"算子 {name} 执行失败: {e}")
+
+
+# ============================================================
+# 表达式解析 (兼容旧接口)
 # ============================================================
 
 def parse_expression(expr: str) -> tuple[str, list]:
-    """解析因子表达式。
+    """解析因子表达式 (兼容旧接口)。
 
     示例:
         "ts_return(close, 20)" -> ("ts_return", ["close", 20])
@@ -527,13 +772,29 @@ def _parse_arg(arg: str, data: pd.DataFrame) -> pd.Series | float | int:
 def evaluate_expression(expr: str, data: pd.DataFrame) -> pd.Series:
     """计算因子表达式。
 
+    支持:
+    - 简单函数调用: ts_return(close, 20)
+    - 嵌套函数调用: ts_std(ts_return(close, 1), 20)
+    - 算术运算: close / ts_mean(close, 20) - 1
+    - 括号: (close - open) / (close + open)
+    - 一元运算: -ts_return(close, 1)
+
     Args:
-        expr: 因子表达式，如 "ts_return(close, 20)"
-        data: 价格数据 (index=date, columns=assets 或 columns 包含因子所需列)
+        expr: 因子表达式
+        data: 价格数据 (index=date, columns=assets)
 
     Returns:
         pd.Series: 因子值
     """
+    # 尝试新解析器 (支持算术运算)
+    try:
+        tokens = _tokenize(expr)
+        parser = _Parser(tokens, data)
+        return parser.parse_expression()
+    except Exception:
+        pass
+
+    # 回退到旧解析器 (仅支持函数调用)
     op_name, args = parse_expression(expr)
 
     # 检查算子是否存在
