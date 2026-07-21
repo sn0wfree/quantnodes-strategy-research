@@ -14,6 +14,7 @@ import pytest
 
 from strategy_research.core.alpha_zoo_convert import (
     analyze_compute_function,
+    convert_all_zoos,
     convert_py_to_yaml,
     convert_zoo,
     yaml_to_string,
@@ -335,3 +336,86 @@ def test_convert_preserves_evaluation_equivalence(tmp_py_simple):
         if mask.sum() >= 5:
             diff = np.abs(a_flat[mask] - b_flat[mask])
             assert diff.max() < 1e-9, f"yaml vs expected: max diff {diff.max()}"
+
+
+# ============================================================
+# Regression: convert_all_zoos 不能产生 _yaml_yaml 增殖目录
+# (历史 bug: 见 chore commit "清理 alpha_zoo 增殖空目录")
+# ============================================================
+
+def test_convert_all_zoos_skips_existing_yaml_output_dirs(tmp_path):
+    """已有 *_yaml 目录应被跳过, 防止 convert_zoo 默认追加 _yaml 造成指数增殖."""
+    # 模拟污染状态: 一个 zoo + 一个已存在的 _yaml 输出目录
+    zoo_dir = tmp_path / "alpha101"
+    zoo_dir.mkdir()
+    (zoo_dir / "alpha_001.py").write_text(
+        'import pandas as pd\n'
+        'def compute(panel):\n'
+        '    return panel["close"]\n'
+    )
+    # 模拟上次运行的输出残留
+    (tmp_path / "alpha101_yaml").mkdir()
+    (tmp_path / "alpha101_yaml_yaml").mkdir()
+    (tmp_path / "alpha101_yaml_yaml_yaml").mkdir()
+
+    result = convert_all_zoos(tmp_path)
+
+    # 只应处理 alpha101, _yaml 后缀全部跳过
+    assert "alpha101" in result
+    assert "alpha101_yaml" not in result
+    # 应记录跳过的目录
+    skipped = result.get("__skipped_yaml_dirs__", [])
+    assert "alpha101_yaml" in skipped
+    assert "alpha101_yaml_yaml" in skipped
+    assert "alpha101_yaml_yaml_yaml" in skipped
+
+
+def test_convert_all_zoos_idempotent(tmp_path):
+    """连跑两次, 第二次不应产生新 _yaml_ 目录 (幂等性)."""
+    zoo_dir = tmp_path / "alpha101"
+    zoo_dir.mkdir()
+    (zoo_dir / "alpha_001.py").write_text(
+        'import pandas as pd\n'
+        'def compute(panel):\n'
+        '    return panel["close"]\n'
+    )
+
+    before = set(p.name for p in tmp_path.iterdir())
+
+    convert_all_zoos(tmp_path)
+    after_first = set(p.name for p in tmp_path.iterdir())
+
+    convert_all_zoos(tmp_path)
+    after_second = set(p.name for p in tmp_path.iterdir())
+
+    # 第一轮: 产生 alpha101_yaml
+    assert "alpha101_yaml" in after_first
+    # 第二轮: 不应有 _yaml_yaml 类型的新目录
+    extra = {n for n in after_second
+             if n not in before and n.endswith("_yaml_yaml")}
+    assert extra == set(), f"Idempotency violated: new dirs {extra}"
+
+
+def test_convert_all_zoos_with_no_yaml_dirs_unchanged_behaviour(tmp_path):
+    """无 _yaml 后缀目录时, 应照常处理所有 zoo."""
+    (tmp_path / "alpha101").mkdir()
+    (tmp_path / "alpha101" / "ok.py").write_text(
+        'import pandas as pd\n'
+        'def compute(panel):\n'
+        '    return panel["close"]\n'
+    )
+    (tmp_path / "fundamental").mkdir()
+    (tmp_path / "fundamental" / "ok.py").write_text(
+        'import pandas as pd\n'
+        'def compute(panel):\n'
+        '    return panel["close"]\n'
+    )
+
+    result = convert_all_zoos(tmp_path)
+
+    assert "alpha101" in result
+    assert "fundamental" in result
+    assert result.get("__skipped_yaml_dirs__", []) == []
+    # 两个 zoo 应都有产物
+    for name in ("alpha101", "fundamental"):
+        assert (tmp_path / f"{name}_yaml").is_dir(), f"{name}_yaml not created"

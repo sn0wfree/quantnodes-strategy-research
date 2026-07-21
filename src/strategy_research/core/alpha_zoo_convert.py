@@ -966,15 +966,30 @@ def convert_zoo(zoo_dir: Path, output_dir: Path | None = None) -> dict:
 
 
 def convert_all_zoos(alpha_zoo_dir: Path) -> dict:
-    """转换所有 zoo 目录。"""
-    all_stats = {}
-    for zoo_dir in sorted(alpha_zoo_dir.iterdir()):
-        if zoo_dir.is_dir() and not zoo_dir.name.startswith("_"):
-            print(f"转换 {zoo_dir.name}...")
-            stats = convert_zoo(zoo_dir)
-            all_stats[zoo_dir.name] = stats
-            print(f"  成功: {stats['success']}, 跳过: {stats['skipped']}, 失败: {stats['failed']}")
+    """转换所有 zoo 目录。
 
+    防护栏:
+      - 跳过名称以 `_yaml` 结尾的目录, 避免 convert_zoo() 默认追加 `_yaml`
+        后下一轮把它当输入再处理, 造成 alpha101 → alpha101_yaml → alpha101_yaml_yaml
+        指数增殖 (历史遗留 bug, 见 chore commit)。
+      - 跳过名称以 `_` 开头的目录 (保留原行为)。
+    """
+    all_stats = {}
+    skipped = []
+    for zoo_dir in sorted(alpha_zoo_dir.iterdir()):
+        if not (zoo_dir.is_dir() and not zoo_dir.name.startswith("_")):
+            continue
+        if zoo_dir.name.endswith("_yaml"):
+            print(f"跳过 {zoo_dir.name} (已是转换输出, 不递归)")
+            skipped.append(zoo_dir.name)
+            continue
+        print(f"转换 {zoo_dir.name}...")
+        stats = convert_zoo(zoo_dir)
+        all_stats[zoo_dir.name] = stats
+        print(f"  成功: {stats['success']}, 跳过: {stats['skipped']}, 失败: {stats['failed']}")
+
+    if skipped:
+        all_stats["__skipped_yaml_dirs__"] = skipped
     return all_stats
 
 
