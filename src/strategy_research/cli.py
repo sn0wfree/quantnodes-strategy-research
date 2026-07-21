@@ -620,23 +620,27 @@ def cmd_import(args: argparse.Namespace) -> int:
         print(f"❌ 不是有效的工作区: {path}")
         return 1
 
-    from strategy_research.core.data_import import import_csv, import_parquet, generate_sample_data, import_dataframe
-    from strategy_research.core.db import save_price_data, init_db
+    from strategy_research.core.data_import import (
+        import_csv, import_parquet, generate_sample_data, import_dataframe,
+        import_tushare, import_ifind, import_fred, import_akshare, import_from_source,
+    )
+    from strategy_research.core.db import init_db
 
     # 确保 DuckDB 初始化
     init_db(path)
 
     strategy_name = args.strategy
+    source = args.source
 
-    if args.source == "sample":
-        # 生成示例数据
+    # 本地文件源
+    if source == "sample":
         prices = generate_sample_data(
             n_assets=args.n_assets,
             n_days=args.n_days,
         )
         success = import_dataframe(path, strategy_name, prices)
 
-    elif args.source == "csv":
+    elif source == "csv":
         if not args.file:
             print("❌ 请指定 --file 参数")
             return 1
@@ -647,19 +651,78 @@ def cmd_import(args: argparse.Namespace) -> int:
             asset_column=args.asset_column,
         )
 
-    elif args.source == "parquet":
+    elif source == "parquet":
         if not args.file:
             print("❌ 请指定 --file 参数")
             return 1
         success = import_parquet(path, strategy_name, args.file)
 
+    # API 数据源
+    elif source == "tushare":
+        if not args.codes:
+            print("❌ 请指定 --codes 参数 (如: 000001.SZ,600519.SH)")
+            return 1
+        codes = [c.strip() for c in args.codes.split(",")]
+        success = import_tushare(
+            path, strategy_name, codes,
+            args.start_date, args.end_date,
+            incremental=args.incremental,
+        )
+
+    elif source == "ifind":
+        if not args.codes:
+            print("❌ 请指定 --codes 参数")
+            return 1
+        codes = [c.strip() for c in args.codes.split(",")]
+        success = import_ifind(
+            path, strategy_name, codes,
+            args.start_date, args.end_date,
+            incremental=args.incremental,
+        )
+
+    elif source == "fred":
+        if not args.codes:
+            # 默认导入核心系列
+            from strategy_research.core.data_source.fred_loader import CORE_SERIES
+            codes = CORE_SERIES
+            print(f"📡 导入 FRED 核心系列 ({len(codes)} 个)...")
+        else:
+            codes = [c.strip() for c in args.codes.split(",")]
+        success = import_fred(
+            path, strategy_name, codes,
+            args.start_date, args.end_date,
+            incremental=args.incremental,
+        )
+
+    elif source == "akshare":
+        if not args.codes:
+            print("❌ 请指定 --codes 参数")
+            return 1
+        codes = [c.strip() for c in args.codes.split(",")]
+        success = import_akshare(
+            path, strategy_name, codes,
+            args.start_date, args.end_date,
+            incremental=args.incremental,
+        )
+
+    elif source == "auto":
+        if not args.codes:
+            print("❌ 请指定 --codes 参数")
+            return 1
+        codes = [c.strip() for c in args.codes.split(",")]
+        success = import_from_source(
+            path, strategy_name, "auto", codes,
+            args.start_date, args.end_date,
+            incremental=args.incremental,
+        )
+
     else:
-        print(f"❌ 未知数据源: {args.source}")
+        print(f"❌ 未知数据源: {source}")
+        print(f"   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
         return 1
 
     if success:
         print(f"\n✅ 数据导入完成")
-        # 显示数据信息
         from strategy_research.core.db import get_price_data_info
         info = get_price_data_info(path, strategy_name)
         if info:
@@ -724,8 +787,15 @@ def main() -> int:
     import_parser = subparsers.add_parser("import", help="导入价格数据")
     import_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
     import_parser.add_argument("--strategy", "-s", required=True, help="策略名称")
-    import_parser.add_argument("--source", choices=["csv", "parquet", "sample"], required=True, help="数据源")
+    import_parser.add_argument("--source", required=True,
+                               choices=["csv", "parquet", "sample", "tushare", "ifind", "fred", "akshare", "auto"],
+                               help="数据源")
     import_parser.add_argument("--file", "-f", help="数据文件路径 (csv/parquet)")
+    import_parser.add_argument("--codes", "-c", help="资产代码列表，逗号分隔 (API 数据源)")
+    import_parser.add_argument("--start-date", default="2020-01-01", help="开始日期 (API 数据源)")
+    import_parser.add_argument("--end-date", default="2025-12-31", help="结束日期 (API 数据源)")
+    import_parser.add_argument("--incremental", action="store_true", default=True, help="增量更新 (默认开启)")
+    import_parser.add_argument("--no-incremental", dest="incremental", action="store_false", help="全量替换")
     import_parser.add_argument("--date-column", default="date", help="日期列名 (csv)")
     import_parser.add_argument("--price-column", default="close", help="价格列名 (csv)")
     import_parser.add_argument("--asset-column", help="资产代码列名 (csv, 宽格式不需要)")
