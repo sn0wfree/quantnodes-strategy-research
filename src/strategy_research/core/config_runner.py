@@ -177,7 +177,7 @@ class FactorStrategy:
         weight_method = self.params.get("weight_method", "inverse_vol")
         if weight_method == "inverse_vol":
             lookback = self.params.get("vol_lookback", 60)
-            vols = price_panel[selected].pct_change().iloc[-lookback:].std()
+            vols = price_panel[selected].pct_change(fill_method=None).iloc[-lookback:].std()
             inv_vol = 1.0 / vols.clip(lower=0.01)
             weights = (inv_vol / inv_vol.sum()).to_dict()
         else:

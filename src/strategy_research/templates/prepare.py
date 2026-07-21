@@ -145,18 +145,18 @@ def _compute_simple_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> d
             # 提取窗口参数
             try:
                 window = int(code.split(",")[-1].strip().rstrip(")"))
-                factors[name] = prices.pct_change(window)
+                factors[name] = prices.pct_change(window, fill_method=None)
             except (ValueError, IndexError):
-                factors[name] = prices.pct_change(20)
+                factors[name] = prices.pct_change(20, fill_method=None)
         elif "ts_std" in code:
             try:
                 window = int(code.split(",")[-1].strip().rstrip(")"))
-                factors[name] = prices.pct_change().rolling(window).std()
+                factors[name] = prices.pct_change(fill_method=None).rolling(window).std()
             except (ValueError, IndexError):
-                factors[name] = prices.pct_change().rolling(20).std()
+                factors[name] = prices.pct_change(fill_method=None).rolling(20).std()
         else:
             # 默认: 20 日动量
-            factors[name] = prices.pct_change(20)
+            factors[name] = prices.pct_change(20, fill_method=None)
 
     return factors
 
@@ -210,7 +210,7 @@ def evaluate(params: dict, factor_exprs: list[dict],
         scores = scores.add(aligned * weight, fill_value=0)
 
     # 计算日收益
-    returns = prices.pct_change()
+    returns = prices.pct_change(fill_method=None)
 
     # 模拟回测
     nav = [1.0]
@@ -310,7 +310,7 @@ def _ann_return(nav: pd.Series, freq: int = 252) -> float:
     """计算年化收益率。"""
     if nav.empty or len(nav) < 2:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     n_years = len(rets) / freq
@@ -339,7 +339,7 @@ def _ann_vol(nav: pd.Series, freq: int = 252) -> float:
     """计算年化波动率。"""
     if nav.empty or len(nav) < 2:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     return float(rets.std() * np.sqrt(freq)) if not rets.empty else 0.0
 
 
@@ -347,7 +347,7 @@ def _sortino(nav: pd.Series, freq: int = 252) -> float:
     """计算 Sortino 比率。"""
     if nav.empty:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     downside = rets[rets < 0]

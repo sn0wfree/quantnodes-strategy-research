@@ -18,7 +18,7 @@ import pandas as pd
 
 def ts_return(series: pd.Series, window: int) -> pd.Series:
     """N 期收益率。"""
-    return series.pct_change(window)
+    return series.pct_change(window, fill_method=None)
 
 
 def ts_std(series: pd.Series, window: int) -> pd.Series:
@@ -112,7 +112,7 @@ def ts_cov(x: pd.Series, y: pd.Series, window: int) -> pd.Series:
 
 def ts_pct_change(series: pd.Series, periods: int) -> pd.Series:
     """N 期百分比变化。"""
-    return series.pct_change(periods)
+    return series.pct_change(periods, fill_method=None)
 
 
 def ts_zscore(series: pd.Series, window: int) -> pd.Series:

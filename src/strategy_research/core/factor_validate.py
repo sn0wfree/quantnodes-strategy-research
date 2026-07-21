@@ -114,7 +114,7 @@ def compute_ic_decay(
     result = {}
     for period in periods:
         # 计算 period 期 forward returns
-        forward_returns = prices.pct_change(period).shift(-period)
+        forward_returns = prices.pct_change(period, fill_method=None).shift(-period)
         if isinstance(forward_returns, pd.DataFrame):
             forward_returns = forward_returns.mean(axis=1)
 
@@ -413,7 +413,7 @@ def validate_factor(
 
     # 计算 forward returns
     if forward_returns is None:
-        forward_returns = prices.pct_change().shift(-1).mean(axis=1)
+        forward_returns = prices.pct_change(fill_method=None).shift(-1).mean(axis=1)
 
     # 对齐
     df = pd.DataFrame({

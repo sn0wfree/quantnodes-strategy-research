@@ -11,7 +11,7 @@ import pandas as pd
 def _ann_return(nav: pd.Series, freq: int = 252) -> float:
     if nav.empty or len(nav) < 2:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     n_years = len(rets) / freq
@@ -22,7 +22,7 @@ def _ann_return(nav: pd.Series, freq: int = 252) -> float:
 def _ann_vol(nav: pd.Series, freq: int = 252) -> float:
     if nav.empty or len(nav) < 2:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     return float(rets.std() * np.sqrt(freq)) if not rets.empty else 0.0
 
 
@@ -36,7 +36,7 @@ def _sharpe(nav: pd.Series, freq: int = 252) -> float:
 def _sortino(nav: pd.Series, freq: int = 252) -> float:
     if nav.empty:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     downside = rets[rets < 0]
@@ -77,8 +77,8 @@ def _info_ratio(nav: pd.Series, bench: pd.Series | None = None, freq: int = 252)
     """Info ratio vs benchmark."""
     if nav.empty or bench is None or bench.empty:
         return 0.0
-    rets_n = nav.pct_change().dropna()
-    rets_b = bench.pct_change().dropna()
+    rets_n = nav.pct_change(fill_method=None).dropna()
+    rets_b = bench.pct_change(fill_method=None).dropna()
     common = rets_n.index.intersection(rets_b.index)
     if len(common) < 2:
         return 0.0
@@ -91,7 +91,7 @@ def _info_ratio(nav: pd.Series, bench: pd.Series | None = None, freq: int = 252)
 def _downside_dev(nav: pd.Series, freq: int = 252) -> float:
     if nav.empty:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     downside = rets[rets < 0]
@@ -102,7 +102,7 @@ def _var_cvar(nav: pd.Series, alpha: float = 0.05) -> tuple[float, float]:
     """历史法 VaR / CVaR."""
     if nav.empty or len(nav) < 2:
         return 0.0, 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0, 0.0
     var = float(rets.quantile(alpha))
@@ -113,7 +113,7 @@ def _var_cvar(nav: pd.Series, alpha: float = 0.05) -> tuple[float, float]:
 def _win_rate(nav: pd.Series) -> float:
     if nav.empty:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     return float((rets > 0).mean())
@@ -122,7 +122,7 @@ def _win_rate(nav: pd.Series) -> float:
 def _profit_loss_ratio(nav: pd.Series) -> float:
     if nav.empty:
         return 0.0
-    rets = nav.pct_change().dropna()
+    rets = nav.pct_change(fill_method=None).dropna()
     if rets.empty:
         return 0.0
     wins = rets[rets > 0]
@@ -135,7 +135,7 @@ def _profit_loss_ratio(nav: pd.Series) -> float:
 def _max_monthly_loss(nav: pd.Series) -> float:
     if nav.empty:
         return 0.0
-    monthly = nav.resample("M").last().pct_change().dropna()
+    monthly = nav.resample("M").last().pct_change(fill_method=None).dropna()
     if monthly.empty:
         return 0.0
     return float(monthly.min())
@@ -144,7 +144,7 @@ def _max_monthly_loss(nav: pd.Series) -> float:
 def _profit_months_ratio(nav: pd.Series) -> float:
     if nav.empty:
         return 0.0
-    monthly = nav.resample("M").last().pct_change().dropna()
+    monthly = nav.resample("M").last().pct_change(fill_method=None).dropna()
     if monthly.empty:
         return 0.0
     return float((monthly > 0).mean())

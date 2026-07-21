@@ -152,7 +152,7 @@ class StrategyEngine:
         # 波动率目标
         if (self.vol_targeting and self.vol_targeting.enabled
                 and len(nav_history) >= self.vol_targeting.lookback):
-            rets = nav_history.iloc[-self.vol_targeting.lookback:].pct_change().dropna()
+            rets = nav_history.iloc[-self.vol_targeting.lookback:].pct_change(fill_method=None).dropna()
             if len(rets) >= 10:
                 vol = rets.std() * np.sqrt(252)
                 if vol > 0:
