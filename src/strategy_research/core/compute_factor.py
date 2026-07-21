@@ -270,6 +270,182 @@ def cross_sectional_std(series: pd.Series) -> pd.Series:
 
 
 # ============================================================
+# 新增截面算子 (高级)
+# ============================================================
+
+def cs_quantile_clip(df: pd.DataFrame, q_low: float = 0.025, q_high: float = 0.975) -> pd.DataFrame:
+    """截面分位数剪裁: 把每行 (截面) 异常值剪裁到 [q_low, q_high] 分位数。"""
+    def _clip(row):
+        if row.notna().sum() < 2:
+            return row
+        lo = row.quantile(q_low)
+        hi = row.quantile(q_high)
+        return row.clip(lo, hi)
+    return df.apply(_clip, axis=1)
+
+
+def cs_pct_pos(df: pd.DataFrame) -> pd.DataFrame:
+    """截面正值占比: 每行的 (x > 0) 比例。"""
+    return (df > 0).sum(axis=1) / df.notna().sum(axis=1)
+
+
+# ============================================================
+# 新增时序算子 (高级)
+# ============================================================
+
+def ts_centralization(series: pd.Series, window: int) -> pd.Series:
+    """滚动去均值: x - rolling_mean(x, window)。"""
+    return series - series.rolling(window, min_periods=window).mean()
+
+
+def ts_standardization(series: pd.Series, window: int) -> pd.Series:
+    """滚动标准化: (x - rolling_mean) / rolling_std。"""
+    mean = series.rolling(window, min_periods=window).mean()
+    std = series.rolling(window, min_periods=window).std()
+    return (series - mean) / std
+
+
+def ts_entropy(series: pd.Series, window: int, bins: int = 10) -> pd.Series:
+    """滚动信息熵 (Shannon): -sum(p * log(p))."""
+    def _entropy(x):
+        if np.isnan(x).all():
+            return np.nan
+        valid = x[~np.isnan(x)]
+        if len(valid) < 2:
+            return np.nan
+        hist, _ = np.histogram(valid, bins=bins, density=False)
+        total = hist.sum()
+        if total == 0:
+            return np.nan
+        p = hist / total
+        p = p[p > 0]
+        return float(-(p * np.log(p)).sum())
+
+    return series.rolling(window, min_periods=window).apply(_entropy, raw=True)
+
+
+def ts_pct_pos(series: pd.Series, window: int) -> pd.Series:
+    """滚动正值占比: 窗口内 x > 0 的比例。"""
+    return series.rolling(window, min_periods=window).apply(
+        lambda x: (x > 0).sum() / len(x) if len(x) > 0 else np.nan,
+        raw=True,
+    )
+
+
+def ts_count_pos(series: pd.Series, window: int) -> pd.Series:
+    """滚动正计数: 窗口内 x > 0 的个数。"""
+    return series.rolling(window, min_periods=window).apply(
+        lambda x: int((x > 0).sum()), raw=True,
+    )
+
+
+def ts_count_neg(series: pd.Series, window: int) -> pd.Series:
+    """滚动负计数: 窗口内 x < 0 的个数。"""
+    return series.rolling(window, min_periods=window).apply(
+        lambda x: int((x < 0).sum()), raw=True,
+    )
+
+
+def ts_max_min_diff(series: pd.Series, window: int) -> pd.Series:
+    """滚动 max-min 范围: rolling_max - rolling_min。"""
+    return (
+        series.rolling(window, min_periods=window).max()
+        - series.rolling(window, min_periods=window).min()
+    )
+
+
+def ts_quantile_range(series: pd.Series, q_low: float, q_high: float, window: int) -> pd.Series:
+    """滚动分位差: rolling_quantile(q_high) - rolling_quantile(q_low)."""
+    high = series.rolling(window, min_periods=window).quantile(q_high)
+    low = series.rolling(window, min_periods=window).quantile(q_low)
+    return high - low
+
+
+def ts_decay_custom(series: pd.Series, window: int, weights: np.ndarray) -> pd.Series:
+    """自定义权重滚动加权平均: dot(weights, window)。"""
+    weights = np.asarray(weights, dtype=float)
+    if len(weights) != window:
+        raise ValueError(f"weights length ({len(weights)}) must equal window ({window})")
+    weights = weights / weights.sum()
+
+    def _apply(x):
+        valid = x[~np.isnan(x)]
+        if len(valid) < window:
+            return np.nan
+        return float(np.dot(valid, weights))
+
+    return series.rolling(window, min_periods=window).apply(_apply, raw=True)
+
+
+# ============================================================
+# 稳健统计时序算子
+# ============================================================
+
+def ts_iqr(series: pd.Series, window: int) -> pd.Series:
+    """滚动四分位距: Q75 - Q25 (IQR)。"""
+    q75 = series.rolling(window, min_periods=window).quantile(0.75)
+    q25 = series.rolling(window, min_periods=window).quantile(0.25)
+    return q75 - q25
+
+
+def ts_median_abs_dev(series: pd.Series, window: int) -> pd.Series:
+    """滚动中位绝对偏差: median(|x - median(x)|)。"""
+    def _mad(x):
+        valid = x[~np.isnan(x)]
+        if len(valid) < window:
+            return np.nan
+        med = np.median(valid)
+        return float(np.median(np.abs(valid - med)))
+
+    return series.rolling(window, min_periods=window).apply(_mad, raw=True)
+
+
+def ts_trim_mean(series: pd.Series, window: int, pct: float = 0.1) -> pd.Series:
+    """滚动截尾均值: 去掉头尾各 pct 部分后取平均。"""
+    def _trim(x):
+        valid = x[~np.isnan(x)]
+        if len(valid) < window:
+            return np.nan
+        sorted_x = np.sort(valid)
+        k = int(len(sorted_x) * pct)
+        if 2 * k >= len(sorted_x):
+            return float(np.mean(sorted_x))
+        return float(np.mean(sorted_x[k:len(sorted_x) - k]))
+
+    return series.rolling(window, min_periods=window).apply(_trim, raw=True)
+
+
+def ts_huber_mean(series: pd.Series, window: int, k: float = 1.345) -> pd.Series:
+    """Huber 鲁棒均值: 使用 Huber 权重迭代重新加权, k 是 Huber 阈值。"""
+    from scipy import optimize as _opt  # 用 scipy 最小化; 实际也可手写 50 行
+
+    def _huber(x):
+        valid = x[~np.isnan(x)]
+        n = len(valid)
+        if n < window:
+            return np.nan
+        mu = float(np.mean(valid))
+        for _ in range(50):
+            r = valid - mu
+            mad = np.median(np.abs(r))
+            if mad < 1e-10:
+                break
+            sigma = mad / 0.6745  # 1/(Q(0.75) 标准 sigma 估计)
+            w = np.where(np.abs(r / sigma) <= k, 1.0, k / (np.abs(r / sigma)))
+            w = np.nan_to_num(w, nan=0.0)
+            if w.sum() == 0:
+                break
+            mu_new = float((w * valid).sum() / w.sum())
+            if abs(mu_new - mu) < 1e-9:
+                mu = mu_new
+                break
+            mu = mu_new
+        return mu
+
+    return series.rolling(window, min_periods=window).apply(_huber, raw=True)
+
+
+# ============================================================
 # 数学算子
 # ============================================================
 
@@ -398,6 +574,27 @@ OPERATORS = {
     "ts_zscore": ts_zscore,
     "ts_decay_linear": ts_decay_linear,
     "ts_decay_exp": ts_decay_exp,
+
+    # 时序算子 (新增高级)
+    "ts_centralization": ts_centralization,
+    "ts_standardization": ts_standardization,
+    "ts_entropy": ts_entropy,
+    "ts_pct_pos": ts_pct_pos,
+    "ts_count_pos": ts_count_pos,
+    "ts_count_neg": ts_count_neg,
+    "ts_max_min_diff": ts_max_min_diff,
+    "ts_quantile_range": ts_quantile_range,
+    "ts_decay_custom": ts_decay_custom,
+
+    # 稳健统计
+    "ts_iqr": ts_iqr,
+    "ts_median_abs_dev": ts_median_abs_dev,
+    "ts_trim_mean": ts_trim_mean,
+    "ts_huber_mean": ts_huber_mean,
+
+    # 截面算子 (新增高级)
+    "cs_quantile_clip": cs_quantile_clip,
+    "cs_pct_pos": cs_pct_pos,
 
     # 扩展窗口算子
     "expanding_sum": expanding_sum,

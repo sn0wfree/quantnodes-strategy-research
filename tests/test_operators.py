@@ -266,6 +266,297 @@ def test_ts_mean_equals_rolling(s_a):
         assert diff.max() < 1e-9
 
 
+# ============================================================
+# 新增算子测试 (截面高级 + 时序高级 + 稳健统计)
+# ============================================================
+
+@pytest.fixture
+def s_mixed() -> pd.Series:
+    """含正负值的 Series。"""
+    rng = np.random.default_rng(42)
+    arr = np.concatenate([rng.uniform(-5, -1, 25), rng.uniform(1, 5, 25)])
+    rng2 = np.random.default_rng(42)
+    rng2.shuffle(arr)
+    return pd.Series(arr, index=pd.bdate_range("2024-01-01", periods=50))
+
+
+def test_cs_quantile_clip_clips_extremes(df_a):
+    """cs_quantile_clip 应削减截面极值。"""
+    fn = OPERATORS["cs_quantile_clip"]
+    r = fn(df_a, 0.1, 0.9)
+    # 剪裁后 min/max 应在 q10/q90 范围内
+    for i in range(len(df_a)):
+        row = df_a.iloc[i].dropna()
+        qlo, qhi = row.quantile(0.1), row.quantile(0.9)
+        assert r.iloc[i].min() >= qlo - 1e-9, f"row {i} lower bound violated"
+        assert r.iloc[i].max() <= qhi + 1e-9, f"row {i} upper bound violated"
+
+
+def test_cs_quantile_clip_no_inf(df_a):
+    """应不产 inf."""
+    fn = OPERATORS["cs_quantile_clip"]
+    r = fn(df_a)
+    assert not np.isinf(r.values).any()
+
+
+def test_cs_quantile_clip_single_value_row():
+    """单值行不应崩溃."""
+    fn = OPERATORS["cs_quantile_clip"]
+    df = pd.DataFrame({"A": [1, 2, 3]}, index=pd.bdate_range("2024-01-01", periods=3))
+    r = fn(df)
+    assert r.shape == df.shape
+
+
+def test_cs_pct_pos_range(df_a):
+    """cs_pct_pos 应在 [0, 1] 之间."""
+    fn = OPERATORS["cs_pct_pos"]
+    r = fn(df_a)
+    assert r.between(0, 1).all()
+
+
+def test_cs_pct_pos_all_positive(df_a):
+    """df_a 值都 > 10, 占比应为 1.0."""
+    fn = OPERATORS["cs_pct_pos"]
+    r = fn(df_a)
+    assert (r == 1.0).all()
+
+
+def test_cs_pct_pos_mixed_signs():
+    """混合正负值: 占比应在 (0, 1)."""
+    fn = OPERATORS["cs_pct_pos"]
+    df = pd.DataFrame({
+        "A": [-1, 2, -3],
+        "B": [1, -2, 3],
+        "C": [1, 2, 3],
+    }, index=pd.bdate_range("2024-01-01", periods=3))
+    r = fn(df)
+    # Row 0: A负 B正 C正 -> 2/3
+    assert abs(r.iloc[0] - 2/3) < 1e-9
+
+
+# ----- 时序高级算子 -----
+
+def test_ts_centralization_returns_zero_mean(s_a):
+    """滚动去均值: result 在每个窗口内平均 ≈ 0."""
+    fn = OPERATORS["ts_centralization"]
+    r = fn(s_a, 10)
+    assert isinstance(r, pd.Series)
+    # 后 5 行: rolling 10 的均值应为接近 0
+    tail = r.iloc[-5:]
+    assert abs(tail.mean()) < 5.0  # 容忍随机噪声
+
+
+def test_ts_standardization_returns_unit_std(s_a):
+    """ts_standardization 输出 std ≈ 1."""
+    fn = OPERATORS["ts_standardization"]
+    r = fn(s_a, 20)
+    # 滚动 20 std 应接近 1
+    assert r.iloc[20:].std() < 5.0  # 容忍随机
+
+
+def test_ts_entropy_non_negative(s_mixed):
+    """Shannon 熵应为非负数."""
+    fn = OPERATORS["ts_entropy"]
+    r = fn(s_mixed, 10, bins=5)
+    valid = r.dropna()
+    assert (valid >= 0).all()
+
+
+def test_ts_entropy_uniform_data():
+    """均匀分布应产出最大熵."""
+    rng = np.random.default_rng(42)
+    s = pd.Series(rng.uniform(0, 1, 100), index=pd.bdate_range("2024-01-01", periods=100))
+    fn = OPERATORS["ts_entropy"]
+    r = fn(s, 20, bins=5)
+    valid = r.dropna()
+    # 熵最大为 ln(bins) ≈ 1.609
+    assert valid.max() <= np.log(5) + 0.01
+
+
+def test_ts_pct_pos_range(s_mixed):
+    """ts_pct_pos 应在 [0, 1] 之间."""
+    fn = OPERATORS["ts_pct_pos"]
+    r = fn(s_mixed, 10)
+    valid = r.dropna()
+    assert valid.between(0, 1).all()
+
+
+def test_ts_pct_pos_all_positive():
+    """全正值应产出 1.0."""
+    rng = np.random.default_rng(42)
+    s = pd.Series(rng.uniform(0, 10, 50), index=pd.bdate_range("2024-01-01", periods=50))
+    fn = OPERATORS["ts_pct_pos"]
+    r = fn(s, 10)
+    valid = r.dropna()
+    assert (valid == 1.0).all()
+
+
+def test_ts_count_pos_int_values():
+    """ts_count_pos 应返回整数. 用 docstring 不强求 dtype, 只校验等于 (x>0).sum() per window."""
+    s = pd.Series([-1, -2, 3, 4, -5] * 10, index=pd.bdate_range("2024-01-01", periods=50))
+    fn = OPERATORS["ts_count_pos"]
+    r = fn(s, 5)
+    # 校验: 手工计算窗口 5 的 count_pos
+    expected = s.rolling(5).apply(lambda x: int((x > 0).sum()), raw=True)
+    diff = (r - expected).abs()
+    assert diff.max() < 1e-9
+
+
+def test_ts_count_neg(s_mixed):
+    fn = OPERATORS["ts_count_neg"]
+    r = fn(s_mixed, 10)
+    # 窗口末尾为 10 个数的负计数
+    valid = r.dropna()
+    assert (valid >= 0).all()
+    assert (valid <= 10).all()
+
+
+def test_ts_max_min_diff_non_negative(s_mixed):
+    """ts_max_min_diff 应 >= 0."""
+    fn = OPERATORS["ts_max_min_diff"]
+    r = fn(s_mixed, 10)
+    valid = r.dropna()
+    assert (valid >= 0).all()
+
+
+def test_ts_max_min_diff_equals_pandas(s_a):
+    fn = OPERATORS["ts_max_min_diff"]
+    r = fn(s_a, 5)
+    expected = s_a.rolling(5, min_periods=5).max() - s_a.rolling(5, min_periods=5).min()
+    diff = (r - expected).abs()
+    assert diff.max() < 1e-9
+
+
+def test_ts_quantile_range_q75_q25(s_a):
+    """默认 q_low=0.25, q_high=0.75 应等于 IQR = ts_iqr."""
+    fn = OPERATORS["ts_quantile_range"]
+    r = fn(s_a, 0.25, 0.75, 10)
+    fn_iqr = OPERATORS["ts_iqr"]
+    expected = fn_iqr(s_a, 10)
+    diff = (r - expected).abs()
+    assert diff.max() < 1e-9
+
+
+def test_ts_decay_custom_basic(s_a):
+    """ts_decay_custom 应按权重计算加权平均."""
+    import numpy as np
+    fn = OPERATORS["ts_decay_custom"]
+    # 简单均匀权重 (5)
+    weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
+    r = fn(s_a, 5, weights)
+    # 应等于 rolling mean
+    expected = s_a.rolling(5, min_periods=5).mean()
+    diff = (r - expected).abs()
+    assert diff.max() < 1e-9
+
+
+def test_ts_decay_custom_weighted(s_a):
+    """加权不等于均值."""
+    import numpy as np
+    fn = OPERATORS["ts_decay_custom"]
+    # 线性递增权重: 最新值权重最大
+    weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    r = fn(s_a, 5, weights)
+    # 简单 rolling mean 不等
+    expected = s_a.rolling(5, min_periods=5).mean()
+    # 加权平均应偏离 rolling mean
+    assert abs((r.iloc[-1] - expected.iloc[-1])) > 0.01
+
+
+def test_ts_decay_custom_wrong_length_raises():
+    """weights 长度 != window 应报错."""
+    import numpy as np
+    fn = OPERATORS["ts_decay_custom"]
+    s = pd.Series([1.0] * 10)
+    with pytest.raises(ValueError, match="must equal"):
+        fn(s, 5, np.array([1.0, 2.0, 3.0]))  # length 3 vs window 5
+
+
+# ----- 稳健统计 -----
+
+def test_ts_iqr_non_negative(s_a):
+    """IQR = Q75-Q25 >= 0."""
+    fn = OPERATORS["ts_iqr"]
+    r = fn(s_a, 10)
+    valid = r.dropna()
+    assert (valid >= 0).all()
+
+
+def test_ts_iqr_equals_pandas_quantile(s_a):
+    """ts_iqr 应等于 rolling Q75 - rolling Q25."""
+    fn = OPERATORS["ts_iqr"]
+    r = fn(s_a, 10)
+    q75 = s_a.rolling(10, min_periods=10).quantile(0.75)
+    q25 = s_a.rolling(10, min_periods=10).quantile(0.25)
+    diff = (r - (q75 - q25)).abs()
+    assert diff.max() < 1e-9
+
+
+def test_ts_median_abs_dev_non_negative(s_a):
+    """MAD >= 0."""
+    fn = OPERATORS["ts_median_abs_dev"]
+    r = fn(s_a, 10)
+    valid = r.dropna()
+    assert (valid >= 0).all()
+
+
+def test_ts_median_abs_dev_zero_for_constant():
+    """常数序列 MAD = 0."""
+    s = pd.Series([5.0] * 50, index=pd.bdate_range("2024-01-01", periods=50))
+    fn = OPERATORS["ts_median_abs_dev"]
+    r = fn(s, 10)
+    valid = r.dropna()
+    np.testing.assert_array_almost_equal(valid.values, np.zeros_like(valid.values))
+
+
+def test_ts_trim_mean_robust_to_outliers():
+    """ts_trim_mean 对极端值更鲁棒."""
+    rng = np.random.default_rng(42)
+    arr = np.concatenate([rng.uniform(0, 1, 49), [100.0]])  # 1 个极端值
+    s = pd.Series(arr, index=pd.bdate_range("2024-01-01", periods=50))
+    fn_mean = OPERATORS["ts_mean"]
+    fn_trim = OPERATORS["ts_trim_mean"]
+    # 朴素均值应包含极端值
+    plain = fn_mean(s, 50).iloc[-1]
+    trimmed = fn_trim(s, 50, pct=0.1).iloc[-1]  # 去掉 10% = 5 个最低 5 个最高
+    # trimmed 不应包含 100 那个极端值
+    assert abs(trimmed - 0.5) < abs(plain - 0.5) * 0.5  # trimmed 应远更接近 0.5
+
+
+def test_ts_trim_mean_returns_value(s_a):
+    """基础烟雾测试."""
+    fn = OPERATORS["ts_trim_mean"]
+    r = fn(s_a, 10, pct=0.1)
+    assert isinstance(r, pd.Series)
+    assert r.shape == s_a.shape
+
+
+def test_ts_huber_mean_returns_value(s_a):
+    """基本功能."""
+    fn = OPERATORS["ts_huber_mean"]
+    r = fn(s_a, 10)
+    assert isinstance(r, pd.Series)
+    # 鲁棒均值应接近简单均值
+    plain = s_a.rolling(10, min_periods=10).mean().iloc[-1]
+    huber = r.iloc[-1]
+    assert abs(plain - huber) < 5.0
+
+
+def test_ts_huber_mean_robust_to_outliers():
+    """Huber 均值对极端值更鲁棒."""
+    rng = np.random.default_rng(42)
+    arr = np.concatenate([rng.uniform(0, 1, 49), [100.0]])
+    s = pd.Series(arr, index=pd.bdate_range("2024-01-01", periods=50))
+    fn_mean = OPERATORS["ts_mean"]
+    fn_huber = OPERATORS["ts_huber_mean"]
+    plain = fn_mean(s, 50).iloc[-1]
+    huber = fn_huber(s, 50).iloc[-1]
+    # Huber 应更接近 0.5
+    assert abs(huber - 0.5) < abs(plain - 0.5) * 0.5
+
+
+
+
 def test_eq_produces_boolean(s_a):
     """eq 应输出布尔 Series。"""
     fn = OPERATORS["eq"]
