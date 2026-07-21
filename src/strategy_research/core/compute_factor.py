@@ -354,6 +354,16 @@ def combine(f1: pd.Series, f2: pd.Series, method: str = "add") -> pd.Series:
         raise ValueError(f"未知组合方法: {method}")
 
 
+def signed_power(series: pd.Series, p: float) -> pd.Series:
+    """保留符号的幂运算: sign(x) * abs(x)^p。"""
+    return np.sign(series) * np.abs(series) ** p
+
+
+def safe_div(a: pd.Series, b: pd.Series, eps: float = 1e-12) -> pd.Series:
+    """安全除法: a / (b + eps * sign(b)), 除零 → NaN。"""
+    return a / (b + eps * np.sign(b))
+
+
 # ============================================================
 # 算子注册表
 # ============================================================
@@ -427,6 +437,8 @@ OPERATORS = {
     "where": where,
     "weighted_sum": weighted_sum,
     "combine": combine,
+    "signed_power": signed_power,
+    "safe_div": safe_div,
 }
 
 
