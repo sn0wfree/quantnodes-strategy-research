@@ -456,7 +456,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("❌ 未指定策略名称，请使用 --strategy <name>")
             return 1
 
-    from strategy_research.core.backtest import run_backtest
+    from strategy_research.core.backtest import run_backtest_script as run_backtest
     result = run_backtest(
         workspace_path=path,
         strategy_name=strategy_name,
@@ -611,6 +611,67 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import(args: argparse.Namespace) -> int:
+    """执行 import 命令 - 导入价格数据。"""
+    path = Path(args.path).resolve()
+
+    # 检查工作区
+    if not (path / "config.yaml").exists():
+        print(f"❌ 不是有效的工作区: {path}")
+        return 1
+
+    from strategy_research.core.data_import import import_csv, import_parquet, generate_sample_data, import_dataframe
+    from strategy_research.core.db import save_price_data, init_db
+
+    # 确保 DuckDB 初始化
+    init_db(path)
+
+    strategy_name = args.strategy
+
+    if args.source == "sample":
+        # 生成示例数据
+        prices = generate_sample_data(
+            n_assets=args.n_assets,
+            n_days=args.n_days,
+        )
+        success = import_dataframe(path, strategy_name, prices)
+
+    elif args.source == "csv":
+        if not args.file:
+            print("❌ 请指定 --file 参数")
+            return 1
+        success = import_csv(
+            path, strategy_name, args.file,
+            date_column=args.date_column,
+            price_column=args.price_column,
+            asset_column=args.asset_column,
+        )
+
+    elif args.source == "parquet":
+        if not args.file:
+            print("❌ 请指定 --file 参数")
+            return 1
+        success = import_parquet(path, strategy_name, args.file)
+
+    else:
+        print(f"❌ 未知数据源: {args.source}")
+        return 1
+
+    if success:
+        print(f"\n✅ 数据导入完成")
+        # 显示数据信息
+        from strategy_research.core.db import get_price_data_info
+        info = get_price_data_info(path, strategy_name)
+        if info:
+            print(f"   资产数: {info.get('n_assets', 0)}")
+            print(f"   日期数: {info.get('n_dates', 0)}")
+            print(f"   时间范围: {info.get('start_date')} ~ {info.get('end_date')}")
+        return 0
+    else:
+        print(f"\n❌ 数据导入失败")
+        return 1
+
+
 # ============================================================
 # Main CLI
 # ============================================================
@@ -659,6 +720,18 @@ def main() -> int:
     list_parser.add_argument("--strategy", "-s", help="策略名称")
     list_parser.add_argument("--limit", "-l", type=int, default=20, help="显示数量")
 
+    # import
+    import_parser = subparsers.add_parser("import", help="导入价格数据")
+    import_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    import_parser.add_argument("--strategy", "-s", required=True, help="策略名称")
+    import_parser.add_argument("--source", choices=["csv", "parquet", "sample"], required=True, help="数据源")
+    import_parser.add_argument("--file", "-f", help="数据文件路径 (csv/parquet)")
+    import_parser.add_argument("--date-column", default="date", help="日期列名 (csv)")
+    import_parser.add_argument("--price-column", default="close", help="价格列名 (csv)")
+    import_parser.add_argument("--asset-column", help="资产代码列名 (csv, 宽格式不需要)")
+    import_parser.add_argument("--n-assets", type=int, default=10, help="示例资产数量 (sample)")
+    import_parser.add_argument("--n-days", type=int, default=504, help="示例天数 (sample)")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -673,6 +746,8 @@ def main() -> int:
         return cmd_validate(args)
     elif args.command == "list":
         return cmd_list(args)
+    elif args.command == "import":
+        return cmd_import(args)
     else:
         parser.print_help()
         return 0

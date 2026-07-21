@@ -1,0 +1,55 @@
+# strategy-research YAML 配置模板
+# 复用自 QuantNodes/strategy/momentum_etf_rotation/strategies/
+
+strategy:
+  name: {strategy_name}        # 策略名称
+  type: {strategy_type}        # rotation/selection/timing/industry
+
+data:
+  source: duckdb               # duckdb (统一使用 DuckDB)
+  # start_date: 2020-01-01     # 可选: 开始日期
+  # end_date: 2025-12-31       # 可选: 结束日期
+
+rebalance:
+  freq: M                      # M=月度, W=周度, Q=季度
+  min_history: 252             # 预热期 (日频=252, 周频=52)
+
+top_n: 10                      # 选择资产数
+max_weight: 0.25               # 最大权重
+weight_method: inverse_vol     # inverse_vol/equal
+
+cost:
+  enabled: true
+  commission_bp: 5             # 佣金 (基点)
+  slippage_bp: 10              # 滑点 (基点)
+  impact_factor: 0.1           # 冲击成本因子
+
+risk:
+  vol_targeting:
+    enabled: false
+    target_vol: 0.15           # 目标年化波动率
+    lookback: 60               # 波动率计算窗口 (天)
+    min_scale: 0.3             # 最小缩放比例
+    max_scale: 2.0             # 最大缩放比例
+  trend_filter:
+    enabled: false
+    ma_window: 200             # MA 窗口 (天)
+    bear_exposure: 0.5         # 熊市暴露比例
+  stop_loss:
+    enabled: false
+    threshold: -0.10           # 回撤阈值 (如 -0.10 = -10%)
+    cooldown_weeks: 5          # 冷却期 (周)
+
+strategy_params:
+  vol_lookback: 60             # 波动率计算窗口 (逆波动率加权)
+
+# 因子配置
+factors:
+  - name: momentum_20d
+    code: ts_return(close, 20)
+    weight: 0.5
+    category: momentum
+  - name: vol_20d
+    code: ts_std(ts_return(close, 1), 20)
+    weight: 0.5
+    category: volatility

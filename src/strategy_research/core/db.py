@@ -1,9 +1,13 @@
 """DuckDB 工具函数。"""
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+import numpy as np
+import pandas as pd
 
 
 # ============================================================
@@ -32,6 +36,29 @@ def get_connection(workspace_path: Path, read_only: bool = False):
 # ============================================================
 
 DUCKDB_INIT_SQL = """
+-- 价格数据 (统一存储)
+CREATE TABLE IF NOT EXISTS price_data (
+    strategy_name VARCHAR NOT NULL,
+    asset_code VARCHAR NOT NULL,
+    date DATE NOT NULL,
+    open DOUBLE,
+    high DOUBLE,
+    low DOUBLE,
+    close DOUBLE,
+    volume DOUBLE,
+    PRIMARY KEY (strategy_name, asset_code, date)
+);
+
+-- 因子数据 (计算结果缓存)
+CREATE TABLE IF NOT EXISTS factor_data (
+    strategy_name VARCHAR NOT NULL,
+    factor_name VARCHAR NOT NULL,
+    date DATE NOT NULL,
+    asset_code VARCHAR NOT NULL,
+    factor_value DOUBLE,
+    PRIMARY KEY (strategy_name, factor_name, date, asset_code)
+);
+
 -- 因子注册表
 CREATE TABLE IF NOT EXISTS factor_registry (
     factor_name VARCHAR NOT NULL,
@@ -95,6 +122,25 @@ CREATE TABLE IF NOT EXISTS backtest_results (
     PRIMARY KEY (strategy_name, run)
 );
 
+-- 权重历史
+CREATE TABLE IF NOT EXISTS weight_history (
+    strategy_name VARCHAR NOT NULL,
+    run VARCHAR NOT NULL,
+    date DATE NOT NULL,
+    asset_code VARCHAR NOT NULL,
+    weight DOUBLE,
+    PRIMARY KEY (strategy_name, run, date, asset_code)
+);
+
+-- NAV 历史
+CREATE TABLE IF NOT EXISTS nav_history (
+    strategy_name VARCHAR NOT NULL,
+    run VARCHAR NOT NULL,
+    date DATE NOT NULL,
+    nav DOUBLE,
+    PRIMARY KEY (strategy_name, run, date)
+);
+
 -- 数据指纹
 CREATE TABLE IF NOT EXISTS data_fingerprint (
     table_name VARCHAR NOT NULL,
@@ -121,6 +167,367 @@ def init_db(workspace_path: Path) -> bool:
         print(f"❌ DuckDB 初始化失败: {e}")
         conn.close()
         return False
+
+
+# ============================================================
+# 价格数据操作
+# ============================================================
+
+def load_price_data(
+    workspace_path: Path,
+    strategy_name: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """从 DuckDB 加载价格数据。
+
+    Returns:
+        pd.DataFrame: (T, N) 价格面板, index=date, columns=assets
+    """
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return pd.DataFrame()
+
+    try:
+        query = """
+            SELECT date, asset_code, close
+            FROM price_data
+            WHERE strategy_name = ?
+        """
+        params = [strategy_name]
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY date, asset_code"
+
+        df = conn.execute(query, params).fetchdf()
+        conn.close()
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # pivot to panel
+        panel = df.pivot(index="date", columns="asset_code", values="close")
+        panel.index = pd.to_datetime(panel.index)
+        return panel
+
+    except Exception as e:
+        print(f"❌ 加载价格数据失败: {e}")
+        conn.close()
+        return pd.DataFrame()
+
+
+def save_price_data(
+    workspace_path: Path,
+    strategy_name: str,
+    prices: pd.DataFrame,
+) -> bool:
+    """保存价格数据到 DuckDB。
+
+    Args:
+        prices: (T, N) 价格面板, index=date, columns=assets
+    """
+    conn = get_connection(workspace_path)
+    if conn is None:
+        return False
+
+    try:
+        # melt to long format
+        df = prices.reset_index()
+        # 确保日期列名为 'date'
+        date_col = df.columns[0]  # 第一列是 index
+        if date_col != "date":
+            df = df.rename(columns={date_col: "date"})
+
+        df = df.melt(
+            id_vars="date", var_name="asset_code", value_name="close"
+        )
+        df["strategy_name"] = strategy_name
+        df["open"] = df["close"]  # 简化: open = close
+        df["high"] = df["close"]
+        df["low"] = df["close"]
+        df["volume"] = 0.0
+
+        conn.execute("""
+            INSERT OR REPLACE INTO price_data
+            (strategy_name, asset_code, date, open, high, low, close, volume)
+            SELECT strategy_name, asset_code, date, open, high, low, close, volume
+            FROM df
+        """)
+
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ 保存价格数据失败: {e}")
+        conn.close()
+        return False
+
+
+def get_price_data_info(workspace_path: Path, strategy_name: str) -> dict:
+    """获取价格数据信息。"""
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return {}
+
+    try:
+        result = conn.execute("""
+            SELECT COUNT(DISTINCT asset_code) as n_assets,
+                   COUNT(DISTINCT date) as n_dates,
+                   MIN(date) as start_date,
+                   MAX(date) as end_date
+            FROM price_data
+            WHERE strategy_name = ?
+        """, [strategy_name]).fetchone()
+        conn.close()
+
+        if result:
+            return {
+                "n_assets": result[0],
+                "n_dates": result[1],
+                "start_date": result[2],
+                "end_date": result[3],
+            }
+        return {}
+    except Exception as e:
+        print(f"❌ 获取价格数据信息失败: {e}")
+        conn.close()
+        return {}
+
+
+# ============================================================
+# 因子数据操作
+# ============================================================
+
+def save_factor_data(
+    workspace_path: Path,
+    strategy_name: str,
+    factor_name: str,
+    factor_values: pd.DataFrame,
+) -> bool:
+    """保存因子数据到 DuckDB。
+
+    Args:
+        factor_values: (T, N) 因子值面板, index=date, columns=assets
+    """
+    conn = get_connection(workspace_path)
+    if conn is None:
+        return False
+
+    try:
+        df = factor_values.reset_index().melt(
+            id_vars="date", var_name="asset_code", value_name="factor_value"
+        )
+        df["strategy_name"] = strategy_name
+        df["factor_name"] = factor_name
+
+        conn.execute("""
+            INSERT OR REPLACE INTO factor_data
+            (strategy_name, factor_name, date, asset_code, factor_value)
+            SELECT strategy_name, factor_name, date, asset_code, factor_value
+            FROM df
+        """)
+
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ 保存因子数据失败: {e}")
+        conn.close()
+        return False
+
+
+def load_factor_data(
+    workspace_path: Path,
+    strategy_name: str,
+    factor_name: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """从 DuckDB 加载因子数据。"""
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return pd.DataFrame()
+
+    try:
+        query = """
+            SELECT date, asset_code, factor_value
+            FROM factor_data
+            WHERE strategy_name = ? AND factor_name = ?
+        """
+        params = [strategy_name, factor_name]
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY date, asset_code"
+
+        df = conn.execute(query, params).fetchdf()
+        conn.close()
+
+        if df.empty:
+            return pd.DataFrame()
+
+        panel = df.pivot(index="date", columns="asset_code", values="factor_value")
+        panel.index = pd.to_datetime(panel.index)
+        return panel
+
+    except Exception as e:
+        print(f"❌ 加载因子数据失败: {e}")
+        conn.close()
+        return pd.DataFrame()
+
+
+# ============================================================
+# 权重历史操作
+# ============================================================
+
+def save_weight_history(
+    workspace_path: Path,
+    strategy_name: str,
+    run: str,
+    weights_history: list[tuple[pd.Timestamp, dict[str, float]]],
+) -> bool:
+    """保存权重历史到 DuckDB。"""
+    conn = get_connection(workspace_path)
+    if conn is None:
+        return False
+
+    try:
+        rows = []
+        for date, weights in weights_history:
+            for asset_code, weight in weights.items():
+                rows.append({
+                    "strategy_name": strategy_name,
+                    "run": run,
+                    "date": date,
+                    "asset_code": asset_code,
+                    "weight": weight,
+                })
+
+        if not rows:
+            conn.close()
+            return True
+
+        df = pd.DataFrame(rows)
+        conn.execute("""
+            INSERT OR REPLACE INTO weight_history
+            (strategy_name, run, date, asset_code, weight)
+            SELECT strategy_name, run, date, asset_code, weight
+            FROM df
+        """)
+
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ 保存权重历史失败: {e}")
+        conn.close()
+        return False
+
+
+def load_weight_history(
+    workspace_path: Path,
+    strategy_name: str,
+    run: str,
+) -> pd.DataFrame:
+    """加载权重历史。"""
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return pd.DataFrame()
+
+    try:
+        result = conn.execute("""
+            SELECT date, asset_code, weight
+            FROM weight_history
+            WHERE strategy_name = ? AND run = ?
+            ORDER BY date, asset_code
+        """, [strategy_name, run]).fetchdf()
+        conn.close()
+
+        if result.empty:
+            return pd.DataFrame()
+
+        return result.pivot(index="date", columns="asset_code", values="weight")
+
+    except Exception as e:
+        print(f"❌ 加载权重历史失败: {e}")
+        conn.close()
+        return pd.DataFrame()
+
+
+# ============================================================
+# NAV 历史操作
+# ============================================================
+
+def save_nav_history(
+    workspace_path: Path,
+    strategy_name: str,
+    run: str,
+    nav: pd.Series,
+) -> bool:
+    """保存 NAV 历史到 DuckDB。"""
+    conn = get_connection(workspace_path)
+    if conn is None:
+        return False
+
+    try:
+        df = pd.DataFrame({
+            "strategy_name": strategy_name,
+            "run": run,
+            "date": nav.index,
+            "nav": nav.values,
+        })
+
+        conn.execute("""
+            INSERT OR REPLACE INTO nav_history
+            (strategy_name, run, date, nav)
+            SELECT strategy_name, run, date, nav
+            FROM df
+        """)
+
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ 保存 NAV 历史失败: {e}")
+        conn.close()
+        return False
+
+
+def load_nav_history(
+    workspace_path: Path,
+    strategy_name: str,
+    run: str,
+) -> pd.Series:
+    """加载 NAV 历史。"""
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return pd.Series(dtype=float)
+
+    try:
+        result = conn.execute("""
+            SELECT date, nav
+            FROM nav_history
+            WHERE strategy_name = ? AND run = ?
+            ORDER BY date
+        """, [strategy_name, run]).fetchdf()
+        conn.close()
+
+        if result.empty:
+            return pd.Series(dtype=float)
+
+        return pd.Series(result["nav"].values, index=pd.to_datetime(result["date"]))
+
+    except Exception as e:
+        print(f"❌ 加载 NAV 历史失败: {e}")
+        conn.close()
+        return pd.Series(dtype=float)
 
 
 # ============================================================
@@ -412,6 +819,12 @@ def get_best_backtest(workspace_path: Path, strategy_name: str) -> Optional[dict
 # ============================================================
 # 数据指纹操作
 # ============================================================
+
+def compute_data_fingerprint(data: pd.DataFrame) -> str:
+    """计算数据指纹。"""
+    content = f"{list(data.columns)}_{len(data)}_{data.index.min()}_{data.index.max()}"
+    return hashlib.md5(content.encode()).hexdigest()[:16]
+
 
 def update_data_fingerprint(
     workspace_path: Path,
