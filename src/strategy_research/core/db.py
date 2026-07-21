@@ -150,6 +150,16 @@ CREATE TABLE IF NOT EXISTS data_fingerprint (
     row_count INTEGER,
     PRIMARY KEY (table_name, strategy_name)
 );
+
+-- 导入元数据 (增量更新追踪)
+CREATE TABLE IF NOT EXISTS import_meta (
+    strategy_name VARCHAR NOT NULL,
+    asset_code VARCHAR NOT NULL,
+    last_date DATE,
+    last_source VARCHAR,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (strategy_name, asset_code)
+);
 """
 
 
@@ -880,3 +890,90 @@ def get_data_fingerprint(workspace_path: Path, strategy_name: str) -> Optional[d
         print(f"❌ 获取数据指纹失败: {e}")
         conn.close()
         return None
+
+
+# ============================================================
+# 导入元数据操作 (增量更新)
+# ============================================================
+
+def get_last_import_date(
+    workspace_path: Path,
+    strategy_name: str,
+    asset_code: str,
+) -> Optional[datetime]:
+    """获取某资产的最后导入日期。"""
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return None
+
+    try:
+        result = conn.execute("""
+            SELECT last_date FROM import_meta
+            WHERE strategy_name = ? AND asset_code = ?
+        """, [strategy_name, asset_code]).fetchone()
+        conn.close()
+
+        if result and result[0]:
+            return result[0]
+        return None
+    except Exception:
+        return None
+
+
+def update_import_meta(
+    workspace_path: Path,
+    strategy_name: str,
+    asset_code: str,
+    last_date: str,
+    source: str = "",
+) -> bool:
+    """更新导入元数据。"""
+    conn = get_connection(workspace_path)
+    if conn is None:
+        return False
+
+    try:
+        conn.execute("""
+            INSERT OR REPLACE INTO import_meta
+            (strategy_name, asset_code, last_date, last_source, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, [strategy_name, asset_code, last_date, source])
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ 更新导入元数据失败: {e}")
+        conn.close()
+        return False
+
+
+def get_import_meta(
+    workspace_path: Path,
+    strategy_name: str,
+) -> list[dict]:
+    """获取所有资产的导入元数据。"""
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return []
+
+    try:
+        result = conn.execute("""
+            SELECT asset_code, last_date, last_source, updated_at
+            FROM import_meta
+            WHERE strategy_name = ?
+            ORDER BY asset_code
+        """, [strategy_name]).fetchall()
+        conn.close()
+
+        return [
+            {
+                "asset_code": row[0],
+                "last_date": row[1],
+                "last_source": row[2],
+                "updated_at": row[3],
+            }
+            for row in result
+        ]
+    except Exception as e:
+        print(f"❌ 获取导入元数据失败: {e}")
+        conn.close()
+        return []
