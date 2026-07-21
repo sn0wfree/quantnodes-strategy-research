@@ -19,6 +19,7 @@ from .db import (
     save_weight_history, save_nav_history,
 )
 from .git import git_commit, git_get_hash
+from .run_card import write_run_card
 
 
 # ============================================================
@@ -119,6 +120,7 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
         with open(results_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     else:
+        results_path.parent.mkdir(parents=True, exist_ok=True)
         lines = [
             "run\tcommit\taction\tcalmar\tsharpe\tmax_dd\t"
             "ann_return\tturnover\tfactors_added\tfactors_removed\t"
@@ -150,6 +152,18 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
 # ============================================================
 # 回测执行 (脚本模式)
 # ============================================================
+
+def _extract_warnings(metrics: dict, output: str) -> list[str]:
+    """从 metrics 和 output 中提取 warnings (用于 run_card).
+
+    v1 极简版: 仅检测 NaN/Inf 字段, 后续可扩展.
+    """
+    warnings: list[str] = []
+    for k, v in metrics.items():
+        if isinstance(v, float) and (v != v or v == float("inf") or v == float("-inf")):
+            warnings.append(f"invalid_{k}: {v!r}")
+    return warnings
+
 
 def run_strategy(
     strategy_dir: Path,
@@ -237,6 +251,22 @@ def run_backtest_script(
         description=description,
     )
 
+    # Trust Layer: write run_card.{json,md}
+    write_run_card(
+        run_dir,
+        config={
+            "run": run_name,
+            "strategy": strategy_name,
+            "action": action,
+        },
+        metrics=metrics,
+        strategy_paths=[
+            run_dir / "strategy.py",
+            run_dir / "config.yaml",
+        ],
+        warnings=_extract_warnings(metrics, output),
+    )
+
     return {
         "success": success,
         "run": run_name,
@@ -311,6 +341,21 @@ def run_backtest_from_yaml(
         # 保存权重历史和 NAV 历史到 DuckDB
         save_weight_history(workspace_path, strategy_name, run_name, result.weights_history)
         save_nav_history(workspace_path, strategy_name, run_name, result.nav_daily)
+
+        # Trust Layer: write run_card.{json,md}
+        write_run_card(
+            run_dir,
+            config={
+                "run": run_name,
+                "strategy": strategy_name,
+                "action": action,
+            },
+            metrics=metrics,
+            strategy_paths=[
+                run_dir / "strategy.py",
+                run_dir / "config.yaml",
+            ],
+        )
 
         return {
             "success": True,
@@ -395,11 +440,12 @@ def get_experiment_history(
     if len(lines) <= 1:
         return []
 
-    header = lines[0].strip().split("\t")
+    header = lines[0].rstrip("\n").split("\t")
 
     experiments = []
     for line in lines[1:limit + 1]:
-        parts = line.strip().split("\t")
+        # 用 rstrip 保留 trailing empty (zip header 长度对齐)
+        parts = line.rstrip("\n").split("\t")
         if len(parts) >= len(header):
             exp = dict(zip(header, parts))
             experiments.append(exp)
