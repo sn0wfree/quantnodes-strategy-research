@@ -181,8 +181,11 @@ def signed_power(df: pd.DataFrame, p: float) -> pd.DataFrame:
 
 
 def safe_div(a: pd.DataFrame, b: pd.DataFrame, eps: float = 1e-12) -> pd.DataFrame:
-    """安全除法: a / (b + eps * sign(b)), 除零 → NaN。"""
-    return a / (b + eps * np.sign(b))
+    """安全除法: |b|<eps → NaN, 否则 a/b。"""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        denom = np.where(np.abs(b.values) < eps, 1.0, b.values)
+        result = np.where(np.abs(b.values) < eps, np.nan, a.values / denom)
+    return pd.DataFrame(result, index=a.index, columns=a.columns)
 
 
 def vwap(panel: dict[str, pd.DataFrame], market: str = "equity_cn") -> pd.DataFrame:
