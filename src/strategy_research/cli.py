@@ -2137,6 +2137,10 @@ def main() -> int:
     from .core.engine.cli import add_engine_subparsers
     add_engine_subparsers(subparsers)
 
+    # strategy acceptance (P6 Step 0) — 离线验收调试工具
+    from .core.strategy_acceptance.cli import add_accept_subparsers
+    add_accept_subparsers(subparsers)
+
     # api serve
     api_parser = subparsers.add_parser("api", help="HTTP API 服务器")
     api_subparsers = api_parser.add_subparsers(dest="api_command", help="API 命令")
@@ -2301,6 +2305,9 @@ def main() -> int:
     elif args.command == "engine":
         from .core.engine.cli import dispatch_engine
         return dispatch_engine(args)
+    elif args.command == "accept":
+        from .core.strategy_acceptance.cli import cmd_accept
+        return cmd_accept(args)
     elif args.command == "api":
         if args.api_command == "serve":
             return cmd_api_serve(args)
