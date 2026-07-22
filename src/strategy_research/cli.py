@@ -804,6 +804,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
     from .core.autoresearch import (
         build_agent_prompt, save_agent_record, read_current_state,
         parse_agent_output, retry_agent_spawn, get_cooldown_seconds,
+        should_run_lazy_detection, read_agent_history, detect_lazy_behavior, save_laziness_report,
     )
     from .core.backtest import run_backtest_script
 
@@ -859,6 +860,35 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         current_state = read_current_state(path, strategy_name)
         print(f"  最佳 Calmar: {current_state['best_calmar']:.4f}")
         print(f"  总轮数: {current_state['total_runs']}")
+
+        # Lazy Detection (每 N 轮检测)
+        lazy_detection_interval = args.lazy_detection_interval or 10
+        if should_run_lazy_detection(round_num, lazy_detection_interval):
+            print(f"\n[Lazy Detection] 检测 Agent 行为 (每 {lazy_detection_interval} 轮)...")
+            runs_dir = path / "strategies" / strategy_name / "runs"
+            lazy_results = []
+            
+            # 读取最近 10 轮的 agent 记录
+            for agent_name in ["researcher", "factor_analyst", "strategist", "anti_overfit_analyst"]:
+                history = read_agent_history(runs_dir, agent_name, threshold=10)
+                if history:
+                    last_output = history[-1].get("output", {})
+                    lazy_result = detect_lazy_behavior(agent_name, last_output, history)
+                    lazy_results.append({"agent": agent_name, **lazy_result})
+                    if lazy_result["issues"]:
+                        print(f"  ⚠️ {agent_name}: {lazy_result['issues']}")
+            
+            # 保存报告
+            if lazy_results:
+                overall_score = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
+                # 创建 run 目录 (如果不存在)
+                runs_dir = path / "strategies" / strategy_name / "runs"
+                run_num = len([d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]) + 1
+                run_name = f"run_{run_num:04d}"
+                run_dir = runs_dir / run_name
+                run_dir.mkdir(exist_ok=True)
+                save_laziness_report(run_dir, round_num, lazy_results, overall_score)
+                print(f"✅ 保存 laziness report: {run_dir}/laziness_report.json")
 
         # 创建 run 目录
         runs_dir = path / "strategies" / strategy_name / "runs"
@@ -1248,6 +1278,7 @@ def main() -> int:
     autoresearch_parser.add_argument("--min-cooldown", type=float, default=1.0, help="最小 cooldown (秒)")
     autoresearch_parser.add_argument("--max-retries", type=int, default=3, help="最大重试次数")
     autoresearch_parser.add_argument("--max-rounds", type=int, help="最大轮数 (不指定则无限循环)")
+    autoresearch_parser.add_argument("--lazy-detection-interval", type=int, default=10, help="懒惰检测间隔 (轮数, 默认 10)")
 
     args = parser.parse_args()
 

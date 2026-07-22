@@ -278,3 +278,200 @@ def get_cooldown_seconds(base_cooldown: float = 30.0, jitter: float = 10.0, min_
     import random
     actual = base_cooldown + random.uniform(-jitter, jitter)
     return max(min_cooldown, actual)
+
+
+# ============================================================
+# Lazy Detection (懒惰检测)
+# ============================================================
+
+def should_run_lazy_detection(round_num: int, interval: int = 10) -> bool:
+    """判断是否应该运行懒惰检测。
+
+    Args:
+        round_num: 当前轮数
+        interval: 检测间隔 (默认 10 轮)
+
+    Returns:
+        是否应该运行检测
+    """
+    return round_num > 0 and round_num % interval == 0
+
+
+def read_agent_history(
+    runs_dir: Path,
+    agent_name: str,
+    threshold: int = 10,
+) -> list[dict[str, Any]]:
+    """读取最近 N 轮的 Agent 记录。
+
+    Args:
+        runs_dir: runs 目录路径
+        agent_name: Agent 名称
+        threshold: 读取最近 N 轮 (默认 10)
+
+    Returns:
+        历史记录列表 [{"round": N, "output": {...}}, ...]
+    """
+    history = []
+
+    # 获取所有 run 目录 (排序)
+    run_dirs = sorted(
+        [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
+        key=lambda d: d.name
+    )
+
+    # 只读取最近 threshold 轮
+    for run_dir in run_dirs[-threshold:]:
+        agent_file = run_dir / "agents" / f"{agent_name}.json"
+        if agent_file.exists():
+            try:
+                with open(agent_file, "r", encoding="utf-8") as f:
+                    record = json.load(f)
+                # 提取轮数
+                run_name = run_dir.name
+                round_num = int(run_name.split("_")[1]) if "_" in run_name else 0
+                history.append({
+                    "round": round_num,
+                    "output": record.get("output", {}),
+                    "timestamp": record.get("timestamp", ""),
+                })
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+    return history
+
+
+def detect_lazy_behavior(
+    agent_name: str,
+    current_output: dict[str, Any],
+    history: list[dict[str, Any]],
+    threshold: int = 3,
+) -> dict[str, Any]:
+    """检测 Agent 是否在偷懒。
+
+    Args:
+        agent_name: Agent 名称
+        current_output: 当前输出
+        history: 历史记录 (最近 N 轮)
+        threshold: 重复阈值 (默认 3)
+
+    Returns:
+        {"lazy_score": float, "issues": list[str], "is_lazy": bool}
+    """
+    lazy_score = 0.0
+    issues = []
+
+    if not history:
+        return {"lazy_score": 0.0, "issues": [], "is_lazy": False}
+
+    recent_outputs = [h.get("output", {}) for h in history[-threshold:]]
+
+    if agent_name == "researcher":
+        # 检查 hypothesis 是否重复
+        recent_hypotheses = [h.get("hypothesis") for h in recent_outputs if h.get("hypothesis")]
+        if current_output.get("hypothesis") in recent_hypotheses:
+            lazy_score += 0.5
+            issues.append("hypothesis 与上轮相同")
+
+        # 检查 action 是否重复
+        recent_actions = [h.get("action") for h in recent_outputs if h.get("action")]
+        if current_output.get("action") in recent_actions:
+            lazy_score += 0.3
+            issues.append("action 与上轮相同")
+
+    elif agent_name == "factor_analyst":
+        # 检查 candidates 是否连续为空
+        recent_candidates = [h.get("candidates", []) for h in recent_outputs]
+        if all(len(c) == 0 for c in recent_candidates) and len(recent_candidates) >= threshold:
+            lazy_score += 0.3
+            issues.append(f"连续 {threshold} 轮无候选因子")
+
+        # 检查 rejected 因子是否相同
+        recent_rejected_names = [
+            [r.get("factor_name") for r in h.get("rejected", [])]
+            for h in recent_outputs
+        ]
+        current_rejected_names = [r.get("factor_name") for r in current_output.get("rejected", [])]
+        if recent_rejected_names and current_rejected_names:
+            if all(set(current_rejected_names) == set(r) for r in recent_rejected_names):
+                lazy_score += 0.2
+                issues.append("rejected 因子与上轮相同")
+
+    elif agent_name == "strategist":
+        # 检查 changes 是否连续为空
+        recent_changes = [h.get("changes", []) for h in recent_outputs]
+        if all(len(c) == 0 for c in recent_changes) and len(recent_changes) >= threshold:
+            lazy_score += 0.4
+            issues.append(f"连续 {threshold} 轮无 changes")
+
+        # 检查 action 是否连续相同
+        recent_actions = [h.get("action") for h in recent_outputs if h.get("action")]
+        if recent_actions and all(a == recent_actions[0] for a in recent_actions):
+            lazy_score += 0.3
+            issues.append("action 连续相同")
+
+    elif agent_name == "risk_controller":
+        # 检查 risk_rating 是否连续相同
+        recent_ratings = [h.get("risk_rating") for h in recent_outputs if h.get("risk_rating")]
+        if recent_ratings and all(r == recent_ratings[0] for r in recent_ratings):
+            lazy_score += 0.2
+            issues.append("risk_rating 连续相同")
+
+    elif agent_name == "anti_overfit_analyst":
+        # 检查 verdict 是否连续 discard
+        recent_verdicts = [h.get("verdict") for h in recent_outputs if h.get("verdict")]
+        if recent_verdicts and all(v == "discard" for v in recent_verdicts):
+            lazy_score += 0.4
+            issues.append(f"连续 {len(recent_verdicts)} 轮 verdict=discard")
+
+        # 检查 overfit_passed 是否连续 false
+        recent_overfit = [h.get("overfit_passed") for h in recent_outputs if "overfit_passed" in h]
+        if recent_overfit and all(v == False for v in recent_overfit):
+            lazy_score += 0.3
+            issues.append("overfit_passed 连续 false")
+
+    return {
+        "lazy_score": min(lazy_score, 1.0),
+        "issues": issues,
+        "is_lazy": lazy_score >= 0.3,
+    }
+
+
+def save_laziness_report(
+    run_dir: Path,
+    round_num: int,
+    lazy_results: list[dict[str, Any]],
+    overall_lazy_score: float,
+) -> Path:
+    """保存 laziness report 到 runs/run_XXXX/。
+
+    Args:
+        run_dir: run 目录路径
+        round_num: 当前轮数
+        lazy_results: 检测结果列表
+        overall_lazy_score: 整体懒惰分数
+
+    Returns:
+        保存的文件路径
+    """
+    # 生成 summary
+    lazy_agents = [r for r in lazy_results if r.get("issues")]
+    if lazy_agents:
+        agent_names = [r["agent"] for r in lazy_agents]
+        summary = f"{'、'.join(agent_names)} 存在懒惰行为"
+    else:
+        summary = "所有 Agent 行为正常"
+
+    report = {
+        "round": round_num,
+        "timestamp": datetime.now().isoformat(),
+        "overall_lazy_score": overall_lazy_score,
+        "agents": lazy_results,
+        "summary": summary,
+    }
+
+    filepath = run_dir / "laziness_report.json"
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    return filepath
