@@ -142,31 +142,31 @@ def read_current_state(
 
     # 读取 results.tsv
     results_path = strategy_dir / "runs" / "results.tsv"
+    lines = []
     if results_path.exists():
-        lines = results_path.read_text(encoding="utf-8").strip().split("\n")
-        header = lines[0] if lines else ""
-        recent_runs = "\n".join(lines[-10:]) if len(lines) > 1 else ""
-        
-        # 解析最佳 Calmar
-        best_calmar = 0.0
-        for line in lines[1:]:
-            parts = line.split("\t")
-            if len(parts) >= 4:
-                try:
-                    calmar = float(parts[3])
-                    best_calmar = max(best_calmar, calmar)
-                except ValueError:
-                    pass
-    else:
-        header = ""
-        recent_runs = ""
-        best_calmar = 0.0
+        content = results_path.read_text(encoding="utf-8").strip()
+        if content:
+            lines = content.split("\n")
+
+    header = lines[0] if lines else ""
+    recent_runs = "\n".join(lines[-10:]) if len(lines) > 1 else ""
+
+    # 解析最佳 Calmar
+    best_calmar = 0.0
+    for line in lines[1:]:
+        parts = line.split("\t")
+        if len(parts) >= 4:
+            try:
+                calmar = float(parts[3])
+                best_calmar = max(best_calmar, calmar)
+            except ValueError:
+                pass
 
     return {
         "strategy_py": strategy_py,
         "best_calmar": best_calmar,
         "current_calmar": best_calmar,
-        "total_runs": len(lines) - 1 if lines else 0,
+        "total_runs": max(len(lines) - 1, 0),
         "recent_runs": recent_runs,
     }
 
