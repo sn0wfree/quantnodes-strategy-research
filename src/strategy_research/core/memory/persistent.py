@@ -238,7 +238,7 @@ class PersistentMemory:
     def find_relevant(self, query: str, max_results: int = MAX_RESULTS) -> List[MemoryEntry]:
         """Keyword search across all memory entries.
 
-        Scoring: metadata_hits * 2.0 + body_hits * 1.0.
+        Scoring: metadata_hits * 2.0 + body_hits * 1.0, with recency boost.
 
         Args:
             query: Search query.
@@ -247,20 +247,42 @@ class PersistentMemory:
         Returns:
             Top-scoring memory entries.
         """
+        import time
+
         query_tokens = _tokenize(query)
         if not query_tokens:
             return []
 
+        now = time.time()
         scored: list[tuple[float, MemoryEntry]] = []
         for entry in self._scan_entries():
             meta_tokens = _tokenize(f"{entry.title} {entry.description}")
             body_tokens = _tokenize(entry.body)
-            score = len(query_tokens & meta_tokens) * METADATA_WEIGHT + len(query_tokens & body_tokens)
-            if score > 0:
+            token_score = len(query_tokens & meta_tokens) * METADATA_WEIGHT + len(query_tokens & body_tokens)
+            if token_score > 0:
+                # Recency boost: 1.0 / (1 + days_since_modified / 7)
+                days_since = (now - entry.modified_at) / 86400
+                recency_score = 1.0 / (1 + days_since / 7)
+                score = token_score * recency_score
                 scored.append((score, entry))
 
         scored.sort(key=lambda x: (-x[0], -x[1].modified_at))
         return [entry for _, entry in scored[:max_results]]
+
+    def format_context_for_prompt(self, query: str, max_results: int = 3) -> str:
+        """Format recalled memories for prompt injection.
+
+        Returns:
+            <recalled-memories> block or empty string.
+        """
+        entries = self.find_relevant(query, max_results)
+        if not entries:
+            return ""
+        lines = ["<recalled-memories>"]
+        for e in entries:
+            lines.append(f"- [{e.title}]({e.path.name}) — {e.description}")
+        lines.append("</recalled-memories>")
+        return "\n".join(lines)
 
     def add(self, name: str, content: str, memory_type: str = "project",
             description: str = "") -> Path:
@@ -292,6 +314,12 @@ class PersistentMemory:
             allowed = ", ".join(MEMORY_TYPES)
             raise ValueError(f"memory_type must be one of: {allowed}")
 
+        # Write dedup: check if content hash already exists
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+        for entry in self._scan_entries():
+            if entry.body.startswith(f"[hash:{content_hash}]"):
+                return entry.path  # Already exists, skip write
+
         # Preserve non-Latin script characters in the slug — collapsing
         # them all to ``_`` caused two same-length non-Latin names to share a
         # filename and silently overwrite each other (PR #95 + #104).
@@ -318,7 +346,9 @@ class PersistentMemory:
         frontmatter = (
             f"---\nname: {safe_name}\n"
             f"description: {safe_desc}\n"
-            f"type: {memory_type}\n---\n\n"
+            f"type: {memory_type}\n"
+            f"hash: {content_hash}\n---\n\n"
+            f"[hash:{content_hash}]\n"
             f"{clean_content}"
         )
         path.write_text(frontmatter, encoding="utf-8")
