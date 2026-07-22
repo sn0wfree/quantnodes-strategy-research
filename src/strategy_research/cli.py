@@ -1783,6 +1783,9 @@ def main() -> int:
     from .core.validation.cli import add_validate_subparsers
     add_validate_subparsers(subparsers)
 
+    from .core.engine.cli import add_engine_subparsers
+    add_engine_subparsers(subparsers)
+
     # api serve
     api_parser = subparsers.add_parser("api", help="HTTP API 服务器")
     api_subparsers = api_parser.add_subparsers(dest="api_command", help="API 命令")
@@ -1879,6 +1882,9 @@ def main() -> int:
     elif args.command == "validate-run":
         from .core.validation.cli import cmd_validate_run
         return cmd_validate_run(args)
+    elif args.command == "engine":
+        from .core.engine.cli import dispatch_engine
+        return dispatch_engine(args)
     elif args.command == "api":
         if args.api_command == "serve":
             return cmd_api_serve(args)
