@@ -100,7 +100,7 @@ def workspace_path(tmp_path: Path) -> Path:
 
 
 def _make_args(path: Path) -> argparse.Namespace:
-    return argparse.Namespace(path=str(path), force=False)
+    return argparse.Namespace(path=str(path), force=False, no_baseline=False)
 
 
 class TestCmdInit:
@@ -220,7 +220,7 @@ class TestCmdInit:
         (workspace_path / "existing_file.txt").write_text("old")
 
         monkeypatch.setattr("builtins.input", lambda _: "test_strat")
-        args = argparse.Namespace(path=str(workspace_path), force=True)
+        args = argparse.Namespace(path=str(workspace_path), force=True, no_baseline=True)
         rc = cmd_init(args)
         assert rc == 0
 
@@ -233,7 +233,7 @@ class TestCmdInit:
         (workspace_path / "existing_file.txt").write_text("old")
 
         monkeypatch.setattr("builtins.input", lambda _: "test_strat")
-        args = argparse.Namespace(path=str(workspace_path), force=False)
+        args = argparse.Namespace(path=str(workspace_path), force=False, no_baseline=True)
         rc = cmd_init(args)
         assert rc == 1
 

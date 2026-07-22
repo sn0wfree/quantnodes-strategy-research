@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+# 默认配置: 保留最近 N 轮详细数据 (其他轮次优先读取 summary.json)
+DEFAULT_KEEP_RECENT = 10
+
+
 def build_agent_prompt(
     agent_name: str,
     prompts_dir: Path,
@@ -301,16 +305,25 @@ def read_agent_history(
     runs_dir: Path,
     agent_name: str,
     threshold: int = 10,
+    current_round: int | None = None,
+    keep_recent: int = DEFAULT_KEEP_RECENT,
 ) -> list[dict[str, Any]]:
-    """读取最近 N 轮的 Agent 记录。
+    """读取最近 N 轮的 Agent 记录 (按需加载摘要)。
+
+    最近 keep_recent 轮: 读取详细 agents/*.json
+    超过 keep_recent 轮: 读取 summary.json 中的 agent_summaries.{name}
+
+    注意: 物理文件全部保留, 只是读取策略不同。
 
     Args:
         runs_dir: runs 目录路径
         agent_name: Agent 名称
         threshold: 读取最近 N 轮 (默认 10)
+        current_round: 当前轮数 (用于判断是否读取详细)
+        keep_recent: 保留详细数据的最近轮数 (默认 10)
 
     Returns:
-        历史记录列表 [{"round": N, "output": {...}}, ...]
+        历史记录列表 [{"round": N, "output": {...}, "source": "detailed|summary"}, ...]
     """
     history = []
 
@@ -322,21 +335,49 @@ def read_agent_history(
 
     # 只读取最近 threshold 轮
     for run_dir in run_dirs[-threshold:]:
-        agent_file = run_dir / "agents" / f"{agent_name}.json"
-        if agent_file.exists():
-            try:
-                with open(agent_file, "r", encoding="utf-8") as f:
-                    record = json.load(f)
-                # 提取轮数
-                run_name = run_dir.name
-                round_num = int(run_name.split("_")[1]) if "_" in run_name else 0
-                history.append({
-                    "round": round_num,
-                    "output": record.get("output", {}),
-                    "timestamp": record.get("timestamp", ""),
-                })
-            except (json.JSONDecodeError, KeyError):
-                pass
+        run_name = run_dir.name
+        try:
+            round_num = int(run_name.split("_")[1]) if "_" in run_name else 0
+        except (ValueError, IndexError):
+            continue
+
+        # 决定读取源
+        read_detailed = (
+            current_round is None
+            or should_read_detailed(round_num, current_round, keep_recent)
+        )
+
+        if read_detailed:
+            # 读取详细 agents/*.json
+            agent_file = run_dir / "agents" / f"{agent_name}.json"
+            if agent_file.exists():
+                try:
+                    with open(agent_file, "r", encoding="utf-8") as f:
+                        record = json.load(f)
+                    history.append({
+                        "round": round_num,
+                        "output": record.get("output", {}),
+                        "timestamp": record.get("timestamp", ""),
+                        "source": "detailed",
+                    })
+                    continue
+                except (json.JSONDecodeError, KeyError, OSError):
+                    pass
+
+        # 读取 summary.json (摘要)
+        summary = load_run_summary(run_dir)
+        if summary and "agent_summaries" in summary:
+            agent_summary = summary["agent_summaries"].get(agent_name, "")
+            history.append({
+                "round": round_num,
+                "output": {
+                    "summary": agent_summary,
+                    "verdict": summary.get("verdict"),
+                    "metrics": summary.get("metrics", {}),
+                },
+                "timestamp": summary.get("timestamp", ""),
+                "source": "summary",
+            })
 
     return history
 
@@ -475,3 +516,376 @@ def save_laziness_report(
         json.dump(report, f, indent=2, ensure_ascii=False)
 
     return filepath
+
+
+# ============================================================
+# Summary Generation (Phase 1)
+# ============================================================
+
+def _extract_actions(agent_outputs: dict[str, dict]) -> list[str]:
+    """从 agent outputs 提取 actions 列表。
+
+    Args:
+        agent_outputs: {"agent_name": output_dict}
+
+    Returns:
+        actions 列表 (e.g., ["researcher: search_external", "change: top_n=5"])
+    """
+    actions = []
+
+    researcher = agent_outputs.get("researcher", {})
+    if researcher.get("action"):
+        actions.append(f"researcher: {researcher['action']}")
+
+    strategist = agent_outputs.get("strategist", {})
+    if strategist.get("action"):
+        actions.append(f"strategist: {strategist['action']}")
+
+    for change in strategist.get("changes", []):
+        actions.append(f"change: {change.get('param', '?')}={change.get('new', '?')}")
+
+    return actions
+
+
+def _summarize_each_agent(agent_outputs: dict[str, dict]) -> dict[str, str]:
+    """每个 Agent 一句话总结 (~50-100 chars)。
+
+    Args:
+        agent_outputs: {"agent_name": output_dict}
+
+    Returns:
+        {"agent_name": "summary_text"}
+    """
+    summaries = {}
+
+    # Researcher
+    researcher = agent_outputs.get("researcher", {})
+    if researcher:
+        action = researcher.get("action", "?")
+        direction = researcher.get("factor_direction", "")
+        hypothesis = researcher.get("hypothesis", "")[:40]
+        summaries["researcher"] = f"{action} | {direction} | {hypothesis}"[:100]
+
+    # Data Quality
+    data_quality = agent_outputs.get("data_quality", {})
+    if data_quality:
+        passed = data_quality.get("passed", False)
+        warnings_count = len(data_quality.get("warnings", []))
+        summaries["data_quality"] = f"passed={passed} | warnings={warnings_count}"
+
+    # Factor Analyst
+    factor = agent_outputs.get("factor_analyst", {})
+    if factor:
+        candidates = factor.get("candidates", [])
+        rec = factor.get("recommendation", "")[:30]
+        summaries["factor_analyst"] = f"{len(candidates)} candidates | {rec}"
+
+    # Strategist
+    strategist = agent_outputs.get("strategist", {})
+    if strategist:
+        changes = strategist.get("changes", [])
+        action = strategist.get("action", "?")
+        summaries["strategist"] = f"{action} | {len(changes)} changes"
+
+    # Portfolio Construction
+    portfolio = agent_outputs.get("portfolio_construction", {})
+    if portfolio:
+        method = portfolio.get("method", "?")
+        vol = portfolio.get("portfolio_vol", 0)
+        summaries["portfolio_construction"] = f"{method} | vol={vol:.3f}"[:80]
+
+    # Risk Controller
+    risk = agent_outputs.get("risk_controller", {})
+    if risk:
+        passed = risk.get("risk_passed", False)
+        rating = risk.get("risk_rating", "?")
+        summaries["risk_controller"] = f"passed={passed} | rating={rating}"
+
+    # Attribution Analyst
+    attribution = agent_outputs.get("attribution_analyst", {})
+    if attribution:
+        alpha = attribution.get("alpha", 0)
+        beta = attribution.get("beta_mkt", 0)
+        summaries["attribution_analyst"] = f"alpha={alpha:.4f} | beta={beta:.2f}"
+
+    # Anti-overfit Analyst
+    anti_overfit = agent_outputs.get("anti_overfit_analyst", {})
+    if anti_overfit:
+        verdict = anti_overfit.get("verdict", "?")
+        passed = anti_overfit.get("overfit_passed", False)
+        summaries["anti_overfit_analyst"] = f"{verdict} | overfit_passed={passed}"
+
+    # Backtest Diagnostics
+    diagnostics = agent_outputs.get("backtest_diagnostics", {})
+    if diagnostics:
+        error_type = diagnostics.get("error_type", "?")
+        severity = diagnostics.get("severity", "?")
+        summaries["backtest_diagnostics"] = f"error={error_type} | severity={severity}"
+
+    return summaries
+
+
+def _extract_key_insight(
+    agent_outputs: dict[str, dict],
+    metrics: dict[str, Any],
+) -> str:
+    """提取本轮关键洞察 (~100-150 chars)。
+
+    Args:
+        agent_outputs: 所有 agent 输出
+        metrics: 本轮 metrics
+
+    Returns:
+        关键洞察字符串
+    """
+    insights = []
+
+    # 从 anti_overfit 提取
+    anti_overfit = agent_outputs.get("anti_overfit_analyst", {})
+    analysis = anti_overfit.get("analysis", "")
+    if analysis:
+        insights.append(analysis[:80])
+
+    # 从 attribution 提取
+    attribution = agent_outputs.get("attribution_analyst", {})
+    alpha = attribution.get("alpha", 0)
+    if alpha:
+        insights.append(f"alpha={alpha:.3f}")
+
+    # 从 researcher 提取
+    researcher = agent_outputs.get("researcher", {})
+    reason = researcher.get("reason", "")
+    if reason:
+        insights.append(f"reason: {reason[:50]}")
+
+    return " | ".join(insights)[:150] if insights else ""
+
+
+def _compute_performance_change(
+    current_metrics: dict[str, Any],
+    previous_summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """计算本轮相对于上轮的变化。
+
+    Args:
+        current_metrics: 本轮 metrics
+        previous_summary: 上轮的 summary (从 summary.json 读取)
+
+    Returns:
+        {
+            "calmar_delta": float,
+            "sharpe_delta": float,
+            "max_dd_delta": float,
+            "verdict_changed": bool,
+        }
+    """
+    if not previous_summary:
+        return {}
+
+    prev_metrics = previous_summary.get("metrics", {})
+    prev_verdict = previous_summary.get("verdict", "")
+
+    current_verdict = current_metrics.get("verdict", "")
+
+    return {
+        "calmar_delta": current_metrics.get("calmar", 0) - prev_metrics.get("calmar", 0),
+        "sharpe_delta": current_metrics.get("sharpe", 0) - prev_metrics.get("sharpe", 0),
+        "max_dd_delta": current_metrics.get("max_dd", 0) - prev_metrics.get("max_dd", 0),
+        "verdict_changed": prev_verdict != current_verdict,
+    }
+
+
+def generate_run_summary(
+    agent_outputs: dict[str, dict[str, Any]],
+    metrics: dict[str, Any],
+    verdict: str,
+    round_num: int,
+    previous_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """生成 run 摘要 (~300 chars)。
+
+    借鉴 OpenCode CompactionPart 的设计,提供快速访问层而不删除原始 agents/。
+
+    Args:
+        agent_outputs: 所有 agent 的输出 {"agent_name": output_dict}
+        metrics: 本轮 metrics (calmar, sharpe, max_dd, ann_return, ann_vol, turnover)
+        verdict: 本轮 verdict (keep/discard)
+        round_num: 当前轮数
+        previous_summary: 上轮的 summary (用于计算 performance_change)
+
+    Returns:
+        summary dict (~300 chars):
+        {
+            "round": int,
+            "timestamp": str,
+            "verdict": "keep|discard",
+            "metrics": {...},
+            "actions": [...],
+            "agent_summaries": {...},
+            "hypothesis": str,
+            "key_insight": str,
+            "performance_change": {...},
+        }
+    """
+    summary = {
+        "round": round_num,
+        "timestamp": datetime.now().isoformat(),
+        "verdict": verdict,
+        "metrics": {
+            "calmar": metrics.get("calmar", 0),
+            "sharpe": metrics.get("sharpe", 0),
+            "max_dd": metrics.get("max_dd", 0),
+            "ann_return": metrics.get("ann_return", 0),
+            "ann_vol": metrics.get("ann_vol", 0),
+            "turnover": metrics.get("turnover", 0),
+        },
+        "actions": _extract_actions(agent_outputs),
+        "agent_summaries": _summarize_each_agent(agent_outputs),
+        "hypothesis": agent_outputs.get("researcher", {}).get("hypothesis", ""),
+        "key_insight": _extract_key_insight(agent_outputs, metrics),
+    }
+
+    # 计算 performance_change (需要包含 verdict 用于对比)
+    metrics_with_verdict = dict(metrics)
+    metrics_with_verdict["verdict"] = verdict
+    summary["performance_change"] = _compute_performance_change(
+        metrics_with_verdict, previous_summary
+    )
+
+    return summary
+
+
+def save_run_summary(run_dir: Path, summary: dict[str, Any]) -> Path:
+    """保存 summary.json 到 run_dir。
+
+    Args:
+        run_dir: run 目录路径 (e.g., runs/run_0042/)
+        summary: generate_run_summary() 返回的 dict
+
+    Returns:
+        保存的文件路径
+    """
+    summary_file = run_dir / "summary.json"
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+    return summary_file
+
+
+def load_run_summary(run_dir: Path) -> dict[str, Any] | None:
+    """快速加载 summary.json (~300 chars)。
+
+    Args:
+        run_dir: run 目录路径
+
+    Returns:
+        summary dict 或 None (如果不存在)
+    """
+    summary_file = run_dir / "summary.json"
+    if summary_file.exists():
+        try:
+            return json.loads(summary_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+    return None
+
+
+# ============================================================
+# Layered Read Configuration (Phase 2)
+# ============================================================
+
+# DEFAULT_KEEP_RECENT 已在文件顶部定义
+
+
+def should_read_detailed(
+    round_num: int,
+    current_round: int,
+    keep_recent: int = DEFAULT_KEEP_RECENT,
+) -> bool:
+    """判断 run 是否读取详细数据 (按距当前轮的距离)。
+
+    Args:
+        round_num: run 轮数
+        current_round: 当前轮数
+        keep_recent: 保留详细数据的最近轮数 (默认 10)
+
+    Returns:
+        True = 读取详细 agents/*.json
+        False = 读取 summary.json
+    """
+    return current_round - round_num < keep_recent
+
+
+def get_run_data(
+    run_dir: Path,
+    current_round: int,
+    keep_recent: int = DEFAULT_KEEP_RECENT,
+) -> dict[str, Any]:
+    """根据距当前轮数决定读取详细还是摘要。
+
+    注意: 不删除任何文件, 只是选择读取源。物理文件全部保留。
+
+    Args:
+        run_dir: run 目录路径
+        current_round: 当前轮数
+        keep_recent: 保留详细数据的轮数
+
+    Returns:
+        {
+            "detailed": bool,    # 是否为详细数据
+            "source": str,       # "agents" | "summary" | "tsv" | "none"
+            "data": dict,        # 完整 agents 或 summary 或 tsv 行
+            "round": int,        # 轮数
+        }
+    """
+    try:
+        round_num = int(run_dir.name.split("_")[1])
+    except (ValueError, IndexError):
+        return {"detailed": False, "source": "none", "data": {}, "round": 0}
+
+    if should_read_detailed(round_num, current_round, keep_recent):
+        # 最近 keep_recent 轮: 读取详细
+        agents_dir = run_dir / "agents"
+        if agents_dir.exists():
+            return {
+                "detailed": True,
+                "source": "agents",
+                "data": _load_all_agents(agents_dir),
+                "round": round_num,
+            }
+
+    # 超过 keep_recent 轮: 读取 summary
+    summary = load_run_summary(run_dir)
+    if summary:
+        return {
+            "detailed": False,
+            "source": "summary",
+            "data": summary,
+            "round": round_num,
+        }
+
+    # 无 summary: 降级到 None (保留物理 agents/ 但不读取)
+    return {
+        "detailed": False,
+        "source": "none",
+        "data": {},
+        "round": round_num,
+    }
+
+
+def _load_all_agents(agents_dir: Path) -> dict[str, dict[str, Any]]:
+    """加载所有 agent 记录。
+
+    Args:
+        agents_dir: agents/ 目录路径
+
+    Returns:
+        {"agent_name": output_dict}
+    """
+    result = {}
+    for agent_file in agents_dir.glob("*.json"):
+        try:
+            data = json.loads(agent_file.read_text(encoding="utf-8"))
+            result[agent_file.stem] = data.get("output", {})
+        except (json.JSONDecodeError, OSError):
+            pass
+    return result

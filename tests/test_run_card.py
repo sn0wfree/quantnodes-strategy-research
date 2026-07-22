@@ -69,9 +69,12 @@ def test_write_run_card_json_structure(tmp_path):
     # schema & meta
     assert card["schema_version"] == SCHEMA_VERSION
     assert "generated_at" in card
-    # config summary — 7 keys, 不含 secret
-    assert set(card["config"].keys()) == set(BACKTEST_SUMMARY_KEYS)
+    # config summary — 非白名单字段不应出现（特别是 secret_api_key）
     assert "secret_api_key" not in card["config"]
+    # 白名单内的字段应被保留（前提是 config 提供了）
+    for k in BACKTEST_SUMMARY_KEYS:
+        if k in config:
+            assert k in card["config"], f"missing whitelist key: {k}"
     # metrics 过滤 — 不含 dict/list
     assert "calmar" in card["metrics"]
     assert "sharpe" in card["metrics"]

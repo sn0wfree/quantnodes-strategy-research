@@ -208,6 +208,39 @@ strategies:
     type: {strategy_type}
     goal_metric: {goal_metric}
     goal_direction: maximize
+
+# 数据源 (cmd import 时使用)
+data:
+  source: duckdb
+  incremental: true
+  codes:
+    - 000300.SH  # 沪深 300（示例，可改为具体股票）
+
+# 回测参数 (cmd run / cmd evaluate 时使用)
+rebalance:
+  freq: M                      # M=月度, W=周度, Q=季度
+  min_history: 252
+
+top_n: 10
+max_weight: 0.25
+weight_method: inverse_vol     # inverse_vol/equal
+
+# 交易成本
+cost:
+  enabled: true
+  commission_bp: 5
+  slippage_bp: 10
+  impact_factor: 0.1
+
+# 风险控制
+risk:
+  vol_targeting:
+    enabled: false
+    target_vol: 0.15
+  trend_filter:
+    enabled: false
+  stop_loss:
+    enabled: false
 """
     (path / "config.yaml").write_text(config_content, encoding="utf-8")
     print("✓ 创建 config.yaml")
@@ -251,12 +284,13 @@ strategies:
     _init_git(path)
 
     # Baseline 回测 (buy and hold HS300)
-    try:
-        strategy_dir = path / "strategies" / strategy_name
-        _run_baseline_backtest(path, strategy_name, strategy_dir)
-        print("✓ 运行 baseline 回测 (buy and hold HS300)")
-    except Exception as e:
-        print(f"⚠️  baseline 回测失败: {e}")
+    if not args.no_baseline:
+        try:
+            strategy_dir = path / "strategies" / strategy_name
+            _run_baseline_backtest(path, strategy_name, strategy_dir)
+            print("✓ 运行 baseline 回测 (buy and hold HS300)")
+        except Exception as e:
+            print(f"⚠️  baseline 回测失败: {e}")
 
     print(f"\n✅ 工作区初始化完成!")
     print(f"   请阅读 {path / 'README.md'} 开始研究。")
@@ -812,6 +846,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         build_agent_prompt, save_agent_record, read_current_state,
         parse_agent_output, retry_agent_spawn, get_cooldown_seconds,
         should_run_lazy_detection, read_agent_history, detect_lazy_behavior, save_laziness_report,
+        generate_run_summary, save_run_summary, load_run_summary, DEFAULT_KEEP_RECENT,
     )
     from .core.backtest import run_backtest_script
 
@@ -886,13 +921,17 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
 
         # Lazy Detection (每 N 轮检测)
         lazy_detection_interval = args.lazy_detection_interval or 10
+        keep_recent = args.keep_recent or DEFAULT_KEEP_RECENT
         if should_run_lazy_detection(round_num, lazy_detection_interval):
             print(f"\n[Lazy Detection] 检测 Agent 行为 (每 {lazy_detection_interval} 轮)...")
             lazy_results = []
-            
-            # 读取最近 10 轮的 agent 记录
+
+            # 读取最近 10 轮的 agent 记录 (分层读取: 详细/摘要)
             for agent_name in ["researcher", "factor_analyst", "strategist", "anti_overfit_analyst"]:
-                history = read_agent_history(runs_dir, agent_name, threshold=10)
+                history = read_agent_history(
+                    runs_dir, agent_name, threshold=10,
+                    current_round=round_num, keep_recent=keep_recent,
+                )
                 if history:
                     last_output = history[-1].get("output", {})
                     lazy_result = detect_lazy_behavior(agent_name, last_output, history)
@@ -1086,6 +1125,33 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
                         lines[i] = "\t".join(parts)
                     break
             results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # 生成并保存 summary.json (Phase 1)
+        agent_outputs = {
+            "researcher": researcher_output,
+            "data_quality": data_quality_output,
+            "factor_analyst": factor_analyst_output,
+            "strategist": strategist_output,
+            "portfolio_construction": portfolio_construction_output,
+            "risk_controller": risk_controller_output,
+            "attribution_analyst": attribution_analyst_output,
+            "anti_overfit_analyst": anti_overfit_analyst_output,
+            "backtest_diagnostics": backtest_diagnostics_output,
+        }
+
+        # 读取上一轮 summary 用于计算 performance_change
+        previous_summary = None
+        if round_num > 1:
+            prev_run_name = f"run_{(round_num - 1):04d}"
+            prev_run_dir = runs_dir / prev_run_name
+            if prev_run_dir.exists():
+                previous_summary = load_run_summary(prev_run_dir)
+
+        summary = generate_run_summary(
+            agent_outputs, metrics, verdict, round_num, previous_summary
+        )
+        save_run_summary(run_dir, summary)
+        print(f"  summary.json 已保存")
 
         print(f"\n✅ 第 {round_num} 轮完成 ({run_name})")
         print(f"  verdict: {verdict}")
@@ -1352,7 +1418,9 @@ def main() -> int:
     # init
     init_parser = subparsers.add_parser("init", help="初始化工作区")
     init_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    init_parser.add_argument("--force", action="store_true", help="强制初始化")
+    init_parser.add_argument("--force", action="store_true", help="强制初始化（非空目录）")
+    init_parser.add_argument("--no-baseline", action="store_true",
+                              help="跳过默认 baseline 回测（更快初始化）")
 
     # status
     status_parser = subparsers.add_parser("status", help="查看工作区状态")
@@ -1425,6 +1493,7 @@ def main() -> int:
     autoresearch_parser.add_argument("--max-retries", type=int, default=3, help="最大重试次数")
     autoresearch_parser.add_argument("--max-rounds", type=int, help="最大轮数 (不指定则无限循环)")
     autoresearch_parser.add_argument("--lazy-detection-interval", type=int, default=10, help="懒惰检测间隔 (轮数, 默认 10)")
+    autoresearch_parser.add_argument("--keep-recent", type=int, default=10, help="读取时保留最近 N 轮详细数据 (其他轮次读取 summary.json, 默认 10)")
 
     args = parser.parse_args()
 

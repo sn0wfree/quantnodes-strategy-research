@@ -135,7 +135,13 @@ def create_strategy(cfg: dict):
 
 
 class FactorStrategy:
-    """因子策略: 基于因子表达式计算权重."""
+    """因子策略: 基于因子表达式计算权重.
+
+    支持 3 种因子类型（按 YAML 配置自动识别）：
+    1. **code**: 表达式因子（如 `ts_return(close, 20)`）
+    2. **alpha_id**: 单个 Alpha Zoo 因子（如 `gtja191_001`）
+    3. **alpha_ids**: 多个 Alpha Zoo 因子组合 + combination 方法
+    """
 
     def __init__(self, factors: list[dict], params: dict):
         self.factors = factors
@@ -149,24 +155,80 @@ class FactorStrategy:
     ) -> dict[str, float]:
         """计算权重."""
         from .compute_factor import compute_factor
+        from .alpha_zoo_adapter import AlphaZooAdapter
 
         # 1. 计算因子值
         factor_values = {}
+        alpha_zoo = None  # lazy init
+
         for factor in self.factors:
             name = factor.get("name", "unknown")
+
+            # 方式 1: 表达式因子
             code = factor.get("code", "")
             if code:
-                factor_values[name] = compute_factor(code, price_panel.loc[:date])
+                try:
+                    factor_values[name] = compute_factor(code, price_panel.loc[:date])
+                except Exception as e:
+                    print(f"⚠️  因子 {name} 计算失败: {e}")
+                continue
 
-        # 2. 计算综合分数
+            # 方式 2: 单个 Alpha Zoo 因子
+            alpha_id = factor.get("alpha_id", "")
+            if alpha_id:
+                if alpha_zoo is None:
+                    alpha_zoo = AlphaZooAdapter()
+                try:
+                    wide = alpha_zoo.compute_as_wide(alpha_id, price_panel.loc[:date])
+                    factor_values[name] = wide
+                except Exception as e:
+                    print(f"⚠️  Alpha Zoo {alpha_id} 计算失败: {e}")
+                continue
+
+            # 方式 3: 多个 Alpha Zoo 因子组合
+            alpha_ids = factor.get("alpha_ids", [])
+            if alpha_ids:
+                if alpha_zoo is None:
+                    alpha_zoo = AlphaZooAdapter()
+                combination = factor.get("combination", "equal")
+                try:
+                    # 计算多个 Alpha，然后按方法组合
+                    df_batch = alpha_zoo.compute_batch(alpha_ids, price_panel.loc[:date])
+                    if df_batch.empty:
+                        continue
+                    if combination == "equal":
+                        combined = df_batch.mean(axis=1)
+                    elif combination == "ic_weighted":
+                        # 简单等权（IC 加权需另算权重）
+                        combined = df_batch.mean(axis=1)
+                    else:
+                        combined = df_batch.mean(axis=1)
+                    # 转为 wide 形式（index=date, columns=assets）
+                    combined_wide = combined.unstack()
+                    factor_values[name] = combined_wide
+                except Exception as e:
+                    print(f"⚠️  Alpha Zoo 组合 {alpha_ids} 计算失败: {e}")
+
+        # 2. 计算综合分数 — 取每个因子在当前 date 的横截面值
         scores = pd.Series(0.0, index=price_panel.columns)
         for factor in self.factors:
             name = factor.get("name", "unknown")
             weight = factor.get("weight", 1.0)
             if name in factor_values:
                 fv = factor_values[name]
+                # 取当前 date 的横截面（per-asset）
+                if isinstance(fv, pd.DataFrame):
+                    # wide DataFrame (T,N) → 取当前 date 一行
+                    if date in fv.index:
+                        current = fv.loc[date]
+                    else:
+                        # date 不在索引里（如 expression 因子返回空 Series），fallback 到最后一行
+                        current = fv.iloc[-1] if len(fv) > 0 else pd.Series(0.0, index=price_panel.columns)
+                else:
+                    # Series（单资产情况）
+                    current = fv
                 # 对齐到 price_panel 的列
-                aligned = fv.reindex(price_panel.columns)
+                aligned = current.reindex(price_panel.columns, fill_value=0)
                 scores = scores.add(aligned * weight, fill_value=0)
 
         # 3. 选择 top_n

@@ -21,12 +21,18 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "0.2"
 BACKTEST_SUMMARY_KEYS = (
+    # 回测元数据
+    "run",
+    "strategy",
+    "action",
+    # 数据范围
     "codes",
     "start_date",
     "end_date",
     "interval",
+    # 回测引擎
     "engine",
     "initial_cash",
     "source",
