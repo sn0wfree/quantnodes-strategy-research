@@ -159,7 +159,7 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 
 ---
 
-## CLI 命令（27 个 = 13 + 14）
+## CLI 命令（32 个 = 13 + 19）
 
 | 命令 | 用途 | 示例 |
 |---|---|---|
@@ -191,6 +191,12 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 | `hypothesis search` | 搜索假设 | `hypothesis search --query "momentum"` |
 | `hypothesis link` | 链接回测结果 | `hypothesis link hyp_abc --run-card /path/run_card.json` |
 | `validate-run` | 跑验证工具（MC/Bootstrap/WF）| `validate-run /tmp/ws/strategies/m/runs/run_0001 --monte-carlo --bootstrap --walk-forward` |
+| `portfolio run` | 组合回测 | `portfolio run --config portfolio.yaml --output-dir ./runs/portfolio` |
+| `portfolio list` | 列出所有策略 | `portfolio list --strategy-dir ./strategies` |
+| `portfolio show` | 显示组合结果 | `portfolio show ./runs/portfolio_001` |
+| `portfolio correlate` | 策略相关性矩阵 | `portfolio correlate --strategy-dir ./strategies` |
+| `api serve` | 启动 HTTP API 服务器 | `api serve --host 0.0.0.0 --port 8765` |
+| `webui serve` | 启动 Web UI 仪表盘 | `webui serve --host 0.0.0.0 --port 8766` |
 
 ### `preflight` 输出示例
 
@@ -446,33 +452,29 @@ $ quantnodes-research session list
 | **P1.5** | Workflow 层（DAG 调度 + Controller + 4 种 Executor + Grounding）| ✅ 完成 | 88 测试 |
 | **P2** | Hook + Memory + Session（llmwikify 模式 + FTS5 + 触发器同步）| ✅ 完成 | 116 测试 |
 | **P3** | Goal + Hypothesis + Validation（MC + Bootstrap + WF）| ✅ 完成 | 283 新测试（162 Goal + 58 Hypothesis + 40 Validation + 23 Integration） |
-| **backtest-overhaul** | Phase 1+2+3（dataclass + 17-key metrics + market_detection + run_card + AST guard）| ⏳ 下一步 | 详见 [docs/backtest-overhaul/README.md](docs/backtest-overhaul/README.md) |
-| **P4-b** | Portfolio 多策略组合回测（combiner + correlation + VaR/CVaR）| ⏳ 计划中 | — |
-| **P4-d** | HTTP API server mode（FastAPI + 6 routers + Swagger）| ⏳ 计划中 | — |
-| **P4-c** | Web UI dashboard（FastAPI + Jinja + HTMX, 7 页面）| ⏳ 计划中 | — |
+| **backtest-overhaul** | Phase 1+2+3（dataclass + 17-key metrics + market_detection + run_card + AST guard）| ✅ 完成 | 233 测试 |
+| **P4-b** | Portfolio 多策略组合回测（combiner + correlation + VaR/CVaR）| ✅ 完成 | 27 测试 |
+| **P4-d** | HTTP API server mode（FastAPI + 6 routers + Swagger）| ✅ 完成 | 15 测试 |
+| **P4-c** | Web UI dashboard（FastAPI + Jinja + HTMX, 7 页面）| ✅ 完成 | 9 测试 |
 
 ### 测试统计
 
-- **4,053+ 测试通过**
+- **4,219+ 测试通过**
 - **0 回归**
-- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 全覆盖
-- CLI 子命令：13 → **27**（+7 goal + 6 hypothesis + 1 validate-run）
+- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 + backtest-overhaul + P4 全覆盖
+- CLI 子命令：13 → **32**（+7 goal + 6 hypothesis + 1 validate-run + 4 portfolio + 1 api + 1 webui）
 
 ### 版本发布
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | **v0.2.0** | 2026-07-22 | 已发布到 PyPI（自动发布 workflow） |
-| **v0.3.0** | 2026-07-22 | 本地 marker，未推送 PyPI；包含 P3（Goal + Hypothesis + Validation）|
+| **v0.3.0** | 2026-07-22 | 本地 marker，未推送 PyPI；包含 P3 + backtest-overhaul + P4（Portfolio / API / WebUI）|
 
 ### 下一步计划
 
-1. **backtest-overhaul Phase 1+2+3**（1.5+1.5+2.5 hr）：为 `core/backtest.py` 补测试，引入 3 dataclass + 17-key metrics + 市场检测 + run_card + AST guard
-2. **P4-b Portfolio 多策略组合回测**（2-3 hr）：combiner（equal_weight/risk_parity/sharpe_weight）+ 相关性矩阵 + VaR/CVaR + CLI
-3. **P4-d HTTP API server**（2-3 hr）：FastAPI app + 6 routers（goal/hypothesis/validation/session/memory/run）+ `api serve` CLI + Swagger `/docs`
-4. **P4-c Web UI dashboard**（2-3 hr）：FastAPI + Jinja + HTMX，7 页面（dashboard/goals/hypotheses/runs/memory）+ `webui serve` CLI
-5. **合回主仓库** sn0wfree/quantnodes：v0.4.0 稳定后启动
-6. **持续优化**：性能 + 用户体验
+1. **合回主仓库** sn0wfree/quantnodes：v0.4.0 稳定后启动
+2. **持续优化**：性能 + 用户体验 + 更多 validation 市场（CRYPTO/FUTURES/FOREX）
 
 ---
 

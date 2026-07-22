@@ -691,7 +691,7 @@ $ pytest tests/test_hooks.py tests/test_session_memory.py tests/test_memory_fts5
 | Validation 工具 | 无 | 无 | 无 | 无 | 无 | **MC + Bootstrap + WF + multi-market** |
 | Goal Context 注入 | 无 | 无 | 无 | 无 | 无 | **每个 user message 顶部注入** |
 | 自动 Hypothesis 创建 | 无 | 无 | 无 | 无 | 无 | **首次 (strategy, market) 幂等创建** |
-| CLI 子命令数 | 13 | 13 | 13 | 13 | 14 | **27（+14）** |
+| CLI 子命令数 | 13 | 13 | 13 | 13 | 14 | **32（+19）** |
 | Goal CLI | — | — | — | — | — | **start/status/evidence/audit/complete/list/cancel** |
 | Hypothesis CLI | — | — | — | — | — | **create/list/show/update/search/link** |
 | Validation CLI | — | — | — | — | — | **validate-run** |
@@ -699,7 +699,7 @@ $ pytest tests/test_hooks.py tests/test_session_memory.py tests/test_memory_fts5
 | 测试数 | 3144 | 3233 | 3607 | 3681 | **3737+** | **4,053+（+283 净增）** |
 | e2e 测试 | 无 | 无 | 1 套 4 case | 2 套 9 case | 3 套 17 case | **6 套 35 case** |
 
-> **P3 完成状态（2026-07-22）**：CLI 27 子命令（+14）、测试数 4,053（+283 净增）、仓库总行数 ~11,500+、e2e 测试 6 套 35 case、0 回归
+> **P4 完成状态（2026-07-22）**：CLI 32 子命令（+19）、测试数 4,219（+449 净增 vs P2 结束）、仓库总行数 ~12,500+、e2e 测试 6 套 35 case、0 回归
 
 ---
 
