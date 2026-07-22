@@ -1712,6 +1712,10 @@ def main() -> int:
     session_list_parser = session_subparsers.add_parser("list", help="列出会话")
     session_list_parser.add_argument("--limit", "-l", type=int, default=20, help="显示数量")
 
+    # goal (P3-a)
+    from .core.goal.cli import add_goal_subparsers
+    add_goal_subparsers(subparsers)
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1747,6 +1751,25 @@ def main() -> int:
         else:
             session_parser.print_help()
             return 0
+    elif args.command == "goal":
+        from .core.goal.cli import (
+            cmd_goal_audit,
+            cmd_goal_cancel,
+            cmd_goal_complete,
+            cmd_goal_evidence,
+            cmd_goal_list,
+            cmd_goal_start,
+            cmd_goal_status,
+        )
+        return {
+            "start": cmd_goal_start,
+            "status": cmd_goal_status,
+            "evidence": cmd_goal_evidence,
+            "audit": cmd_goal_audit,
+            "complete": cmd_goal_complete,
+            "list": cmd_goal_list,
+            "cancel": cmd_goal_cancel,
+        }.get(args.goal_command, lambda a: (goal_parser.print_help(), 0)[1])(args)
     else:
         parser.print_help()
         return 0
