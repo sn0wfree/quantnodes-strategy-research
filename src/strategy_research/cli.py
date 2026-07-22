@@ -1064,15 +1064,21 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         verdict = anti_overfit_analyst_output.get("verdict", "discard")
         print(f"  verdict: {verdict}")
 
-        # 保存 results.tsv
+        # 更新 results.tsv (覆盖 backtest 写入的 pending 行为,使用最终 verdict)
+        # backtest 已经写入了一行 (status=pending),这里更新同一行的 status
         results_path = runs_dir / "results.tsv"
-        with open(results_path, "a", encoding="utf-8") as f:
-            f.write(f"{run_name}\t{backtest_result.get('commit', 'N/A')}\t"
-                    f"{strategist_output.get('action', 'unknown')}\t"
-                    f"{metrics.get('calmar', 0)}\t{metrics.get('sharpe', 0)}\t{metrics.get('max_dd', 0)}\t"
-                    f"{metrics.get('ann_return', 0)}\t{metrics.get('turnover', 0)}\t"
-                    f"{len(factor_analyst_output.get('candidates', []))}\t0\t0\t"
-                    f"{verdict}\t{strategist_output.get('hypothesis', '')}\n")
+        if results_path.exists():
+            content = results_path.read_text(encoding="utf-8")
+            lines = content.strip().split("\n")
+            # 找到最后一个 run_name 行,更新 status
+            for i in range(len(lines) - 1, 0, -1):
+                if lines[i].startswith(run_name + "\t") or lines[i].startswith(run_name + " "):
+                    parts = lines[i].split("\t")
+                    if len(parts) >= 12:
+                        parts[11] = verdict  # status
+                        lines[i] = "\t".join(parts)
+                    break
+            results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         print(f"\n✅ 第 {round_num} 轮完成 ({run_name})")
         print(f"  verdict: {verdict}")
@@ -1098,25 +1104,57 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
 
 def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
                  current_state: dict, previous_outputs: list) -> str:
-    """spawn 单个 Agent (模拟 Task tool 调用)。"""
-    # 这里是模拟实现,实际应该调用 Task tool
-    # 返回一个示例 JSON 输出
+    """spawn 单个 Agent (模拟 Task tool 调用)。
+
+    支持通过环境变量 AUTORESEARCH_BEHAVIOR 控制模拟行为:
+    - "static": 每次返回相同输出 (默认,用于测试)
+    - "varying": 每次返回不同输出 (模拟真实 Agent 探索)
+    - "improving": 模拟 Agent 找到改进方案的过程
+    """
     import json
+    import os
+    import random
+
+    behavior = os.environ.get("AUTORESEARCH_BEHAVIOR", "static")
+    # 从 current_state 获取轮数
+    round_num = current_state.get("total_runs", 0)
 
     if agent_name == "researcher":
+        if behavior == "varying":
+            actions = ["search_external", "discover_local", "optimize_param", "remove_factor"]
+            directions = ["momentum", "volatility", "value", "quality", "size"]
+            idx = round_num % len(actions)
+            return json.dumps({
+                "action": actions[idx],
+                "hypothesis": f"第 {round_num + 1} 轮: 尝试 {directions[idx]} 因子 ({random.randint(1, 100)})",
+                "reason": f"基于上一轮结果探索 {directions[idx]} 维度",
+                "avoid_actions": ["discover_local"] if round_num > 2 else [],
+                "factor_direction": directions[idx],
+                "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                              "narrative_bias": "pass", "confirmation_bias": "pass",
+                              "recency_bias": "pass"},
+            })
+        elif behavior == "improving":
+            # 模拟 Agent 找到改进方案
+            return json.dumps({
+                "action": "optimize_param",
+                "hypothesis": f"Round {round_num + 1}: 调整 top_n 参数",
+                "reason": "降低 top_n 增加集中度",
+                "avoid_actions": [],
+                "factor_direction": "momentum",
+                "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                              "narrative_bias": "pass", "confirmation_bias": "pass",
+                              "recency_bias": "pass"},
+            })
         return json.dumps({
             "action": "discover_local",
             "hypothesis": "波动率因子可能有效",
             "reason": "当前因子池缺少波动率维度",
             "avoid_actions": [],
             "factor_direction": "volatility",
-            "bias_check": {
-                "leader_bias": "pass",
-                "english_bias": "pass",
-                "narrative_bias": "pass",
-                "confirmation_bias": "pass",
-                "recency_bias": "pass"
-            }
+            "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                          "narrative_bias": "pass", "confirmation_bias": "pass",
+                          "recency_bias": "pass"}
         })
     elif agent_name == "data_quality":
         return json.dumps({
@@ -1128,6 +1166,48 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "price_anomalies": []
         })
     elif agent_name == "factor_analyst":
+        if behavior == "varying":
+            # 模拟不同轮次返回不同因子
+            factors_pool = [
+                [{"factor_name": "momentum_60d", "factor_code": "ts_return(close, 60)",
+                  "category": "momentum", "ic_mean": 0.045, "ir": 0.62, "overall_score": 0.68, "passed": True}],
+                [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
+                  "category": "momentum", "ic_mean": 0.052, "ir": 0.71, "overall_score": 0.75, "passed": True}],
+                [],
+                [{"factor_name": "reversal_10d", "factor_code": "-ts_return(close, 10)",
+                  "category": "reversal", "ic_mean": 0.038, "ir": 0.55, "overall_score": 0.62, "passed": True}],
+                [],
+                [{"factor_name": "momentum_120d", "factor_code": "ts_return(close, 120)",
+                  "category": "momentum", "ic_mean": 0.041, "ir": 0.58, "overall_score": 0.66, "passed": True}],
+            ]
+            candidates = factors_pool[round_num % len(factors_pool)]
+            return json.dumps({
+                "path_used": "local" if round_num % 2 == 0 else "alpha_zoo",
+                "candidates": candidates,
+                "rejected": [{"factor_name": f"bad_factor_{round_num}", "reason": "IC < 0.03"}],
+                "combination_method": "ic_weighted",
+                "recommendation": "建议集成新因子" if candidates else "无有效因子",
+            })
+        elif behavior == "improving":
+            # 在第 3 轮后找到有效因子
+            if round_num >= 3:
+                return json.dumps({
+                    "path_used": "local",
+                    "candidates": [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
+                                    "category": "momentum", "ic_mean": 0.052, "ir": 0.71,
+                                    "overall_score": 0.75, "passed": True}],
+                    "rejected": [],
+                    "combination_method": "ic_weighted",
+                    "recommendation": "建议集成 vol_adj_mom",
+                })
+            else:
+                return json.dumps({
+                    "path_used": "local",
+                    "candidates": [],
+                    "rejected": [{"factor_name": "test", "reason": "IC too low"}],
+                    "combination_method": "ic_weighted",
+                    "recommendation": "无有效因子",
+                })
         return json.dumps({
             "path_used": "local",
             "candidates": [],
@@ -1138,6 +1218,13 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "recommendation": "无有效因子"
         })
     elif agent_name == "strategist":
+        if behavior == "improving" and round_num >= 3:
+            return json.dumps({
+                "action": "integrate",
+                "changes": [{"param": "FACTOR_EXPRS", "old": [], "new": ["vol_adj_mom"]}],
+                "reason": "集成 vol_adj_mom 因子",
+                "expected_impact": "Calmar 提升",
+            })
         return json.dumps({
             "action": "optimize",
             "changes": [],
@@ -1153,6 +1240,16 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "portfolio_vol": 0.15
         })
     elif agent_name == "risk_controller":
+        if behavior == "improving" and round_num >= 3:
+            return json.dumps({
+                "risk_passed": True,
+                "risk_rating": "Green",
+                "var_95": -0.018,
+                "cvar_95": -0.025,
+                "max_drawdown": -0.25,
+                "stress_results": {},
+                "tail_risk": {"kurtosis": 2.8, "skewness": -0.05}
+            })
         return json.dumps({
             "risk_passed": False,
             "risk_rating": "Red",
@@ -1163,6 +1260,20 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "tail_risk": {"kurtosis": 3.2, "skewness": -0.15}
         })
     elif agent_name == "attribution_analyst":
+        if behavior == "improving" and round_num >= 3:
+            return json.dumps({
+                "alpha": 0.005 + round_num * 0.001,
+                "beta_mkt": 0.85,
+                "beta_smb": 0.05,
+                "beta_hml": -0.02,
+                "beta_mom": 0.08,
+                "sector_allocation": 0.002,
+                "stock_selection": 0.003 + round_num * 0.001,
+                "interaction": 0.001,
+                "bull_capture": 1.05,
+                "bear_capture": 0.85,
+                "r_squared": 0.90
+            })
         return json.dumps({
             "alpha": -0.0039,
             "beta_mkt": 0.92,
@@ -1177,6 +1288,21 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "r_squared": 0.88
         })
     elif agent_name == "anti_overfit_analyst":
+        if behavior == "improving" and round_num >= 4:
+            return json.dumps({
+                "verdict": "keep",
+                "overfit_passed": True,
+                "methods_passed": {
+                    "start_dependency": True,
+                    "rebalance_offset": True,
+                    "parameter_perturbation": True,
+                    "ablation": True,
+                    "bootstrap": True,
+                    "monte_carlo": True
+                },
+                "analysis": "所有抗过拟合方法通过",
+                "suggestions": ["继续优化"]
+            })
         return json.dumps({
             "verdict": "discard",
             "overfit_passed": False,
