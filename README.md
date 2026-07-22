@@ -159,7 +159,7 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 
 ---
 
-## CLI 命令（13 个）
+## CLI 命令（27 个 = 13 + 14）
 
 | 命令 | 用途 | 示例 |
 |---|---|---|
@@ -177,6 +177,20 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 | `autoresearch` | 自动化研究循环（10 角色串行）| `autoresearch /tmp/ws --max-rounds 5` |
 | `session stats` | 查看写入统计 | `session stats` |
 | `session list` | 列出会话 | `session list` |
+| `goal start` | 创建研究目标（取代当前目标）| `goal start --session-id s1 --objective "..."` |
+| `goal status` | 查看目标状态 | `goal status --session-id s1` |
+| `goal evidence` | 追加证据 | `goal evidence --session-id s1 --text "..." --criterion-id c1` |
+| `goal audit` | 写完成审计 | `goal audit --session-id s1 --criterion-id c1 --result satisfied` |
+| `goal complete` | 完成目标 | `goal complete --session-id s1 --audit-file audit.json` |
+| `goal list` | 列出会话的所有目标 | `goal list --session-id s1` |
+| `goal cancel` | 取消当前目标 | `goal cancel --session-id s1` |
+| `hypothesis create` | 创建研究假设 | `hypothesis create --title "..." --thesis "..."` |
+| `hypothesis list` | 列出假设 | `hypothesis list --status testing` |
+| `hypothesis show` | 显示单个假设 | `hypothesis show hyp_abc123def456` |
+| `hypothesis update` | 更新假设 | `hypothesis update hyp_abc --status validated` |
+| `hypothesis search` | 搜索假设 | `hypothesis search --query "momentum"` |
+| `hypothesis link` | 链接回测结果 | `hypothesis link hyp_abc --run-card /path/run_card.json` |
+| `validate-run` | 跑验证工具（MC/Bootstrap/WF）| `validate-run /tmp/ws/strategies/m/runs/run_0001 --monte-carlo --bootstrap --walk-forward` |
 
 ### `preflight` 输出示例
 
