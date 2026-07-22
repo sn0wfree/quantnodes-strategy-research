@@ -19,6 +19,7 @@ from .models import (
     StaleGoalError,
 )
 from .policy import normalize_required_text, reject_live_execution_objective
+from .store import GoalStore
 
 __all__ = [
     "AuditRow",
@@ -28,6 +29,7 @@ __all__ = [
     "GoalCriterion",
     "GoalRecord",
     "GoalStatus",
+    "GoalStore",
     "RiskTier",
     "StaleGoalError",
     "normalize_required_text",
