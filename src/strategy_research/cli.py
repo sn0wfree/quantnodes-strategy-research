@@ -1541,6 +1541,63 @@ def _cmd_llm_list_profiles() -> int:
 
 
 # ============================================================
+# Session commands
+# ============================================================
+
+def cmd_session_stats(args) -> int:
+    """查看写入统计。"""
+    from .core.session import SessionDB, MetricsLogger
+    from .core.session.metrics import MetricsLogger as ML
+
+    db = SessionDB()
+    stats = db.metrics_logger.get_stats()
+
+    if not stats or stats.get("total_writes", 0) == 0:
+        print("暂无写入记录")
+        return 0
+
+    print("=== Session 写入统计 ===")
+    print(f"  总写入次数: {stats.get('total_writes', 0)}")
+    print(f"  总消息数:   {stats.get('total_messages', 0)}")
+    print(f"  成功率:     {stats.get('success_rate', 0):.1%}")
+    print(f"  平均速率:   {stats.get('avg_rate', 0):.0f} 条/秒")
+    print(f"  最大速率:   {stats.get('max_rate', 0):.0f} 条/秒")
+    print(f"  最小速率:   {stats.get('min_rate', 0):.0f} 条/秒")
+    print(f"  平均耗时:   {stats.get('avg_duration', 0):.3f}s")
+    print(f"  总耗时:     {stats.get('total_duration', 0):.3f}s")
+
+    # 显示最近记录
+    recent = db.metrics_logger.get_recent(n=args.recent)
+    if recent:
+        print(f"\n=== 最近 {len(recent)} 条记录 ===")
+        for r in reversed(recent):
+            status = "✓" if r["ok"] else "✗"
+            print(f"  {status} {r['count']} 条, {r['duration']:.3f}s, {r['rate']:.0f} 条/秒")
+
+    return 0
+
+
+def cmd_session_list(args) -> int:
+    """列出会话。"""
+    from .core.session import SessionDB
+
+    db = SessionDB()
+    sessions = db.list_sessions(limit=args.limit)
+
+    if not sessions:
+        print("暂无会话")
+        return 0
+
+    print(f"=== 会话列表 (共 {len(sessions)} 个) ===")
+    for s in sessions:
+        from datetime import datetime
+        created = datetime.fromtimestamp(s.created_at).strftime("%Y-%m-%d %H:%M")
+        print(f"  {s.id[:16]:16s}  {created}  {s.workspace or '(global)'}")
+
+    return 0
+
+
+# ============================================================
 # Main CLI
 # ============================================================
 
@@ -1643,6 +1700,18 @@ def main() -> int:
     autoresearch_parser.add_argument("--lazy-detection-interval", type=int, default=10, help="懒惰检测间隔 (轮数, 默认 10)")
     autoresearch_parser.add_argument("--keep-recent", type=int, default=10, help="读取时保留最近 N 轮详细数据 (其他轮次读取 summary.json, 默认 10)")
 
+    # session
+    session_parser = subparsers.add_parser("session", help="会话管理")
+    session_subparsers = session_parser.add_subparsers(dest="session_command", help="会话命令")
+
+    # session stats
+    session_stats_parser = session_subparsers.add_parser("stats", help="查看写入统计")
+    session_stats_parser.add_argument("--recent", "-r", type=int, default=10, help="显示最近 N 条记录")
+
+    # session list
+    session_list_parser = session_subparsers.add_parser("list", help="列出会话")
+    session_list_parser.add_argument("--limit", "-l", type=int, default=20, help="显示数量")
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1670,6 +1739,14 @@ def main() -> int:
         return cmd_import(args)
     elif args.command == "autoresearch":
         return cmd_autoresearch(args)
+    elif args.command == "session":
+        if args.session_command == "stats":
+            return cmd_session_stats(args)
+        elif args.session_command == "list":
+            return cmd_session_list(args)
+        else:
+            session_parser.print_help()
+            return 0
     else:
         parser.print_help()
         return 0
