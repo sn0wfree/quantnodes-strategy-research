@@ -1,0 +1,101 @@
+# ============================================================
+# strategy-research LLM 配置文件
+# ============================================================
+# 位置: ~/.quantnodes-research/llm.yaml
+# 优先级: CLI flags > env vars > 本文件 > 代码默认值
+# 文档: docs/llm-config-template.yaml (本文件)
+# ============================================================
+
+# 启动时默认激活的 profile (CLI --llm-profile 覆盖)
+default_profile: deepseek
+
+# ============================================================
+# Profiles: 命名 LLM 配置集合
+# ============================================================
+# 每个 profile 可覆盖以下任意字段:
+#   base_url, model, temperature, top_p, max_tokens,
+#   frequency_penalty, presence_penalty, stop, seed,
+#   timeout_s, max_retries, retry_backoff_s, proxy,
+#   stream, parallel_tool_calls, tool_choice, provider
+#
+# api_key 永远从 env 读取 (OPENAI_API_KEY) — 不要填在这里!
+# ============================================================
+
+profiles:
+
+  # ── default: OpenAI 官方 ───────────────────
+  default:
+    provider: openai
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    temperature: 0.7
+    max_tokens: 4096
+    timeout_s: 60.0
+    max_retries: 3
+    stream: true
+
+  # ── deepseek: 高性价比中文友好 ─────────────
+  deepseek:
+    provider: deepseek
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-chat
+    temperature: 0.3
+    max_tokens: 8000
+    timeout_s: 90.0
+    max_retries: 5
+    stream: true
+
+  # ── kimi: 长上下文 (128K) ─────────────────
+  kimi:
+    provider: kimi
+    base_url: https://api.moonshot.cn/v1
+    model: moonshot-v1-8k
+    temperature: 0.7
+    max_tokens: 8000
+    timeout_s: 60.0
+
+  # ── qwen: 阿里云百炼 ───────────────────────
+  qwen:
+    provider: qwen
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+    temperature: 0.7
+    max_tokens: 8000
+    timeout_s: 60.0
+
+  # ── fast: 小模型快速试错 ───────────────────
+  fast:
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.5
+    max_tokens: 2048
+    timeout_s: 30.0
+    max_retries: 2
+
+  # ── deep: 大模型深度推理 ───────────────────
+  deep:
+    provider: openai
+    model: gpt-4o
+    temperature: 0.2
+    max_tokens: 16000
+    timeout_s: 180.0
+    max_retries: 5
+    top_p: 0.95
+
+  # ── deterministic: 复现性（设 seed）─────────
+  deterministic:
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.0
+    seed: 42
+    stream: false
+    # 注意: 并发 + 同一 seed 不保证严格 bit-exact 复现
+
+# ============================================================
+# 自定义 profile 示例（用户可加任意命名 profile）
+# ============================================================
+# my_custom:
+#   base_url: https://my-proxy.example.com/v1
+#   model: my-finetuned-model
+#   temperature: 0.5
+#   proxy: socks5://127.0.0.1:1080
