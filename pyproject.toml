@@ -45,6 +45,10 @@ api = [
     "uvicorn[standard]>=0.27",
     "pydantic>=2.5",
 ]
+engine = [
+    "pydantic>=2.5",
+    "QuantOPT>=0.1.1",
+]
 webui = [
     "jinja2>=3.1",
 ]
