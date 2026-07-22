@@ -1,0 +1,28 @@
+name: crypto_lab
+description: 加密货币研究实验室 — 链上数据 + 技术分析 + 风控
+agents:
+  - id: researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: factor_analyst
+    prompt_file: .prompts/factor_analyst.md
+    input_from: [researcher]
+    tools: [compute_factor, run_backtest]
+  - id: strategist
+    prompt_file: .prompts/strategist.md
+    input_from: [factor_analyst]
+    tools: [write_file, run_backtest]
+  - id: risk_controller
+    prompt_file: .prompts/risk_controller.md
+    input_from: [strategist]
+    tools: [run_backtest]
+  - id: backtest_diagnostics
+    prompt_file: .prompts/backtest_diagnostics.md
+    input_from: [risk_controller]
+    tools: [run_backtest]
+dag:
+  researcher: []
+  factor_analyst: [researcher]
+  strategist: [factor_analyst]
+  risk_controller: [strategist]
+  backtest_diagnostics: [risk_controller]

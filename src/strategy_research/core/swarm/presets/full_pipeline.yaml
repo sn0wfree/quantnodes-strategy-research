@@ -1,0 +1,53 @@
+name: full_pipeline
+description: 完整 10-agent 研究流水线
+agents:
+  - id: researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: data_quality
+    prompt_file: .prompts/data_quality.md
+    input_from: [researcher]
+    tools: [read_file]
+  - id: factor_analyst
+    prompt_file: .prompts/factor_analyst.md
+    input_from: [researcher, data_quality]
+    tools: [compute_factor, run_backtest]
+  - id: strategist
+    prompt_file: .prompts/strategist.md
+    input_from: [factor_analyst]
+    tools: [write_file, run_backtest]
+  - id: portfolio_construction
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [strategist]
+    tools: [run_backtest]
+  - id: risk_controller
+    prompt_file: .prompts/risk_controller.md
+    input_from: [portfolio_construction]
+    tools: [run_backtest]
+  - id: attribution_analyst
+    prompt_file: .prompts/attribution_analyst.md
+    input_from: [risk_controller]
+    tools: [compute_factor]
+  - id: anti_overfit_analyst
+    prompt_file: .prompts/anti_overfit_analyst.md
+    input_from: [risk_controller, attribution_analyst]
+    tools: [run_backtest]
+  - id: backtest_diagnostics
+    prompt_file: .prompts/backtest_diagnostics.md
+    input_from: [anti_overfit_analyst]
+    tools: [run_backtest]
+  - id: orchestrator
+    prompt_file: .prompts/orchestrator.md
+    input_from: [backtest_diagnostics]
+    tools: [read_file]
+dag:
+  researcher: []
+  data_quality: [researcher]
+  factor_analyst: [researcher, data_quality]
+  strategist: [factor_analyst]
+  portfolio_construction: [strategist]
+  risk_controller: [portfolio_construction]
+  attribution_analyst: [risk_controller]
+  anti_overfit_analyst: [risk_controller, attribution_analyst]
+  backtest_diagnostics: [anti_overfit_analyst]
+  orchestrator: [backtest_diagnostics]

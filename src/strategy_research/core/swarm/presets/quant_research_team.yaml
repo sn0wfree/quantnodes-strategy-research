@@ -1,0 +1,23 @@
+name: quant_research_team
+description: 量化研究团队 — 因子发现到策略优化
+agents:
+  - id: researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, compute_factor]
+  - id: data_quality
+    prompt_file: .prompts/data_quality.md
+    input_from: [researcher]
+    tools: [read_file]
+  - id: factor_analyst
+    prompt_file: .prompts/factor_analyst.md
+    input_from: [researcher, data_quality]
+    tools: [compute_factor, run_backtest]
+  - id: strategist
+    prompt_file: .prompts/strategist.md
+    input_from: [factor_analyst]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  researcher: []
+  data_quality: [researcher]
+  factor_analyst: [researcher, data_quality]
+  strategist: [factor_analyst]

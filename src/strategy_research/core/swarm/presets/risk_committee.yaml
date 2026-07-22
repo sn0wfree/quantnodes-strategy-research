@@ -1,0 +1,18 @@
+name: risk_committee
+description: 风控委员会 — 风险评估与归因分析
+agents:
+  - id: risk_controller
+    prompt_file: .prompts/risk_controller.md
+    tools: [read_file, run_backtest]
+  - id: attribution_analyst
+    prompt_file: .prompts/attribution_analyst.md
+    input_from: [risk_controller]
+    tools: [read_file, compute_factor]
+  - id: anti_overfit_analyst
+    prompt_file: .prompts/anti_overfit_analyst.md
+    input_from: [risk_controller, attribution_analyst]
+    tools: [run_backtest]
+dag:
+  risk_controller: []
+  attribution_analyst: [risk_controller]
+  anti_overfit_analyst: [risk_controller, attribution_analyst]

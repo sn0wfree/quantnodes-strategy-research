@@ -1,0 +1,33 @@
+name: sector_rotation
+description: 行业轮动研究 — 行业因子 + 动量 + 风格切换
+agents:
+  - id: researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, compute_factor]
+  - id: factor_analyst
+    prompt_file: .prompts/factor_analyst.md
+    input_from: [researcher]
+    tools: [compute_factor, run_backtest]
+  - id: strategist
+    prompt_file: .prompts/strategist.md
+    input_from: [factor_analyst]
+    tools: [write_file, run_backtest]
+  - id: portfolio_construction
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [strategist]
+    tools: [run_backtest]
+  - id: attribution_analyst
+    prompt_file: .prompts/attribution_analyst.md
+    input_from: [portfolio_construction]
+    tools: [compute_factor]
+  - id: orchestrator
+    prompt_file: .prompts/orchestrator.md
+    input_from: [attribution_analyst]
+    tools: [read_file]
+dag:
+  researcher: []
+  factor_analyst: [researcher]
+  strategist: [factor_analyst]
+  portfolio_construction: [strategist]
+  attribution_analyst: [portfolio_construction]
+  orchestrator: [attribution_analyst]

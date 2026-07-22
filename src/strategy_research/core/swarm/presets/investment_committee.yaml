@@ -1,0 +1,28 @@
+name: investment_committee
+description: 投资委员会 — 多角色评审策略方案
+agents:
+  - id: quant_researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, compute_factor]
+  - id: risk_controller
+    prompt_file: .prompts/risk_controller.md
+    input_from: [quant_researcher]
+    tools: [read_file, run_backtest]
+  - id: portfolio_construction
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [quant_researcher, risk_controller]
+    tools: [run_backtest]
+  - id: anti_overfit_analyst
+    prompt_file: .prompts/anti_overfit_analyst.md
+    input_from: [portfolio_construction]
+    tools: [run_backtest]
+  - id: orchestrator
+    prompt_file: .prompts/orchestrator.md
+    input_from: [anti_overfit_analyst]
+    tools: [read_file]
+dag:
+  quant_researcher: []
+  risk_controller: [quant_researcher]
+  portfolio_construction: [quant_researcher, risk_controller]
+  anti_overfit_analyst: [portfolio_construction]
+  orchestrator: [anti_overfit_analyst]
