@@ -30,7 +30,10 @@ R_p - R_f = α + β_mkt × MKT + β_smb × SMB + β_hml × HML + β_mom × MOM +
 
 ## 输出
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "alpha": 0.008,
   "beta_mkt": 0.85,
@@ -44,7 +47,6 @@ R_p - R_f = α + β_mkt × MKT + β_smb × SMB + β_hml × HML + β_mom × MOM +
   "bear_capture": 0.85,
   "r_squared": 0.92
 }
-```
 
 ## 规则
 

@@ -65,6 +65,20 @@
 - FACTOR_EXPRS: 因子表达式列表
 - FACTOR_WEIGHT_METHOD: 因子权重方式
 
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
+{
+  "action": "integrate | optimize | remove",
+  "changes": [
+    {"param": "FACTOR_EXPRS", "old": [...], "new": [...]},
+    {"param": "top_n", "old": 10, "new": 20}
+  ],
+  "reason": "操作原因",
+  "expected_impact": "预期影响"
+}
+
 ## 规则
 - 每次只做一个操作
 - 保留 Calmar 改善的因子

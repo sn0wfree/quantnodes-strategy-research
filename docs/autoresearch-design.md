@@ -19,86 +19,55 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Main Agent (看门狗)                         │
-│  启动 → 监控卡住/重复 → 最终停止确认 (非常苛刻)                      │
+│                 Main Process (Orchestrator + Main Agent)            │
+│                                                                     │
+│  职责:                                                              │
+│  - 读状态 (Step 1)                                                  │
+│  - spawn 每个 Subagent via Task tool (Step 2/3/5)                  │
+│  - 保存记录到 runs/run_XXXX/agents/                                 │
+│  - 传递输出给下一个 Agent                                           │
+│  - 决策 keep/discard (Step 6)                                       │
+│  - 监控卡住/重复                                                    │
+│  - 速度控制                                                        │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                               │
+                              │ spawn via Task tool (串行)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Orchestrator                                │
-│  Step 1: 读状态                                                    │
-│  Step 2: spawn Researcher                                          │
-│  Step 3: spawn Data Quality → Factor Analyst → Strategist → P.C.   │
-│  Step 4: 保存 (框架自动)                                           │
-│  Step 5: spawn Risk Controller → Attribution Analyst → Anti-overfit │
-│  Step 6: 提交                                                      │
+│                         Subagents                                   │
+│                                                                     │
+│  Step 2: Researcher → agents/researcher.json                       │
+│  Step 3: Data Quality → agents/data_quality.json                   │
+│  Step 3: Factor Analyst → agents/factor_analyst.json               │
+│  Step 3: Strategist → agents/strategist.json                       │
+│  Step 3: Portfolio Construction → agents/portfolio_construction.json│
+│  Step 5: Risk Controller → agents/risk_controller.json             │
+│  Step 5: Attribution Analyst → agents/attribution_analyst.json     │
+│  Step 5: Anti-overfit Analyst → agents/anti_overfit_analyst.json   │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-┌──────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ Data Quality │  │    Researcher    │  │  Factor Analyst  │
-│              │  │                  │  │                  │
-│ - NaN 比例   │  │ - 偏见自检       │  │ - 路径 A: 本地   │
-│ - 交易日缺失 │  │ - 因子池评估     │  │   MCTS           │
-│ - 价格异常   │  │ - 行动决策       │  │ - 路径 D: Alpha  │
-│ - 除权因子   │  │ - Research       │  │   Zoo            │
-│              │  │   Momentum       │  │ - IC/IR          │
-│              │  │ - 假设           │  │ - 6 维评分       │
-│              │  │                  │  │ - Mutual IC      │
-│              │  │                  │  │ - IC 衰减        │
-└──────────────┘  └──────────────────┘  └──────────────────┘
-        │
-        ▼
-┌──────────────────┐                  ┌──────────────────┐
-│    Strategist    │                  │ Portfolio        │
-│                  │                  │ Construction     │
-│ - 因子集成       │                  │                  │
-│ - 参数优化       │                  │ - 风险平价       │
-│ - 因子移除       │                  │ - 协方差估计     │
-│                  │                  │ - 风险预算       │
-└──────────────────┘                  └──────────────────┘
-                                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ Risk Controller  │  │  Attribution     │  │ Anti-overfit     │
-│                  │  │  Analyst         │  │ Analyst          │
-│ - 风控阈值       │  │                  │  │                  │
-│ - VaR/CVaR      │  │ - Brinson 归因   │  │ - 起点依赖       │
-│ - Monte Carlo    │  │ - Fama-French    │  │ - 调仓日偏移     │
-│ - 压力测试       │  │ - 牛熊捕获率     │  │ - 参数扰动       │
-│ - 尾部风险       │  │                  │  │ - 消融实验       │
-│                  │  │                  │  │ - Bootstrap      │
-│                  │  │                  │  │ - MC 排列检验    │
-└──────────────────┘  └──────────────────┘  └──────────────────┘
-
-┌──────────────────┐
-│ Backtest         │
-│ Diagnostics      │
-│                  │
-│ - 错误分类       │
-│ - 修复建议       │
-└──────────────────┘
 ```
 
-### 2.2 Agent 清单
+### 2.2 关键约束
+
+- **Task tool 嵌套限制**: 只能 spawn 一个 subagent,不能嵌套 spawn
+- **串行执行**: 所有 Agent 由 Main Process 串行 spawn
+- **立即保存**: 每个 Agent 完成后立即保存记录到 `runs/run_XXXX/agents/`
+- **传递通信**: Agent 间通信通过 Main Process 传递 (不通过文件)
+
+### 2.3 Agent 清单
 
 | # | 角色 | 文件 | 核心问题 |
 |---|------|------|---------|
-| 0 | **Main Agent** (看门狗) | — (主进程) | 启动 / 监控 / 停止 |
-| 1 | **Orchestrator** (调度) | `.prompts/orchestrator.md` | 谁在什么时候跑? |
-| 2 | **Data Quality** (数据质量) | `.prompts/data_quality.md` | 数据干净吗? |
-| 3 | **Researcher** (研究员) | `.prompts/researcher.md` | 下一步做什么? |
-| 4 | **Factor Analyst** (因子分析师) | `.prompts/factor_analyst.md` | 哪些因子有效? |
-| 5 | **Strategist** (策略师) | `.prompts/strategist.md` | 怎么集成到策略? |
-| 6 | **Portfolio Construction** (组合构建) | `.prompts/portfolio_construction.md` | 权重怎么分配? |
-| 7 | **Risk Controller** (风控官) | `.prompts/risk_controller.md` | 风险超标了吗? |
-| 8 | **Attribution Analyst** (归因分析师) | `.prompts/attribution_analyst.md` | 收益来源是什么? |
-| 9 | **Anti-overfit Analyst** (抗过拟合分析师) | `.prompts/anti_overfit_analyst.md` | 结果可信吗? |
-| 10 | **Backtest Diagnostics** (回测诊断) | `.prompts/backtest_diagnostics.md` | 回测哪里出错了? |
+| 1 | **Researcher** | `.prompts/researcher.md` | 下一步做什么? |
+| 2 | **Data Quality** | `.prompts/data_quality.md` | 数据干净吗? |
+| 3 | **Factor Analyst** | `.prompts/factor_analyst.md` | 哪些因子有效? |
+| 4 | **Strategist** | `.prompts/strategist.md` | 怎么集成到策略? |
+| 5 | **Portfolio Construction** | `.prompts/portfolio_construction.md` | 权重怎么分配? |
+| 6 | **Risk Controller** | `.prompts/risk_controller.md` | 风险超标了吗? |
+| 7 | **Attribution Analyst** | `.prompts/attribution_analyst.md` | 收益来源是什么? |
+| 8 | **Anti-overfit Analyst** | `.prompts/anti_overfit_analyst.md` | 结果可信吗? |
 
 ## 3. Agent 角色定义
 
@@ -580,3 +549,97 @@ workspace/
 | P2 | 改 backtest.py (git-as-log) | `src/strategy_research/core/backtest.py` |
 | P2 | 改 git.py (rich message) | `src/strategy_research/core/git.py` |
 | P2 | 改 db.py (扩展表) | `src/strategy_research/core/db.py` |
+
+## 10. 实现细节
+
+### 10.1 辅助函数 (autoresearch.py)
+
+```python
+# 核心函数
+build_agent_prompt()      # 构造 Agent prompt
+save_agent_record()       # 保存 Agent 记录到 runs/run_XXXX/agents/
+read_current_state()      # 读取当前状态 (strategy.py + results.tsv)
+parse_agent_output()      # 解析 Agent 输出 (自动处理 markdown 包裹)
+retry_agent_spawn()       # 重试 Agent spawn (最多 3 次)
+get_cooldown_seconds()    # 计算带随机抖动的 cooldown 时间
+```
+
+### 10.2 输出格式要求
+
+所有 Agent 必须返回纯 JSON,不要包含 markdown 代码块标记。
+
+**容错解析**:
+1. 尝试直接 JSON 解析
+2. 提取 ```json ... ``` 中的内容
+3. 提取 ``` ... ``` 中的内容
+4. 提取 { ... } 或 [ ... ] 中的内容
+5. 返回 {"error": "parse_failed", "raw": raw_output[:1000]}
+
+### 10.3 速度控制
+
+**Cooldown 配置**:
+- `base_cooldown`: 30 秒 (默认)
+- `jitter`: 10 秒 (±随机抖动)
+- `min_cooldown`: 1 秒 (最小值)
+
+**实际 cooldown** = `base_cooldown + random(-jitter, +jitter)`, 最小 `min_cooldown`
+
+**执行位置**: 每个 Agent 之间 (Step 3.1→3.2→3.3→4→5.1→5.2→5.3→5.4)
+
+**轮间 cooldown**: `base_cooldown * 2 ± jitter * 2`
+
+### 10.4 强制执行
+
+所有 Agent 强制执行,无论前一个 Agent 输出如何:
+- Portfolio Construction: 即使 Strategist 无新因子,仍检查/优化现有权重
+- Backtest Diagnostics: 即使 Risk Controller 无问题,仍检查回测日志
+
+### 10.5 重试机制
+
+**重试策略**:
+- 最大重试次数: 3 (可配置)
+- 重试间隔: 5 秒
+- 重试条件: JSON 解析失败或执行异常
+
+**重试流程**:
+1. 执行 Agent spawn
+2. 解析输出 (parse_agent_output)
+3. 如果解析失败,等待 5 秒后重试
+4. 如果 3 次都失败,返回 {"error": "max_retries_exceeded"}
+
+### 10.6 CLI 命令
+
+```bash
+# 运行自动化研究循环
+quantnodes-research autoresearch <path> \
+  --strategy <name> \
+  --cooldown 30 \        # 基础 cooldown (秒)
+  --jitter 10 \          # 随机抖动范围 (±秒)
+  --min-cooldown 1 \     # 最小 cooldown (秒)
+  --max-retries 3 \      # 最大重试次数
+  --max-rounds 100       # 最大轮数 (不指定则无限循环)
+```
+
+## 11. 测试验证
+
+### 11.1 第 13 轮测试结果
+
+| Agent | 输出 | 状态 |
+|-------|------|------|
+| Researcher | action=search_external | ✅ |
+| Data Quality | passed=True | ✅ |
+| Factor Analyst | candidates=0, rejected=8 | ✅ |
+| Strategist | vol_20d 退化,已回退 | ✅ |
+| Portfolio Construction | 未执行 | ❌ (已修复) |
+| Risk Controller | risk_passed=False, Red | ✅ |
+| Attribution Analyst | alpha=-0.39% | ✅ |
+| Anti-overfit Analyst | verdict=discard | ✅ |
+| Backtest Diagnostics | 未执行 | ❌ (已修复) |
+
+### 11.2 修复内容
+
+1. **强制执行**: Portfolio Construction + Backtest Diagnostics 强制执行
+2. **统一格式**: 所有 .prompts/*.md 添加纯 JSON 格式要求
+3. **容错解析**: 添加 parse_agent_output() 函数
+4. **速度控制**: 添加 cooldown 配置 (30s ± 10s, MIN=1s)
+5. **重试机制**: 添加 retry_agent_spawn() 函数 (最多 3 次)

@@ -796,6 +796,382 @@ def cmd_import(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_autoresearch(args: argparse.Namespace) -> int:
+    """执行 autoresearch 命令 - 运行自动化研究循环。"""
+    import json
+    import time
+    import random
+    from .core.autoresearch import (
+        build_agent_prompt, save_agent_record, read_current_state,
+        parse_agent_output, retry_agent_spawn, get_cooldown_seconds,
+    )
+    from .core.backtest import run_backtest_script
+
+    path = Path(args.path).resolve()
+
+    # 检查工作区
+    if not (path / "config.yaml").exists():
+        print(f"❌ 不是有效的工作区: {path}")
+        return 1
+
+    # 读取 config.yaml
+    try:
+        import yaml
+    except ImportError:
+        print("❌ 需要安装 pyyaml: pip install pyyaml")
+        return 1
+
+    config_path = path / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    strategy_name = args.strategy
+    if not strategy_name:
+        strategy_name = config.get("workspace", {}).get("default_strategy")
+        if not strategy_name:
+            print("❌ 未指定策略名称，请使用 --strategy <name>")
+            return 1
+
+    # 速度控制参数
+    base_cooldown = args.cooldown or 30.0
+    jitter = args.jitter or 10.0
+    min_cooldown = args.min_cooldown or 1.0
+    max_retries = args.max_retries or 3
+
+    print(f"\n🚀 启动 autoresearch 循环")
+    print(f"   策略: {strategy_name}")
+    print(f"   cooldown: {base_cooldown}s ± {jitter}s (MIN={min_cooldown}s)")
+    print(f"   max_retries: {max_retries}")
+    print()
+
+    # 主循环
+    round_num = 0
+    while True:
+        round_num += 1
+        round_start = time.time()
+
+        print(f"{'='*60}")
+        print(f"📍 第 {round_num} 轮研究")
+        print(f"{'='*60}")
+
+        # Step 1: 读状态
+        print("\n[Step 1] 读取状态...")
+        current_state = read_current_state(path, strategy_name)
+        print(f"  最佳 Calmar: {current_state['best_calmar']:.4f}")
+        print(f"  总轮数: {current_state['total_runs']}")
+
+        # 创建 run 目录
+        runs_dir = path / "strategies" / strategy_name / "runs"
+        run_num = len([d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]) + 1
+        run_name = f"run_{run_num:04d}"
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(exist_ok=True)
+        (run_dir / "agents").mkdir(exist_ok=True)
+
+        # Step 2: spawn Researcher
+        print("\n[Step 2] spawn Researcher...")
+        researcher_output = retry_agent_spawn(
+            lambda: _spawn_agent("researcher", path, strategy_name, current_state, []),
+            "researcher",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "researcher", 2, current_state, researcher_output)
+        print(f"  action: {researcher_output.get('action', '?')}")
+        print(f"  hypothesis: {researcher_output.get('hypothesis', '?')[:50]}...")
+
+        # Step 3: 执行 (强制执行所有 Agent)
+        print("\n[Step 3] 执行...")
+
+        # 3.1 Data Quality
+        print("\n  [3.1] Data Quality...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        data_quality_output = retry_agent_spawn(
+            lambda: _spawn_agent("data_quality", path, strategy_name, current_state, [researcher_output]),
+            "data_quality",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "data_quality", 3, {"researcher": researcher_output}, data_quality_output)
+        print(f"    passed: {data_quality_output.get('passed', '?')}")
+        print(f"    warnings: {len(data_quality_output.get('warnings', []))}")
+
+        # 3.2 Factor Analyst
+        print("\n  [3.2] Factor Analyst...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        factor_analyst_output = retry_agent_spawn(
+            lambda: _spawn_agent("factor_analyst", path, strategy_name, current_state, [researcher_output, data_quality_output]),
+            "factor_analyst",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "factor_analyst", 3, {"researcher": researcher_output, "data_quality": data_quality_output}, factor_analyst_output)
+        print(f"    candidates: {len(factor_analyst_output.get('candidates', []))}")
+        print(f"    rejected: {len(factor_analyst_output.get('rejected', []))}")
+
+        # 3.3 Strategist
+        print("\n  [3.3] Strategist...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        strategist_output = retry_agent_spawn(
+            lambda: _spawn_agent("strategist", path, strategy_name, current_state, [researcher_output, data_quality_output, factor_analyst_output]),
+            "strategist",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "strategist", 3, {"researcher": researcher_output, "factor_analyst": factor_analyst_output}, strategist_output)
+        print(f"    action: {strategist_output.get('action', '?')}")
+        print(f"    changes: {len(strategist_output.get('changes', []))}")
+
+        # 3.4 Portfolio Construction (强制执行)
+        print("\n  [3.4] Portfolio Construction...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        portfolio_construction_output = retry_agent_spawn(
+            lambda: _spawn_agent("portfolio_construction", path, strategy_name, current_state, [strategist_output]),
+            "portfolio_construction",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "portfolio_construction", 3, {"strategist": strategist_output}, portfolio_construction_output)
+        print(f"    method: {portfolio_construction_output.get('method', '?')}")
+        print(f"    portfolio_vol: {portfolio_construction_output.get('portfolio_vol', '?')}")
+
+        # Step 4: 运行回测
+        print("\n[Step 4] 运行回测...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"  cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        backtest_result = run_backtest_script(
+            workspace_path=path,
+            strategy_name=strategy_name,
+            action=strategist_output.get("action", "unknown"),
+            description=strategist_output.get("hypothesis", ""),
+        )
+
+        if backtest_result.get("success"):
+            metrics = backtest_result.get("metrics", {})
+            print(f"  Calmar: {metrics.get('calmar', 'N/A')}")
+            print(f"  Sharpe: {metrics.get('sharpe', 'N/A')}")
+            print(f"  MaxDD: {metrics.get('max_dd', 'N/A')}")
+        else:
+            print(f"  ❌ 回测失败: {backtest_result.get('error', 'unknown')}")
+            metrics = {}
+
+        # Step 5: 评估 (强制执行所有 Agent)
+        print("\n[Step 5] 评估...")
+
+        # 5.1 Risk Controller
+        print("\n  [5.1] Risk Controller...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        risk_controller_output = retry_agent_spawn(
+            lambda: _spawn_agent("risk_controller", path, strategy_name, current_state, [metrics]),
+            "risk_controller",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "risk_controller", 5, {"metrics": metrics}, risk_controller_output)
+        print(f"    risk_passed: {risk_controller_output.get('risk_passed', '?')}")
+        print(f"    risk_rating: {risk_controller_output.get('risk_rating', '?')}")
+
+        # 5.2 Attribution Analyst
+        print("\n  [5.2] Attribution Analyst...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        attribution_analyst_output = retry_agent_spawn(
+            lambda: _spawn_agent("attribution_analyst", path, strategy_name, current_state, [metrics, risk_controller_output]),
+            "attribution_analyst",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "attribution_analyst", 5, {"metrics": metrics, "risk_controller": risk_controller_output}, attribution_analyst_output)
+        print(f"    alpha: {attribution_analyst_output.get('alpha', '?')}")
+        print(f"    beta_mkt: {attribution_analyst_output.get('beta_mkt', '?')}")
+
+        # 5.3 Anti-overfit Analyst
+        print("\n  [5.3] Anti-overfit Analyst...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        anti_overfit_analyst_output = retry_agent_spawn(
+            lambda: _spawn_agent("anti_overfit_analyst", path, strategy_name, current_state, [metrics, risk_controller_output, attribution_analyst_output]),
+            "anti_overfit_analyst",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "anti_overfit_analyst", 5, {"metrics": metrics, "risk_controller": risk_controller_output, "attribution_analyst": attribution_analyst_output}, anti_overfit_analyst_output)
+        print(f"    verdict: {anti_overfit_analyst_output.get('verdict', '?')}")
+        print(f"    overfit_passed: {anti_overfit_analyst_output.get('overfit_passed', '?')}")
+
+        # 5.4 Backtest Diagnostics (强制执行)
+        print("\n  [5.4] Backtest Diagnostics...")
+        cooldown = get_cooldown_seconds(base_cooldown, jitter, min_cooldown)
+        print(f"    cooldown: {cooldown:.1f}s")
+        time.sleep(cooldown)
+
+        backtest_diagnostics_output = retry_agent_spawn(
+            lambda: _spawn_agent("backtest_diagnostics", path, strategy_name, current_state, [backtest_result.get("run_log", ""), metrics]),
+            "backtest_diagnostics",
+            max_retries=max_retries,
+        )
+        save_agent_record(run_dir, "backtest_diagnostics", 5, {"run_log": backtest_result.get("run_log", ""), "metrics": metrics}, backtest_diagnostics_output)
+        print(f"    error_type: {backtest_diagnostics_output.get('error_type', '?')}")
+        print(f"    severity: {backtest_diagnostics_output.get('severity', '?')}")
+
+        # Step 6: 提交
+        print("\n[Step 6] 提交...")
+        verdict = anti_overfit_analyst_output.get("verdict", "discard")
+        print(f"  verdict: {verdict}")
+
+        # 保存 results.tsv
+        results_path = runs_dir / "results.tsv"
+        with open(results_path, "a", encoding="utf-8") as f:
+            f.write(f"{run_name}\t{backtest_result.get('commit', 'N/A')}\t"
+                    f"{strategist_output.get('action', 'unknown')}\t"
+                    f"{metrics.get('calmar', 0)}\t{metrics.get('sharpe', 0)}\t{metrics.get('max_dd', 0)}\t"
+                    f"{metrics.get('ann_return', 0)}\t{metrics.get('turnover', 0)}\t"
+                    f"{len(factor_analyst_output.get('candidates', []))}\t0\t0\t"
+                    f"{verdict}\t{strategist_output.get('hypothesis', '')}\n")
+
+        print(f"\n✅ 第 {round_num} 轮完成 ({run_name})")
+        print(f"  verdict: {verdict}")
+        print(f"  Calmar: {metrics.get('calmar', 'N/A')}")
+        print(f"  Sharpe: {metrics.get('sharpe', 'N/A')}")
+        print(f"  MaxDD: {metrics.get('max_dd', 'N/A')}")
+
+        # 检查停止条件
+        if args.max_rounds and round_num >= args.max_rounds:
+            print(f"\n🛑 达到最大轮数 ({args.max_rounds}),停止")
+            break
+
+        # 轮间 cooldown
+        round_time = time.time() - round_start
+        round_cooldown = get_cooldown_seconds(base_cooldown * 2, jitter * 2, min_cooldown * 2)
+        if round_time < round_cooldown:
+            wait_time = round_cooldown - round_time
+            print(f"\n⏳ 轮间 cooldown: {wait_time:.1f}s")
+            time.sleep(wait_time)
+
+    return 0
+
+
+def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
+                 current_state: dict, previous_outputs: list) -> str:
+    """spawn 单个 Agent (模拟 Task tool 调用)。"""
+    # 这里是模拟实现,实际应该调用 Task tool
+    # 返回一个示例 JSON 输出
+    import json
+
+    if agent_name == "researcher":
+        return json.dumps({
+            "action": "discover_local",
+            "hypothesis": "波动率因子可能有效",
+            "reason": "当前因子池缺少波动率维度",
+            "avoid_actions": [],
+            "factor_direction": "volatility",
+            "bias_check": {
+                "leader_bias": "pass",
+                "english_bias": "pass",
+                "narrative_bias": "pass",
+                "confirmation_bias": "pass",
+                "recency_bias": "pass"
+            }
+        })
+    elif agent_name == "data_quality":
+        return json.dumps({
+            "passed": True,
+            "warnings": ["NaN 比例 0.02%"],
+            "data_fingerprint": "abc123",
+            "nan_ratio": 0.0002,
+            "missing_days": 0,
+            "price_anomalies": []
+        })
+    elif agent_name == "factor_analyst":
+        return json.dumps({
+            "path_used": "local",
+            "candidates": [],
+            "rejected": [
+                {"factor_name": "ts_std_20d", "reason": "IC 0.018 < 0.03"}
+            ],
+            "combination_method": "ic_weighted",
+            "recommendation": "无有效因子"
+        })
+    elif agent_name == "strategist":
+        return json.dumps({
+            "action": "optimize",
+            "changes": [],
+            "reason": "无新因子,保持现有策略",
+            "expected_impact": "无变化"
+        })
+    elif agent_name == "portfolio_construction":
+        return json.dumps({
+            "method": "equal",
+            "weights": {},
+            "risk_contributions": {},
+            "diversification_ratio": 1.0,
+            "portfolio_vol": 0.15
+        })
+    elif agent_name == "risk_controller":
+        return json.dumps({
+            "risk_passed": False,
+            "risk_rating": "Red",
+            "var_95": -0.021,
+            "cvar_95": -0.034,
+            "max_drawdown": -0.50,
+            "stress_results": {},
+            "tail_risk": {"kurtosis": 3.2, "skewness": -0.15}
+        })
+    elif agent_name == "attribution_analyst":
+        return json.dumps({
+            "alpha": -0.0039,
+            "beta_mkt": 0.92,
+            "beta_smb": 0.05,
+            "beta_hml": -0.02,
+            "beta_mom": 0.08,
+            "sector_allocation": 0.001,
+            "stock_selection": -0.005,
+            "interaction": 0.001,
+            "bull_capture": 0.95,
+            "bear_capture": 1.12,
+            "r_squared": 0.88
+        })
+    elif agent_name == "anti_overfit_analyst":
+        return json.dumps({
+            "verdict": "discard",
+            "overfit_passed": False,
+            "methods_passed": {
+                "start_dependency": False,
+                "rebalance_offset": False,
+                "parameter_perturbation": False,
+                "ablation": False,
+                "bootstrap": False,
+                "monte_carlo": False
+            },
+            "analysis": "所有抗过拟合方法均失败",
+            "suggestions": ["重新设计因子", "增加数据量"]
+        })
+    elif agent_name == "backtest_diagnostics":
+        return json.dumps({
+            "error_type": "none",
+            "severity": "info",
+            "symptom": "无异常",
+            "root_cause": "N/A",
+            "fix_suggestion": "N/A",
+            "confidence": 1.0
+        })
+    else:
+        return json.dumps({"error": f"Unknown agent: {agent_name}"})
+
+
 # ============================================================
 # Main CLI
 # ============================================================
@@ -863,6 +1239,16 @@ def main() -> int:
     import_parser.add_argument("--n-assets", type=int, default=10, help="示例资产数量 (sample)")
     import_parser.add_argument("--n-days", type=int, default=504, help="示例天数 (sample)")
 
+    # autoresearch
+    autoresearch_parser = subparsers.add_parser("autoresearch", help="运行自动化研究循环")
+    autoresearch_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    autoresearch_parser.add_argument("--strategy", "-s", help="策略名称")
+    autoresearch_parser.add_argument("--cooldown", "-c", type=float, default=30.0, help="基础 cooldown (秒)")
+    autoresearch_parser.add_argument("--jitter", "-j", type=float, default=10.0, help="随机抖动范围 (±秒)")
+    autoresearch_parser.add_argument("--min-cooldown", type=float, default=1.0, help="最小 cooldown (秒)")
+    autoresearch_parser.add_argument("--max-retries", type=int, default=3, help="最大重试次数")
+    autoresearch_parser.add_argument("--max-rounds", type=int, help="最大轮数 (不指定则无限循环)")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -879,6 +1265,8 @@ def main() -> int:
         return cmd_list(args)
     elif args.command == "import":
         return cmd_import(args)
+    elif args.command == "autoresearch":
+        return cmd_autoresearch(args)
     else:
         parser.print_help()
         return 0

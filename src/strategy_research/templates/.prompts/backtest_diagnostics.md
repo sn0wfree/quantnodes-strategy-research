@@ -37,7 +37,10 @@
 
 ## 输出
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "error_type": "runtime_error | logic_bug | none",
   "severity": "critical | warning | info",
@@ -46,7 +49,6 @@
   "fix_suggestion": "放宽 ts_return(close, 20) 的阈值",
   "confidence": 0.85
 }
-```
 
 ## 规则
 

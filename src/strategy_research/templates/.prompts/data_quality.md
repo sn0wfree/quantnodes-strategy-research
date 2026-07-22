@@ -21,7 +21,10 @@
 
 ## 输出
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "passed": true,
   "warnings": ["警告 1", "警告 2"],
@@ -30,7 +33,6 @@
   "missing_days": 0,
   "price_anomalies": []
 }
-```
 
 ## 规则
 

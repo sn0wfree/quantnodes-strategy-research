@@ -26,13 +26,15 @@
 
 每步完成后向 Main Agent 报告进度:
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "step": 1,
   "status": "completed",
   "output": {...}
 }
-```
 
 ## 速度控制
 

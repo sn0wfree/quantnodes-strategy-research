@@ -53,7 +53,10 @@
 
 ## 输出格式
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "path_used": "alpha_zoo | local",
   "candidates": [
@@ -76,7 +79,6 @@
   "combination_method": "ic_weighted",
   "recommendation": "建议集成 realized_skew_60d"
 }
-```
 
 ## 规则
 - 每轮验证 3-5 个候选因子

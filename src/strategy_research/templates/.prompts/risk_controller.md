@@ -50,7 +50,10 @@ CVaR_95 = -returns[returns < -VaR_95].mean()
 
 ## 输出
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "risk_passed": true,
   "risk_rating": "Green | Yellow | Red",
@@ -67,7 +70,6 @@ CVaR_95 = -returns[returns < -VaR_95].mean()
     "skewness": -0.15
   }
 }
-```
 
 ## 规则
 

@@ -34,7 +34,10 @@
 
 ## 输出格式
 
-```json
+**必须返回纯 JSON,不要包含任何其他文本、解释或 markdown 代码块标记。**
+
+直接以 { 开头,以 } 结尾。
+
 {
   "action": "search_external | discover_local | optimize_param | remove_factor",
   "hypothesis": "一句话描述假设",
@@ -49,7 +52,6 @@
     "recency_bias": "pass | fail"
   }
 }
-```
 
 ## 规则
 - 每轮只做一个实验 (因子发现 or 参数优化 or 因子移除)
