@@ -421,6 +421,8 @@ def generate_sample_ohlcv_data(
 ) -> dict[str, "pd.DataFrame"]:
     """生成示例 OHLCV 数据 (dict[code → DataFrame])，模拟 loader.fetch() 返回格式。
 
+    保持真实 OHLC 不变量：high >= max(open, close) >= min(open, close) >= low。
+
     用于测试 save_ohlcv_data 与 OHLCV 完整性检查。
     """
     import numpy as np
@@ -432,10 +434,14 @@ def generate_sample_ohlcv_data(
     returns = np.random.randn(n_days, n_assets) * 0.02
     close = np.exp(np.cumsum(returns, axis=0))
 
-    intraday = np.abs(np.random.randn(n_days, n_assets)) * 0.005  # 0.5% 噪声
-    high = close * (1 + intraday)
-    low = close * (1 - intraday)
+    # open: close 上下 0.2% 噪声
     open_ = close * (1 + np.random.randn(n_days, n_assets) * 0.002)
+    # high: 比 max(open, close) 还高 0~1%
+    base_high = np.maximum(open_, close)
+    high = base_high * (1 + np.abs(np.random.randn(n_days, n_assets)) * 0.005)
+    # low: 比 min(open, close) 还低 0~1%
+    base_low = np.minimum(open_, close)
+    low = base_low * (1 - np.abs(np.random.randn(n_days, n_assets)) * 0.005)
     volume = np.random.randint(100_000, 10_000_000, size=(n_days, n_assets)).astype(float)
 
     result = {}
