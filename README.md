@@ -1,17 +1,124 @@
 # quantnodes-strategy-research
 
-通用策略自动研究框架 — Karpathy autoresearch 极简 + 多 Agent 增强 + 因子研发流水线
+**QuantNodes 策略研究子项目** — AI 驱动的量化策略自动研究框架
+
+> ⚠️ **项目状态**：本项目原为 [QuantNodes](https://github.com/sn0wfree/quantnodes) 整体大项目中的一个模块（`research/strategy-research/`），现**剥离独立开发**，作为 QuantNodes 生态的子项目进行快速迭代。后续会在适当时机合回主仓库。
+
+---
+
+## 📑 目录
+
+- [项目背景](#项目背景)
+- [核心特性](#核心特性)
+- [安装](#安装)
+- [快速开始](#快速开始-30-秒)
+- [CLI 命令](#cli-命令13-个)
+- [工作区结构](#工作区结构)
+- [数据源](#数据源)
+- [因子体系](#因子体系)
+- [系统架构](#系统架构)
+- [更新状况](#更新状况)
+- [开发](#开发)
+- [许可证](#许可证)
+
+---
+
+## 项目背景
+
+### 起源
+
+本项目源自 QuantNodes 整体大项目中的 **strategy-research** 模块（路径：`research/strategy-research/`）。QuantNodes 是一个综合性的量化投资平台，包含多个相互依赖的子模块。
+
+### 为什么剥离？
+
+为了**快速迭代和独立发布**，本模块现以独立项目形式开发：
+
+| 优势 | 说明 |
+|---|---|
+| **独立版本控制** | 不受主仓库其他模块影响 |
+| **更快发布周期** | 单独打 tag、单独发 PyPI |
+| **清晰依赖关系** | 仅依赖核心库（httpx、duckdb、pandas 等）|
+| **便于引用** | 其他项目可单独引用 |
+| **独立测试** | 独立 CI/CD，不被主仓库拖累 |
+
+### 与主项目关系
+
+- **上游**：主仓库 `sn0wfree/quantnodes`
+- **本仓库**：`sn0wfree/quantnodes-strategy-research`
+- **依赖方向**：本项目 → 仅依赖通用 Python 库（无 QuantNodes 内部依赖）
+- **未来**：核心功能稳定后，会以 PR 形式合回主仓库
+
+---
+
+## 核心特性
+
+### 🎯 核心能力
+
+- ✅ **完整工作区管理**：`init` / `evaluate` / `reproduce` / `run` 全流程
+- ✅ **多数据源**：Tencent / Eastmoney / Akshare / Tushare / YFinance / Local / FRED / iFinD
+- ✅ **460+ 因子库**：Alpha101 / GTJA191 / Qlib158 / Academic / Fundamental
+- ✅ **AI Agent 真跑**：6 个工具 + 沙箱 + 3 层上下文压缩
+- ✅ **Workflow 层**：DAG 调度 + Controller + 4 种 Executor + Grounding
+- ✅ **Hook 系统**：借鉴 llmwikify 13 事件点
+- ✅ **Memory 系统**：FTS5 + Recency boost + Write dedup
+- ✅ **Session 管理**：SQLite + FTS5 + 触发器同步 + 限流 + 监控
+- ✅ **PyPI 发布**：已发布 v0.2.0（自动发布 workflow）
+
+### 🏗️ 技术栈
+
+- **Python 3.10+**
+- **数据**：DuckDB / SQLite / Pandas
+- **LLM**：OpenAI 兼容（httpx 零依赖）
+- **测试**：pytest（3,770+ 测试）
+- **借鉴**：vibe-trading-ai 0.1.11（HKUDS，MIT）/ llmwikify（Hook 系统）
 
 ---
 
 ## 安装
 
-```bash
-# 开发模式安装
-pip install -e ~/Public/QuantNodes/research/strategy-research
+### 方式 1：独立安装（推荐）
 
-# 或作为 QuantNodes 的一部分
-pip install -e ~/Public/QuantNodes
+```bash
+# 克隆仓库
+git clone https://github.com/sn0wfree/quantnodes-strategy-research.git
+cd quantnodes-strategy-research
+
+# 开发模式安装
+pip install -e .
+
+# 验证安装
+quantnodes-research --help
+```
+
+### 方式 2：从 PyPI 安装
+
+```bash
+pip install quantnodes-strategy-research
+```
+
+### 方式 3：作为 QuantNodes 子模块
+
+```bash
+# 在 QuantNodes 主仓库中
+git clone https://github.com/sn0wfree/quantnodes-strategy-research.git research/strategy-research
+pip install -e research/strategy-research
+```
+
+### 环境变量
+
+设置至少一个 LLM API Key：
+
+```bash
+# 任选其一
+export OPENAI_API_KEY=sk-xxx        # OpenAI
+export DEEPSEEK_API_KEY=sk-xxx      # DeepSeek
+export KIMI_API_KEY=sk-xxx          # Moonshot Kimi
+export QWEN_API_KEY=sk-xxx          # Alibaba Qwen
+export ANTHROPIC_API_KEY=sk-xxx     # Anthropic Claude
+
+# 可选：自定义 base URL 和模型
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export OPENAI_MODEL=deepseek-chat
 ```
 
 ---
@@ -35,7 +142,8 @@ quantnodes-research evaluate /tmp/demo_ws
 quantnodes-research reproduce /tmp/demo_ws run_0001
 ```
 
-第一次跑会得到类似：
+**首次运行输出：**
+
 ```
 ✓ 创建 README.md
 ✓ 创建 config.yaml
@@ -88,8 +196,6 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 ======================================================================
   ❌ 1 项 CRITICAL 检查失败，agent 无法启动
 ```
-
-设置 `OPENAI_API_KEY`（或 DEEPSEEK_API_KEY / KIMI_API_KEY / QWEN_API_KEY / ANTHROPIC_API_KEY 任一）后，`LLM Provider` 变 `[OK]`，rc=0 可启动。
 
 ### `evaluate` 输出示例
 
@@ -204,7 +310,8 @@ alphas = adapter.list_alphas(zoo="gtja191", theme="momentum")
 df = adapter.compute_as_wide("gtja191_001", prices_panel)
 ```
 
-YAML 配置示例：
+**YAML 配置示例：**
+
 ```yaml
 factors:
   # 表达式因子
@@ -223,30 +330,38 @@ factors:
 
 ---
 
-## 设计理念
+## 系统架构
 
-- **Karpathy 极简**: 框架提供工具和循环指引，**不调 LLM**（P1 阶段接通）
-- **Skill/Harness 模式**: 外部 Agent 读 prompt 后自主决策
-- **通用性**: 通过 `prepare.evaluate()` 目标函数接口适配不同策略
-- **实验可复现**: 每次实验保存 SHA-256 快照到 `run_card.json`，可随时复现
-- **磁盘优先**: 所有指令写在文件里 — Agent 中途崩溃可从同套文件恢复 context
-- **借鉴来源**: 借鉴 vibe-trading-ai 0.1.11 (HKUDS, MIT) 的设计模式（详见 `docs/enhancement.md`）
+### 三层架构
 
----
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Workflow 层（P1.5）                                          │
+│  - WorkflowController（DAG 调度）                            │
+│  - AgentExecutor Protocol（接口）                           │
+│  - Agent Validators（验证）                                  │
+│  - Grounding Provider（市场数据预取）                       │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Agent 层（P1）                                              │
+│  - AgentLoop（ReAct 循环 + 3 层压缩）                       │
+│  - BaseTool + ToolRegistry（6 个工具）                      │
+│  - Sandbox（AST guard + 路径白名单）                        │
+│  - ContextBuilder（system + user prompt）                   │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Hook + Memory + Session 层（P2）                            │
+│  - Hook 系统（llmwikify 模式，13 事件点）                    │
+│  - Memory（FTS5 + Recency boost + Dedup）                    │
+│  - Session（SQLite + FTS5 + 触发器同步 + 限流）             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## 借鉴路线图（[docs/enhancement.md](docs/enhancement.md)）
-
-| 阶段 | 范围 | 状态 |
-|---|---|---|
-| **P0** | 修通 init（`.format()`/DuckDB/OHLCV/默认因子/CLI/preflight/eastmoney）| ✅ 完成 |
-| **P1** | Agent 真跑（替换 stub 接通 LLM，6 个工具，沙箱，3 层压缩）| ✅ 完成 |
-| **P1.5** | Workflow 层（DAG 调度 + Controller + 4 种 Executor + Grounding）| ✅ 完成 |
-| **P2** | Hook + Memory + Session（llmwikify 模式 + FTS5 + 触发器同步）| ✅ 完成 |
-| **P3** | Goal + Hypothesis + Validation（MC + Bootstrap + WF）| 待 P2 完成 |
-
----
-
-## Hook 系统（P2）
+### Hook 系统（P2）
 
 借鉴 llmwikify 的 13 事件点 Hook 系统：
 
@@ -264,11 +379,10 @@ ctx = AgentHookContext(iteration=1)
 asyncio.run(composite.after_iteration(ctx))
 ```
 
-**13 个事件点**：`wants_streaming / before_iteration / after_iteration / on_stream / on_stream_end / emit_reasoning / emit_reasoning_end / before_execute_tools / after_tool_executed / on_tool_error / on_confirmation / finalize_content / on_error`
+**13 个事件点**：
+`wants_streaming / before_iteration / after_iteration / on_stream / on_stream_end / emit_reasoning / emit_reasoning_end / before_execute_tools / after_tool_executed / on_tool_error / on_confirmation / finalize_content / on_error`
 
----
-
-## Memory 系统（P2）
+### Memory 系统（P2）
 
 - **FTS5 全文搜索**（全局索引）
 - **Recency boost**（时间衰减）
@@ -284,9 +398,7 @@ results = memory.find_relevant("momentum")
 context = memory.format_context_for_prompt("momentum")
 ```
 
----
-
-## Session 管理（P2）
+### Session 管理（P2）
 
 - **SQLite + FTS5**（跨 workspace 搜索）
 - **触发器自动同步**（INSERT/UPDATE/DELETE）
@@ -301,31 +413,81 @@ $ quantnodes-research session stats
 $ quantnodes-research session list
 ```
 
-性能基准：
-- 1000 条插入：1.15s（868 条/秒）
+**性能基准：**
+- 1,000 条插入：1.15s
 - 100,000 条插入：4.42s（22,625 条/秒）
 - 搜索：35,000~55,000 次/秒
+- 触发器自动同步：✅ 无应用层代码
+
+---
+
+## 更新状况
+
+### 路线图进度
+
+| 阶段 | 范围 | 状态 | 详细说明 |
+|---|---|---|---|
+| **P0** | 修通 init（`.format()`/DuckDB/OHLCV/默认因子/CLI/preflight/eastmoney）| ✅ 完成 | 详见 [enhancement.md §2](docs/enhancement.md) |
+| **P1** | Agent 真跑（替换 stub 接通 LLM，6 个工具，沙箱，3 层压缩）| ✅ 完成 | PR #4-#6 + AgentLoop 改造 |
+| **P1.5** | Workflow 层（DAG 调度 + Controller + 4 种 Executor + Grounding）| ✅ 完成 | 88 测试 |
+| **P2** | Hook + Memory + Session（llmwikify 模式 + FTS5 + 触发器同步）| ✅ 完成 | 116 测试 |
+| **P3** | Goal + Hypothesis + Validation（MC + Bootstrap + WF）| ⏳ 待启动 | 计划中 |
+
+### 测试统计
+
+- **3,770+ 测试通过**
+- **0 回归**
+- 测试覆盖：P0 + P1 + P1.5 + P2 全覆盖
+
+### 版本发布
+
+| 版本 | 日期 | 说明 |
+|---|---|---|
+| **v0.2.0** | 2026-07-22 | 已发布到 PyPI（自动发布 workflow） |
+
+### 下一步计划
+
+1. **P3**: Goal + Hypothesis + Validation
+2. **合回主仓库**：核心功能稳定后
+3. **持续优化**：性能 + 用户体验
 
 ---
 
 ## 开发
 
-```bash
-# 安装开发依赖
-pip install -e ".[dev]"
+### 安装开发依赖
 
-# 运行全部测试
-pytest                                    # 3812 passed
-pytest tests/test_preflight.py -v         # 单跑 preflight 测试
-pytest tests/test_cli_init.py -v           # 单跑 init 测试
+```bash
+pip install -e ".[dev]"
+```
+
+### 运行测试
+
+```bash
+# 全部测试
+pytest                                    # 3,770 passed
+
+# 单跑特定模块
+pytest tests/test_preflight.py -v         # preflight 测试
+pytest tests/test_cli_init.py -v           # init 测试
 pytest tests/test_workflow_e2e.py -v       # Workflow e2e 测试
 pytest tests/test_session.py -v            # Session 测试
 
-# 代码检查
-ruff check .
+# 性能测试
+pytest tests/test_session_triggers.py -v   # 触发器同步性能
 ```
 
-### 测试覆盖（3,812 个测试）
+### 代码检查
+
+```bash
+# Lint
+ruff check .
+
+# 类型检查（可选）
+mypy src/strategy_research/
+```
+
+### 测试覆盖（3,770+ 个测试）
 
 | 模块 | 测试数 | 状态 |
 |---|---|---|
@@ -340,8 +502,58 @@ ruff check .
 | `test_integration.py` | 9 | ✅ |
 | P0 + P1 测试 | 3,608 | ✅ |
 
+### 文档结构
+
+```
+docs/
+├── enhancement.md                # 借鉴路线图（P0-P3）
+├── workflow-design.md            # P1.5 Workflow 设计
+├── vibe-trading-survey.md        # vibe-trading 调研（1805 行）
+├── vibe-trading-credits.md       # 借鉴致谢
+├── autoresearch-design.md        # autoresearch 设计
+├── llm-config-template.yaml      # LLM 配置模板
+└── backtest-overhaul/            # 回测重构
+
+examples/
+├── demo_workflow.py              # 工作流演示
+└── session_example.py            # Session 使用示例
+```
+
+---
+
+## 借鉴致谢
+
+本项目借鉴了以下开源项目：
+
+- **vibe-trading-ai 0.1.11**（HKUDS，MIT License）
+  - Agent 工具、Trace、Progress、Memory 等
+  - 详见 `docs/vibe-trading-credits.md`
+- **llmwikify**（MIT License）
+  - Hook 系统（13 事件点）
+  - AgentLoop 设计模式
+
+---
+
+## 设计理念
+
+- **Karpathy 极简**: 框架提供工具和循环指引，Agent 自主决策
+- **Skill/Harness 模式**: 外部 Agent 读 prompt 后自主决策
+- **通用性**: 通过 `prepare.evaluate()` 目标函数接口适配不同策略
+- **实验可复现**: 每次实验保存 SHA-256 快照到 `run_card.json`，可随时复现
+- **磁盘优先**: 所有指令写在文件里 — Agent 中途崩溃可从同套文件恢复 context
+- **Hook 解耦**: 通过 Hook 系统实现横切关注点（日志、监控、归档）的解耦
+
 ---
 
 ## 许可证
 
 MIT
+
+---
+
+## 相关链接
+
+- **主仓库**：[sn0wfree/quantnodes](https://github.com/sn0wfree/quantnodes)
+- **本仓库**：[sn0wfree/quantnodes-strategy-research](https://github.com/sn0wfree/quantnodes-strategy-research)
+- **PyPI**：[quantnodes-strategy-research](https://pypi.org/project/quantnodes-strategy-research/)
+- **问题反馈**：[GitHub Issues](https://github.com/sn0wfree/quantnodes-strategy-research/issues)
