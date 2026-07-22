@@ -46,14 +46,15 @@ def parse_result(result: str) -> dict:
 
 
 class TestRegistry:
-    def test_build_default_has_all_six(self):
+    def test_build_default_has_all_nine(self):
         r = build_default_registry()
         names = sorted(r.tool_names)
         assert names == [
-            "compute_factor", "git_diff", "list_history",
-            "read_file", "run_backtest", "write_file",
+            "compute_factor", "factor_analysis", "git_diff", "list_history",
+            "options_pricing", "pattern_recognition", "read_file",
+            "run_backtest", "write_file",
         ]
-        assert len(r) == 6
+        assert len(r) == 9
 
     def test_registry_contains(self):
         r = build_default_registry()

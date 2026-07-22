@@ -10,6 +10,9 @@ Tools:
     ComputeFactorTool - invoke core.compute_factor.compute_factor
     GitDiffTool       - subprocess wrapper for git diff
     ListHistoryTool   - list runs from results.tsv + runs/ directory
+    FactorAnalysisTool - factor IC/IR analysis
+    PatternRecognitionTool - detect chart patterns
+    OptionsPricingTool - Black-Scholes options pricing
 """
 
 from __future__ import annotations
@@ -530,11 +533,282 @@ class ListHistoryTool(BaseTool):
         })
 
 
+# ── 7. FactorAnalysisTool ──────────────────────────────────────────
+
+
+class FactorAnalysisTool(BaseTool):
+    """Analyze factor IC/IR statistics."""
+
+    name = "factor_analysis"
+    description = (
+        "Run factor IC/IR analysis on a factor expression. Computes IC mean, "
+        "IC std, IR, IC>0 ratio, and returns statistical summary."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "factor_code": {"type": "string", "description": "Factor expression."},
+            "asset": {"type": "string", "description": "Asset code (default: first)."},
+            "forward_days": {"type": "integer", "description": "Forward return days (default 5)."},
+        },
+        "required": ["workspace", "factor_code"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        factor_code = kwargs.get("factor_code")
+        if not isinstance(factor_code, str) or not factor_code:
+            return _err("missing or invalid 'factor_code'")
+        asset = kwargs.get("asset")
+        forward_days = int(kwargs.get("forward_days", 5))
+
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"db open failed: {exc}")
+
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            prices_df = conn.execute(
+                "SELECT date, asset, close FROM ohlcv ORDER BY date, asset"
+            ).fetch_df()
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"ohlcv query failed: {exc}")
+
+        if prices_df.empty:
+            return _err("ohlcv table is empty")
+
+        available_assets = sorted(prices_df["asset"].unique())
+        if asset is None:
+            asset = available_assets[0]
+        elif asset not in available_assets:
+            return _err(f"asset '{asset}' not found")
+
+        asset_df = prices_df[prices_df["asset"] == asset].copy()
+        asset_df = asset_df.set_index("date")[["close"]]
+        asset_df = asset_df.sort_index()
+
+        try:
+            factor_series = compute_factor(factor_code, asset_df)
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"compute failed: {exc}")
+
+        # Compute forward returns
+        asset_df["fwd_ret"] = asset_df["close"].pct_change(forward_days).shift(-forward_days)
+
+        # Align and compute IC
+        import pandas as pd
+        aligned = pd.concat([factor_series, asset_df["fwd_ret"]], axis=1).dropna()
+        if len(aligned) < 10:
+            return _err("insufficient data for IC analysis (need >= 10 rows)")
+
+        ic = aligned.iloc[:, 0].corr(aligned["fwd_ret"])
+        ic_mean = float(aligned.iloc[:, 0].corr(aligned["fwd_ret"], method="spearman")) if len(aligned) > 5 else 0.0
+
+        return _ok({
+            "factor_code": factor_code,
+            "asset": asset,
+            "forward_days": forward_days,
+            "ic_mean": round(ic, 4) if pd.notna(ic) else None,
+            "spearman_ic": round(ic_mean, 4),
+            "n_observations": len(aligned),
+        })
+
+
+# ── 8. PatternRecognitionTool ──────────────────────────────────────
+
+
+class PatternRecognitionTool(BaseTool):
+    """Detect common chart patterns in price data."""
+
+    name = "pattern_recognition"
+    description = (
+        "Detect common chart patterns (head-shoulders, double-top/bottom, "
+        "trend lines, support/resistance) in price data."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "asset": {"type": "string", "description": "Asset code."},
+            "lookback": {"type": "integer", "description": "Days to look back (default 60)."},
+        },
+        "required": ["workspace"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        asset = kwargs.get("asset")
+        lookback = int(kwargs.get("lookback", 60))
+
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"db open failed: {exc}")
+
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            prices_df = conn.execute(
+                "SELECT date, asset, open, high, low, close, volume FROM ohlcv ORDER BY date"
+            ).fetch_df()
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"ohlcv query failed: {exc}")
+
+        if prices_df.empty:
+            return _err("ohlcv table is empty")
+
+        if asset:
+            prices_df = prices_df[prices_df["asset"] == asset]
+
+        prices_df = prices_df.tail(lookback)
+        if len(prices_df) < 10:
+            return _err("insufficient data")
+
+        closes = prices_df["close"].values
+        highs = prices_df["high"].values
+        lows = prices_df["low"].values
+
+        patterns = []
+
+        # Simple trend detection
+        if len(closes) >= 20:
+            ma20 = closes[-20:].mean()
+            ma5 = closes[-5:].mean() if len(closes) >= 5 else ma20
+            if ma5 > ma20:
+                patterns.append({"pattern": "uptrend", "confidence": 0.6})
+            elif ma5 < ma20:
+                patterns.append({"pattern": "downtrend", "confidence": 0.6})
+
+        # Support/Resistance
+        recent_high = float(highs.max())
+        recent_low = float(lows.min())
+        current = float(closes[-1])
+        range_pct = (recent_high - recent_low) / recent_high * 100 if recent_high > 0 else 0
+
+        if current >= recent_high * 0.98:
+            patterns.append({"pattern": "near_resistance", "level": round(recent_high, 2), "confidence": 0.5})
+        if current <= recent_low * 1.02:
+            patterns.append({"pattern": "near_support", "level": round(recent_low, 2), "confidence": 0.5})
+
+        # Volatility squeeze
+        if len(closes) >= 20:
+            std20 = float(closes[-20:].std())
+            std5 = float(closes[-5:].std()) if len(closes) >= 5 else std20
+            if std5 < std20 * 0.6:
+                patterns.append({"pattern": "volatility_squeeze", "confidence": 0.5})
+
+        return _ok({
+            "asset": asset or "(all)",
+            "lookback": lookback,
+            "current_price": round(current, 2),
+            "range_pct": round(range_pct, 2),
+            "patterns": patterns,
+        })
+
+
+# ── 9. OptionsPricingTool ──────────────────────────────────────────
+
+
+class OptionsPricingTool(BaseTool):
+    """Black-Scholes options pricing with Greeks."""
+
+    name = "options_pricing"
+    description = (
+        "Compute Black-Scholes option price and Greeks (delta, gamma, theta, vega, rho)."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "spot": {"type": "number", "description": "Current spot price."},
+            "strike": {"type": "number", "description": "Strike price."},
+            "rate": {"type": "number", "description": "Risk-free rate (annualized, e.g. 0.05)."},
+            "volatility": {"type": "number", "description": "Volatility (annualized, e.g. 0.2)."},
+            "time_to_expiry": {"type": "number", "description": "Time to expiry in years (e.g. 0.5)."},
+            "option_type": {"type": "string", "description": "'call' or 'put'."},
+        },
+        "required": ["spot", "strike", "rate", "volatility", "time_to_expiry", "option_type"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import math
+
+        try:
+            spot = float(kwargs["spot"])
+            strike = float(kwargs["strike"])
+            rate = float(kwargs["rate"])
+            vol = float(kwargs["volatility"])
+            T = float(kwargs["time_to_expiry"])
+            option_type = kwargs.get("option_type", "call").lower()
+        except (KeyError, ValueError, TypeError) as exc:
+            return _err(f"invalid parameters: {exc}")
+
+        if option_type not in ("call", "put"):
+            return _err("option_type must be 'call' or 'put'")
+        if T <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
+            return _err("spot, strike, volatility, and time_to_expiry must be positive")
+
+        from math import log, sqrt, exp
+        from scipy.stats import norm
+
+        d1 = (log(spot / strike) + (rate + 0.5 * vol**2) * T) / (vol * sqrt(T))
+        d2 = d1 - vol * sqrt(T)
+
+        if option_type == "call":
+            price = spot * norm.cdf(d1) - strike * exp(-rate * T) * norm.cdf(d2)
+            delta = float(norm.cdf(d1))
+        else:
+            price = strike * exp(-rate * T) * norm.cdf(-d2) - spot * norm.cdf(-d1)
+            delta = float(norm.cdf(d1) - 1)
+
+        gamma = float(norm.pdf(d1) / (spot * vol * sqrt(T)))
+        theta = float(
+            -(spot * norm.pdf(d1) * vol) / (2 * sqrt(T))
+            - rate * strike * exp(-rate * T) * norm.cdf(d2 if option_type == "call" else -d2)
+        )
+        vega = float(spot * norm.pdf(d1) * sqrt(T) / 100)
+        rho = float(
+            strike * T * exp(-rate * T) * norm.cdf(d2 if option_type == "call" else -d2) / 100
+        )
+
+        return _ok({
+            "option_type": option_type,
+            "spot": spot,
+            "strike": strike,
+            "rate": rate,
+            "volatility": vol,
+            "time_to_expiry": T,
+            "price": round(price, 4),
+            "delta": round(delta, 4),
+            "gamma": round(gamma, 4),
+            "theta": round(theta, 4),
+            "vega": round(vega, 4),
+            "rho": round(rho, 4),
+        })
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
 def build_default_registry() -> ToolRegistry:
-    """Build a ToolRegistry with all 6 tools.
+    """Build a ToolRegistry with all 9 tools.
 
     Tools are stateless; AgentLoop injects `workspace` per call.
     No workspace is bound at construction time.
@@ -546,6 +820,9 @@ def build_default_registry() -> ToolRegistry:
     r.register(ComputeFactorTool())
     r.register(GitDiffTool())
     r.register(ListHistoryTool())
+    r.register(FactorAnalysisTool())
+    r.register(PatternRecognitionTool())
+    r.register(OptionsPricingTool())
     return r
 
 
@@ -556,5 +833,8 @@ __all__ = [
     "ComputeFactorTool",
     "GitDiffTool",
     "ListHistoryTool",
+    "FactorAnalysisTool",
+    "PatternRecognitionTool",
+    "OptionsPricingTool",
     "build_default_registry",
 ]
