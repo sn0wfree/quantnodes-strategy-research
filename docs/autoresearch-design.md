@@ -726,3 +726,117 @@ quantnodes-research autoresearch <path> \
 | `autoresearch.py` | 添加 `should_run_lazy_detection()`, `detect_lazy_behavior()`, `save_laziness_report()`, `read_agent_history()` |
 | `cli.py` | 在 Step 1 之后添加检测逻辑 (条件: `round_num % 10 == 0`) |
 | `design doc` | 本章节 |
+
+## 13. 分层上下文 (Layered Context) - 暂不实施
+
+**状态**: 📝 设计完成, ⏸️ 暂不实施 (2026-07-22 决策)
+
+### 13.1 动机
+
+当前每个 Agent 接收相同的完整上下文 (strategy.py 全文 + recent_runs + 累积 previous_outputs):
+- 每个 Agent 平均 ~1K tokens context
+- Anti-overfit 输入累积 8 个 outputs (~3.2KB)
+- 通过分层可优化 token 使用
+
+**为什么不实施**: 当前 token 压力在可控范围,实施复杂度高,收益相对有限 (~14% 平均 context 减少)。等出现明显瓶颈再考虑。
+
+### 13.2 设计 (待未来实施)
+
+**核心思路**: 不同 Agent 看不同粒度的信息,优化 token 使用。
+
+**9 个 Agent 分层配置**:
+
+| Agent | needs | max_chars | 当前 (chars) | 优化后 (chars) | 变化 |
+|-------|-------|-----------|------------|--------------|------|
+| researcher | strategy_summary, recent_summaries | 1500 | 2322 | 1500 | **-35%** |
+| data_quality | data_fingerprint | 500 | 742 | 500 | **-33%** |
+| factor_analyst | researcher_action, factor_pool | 1000 | 1021 | 1000 | -2% |
+| strategist | factor_candidates, strategy_key_params | 1200 | 974 | 1200 | +23% |
+| portfolio_construction | factor_scores | 600 | 449 | 600 | +34% |
+| risk_controller | current_metrics, risk_thresholds | 600 | 755 | 600 | -21% |
+| attribution_analyst | current_metrics | 600 | 1085 | 600 | **-45%** |
+| anti_overfit_analyst | all_agent_summaries, current_metrics | 1800 | 1545 | 1800 | +17% |
+| backtest_diagnostics | run_log, current_metrics | 500 | 712 | 500 | **-30%** |
+
+### 13.3 待实施函数
+
+```python
+# 待添加: 分层配置
+AGENT_LAYER_CONFIG = {
+    "researcher": {"needs": ["strategy_summary", "recent_summaries"], "max_chars": 1500},
+    "data_quality": {"needs": ["data_fingerprint"], "max_chars": 500},
+    # ... 其他 7 个 Agent
+}
+
+# 待添加: 单个 Agent output 摘要
+def summarize_agent_output(agent_name: str, output: dict) -> str:
+    """把单个 agent output 压缩成 ~50 chars 摘要。"""
+
+# 待添加: 分层 prompt 构建 (核心)
+def build_agent_prompt_layered(
+    agent_name: str,
+    prompts_dir: Path,
+    current_state: dict,
+    previous_outputs: list[dict],
+    keep_recent: int = 10,
+) -> str:
+    """分层构建 Agent prompt。"""
+```
+
+### 13.4 关键设计: previous_outputs 改用摘要
+
+**当前问题**:
+- Strategist input 累积 3 个完整 outputs (~1.2KB)
+- Portfolio input 累积 4 个完整 outputs (~1.6KB)
+- Anti-overfit input 累积 8 个完整 outputs (~3.2KB!)
+
+**优化方案**:
+```python
+# 当前 (累积完整)
+previous_outputs = [researcher_out, data_quality_out, factor_analyst_out]
+
+# 优化后 (只传摘要)
+previous_outputs_summary = {
+    "researcher": "search_external | volatility | hypothesis: ...",
+    "data_quality": "passed=True | warnings=1",
+    "factor_analyst": "vol_adj_mom (IC=0.052)",
+}
+```
+
+### 13.5 触发条件
+
+如果出现以下情况,启用 Phase 4:
+- 单轮总 token 超过 5K
+- Anti-overfit 输入超过 2K (累积 8+ outputs)
+- 运行超过 1000 轮
+- Agent 频繁报告"信息不足"
+
+### 13.6 风险与缓解 (未来实施时考虑)
+
+| 风险 | 等级 | 缓解措施 |
+|------|------|---------|
+| Agent 缺少关键信息 | 高 | 配置 max_chars 和 needs 字段,确保必要信息 |
+| 摘要丢失细节 | 中 | 保留 summary.json 包含 key_insight,Agent 可读完整文件 |
+| 向后兼容 | 中 | 保留 `build_agent_prompt` 旧函数,通过 use_layered 切换 |
+| 测试覆盖 | 中 | 为每个 Agent 写测试,验证 context 大小 |
+
+### 13.7 实施步骤 (未来)
+
+1. 添加 `AGENT_LAYER_CONFIG` 和 `summarize_agent_output` (~50 行)
+2. 添加 `build_agent_prompt_layered` 核心函数 (~100 行)
+3. 集成到 `cmd_autoresearch` (替换 `build_agent_prompt` 调用, ~20 行)
+4. 添加单元测试 (验证每个 Agent context 大小, ~100 行)
+5. 完整 autoresearch 测试 (验证流程不变)
+
+---
+
+## 附录: 实施路线图总结
+
+| Phase | 内容 | 状态 | 风险 |
+|-------|------|------|------|
+| 1 | summary.json 生成 (每轮) | 📝 设计完成 | 低 |
+| 2 | 可配置 keep_recent + CLI 参数 | 📝 设计完成 | 低 |
+| 3 | 分层读取 (详细/摘要) | 📝 设计完成 | 低 |
+| 4 | 分层上下文 (Agent prompt 优化) | 📝 记录, 暂不实施 | 中 |
+
+**最近一次更新**: 2026-07-22 — 完成 lazy detection + 模拟 agent 行为 + 记录 Phase 4 设计
