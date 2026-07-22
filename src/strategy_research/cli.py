@@ -20,91 +20,23 @@ def _load_template(name: str) -> str:
     return ""
 
 
+def _render_template(template: str, **kwargs) -> str:
+    """替换 {key} 占位符，但保留 {} 字面量 (Python dict literal 等)。
+
+    与 str.format() 的区别：本函数用 str.replace 逐个替换已知的 {key} 占位符，
+    不会把 Python 代码中的空 dict {} 误判为位置参数。
+    """
+    for key, value in kwargs.items():
+        template = template.replace("{" + key + "}", str(value))
+    return template
+
+
 # ============================================================
 # DuckDB 初始化 SQL
 # ============================================================
-
-DUCKDB_INIT_SQL = """
--- 因子注册表
-CREATE TABLE IF NOT EXISTS factor_registry (
-    factor_name VARCHAR NOT NULL,
-    factor_code VARCHAR NOT NULL,
-    factor_type VARCHAR NOT NULL,
-    category VARCHAR,
-    source VARCHAR,
-    lookback_window INTEGER,
-    strategy_name VARCHAR NOT NULL,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    added_by VARCHAR,
-    PRIMARY KEY (strategy_name, factor_name)
-);
-
--- 验证缓存
-CREATE TABLE IF NOT EXISTS validation_cache (
-    factor_name VARCHAR NOT NULL,
-    factor_code VARCHAR NOT NULL,
-    strategy_name VARCHAR NOT NULL,
-    ic_mean DOUBLE,
-    ic_std DOUBLE,
-    ir DOUBLE,
-    ic_decay_1d DOUBLE,
-    ic_decay_5d DOUBLE,
-    ic_decay_20d DOUBLE,
-    rank_ic_mean DOUBLE,
-    stability_score DOUBLE,
-    diversification_score DOUBLE,
-    turnover DOUBLE,
-    monotonicity_score DOUBLE,
-    coverage DOUBLE,
-    overall_score DOUBLE,
-    is_valid BOOLEAN,
-    fail_reasons VARCHAR,
-    validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source VARCHAR,
-    data_fingerprint VARCHAR,
-    PRIMARY KEY (strategy_name, factor_name)
-);
-
--- 回测结果
-CREATE TABLE IF NOT EXISTS backtest_results (
-    strategy_name VARCHAR NOT NULL,
-    run VARCHAR NOT NULL,
-    commit_hash VARCHAR,
-    action VARCHAR,
-    action_type VARCHAR,
-    goal_metric DOUBLE,
-    calmar DOUBLE,
-    sharpe DOUBLE,
-    max_dd DOUBLE,
-    ann_return DOUBLE,
-    ann_vol DOUBLE,
-    sortino DOUBLE,
-    turnover DOUBLE,
-    factors_added INTEGER,
-    factors_removed INTEGER,
-    params_changed INTEGER,
-    status VARCHAR,
-    description VARCHAR,
-    hypothesis VARCHAR,
-    verdict VARCHAR,
-    risk_rating VARCHAR,
-    attribution_alpha DOUBLE,
-    attribution_beta_mkt DOUBLE,
-    overfit_passed BOOLEAN,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (strategy_name, run)
-);
-
--- 数据指纹
-CREATE TABLE IF NOT EXISTS data_fingerprint (
-    table_name VARCHAR NOT NULL,
-    strategy_name VARCHAR NOT NULL,
-    fingerprint VARCHAR,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    row_count INTEGER,
-    PRIMARY KEY (table_name, strategy_name)
-);
-"""
+# 注意：DUCKDB_INIT_SQL 的权威定义在 core.db.DUCKDB_INIT_SQL（含 price_data /
+# factor_data / weight_history / nav_history / import_meta 共 8 张表）。
+# 这里不再重复定义，_init_duckdb() 直接调用 core.db.init_db()。
 
 
 # ============================================================
@@ -122,7 +54,8 @@ def _create_strategy(path: Path, strategy_name: str, strategy_type: str,
     program_template = _load_template("program.md")
     if program_template:
         (strategy_dir / "program.md").write_text(
-            program_template.format(
+            _render_template(
+                program_template,
                 strategy_name=strategy_name,
                 strategy_type=strategy_type,
                 goal_metric=goal_metric,
@@ -134,7 +67,8 @@ def _create_strategy(path: Path, strategy_name: str, strategy_type: str,
     prepare_template = _load_template("prepare.py")
     if prepare_template:
         (strategy_dir / "prepare.py").write_text(
-            prepare_template.format(
+            _render_template(
+                prepare_template,
                 strategy_name=strategy_name,
                 goal_metric=goal_metric,
             ),
@@ -145,7 +79,7 @@ def _create_strategy(path: Path, strategy_name: str, strategy_type: str,
     strategy_template = _load_template("strategy.py")
     if strategy_template:
         (strategy_dir / "strategy.py").write_text(
-            strategy_template.format(strategy_name=strategy_name),
+            _render_template(strategy_template, strategy_name=strategy_name),
             encoding="utf-8",
         )
 
@@ -161,19 +95,12 @@ def _create_strategy(path: Path, strategy_name: str, strategy_type: str,
 
 
 def _init_duckdb(path: Path) -> None:
-    """初始化 DuckDB 表结构。"""
-    try:
-        import duckdb
-    except ImportError:
-        print("⚠️  duckdb 未安装，跳过 DuckDB 初始化。")
-        print("   安装: pip install duckdb")
-        return
+    """初始化 DuckDB 表结构。委托给 core.db.init_db() 使用完整 schema。"""
+    from .core.db import init_db
 
-    db_path = path / "data.duckdb"
-    conn = duckdb.connect(str(db_path))
-    conn.execute(DUCKDB_INIT_SQL)
-    conn.close()
-    print(f"✓ 初始化 DuckDB: {db_path}")
+    ok = init_db(path)
+    if ok:
+        print(f"✓ 初始化 DuckDB: {path / 'data.duckdb'}")
 
 
 def _init_git(path: Path) -> None:
@@ -263,7 +190,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     readme_template = _load_template("README.md")
     if readme_template:
         (path / "README.md").write_text(
-            readme_template.format(strategy=strategy_name),
+            _render_template(readme_template, strategy=strategy_name),
             encoding="utf-8",
         )
     print("✓ 创建 README.md")
@@ -290,11 +217,12 @@ strategies:
         "orchestrator.md", "data_quality.md", "researcher.md", "factor_analyst.md",
         "strategist.md", "portfolio_construction.md", "risk_controller.md",
         "attribution_analyst.md", "anti_overfit_analyst.md", "backtest_diagnostics.md",
+        "critic.md",
     ]:
         prompt_content = _load_template(f".prompts/{prompt_name}")
         if prompt_content:
             (prompts_dir / prompt_name).write_text(prompt_content, encoding="utf-8")
-    print("✓ 创建 .prompts/ (10 个提示词)")
+    print("✓ 创建 .prompts/ (11 个提示词)")
 
     # .skills/
     skills_dir = path / ".skills"
