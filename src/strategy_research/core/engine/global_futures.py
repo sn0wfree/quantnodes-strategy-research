@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 from .futures_base import FuturesBaseEngine
@@ -25,13 +27,8 @@ _GLOBAL_FUTURES_MULTIPLIERS = {
 
 def _get_global_product_code(symbol: str) -> str:
     code = symbol.split(".")[0] if "." in symbol else symbol
-    product = ""
-    for ch in code:
-        if ch.isalpha():
-            product += ch
-        else:
-            break
-    return product.upper()
+    match = re.match(r"\d?[A-Za-z]+", code)
+    return match.group(0).upper() if match else ""
 
 
 class GlobalFuturesEngine(FuturesBaseEngine):
