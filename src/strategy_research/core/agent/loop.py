@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..hooks.composite import CompositeHook
+from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
@@ -121,6 +123,8 @@ class AgentLoop:
         strategy_name: str | None = None,
         enable_goal_injection: bool = True,
         enable_hypothesis_auto_create: bool = True,
+        hooks: CompositeHook | None = None,
+        session_manager: Any | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -134,6 +138,8 @@ class AgentLoop:
         self.strategy_name = strategy_name
         self.enable_goal_injection = enable_goal_injection
         self.enable_hypothesis_auto_create = enable_hypothesis_auto_create
+        self._hooks = hooks
+        self._session_manager = session_manager
 
         # Tool filtering: allowed_tools > readonly > all
         if allowed_tools is not None:
@@ -156,6 +162,7 @@ class AgentLoop:
             config=config, registry=self.registry,
             memory=memory, workspace=workspace,
             system_prompt=system_prompt,
+            session_manager=getattr(self, '_session_manager', None),
         )
         self.client = OpenAICompatClient(config)
         # Track tool_calls per iteration for no_progress detection
@@ -164,6 +171,31 @@ class AgentLoop:
         self._trace_writer: TraceWriter | None = None
         if trace_dir is not None:
             self._trace_writer = TraceWriter(trace_dir)
+
+    # ── Hook sync adapter ─────────────────────────
+
+    def _fire_hooks(self, method_name: str, *args: Any, **kwargs: Any) -> None:
+        """Sync adapter for async CompositeHook methods."""
+        if self._hooks is None:
+            return
+        import asyncio
+        try:
+            method = getattr(self._hooks, method_name)
+            coro = method(*args, **kwargs)
+            if asyncio.iscoroutine(coro):
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(coro)
+                finally:
+                    loop.close()
+        except Exception:  # noqa: BLE001
+            logger.warning("Hook %s failed", method_name, exc_info=True)
+
+    def _build_hook_context(
+        self, iteration: int, messages: list[dict[str, Any]],
+    ) -> AgentHookContext:
+        """Build AgentHookContext for the current iteration."""
+        return AgentHookContext(iteration=iteration, messages=messages)
 
     # ── Public API ───────────────────────────────
 
@@ -202,8 +234,16 @@ class AgentLoop:
             "tokens": estimate_tokens(messages),
         })
 
+        # P2-b: Hook — before_run
+        hook_ctx = self._build_hook_context(0, messages)
+        self._fire_hooks("before_run", hook_ctx)
+
         for iteration in range(1, self.max_iterations + 1):
             result.iterations = iteration
+
+            # P2-b: Hook — before_iteration
+            hook_ctx = self._build_hook_context(iteration, messages)
+            self._fire_hooks("before_iteration", hook_ctx)
 
             # Context compression before LLM call
             messages, applied = self._maybe_compact(messages)
@@ -220,6 +260,8 @@ class AgentLoop:
                 result.finished_reason = "error"
                 result.error = f"{type(exc).__name__}: {exc}"
                 self._trace({"type": "error", "iteration": iteration, "error": str(exc)})
+                # P2-b: Hook — on_error
+                self._fire_hooks("on_error", hook_ctx, exc)
                 break
 
             # Append assistant message
@@ -241,16 +283,31 @@ class AgentLoop:
             if not response.has_tool_calls():
                 result.answer = response.content
                 result.finished_reason = "stop"
+                # P2-b: Hook — after_iteration (before break)
+                self._fire_hooks("after_iteration", hook_ctx)
                 self._trace({"type": "loop_end", "reason": "stop", "iteration": iteration})
                 break
 
             # Execute each tool_call with HeartbeatTimer
+            # P2-b: Hook — before_execute_tools
+            self._fire_hooks("before_execute_tools", hook_ctx)
+
             tool_hashes_this_iter: list[str] = []
             for tc in response.tool_calls:
                 tool_hashes_this_iter.append(_tool_call_hash(tc))
                 tool_result_msg = self._execute_tool_with_heartbeat(tc, result)
+
+                # P2-b: Hook — after_tool_executed or on_tool_error
+                if tool_result_msg.get("content", "").startswith('{"status": "error"'):
+                    self._fire_hooks("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
+                else:
+                    self._fire_hooks("after_tool_executed", hook_ctx, tc, tool_result_msg)
+
                 messages.append(tool_result_msg)
                 result.messages.append(tool_result_msg)
+
+            # P2-b: Hook — after_iteration
+            self._fire_hooks("after_iteration", hook_ctx)
 
             # No-progress detection
             self._recent_hashes.extend(tool_hashes_this_iter)
@@ -263,6 +320,8 @@ class AgentLoop:
                     f"No progress detected (last {self.no_progress_window} tool calls identical)"
                 )
                 self._trace({"type": "loop_end", "reason": "no_progress", "iteration": iteration})
+                # P2-b: Hook — after_run (before early return)
+                self._fire_hooks("after_run", hook_ctx, result)
                 return result
 
         else:
@@ -285,6 +344,9 @@ class AgentLoop:
             "elapsed_s": round(elapsed, 2),
             "compression": result.compression_applied,
         })
+
+        # P2-b: Hook — after_run
+        self._fire_hooks("after_run", hook_ctx, result)
 
         # Git commit after run
         self._git_commit(full_task, result)

@@ -63,6 +63,12 @@ class AgentHook:
     def finalize_content(self, ctx: AgentHookContext, content: str | None) -> str | None:
         return content
 
+    def before_run(self, ctx: AgentHookContext) -> None:
+        pass
+
+    def after_run(self, ctx: AgentHookContext, result: Any) -> None:
+        pass
+
     def on_error(self, ctx: AgentHookContext, error: BaseException) -> None:
         pass
 
@@ -157,6 +163,12 @@ class CompositeHook(AgentHook):
         self, ctx: AgentHookContext, content: str | None,
     ) -> str | None:
         return await self._fire_pipeline("finalize_content", ctx, content)
+
+    async def before_run(self, ctx: AgentHookContext) -> None:
+        await self._fire("before_run", ctx)
+
+    async def after_run(self, ctx: AgentHookContext, result: Any) -> None:
+        await self._fire("after_run", ctx, result)
 
     async def on_error(self, ctx: AgentHookContext, error: BaseException) -> None:
         await self._fire("on_error", ctx, error)

@@ -1,8 +1,9 @@
-"""SessionMemoryHook — 自动归档会话到 <workspace>/memory/。
+"""SessionMemoryHook — 自动归档会话到 <workspace>/memory/ + SessionDB。
 
 触发时机：
 - 用户主动 /reset
 - 会话结束
+- AgentLoop after_run 钩子
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class SessionMemoryHook(AgentHook):
-    """自动归档会话到 <workspace>/memory/。"""
+    """自动归档会话到 <workspace>/memory/ + SessionDB。"""
 
     name = "session_memory"
 
@@ -28,10 +29,12 @@ class SessionMemoryHook(AgentHook):
         workspace: Path | str | None = None,
         messages_count: int = 15,
         llm_slug: bool = True,
+        session_manager: Any | None = None,
     ) -> None:
         self._workspace = Path(workspace) if workspace else None
         self._messages_count = messages_count
         self._llm_slug = llm_slug
+        self._session_manager = session_manager
         self._pending_archive: list[dict[str, Any]] = []
 
     def after_iteration(self, ctx: AgentHookContext) -> None:
@@ -44,7 +47,7 @@ class SessionMemoryHook(AgentHook):
         pass  # 由外部调用 archive_session 触发
 
     def archive_session(self, session_id: str | None = None) -> Path | None:
-        """手动触发归档。"""
+        """手动触发归档 — 写 Markdown 文件 + SessionDB。"""
         if not self._workspace or not self._pending_archive:
             return None
 
@@ -56,6 +59,18 @@ class SessionMemoryHook(AgentHook):
 
         content = self._format_session(session_id, self._pending_archive)
         filepath.write_text(content, encoding="utf-8")
+
+        # P2-b: 同时写入 SessionDB
+        if self._session_manager and session_id:
+            try:
+                for msg in self._pending_archive:
+                    self._session_manager.add_message(
+                        session_id=session_id,
+                        role=msg.get("role", "unknown"),
+                        content=msg.get("content", ""),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("SessionDB write failed: %s", exc)
 
         self._pending_archive.clear()
         logger.info("Session archived to %s", filepath)

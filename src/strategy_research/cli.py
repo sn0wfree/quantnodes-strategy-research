@@ -1620,6 +1620,328 @@ def cmd_session_list(args) -> int:
     return 0
 
 
+def cmd_session_show(args) -> int:
+    """显示会话详情。"""
+    from .core.session import SessionDB
+
+    db = SessionDB()
+    session = db.get_session(args.session_id)
+    if not session:
+        print(f"会话 {args.session_id} 不存在")
+        return 1
+
+    from datetime import datetime
+    created = datetime.fromtimestamp(session.created_at).strftime("%Y-%m-%d %H:%M:%S")
+    updated = datetime.fromtimestamp(session.updated_at).strftime("%Y-%m-%d %H:%M:%S")
+
+    print(f"=== 会话详情 ===")
+    print(f"  ID:        {session.id}")
+    print(f"  创建时间:  {created}")
+    print(f"  更新时间:  {updated}")
+    print(f"  工作区:    {session.workspace or '(global)'}")
+    if session.metadata_json:
+        print(f"  元数据:    {session.metadata_json[:200]}")
+
+    messages = db.get_messages(args.session_id, limit=50)
+    if messages:
+        print(f"\n=== 消息 (共 {len(messages)} 条) ===")
+        for msg in messages:
+            ts = datetime.fromtimestamp(msg.timestamp).strftime("%H:%M:%S")
+            content = (msg.content or "")[:120]
+            print(f"  [{ts}] {msg.role}: {content}")
+    else:
+        print("\n(无消息)")
+
+    return 0
+
+
+def cmd_session_search(args) -> int:
+    """搜索消息。"""
+    from .core.session import SessionDB
+
+    db = SessionDB()
+    results = db.search_messages(args.query, limit=args.limit)
+
+    if not results:
+        print(f"未找到匹配 '{args.query}' 的消息")
+        return 0
+
+    print(f"=== 搜索结果 (共 {len(results)} 条, 关键词: {args.query}) ===")
+    for r in results:
+        session_id = r.get("session_id", "?")[:12]
+        role = r.get("role", "?")
+        content = (r.get("content", "") or "")[:120]
+        print(f"  [{session_id}] {role}: {content}")
+
+    return 0
+
+
+def cmd_session_delete(args) -> int:
+    """删除会话。"""
+    from .core.session import SessionDB
+
+    db = SessionDB()
+    session = db.get_session(args.session_id)
+    if not session:
+        print(f"会话 {args.session_id} 不存在")
+        return 1
+
+    ok = db.delete_session(args.session_id)
+    if ok:
+        print(f"已删除会话 {args.session_id}")
+    else:
+        print(f"删除会话 {args.session_id} 失败")
+        return 1
+
+    return 0
+
+
+def cmd_skills_list(args) -> int:
+    """列出所有技能。"""
+    from .core.skills import SkillRegistry
+
+    skills_dir = Path(__file__).parent / "templates" / ".skills"
+    registry = SkillRegistry()
+    registry.load_directory(skills_dir)
+
+    category = getattr(args, "category", None)
+    if category:
+        skills = registry.by_category(category)
+    else:
+        skills = registry.list_all()
+
+    if not skills:
+        print("暂无技能")
+        return 0
+
+    print(f"=== 技能列表 (共 {len(skills)} 个) ===")
+    for s in skills:
+        desc = s.description[:60] if s.description else "(无描述)"
+        tags = f" [{', '.join(s.tags)}]" if s.tags else ""
+        print(f"  {s.name:30s}  {desc}{tags}")
+
+    return 0
+
+
+def cmd_skills_show(args) -> int:
+    """显示技能内容。"""
+    from .core.skills import SkillRegistry
+
+    skills_dir = Path(__file__).parent / "templates" / ".skills"
+    registry = SkillRegistry()
+    registry.load_directory(skills_dir)
+
+    skill = registry.get(args.name)
+    if not skill:
+        print(f"技能 '{args.name}' 不存在")
+        return 1
+
+    print(f"=== {skill.name} ===")
+    if skill.description:
+        print(f"描述: {skill.description}")
+    if skill.category:
+        print(f"类别: {skill.category}")
+    if skill.tags:
+        print(f"标签: {', '.join(skill.tags)}")
+    print()
+    print(skill.content)
+
+    return 0
+
+
+def cmd_skills_search(args) -> int:
+    """搜索技能。"""
+    from .core.skills import SkillRegistry
+
+    skills_dir = Path(__file__).parent / "templates" / ".skills"
+    registry = SkillRegistry()
+    registry.load_directory(skills_dir)
+
+    results = registry.search(args.query)
+    if not results:
+        print(f"未找到匹配 '{args.query}' 的技能")
+        return 0
+
+    print(f"=== 搜索结果 (共 {len(results)} 个, 关键词: {args.query}) ===")
+    for s in results:
+        desc = s.description[:60] if s.description else "(无描述)"
+        print(f"  {s.name:30s}  {desc}")
+
+    return 0
+
+
+def cmd_swarm_list(args) -> int:
+    """列出所有 swarm preset。"""
+    from .core.swarm import list_presets
+
+    presets_dir = Path(__file__).parent / "core" / "swarm" / "presets"
+    presets = list_presets(presets_dir)
+
+    if not presets:
+        print("暂无 swarm preset")
+        return 0
+
+    print(f"=== Swarm Presets (共 {len(presets)} 个) ===")
+    for p in presets:
+        agent_count = len(p.agents)
+        print(f"  {p.name:30s}  {agent_count} agents  {p.description[:50]}")
+
+    return 0
+
+
+def cmd_swarm_inspect(args) -> int:
+    """显示 swarm preset 结构。"""
+    from .core.swarm import load_preset
+
+    presets_dir = Path(__file__).parent / "core" / "swarm" / "presets"
+    preset = None
+    for ext in ("*.yaml", "*.yml"):
+        for f in presets_dir.glob(ext):
+            p = load_preset(f)
+            if p and p.name == args.name:
+                preset = p
+                break
+        if preset:
+            break
+
+    if not preset:
+        print(f"Preset '{args.name}' 不存在")
+        return 1
+
+    print(f"=== {preset.name} ===")
+    print(f"描述: {preset.description}")
+    print(f"Agents: {len(preset.agents)}")
+    print()
+
+    print("DAG 结构:")
+    for agent_id, deps in preset.dag.items():
+        dep_str = ", ".join(deps) if deps else "(无依赖)"
+        print(f"  {agent_id} ← {dep_str}")
+
+    print()
+    print("Agent 详情:")
+    for a in preset.agents:
+        tools_str = ", ".join(a.tools) if a.tools else "(无工具)"
+        print(f"  {a.id}: {tools_str}")
+
+    return 0
+
+
+def cmd_swarm_run(args) -> int:
+    """执行 swarm preset。"""
+    from .core.swarm import load_preset, SwarmRuntime
+
+    presets_dir = Path(__file__).parent / "core" / "swarm" / "presets"
+    preset = None
+    for ext in ("*.yaml", "*.yml"):
+        for f in presets_dir.glob(ext):
+            p = load_preset(f)
+            if p and p.name == args.name:
+                preset = p
+                break
+        if preset:
+            break
+
+    if not preset:
+        print(f"Preset '{args.name}' 不存在")
+        return 1
+
+    workspace = Path(args.workspace)
+    task = args.task or f"执行 swarm preset: {preset.name}"
+
+    runtime = SwarmRuntime()
+    result = runtime.execute(preset, workspace, task)
+
+    print(f"=== Swarm 执行完成 ===")
+    print(f"Run ID:  {result.run_id}")
+    print(f"Preset:  {result.preset_name}")
+    print(f"耗时:    {result.elapsed_s}s")
+    print(f"成功:    {'是' if result.success else '否'}")
+    print()
+
+    for agent_id, ar in result.agent_results.items():
+        status = "✓" if ar.status.value == "completed" else "✗"
+        print(f"  {status} {agent_id}: {ar.elapsed_s}s")
+
+    return 0
+
+
+def cmd_swarm_cancel(args) -> int:
+    """取消运行中的 swarm。"""
+    from .core.swarm import SwarmRuntime
+
+    runtime = SwarmRuntime()
+    ok = runtime.cancel(args.run_id)
+    if ok:
+        print(f"已取消 swarm {args.run_id}")
+    else:
+        print(f"未找到运行中的 swarm {args.run_id}")
+        return 1
+
+    return 0
+
+
+def cmd_mcp_serve(args) -> int:
+    """启动 MCP 服务器。"""
+    from .core.mcp import MCPServer
+
+    server = MCPServer()
+    server.register_default_tools()
+
+    if args.transport == "stdio":
+        server.serve_stdio()
+    else:
+        print(f"MCP SSE server not yet implemented (port {args.port})")
+        return 1
+
+    return 0
+
+
+def cmd_mcp_list_tools(args) -> int:
+    """列出所有 MCP 工具。"""
+    from .core.mcp import MCPServer
+
+    server = MCPServer()
+    server.register_default_tools()
+
+    tools = server.list_tools()
+    print(f"=== MCP Tools (共 {len(tools)} 个) ===")
+    for t in tools:
+        params = t.get("inputSchema", {}).get("properties", {})
+        param_str = ", ".join(params.keys()) if params else "no params"
+        print(f"  {t['name']:30s}  {param_str:30s}  {t['description'][:40]}")
+
+    return 0
+
+
+def cmd_export(args) -> int:
+    """导出策略到多种平台格式。"""
+    from .core.export import export_strategy
+
+    workspace = Path(args.path).resolve()
+    strategy_name = args.strategy
+    strategy_path = workspace / "strategies" / strategy_name / "strategy.py"
+
+    if not strategy_path.exists():
+        print(f"策略文件不存在: {strategy_path}")
+        return 1
+
+    output_dir = Path(args.output) if args.output else workspace / "exports"
+    formats = args.format
+
+    results = export_strategy(strategy_path, output_dir, formats)
+
+    print(f"=== 导出结果: {strategy_name} ===")
+    for fmt, result in results.items():
+        status = "✓" if result["status"] == "ok" else "✗"
+        if result["status"] == "ok":
+            print(f"  {status} {fmt}: {result['path']} ({result['lines']} 行)")
+        else:
+            print(f"  {status} {fmt}: {result['error']}")
+
+    return 0
+
+
 # ============================================================
 # Main CLI
 # ============================================================
@@ -1735,6 +2057,71 @@ def main() -> int:
     session_list_parser = session_subparsers.add_parser("list", help="列出会话")
     session_list_parser.add_argument("--limit", "-l", type=int, default=20, help="显示数量")
 
+    # session show
+    session_show_parser = session_subparsers.add_parser("show", help="显示会话详情")
+    session_show_parser.add_argument("session_id", help="会话 ID")
+
+    # session search
+    session_search_parser = session_subparsers.add_parser("search", help="搜索消息")
+    session_search_parser.add_argument("query", help="搜索关键词")
+    session_search_parser.add_argument("--limit", "-l", type=int, default=20, help="返回数量")
+
+    # session delete
+    session_delete_parser = session_subparsers.add_parser("delete", help="删除会话")
+    session_delete_parser.add_argument("session_id", help="会话 ID")
+
+    # skills
+    skills_parser = subparsers.add_parser("skills", help="技能管理")
+    skills_subparsers = skills_parser.add_subparsers(dest="skills_command", help="技能命令")
+
+    skills_list_parser = skills_subparsers.add_parser("list", help="列出所有技能")
+    skills_list_parser.add_argument("--category", "-c", help="按类别筛选")
+
+    skills_show_parser = skills_subparsers.add_parser("show", help="显示技能内容")
+    skills_show_parser.add_argument("name", help="技能名称")
+
+    skills_search_parser = skills_subparsers.add_parser("search", help="搜索技能")
+    skills_search_parser.add_argument("query", help="搜索关键词")
+
+    # swarm
+    swarm_parser = subparsers.add_parser("swarm", help="多智能体协同")
+    swarm_subparsers = swarm_parser.add_subparsers(dest="swarm_command", help="swarm 命令")
+
+    swarm_list_parser = swarm_subparsers.add_parser("list", help="列出所有 preset")
+
+    swarm_inspect_parser = swarm_subparsers.add_parser("inspect", help="显示 preset 结构")
+    swarm_inspect_parser.add_argument("name", help="preset 名称")
+
+    swarm_run_parser = swarm_subparsers.add_parser("run", help="执行 swarm preset")
+    swarm_run_parser.add_argument("name", help="preset 名称")
+    swarm_run_parser.add_argument("--workspace", "-w", required=True, help="工作区路径")
+    swarm_run_parser.add_argument("--task", "-t", default="", help="任务描述")
+
+    swarm_cancel_parser = swarm_subparsers.add_parser("cancel", help="取消运行中的 swarm")
+    swarm_cancel_parser.add_argument("run_id", help="运行 ID")
+
+    # mcp
+    mcp_parser = subparsers.add_parser("mcp", help="MCP 服务器")
+    mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_command", help="MCP 命令")
+
+    mcp_serve_parser = mcp_subparsers.add_parser("serve", help="启动 MCP 服务器")
+    mcp_serve_parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio", help="传输方式")
+    mcp_serve_parser.add_argument("--port", type=int, default=8900, help="SSE 端口")
+
+    mcp_list_tools_parser = mcp_subparsers.add_parser("list-tools", help="列出所有 MCP 工具")
+
+    # export
+    export_parser = subparsers.add_parser("export", help="导出策略")
+    export_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    export_parser.add_argument("--strategy", "-s", required=True, help="策略名称")
+    export_parser.add_argument("--format", "-f", nargs="+", default=["pine", "tdx", "vnpy"],
+                               choices=["pine", "tdx", "vnpy"], help="导出格式")
+    export_parser.add_argument("--output", "-o", help="输出目录 (默认: workspace/exports/)")
+
+    # schedule (P5)
+    from .core.scheduled_research.cli import add_schedule_subparsers
+    add_schedule_subparsers(subparsers)
+
     # goal (P3-a)
     from .core.goal.cli import add_goal_subparsers
     add_goal_subparsers(subparsers)
@@ -1804,8 +2191,73 @@ def main() -> int:
             return cmd_session_stats(args)
         elif args.session_command == "list":
             return cmd_session_list(args)
+        elif args.session_command == "show":
+            return cmd_session_show(args)
+        elif args.session_command == "search":
+            return cmd_session_search(args)
+        elif args.session_command == "delete":
+            return cmd_session_delete(args)
         else:
             session_parser.print_help()
+            return 0
+    elif args.command == "skills":
+        if args.skills_command == "list":
+            return cmd_skills_list(args)
+        elif args.skills_command == "show":
+            return cmd_skills_show(args)
+        elif args.skills_command == "search":
+            return cmd_skills_search(args)
+        else:
+            skills_parser.print_help()
+            return 0
+    elif args.command == "swarm":
+        if args.swarm_command == "list":
+            return cmd_swarm_list(args)
+        elif args.swarm_command == "inspect":
+            return cmd_swarm_inspect(args)
+        elif args.swarm_command == "run":
+            return cmd_swarm_run(args)
+        elif args.swarm_command == "cancel":
+            return cmd_swarm_cancel(args)
+        else:
+            swarm_parser.print_help()
+            return 0
+    elif args.command == "mcp":
+        if args.mcp_command == "serve":
+            return cmd_mcp_serve(args)
+        elif args.mcp_command == "list-tools":
+            return cmd_mcp_list_tools(args)
+        else:
+            mcp_parser.print_help()
+            return 0
+    elif args.command == "export":
+        return cmd_export(args)
+    elif args.command == "schedule":
+        from .core.scheduled_research.cli import (
+            cmd_schedule_create,
+            cmd_schedule_list,
+            cmd_schedule_show,
+            cmd_schedule_cancel,
+            cmd_schedule_delete,
+            cmd_schedule_run,
+            cmd_schedule_start,
+        )
+        if args.schedule_command == "create":
+            return cmd_schedule_create(args)
+        elif args.schedule_command == "list":
+            return cmd_schedule_list(args)
+        elif args.schedule_command == "show":
+            return cmd_schedule_show(args)
+        elif args.schedule_command == "cancel":
+            return cmd_schedule_cancel(args)
+        elif args.schedule_command == "delete":
+            return cmd_schedule_delete(args)
+        elif args.schedule_command == "run":
+            return cmd_schedule_run(args)
+        elif args.schedule_command == "start":
+            return cmd_schedule_start(args)
+        else:
+            schedule_parser.print_help()
             return 0
     elif args.command == "goal":
         from .core.goal.cli import (
