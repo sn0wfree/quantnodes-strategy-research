@@ -558,13 +558,37 @@ $ pytest tests/test_hooks.py tests/test_session_memory.py tests/test_memory_fts5
 
 ## 5. P3 Roadmap（P0 + P1 + P1.5 + P2 完成后执行）
 
-### P3 — Goal + Hypothesis + Validation（Week 12-14，**待 P2 完成后讨论**）
+### P3 — Goal + Hypothesis + Validation（Week 12-14，**P3-a 完成，P3-b/c/d 待启动**）
 
 **预计复制**：
-- `src/goal/{models,store,policy,context}.py`
-- `src/hypotheses/registry.py`
-- `backtest/validation.py`
-- `src/factors/bench_runner_strict.py`
+- `src/goal/{models,store,policy,context}.py` — ✅ P3-a 完成
+- `src/hypotheses/registry.py` — ☐ P3-b
+- `backtest/validation.py` — ☐ P3-c
+- `src/factors/bench_runner_strict.py` — ☐ P3-c
+
+### P3-a — Goal 系统（已完成，162 测试）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/goal/models.py`: GoalStatus (12 值) + RiskTier (4 值全部照搬) + GoalRecord (19 fields) + GoalClaim + GoalCriterion + EvidenceInput/Record + AuditRow + StaleGoalError
+  - `core/goal/policy.py`: normalize_required_text + reject_live_execution_objective（拒 EN/CN live-trading）
+  - `core/goal/store.py`: SQLite-backed GoalStore (1017 行复制 + 去 src.config accessor 依赖)
+  - `core/goal/context.py`: format_goal_context + format_goal_continuation_prompt
+  - `core/goal/cli.py`: 7 子命令 (start/status/evidence/audit/complete/list/cancel)
+  - `core/goal/__init__.py`: 公共 API 导出
+  - `cli.py`: 接入 `goal` 子命令
+- 测试 (162 个)：
+  - `test_goal_models.py` — 26 测试
+  - `test_goal_policy.py` — 34 测试
+  - `test_goal_store.py` — 32 测试
+  - `test_goal_context.py` — 32 测试
+  - `test_goal_cli.py` — 26 测试
+  - `test_goal_e2e.py` — 12 测试
+- 文档：`docs/goal-design.md`
+- Commits：`0dab8b8` (Day 1) + `057a9dc` (Day 2) + `9540de3` (Day 3) + `1ae86e1` (Day 4)
+- 测试结果：3770 → 3932 passed (+162, 0 regression)
+- 备注：RiskTier 全部 4 个值照搬，LIVE_TRADING_OR_EXECUTION 在 replace_goal 显式拒绝
 
 ---
 
