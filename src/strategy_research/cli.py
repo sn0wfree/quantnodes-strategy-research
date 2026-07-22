@@ -1716,6 +1716,10 @@ def main() -> int:
     from .core.goal.cli import add_goal_subparsers
     add_goal_subparsers(subparsers)
 
+    # hypothesis (P3-b)
+    from .core.hypothesis.cli import add_hypothesis_subparsers
+    add_hypothesis_subparsers(subparsers)
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1770,6 +1774,23 @@ def main() -> int:
             "list": cmd_goal_list,
             "cancel": cmd_goal_cancel,
         }.get(args.goal_command, lambda a: (goal_parser.print_help(), 0)[1])(args)
+    elif args.command == "hypothesis":
+        from .core.hypothesis.cli import (
+            cmd_hypothesis_create,
+            cmd_hypothesis_link,
+            cmd_hypothesis_list,
+            cmd_hypothesis_search,
+            cmd_hypothesis_show,
+            cmd_hypothesis_update,
+        )
+        return {
+            "create": cmd_hypothesis_create,
+            "list": cmd_hypothesis_list,
+            "show": cmd_hypothesis_show,
+            "update": cmd_hypothesis_update,
+            "search": cmd_hypothesis_search,
+            "link": cmd_hypothesis_link,
+        }.get(args.hypothesis_command, lambda a: (hypothesis_parser.print_help(), 0)[1])(args)
     else:
         parser.print_help()
         return 0
