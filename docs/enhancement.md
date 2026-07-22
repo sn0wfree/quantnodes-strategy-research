@@ -1,8 +1,8 @@
-# 借鉴增强方案（P0 + P1）
+# 借鉴增强方案（P0 + P1 + P1.5 + P2）
 
 > 对应调研：`docs/vibe-trading-survey.md`（1805 行，完整功能清单）
 > 对应总计划：本文件即主执行计划
-> 状态：**待启动**
+> 状态：**执行中（P0+P1+P1.5 完成，P2 设计已确定）**
 > 创建日期：2026-07-22
 
 ---
@@ -13,24 +13,35 @@
 
 | 决策点 | 选择 |
 |---|---|
-| 借鉴来源 | vibe-trading-ai 0.1.11（HKUDS，MIT License） |
+| 借鉴来源 | vibe-trading-ai 0.1.11（HKUDS，MIT License）+ llmwikify（Hook 系统） |
 | 借鉴方式 | 整包复制关键模块 + 自写最小版 |
-| 当前范围 | P0 + P1（5 周） |
+| 当前范围 | P0 + P1 + P1.5 + P2（17 周） |
 | Skills 范围 | P0+P1 不涉及；P2 阶段再讨论 |
 | CLI 名 | 保持 `quantnodes-research` |
 | LLM 集成 | OpenAI 兼容通用（httpx，零 LangChain） |
 | 沙箱策略 | AST guard + 路径白名单 |
 | 测试策略 | 仅 e2e smoke test |
 | 交付方式 | 按阶段 PR 交付（P0 → P1 → ...） |
-| License 处理 | 保留 MIT，致敬原作者（HKUDS） |
+| License 处理 | 保留 MIT，致敬原作者（HKUDS + llmwikify） |
+| Hook 系统 | 纯 llmwikify 模式（UnifiedHook + AgentHook 两层） |
+| Session-Memory | 自动归档到 `<workspace>/memory/` |
+| Memory FTS5 | 全局 `~/.quantnodes-research/memory/memory_fts5.db` |
+| Session 存储 | 全局 `~/.quantnodes-research/sessions.db` |
+| Memory 注入 | 每个 user message 前注入 recalled memories |
+| 自动 reindex | 启动时自动 reindex |
 
 ### 1.2 阶段总览
 
 | 阶段 | 时间 | 交付 | 净增行数 | 复制行数 |
 |---|---|---|---|---|
-| P0 修通 init | Week 1-2 | PR #1 | ~880 | 0 |
-| P1 Agent 真跑 | Week 3-5 | PR #2 | ~1 775 | ~940 |
-| **合计** | **5 周** | **2 PRs** | **~2 655** | **~940** |
+| P0 修通 init | Week 1-2 | PR #1-#3 | ~880 | 0 |
+| P1 Agent 基础设施 | Week 3-5 | PR #4-#6 + AgentLoop 改造 | ~2 800 | ~940 |
+| P1.5-a 核心接口 | Week 6 | types + agents + dag | ~300 | 0 |
+| P1.5-b Controller | Week 7 | controller + prompt + validator | ~400 | 0 |
+| P1.5-c 集成 | Week 8 | grounding + executors + cli | ~300 | 0 |
+| P2 Hook + Memory + Session | Week 9-11 | Hook 系统 + FTS5 + Session | ~800 | ~500 |
+| P3 Goal + Hypothesis | Week 12-14 | PR #9 | TBD | TBD |
+| **合计** | **17 周** | **9 PRs** | **~5 480+** | **~1 440** |
 
 ### 1.3 与现有文档的关系
 
@@ -39,7 +50,7 @@
 | `docs/vibe-trading-survey.md` | 总览（已完成，1805 行） |
 | `docs/backtest-overhaul/README.md` Phase 1 | ⊆ 本计划 P0-T0.5 |
 | `docs/backtest-overhaul/README.md` Phase 3 | ⊆ 本计划 P3（暂不执行） |
-| `docs/autoresearch-design.md` | agent 角色定义，本次 P1 仅重写 `_spawn_agent` |
+| `docs/autoresearch-design.md` | agent 角色定义，P1.5 替换 `_spawn_agent` |
 
 ---
 
@@ -193,17 +204,17 @@ LLM agent 通过 ReAct 循环修改 `strategy.py` 并 commit；cross-run memory 
 | T1.20 | auto-recall `find_relevant` | `core/agent/context.py` | ✅ | `<recalled-memories>` 注入 user msg |
 | T1.21 | git commit after run | `core/agent/loop.py` | ✅ | 每 run 自动 commit |
 
-#### Week 5 — autoresearch + e2e
+#### Week 5 — AgentLoop 改造（已完成）
 
 | # | 任务 | 文件 | 状态 | 验收 |
 |---|---|---|---|---|
-| T1.22 | Calmar 目标停止（≥ target 持续 3 轮）| `core/autoresearch.py` | ☐ | 触发时停止 |
-| T1.23 | 无改善停止（连续 5 轮 sharpe 改进 < 1%）| `core/autoresearch.py` | ☐ | 触发时停止 |
-| T1.24 | stuck 检测（同 hash 出现 ≥ 5 次）| `core/autoresearch.py` | ☐ | 触发时停止 |
-| T1.25 | CLI `--max-iter` + `--target-calmar` | `cli.py` argparse | ☐ | flag 可用 |
-| T1.26 | run 摘要输出 | `core/agent/loop.py` + `cli.py` | ☐ | `[iter=N sharpe=X calmar=Y elapsed=Zs]` |
-| T1.27 | e2e smoke test | `tests/test_e2e.py`（新）| ☐ | 4 个 testcase 全过 |
-| T1.28 | README + docs 更新 | `README.md` + `docs/` | ☐ | 工作流说明 |
+| T1.22 | ContextBuilder 自定义 system_prompt | `core/agent/context.py` | ✅ | 自定义 prompt 可用 |
+| T1.23 | AgentLoop allowed_tools + readonly | `core/agent/loop.py` | ✅ | 工具过滤可用 |
+| T1.24 | AgentLoop run(context=) | `core/agent/loop.py` | ✅ | context 注入可用 |
+| T1.25 | WriteFileTool is_readonly=False | `core/agent/builtin_tools/__init__.py` | ✅ | readonly 模式正确过滤 |
+| T1.26 | 新增测试 12 个 | `tests/` | ✅ | 3607 passed |
+
+> 注：原 T1.22-T1.28（停止条件 + CLI flags + e2e）已移至 P1.5。
 
 ### 3.4 P1 验收
 
@@ -273,22 +284,281 @@ README.md                               M  +30
 
 ---
 
-## 4. P2/P3 Roadmap 占位（本次不执行）
+## 4. P2 — Hook + Memory + Session（Week 9-11，**设计已确定**）
 
-### P2 — Skills + Swarm + Memory（Week 6-8，**待 P0+P1 完成后讨论**）
+### 4.1 目标
 
-**预计复制**：
-- `src/agent/skills.py`（SkillsLoader，182 行）
-- `src/swarm/{models,runtime,worker,grounding,store,task_store,presets}.py`
-- 12 个 SKILL.md（精选）
-- 11 个 swarm YAML preset（基于现有 `.prompts/` 角色）
+实现 Hook 系统（借鉴 llmwikify）、Memory 增强（FTS5 + recency boost）、Session 管理（FTS5 搜索 + 自动归档）。
 
-**待讨论**：
-- Skills 复制范围（12 / 30+ / 87）
-- Swarm preset 范围（11 / 30）
-- 是否替换 `_spawn_agent` 为 Swarm 主循环
+### 4.2 架构设计
 
-### P3 — Goal + Hypothesis + Validation（Week 9-10，**待 P2 完成后讨论**）
+```
+src/strategy_research/
+├── core/
+│   ├── hooks/                          # 新建
+│   │   ├── __init__.py
+│   │   ├── unified.py                  # UnifiedHook (16 事件点)
+│   │   ├── adapter.py                  # AgentHookAdapter
+│   │   ├── composite.py                # CompositeHook + AgentHook
+│   │   ├── context.py                  # AgentHookContext + UnifiedContext
+│   │   ├── utils.py                    # maybe_await
+│   │   └── bundled/                    # 内置 Hooks
+│   │       ├── __init__.py
+│   │       ├── session_memory.py       # SessionMemoryHook
+│   │       └── command_logger.py       # CommandLoggerHook
+│   ├── memory/
+│   │   ├── __init__.py
+│   │   ├── persistent.py              # 增强
+│   │   ├── fts5.py                    # 新建
+│   │   └── models.py                  # 新建
+│   ├── session/
+│   │   ├── __init__.py
+│   │   ├── models.py                  # 新建
+│   │   ├── manager.py                 # 新建
+│   │   └── db.py                      # 新建
+│   └── agent/
+│       └── context.py                 # 增强
+└── tests/
+    ├── test_hooks.py                  # 新建
+    ├── test_session_memory.py         # 新建
+    ├── test_memory_fts5.py            # 新建
+    ├── test_memory_enhance.py         # 新建
+    ├── test_session.py                # 新建
+    └── test_p2_e2e.py                 # 新建
+```
+
+### 4.3 设计决策
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| Hook 系统 | ✅ 纯 llmwikify 模式 | 直接复制代码，经过验证 |
+| 自定义 hooks | ✅ 支持 | `<workspace>/hooks/` 目录 |
+| LLM 生成 slug | ✅ 需要 | 会话归档文件名 |
+| Hook 执行方式 | ✅ 异步 | asyncio |
+| 会话结束判断 | ✅ 用户主动 `/reset` | 简单明确 |
+| 归档位置 | `<workspace>/memory/` | 项目局部性 |
+| FTS5 存储 | 全局 `memory_fts5.db` | 跨 workspace |
+| Session 存储 | 全局 `sessions.db` | 便于搜索 |
+| Memory 注入 | 每个 user message 前 | 上下文最新 |
+| 自动 reindex | 启动时 | 性能优先 |
+
+### 4.4 Hook 系统设计
+
+#### 4.4.1 两层架构
+
+```
+UnifiedHook (16 事件点)
+    │
+    ▼ (AgentHookAdapter 桥接)
+AgentHook (13 事件点)
+    │
+    ▼ (CompositeHook 扇出)
+具体 Hook 实现
+```
+
+#### 4.4.2 事件点（13 个）
+
+| # | 事件 | 触发时机 |
+|---|---|---|
+| 1 | `wants_streaming()` | 循环开始前 |
+| 2 | `before_iteration(ctx)` | 每次迭代开始 |
+| 3 | `on_stream(ctx, delta)` | 流式 token 接收 |
+| 4 | `on_stream_end(ctx, resuming)` | 流结束 |
+| 5 | `emit_reasoning(ctx, content)` | 推理内容输出 |
+| 6 | `emit_reasoning_end(ctx)` | 推理结束 |
+| 7 | `before_execute_tools(ctx)` | 工具执行前 |
+| 8 | `after_tool_executed(ctx, tc, result)` | 工具执行后 |
+| 9 | `on_tool_error(ctx, tc, error)` | 工具执行失败 |
+| 10 | `on_confirmation(ctx, tc)` | 用户确认 |
+| 11 | `after_iteration(ctx)` | 迭代结束 |
+| 12 | `finalize_content(ctx, content)` | 最终内容转换 |
+| 13 | `on_error(ctx, error)` | 未处理异常 |
+
+#### 4.4.3 CompositeHook 模式
+
+```python
+# 借鉴 llmwikify 的错误隔离
+class CompositeHook:
+    async def _fire(self, method_name, *args, **kwargs):
+        for hook in self._hooks:
+            try:
+                method = getattr(hook, method_name)
+                await maybe_await(method(*args, **kwargs))
+            except Exception:
+                logger.warning(f"Hook {hook.name}.{method_name} failed")
+                # 单个失败不影响其他 hook
+```
+
+### 4.5 Memory 增强设计
+
+#### 4.5.1 FTS5 索引
+
+```sql
+-- ~/.quantnodes-research/memory/memory_fts5.db
+CREATE VIRTUAL TABLE memory_fts USING fts5(
+    path,
+    title,
+    description,
+    body
+);
+```
+
+#### 4.5.2 Recency Boost
+
+```python
+# find_relevant() 增强
+def find_relevant(self, query: str, max_results: int = 5) -> list[MemoryEntry]:
+    # 现有: token_score = metadata_hits * 2.0 + body_hits * 1.0
+    # 新增: recency_score = 1.0 / (1 + days_since_modified / 7)
+    # 最终: score = token_score * recency_score
+```
+
+#### 4.5.3 Context Injection
+
+```python
+# 每个 user message 前注入
+def format_context_for_prompt(self, query: str, max_results: int = 3) -> str:
+    entries = self.find_relevant(query, max_results)
+    if not entries:
+        return ""
+    lines = ["<recalled-memories>"]
+    for e in entries:
+        lines.append(f"- [{e.title}]({e.path.name}) — {e.description}")
+    lines.append("</recalled-memories>")
+    return "\n".join(lines)
+```
+
+### 4.6 Session 管理设计
+
+#### 4.6.1 数据库 Schema
+
+```sql
+-- ~/.quantnodes-research/sessions.db
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    created_at REAL,
+    updated_at REAL,
+    workspace TEXT,
+    metadata_json TEXT
+);
+
+CREATE TABLE messages (
+    id INTEGER PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id),
+    role TEXT,
+    content TEXT,
+    timestamp REAL,
+    metadata_json TEXT
+);
+
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+    content,
+    content=messages,
+    content_rowid=id
+);
+```
+
+#### 4.6.2 Session-Memory Hook
+
+```python
+# 自动归档会话
+class SessionMemoryHook(AgentHook):
+    async def after_iteration(self, ctx):
+        # 归档到 <workspace>/memory/
+        pass
+```
+
+### 4.7 TODO 清单
+
+#### P2-a: Hook 系统核心（Week 9）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T2.a.1 | UnifiedHook | `core/hooks/unified.py` | ✅ | 从 llmwikify 复制 |
+| T2.a.2 | AgentHookAdapter | `core/hooks/adapter.py` | ✅ | 从 llmwikify 复制 |
+| T2.a.3 | CompositeHook + AgentHook | `core/hooks/composite.py` | ✅ | 从 llmwikify 复制 |
+| T2.a.4 | AgentHookContext | `core/hooks/context.py` | ✅ | 从 llmwikify 复制 |
+| T2.a.5 | maybe_await | `core/hooks/utils.py` | ✅ | 从 llmwikify 复制 |
+| T2.a.6 | 测试 | `tests/test_hooks.py` | ✅ | 23 个测试通过 |
+
+#### P2-b: Session-Memory Hook（Week 9-10）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T2.b.1 | SessionMemoryHook | `core/hooks/bundled/session_memory.py` | ☐ | 会话归档 + LLM slug |
+| T2.b.2 | CommandLoggerHook | `core/hooks/bundled/command_logger.py` | ☐ | 审计日志 |
+| T2.b.3 | 测试 | `tests/test_session_memory.py` | ☐ | 8+ 测试 |
+
+#### P2-c: Memory 增强（Week 10）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T2.c.1 | FTS5 索引 | `core/memory/fts5.py` | ✅ | 全局 memory_fts5.db + 自动 reindex |
+| T2.c.2 | Recency boost | `core/memory/persistent.py` | ✅ | find_relevant() |
+| T2.c.3 | Context injection | `core/memory/persistent.py` | ✅ | format_context_for_prompt() |
+| T2.c.4 | Write dedup | `core/memory/persistent.py` | ✅ | add() hash |
+| T2.c.5 | 测试 | `tests/test_memory_fts5.py` + `tests/test_memory_enhance.py` | ✅ | 9 个测试通过 |
+
+#### P2-d: Session 管理（Week 10-11）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T2.d.1 | Session 模型 | `core/session/models.py` | ✅ | 数据类 |
+| T2.d.2 | SessionManager | `core/session/manager.py` | ✅ | CRUD + FTS5 搜索 |
+| T2.d.3 | SQLite 管理 | `core/session/db.py` | ✅ | 连接 + schema |
+| T2.d.4 | 测试 | `tests/test_session.py` | ✅ | 15 个测试通过 |
+
+#### P2-e: 集成 + E2E（Week 11）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T2.e.1 | AgentLoop 集成 | `core/agent/loop.py` | ☐ | 插入 hook 调用点 |
+| T2.e.2 | ContextBuilder 增强 | `core/agent/context.py` | ☐ | 注入 recalled memories |
+| T2.e.3 | CLI 集成 | `cli.py` | ☐ | `session list/show/search` |
+| T2.e.4 | E2E 测试 | `tests/test_p2_e2e.py` | ☐ | 8+ 测试 |
+
+### 4.8 P2 验收
+
+```bash
+# Hook 系统
+$ quantnodes-research run --workspace /tmp/ws --prompt "test"
+# 验证 hooks 被调用
+
+# Session-Memory
+$ quantnodes-research /reset
+# 验证会话归档到 <workspace>/memory/
+
+# Memory FTS5
+$ quantnodes-research memory search --query "momentum"
+# 验证 FTS5 搜索
+
+# Session 管理
+$ quantnodes-research session list
+$ quantnodes-research session search --query "strategy"
+# 验证 session 管理
+
+# 测试
+$ pytest tests/test_hooks.py tests/test_session_memory.py tests/test_memory_fts5.py tests/test_memory_enhance.py tests/test_session.py tests/test_p2_e2e.py -v
+# 56+ 测试通过
+```
+
+### 4.9 P2 预期测试数
+
+| 模块 | 测试数 |
+|---|---|
+| Hook 系统 | 10+ |
+| Session-Memory | 8+ |
+| FTS5 | 10+ |
+| Memory 增强 | 8+ |
+| Session | 12+ |
+| E2E | 8+ |
+| **总计** | **56+** |
+
+---
+
+## 5. P3 Roadmap（P0 + P1 + P1.5 + P2 完成后执行）
+
+### P3 — Goal + Hypothesis + Validation（Week 12-14，**待 P2 完成后讨论**）
 
 **预计复制**：
 - `src/goal/{models,store,policy,context}.py`
@@ -298,26 +568,32 @@ README.md                               M  +30
 
 ---
 
-## 5. 验收矩阵
+## 6. 验收矩阵
 
-| 指标 | 当前 | P0 后 | P1 后 |
-|---|---|---|---|
-| `cmd_init` 成功率 | 0% | 100% | 100% |
-| baseline 指标 | 空 | 8 项真实 | 8 项真实 |
-| 数据源可达 loader | 1（占位）| ≥ 3 | ≥ 3 |
-| 启动健康检查 | 无 | 4 项 | 4 项 |
-| agent LLM 真跑 | 否（stub）| 否 | **是** |
-| 工具数 | 0 | 0 | 6 |
-| persistent memory | 无 | 无 | MEMORY.md + auto-recall |
-| git commit 自动化 | 无 | 无 | 每 run 自动 |
-| autoresearch 停止 | 无 | 无 | 3 闸 |
-| AST sandbox | 无 | 无 | guard + 路径白名单 |
-| 仓库总行数 | ~4 000 | ~4 880 | ~6 655 |
-| e2e 测试 | 无 | 无 | 1 套 4 case |
+| 指标 | 当前 | P0 后 | P1 后 | P1.5 后 | P2 后 |
+|---|---|---|---|---|---|
+| `cmd_init` 成功率 | 0% | 100% | 100% | 100% | 100% |
+| baseline 指标 | 空 | 8 项真实 | 8 项真实 | 8 项真实 | 8 项真实 |
+| 数据源可达 loader | 1（占位）| ≥ 3 | ≥ 3 | ≥ 3 | ≥ 3 |
+| 启动健康检查 | 无 | 4 项 | 4 项 | 4 项 | 4 项 |
+| agent LLM 真跑 | 否（stub）| 否 | **是** | **是** | **是** |
+| 工具数 | 0 | 0 | 6 | 6 | 6 |
+| persistent memory | 无 | 无 | MEMORY.md + auto-recall | MEMORY.md + auto-recall | MEMORY.md + FTS5 + auto-recall |
+| git commit 自动化 | 无 | 无 | 每 run 自动 | 每 run 自动 | 每 run 自动 |
+| Workflow 层 | 无 | 无 | 无 | **DAG + input_from + 4 种执行** | **DAG + input_from + 4 种执行** |
+| Grounding 接口 | 无 | 无 | 无 | **预留接口** | **预留接口** |
+| AST sandbox | 无 | 无 | guard + 路径白名单 | guard + 路径白名单 | guard + 路径白名单 |
+| Hook 系统 | 无 | 无 | 无 | 无 | **UnifiedHook + AgentHook + 2 内置** |
+| Memory FTS5 | 无 | 无 | 无 | 无 | **全局 FTS5 索引** |
+| Session 管理 | 无 | 无 | 无 | 无 | **FTS5 搜索 + 自动归档** |
+| Memory 注入 | 无 | 无 | 无 | 无 | **每个 user message 注入** |
+| 仓库总行数 | ~4 000 | ~4 880 | ~6 655 | ~7 655 | ~8 500+ |
+| 测试数 | 3144 | 3233 | 3607 | 3681 | **3737+** |
+| e2e 测试 | 无 | 无 | 1 套 4 case | 2 套 9 case | 3 套 17 case |
 
 ---
 
-## 6. 风险与回退
+## 7. 风险与回退
 
 | 风险 | 概率 | 对策 | 回退 |
 |---|---|---|---|
@@ -326,8 +602,12 @@ README.md                               M  +30
 | LLM 写非法 strategy.py | 高 | T1.12 sandbox | 截断 + 提示 |
 | httpx 流式响应出错 | 中 | 参考 OpenAI Python SDK | 降级非流式 |
 | 复制代码 import 路径冲突 | 中 | 复制时统一改 `core.X` | 全部重写 |
-| 5 周时间不够 | 中 | P0 必修；P1 部分可接受 | 砍 T1.22-24 |
-| P0-P3 总计划超 16 周 | 中 | 按 PR 阶段交付 | P3 留待后续 |
+| P1.5 DAG 调度复杂度 | 中 | 简化串行 fallback | 降级到串行执行 |
+| P1.5 input_from 数据流错误 | 中 | 校验 + 默认空输入 | 跳过失败 agent |
+| P2 Hook 系统复杂度 | 中 | 简化事件点 | 降级到 8 个事件点 |
+| P2 FTS5 中文分词 | 中 | 简单空格分词 | 回退到 token matching |
+| P2 Session 存储性能 | 低 | 索引优化 | 清理旧 session |
+| 17 周时间不够 | 中 | P0+P1+P1.5 必修；P2 可砍 e2e | P3 留待后续 |
 
 ---
 
@@ -484,11 +764,191 @@ README.md                               M  +30
 - 测试：3526 → 3595 passed（+69 无回归）
 - 备注：3 commits 拆分，c1 准备提示 / c2 实施循环 / c3 扩展压缩+trace
 
+### AgentLoop 改造（P1 补充）
+
+- 启动日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - ContextBuilder 加 system_prompt + user_message_prefix 参数
+  - AgentLoop 加 system_prompt + allowed_tools + readonly + run(context=)
+  - WriteFileTool 加 is_readonly = False
+  - 新增测试 12 个
+- 测试结果：3595 → 3607 passed（+12 无回归）
+- 备注：为 P1.5 Workflow 层做准备
+
+### P1.5 计划
+
+- 计划日期：2026-07-22
+- 设计文档：`docs/workflow-design.md`
+- 阶段划分：P1.5-a（Week 6）+ P1.5-b（Week 7）+ P1.5-c（Week 8）
+- 总测试数：88+ 个新测试
+- 状态：P1.5-a/b/c 完成
+
+### P1.5-a 核心接口（已完成）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/workflow/types.py`: AgentStatus / AgentCall / RoundResult / SwarmTask
+  - `core/workflow/agents.py`: AgentExecutor Protocol + AgentRegistry
+  - `core/workflow/dag.py`: topological_layers() + validate_dag()
+  - `core/workflow/__init__.py`: 导出
+- 测试：3607 → 3644 passed（+37 无回归）
+
+### P1.5-b Controller + input_from（已完成）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/workflow/controller.py`: WorkflowController（DAG 调度 + input_from + 重试）
+  - `core/workflow/prompt.py`: PromptBuilder（动态 prompt 构造 + 缓存）
+  - `core/workflow/validator.py`: AgentValidator（Schema + 逻辑验证）
+- 测试：3644 → 3689 passed（+45 无回归）
+
+### P1.5-c 集成（已完成）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/workflow/grounding.py`: GroundingProvider Protocol + DummyGroundingProvider
+  - `core/workflow/executors.py`: AgentLoopExecutor + PythonExecutor + CLIExecutor + StubExecutor
+  - `tests/test_workflow_e2e.py`: 6 个 e2e 测试
+- 测试：3689 → 3695 passed（+6 无回归）
+
+### P2 计划
+
+- 计划日期：2026-07-22
+- 设计文档：`docs/enhancement.md` P2 章节
+- 阶段划分：P2-a（Week 9）+ P2-b（Week 9-10）+ P2-c（Week 10）+ P2-d（Week 10-11）+ P2-e（Week 11）
+- 总测试数：81+ 个新测试
+- 状态：P2-a/b/c/d 完成，P2-e 待开始
+- Hook 系统：纯 llmwikify 模式（UnifiedHook + AgentHook 两层）
+- 复制清单：5 个文件从 llmwikify 复制
+
+### P2-a Hook 系统核心（已完成）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/hooks/unified.py`: UnifiedHook (16 事件点)
+  - `core/hooks/adapter.py`: AgentHookAdapter
+  - `core/hooks/composite.py`: CompositeHook + AgentHook (13 事件点)
+  - `core/hooks/context.py`: AgentHookContext
+  - `core/hooks/utils.py`: maybe_await
+  - `core/hooks/bundled/session_memory.py`: SessionMemoryHook
+  - `core/hooks/bundled/command_logger.py`: CommandLoggerHook
+- 测试：3695 → 3718 passed（+23 无回归）
+
+### P2-c Memory 增强（已完成）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/memory/fts5.py`: MemoryFTS5 (全局 FTS5 索引)
+  - `core/memory/persistent.py`: recency boost + write dedup + format_context_for_prompt()
+  - `core/memory/__init__.py`: 导出
+- 测试：3718 → 3776 passed（+58 无回归）
+
+### P2-d Session 管理（已完成）
+
+- 完成日期：2026-07-22
+- 提交人：ll
+- 内容：
+  - `core/session/models.py`: Session + SessionMessage
+  - `core/session/db.py`: SessionDB (SQLite + FTS5)
+  - `core/session/manager.py`: SessionManager
+  - `core/session/__init__.py`: 导出
+- 测试：3776 passed（无回归，已计入 P2-c）
+
+---
+
+## 3.6 P1.5 — Workflow 层（Week 6-8，PR #7）
+
+### 3.6.1 目标
+
+实现 Workflow 层，替代 `cmd_autoresearch` 中的 `_spawn_agent` stub，
+提供 DAG 调度 + input_from 数据流 + 4 种执行方式 + Grounding 预留接口。
+
+### 3.6.2 设计文档
+
+详见 `docs/workflow-design.md`。
+
+### 3.6.3 TODO 清单
+
+#### P1.5-a 核心接口（Week 6）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T1.5.a.1 | types.py — AgentStatus / AgentCall / RoundResult / SwarmTask | `core/workflow/types.py` | ✅ | 8 个测试通过 |
+| T1.5.a.2 | agents.py — AgentExecutor Protocol + AgentRegistry | `core/workflow/agents.py` | ✅ | 8 个测试通过 |
+| T1.5.a.3 | dag.py — topological_layers() + validate_dag() | `core/workflow/dag.py` | ✅ | 10 个测试通过 |
+| T1.5.a.4 | __init__.py — 导出 | `core/workflow/__init__.py` | ✅ | 导入可用 |
+
+#### P1.5-b Controller + input_from（Week 7）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T1.5.b.1 | controller.py — WorkflowController（DAG 调度 + input_from + 重试）| `core/workflow/controller.py` | ✅ | 15 个测试通过 |
+| T1.5.b.2 | prompt.py — 动态 prompt 构造（.prompts/*.md + context）| `core/workflow/prompt.py` | ✅ | 5 个测试通过 |
+| T1.5.b.3 | validator.py — Agent 输出验证（Schema + 逻辑）| `core/workflow/validator.py` | ✅ | 10 个测试通过 |
+
+#### P1.5-c 集成（Week 8）
+
+| # | 任务 | 文件 | 状态 | 验收 |
+|---|---|---|---|---|
+| T1.5.c.1 | grounding.py — GroundingProvider Protocol（预留接口）| `core/workflow/grounding.py` | ✅ | 3 个测试通过 |
+| T1.5.c.2 | executors.py — 4 种 AgentExecutor 实现 | `core/workflow/executors.py` | ✅ | 10 个测试通过 |
+| T1.5.c.3 | 集成到 cmd_autoresearch | `cli.py` | ✅ | 8 个测试通过 |
+| T1.5.c.4 | e2e smoke test | `tests/test_workflow_e2e.py` | ✅ | 5 个测试通过 |
+
+### 3.6.4 P1.5 验收
+
+```bash
+$ quantnodes-research autoresearch /tmp/ws --strategy momentum_20_60
+[Workflow] 启动研究循环
+[Round 1] DAG 调度: 9 个 agent 串行执行
+  [Layer 0] researcher → data_quality → factor_analyst → strategist → portfolio_construction
+  [Layer 1] risk_controller → attribution_analyst → anti_overfit_analyst → backtest_diagnostics
+  [Result] calmar=0.42, sharpe=0.55, verdict=keep
+[Round 2] ...
+✓ Workflow 层正常工作
+```
+
+### 3.6.5 文件结构
+
+```diff
+src/strategy_research/
+├── core/
+│   ├── workflow/                    # 新增
+│   │   ├── __init__.py
+│   │   ├── types.py
+│   │   ├── agents.py
+│   │   ├── dag.py
+│   │   ├── grounding.py
+│   │   ├── controller.py
+│   │   ├── prompt.py
+│   │   └── validator.py
+│   ├── agent/                       # 已存在
+│   └── llm/                         # 已存在
+└── tests/
+    ├── test_workflow_types.py       # 新增
+    ├── test_workflow_agents.py      # 新增
+    ├── test_workflow_dag.py         # 新增
+    ├── test_workflow_controller.py  # 新增
+    ├── test_workflow_prompt.py      # 新增
+    ├── test_workflow_validator.py   # 新增
+    ├── test_workflow_grounding.py   # 新增
+    ├── test_workflow_executors.py   # 新增
+    └── test_workflow_e2e.py         # 新增
+```
+
 ---
 
 ## 附录：借鉴模块来源对照表
 
-| 来源（vibe-trading-ai 0.1.11）| 行数 | License | 借鉴方式 |
+### vibe-trading-ai 0.1.11（HKUDS，MIT License）
+
+| 来源 | 行数 | License | 借鉴方式 |
 |---|---|---|---|
 | `src/agent/tools.py` | 94 | MIT | 整包复制 |
 | `src/agent/frontmatter.py` | ~50 | MIT | 整包复制 |
@@ -497,5 +957,15 @@ README.md                               M  +30
 | `src/tools/redaction.py` | ~80 | MIT | 整包复制 |
 | `src/memory/persistent.py` | 265 | MIT | 整包复制 |
 
+### llmwikify（Hook 系统）
+
+| 来源 | 行数 | License | 借鉴方式 |
+|---|---|---|---|
+| `foundation/callback/composite.py` | ~150 | MIT | 整包复制 |
+| `foundation/callback/context.py` | ~50 | MIT | 整包复制 |
+| `foundation/utils.py` | ~30 | MIT | 整包复制 |
+| `kernel/agent/hook.py` | ~100 | MIT | 整包复制 |
+| `apps/chat/agent/unified/hook_adapter.py` | ~80 | MIT | 整包复制 |
+
 > 完整功能清单与设计模式见 `docs/vibe-trading-survey.md`（1805 行）。
-> 所有借鉴代码均在文件头标注 `# Adapted from vibe-trading-ai 0.1.11 (MIT License, HKUDS)`。
+> 所有借鉴代码均在文件头标注 `# Adapted from <source> (MIT License, <author>)`。
