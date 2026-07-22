@@ -166,32 +166,32 @@ LLM agent 通过 ReAct 循环修改 `strategy.py` 并 commit；cross-run memory 
 
 | # | 任务 | 文件 | 状态 | 验收 |
 |---|---|---|---|---|
-| T1.1 | 复制 6 个模块（C1-C6）| `core/agent/`, `core/memory/` | ☐ | 加 LICENSE 头 |
-| T1.2 | 新建 `vibe-trading-credits.md` | `docs/` | ☐ | 列出 6 个文件 + LICENSE |
-| T1.3 | OpenAI 兼容 LLM 客户端 | `core/llm/openai_client.py`（新）| ☐ | httpx 调通 OpenAI/DeepSeek/Kimi/Qwen |
-| T1.4 | LLM 响应解析（tool_calls）| `core/llm/parser.py`（新）| ☐ | 解析 JSON |
-| T1.5 | `read_file` 工具 | `core/agent/tools/read_file.py`（新）| ☐ | 读 workspace 内任意文件 |
-| T1.6 | `write_file` 工具 | `core/agent/tools/write_file.py`（新）| ☐ | 路径白名单 |
-| T1.7 | `run_backtest` 工具 | `core/agent/tools/run_backtest.py`（新）| ☐ | 调 `prepare.evaluate()` |
-| T1.8 | `compute_factor` 工具 | `core/agent/tools/compute_factor.py`（新）| ☐ | 调 `core/compute_factor.py` |
-| T1.9 | `git_diff` 工具 | `core/agent/tools/git_diff.py`（新）| ☐ | `git diff` 包装 |
-| T1.10 | `list_history` 工具 | `core/agent/tools/list_history.py`（新）| ☐ | 列 runs |
-| T1.11 | ToolRegistry 装配 | `core/agent/registry.py`（新）| ☐ | 6 个工具注册 |
-| T1.12 | AST guard + 路径白名单 | `core/agent/sandbox.py`（新）| ☐ | 拦截 exec/eval/open/非法路径 |
+| T1.1 | 复制 6 个模块（C1-C6）| `core/agent/`, `core/memory/` | ✅ | 无文件头 (PR4) |
+| T1.2 | 新建 `vibe-trading-credits.md` | `docs/` | ✅ | 列出 6 个文件 + LICENSE |
+| T1.3 | OpenAI 兼容 LLM 客户端 | `core/llm/openai_client.py` | ✅ | httpx 调通 4 provider |
+| T1.4 | LLM 响应解析（tool_calls）| `core/llm/parser.py` | ✅ | 3 段 JSON 兜底 |
+| T1.5 | `read_file` 工具 | `core/agent/builtin_tools/` | ✅ | 读 workspace 文件 |
+| T1.6 | `write_file` 工具 | `core/agent/builtin_tools/` | ✅ | AST guard + 路径白名单 |
+| T1.7 | `run_backtest` 工具 | `core/agent/builtin_tools/` | ✅ | 调 run_backtest_from_yaml |
+| T1.8 | `compute_factor` 工具 | `core/agent/builtin_tools/` | ✅ | 单 asset 单列 wide 格式 |
+| T1.9 | `git_diff` 工具 | `core/agent/builtin_tools/` | ✅ | git diff 包装 + flag injection |
+| T1.10 | `list_history` 工具 | `core/agent/builtin_tools/` | ✅ | results.tsv 读取 + 排序 |
+| T1.11 | ToolRegistry 装配 | `core/agent/builtin_tools/` | ✅ | build_default_registry() |
+| T1.12 | AST guard + 路径白名单 | `core/agent/sandbox.py` | ✅ | 23 模块拦截 + 路径越界拦截 |
 
 #### Week 4 — AgentLoop mini + 集成
 
 | # | 任务 | 文件 | 状态 | 验收 |
 |---|---|---|---|---|
-| T1.13 | ContextBuilder（tool list + workspace + memory）| `core/agent/context.py`（新）| ☐ | 系统 prompt 含工具列表 |
-| T1.14 | mini AgentLoop ReAct | `core/agent/loop.py`（新，500 行）| ☐ | 循环跑通 |
-| T1.15 | microcompact 层 | `core/agent/loop.py` | ☐ | 0.5×threshold 触发 |
-| T1.16 | context_collapse 层 | `core/agent/loop.py` | ☐ | 0.7×threshold 触发 |
-| T1.17 | HeartbeatTimer 接入 | `core/agent/loop.py` + `progress.py` | ☐ | 长工具调用 keepalive |
-| T1.18 | TraceWriter 接入 | `core/agent/loop.py` + `trace.py` | ☐ | JSONL trace 写出 |
-| T1.19 | PersistentMemory.snapshot 注入 | `core/agent/context.py` | ☐ | system prompt 冻结 |
-| T1.20 | auto-recall `find_relevant` | `core/agent/loop.py` | ☐ | `<recalled-memories>` 注入 user msg |
-| T1.21 | git commit after run | `core/agent/loop.py` | ☐ | 每 run 自动 commit |
+| T1.13 | ContextBuilder（tool list + workspace + memory）| `core/agent/context.py` | ✅ | 系统 prompt 含工具列表 |
+| T1.14 | mini AgentLoop ReAct | `core/agent/loop.py` | ✅ | 循环跑通 |
+| T1.15 | microcompact 层 | `core/agent/loop.py` | ✅ | 0.5×threshold 触发 |
+| T1.16 | context_collapse 层 | `core/agent/loop.py` | ✅ | 0.7×threshold 触发 |
+| T1.17 | HeartbeatTimer 接入 | `core/agent/loop.py` + `progress.py` | ✅ | 长工具调用 keepalive |
+| T1.18 | TraceWriter 接入 | `core/agent/loop.py` + `trace.py` | ✅ | JSONL trace 写出 |
+| T1.19 | PersistentMemory.snapshot 注入 | `core/agent/context.py` | ✅ | system prompt 冻结 |
+| T1.20 | auto-recall `find_relevant` | `core/agent/context.py` | ✅ | `<recalled-memories>` 注入 user msg |
+| T1.21 | git commit after run | `core/agent/loop.py` | ✅ | 每 run 自动 commit |
 
 #### Week 5 — autoresearch + e2e
 
@@ -448,6 +448,41 @@ README.md                               M  +30
 - 边界：**不动 _spawn_agent / core/autoresearch.py**（PR7 才替换）
 - 测试：3252 → 3526 passed（+274 无回归）
 - 备注：5 commits 拆分，c1 准备配置 / c2 准备客户端 / c3 准备安全 / c4 准备工具 / c5 暴露 CLI
+
+### PR #6（P1 - AgentLoop + Context + 3 层压缩）
+
+- 启动日期：2026-07-22
+- 提交人：ll
+- commits：
+  - `7ab7888` PR6-c1: ContextBuilder + token 估算
+  - `5f995dd` PR6-c2: AgentLoop ReAct 核心
+  - `dfc893e` PR6-c3: 3 层压缩 + Heartbeat + Trace + git commit
+- 内容（3 commits，+~1160 行）：
+
+  **PR6-c1 ContextBuilder** — 构建 system + user 提示，冻结 memory snapshot
+  - build_system_prompt(): 角色 + 工具清单 + workspace + memory
+  - build_initial_messages(): system + user (含 auto-recalled memories)
+  - estimate_tokens(): 粗估 (chars / 3)
+  - 冻结行为：构造时一次性 snapshot，后续 add() 不影响
+
+  **PR6-c2 AgentLoop ReAct 核心** — 循环执行 ReAct 推理
+  - 主循环: run(task) → LoopResult
+  - 4 种 finished_reason: stop / max_iter / no_progress / error
+  - no_progress 检测: 最近 N 个 tool_calls hash 相同
+  - workspace 自动注入到 tool_call kwargs
+  - tool 执行异常 → JSON error envelope (不 crash loop)
+
+  **PR6-c3 3 层压缩 + Heartbeat + Trace + git commit**
+  - L1 microcompact (50%): 截断 tool_result > 500 chars
+  - L2 context_collapse (70%): 摘要旧消息, 保留最近 4 条
+  - L3 hard_truncate (90%): 仅保留 system + 最近 4 条
+  - HeartbeatTimer: tool 执行时自动包装, 长时间工具 keepalive
+  - TraceWriter: trace.jsonl 记录全部事件 (可选)
+  - auto_git_commit: run() 末尾自动提交 (可选)
+
+- 边界：**不动 _spawn_agent / core/autoresearch.py**（PR7 才替换）
+- 测试：3526 → 3595 passed（+69 无回归）
+- 备注：3 commits 拆分，c1 准备提示 / c2 实施循环 / c3 扩展压缩+trace
 
 ---
 
