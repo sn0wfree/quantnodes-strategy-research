@@ -35,6 +35,7 @@ METRIC_PATTERNS = [
     (r"^sortino:\s*([0-9.eE+-]+)$", "sortino", float),
     (r"^turnover:\s*([0-9.eE+-]+)$", "turnover", float),
     (r"^win_rate:\s*([0-9.eE+-]+)$", "win_rate", float),
+    (r"^trades:\s*([0-9.eE+-]+)$", "trades", float),
 ]
 
 

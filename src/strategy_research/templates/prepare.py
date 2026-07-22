@@ -286,6 +286,7 @@ def evaluate(params: dict, factor_exprs: list[dict],
         "ann_vol": ann_vol,
         "sortino": sortino,
         "turnover": turnover,
+        "trades": len(weight_changes),
     }
 
 
@@ -300,6 +301,7 @@ def _empty_metrics() -> dict:
         "ann_vol": 0.0,
         "sortino": 0.0,
         "turnover": 0.0,
+        "trades": 0,
     }
 
 

@@ -83,6 +83,26 @@ def test_parse_run_log_empty_file(tmp_path):
     assert metrics == {}
 
 
+def test_parse_run_log_extracts_trades_int(tmp_path):
+    """trades: 12 (整数形式) → metrics['trades'] == 12.0"""
+    log = tmp_path / "run.log"
+    log.write_text(
+        "calmar: 1.0\nsharpe: 0.5\nmax_dd: -0.10\ntrades: 12\n",
+        encoding="utf-8",
+    )
+    metrics = parse_run_log(log)
+    assert metrics["trades"] == 12.0
+    assert isinstance(metrics["trades"], float)
+
+
+def test_parse_run_log_extracts_trades_float(tmp_path):
+    """trades: 24.0 (浮点形式) → metrics['trades'] == 24.0"""
+    log = tmp_path / "run.log"
+    log.write_text("trades: 24.0\n", encoding="utf-8")
+    metrics = parse_run_log(log)
+    assert metrics["trades"] == 24.0
+
+
 # ============================================================
 # 2. get_next_run_name — 顺序递增
 # ============================================================

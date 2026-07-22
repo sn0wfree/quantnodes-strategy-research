@@ -43,4 +43,9 @@ if __name__ == "__main__":
     metrics = prepare.evaluate(PARAMS, FACTOR_EXPRS, FACTOR_WEIGHT_METHOD, data)
     print("---")
     for k, v in metrics.items():
-        print(f"{k}: {v:.6f}")
+        if isinstance(v, bool):
+            print(f"{k}: {v}")
+        elif isinstance(v, int):
+            print(f"{k}: {v}")
+        else:
+            print(f"{k}: {v:.6f}")
