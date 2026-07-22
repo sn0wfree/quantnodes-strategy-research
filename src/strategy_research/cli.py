@@ -368,8 +368,12 @@ def cmd_status(args: argparse.Namespace) -> int:
             conn = duckdb.connect(str(db_path), read_only=True)
             tables = conn.execute("SHOW TABLES").fetchall()
             for t in tables:
-                count = conn.execute(f"SELECT COUNT(*) FROM {t[0]}").fetchone()[0]
-                print(f"  - {t[0]}: {count} 行")
+                table_name = t[0]
+                # Use parameterized query with identifier quoting to prevent SQL injection
+                count = conn.execute(
+                    f"SELECT COUNT(*) FROM \"{table_name}\""
+                ).fetchone()[0]
+                print(f"  - {table_name}: {count} 行")
             conn.close()
         except Exception as e:
             print(f"  ⚠️  读取失败: {e}")

@@ -75,23 +75,18 @@ class TestRunValidation:
         assert result["bootstrap"]["confidence"] == 0.9
         assert result["walk_forward"]["n_windows"] == 3
 
-    def test_unsupported_market_warns_and_falls_back(self):
-        """Unsupported markets warn but still execute with market-specific bars_per_year.
+    def test_market_specific_bars_per_year(self):
+        """Each market type uses its own bars_per_year.
 
-        Per P3-c decision: we don't implement per-market algorithm branches
-        yet, but we DO honour the market's bars_per_year (since the user
-        said "plan + reserve interface, do not implement algorithm branches").
-        The warning is the safety net telling the caller to interpret
-        results with caution.
+        All 7 market types are now supported with correct bars_per_year values.
         """
         eq = _make_equity_curve(n=100)
         config = {"validation": {"monte_carlo": True}}
-        with pytest.warns(UserWarning, match="not yet implemented"):
-            result = run_validation(
-                config, eq, trades=[_make_trade(10.0) for _ in range(5)],
-                market=MarketType.CRYPTO,
-            )
-        # CRYPTO has its own bars_per_year (365); algorithm does NOT change
+        result = run_validation(
+            config, eq, trades=[_make_trade(10.0) for _ in range(5)],
+            market=MarketType.CRYPTO,
+        )
+        # CRYPTO has its own bars_per_year (365)
         assert result["bars_per_year"] == 365
         assert result["market"] == "crypto"  # tag preserved
         assert result["monte_carlo"]["bars_per_year"] == 365

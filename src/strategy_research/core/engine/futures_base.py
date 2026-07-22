@@ -18,6 +18,7 @@ class FuturesBaseEngine(BaseEngine):
         self.contract_multiplier: float = config.get("contract_multiplier", 10.0)
         self.margin_rate: float = config.get("margin_rate", 0.10)
         self.commission_per_contract: float = config.get("commission_per_contract", 3.0)
+        self.slippage_rate: float = config.get("slippage", 0.0005)
 
     def _calc_pnl(
         self, symbol: str, direction: int, size: float, entry_price: float, exit_price: float
@@ -40,7 +41,7 @@ class FuturesBaseEngine(BaseEngine):
         return size * self.commission_per_contract
 
     def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * 0.0005)
+        return price * (1 + direction * self.slippage_rate)
 
 
 __all__ = ["FuturesBaseEngine"]

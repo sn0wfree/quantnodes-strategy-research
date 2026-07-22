@@ -13,9 +13,12 @@
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+
+logger = logging.getLogger(__name__)
 
 try:
     from QuantOPT.models.model_RiskParity import RiskParity
@@ -161,7 +164,8 @@ def optimize_weights(
             # 当前权重
             current_w = pos_df.iloc[-1].values if len(pos_df) > 0 else np.ones(n) / n
             weights = _turnover_aware_optimize(codes, cov, mu, current_w, kwargs.get("lambda_r", 1.0))
-    except Exception:
+    except Exception as e:
+        logger.warning("Optimizer '%s' failed (%s), falling back to equal weights", method, e)
         weights = np.ones(n) / n
 
     # 构建输出矩阵

@@ -47,6 +47,35 @@ class TestConfigSchema:
         assert cfg.leverage == 1.0
         assert cfg.source == "duckdb"
 
+    def test_validate_config_valid(self):
+        errors = BacktestConfigSchema.validate_config({
+            "codes": ["AAPL"],
+            "start_date": "2024-01-01",
+            "end_date": "2024-12-31",
+        })
+        assert errors == []
+
+    def test_validate_config_empty_codes(self):
+        errors = BacktestConfigSchema.validate_config({
+            "codes": [],
+            "start_date": "2024-01-01",
+            "end_date": "2024-12-31",
+        })
+        assert len(errors) > 0
+
+    def test_validate_config_missing_fields(self):
+        errors = BacktestConfigSchema.validate_config({})
+        assert len(errors) > 0
+
+    def test_validate_config_bad_leverage(self):
+        errors = BacktestConfigSchema.validate_config({
+            "codes": ["AAPL"],
+            "start_date": "2024-01-01",
+            "end_date": "2024-12-31",
+            "leverage": 0.5,  # must be >= 1.0
+        })
+        assert len(errors) > 0
+
 
 # ============================================================
 # AST Guard

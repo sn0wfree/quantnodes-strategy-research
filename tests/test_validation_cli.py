@@ -125,17 +125,18 @@ class TestValidateRun:
         assert data["market"] == "a_share"
         assert "monte_carlo" not in data
 
-    def test_unsupported_market_warning(self, tmp_path, capsys):
+    def test_market_type_applied(self, tmp_path, capsys):
+        """Market type is correctly applied to validation results."""
         run_dir = _setup_run_dir(tmp_path)
         args = _make_args(
             run_dir=str(run_dir), market="crypto",
             monte_carlo=True, n_simulations=10,
         )
-        with pytest.warns(UserWarning, match="not yet implemented"):
-            rc = cmd_validate_run(args)
+        rc = cmd_validate_run(args)
         assert rc == 0
         data = json.loads((run_dir / "validation.json").read_text())
         assert data["market"] == "crypto"
+        assert data["bars_per_year"] == 365  # CRYPTO has 365 bars/year
 
     def test_seed_reproducible(self, tmp_path):
         """Same seed + config → same Monte Carlo p_value."""

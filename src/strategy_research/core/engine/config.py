@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 try:
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, ValidationError
 except ImportError:
     raise ImportError("pydantic is required for config validation: pip install pydantic")
 
@@ -24,6 +24,18 @@ class BacktestConfigSchema(BaseModel):
     signal_engine_path: Optional[str] = Field(default=None, description="信号引擎文件路径")
     validation: Optional[dict] = Field(default=None, description="验证配置")
     optimizer: Optional[str] = Field(default=None, description="优化器类型")
+
+    @classmethod
+    def validate_config(cls, config: dict) -> list[str]:
+        """Validate a config dict and return list of error messages.
+
+        Returns empty list if config is valid.
+        """
+        try:
+            cls(**config)
+            return []
+        except ValidationError as e:
+            return [err["msg"] for err in e.errors()]
 
 
 __all__ = ["BacktestConfigSchema"]

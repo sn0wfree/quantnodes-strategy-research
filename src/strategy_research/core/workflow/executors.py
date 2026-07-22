@@ -51,13 +51,14 @@ class CLIExecutor:
 
     def run(self, prompt: str, context: dict) -> dict:
         import subprocess
-        import sys
+        import shlex
 
         cmd = self._command or f"echo 'Agent {self._name} executed'"
         try:
+            # Use shell=False with shlex.split to avoid shell injection
             result = subprocess.run(
-                cmd,
-                shell=True,
+                shlex.split(cmd),
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -69,6 +70,8 @@ class CLIExecutor:
             }
         except subprocess.TimeoutExpired:
             return {"status": "error", "error": "Command timed out"}
+        except FileNotFoundError:
+            return {"status": "error", "error": f"Command not found: {cmd}"}
 
 
 class StubExecutor:

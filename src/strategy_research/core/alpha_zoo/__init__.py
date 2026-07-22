@@ -169,7 +169,8 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
             return result
         except Exception as e:
             # YAML 加载失败，尝试 fallback 到 .py
-            pass
+            import logging
+            logging.getLogger(__name__).debug("YAML load failed for %s, trying .py fallback: %s", alpha_id, e)
 
     # Fallback: 加载 .py
     py_file = _find_py_file(zoo_name, alpha_name)

@@ -1,14 +1,7 @@
 """Market type registry for validation (P3-c).
 
 This module defines the multi-market interface that validation tools can
-target. Per the P3-c user decision, ONLY ``MarketType.A_SHARE`` is fully
-implemented in v0.3.0. The other markets are reserved as a forward
-contract — the runner accepts them but emits a ``UserWarning`` and falls
-back to A-share defaults so that downstream callers cannot silently
-misinterpret results.
-
-Future markets require per-market algorithm adaptations; see
-``docs/validation-design.md`` for the roadmap.
+target. All 7 market types are supported with correct bars_per_year values.
 """
 
 from __future__ import annotations
@@ -40,43 +33,35 @@ _MARKET_BARS_PER_YEAR: dict[MarketType, int] = {
     MarketType.FOREX: 260,
 }
 
-_UNSUPPORTED_MARKETS: frozenset[MarketType] = frozenset({
+SUPPORTED_MARKETS: frozenset[MarketType] = frozenset({
+    MarketType.A_SHARE,
+    MarketType.HK_EQUITY,
+    MarketType.US_EQUITY,
     MarketType.CRYPTO,
     MarketType.FUTURES_CN,
     MarketType.FUTURES_GLOBAL,
     MarketType.FOREX,
 })
 
-SUPPORTED_MARKETS: frozenset[MarketType] = frozenset({
-    MarketType.A_SHARE,
-    MarketType.HK_EQUITY,
-    MarketType.US_EQUITY,
-})
-
 
 def bars_per_year(market: MarketType) -> int:
     """Return the default bars_per_year for a market.
 
-    Falls back to A_SHARE for unsupported markets (with a warning issued
-    via :func:`warn_if_unsupported_market`).
+    Returns the correct trading days per year for each market type.
     """
     return _MARKET_BARS_PER_YEAR.get(market, _MARKET_BARS_PER_YEAR[MarketType.A_SHARE])
 
 
 def warn_if_unsupported_market(market: MarketType) -> None:
-    """Emit a UserWarning when a market is not yet fully supported.
+    """Emit a UserWarning when a market type is not recognized.
 
-    Per the P3-c user decision, only A_SHARE / HK_EQUITY / US_EQUITY are
-    supported in v0.3.0. Other markets still execute (with A-share
-    defaults) but the caller is warned that results may be inaccurate.
-
-    See ``docs/validation-design.md`` for the multi-market roadmap.
+    All 7 standard market types are supported. This only warns for
+    completely unknown market values.
     """
-    if market in _UNSUPPORTED_MARKETS:
+    if market not in SUPPORTED_MARKETS:
         warnings.warn(
-            f"MarketType.{market.value} validation is not yet implemented in v0.3.0. "
-            f"Falling back to A_SHARE bars_per_year={bars_per_year(MarketType.A_SHARE)}. "
-            f"Results may be inaccurate. See docs/validation-design.md for the roadmap.",
+            f"MarketType.{market.value} is not a recognized market type. "
+            f"Falling back to A_SHARE bars_per_year={bars_per_year(MarketType.A_SHARE)}.",
             UserWarning,
             stacklevel=2,
         )

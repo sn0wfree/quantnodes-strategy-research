@@ -572,6 +572,37 @@ class GoalStore:
         return int(row[0]) if row else 0
 
     @_synchronized
+    def list_goals(
+        self,
+        session_id: str | None = None,
+        status: GoalStatus | None = None,
+        limit: int = 100,
+    ) -> list[GoalRecord]:
+        """List goals, optionally filtered by session_id and/or status.
+
+        Args:
+            session_id: If provided, filter to this session only.
+            status: If provided, filter to this status only.
+            limit: Maximum number of goals to return (default 100).
+
+        Returns:
+            List of GoalRecord objects, ordered by created_at DESC.
+        """
+        query = "SELECT * FROM goals WHERE 1=1"
+        params: list = []
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status.value)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        return [self._goal_from_row(row) for row in rows]
+
     def delete_session_goals(self, session_id: str) -> int:
         """Delete all goal ledger rows for a session.
 

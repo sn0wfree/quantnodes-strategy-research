@@ -37,8 +37,47 @@ def _load_nav_from_duckdb(run_dir: Path) -> "object | None":
         workspace_path = Path(*parts[: runs_idx - 2]) if runs_idx >= 3 else Path(parts[0])
         run_name = parts[runs_idx + 1]
         return load_nav_history(workspace_path, strategy_name, run_name)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Failed to load NAV from DuckDB: %s", e)
         return None
+
+
+def _load_trades_from_artifacts(run_dir: Path) -> list[TradeInput]:
+    """Attempt to load real trades from trades.csv artifact.
+
+    Returns a list of TradeInput objects, or empty list if unavailable.
+    """
+    import csv
+    trades_path = run_dir / "trades.csv"
+    if not trades_path.exists():
+        return []
+    try:
+        trades = []
+        with open(trades_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    entry_time = datetime.fromisoformat(row["entry_time"])
+                    exit_time = datetime.fromisoformat(row["exit_time"])
+                except (ValueError, KeyError):
+                    continue
+                trades.append(TradeInput(
+                    symbol=row.get("symbol", "UNKNOWN"),
+                    direction=int(row.get("direction", 1)),
+                    entry_price=float(row.get("entry_price", 0.0)),
+                    exit_price=float(row.get("exit_price", 0.0)),
+                    entry_time=entry_time,
+                    exit_time=exit_time,
+                    size=float(row.get("size", 1.0)),
+                    pnl=float(row.get("pnl", 0.0)),
+                    pnl_pct=float(row.get("pnl_pct", 0.0)),
+                    holding_bars=int(row.get("holding_bars", 0)),
+                    exit_reason=row.get("exit_reason", "signal"),
+                ))
+        return trades
+    except Exception:
+        return []
 
 
 def _load_nav_synthetic(run_dir: Path) -> "object | None":
@@ -75,7 +114,9 @@ def _build_synthetic_trades(run_dir: Path) -> list[TradeInput]:
         return []
     try:
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Failed to read metrics.json: %s", e)
         return []
     ann_return = float(metrics.get("ann_return", 0.0))
     sharpe = float(metrics.get("sharpe", 0.0))
@@ -114,11 +155,17 @@ def cmd_validate_run(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
-    # 2. Build trade list (synthetic from metrics.json)
-    trades = _build_synthetic_trades(run_dir)
-    if not trades:
-        print("⚠ no trades available; skipping Monte Carlo + Walk-Forward per-trade checks",
-              file=sys.stderr)
+    # 2. Build trade list (real from trades.csv, fallback to synthetic)
+    trades = _load_trades_from_artifacts(run_dir)
+    if trades:
+        print(f"✓ loaded {len(trades)} trades from trades.csv", file=sys.stderr)
+    else:
+        trades = _build_synthetic_trades(run_dir)
+        if trades:
+            print("⚠ no real trades found; using synthetic trades from metrics.json", file=sys.stderr)
+        else:
+            print("⚠ no trades available; skipping Monte Carlo + Walk-Forward per-trade checks",
+                  file=sys.stderr)
 
     # 3. Build config from CLI flags
     config: dict = {}

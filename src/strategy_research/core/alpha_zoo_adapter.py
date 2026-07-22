@@ -215,6 +215,7 @@ class AlphaZooAdapter:
                                                 if isinstance(e, ast.Constant)
                                             ]
                                 return meta
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug("Failed to extract AST metadata: %s", e)
         return None

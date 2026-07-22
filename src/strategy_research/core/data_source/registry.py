@@ -61,11 +61,13 @@ def _ensure_registered() -> None:
     if _registered:
         return
     _registered = True
+    import logging
+    logger = logging.getLogger(__name__)
     for mod_name in _loader_modules:
         try:
             importlib.import_module(mod_name)
-        except Exception:
-            pass  # 静默跳过依赖缺失的 loader
+        except Exception as e:
+            logger.debug("Skipping loader module %s (dependency missing): %s", mod_name, e)
 
 
 # ============================================================
@@ -135,7 +137,9 @@ def resolve_loader_with_fallback(source: str):
     loader_cls = LOADER_REGISTRY[source]
     try:
         instance = loader_cls()
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Failed to instantiate loader %s: %s", source, e)
         instance = None
 
     if instance is not None and instance.is_available():
@@ -173,6 +177,7 @@ def get_loader_or_fallback(source: str):
                 instance = LOADER_REGISTRY["tushare"]()
                 if instance.is_available():
                     return LOADER_REGISTRY["tushare"]
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("Tushare fallback failed: %s", e)
         raise

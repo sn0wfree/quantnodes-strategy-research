@@ -59,8 +59,9 @@ def cmd_hypothesis_list(args: argparse.Namespace) -> int:
     if args.status:
         try:
             items = [h for h in items if h.status == args.status]
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to filter by status: %s", e)
     if not items:
         print("no hypotheses found")
         return 0

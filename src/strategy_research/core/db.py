@@ -1040,7 +1040,9 @@ def get_last_import_date(
         if result and result[0]:
             return result[0]
         return None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Failed to get last import date: %s", e)
         return None
 
 

@@ -422,8 +422,9 @@ def evaluate_experiment(
                 WHERE strategy_name = ? AND run = ?
             """, [status, strategy_name, run_name])
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to update backtest status: %s", e)
 
     # Git-as-log: 每次 run 都 commit (不只是 keep)
     git_commit_rich(

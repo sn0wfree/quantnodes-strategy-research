@@ -1163,8 +1163,9 @@ def evaluate_expression(expr: str, data: pd.DataFrame) -> pd.Series:
         tokens = _tokenize(expr)
         parser = _Parser(tokens, data)
         return parser.parse_expression()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("New parser failed for '%s', falling back to old parser: %s", expr, e)
 
     # 回退到旧解析器 (仅支持函数调用)
     op_name, args = parse_expression(expr)

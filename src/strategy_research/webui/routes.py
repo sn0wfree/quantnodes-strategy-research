@@ -90,9 +90,23 @@ async def goals_list(request: Request):
         from ..core.goal import GoalStore
         db_path = getattr(request.app.state, "goal_db_path", None)
         store = GoalStore(db_path=db_path)
-        # GoalStore doesn't have list_goals; return empty for now
-    except Exception:
-        pass
+        goal_records = store.list_goals(limit=100)
+        goals = [
+            {
+                "goal_id": g.goal_id,
+                "session_id": g.session_id,
+                "status": g.status.value,
+                "objective": g.objective,
+                "ui_summary": g.ui_summary,
+                "risk_tier": g.risk_tier.value,
+                "created_at": g.created_at,
+                "updated_at": g.updated_at,
+            }
+            for g in goal_records
+        ]
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to load goals: %s", e)
 
     return templates.TemplateResponse("goals/list.html", {
         "request": request,
@@ -110,8 +124,9 @@ async def hypotheses_list(request: Request):
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)
         hypotheses = [h.__dict__ for h in registry.list()]
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to load hypotheses: %s", e)
 
     return templates.TemplateResponse("hypotheses/list.html", {
         "request": request,
@@ -169,8 +184,9 @@ async def memory_search_htmx(request: Request, q: str = ""):
             from ..core.memory import MemoryFTS5
             mem = MemoryFTS5()
             results = mem.search(query=q, max_results=20)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Memory search failed: %s", e)
 
     # Return just the table HTML for HTMX
     if results:

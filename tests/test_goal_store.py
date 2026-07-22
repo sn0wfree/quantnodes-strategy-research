@@ -513,3 +513,64 @@ class TestEnvOverride:
         monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(custom))
         s = GoalStore()
         assert s.db_path == custom.expanduser().resolve()
+
+
+class TestListGoals:
+    def test_list_goals_empty(self, tmp_path: Path):
+        s = GoalStore(db_path=tmp_path / "test.db")
+        goals = s.list_goals()
+        assert goals == []
+
+    def test_list_goals_returns_all(self, tmp_path: Path):
+        s = GoalStore(db_path=tmp_path / "test.db")
+        s.replace_goal(
+            session_id="s1", objective="obj1", ui_summary="sum1",
+            source="test", protocol="p", risk_tier=RiskTier.RESEARCH_GENERAL,
+            criteria=["c1"],
+        )
+        s.replace_goal(
+            session_id="s2", objective="obj2", ui_summary="sum2",
+            source="test", protocol="p", risk_tier=RiskTier.MARKET_SPECIFIC_SHORT_TERM,
+            criteria=["c2"],
+        )
+        goals = s.list_goals()
+        assert len(goals) == 2
+
+    def test_list_goals_filter_by_session(self, tmp_path: Path):
+        s = GoalStore(db_path=tmp_path / "test.db")
+        s.replace_goal(
+            session_id="s1", objective="obj1", ui_summary="sum1",
+            source="test", protocol="p", risk_tier=RiskTier.RESEARCH_GENERAL,
+            criteria=["c1"],
+        )
+        s.replace_goal(
+            session_id="s2", objective="obj2", ui_summary="sum2",
+            source="test", protocol="p", risk_tier=RiskTier.MARKET_SPECIFIC_SHORT_TERM,
+            criteria=["c2"],
+        )
+        goals = s.list_goals(session_id="s1")
+        assert len(goals) == 1
+        assert goals[0].session_id == "s1"
+
+    def test_list_goals_filter_by_status(self, tmp_path: Path):
+        s = GoalStore(db_path=tmp_path / "test.db")
+        s.replace_goal(
+            session_id="s1", objective="obj1", ui_summary="sum1",
+            source="test", protocol="p", risk_tier=RiskTier.RESEARCH_GENERAL,
+            criteria=["c1"],
+        )
+        goals_active = s.list_goals(status=GoalStatus.ACTIVE)
+        assert len(goals_active) == 1
+        goals_completed = s.list_goals(status=GoalStatus.COMPLETE)
+        assert len(goals_completed) == 0
+
+    def test_list_goals_limit(self, tmp_path: Path):
+        s = GoalStore(db_path=tmp_path / "test.db")
+        for i in range(5):
+            s.replace_goal(
+                session_id=f"s{i}", objective=f"obj{i}", ui_summary=f"sum{i}",
+                source="test", protocol="p", risk_tier=RiskTier.RESEARCH_GENERAL,
+                criteria=[f"c{i}"],
+            )
+        goals = s.list_goals(limit=3)
+        assert len(goals) == 3
