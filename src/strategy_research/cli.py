@@ -861,11 +861,26 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         print(f"  最佳 Calmar: {current_state['best_calmar']:.4f}")
         print(f"  总轮数: {current_state['total_runs']}")
 
+        # 创建 run 目录 (提前创建,避免 lazy detection 时重复创建)
+        runs_dir = path / "strategies" / strategy_name / "runs"
+        # 使用 max(num) + 1 与 backtest 模块保持一致
+        existing_nums = []
+        for d in runs_dir.iterdir():
+            if d.is_dir() and d.name.startswith("run_"):
+                try:
+                    existing_nums.append(int(d.name.split("_")[1]))
+                except (ValueError, IndexError):
+                    pass
+        run_num = max(existing_nums, default=0) + 1
+        run_name = f"run_{run_num:04d}"
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(exist_ok=True)
+        (run_dir / "agents").mkdir(exist_ok=True)
+
         # Lazy Detection (每 N 轮检测)
         lazy_detection_interval = args.lazy_detection_interval or 10
         if should_run_lazy_detection(round_num, lazy_detection_interval):
             print(f"\n[Lazy Detection] 检测 Agent 行为 (每 {lazy_detection_interval} 轮)...")
-            runs_dir = path / "strategies" / strategy_name / "runs"
             lazy_results = []
             
             # 读取最近 10 轮的 agent 记录
@@ -881,22 +896,8 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
             # 保存报告
             if lazy_results:
                 overall_score = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
-                # 创建 run 目录 (如果不存在)
-                runs_dir = path / "strategies" / strategy_name / "runs"
-                run_num = len([d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]) + 1
-                run_name = f"run_{run_num:04d}"
-                run_dir = runs_dir / run_name
-                run_dir.mkdir(exist_ok=True)
                 save_laziness_report(run_dir, round_num, lazy_results, overall_score)
                 print(f"✅ 保存 laziness report: {run_dir}/laziness_report.json")
-
-        # 创建 run 目录
-        runs_dir = path / "strategies" / strategy_name / "runs"
-        run_num = len([d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]) + 1
-        run_name = f"run_{run_num:04d}"
-        run_dir = runs_dir / run_name
-        run_dir.mkdir(exist_ok=True)
-        (run_dir / "agents").mkdir(exist_ok=True)
 
         # Step 2: spawn Researcher
         print("\n[Step 2] spawn Researcher...")
@@ -983,6 +984,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
             strategy_name=strategy_name,
             action=strategist_output.get("action", "unknown"),
             description=strategist_output.get("hypothesis", ""),
+            run_dir=run_dir,  # 使用已创建的 run_dir,避免创建额外的空目录
         )
 
         if backtest_result.get("success"):

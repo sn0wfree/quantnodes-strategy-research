@@ -201,14 +201,27 @@ def run_backtest_script(
     action: str = "manual",
     description: str = "",
     timeout: int = 300,
+    run_dir: Path | None = None,
 ) -> dict:
-    """运行策略脚本回测并保存结果。"""
+    """运行策略脚本回测并保存结果。
+
+    Args:
+        workspace_path: 工作区路径
+        strategy_name: 策略名称
+        action: 行动类型
+        description: 描述
+        timeout: 超时时间 (秒)
+        run_dir: 可选的 run 目录路径。如果提供,则使用此目录而不是创建新目录。
+    """
     strategy_dir = workspace_path / "strategies" / strategy_name
     if not strategy_dir.exists():
         return {"success": False, "run": "", "metrics": {}, "error": f"策略目录不存在: {strategy_dir}"}
 
-    run_name = get_next_run_name(strategy_dir)
-    run_dir = create_run_dir(strategy_dir, run_name)
+    if run_dir is None:
+        run_name = get_next_run_name(strategy_dir)
+        run_dir = create_run_dir(strategy_dir, run_name)
+    else:
+        run_name = run_dir.name
 
     save_run_snapshot(strategy_dir, run_dir)
 
