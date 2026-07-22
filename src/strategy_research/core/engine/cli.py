@@ -30,6 +30,10 @@ def add_engine_subparsers(subparsers: Any) -> None:
     bt_parser.add_argument("--commission-rate", type=float, default=0.001, help="手续费率")
     bt_parser.add_argument("--slippage-bps", type=float, default=0.0, help="滑点 (bps)")
     bt_parser.add_argument("--output-dir", help="artifacts 输出目录")
+    bt_parser.add_argument("--optimizer", default="none",
+                           choices=["none", "equal_volatility", "risk_parity", "mean_variance",
+                                    "max_diversification", "turnover_aware"],
+                           help="权重优化器")
     bt_parser.add_argument("--json", action="store_true", dest="json_output", help="JSON 输出")
 
     # engine list-engines
@@ -82,6 +86,7 @@ def cmd_engine_run_backtest(args: argparse.Namespace) -> int:
             config=config,
             signal_engine_path=Path(args.signal_engine).resolve(),
             bars_per_year=args.bars_per_year,
+            optimizer=args.optimizer if args.optimizer != "none" else None,
         )
     except Exception as e:
         print(f"❌ 回测失败: {e}")

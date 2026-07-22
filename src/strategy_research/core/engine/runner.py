@@ -280,6 +280,7 @@ def run_engine_backtest(
     signal_engine_path: Optional[Path] = None,
     signal_engine_cls: Optional[Type[SignalEngine]] = None,
     bars_per_year: int = 252,
+    optimizer: Optional[str] = None,
 ) -> Dict[str, Any]:
     """运行完整回测 pipeline。
 
@@ -290,6 +291,7 @@ def run_engine_backtest(
         signal_engine_path: signal_engine.py 路径 (二选一)
         signal_engine_cls: SignalEngine 类 (二选一)
         bars_per_year: 年化 bar 数
+        optimizer: 优化器名称 (equal_volatility/risk_parity/mean_variance/max_diversification/turnover_aware)
 
     Returns:
         metrics dict
@@ -319,8 +321,17 @@ def run_engine_backtest(
     # 4. Create engine
     engine = _create_market_engine(config, valid_codes)
 
-    # 5. Run
-    metrics = engine.run_backtest(data_map, signal_map, valid_codes, bars_per_year)
+    # 5. Build optimizer callable
+    opt_func = None
+    if optimizer and optimizer != "none":
+        from .optimizers import optimize_weights
+
+        def _opt_func(ret_df, pos_df, dates):
+            return optimize_weights(ret_df, pos_df, dates, method=optimizer)
+        opt_func = _opt_func
+
+    # 6. Run
+    metrics = engine.run_backtest(data_map, signal_map, valid_codes, bars_per_year, optimizer=opt_func)
 
     return metrics
 
