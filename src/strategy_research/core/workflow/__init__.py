@@ -4,7 +4,7 @@ from .dag import topological_layers, validate_dag
 from .controller import WorkflowController, ControllerConfig, AgentExecution, RoundExecution
 from .prompt import PromptBuilder
 from .validator import AgentValidator, ValidationResult
-from .grounding import GroundingProvider, MarketData, DummyGroundingProvider
+from .grounding import GroundingProvider, MarketData
 from .executors import AgentLoopExecutor, PythonExecutor, CLIExecutor, StubExecutor
 
 __all__ = [
@@ -17,7 +17,6 @@ __all__ = [
     "AgentValidator",
     "CLIExecutor",
     "ControllerConfig",
-    "DummyGroundingProvider",
     "GroundingProvider",
     "MarketData",
     "PromptBuilder",

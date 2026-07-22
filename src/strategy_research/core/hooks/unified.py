@@ -9,10 +9,35 @@ AgentHook 通过 AgentHookAdapter 桥接到此接口。
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
-# Forward reference for UnifiedContext
-UnifiedContext = Any
+
+@dataclass
+class UnifiedContext:
+    """Hook execution context passed to all UnifiedHook events.
+
+    Provides typed access to common context fields used across chat,
+    codegen, and research modes. Subclasses or instances can extend with
+    mode-specific fields as needed.
+    """
+
+    session_id: str = ""
+    iteration: int = 0
+    prompt: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class _ContextLike(Protocol):
+    """Minimal context protocol — anything with session_id is a context."""
+
+    session_id: str
+
+
+# Backward-compatible alias: UnifiedContext used to be Any; now it's a
+# proper dataclass but accepts any object with .session_id via _ContextLike.
+UnifiedContext = UnifiedContext
 
 
 class UnifiedHook:
@@ -75,3 +100,6 @@ class UnifiedHook:
 
     def after_iteration(self, ctx: UnifiedContext) -> None:
         pass
+
+
+__all__ = ["UnifiedContext", "UnifiedHook"]

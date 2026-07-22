@@ -14,7 +14,6 @@ from .china_a import ChinaAEngine
 from .crypto import CryptoEngine
 from .forex import ForexEngine
 from .global_equity import GlobalEquityEngine
-from .market_hooks import calc_crypto_funding_fee, check_crypto_liquidation
 from .models import Position
 
 
@@ -92,33 +91,25 @@ class CompositeEngine(BaseEngine):
     def on_bar(self, symbol: str, bar: pd.Series, timestamp: pd.Timestamp) -> None:
         market = self._symbol_market.get(symbol)
         if market == "crypto":
+            # Delegate to CryptoEngine.on_bar with shared state
             crypto_sub = self._rule_engines["crypto"]
-            fee = calc_crypto_funding_fee(
-                symbol, bar, timestamp, self.positions,
-                crypto_sub.funding_rate, self._funding_applied, self._funding_daily_done,
-            )
-            self.capital -= fee
-            if check_crypto_liquidation(symbol, bar, self.positions):
-                pos = self.positions.get(symbol)
-                if pos is not None:
-                    mark_price = float(bar.get("close", pos.entry_price))
-                    liq_price = crypto_sub.apply_slippage(mark_price, -pos.direction)
-                    self._close_position(symbol, liq_price, timestamp, "liquidation")
+            self._run_subengine_on_bar(crypto_sub, symbol, bar, timestamp)
         elif market == "forex":
+            # Delegate to ForexEngine.on_bar with shared state
             forex_sub = self._rule_engines["forex"]
-            if forex_sub.swap_enabled:
-                current_date = timestamp.date()
-                last_swap = self._last_swap_dates.get(symbol)
-                if last_swap != current_date:
-                    pos = self.positions.get(symbol)
-                    if pos is not None:
-                        swap_rate = forex_sub.swap_long if pos.direction == 1 else forex_sub.swap_short
-                        notional = pos.size * float(bar.get("close", pos.entry_price))
-                        is_wed = timestamp.weekday() == 2
-                        multiplier = 3 if is_wed else 1
-                        swap = notional * swap_rate * multiplier * 0.0001
-                        self.capital += swap
-                        self._last_swap_dates[symbol] = current_date
+            self._run_subengine_on_bar(forex_sub, symbol, bar, timestamp)
+
+    def _run_subengine_on_bar(
+        self, sub: BaseEngine, symbol: str, bar: pd.Series, timestamp: pd.Timestamp
+    ) -> None:
+        """Run sub-engine's on_bar with shared capital/positions state."""
+        # Share state references so sub-engine operates on composite state
+        sub.capital = self.capital
+        sub.positions = self.positions
+        sub._bar_idx = self._bar_idx
+        sub.on_bar(symbol, bar, timestamp)
+        # Sync capital back (positions are mutated in place)
+        self.capital = sub.capital
 
 
 __all__ = ["CompositeEngine"]

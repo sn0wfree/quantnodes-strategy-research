@@ -17,6 +17,12 @@ NOT in this PR (PR7):
     - Tool dispatch optimizations
     - Cancellation tokens
     - Checkpointing
+
+Exception handling policy:
+    Agent loop and builtin tools use `except Exception` (BLE001) because
+    any uncaught error in a tool or trace/memory helper would abort the
+    loop. Failures are logged + traced + converted to error responses
+    for the LLM. This is intentional and required for agent resilience.
 """
 
 from __future__ import annotations

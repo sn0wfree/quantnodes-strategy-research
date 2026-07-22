@@ -22,20 +22,4 @@ class GroundingProvider(Protocol):
     def is_available(self) -> bool: ...
 
 
-class DummyGroundingProvider:
-    def __init__(self) -> None:
-        self._available = True
-
-    def fetch_market_data(
-        self,
-        symbol: str,
-        start_date: str,
-        end_date: str,
-    ) -> MarketData:
-        return MarketData(
-            symbol=symbol,
-            data={"start": start_date, "end": end_date, "source": "dummy"},
-        )
-
-    def is_available(self) -> bool:
-        return self._available
+__all__ = ["MarketData", "GroundingProvider"]

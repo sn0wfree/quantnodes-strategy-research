@@ -75,6 +75,13 @@ class CLIExecutor:
 
 
 class StubExecutor:
+    """Stub executor that returns a fixed result.
+
+    ⚠️  This class is intended primarily for testing and development
+    scaffolding. It does not execute real logic. For production workflows,
+    use PythonExecutor, CLIExecutor, or AgentLoopExecutor.
+    """
+
     def __init__(self, name: str, result: dict | None = None) -> None:
         self._name = name
         self._result = result or {"status": "ok"}

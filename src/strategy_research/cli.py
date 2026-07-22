@@ -6,6 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import yaml
+
 
 # ============================================================
 # 模板内容 (从文件加载或内嵌)
@@ -307,12 +309,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
 
     # 读取 config.yaml
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
-        return 1
-
     config_path = path / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -393,12 +389,6 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
         return 1
 
     # 读取 config.yaml
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
-        return 1
-
     config_path = path / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -468,12 +458,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     # 读取 config.yaml
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
-        return 1
-
     config_path = path / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -518,12 +502,6 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
     if not (path / "config.yaml").exists():
         print(f"❌ 不是有效的工作区: {path}")
-        return 1
-
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
         return 1
 
     config_path = path / "config.yaml"
@@ -595,12 +573,6 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 1
 
     # 读取 config.yaml
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
-        return 1
-
     config_path = path / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -667,12 +639,6 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 1
 
     # 读取 config.yaml
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
-        return 1
-
     config_path = path / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -862,12 +828,6 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         return 1
 
     # 读取 config.yaml
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 需要安装 pyyaml: pip install pyyaml")
-        return 1
-
     config_path = path / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
