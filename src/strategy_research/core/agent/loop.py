@@ -111,6 +111,10 @@ class AgentLoop:
         system_prompt: str | None = None,
         allowed_tools: list[str] | None = None,
         readonly: bool = False,
+        session_id: str | None = None,
+        strategy_name: str | None = None,
+        enable_goal_injection: bool = True,
+        enable_hypothesis_auto_create: bool = True,
     ):
         self.config = config
         self.memory = memory
@@ -120,6 +124,10 @@ class AgentLoop:
         self.threshold_tokens = threshold_tokens
         self.heartbeat_interval = heartbeat_interval
         self.auto_git_commit = auto_git_commit
+        self.session_id = session_id
+        self.strategy_name = strategy_name
+        self.enable_goal_injection = enable_goal_injection
+        self.enable_hypothesis_auto_create = enable_hypothesis_auto_create
 
         # Tool filtering: allowed_tools > readonly > all
         if allowed_tools is not None:
@@ -163,9 +171,17 @@ class AgentLoop:
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
+        # P3-d integration: auto-create hypothesis on first call per (strategy, market)
+        self._maybe_auto_create_hypothesis(task)
+
+        # P3-d integration: inject goal context for this session
+        goal_context = self._get_goal_context()
+
         full_task = task
         if context:
             full_task = context + "\n\n" + task
+        if goal_context:
+            full_task = goal_context + "\n\n" + full_task
 
         result = LoopResult()
         messages = self.context_builder.build_initial_messages(full_task)
@@ -466,6 +482,70 @@ class AgentLoop:
                 self._trace_writer.write(entry)
             except Exception:                       # noqa: BLE001
                 pass  # trace failures should never break the loop
+
+    # ── P3-d: Goal + Hypothesis integration ────────
+
+    def _maybe_auto_create_hypothesis(self, task: str) -> None:
+        """Auto-create an exploring hypothesis per (strategy, market) on first run.
+
+        Per the P3-b user decision, this fires only when:
+          - enable_hypothesis_auto_create is True (default)
+          - session_id is set
+          - strategy_name is set
+          - registry has no matching (strategy, market) hypothesis yet
+
+        Failures are swallowed (logged at most) to avoid breaking the loop.
+        """
+        if not self.enable_hypothesis_auto_create:
+            return
+        if not self.session_id or not self.strategy_name:
+            return
+        try:
+            from ..hypothesis import HypothesisAutoCreator
+            creator = HypothesisAutoCreator()
+            hyp = creator.maybe_auto_create(
+                session_id=self.session_id,
+                strategy_name=self.strategy_name,
+                initial_thesis=task,
+                market="a_share",
+            )
+            if hyp is not None:
+                self._trace({
+                    "type": "hypothesis_auto_created",
+                    "hypothesis_id": hyp.hypothesis_id,
+                    "title": hyp.title,
+                })
+        except Exception as exc:                     # noqa: BLE001
+            # Never let hypothesis machinery break the agent loop
+            self._trace({
+                "type": "hypothesis_auto_create_failed",
+                "error": str(exc),
+            })
+
+    def _get_goal_context(self) -> str:
+        """Return formatted <current-research-goal> block for this session.
+
+        Returns empty string when:
+          - enable_goal_injection is False
+          - no session_id is set
+          - no current goal exists for the session
+
+        Failures are swallowed to avoid breaking the loop.
+        """
+        if not self.enable_goal_injection:
+            return ""
+        if not self.session_id:
+            return ""
+        try:
+            from ..goal import get_current_goal_context
+            ctx, _ = get_current_goal_context(self.session_id)
+            return ctx
+        except Exception as exc:                     # noqa: BLE001
+            self._trace({
+                "type": "goal_context_failed",
+                "error": str(exc),
+            })
+            return ""
 
     # ── Git commit after run ──────────────────────
 
