@@ -46,12 +46,7 @@ core/engine/
 ├── composite.py         # 跨市场组合
 └── optimizers/
     ├── __init__.py
-    ├── base.py
-    ├── equal_volatility.py
-    ├── risk_parity.py
-    ├── mean_variance.py
-    ├── max_diversification.py
-    └── turnover_aware.py
+    └── base.py           # 5 个优化器 (QuantOPT 适配层)
 ```
 
 ---
@@ -189,7 +184,65 @@ for symbol in engine.positions:
 
 ---
 
-## 6. Runner 流程
+## 6. Optimizer 适配层
+
+基于 QuantOPT 的 5 个优化器，通过统一接口 `optimize_weights()` 调用。
+
+### 6.1 接口
+
+```python
+from strategy_research.core.engine.optimizers import optimize_weights
+
+result = optimize_weights(ret_df, pos_df, dates, method="risk_parity")
+# ret_df: 收益率矩阵 (T, N)
+# pos_df: 当前权重矩阵 (T, N)
+# dates: 统一日期索引
+# method: 优化方法名
+# 返回: 优化后的权重矩阵 (T, N)
+```
+
+### 6.2 优化器列表
+
+| 方法 | 算法 | QuantOPT 模型 | 说明 |
+|---|---|---|---|
+| `equal_volatility` | inverse-volatility | 自写 (~15行) | 按波动率倒数分配权重 |
+| `risk_parity` | 等风险贡献 | `RiskParity` | 每个资产对组合风险贡献相等 |
+| `mean_variance` | Markowitz 均值方差 | `MVO` | 最大化夏普比率 |
+| `max_diversification` | 最大化分散化比率 | `MaxIR` | 最大化分散化收益/风险比 |
+| `turnover_aware` | 考虑换手成本 | `MaxRiskAdjReturn` | 带 L1 换手惩罚的均值方差 |
+
+### 6.3 QuantOPT 集成
+
+```python
+# 直接调用 QuantOPT 模型 (非 RunOpt 复杂路径)
+from QuantOPT.models.model_RiskParity import RiskParity
+from QuantOPT.models.model_MVO import MVO
+from QuantOPT.models.model_MaxIR import MaxIR
+from QuantOPT.models.model_MaxRiskAdjReturn import MaxRiskAdjReturn
+
+# 统一接口: optimize_weights() → pd.DataFrame
+# 优化失败自动 fallback 到 equal weight
+```
+
+### 6.4 集成到 Engine
+
+```python
+# runner.py — 自动构建 optimizer callable
+opt_func = lambda ret_df, pos_df, dates: optimize_weights(
+    ret_df, pos_df, dates, method=optimizer_name
+)
+engine.run_backtest(data_map, signal_map, codes, optimizer=opt_func)
+
+# CLI — 直接传参
+quantnodes-research engine run-backtest \
+  --workspace ./workspace --strategy my_strategy \
+  --signal-engine ./signal_engine.py \
+  --optimizer risk_parity
+```
+
+---
+
+## 7. Runner 流程
 
 ```python
 def main(run_dir: Path):
@@ -224,7 +277,7 @@ def main(run_dir: Path):
 
 ---
 
-## 7. AST Guard 增强
+## 8. AST Guard 增强
 
 在现有 `sandbox.py` 基础上，为 `signal_engine.py` 增加：
 
@@ -239,7 +292,7 @@ def main(run_dir: Path):
 
 ---
 
-## 8. 向后兼容
+## 9. 向后兼容
 
 | 旧路径 | 新路径 |
 |---|---|
@@ -253,26 +306,27 @@ def main(run_dir: Path):
 
 ---
 
-## 9. 测试策略
+## 10. 测试策略
 
 | Phase | 测试数 | 覆盖 |
 |---|---|---|
-| Phase 1: 数据层 | 15 | load_ohlcv_data + roundtrip |
-| Phase 2: BaseEngine | 30 | 执行循环 + rebalance + equity |
-| Phase 3: 市场引擎 | 40 | 每引擎 4-5 tests |
+| Phase 1: 数据层 | 18 | load_ohlcv_data + roundtrip |
+| Phase 2: BaseEngine | 20 | 执行循环 + rebalance + equity |
+| Phase 3: 市场引擎 | 24 | 9 个引擎 |
 | Phase 4: Runner | 20 | config + AST + routing |
-| Phase 5: 辅助 | 15 | benchmark + artifacts |
-| Phase 6: 集成 | 10 | CLI + E2E |
-| **总计** | **130** | — |
+| Phase 5: 辅助 | 10 | artifacts + metrics |
+| Phase 6: Optimizer | 17 | 5 个优化器 + edge cases |
+| **总计** | **109** | — |
 
 ---
 
-## 10. 依赖
+## 11. 依赖
 
 ```toml
 [project.optional-dependencies]
 engine = [
     "pydantic>=2.5",   # config validation
+    "QuantOPT>=0.1.1", # portfolio optimizers
 ]
 # 无新核心依赖；所有市场引擎纯 Python + numpy/pandas
 ```
