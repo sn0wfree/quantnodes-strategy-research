@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Goals — Strategy Research{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 20px; font-size: 24px;">Goals</h1>
+
+<div class="card">
+    {% if goals %}
+    <table>
+        <thead>
+            <tr><th>Goal ID</th><th>Session</th><th>Objective</th><th>Risk Tier</th><th>Status</th><th>Criteria</th></tr>
+        </thead>
+        <tbody>
+        {% for goal in goals %}
+            <tr>
+                <td><a href="/goals/{{ goal.goal_id }}">{{ goal.goal_id[:16] }}...</a></td>
+                <td>{{ goal.session_id }}</td>
+                <td>{{ goal.objective[:80] }}</td>
+                <td>{{ goal.risk_tier }}</td>
+                <td><span class="badge badge-{{ goal.status }}">{{ goal.status }}</span></td>
+                <td>{{ goal.criteria|length }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No goals yet. Start one with <code>quantnodes-research goal start</code></div>
+    {% endif %}
+</div>
+{% endblock %}

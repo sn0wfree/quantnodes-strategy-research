@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Hypotheses — Strategy Research{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 20px; font-size: 24px;">Hypotheses</h1>
+
+<div class="card">
+    <div style="margin-bottom: 12px;">
+        <input type="text" class="search-box" placeholder="Search hypotheses..."
+               hx-get="/api/hypothesis/search"
+               hx-trigger="keyup changed delay:300ms"
+               hx-target="#hypothesis-list"
+               name="q">
+    </div>
+
+    <div id="hypothesis-list">
+    {% if hypotheses %}
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Title</th><th>Thesis</th><th>Status</th><th>Runs</th></tr>
+        </thead>
+        <tbody>
+        {% for hyp in hypotheses %}
+            <tr>
+                <td><a href="/hypotheses/{{ hyp.hypothesis_id }}">{{ hyp.hypothesis_id }}</a></td>
+                <td>{{ hyp.title }}</td>
+                <td>{{ hyp.thesis[:60] }}</td>
+                <td><span class="badge badge-{{ hyp.status }}">{{ hyp.status }}</span></td>
+                <td>{{ hyp.runs|length }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No hypotheses yet. Create one with <code>quantnodes-research hypothesis create</code></div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

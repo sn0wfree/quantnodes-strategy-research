@@ -1544,6 +1544,37 @@ def _cmd_llm_list_profiles() -> int:
 # Session commands
 # ============================================================
 
+def cmd_webui_serve(args) -> int:
+    """启动 Web UI 服务器。"""
+    from pathlib import Path
+
+    import uvicorn
+
+    from .api.app import create_app
+    from .webui.routes import router as webui_router
+
+    workspace = Path(args.workspace)
+    app = create_app(
+        workspace_path=workspace if workspace.exists() else None,
+        goal_db_path=getattr(args, "goal_db", None),
+        hypotheses_path=getattr(args, "hypotheses_path", None),
+    )
+
+    # Mount webui routes
+    app.include_router(webui_router, tags=["webui"])
+
+    print(f"🌐 Strategy Research Web UI starting at http://{args.host}:{args.port}")
+    print(f"   Workspace: {workspace}")
+
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        reload=getattr(args, "reload", False),
+    )
+    return 0
+
+
 def cmd_api_serve(args) -> int:
     """启动 HTTP API 服务器。"""
     from pathlib import Path
@@ -1763,6 +1794,17 @@ def main() -> int:
     api_serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")
     api_serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
 
+    # webui serve
+    webui_parser = subparsers.add_parser("webui", help="Web UI 仪表盘")
+    webui_subparsers = webui_parser.add_subparsers(dest="webui_command", help="Web UI 命令")
+    webui_serve_parser = webui_subparsers.add_parser("serve", help="启动 Web UI 服务器")
+    webui_serve_parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
+    webui_serve_parser.add_argument("--port", type=int, default=8766, help="监听端口 (默认 8766)")
+    webui_serve_parser.add_argument("--reload", action="store_true", help="热重载 (开发模式)")
+    webui_serve_parser.add_argument("--workspace", "-w", default=".", help="工作区路径")
+    webui_serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")
+    webui_serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1842,6 +1884,12 @@ def main() -> int:
             return cmd_api_serve(args)
         else:
             api_parser.print_help()
+            return 0
+    elif args.command == "webui":
+        if args.webui_command == "serve":
+            return cmd_webui_serve(args)
+        else:
+            webui_parser.print_help()
             return 0
     else:
         parser.print_help()

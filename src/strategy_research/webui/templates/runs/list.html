@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Runs — Strategy Research{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 20px; font-size: 24px;">Runs</h1>
+
+{% for strat_name, strat_runs in runs_by_strategy.items() %}
+<div class="card">
+    <h2>{{ strat_name }}</h2>
+    {% if strat_runs %}
+    <table>
+        <thead>
+            <tr><th>Run</th><th>Sharpe</th><th>Calmar</th><th>Max DD</th><th>Ann Return</th></tr>
+        </thead>
+        <tbody>
+        {% for run in strat_runs %}
+            <tr>
+                <td><a href="/runs/{{ strat_name }}/{{ run.name }}">{{ run.name }}</a></td>
+                <td>{{ "%.4f"|format(run.metrics.get("sharpe", 0)) }}</td>
+                <td>{{ "%.4f"|format(run.metrics.get("calmar", 0)) }}</td>
+                <td>{{ "%.4f"|format(run.metrics.get("max_dd", 0)) }}</td>
+                <td>{{ "%.4f"|format(run.metrics.get("ann_return", 0)) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No runs for this strategy</div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% if not runs_by_strategy %}
+<div class="card">
+    <div class="empty">No runs found. Run <code>quantnodes-research run</code> first.</div>
+</div>
+{% endif %}
+{% endblock %}

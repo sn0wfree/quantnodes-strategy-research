@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Memory — Strategy Research{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 20px; font-size: 24px;">Memory Search</h1>
+
+<div class="card">
+    <div style="margin-bottom: 12px;">
+        <input type="text" class="search-box" placeholder="Search memory..."
+               hx-get="/webui/memory/search"
+               hx-trigger="keyup changed delay:300ms"
+               hx-target="#memory-results"
+               name="q">
+    </div>
+
+    <div id="memory-results">
+    {% if results %}
+    <table>
+        <thead>
+            <tr><th>Title</th><th>Path</th><th>Description</th><th>Score</th></tr>
+        </thead>
+        <tbody>
+        {% for item in results %}
+            <tr>
+                <td>{{ item.get("title", "") }}</td>
+                <td>{{ item.get("path", "") }}</td>
+                <td>{{ item.get("description", "")[:80] }}</td>
+                <td>{{ "%.2f"|format(item.get("score", 0)) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No results. Try a search query.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

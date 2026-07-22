@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Strategy Research{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        nav { background: #1a1a2e; padding: 12px 20px; display: flex; gap: 20px; align-items: center; }
+        nav a { color: #e0e0e0; text-decoration: none; font-size: 14px; }
+        nav a:hover { color: #fff; }
+        nav .brand { font-weight: 700; font-size: 16px; color: #4fc3f7; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 12px; color: #1a1a2e; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; font-size: 13px; color: #666; }
+        td { font-size: 14px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+        .badge-active { background: #e8f5e9; color: #2e7d32; }
+        .badge-exploring { background: #e3f2fd; color: #1565c0; }
+        .badge-completed { background: #f3e5f5; color: #7b1fa2; }
+        .btn { display: inline-block; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; text-decoration: none; }
+        .btn-primary { background: #1a73e8; color: #fff; }
+        .btn-primary:hover { background: #1557b0; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .stat-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .stat-card .label { font-size: 12px; color: #888; text-transform: uppercase; }
+        .stat-card .value { font-size: 28px; font-weight: 700; color: #1a1a2e; margin-top: 4px; }
+        .search-box { padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 300px; font-size: 14px; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/webui/" class="brand">Strategy Research</a>
+        <a href="/webui/goals">Goals</a>
+        <a href="/webui/hypotheses">Hypotheses</a>
+        <a href="/webui/runs">Runs</a>
+        <a href="/webui/memory">Memory</a>
+    </nav>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
