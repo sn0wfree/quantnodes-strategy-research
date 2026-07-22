@@ -232,6 +232,69 @@ def load_price_data(
         return pd.DataFrame()
 
 
+def load_ohlcv_data(
+    workspace_path: Path,
+    strategy_name: str,
+    codes: list[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """从 DuckDB 加载完整 OHLCV 数据（bar-by-bar engine 用）。
+
+    Returns:
+        dict[str, pd.DataFrame]: {asset_code: DataFrame}，每个 DataFrame
+        index=DatetimeIndex，columns=[open, high, low, close, volume]
+    """
+    conn = get_connection(workspace_path, read_only=True)
+    if conn is None:
+        return {}
+
+    try:
+        query = """
+            SELECT date, asset_code, open, high, low, close, volume
+            FROM price_data
+            WHERE strategy_name = ?
+        """
+        params: list = [strategy_name]
+
+        if codes:
+            placeholders = ", ".join(["?" for _ in codes])
+            query += f" AND asset_code IN ({placeholders})"
+            params.extend(codes)
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY asset_code, date"
+
+        df = conn.execute(query, params).fetchdf()
+        conn.close()
+
+        if df.empty:
+            return {}
+
+        result: dict[str, pd.DataFrame] = {}
+        for asset_code, group in df.groupby("asset_code"):
+            asset_df = group.set_index("date")[
+                ["open", "high", "low", "close", "volume"]
+            ].copy()
+            asset_df.index = pd.to_datetime(asset_df.index)
+            for col in ["open", "high", "low", "close", "volume"]:
+                asset_df[col] = pd.to_numeric(asset_df[col], errors="coerce")
+            result[asset_code] = asset_df
+
+        return result
+
+    except Exception as e:
+        print(f"❌ 加载 OHLCV 数据失败: {e}")
+        conn.close()
+        return {}
+
+
 def save_price_data(
     workspace_path: Path,
     strategy_name: str,
