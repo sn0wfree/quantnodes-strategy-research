@@ -1177,7 +1177,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
 
 def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
                  current_state: dict, previous_outputs: list) -> str:
-    """spawn 单个 Agent (模拟 Task tool 调用)。
+    """spawn 单个 Agent (模拟 Task tool 调用).
 
     支持通过环境变量 AUTORESEARCH_BEHAVIOR 控制模拟行为:
     - "static": 每次返回相同输出 (默认,用于测试)
@@ -1461,15 +1461,103 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
 
 
 # ============================================================
+# LLM configuration helpers (PR5-c5)
+# ============================================================
+
+
+_LLM_PARENT = argparse.ArgumentParser(
+    add_help=False,
+    prog="quantnodes-research (LLM flags)",
+    description="LLM configuration overrides",
+)
+_llm_g = _LLM_PARENT.add_argument_group("LLM configuration")
+_llm_g.add_argument("--llm-profile", default=None,
+                    help="激活的 LLM profile (从 ~/.quantnodes-research/llm.yaml)")
+_llm_g.add_argument("--llm-model", default=None, help="覆盖 model")
+_llm_g.add_argument("--llm-base-url", default=None, help="覆盖 base_url")
+_llm_g.add_argument("--llm-temperature", type=float, default=None,
+                    help="覆盖 temperature")
+_llm_g.add_argument("--llm-max-tokens", type=int, default=None,
+                    help="覆盖 max_tokens")
+_llm_g.add_argument("--llm-top-p", type=float, default=None, help="覆盖 top_p")
+_llm_g.add_argument("--llm-timeout", type=float, default=None,
+                    help="覆盖 timeout_s")
+_llm_g.add_argument("--llm-max-retries", type=int, default=None,
+                    help="覆盖 max_retries")
+_llm_g.add_argument("--llm-seed", type=int, default=None, help="覆盖 seed")
+_llm_g.add_argument("--llm-stream", dest="llm_stream",
+                    action="store_true", default=None, help="强制流式")
+_llm_g.add_argument("--llm-no-stream", dest="llm_stream",
+                    action="store_false", help="禁用流式")
+
+
+def _cli_overrides_from_args(args: argparse.Namespace | None) -> dict:
+    """Extract --llm-* kwargs from argparse Namespace."""
+    if args is None:
+        return {}
+    out = {}
+    for key, value in vars(args).items():
+        if key.startswith("llm_") and value is not None:
+            out[key] = value
+    return out
+
+
+def build_llm_config(args: argparse.Namespace | None = None,
+                     *, profile: str | None = None,
+                     cli_overrides: dict | None = None) -> "LLMConfig":
+    """Build an LLMConfig from CLI args + 4-layer merge.
+
+    Args:
+        args: argparse Namespace (with --llm-* attributes).
+        profile: Explicit profile name override (highest priority).
+        cli_overrides: Explicit override dict (alternative to args).
+
+    Returns:
+        Fully merged LLMConfig.
+    """
+    from .core.llm import LLMConfig
+    overrides = cli_overrides if cli_overrides is not None else _cli_overrides_from_args(args)
+    return LLMConfig.load(profile=profile, cli_overrides=overrides)
+
+
+def _cmd_llm_list_profiles() -> int:
+    """Print all available LLM profiles from yaml config."""
+    from .core.llm.config import (
+        DEFAULT_LLM_CONFIG_PATH,
+        get_default_profile,
+        list_profiles,
+    )
+    profiles = list_profiles()
+    default = get_default_profile()
+    print(f"# LLM profiles from {DEFAULT_LLM_CONFIG_PATH}")
+    if not profiles:
+        print("(no llm.yaml found — using code defaults)")
+    else:
+        for name in profiles:
+            marker = " *" if name == default else ""
+            print(f"  {name}{marker}")
+        print(f"\ndefault: {default}")
+    return 0
+
+
+# ============================================================
 # Main CLI
 # ============================================================
 
 def main() -> int:
-    """CLI 入口。"""
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="quantnodes-research",
         description="通用策略自动研究框架",
     )
+
+    # ── Top-level LLM flags (apply globally) ────────────
+    parser.add_argument(
+        "--llm-list-profiles",
+        action="store_true",
+        help="列出所有 LLM profile 后退出 (调试用)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
     # init
@@ -1490,7 +1578,8 @@ def main() -> int:
     reproduce_parser.add_argument("--strategy", "-s", help="策略名称")
 
     # run
-    run_parser = subparsers.add_parser("run", help="运行回测")
+    run_parser = subparsers.add_parser("run", parents=[_LLM_PARENT],
+                                       help="运行回测")
     run_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
     run_parser.add_argument("--strategy", "-s", help="策略名称")
     run_parser.add_argument("--action", "-a", help="行动类型")
@@ -1498,7 +1587,8 @@ def main() -> int:
     run_parser.add_argument("--timeout", "-t", type=int, default=300, help="超时时间 (秒)")
 
     # evaluate
-    evaluate_parser = subparsers.add_parser("evaluate", help="复跑当前 strategy.py")
+    evaluate_parser = subparsers.add_parser("evaluate", parents=[_LLM_PARENT],
+                                             help="复跑当前 strategy.py")
     evaluate_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
     evaluate_parser.add_argument("--strategy", "-s", help="策略名称")
     evaluate_parser.add_argument("--description", "-d", default="", help="描述")
@@ -1541,7 +1631,8 @@ def main() -> int:
     import_parser.add_argument("--n-days", type=int, default=504, help="示例天数 (sample)")
 
     # autoresearch
-    autoresearch_parser = subparsers.add_parser("autoresearch", help="运行自动化研究循环")
+    autoresearch_parser = subparsers.add_parser("autoresearch", parents=[_LLM_PARENT],
+                                                 help="运行自动化研究循环")
     autoresearch_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
     autoresearch_parser.add_argument("--strategy", "-s", help="策略名称")
     autoresearch_parser.add_argument("--cooldown", "-c", type=float, default=30.0, help="基础 cooldown (秒)")
@@ -1552,7 +1643,12 @@ def main() -> int:
     autoresearch_parser.add_argument("--lazy-detection-interval", type=int, default=10, help="懒惰检测间隔 (轮数, 默认 10)")
     autoresearch_parser.add_argument("--keep-recent", type=int, default=10, help="读取时保留最近 N 轮详细数据 (其他轮次读取 summary.json, 默认 10)")
 
+    # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
+
+    # --llm-list-profiles: print and exit early
+    if getattr(args, "llm_list_profiles", False):
+        return _cmd_llm_list_profiles()
 
     if args.command == "init":
         return cmd_init(args)
