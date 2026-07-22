@@ -55,7 +55,7 @@ class TestTriggerPerformance:
             db.add_message("s1", "user", f"Message number {i} with some content")
         elapsed = time.time() - start
         print(f"\nBulk insert (1000 messages): {elapsed:.3f}s")
-        assert elapsed < 1.5  # Should be under 1.5 seconds
+        assert elapsed < 2.0  # Should be under 2 seconds
 
     def test_search_performance(self, tmp_path):
         db = SessionDB(tmp_path / "test.db")

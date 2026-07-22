@@ -51,7 +51,7 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 
 ---
 
-## CLI 命令（11 个）
+## CLI 命令（13 个）
 
 | 命令 | 用途 | 示例 |
 |---|---|---|
@@ -67,6 +67,8 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 | `list` | 列出历史实验 | `list /tmp/ws --limit 10` |
 | `import` | 导入价格数据 | `import /tmp/ws --strategy x --source akshare --codes 600519.SH` |
 | `autoresearch` | 自动化研究循环（10 角色串行）| `autoresearch /tmp/ws --max-rounds 5` |
+| `session stats` | 查看写入统计 | `session stats` |
+| `session list` | 列出会话 | `session list` |
 
 ### `preflight` 输出示例
 
@@ -237,9 +239,72 @@ factors:
 | 阶段 | 范围 | 状态 |
 |---|---|---|
 | **P0** | 修通 init（`.format()`/DuckDB/OHLCV/默认因子/CLI/preflight/eastmoney）| ✅ 完成 |
-| **P1** | Agent 真跑（替换 stub 接通 LLM）| 待启动 |
-| **P2** | Skills + Swarm + Memory（11 个角色 DAG）| 待 P1 完成 |
+| **P1** | Agent 真跑（替换 stub 接通 LLM，6 个工具，沙箱，3 层压缩）| ✅ 完成 |
+| **P1.5** | Workflow 层（DAG 调度 + Controller + 4 种 Executor + Grounding）| ✅ 完成 |
+| **P2** | Hook + Memory + Session（llmwikify 模式 + FTS5 + 触发器同步）| ✅ 完成 |
 | **P3** | Goal + Hypothesis + Validation（MC + Bootstrap + WF）| 待 P2 完成 |
+
+---
+
+## Hook 系统（P2）
+
+借鉴 llmwikify 的 13 事件点 Hook 系统：
+
+```python
+from strategy_research.core.hooks import AgentHook, CompositeHook, AgentHookContext
+
+class MyHook(AgentHook):
+    name = "my_hook"
+    
+    def after_iteration(self, ctx: AgentHookContext):
+        print(f"Iteration {ctx.iteration} done")
+
+composite = CompositeHook([MyHook()])
+ctx = AgentHookContext(iteration=1)
+asyncio.run(composite.after_iteration(ctx))
+```
+
+**13 个事件点**：`wants_streaming / before_iteration / after_iteration / on_stream / on_stream_end / emit_reasoning / emit_reasoning_end / before_execute_tools / after_tool_executed / on_tool_error / on_confirmation / finalize_content / on_error`
+
+---
+
+## Memory 系统（P2）
+
+- **FTS5 全文搜索**（全局索引）
+- **Recency boost**（时间衰减）
+- **Write dedup**（SHA-256）
+- **Context injection**（`<recalled-memories>` 块）
+
+```python
+from strategy_research.core.memory import PersistentMemory
+
+memory = PersistentMemory()
+memory.add("factor", "Momentum works in large caps", "feedback", "Momentum")
+results = memory.find_relevant("momentum")
+context = memory.format_context_for_prompt("momentum")
+```
+
+---
+
+## Session 管理（P2）
+
+- **SQLite + FTS5**（跨 workspace 搜索）
+- **触发器自动同步**（INSERT/UPDATE/DELETE）
+- **限流器**（可配置，默认 80,000 条/秒）
+- **JSONL 监控**（写入指标）
+
+```bash
+# 查看写入统计
+$ quantnodes-research session stats
+
+# 列出会话
+$ quantnodes-research session list
+```
+
+性能基准：
+- 1000 条插入：1.15s（868 条/秒）
+- 100,000 条插入：4.42s（22,625 条/秒）
+- 搜索：35,000~55,000 次/秒
 
 ---
 
@@ -250,20 +315,30 @@ factors:
 pip install -e ".[dev]"
 
 # 运行全部测试
-pytest                                    # 3221 passed
+pytest                                    # 3812 passed
 pytest tests/test_preflight.py -v         # 单跑 preflight 测试
 pytest tests/test_cli_init.py -v           # 单跑 init 测试
+pytest tests/test_workflow_e2e.py -v       # Workflow e2e 测试
+pytest tests/test_session.py -v            # Session 测试
 
 # 代码检查
 ruff check .
 ```
 
-### 测试覆盖（P0 新增 77 个）
+### 测试覆盖（3,812 个测试）
 
-- `tests/test_cli_init.py` — `_render_template` / `cmd_init` / `cmd_evaluate`
-- `tests/test_preflight.py` — 4 项 check + 总入口
-- `tests/test_ohlcv_save.py` — `save_ohlcv_data` / `generate_sample_ohlcv_data`
-- `tests/test_eastmoney_loader.py` — secid 映射 / loader 行为 / fallback chain
+| 模块 | 测试数 | 状态 |
+|---|---|---|
+| `test_workflow_*.py` | 88 | ✅ |
+| `test_hooks.py` | 23 | ✅ |
+| `test_memory_fts5.py` | 12 | ✅ |
+| `test_memory_enhance.py` | 11 | ✅ |
+| `test_session.py` | 34 | ✅ |
+| `test_session_triggers.py` | 6 | ✅ |
+| `test_session_rate_limiter.py` | 12 | ✅ |
+| `test_session_metrics.py` | 9 | ✅ |
+| `test_integration.py` | 9 | ✅ |
+| P0 + P1 测试 | 3,608 | ✅ |
 
 ---
 
