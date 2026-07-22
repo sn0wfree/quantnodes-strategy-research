@@ -613,7 +613,13 @@ def _summarize_each_agent(agent_outputs: dict[str, dict]) -> dict[str, str]:
     if anti_overfit:
         verdict = anti_overfit.get("verdict", "?")
         passed = anti_overfit.get("overfit_passed", False)
-        summaries["anti_overfit_analyst"] = f"{verdict} | overfit_passed={passed}"
+        weighted_score = anti_overfit.get("weighted_score")
+        if weighted_score is not None:
+            summaries["anti_overfit_analyst"] = (
+                f"{verdict} | score={weighted_score:.2f} | overfit_passed={passed}"
+            )
+        else:
+            summaries["anti_overfit_analyst"] = f"{verdict} | overfit_passed={passed}"
 
     # Backtest Diagnostics
     diagnostics = agent_outputs.get("backtest_diagnostics", {})

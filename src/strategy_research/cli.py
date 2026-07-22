@@ -1361,34 +1361,91 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "r_squared": 0.88
         })
     elif agent_name == "anti_overfit_analyst":
+        # P0: 基于真实 metrics 计算合理的过拟合检测
+        # 从 previous_outputs 提取 metrics (最后一个是 metrics dict)
+        metrics = {}
+        if previous_outputs:
+            last = previous_outputs[-1]
+            if isinstance(last, dict):
+                metrics = last
+
+        try:
+            calmar = float(metrics.get("calmar", 0.0)) if metrics else 0.0
+        except (ValueError, TypeError):
+            calmar = 0.0
+        try:
+            sharpe = float(metrics.get("sharpe", 0.0)) if metrics else 0.0
+        except (ValueError, TypeError):
+            sharpe = 0.0
+        try:
+            max_dd = float(metrics.get("max_dd", 0.0)) if metrics else 0.0
+        except (ValueError, TypeError):
+            max_dd = 0.0
+
+        # P2: 加权评分 (start_dependency 权重最高 = 0.20)
+        weights = {
+            "start_dependency": 0.20,
+            "parameter_perturbation": 0.20,
+            "rebalance_offset": 0.15,
+            "ablation": 0.15,
+            "bootstrap": 0.15,
+            "monte_carlo": 0.15,
+        }
+
+        # P2: pass 阈值 (默认 0.5, 可通过环境变量配置)
+        try:
+            pass_threshold = float(os.environ.get("ANTI_OVERFIT_THRESHOLD", "0.5"))
+        except ValueError:
+            pass_threshold = 0.5
+
+        # 基于 metrics 判断每种方法的 pass/fail
+        methods_passed = {
+            "start_dependency": calmar >= 0.3,                  # Calmar 稳定
+            "rebalance_offset": abs(max_dd) <= 0.5,             # 风险可控
+            "parameter_perturbation": calmar >= 0.4,             # 参数稳健
+            "ablation": calmar > 0.0,                            # 因子有贡献
+            "bootstrap": sharpe >= 0.5,                          # 统计显著
+            "monte_carlo": calmar >= 0.5 and sharpe >= 0.4,     # 优于随机
+        }
+
+        # 计算 weighted_score
+        weighted_score = sum(
+            weights[k] * (1 if v else 0)
+            for k, v in methods_passed.items()
+        )
+
+        # 模拟 "improving" 行为 (Round 4+): 所有方法通过
         if behavior == "improving" and round_num >= 4:
-            return json.dumps({
-                "verdict": "keep",
-                "overfit_passed": True,
-                "methods_passed": {
-                    "start_dependency": True,
-                    "rebalance_offset": True,
-                    "parameter_perturbation": True,
-                    "ablation": True,
-                    "bootstrap": True,
-                    "monte_carlo": True
-                },
-                "analysis": "所有抗过拟合方法通过",
-                "suggestions": ["继续优化"]
-            })
+            for k in methods_passed:
+                methods_passed[k] = True
+            weighted_score = 1.0
+            analysis = (
+                f"所有抗过拟合方法通过 "
+                f"(Calmar={calmar:.3f}, Sharpe={sharpe:.3f}, score={weighted_score:.2f})"
+            )
+        else:
+            if weighted_score >= pass_threshold:
+                analysis = (
+                    f"加权评分通过 "
+                    f"({weighted_score:.2f}, Calmar={calmar:.3f}, Sharpe={sharpe:.3f})"
+                )
+            else:
+                failed = [k for k, v in methods_passed.items() if not v]
+                analysis = (
+                    f"加权评分 {weighted_score:.2f} < {pass_threshold}, "
+                    f"失败: {', '.join(failed)}"
+                )
+
+        overfit_passed = weighted_score >= pass_threshold
+        verdict = "keep" if overfit_passed else "discard"
+
         return json.dumps({
-            "verdict": "discard",
-            "overfit_passed": False,
-            "methods_passed": {
-                "start_dependency": False,
-                "rebalance_offset": False,
-                "parameter_perturbation": False,
-                "ablation": False,
-                "bootstrap": False,
-                "monte_carlo": False
-            },
-            "analysis": "所有抗过拟合方法均失败",
-            "suggestions": ["重新设计因子", "增加数据量"]
+            "verdict": verdict,
+            "overfit_passed": overfit_passed,
+            "weighted_score": round(weighted_score, 3),
+            "methods_passed": methods_passed,
+            "analysis": analysis,
+            "suggestions": [] if overfit_passed else ["调整因子参数", "增加训练数据"],
         })
     elif agent_name == "backtest_diagnostics":
         return json.dumps({
