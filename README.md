@@ -445,25 +445,34 @@ $ quantnodes-research session list
 | **P1** | Agent 真跑（替换 stub 接通 LLM，6 个工具，沙箱，3 层压缩）| ✅ 完成 | PR #4-#6 + AgentLoop 改造 |
 | **P1.5** | Workflow 层（DAG 调度 + Controller + 4 种 Executor + Grounding）| ✅ 完成 | 88 测试 |
 | **P2** | Hook + Memory + Session（llmwikify 模式 + FTS5 + 触发器同步）| ✅ 完成 | 116 测试 |
-| **P3** | Goal + Hypothesis + Validation（MC + Bootstrap + WF）| ⏳ 待启动 | 计划中 |
+| **P3** | Goal + Hypothesis + Validation（MC + Bootstrap + WF）| ✅ 完成 | 283 新测试（162 Goal + 58 Hypothesis + 40 Validation + 23 Integration） |
+| **backtest-overhaul** | Phase 1+2+3（dataclass + 17-key metrics + market_detection + run_card + AST guard）| ⏳ 下一步 | 详见 [docs/backtest-overhaul/README.md](docs/backtest-overhaul/README.md) |
+| **P4-b** | Portfolio 多策略组合回测（combiner + correlation + VaR/CVaR）| ⏳ 计划中 | — |
+| **P4-d** | HTTP API server mode（FastAPI + 6 routers + Swagger）| ⏳ 计划中 | — |
+| **P4-c** | Web UI dashboard（FastAPI + Jinja + HTMX, 7 页面）| ⏳ 计划中 | — |
 
 ### 测试统计
 
-- **3,770+ 测试通过**
+- **4,053+ 测试通过**
 - **0 回归**
-- 测试覆盖：P0 + P1 + P1.5 + P2 全覆盖
+- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 全覆盖
+- CLI 子命令：13 → **27**（+7 goal + 6 hypothesis + 1 validate-run）
 
 ### 版本发布
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | **v0.2.0** | 2026-07-22 | 已发布到 PyPI（自动发布 workflow） |
+| **v0.3.0** | 2026-07-22 | 本地 marker，未推送 PyPI；包含 P3（Goal + Hypothesis + Validation）|
 
 ### 下一步计划
 
-1. **P3**: Goal + Hypothesis + Validation
-2. **合回主仓库**：核心功能稳定后
-3. **持续优化**：性能 + 用户体验
+1. **backtest-overhaul Phase 1+2+3**（1.5+1.5+2.5 hr）：为 `core/backtest.py` 补测试，引入 3 dataclass + 17-key metrics + 市场检测 + run_card + AST guard
+2. **P4-b Portfolio 多策略组合回测**（2-3 hr）：combiner（equal_weight/risk_parity/sharpe_weight）+ 相关性矩阵 + VaR/CVaR + CLI
+3. **P4-d HTTP API server**（2-3 hr）：FastAPI app + 6 routers（goal/hypothesis/validation/session/memory/run）+ `api serve` CLI + Swagger `/docs`
+4. **P4-c Web UI dashboard**（2-3 hr）：FastAPI + Jinja + HTMX，7 页面（dashboard/goals/hypotheses/runs/memory）+ `webui serve` CLI
+5. **合回主仓库** sn0wfree/quantnodes：v0.4.0 稳定后启动
+6. **持续优化**：性能 + 用户体验
 
 ---
 

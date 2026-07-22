@@ -669,39 +669,37 @@ $ pytest tests/test_hooks.py tests/test_session_memory.py tests/test_memory_fts5
 
 ## 6. 验收矩阵
 
-| 指标 | 当前 | P0 后 | P1 后 | P1.5 后 | P2 后 |
-|---|---|---|---|---|---|
-| `cmd_init` 成功率 | 0% | 100% | 100% | 100% | 100% |
-| baseline 指标 | 空 | 8 项真实 | 8 项真实 | 8 项真实 | 8 项真实 |
-| 数据源可达 loader | 1（占位）| ≥ 3 | ≥ 3 | ≥ 3 | ≥ 3 |
-| 启动健康检查 | 无 | 4 项 | 4 项 | 4 项 | 4 项 |
-| agent LLM 真跑 | 否（stub）| 否 | **是** | **是** | **是** |
-| 工具数 | 0 | 0 | 6 | 6 | 6 |
-| persistent memory | 无 | 无 | MEMORY.md + auto-recall | MEMORY.md + auto-recall | MEMORY.md + FTS5 + auto-recall |
-| git commit 自动化 | 无 | 无 | 每 run 自动 | 每 run 自动 | 每 run 自动 |
-| Workflow 层 | 无 | 无 | 无 | **DAG + input_from + 4 种执行** | **DAG + input_from + 4 种执行** |
-| Grounding 接口 | 无 | 无 | 无 | **预留接口** | **预留接口** |
-| AST sandbox | 无 | 无 | guard + 路径白名单 | guard + 路径白名单 | guard + 路径白名单 |
-| Hook 系统 | 无 | 无 | 无 | 无 | **UnifiedHook + AgentHook + 2 内置** |
-| Memory FTS5 | 无 | 无 | 无 | 无 | **全局 FTS5 索引** |
-| Session 管理 | 无 | 无 | 无 | 无 | **FTS5 搜索 + 自动归档** |
-| Memory 注入 | 无 | 无 | 无 | 无 | **每个 user message 注入** |
-| Goal 系统 | 无 | 无 | 无 | 无 | 无 |
-| Hypothesis 系统 | 无 | 无 | 无 | 无 | 无 |
-| Validation 工具 | 无 | 无 | 无 | 无 | 无 |
-| Goal Context 注入 | 无 | 无 | 无 | 无 | 无 |
-| 自动 Hypothesis 创建 | 无 | 无 | 无 | 无 | 无 |
-| CLI 子命令数 | 13 | 13 | 13 | 13 | 14 |
-| **P3 后** |
-| CLI 子命令数 | — | — | — | — | — |
-| Goal CLI | — | — | — | — | — |
-| Hypothesis CLI | — | — | — | — | — |
-| Validation CLI | — | — | — | — | — |
-| 仓库总行数 | ~4 000 | ~4 880 | ~6 655 | ~7 655 | ~8 500+ |
-| 测试数 | 3144 | 3233 | 3607 | 3681 | **3737+** |
-| e2e 测试 | 无 | 无 | 1 套 4 case | 2 套 9 case | 3 套 17 case |
+| 指标 | 当前 | P0 后 | P1 后 | P1.5 后 | P2 后 | **P3 后** |
+|---|---|---|---|---|---|---|
+| `cmd_init` 成功率 | 0% | 100% | 100% | 100% | 100% | **100%** |
+| baseline 指标 | 空 | 8 项真实 | 8 项真实 | 8 项真实 | 8 项真实 | **8 项真实** |
+| 数据源可达 loader | 1（占位）| ≥ 3 | ≥ 3 | ≥ 3 | ≥ 3 | **≥ 3** |
+| 启动健康检查 | 无 | 4 项 | 4 项 | 4 项 | 4 项 | **4 项** |
+| agent LLM 真跑 | 否（stub）| 否 | **是** | **是** | **是** | **是** |
+| 工具数 | 0 | 0 | 6 | 6 | 6 | **6** |
+| persistent memory | 无 | 无 | MEMORY.md + auto-recall | MEMORY.md + auto-recall | MEMORY.md + FTS5 + auto-recall | **MEMORY.md + FTS5 + auto-recall** |
+| git commit 自动化 | 无 | 无 | 每 run 自动 | 每 run 自动 | 每 run 自动 | **每 run 自动** |
+| Workflow 层 | 无 | 无 | 无 | **DAG + input_from + 4 种执行** | **DAG + input_from + 4 种执行** | **DAG + input_from + 4 种执行** |
+| Grounding 接口 | 无 | 无 | 无 | **预留接口** | **预留接口** | **预留接口** |
+| AST sandbox | 无 | 无 | guard + 路径白名单 | guard + 路径白名单 | guard + 路径白名单 | **guard + 路径白名单** |
+| Hook 系统 | 无 | 无 | 无 | 无 | **UnifiedHook + AgentHook + 2 内置** | **UnifiedHook + AgentHook + 2 内置** |
+| Memory FTS5 | 无 | 无 | 无 | 无 | **全局 FTS5 索引** | **全局 FTS5 索引** |
+| Session 管理 | 无 | 无 | 无 | 无 | **FTS5 搜索 + 自动归档** | **FTS5 搜索 + 自动归档** |
+| Memory 注入 | 无 | 无 | 无 | 无 | **每个 user message 注入** | **每个 user message 注入** |
+| Goal 系统 | 无 | 无 | 无 | 无 | 无 | **GoalStore + 4 RiskTier + SHA-256 校验** |
+| Hypothesis 系统 | 无 | 无 | 无 | 无 | 无 | **Registry + 5 statuses + token-overlap search** |
+| Validation 工具 | 无 | 无 | 无 | 无 | 无 | **MC + Bootstrap + WF + multi-market** |
+| Goal Context 注入 | 无 | 无 | 无 | 无 | 无 | **每个 user message 顶部注入** |
+| 自动 Hypothesis 创建 | 无 | 无 | 无 | 无 | 无 | **首次 (strategy, market) 幂等创建** |
+| CLI 子命令数 | 13 | 13 | 13 | 13 | 14 | **27（+14）** |
+| Goal CLI | — | — | — | — | — | **start/status/evidence/audit/complete/list/cancel** |
+| Hypothesis CLI | — | — | — | — | — | **create/list/show/update/search/link** |
+| Validation CLI | — | — | — | — | — | **validate-run** |
+| 仓库总行数 | ~4 000 | ~4 880 | ~6 655 | ~7 655 | ~8 500+ | **~11,500+** |
+| 测试数 | 3144 | 3233 | 3607 | 3681 | **3737+** | **4,053+（+283 净增）** |
+| e2e 测试 | 无 | 无 | 1 套 4 case | 2 套 9 case | 3 套 17 case | **6 套 35 case** |
 
-> **P3 完成后实际值（2026-07-22）**：CLI 27 子命令（+14）、测试数 4,053（+283 净增）、仓库总行数 ~11,500+、e2e 测试 6 套 35 case
+> **P3 完成状态（2026-07-22）**：CLI 27 子命令（+14）、测试数 4,053（+283 净增）、仓库总行数 ~11,500+、e2e 测试 6 套 35 case、0 回归
 
 ---
 
