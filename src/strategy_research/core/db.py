@@ -310,6 +310,67 @@ def get_price_data_info(workspace_path: Path, strategy_name: str) -> dict:
 
 
 # ============================================================
+# 单资产 OHLCV 保存 (修复 OHLCV 丢失 bug)
+# ============================================================
+
+def save_ohlcv_data(
+    workspace_path: Path,
+    strategy_name: str,
+    asset_code: str,
+    ohlcv_df: pd.DataFrame,
+) -> bool:
+    """保存单资产 OHLCV 数据到 DuckDB。
+
+    与 save_price_data 的区别：save_price_data 接受宽面板 (T, N) 仅含 close 列；
+    save_ohlcv_data 接受单资产的 OHLCV DataFrame (T, OHLCV)，完整保留 open/high/low/volume。
+
+    Args:
+        workspace_path: 工作区路径
+        strategy_name: 策略名称
+        asset_code: 资产代码
+        ohlcv_df: 单资产 OHLCV DataFrame，index=date，columns 包含 open/high/low/close/volume
+    """
+    conn = get_connection(workspace_path)
+    if conn is None:
+        return False
+
+    try:
+        df = ohlcv_df.reset_index()
+        # 首列视为日期列
+        date_col = df.columns[0]
+        if date_col != "date":
+            df = df.rename(columns={date_col: "date"})
+
+        # 补齐缺失列 (volume 默认 0，OHL 默认 None)
+        for col, default in [("open", None), ("high", None), ("low", None), ("volume", 0.0)]:
+            if col not in df.columns:
+                df[col] = default
+
+        df["strategy_name"] = strategy_name
+        df["asset_code"] = asset_code
+
+        # 保证 close 存在 (loader 至少会返回 close)
+        if "close" not in df.columns:
+            print(f"⚠️  {asset_code}: 缺少 close 列，跳过")
+            conn.close()
+            return False
+
+        conn.execute("""
+            INSERT OR REPLACE INTO price_data
+            (strategy_name, asset_code, date, open, high, low, close, volume)
+            SELECT strategy_name, asset_code, date, open, high, low, close, volume
+            FROM df
+        """)
+
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ 保存 OHLCV 失败 ({asset_code}): {e}")
+        conn.close()
+        return False
+
+
+# ============================================================
 # 因子数据操作
 # ============================================================
 

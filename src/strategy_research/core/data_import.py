@@ -19,6 +19,7 @@ import pandas as pd
 
 from .db import (
     save_price_data,
+    save_ohlcv_data,
     get_price_data_info,
     compute_data_fingerprint,
     update_data_fingerprint,
@@ -149,11 +150,8 @@ def _import_with_loader(
         if df is None or df.empty:
             continue
 
-        # 转为宽格式 (单资产)
-        prices = df[["close"]].rename(columns={"close": code})
-
-        # 保存
-        ok = save_price_data(workspace_path, strategy_name, prices)
+        # 保留完整 OHLCV (修复：之前 df[["close"]] 把 OHLCV 全丢)
+        ok = save_ohlcv_data(workspace_path, strategy_name, code, df)
         if ok:
             success_count += 1
             # 更新导入元数据
@@ -399,7 +397,11 @@ def generate_sample_data(
     n_days: int = 504,
     start_date: str = "2020-01-01",
 ) -> pd.DataFrame:
-    """生成示例价格数据。"""
+    """生成示例价格数据 (宽面板，仅 close 列)。
+
+    Returns:
+        pd.DataFrame: (T, N) 面板, index=date, columns=assets, 值为 close
+    """
     import numpy as np
 
     dates = pd.date_range(start_date, periods=n_days, freq="D")
@@ -410,3 +412,42 @@ def generate_sample_data(
     prices = np.exp(np.cumsum(returns, axis=0))
 
     return pd.DataFrame(prices, index=dates, columns=assets)
+
+
+def generate_sample_ohlcv_data(
+    n_assets: int = 10,
+    n_days: int = 504,
+    start_date: str = "2020-01-01",
+) -> dict[str, "pd.DataFrame"]:
+    """生成示例 OHLCV 数据 (dict[code → DataFrame])，模拟 loader.fetch() 返回格式。
+
+    用于测试 save_ohlcv_data 与 OHLCV 完整性检查。
+    """
+    import numpy as np
+
+    dates = pd.date_range(start_date, periods=n_days, freq="D")
+    assets = [f"asset_{i:03d}" for i in range(n_assets)]
+
+    np.random.seed(42)
+    returns = np.random.randn(n_days, n_assets) * 0.02
+    close = np.exp(np.cumsum(returns, axis=0))
+
+    intraday = np.abs(np.random.randn(n_days, n_assets)) * 0.005  # 0.5% 噪声
+    high = close * (1 + intraday)
+    low = close * (1 - intraday)
+    open_ = close * (1 + np.random.randn(n_days, n_assets) * 0.002)
+    volume = np.random.randint(100_000, 10_000_000, size=(n_days, n_assets)).astype(float)
+
+    result = {}
+    for i, asset in enumerate(assets):
+        df = pd.DataFrame({
+            "open": open_[:, i],
+            "high": high[:, i],
+            "low": low[:, i],
+            "close": close[:, i],
+            "volume": volume[:, i],
+        }, index=dates)
+        df.index.name = "date"
+        result[asset] = df
+
+    return result

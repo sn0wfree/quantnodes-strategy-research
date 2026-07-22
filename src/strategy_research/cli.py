@@ -128,28 +128,30 @@ def _init_git(path: Path) -> None:
 
 
 def _run_baseline_backtest(workspace_path: Path, strategy_name: str, strategy_dir: Path) -> None:
-    """运行 baseline 回测 (buy and hold HS300)。"""
-    import json
-    from .data_import import generate_sample_data, import_dataframe
-    from .backtest import run_backtest_script
+    """运行 baseline 回测 (默认 momentum_20_60 因子)。"""
+    from .core.data_import import generate_sample_data, import_dataframe
+    from .core.backtest import run_backtest_script
 
-    # 生成 HS300 模拟数据
-    prices = generate_sample_data(n_assets=1, n_days=600, start_date="2020-01-01")
-    prices.columns = ["hs300"]
+    # 生成模拟数据 (10 资产 × 504 天)
+    prices = generate_sample_data(n_assets=10, n_days=504, start_date="2022-01-01")
 
-    # 灌入 DuckDB
+    # 灌入 DuckDB (close 面板)
     import_dataframe(workspace_path, strategy_name, prices)
 
-    # 运行回测
+    # 运行 baseline 回测
     result = run_backtest_script(
         workspace_path=workspace_path,
         strategy_name=strategy_name,
         action="baseline",
-        description="HS300 buy-and-hold baseline",
+        description="Default momentum_20_60 baseline",
     )
 
     if result.get("success"):
-        print(f"  baseline: Calmar={result['metrics'].get('calmar', 0):.2f}")
+        m = result["metrics"]
+        print(f"  baseline: Calmar={m.get('calmar', 0):.3f} "
+              f"Sharpe={m.get('sharpe', 0):.3f} "
+              f"MaxDD={m.get('max_dd', 0):.3f} "
+              f"AnnRet={m.get('ann_return', 0):.3f}")
     else:
         print(f"  baseline 回测失败: {result.get('error', 'unknown')}")
 
@@ -466,6 +468,83 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     return 0
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """执行 evaluate 命令 — 重跑当前 strategy.py 并写新 run_XXXX。
+
+    与 run 的区别: evaluate 不需要 action / description,
+    专为手动复跑 baseline / 验证修改后的 strategy.py 设计。
+    """
+    path = Path(args.path).resolve()
+
+    if not (path / "config.yaml").exists():
+        print(f"❌ 不是有效的工作区: {path}")
+        return 1
+
+    try:
+        import yaml
+    except ImportError:
+        print("❌ 需要安装 pyyaml: pip install pyyaml")
+        return 1
+
+    config_path = path / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    strategy_name = args.strategy
+    if not strategy_name:
+        strategy_name = config.get("workspace", {}).get("default_strategy")
+        if not strategy_name:
+            print("❌ 未指定策略名称，请使用 --strategy <name>")
+            return 1
+
+    from .core.backtest import run_backtest_script
+
+    print(f"🔄 复跑策略: {strategy_name}")
+    result = run_backtest_script(
+        workspace_path=path,
+        strategy_name=strategy_name,
+        action="evaluate",
+        description=args.description or "Manual re-evaluation via `evaluate`",
+        timeout=args.timeout,
+    )
+
+    if result["success"]:
+        m = result["metrics"]
+        print(f"\n✅ 复跑成功: {result['run']}")
+        print(f"   Calmar   = {m.get('calmar', 0):.4f}")
+        print(f"   Sharpe   = {m.get('sharpe', 0):.4f}")
+        print(f"   MaxDD    = {m.get('max_dd', 0):.4f}")
+        print(f"   AnnRet   = {m.get('ann_return', 0):.4f}")
+        print(f"   AnnVol   = {m.get('ann_vol', 0):.4f}")
+        print(f"   Sortino  = {m.get('sortino', 0):.4f}")
+        print(f"   Turnover = {m.get('turnover', 0):.4f}")
+        print(f"\n📁 详见: {path / 'strategies' / strategy_name / 'runs' / result['run']}")
+        return 0
+    else:
+        print(f"\n❌ 复跑失败: {result.get('error', 'unknown')[:300]}")
+        return 1
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    """执行 preflight 命令 — 启动前环境检查。
+
+    检查项：
+    - LLM Provider key (critical)
+    - DuckDB 可写
+    - 至少一个数据源可用
+    - OHLCV 数据完整性
+
+    Critical 失败时返回 1，否则 0。
+    """
+    from .core.preflight import run_preflight
+
+    workspace = Path(args.path).resolve() if args.path else Path.cwd()
+    results = run_preflight(workspace, verbose=True)
+
+    critical_failed = [r for r in results if r.critical and r.status != "ready"]
+    return 1 if critical_failed else 0
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -1293,6 +1372,17 @@ def main() -> int:
     run_parser.add_argument("--description", "-d", help="描述")
     run_parser.add_argument("--timeout", "-t", type=int, default=300, help="超时时间 (秒)")
 
+    # evaluate
+    evaluate_parser = subparsers.add_parser("evaluate", help="复跑当前 strategy.py")
+    evaluate_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+    evaluate_parser.add_argument("--strategy", "-s", help="策略名称")
+    evaluate_parser.add_argument("--description", "-d", default="", help="描述")
+    evaluate_parser.add_argument("--timeout", "-t", type=int, default=300, help="超时时间 (秒)")
+
+    # preflight
+    preflight_parser = subparsers.add_parser("preflight", help="启动前环境检查")
+    preflight_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
+
     # validate
     validate_parser = subparsers.add_parser("validate", help="验证因子")
     validate_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
@@ -1346,6 +1436,10 @@ def main() -> int:
         return cmd_reproduce(args)
     elif args.command == "run":
         return cmd_run(args)
+    elif args.command == "evaluate":
+        return cmd_evaluate(args)
+    elif args.command == "preflight":
+        return cmd_preflight(args)
     elif args.command == "validate":
         return cmd_validate(args)
     elif args.command == "list":

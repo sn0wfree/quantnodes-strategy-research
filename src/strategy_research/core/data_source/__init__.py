@@ -10,6 +10,7 @@ from .registry import (
     list_loaders,
     NoAvailableSourceError,
     FALLBACK_CHAINS,
+    LOADER_REGISTRY,
 )
 from .base import DataLoader, validate_date_range, validate_ohlc, normalize_ohlcv
 from .utils import (
@@ -35,6 +36,7 @@ __all__ = [
     "list_loaders",
     "NoAvailableSourceError",
     "FALLBACK_CHAINS",
+    "LOADER_REGISTRY",
     # 基础
     "DataLoader",
     "validate_date_range",

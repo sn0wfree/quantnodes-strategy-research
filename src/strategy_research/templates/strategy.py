@@ -7,17 +7,22 @@ Agent 可以修改: PARAMS, FACTOR_EXPRS, FACTOR_WEIGHT_METHOD
 # 策略参数 (Agent 可改)
 # ============================================================
 PARAMS = {
-    "top_n": 1,                    # 只持有 1 个资产 (HS300 指数)
-    "max_weight": 1.0,             # 全仓
-    "rebalance_freq": 999999,      # 不调仓 (buy and hold)
+    "top_n": 10,                   # 持有 top-N 资产
+    "max_weight": 0.25,            # 单资产最大权重 25%
+    "rebalance_freq": 20,          # 每月调仓 (≈20 交易日)
 }
 
 # ============================================================
 # 因子表达式 (Agent 可改)
 # ============================================================
 FACTOR_EXPRS = [
-    # 无因子 — 纯 buy and hold HS300
-    # Agent 从这里开始迭代
+    # 默认: 中长期动量因子 (ts_mean 20日 / ts_mean 60日 - 1)
+    # Agent 可在此基础上迭代: 增加 / 替换 / 删除因子
+    {
+        "factor_name": "momentum_20_60",
+        "factor_code": "ts_mean(close, 20) / ts_mean(close, 60) - 1",
+        "weight": 1.0,
+    },
 ]
 
 # ============================================================

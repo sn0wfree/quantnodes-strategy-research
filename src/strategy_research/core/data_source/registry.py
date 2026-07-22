@@ -50,6 +50,7 @@ _loader_modules = [
     "strategy_research.core.data_source.ifind_loader",
     "strategy_research.core.data_source.fred_loader",
     "strategy_research.core.data_source.yfinance_loader",
+    "strategy_research.core.data_source.eastmoney_loader",
     "strategy_research.core.data_source.local_loader",
 ]
 
