@@ -643,3 +643,86 @@ quantnodes-research autoresearch <path> \
 3. **容错解析**: 添加 parse_agent_output() 函数
 4. **速度控制**: 添加 cooldown 配置 (30s ± 10s, MIN=1s)
 5. **重试机制**: 添加 retry_agent_spawn() 函数 (最多 3 次)
+
+## 12. Lazy Detection (懒惰检测)
+
+### 12.1 目的
+
+检测 Agent 是否在 "偷懒" — 返回相同或过于简单的输出,没有真正分析当前状态。
+
+**问题示例**:
+- Researcher: 每轮返回相同的 hypothesis ("波动率因子可能有效")
+- Factor Analyst: 每轮返回 0 个候选因子
+- Anti-overfit Analyst: 每轮返回 discard,没有详细分析
+
+### 12.2 检测频率
+
+- **检测间隔**: 每 10 轮检测一次 (而不是每轮)
+- **检测时机**: 在 Step 1 读状态时,如果 `round_num % 10 == 0` 则执行检测
+- **影响范围**: 只读取历史记录并生成报告,不干预正常流程
+
+### 12.3 检测逻辑
+
+**函数**: `detect_lazy_behavior(agent_name, current_output, history, threshold=10)`
+
+| Agent | 检测标准 | lazy_score |
+|-------|---------|------------|
+| Researcher | hypothesis 重复 | +0.5 |
+| Researcher | action 重复 | +0.3 |
+| Factor Analyst | candidates 连续为空 (≥3 轮) | +0.3 |
+| Factor Analyst | rejected 因子相同 | +0.2 |
+| Strategist | changes 连续为空 (≥3 轮) | +0.4 |
+| Strategist | action 连续相同 | +0.3 |
+| Risk Controller | risk_rating 连续相同 | +0.2 |
+| Anti-overfit Analyst | verdict 连续 discard (≥3 轮) | +0.4 |
+| Anti-overfit Analyst | overfit_passed 连续 false | +0.3 |
+
+**lazy_score 阈值**:
+- < 0.3: 正常
+- 0.3 - 0.7: 轻度懒惰
+- > 0.7: 严重懒惰
+
+### 12.4 输出报告
+
+**函数**: `save_laziness_report(run_dir, round_num, lazy_results, overall_lazy_score)`
+
+**保存位置**: `runs/run_XXXX/laziness_report.json`
+
+**输出格式**:
+```json
+{
+  "round": 10,
+  "timestamp": "2026-07-22T08:44:12",
+  "overall_lazy_score": 0.6,
+  "agents": [
+    {
+      "agent": "researcher",
+      "lazy_score": 0.5,
+      "issues": ["hypothesis 与上轮相同"]
+    },
+    {
+      "agent": "factor_analyst",
+      "lazy_score": 0.3,
+      "issues": ["连续 3 轮无候选因子"]
+    }
+  ],
+  "summary": "Researcher 和 Factor Analyst 存在轻度懒惰行为"
+}
+```
+
+### 12.5 CLI 集成
+
+```bash
+# 运行自动化研究循环 (默认每 10 轮检测)
+quantnodes-research autoresearch <path> \
+  --strategy <name> \
+  --lazy-detection-interval 10  # 懒惰检测间隔 (轮数)
+```
+
+### 12.6 实现位置
+
+| 文件 | 修改内容 |
+|------|---------|
+| `autoresearch.py` | 添加 `should_run_lazy_detection()`, `detect_lazy_behavior()`, `save_laziness_report()`, `read_agent_history()` |
+| `cli.py` | 在 Step 1 之后添加检测逻辑 (条件: `round_num % 10 == 0`) |
+| `design doc` | 本章节 |
