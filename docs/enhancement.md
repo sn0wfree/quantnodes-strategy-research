@@ -363,15 +363,33 @@ README.md                               M  +30
 
 - 启动日期：2026-07-22
 - 提交人：ll
-- commits：（待提交）
+- commits：`e5ab5ea` feat: PR3 补 P0 范围 + 文档示例 (与并行 agent 协作后状态)
 - 内容：
   - **G11** 修 run_card 白名单：SCHEMA_VERSION 0.1 → 0.2，BACKTEST_SUMMARY_KEYS 增加 run/strategy/action
   - **G8** FactorStrategy 支持 alpha_id + alpha_ids（Alpha Zoo 单/组合因子）
   - **G10** cmd_init 加 `--no-baseline` 选项
   - **G12** cmd_init 写入完整 config.yaml（data/rebalance/cost/risk 节）
   - **G13** FactorStrategy 修 nlargest 在 wide factor_values 时的 crash
-- 测试：新增 12 个 + 修复 2 个回归 → 3221 passed（无回归）
+- 测试：新增 12 个 + 修复 2 个回归 → 3233 passed（无回归）
 - 备注：更新 README.md + 新增 examples/demo_workflow.py
+
+### PR #4（P1 - 复制 6 个 agent 基础模块）
+
+- 启动日期：2026-07-22
+- 提交人：ll
+- commits：
+  - `0defd47` feat(agent): PR4 commit 1 — 复制 6 个 agent 基础模块
+- 内容：从 vibe-trading-ai 0.1.11 (HKUDS, MIT) 复制 6 个模块到 `core/agent/` 和 `core/memory/`
+  - **tools.py** (94 行): BaseTool + ToolRegistry
+  - **frontmatter.py** (40 行): YAML frontmatter 解析
+  - **progress.py** (184 行): ProgressEvent + HeartbeatTimer
+  - **trace.py** (284 行): TraceWriter（env var 重命名 VIBE_TRADING_ → STRATEGY_RESEARCH_）
+  - **redaction.py** (209 行): redact_payload + is_sensitive_arg
+  - **persistent.py** (368 行): PersistentMemory（路径改 ~/.quantnodes-research/memory/）
+- 适配原则：**不修改文件内容（除上述必要适配），不加任何 header 注释**
+- 归属文档：`docs/vibe-trading-credits.md`（新增，~80 行）
+- 测试：3233 passed（无回归）
+- 备注：PR4 拆为 commit 1（复制）+ commit 2（credits + verification）
 
 ---
 
