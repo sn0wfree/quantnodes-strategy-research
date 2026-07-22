@@ -1720,6 +1720,10 @@ def main() -> int:
     from .core.hypothesis.cli import add_hypothesis_subparsers
     add_hypothesis_subparsers(subparsers)
 
+    # validation (P3-c)
+    from .core.validation.cli import add_validate_subparsers
+    add_validate_subparsers(subparsers)
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1791,6 +1795,9 @@ def main() -> int:
             "search": cmd_hypothesis_search,
             "link": cmd_hypothesis_link,
         }.get(args.hypothesis_command, lambda a: (hypothesis_parser.print_help(), 0)[1])(args)
+    elif args.command == "validate-run":
+        from .core.validation.cli import cmd_validate_run
+        return cmd_validate_run(args)
     else:
         parser.print_help()
         return 0
