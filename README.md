@@ -456,12 +456,13 @@ $ quantnodes-research session list
 | **P4-b** | Portfolio 多策略组合回测（combiner + correlation + VaR/CVaR）| ✅ 完成 | 27 测试 |
 | **P4-d** | HTTP API server mode（FastAPI + 6 routers + Swagger）| ✅ 完成 | 15 测试 |
 | **P4-c** | Web UI dashboard（FastAPI + Jinja + HTMX, 7 页面）| ✅ 完成 | 9 测试 |
+| **Backtest Engine** | bar-by-bar 执行引擎 + 9 市场引擎 + AST guard + artifacts | ✅ 完成 | 104 测试 |
 
 ### 测试统计
 
-- **4,219+ 测试通过**
+- **4,311+ 测试通过**
 - **0 回归**
-- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 + backtest-overhaul + P4 全覆盖
+- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 + backtest-overhaul + P4 + Backtest Engine 全覆盖
 - CLI 子命令：13 → **32**（+7 goal + 6 hypothesis + 1 validate-run + 4 portfolio + 1 api + 1 webui）
 
 ### 版本发布
