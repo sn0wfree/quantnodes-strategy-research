@@ -98,11 +98,15 @@ class ContextBuilder:
         registry: ToolRegistry,
         memory: PersistentMemory | None = None,
         workspace: Path | None = None,
+        system_prompt: str | None = None,
+        user_message_prefix: str | None = None,
     ):
         self.config = config
         self.registry = registry
         self.memory = memory
         self.workspace = workspace
+        self._custom_system_prompt = system_prompt
+        self._user_message_prefix = user_message_prefix
         # Snapshot memory ONCE at construction (frozen).
         self._memory_snapshot = memory.snapshot if memory else ""
         self._system_prompt_cache: str | None = None
@@ -114,15 +118,23 @@ class ContextBuilder:
         if self._system_prompt_cache is not None:
             return self._system_prompt_cache
 
-        tool_list = self._format_tool_list()
-        workspace_str = str(self.workspace) if self.workspace else "(unset)"
+        if self._custom_system_prompt:
+            prompt = self._custom_system_prompt
+            prompt = prompt.replace("{tool_list}", self._format_tool_list())
+            prompt = prompt.replace(
+                "{workspace}",
+                str(self.workspace) if self.workspace else "(unset)",
+            )
+        else:
+            tool_list = self._format_tool_list()
+            workspace_str = str(self.workspace) if self.workspace else "(unset)"
 
-        prompt = self.SYSTEM_PROMPT_HEADER.format(
-            workspace=workspace_str,
-            tool_list=tool_list,
-            memory_snapshot=self._format_memory_snapshot(),
-            user_section="",
-        )
+            prompt = self.SYSTEM_PROMPT_HEADER.format(
+                workspace=workspace_str,
+                tool_list=tool_list,
+                memory_snapshot=self._format_memory_snapshot(),
+                user_section="",
+            )
         self._system_prompt_cache = prompt
         return prompt
 
@@ -138,7 +150,10 @@ class ContextBuilder:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.build_system_prompt()},
         ]
-        user_msg = self._build_user_message(task)
+        full_task = task
+        if self._user_message_prefix:
+            full_task = self._user_message_prefix + "\n\n" + task
+        user_msg = self._build_user_message(full_task)
         messages.append(user_msg)
         return messages
 

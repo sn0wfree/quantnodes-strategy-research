@@ -304,3 +304,53 @@ class TestIntegration:
         ]
         n = estimate_tokens(msgs)
         assert n > 30  # All contributions counted
+
+
+# ── Custom system prompt ─────────────────────────────────────────────
+
+
+class TestCustomSystemPrompt:
+    @pytest.fixture
+    def workspace(self, tmp_path: Path) -> Path:
+        (tmp_path / "strategies").mkdir()
+        return tmp_path
+
+    @pytest.fixture
+    def registry(self) -> ToolRegistry:
+        return build_default_registry()
+
+    def test_custom_prompt_used(self, registry, workspace):
+        """当传入 system_prompt 时，使用自定义 prompt"""
+        custom = "你是数据质量检查员。\n\n可用工具:\n{tool_list}"
+        b = ContextBuilder(LLMConfig(), registry, workspace=workspace,
+                          system_prompt=custom)
+        sp = b.build_system_prompt()
+        assert "数据质量检查员" in sp
+        assert "read_file" in sp  # {tool_list} 被替换
+
+    def test_custom_prompt_with_workspace_placeholder(self, registry, workspace):
+        """自定义 prompt 中的 {workspace} 被替换"""
+        custom = "工作区: {workspace}"
+        b = ContextBuilder(LLMConfig(), registry, workspace=workspace,
+                          system_prompt=custom)
+        sp = b.build_system_prompt()
+        assert str(workspace) in sp
+
+    def test_user_message_prefix(self, registry, workspace):
+        """user_message_prefix 被拼在 task 前面"""
+        prefix = "## 当前状态\ncalmar=0.42"
+        b = ContextBuilder(LLMConfig(), registry, workspace=workspace,
+                          user_message_prefix=prefix)
+        msgs = b.build_initial_messages("improve strategy")
+        content = msgs[1]["content"]
+        assert "calmar=0.42" in content
+        assert "improve strategy" in content
+
+    def test_custom_prompt_caches(self, registry, workspace):
+        """自定义 prompt 也缓存"""
+        custom = "你是分析师。{tool_list}"
+        b = ContextBuilder(LLMConfig(), registry, workspace=workspace,
+                          system_prompt=custom)
+        sp1 = b.build_system_prompt()
+        sp2 = b.build_system_prompt()
+        assert sp1 is sp2

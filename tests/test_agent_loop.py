@@ -428,3 +428,126 @@ class TestIntegration:
         r = loop.run("loopy")
         assert r.finished_reason == "no_progress"
         assert r.iterations == 3  # stopped at window=3
+
+
+# ── Allowed tools filtering ──────────────────────────────────────────
+
+
+class TestAllowedTools:
+    def test_allowed_tools_filtering(self, workspace):
+        """allowed_tools 白名单只保留指定工具"""
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            allowed_tools=["read_file", "list_history"],
+        )
+        assert loop.registry.get("read_file") is not None
+        assert loop.registry.get("list_history") is not None
+        assert loop.registry.get("write_file") is None
+        assert loop.registry.get("run_backtest") is None
+
+    def test_allowed_tools_none_means_all(self, workspace):
+        """allowed_tools=None 时全部工具保留"""
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            allowed_tools=None,
+        )
+        assert loop.registry.get("read_file") is not None
+        assert loop.registry.get("write_file") is not None
+        assert loop.registry.get("run_backtest") is not None
+
+
+# ── Readonly mode ────────────────────────────────────────────────────
+
+
+class TestReadonly:
+    def test_readonly_filters_write_file(self, workspace):
+        """readonly=True 时 write_file 被过滤"""
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            readonly=True,
+        )
+        assert loop.registry.get("write_file") is None
+
+    def test_readonly_preserves_read_tools(self, workspace):
+        """readonly=True 时所有只读工具保留"""
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            readonly=True,
+        )
+        assert loop.registry.get("read_file") is not None
+        assert loop.registry.get("list_history") is not None
+        assert loop.registry.get("git_diff") is not None
+        assert loop.registry.get("compute_factor") is not None
+        assert loop.registry.get("run_backtest") is not None
+
+    def test_readonly_false_keeps_all(self, workspace):
+        """readonly=False 时全部工具保留"""
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            readonly=False,
+        )
+        assert loop.registry.get("write_file") is not None
+
+
+# ── Run with context ─────────────────────────────────────────────────
+
+
+class TestRunWithContext:
+    def test_context_prepended_to_task(self, workspace):
+        """run(context=...) 把 context 拼在 task 前面"""
+        mock = MockLLM([text_resp("done")])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+        )
+        loop.client.chat = mock.chat
+        r = loop.run("improve", context="## 当前状态\ncalmar=0.42")
+        user_msg = r.messages[1]["content"]
+        assert "calmar=0.42" in user_msg
+        assert "improve" in user_msg
+
+    def test_run_without_context_unchanged(self, workspace):
+        """不传 context 时行为不变"""
+        mock = MockLLM([text_resp("done")])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+        )
+        loop.client.chat = mock.chat
+        r = loop.run("hello")
+        assert r.answer == "done"
+        assert r.finished_reason == "stop"
+
+
+# ── Custom system prompt ─────────────────────────────────────────────
+
+
+class TestCustomSystemPrompt:
+    def test_custom_system_prompt_used(self, workspace):
+        """传入 system_prompt 时使用自定义 prompt"""
+        mock = MockLLM([text_resp("done")])
+        custom = "你是风险控制员。{tool_list}"
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            system_prompt=custom,
+        )
+        loop.client.chat = mock.chat
+        r = loop.run("check risk")
+        # system message 应该包含自定义 prompt
+        sys_msg = r.messages[0]["content"]
+        assert "风险控制员" in sys_msg
+        assert "read_file" in sys_msg  # {tool_list} 被替换

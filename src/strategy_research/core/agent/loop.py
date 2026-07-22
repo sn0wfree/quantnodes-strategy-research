@@ -108,9 +108,11 @@ class AgentLoop:
         heartbeat_interval: float = 15.0,
         trace_dir: Path | None = None,
         auto_git_commit: bool = False,
+        system_prompt: str | None = None,
+        allowed_tools: list[str] | None = None,
+        readonly: bool = False,
     ):
         self.config = config
-        self.registry = registry
         self.memory = memory
         self.workspace = workspace
         self.max_iterations = max_iterations
@@ -118,9 +120,28 @@ class AgentLoop:
         self.threshold_tokens = threshold_tokens
         self.heartbeat_interval = heartbeat_interval
         self.auto_git_commit = auto_git_commit
+
+        # Tool filtering: allowed_tools > readonly > all
+        if allowed_tools is not None:
+            filtered = ToolRegistry()
+            for name in allowed_tools:
+                tool = registry.get(name)
+                if tool is not None:
+                    filtered.register(tool)
+            self.registry = filtered
+        elif readonly:
+            filtered = ToolRegistry()
+            for name, tool in registry._tools.items():
+                if getattr(tool, "is_readonly", True):
+                    filtered.register(tool)
+            self.registry = filtered
+        else:
+            self.registry = registry
+
         self.context_builder = ContextBuilder(
-            config=config, registry=registry,
+            config=config, registry=self.registry,
             memory=memory, workspace=workspace,
+            system_prompt=system_prompt,
         )
         self.client = OpenAICompatClient(config)
         # Track tool_calls per iteration for no_progress detection
@@ -132,17 +153,22 @@ class AgentLoop:
 
     # ── Public API ───────────────────────────────
 
-    def run(self, task: str) -> LoopResult:
+    def run(self, task: str, *, context: str | None = None) -> LoopResult:
         """Run the loop until done.
 
         Args:
             task: User task description.
+            context: Optional context to prepend to task (e.g., current_state).
 
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
+        full_task = task
+        if context:
+            full_task = context + "\n\n" + task
+
         result = LoopResult()
-        messages = self.context_builder.build_initial_messages(task)
+        messages = self.context_builder.build_initial_messages(full_task)
         result.messages = list(messages)
 
         # Trace: loop start
@@ -239,7 +265,7 @@ class AgentLoop:
         })
 
         # Git commit after run
-        self._git_commit(task, result)
+        self._git_commit(full_task, result)
 
         if self._trace_writer is not None:
             result.trace_path = str(self._trace_writer.path)

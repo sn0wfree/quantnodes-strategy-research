@@ -151,6 +151,7 @@ class WriteFileTool(BaseTool):
         "required": ["workspace", "path", "content"],
     }
     repeatable = True
+    is_readonly = False
 
     def execute(self, **kwargs: Any) -> str:
         try:
