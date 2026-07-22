@@ -391,6 +391,64 @@ README.md                               M  +30
 - 测试：3233 passed（无回归）
 - 备注：PR4 拆为 commit 1（复制）+ commit 2（credits + verification）
 
+### PR #5（P1 - LLM 客户端 + 工具 + 沙箱 + CLI flags）
+
+- 启动日期：2026-07-22
+- 提交人：ll
+- commits：
+  - `af2995f` PR5-c1: LLMConfig + 4 层合并 + .env + profile 切换
+  - `6c9ee5d` PR5-c2: OpenAI 兼容客户端 + parser + errors
+  - `072666a` PR5-c3: sandbox AST guard + 路径白名单
+  - `448f549` PR5-c4: 6 BaseTool 工具 + registry
+  - `e1ac378` PR5-c5: --llm-* flags + deps(httpx,dotenv) + 测试
+- 内容（5 子 commits，+4436 行）：
+
+  **PR5-c1 LLMConfig** — 17 字段 immutable dataclass + 4 层合并 (CLI > env > yaml > 默认)
+  - 文档：`docs/llm-config-template.yaml`（100 行，7 profile 示例）
+  - 支持 4 provider 默认: openai/deepseek/kimi/qwen
+  - api_key 永远从 env 读 (OPENAI_API_KEY)，不进 yaml
+  - 隐式 profile 不存在 / yaml 缺失 → 静默回退到代码默认值
+  - python-dotenv 自动加载（best-effort，可选依赖）
+
+  **PR5-c2 OpenAI 客户端** — sync/async/stream + 指数退避重试 + 4 段错误映射
+  - 401/403 → LLMAuthError, 429 → LLMRateLimitError, 5xx → LLMServerError
+  - timeout → LLMTimeoutError, malformed → LLMMalformedResponseError
+  - 缺 api_key → LLMConfigError（启动期早抛）
+  - Parser: 3 段兜底 JSON (standard / ```json``` / strip non-JSON)
+  - SSE: data: 行解析，跳过空行/[DONE]/malformed
+  - 用量统计 + finish_reason 透传
+
+  **PR5-c3 Sandbox** — AST guard + PathWhitelist 两层防护
+  - AST 拦截 exec/eval/compile/__import__/breakpoint
+  - AST 拦截 23 个危险模块 (os/subprocess/shutil/socket/requests/...)
+  - AST 拦截 dunder 属性访问（除白名单）
+  - 允许 pandas/numpy/scipy/typing/常见策略代码
+  - PathWhitelist: 默认 write_roots=strategies/templates/memory/logs
+  - 默认 read_roots: + data/docs/. (workspace 根文件)
+  - 拒绝: 绝对路径 / ../ / UNC / ~ / 空 / 非字符串
+
+  **PR5-c4 6 个 BaseTool** — kwargs 注入 workspace，无状态
+  - ReadFileTool (read_file): 读 + limit/offset + UTF-8 校验
+  - WriteFileTool (write_file): 写 + AST guard + 自动创建父目录
+  - RunBacktestTool (run_backtest): 包装 core.backtest.run_backtest_from_yaml
+  - ComputeFactorTool (compute_factor): 单 asset 单列 wide 格式
+  - GitDiffTool (git_diff): staged / ref / pathspec + flag injection 防护
+  - ListHistoryTool (list_history): results.tsv + 排序 + limit
+  - build_default_registry() 注册全部 6 个
+  - 错误统一 JSON envelope: {status: 'error', error: '...'}
+
+  **PR5-c5 CLI flags** — 12 个 --llm-* flag + pyproject deps
+  - parent parser: --llm-profile / --llm-model / --llm-base-url / --llm-temperature
+                   / --llm-max-tokens / --llm-top-p / --llm-timeout
+                   / --llm-max-retries / --llm-seed / --llm-stream / --llm-no-stream
+  - 顶层 --llm-list-profiles 调试入口
+  - 挂到 run / evaluate / autoresearch 3 个子命令
+  - pyproject.toml: httpx>=0.27 (强制), python-dotenv (可选)
+
+- 边界：**不动 _spawn_agent / core/autoresearch.py**（PR7 才替换）
+- 测试：3252 → 3526 passed（+274 无回归）
+- 备注：5 commits 拆分，c1 准备配置 / c2 准备客户端 / c3 准备安全 / c4 准备工具 / c5 暴露 CLI
+
 ---
 
 ## 附录：借鉴模块来源对照表
