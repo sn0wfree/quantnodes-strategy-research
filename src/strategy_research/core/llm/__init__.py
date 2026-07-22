@@ -2,7 +2,12 @@
 
 Public API:
     LLMConfig           - immutable config dataclass with 4-layer merge
-    OpenAICompatClient  - OpenAI/DeepSeek/Kimi/Qwen unified client (PR5-c2)
+    OpenAICompatClient  - OpenAI/DeepSeek/Kimi/Qwen unified client
+    LLMResponse         - parsed non-streaming response
+    StreamChunk         - one streaming chunk
+    ToolCall            - one tool invocation from LLM
+    Errors              - LLMAuthError / LLMRateLimitError / LLMTimeoutError
+                          / LLMServerError / LLMMalformedResponseError / LLMConfigError
 
 Layered configuration (higher overrides lower):
     1. Code defaults        (LLMConfig field defaults)
@@ -13,15 +18,40 @@ Layered configuration (higher overrides lower):
 
 Typical usage:
 
-    from strategy_research.core.llm import LLMConfig
+    from strategy_research.core.llm import LLMConfig, OpenAICompatClient
 
-    cfg = LLMConfig.load()
-    # override temperature at runtime
-    cfg2 = cfg.with_config(temperature=0.3)
+    cfg = LLMConfig.load(profile="deepseek")
+    client = OpenAICompatClient(cfg)
+    resp = client.chat([{"role": "user", "content": "hi"}])
+    print(resp.content)
 """
 
 from __future__ import annotations
 
 from .config import LLMConfig
+from .errors import (
+    LLMAuthError,
+    LLMConfigError,
+    LLMError,
+    LLMMalformedResponseError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+)
+from .openai_client import OpenAICompatClient
+from .parser import LLMResponse, StreamChunk, ToolCall
 
-__all__ = ["LLMConfig"]
+__all__ = [
+    "LLMConfig",
+    "OpenAICompatClient",
+    "LLMResponse",
+    "StreamChunk",
+    "ToolCall",
+    "LLMError",
+    "LLMAuthError",
+    "LLMConfigError",
+    "LLMMalformedResponseError",
+    "LLMRateLimitError",
+    "LLMServerError",
+    "LLMTimeoutError",
+]
