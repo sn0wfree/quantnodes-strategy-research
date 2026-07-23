@@ -17,6 +17,7 @@ from .registry import (
     HypothesisRegistry,
     default_hypotheses_path,
 )
+from .store import HypothesisStore, default_db_path
 from .validator import DEFAULT_CRITERIA, ValidationResult, validate_hypothesis
 
 __all__ = [
@@ -26,7 +27,9 @@ __all__ = [
     "Hypothesis",
     "HypothesisAutoCreator",
     "HypothesisRegistry",
+    "HypothesisStore",
     "ValidationResult",
+    "default_db_path",
     "default_hypotheses_path",
     "validate_hypothesis",
 ]

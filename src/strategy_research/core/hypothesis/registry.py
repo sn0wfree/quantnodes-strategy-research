@@ -172,17 +172,31 @@ class Hypothesis:
 
 
 class HypothesisRegistry:
-    """File-backed registry for research hypotheses."""
+    """File-backed registry for research hypotheses.
 
-    def __init__(self, path: Path | None = None) -> None:
+    P3-E: Optionally backed by SQLite (via HypothesisStore). If ``db_path``
+    is provided or ``HYPOTHESIS_USE_SQLITE`` env is set, delegates to
+    HypothesisStore. Otherwise falls back to the legacy JSON file storage.
+    """
+
+    def __init__(self, path: Path | None = None, db_path: Path | None = None) -> None:
         """Initialize the registry.
 
         Args:
-            path: Optional storage path. Defaults to env override or
+            path: Optional JSON storage path. Defaults to env override or
                 ``~/.quantnodes-research/hypotheses.json``.
+            db_path: Optional SQLite path. If provided, uses HypothesisStore.
         """
+        import os
         self.path = path or default_hypotheses_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        # P3-E: SQLite-backed mode
+        if db_path is not None or os.environ.get("HYPOTHESIS_USE_SQLITE", "").strip():
+            from .store import HypothesisStore
+            self._store: HypothesisStore | None = HypothesisStore(db_path=db_path)
+        else:
+            self._store = None
 
     def create(
         self,
