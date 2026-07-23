@@ -1157,16 +1157,48 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
 
 def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
                  current_state: dict, previous_outputs: list) -> str:
-    """spawn 单个 Agent (模拟 Task tool 调用).
+    """spawn 单个 Agent (Phase C-1: 真接 AgentLoop + 角色 prompt).
 
-    支持通过环境变量 AUTORESEARCH_BEHAVIOR 控制模拟行为:
+    决策:
+    - 满足条件时 (有 LLM API key 且未设 AUTORESEARCH_BEHAVIOR) → 真调 AgentLoop.run()
+    - 否则退到 stub (test / CI / 无 API key)
+
+    stub 行为由环境变量 AUTORESEARCH_BEHAVIOR 控制:
     - "static": 每次返回相同输出 (默认,用于测试)
     - "varying": 每次返回不同输出 (模拟真实 Agent 探索)
     - "improving": 模拟 Agent 找到改进方案的过程
+
+    返回: JSON 字符串, 调用方 parse_agent_output() 解码.
     """
     import json
     import os
     import random
+
+    from .core.agent.role_factory import (
+        should_use_real_llm,
+        run_agent_via_llm,
+        build_agent_loop,
+    )
+
+    # Phase C-1: 真 LLM 路径
+    if should_use_real_llm():
+        try:
+            # 构造任务: 综合 current_state + previous_outputs
+            task_lines = [f"你是 {agent_name}. 你的工作目录: {workspace_path}"]
+            if current_state:
+                task_lines.append("当前状态:")
+                task_lines.append(json.dumps(current_state, ensure_ascii=False, default=str))
+            return run_agent_via_llm(
+                role=agent_name,
+                workspace_path=workspace_path,
+                strategy_name=strategy_name,
+                task="\n".join(task_lines),
+                previous_outputs=previous_outputs,
+                max_iterations=8,
+            )
+        except Exception as exc:
+            # 真 LLM 失败 → 退到 stub, 不让主循环崩
+            print(f"⚠️  AgentLoop.run() 失败 ({agent_name}): {exc}; 退到 stub")
 
     behavior = os.environ.get("AUTORESEARCH_BEHAVIOR", "static")
     # 从 current_state 获取轮数
