@@ -1,0 +1,21 @@
+name: crypto_trading_desk
+description: 加密交易台 — 资金费率/清算微观/链上/风控四路并行
+agents:
+  - id: funding_basis
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: liquidation_micro
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, compute_factor]
+  - id: onchain_flow
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: risk_manager
+    prompt_file: .prompts/risk_controller.md
+    input_from: [funding_basis, liquidation_micro, onchain_flow]
+    tools: [read_file, list_history]
+dag:
+  funding_basis: []
+  liquidation_micro: []
+  onchain_flow: []
+  risk_manager: [funding_basis, liquidation_micro, onchain_flow]

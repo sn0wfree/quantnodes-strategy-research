@@ -1,0 +1,21 @@
+name: global_allocation_committee
+description: 全球配置委员会 — A股/加密/港美三路并行 → 配置器
+agents:
+  - id: a_share_specialist
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: crypto_specialist
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, factor_analysis]
+  - id: hk_us_specialist
+    prompt_file: .prompts/strategist.md
+    tools: [read_file]
+  - id: allocator
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [a_share_specialist, crypto_specialist, hk_us_specialist]
+    tools: [read_file]
+dag:
+  a_share_specialist: []
+  crypto_specialist: []
+  hk_us_specialist: []
+  allocator: [a_share_specialist, crypto_specialist, hk_us_specialist]

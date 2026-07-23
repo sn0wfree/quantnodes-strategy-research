@@ -1,0 +1,21 @@
+name: etf_allocation_desk
+description: ETF 配置台 — ETF 筛选/宏观/风险预算三路并行 → 组合优化
+agents:
+  - id: etf_screener
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, compute_factor]
+  - id: macro_analyst
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: risk_budgeting
+    prompt_file: .prompts/risk_controller.md
+    tools: [read_file, factor_analysis]
+  - id: portfolio_optimizer
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [etf_screener, macro_analyst, risk_budgeting]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  etf_screener: []
+  macro_analyst: []
+  risk_budgeting: []
+  portfolio_optimizer: [etf_screener, macro_analyst, risk_budgeting]

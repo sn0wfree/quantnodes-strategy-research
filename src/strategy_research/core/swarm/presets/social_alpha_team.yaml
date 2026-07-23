@@ -1,0 +1,21 @@
+name: social_alpha_team
+description: 社交阿尔法团队 — Twitter/Telegram/Reddit 三路并行 → 阿尔法综合
+agents:
+  - id: twitter_scanner
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: telegram_scanner
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: reddit_scanner
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file]
+  - id: alpha_synthesizer
+    prompt_file: .prompts/strategist.md
+    input_from: [twitter_scanner, telegram_scanner, reddit_scanner]
+    tools: [read_file, write_file]
+dag:
+  twitter_scanner: []
+  telegram_scanner: []
+  reddit_scanner: []
+  alpha_synthesizer: [twitter_scanner, telegram_scanner, reddit_scanner]

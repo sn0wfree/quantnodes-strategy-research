@@ -1,0 +1,21 @@
+name: global_equities_desk
+description: 全球股权台 — A股/港美/加密三路并行 → 全球策略师
+agents:
+  - id: a_share
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: hk_us
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, factor_analysis]
+  - id: crypto
+    prompt_file: .prompts/strategist.md
+    tools: [read_file]
+  - id: global_strategist
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [a_share, hk_us, crypto]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  a_share: []
+  hk_us: []
+  crypto: []
+  global_strategist: [a_share, hk_us, crypto]

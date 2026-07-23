@@ -1,0 +1,18 @@
+name: event_driven_task_force
+description: 事件驱动特遣队 — 扫描 → 深度影响 → 策略构建 顺序流
+agents:
+  - id: event_scanner
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: deep_impact
+    prompt_file: .prompts/factor_analyst.md
+    input_from: [event_scanner]
+    tools: [read_file, factor_analysis]
+  - id: strategy_builder
+    prompt_file: .prompts/strategist.md
+    input_from: [deep_impact]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  event_scanner: []
+  deep_impact: [event_scanner]
+  strategy_builder: [deep_impact]

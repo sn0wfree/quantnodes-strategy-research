@@ -1,0 +1,22 @@
+name: quant_research_committee
+description: 量化研究委员会 — 因子挖掘/验证并行 → 组合 → 审查
+agents:
+  - id: factor_miner
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, compute_factor]
+  - id: factor_validator
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, compute_factor, factor_analysis]
+  - id: factor_combiner
+    prompt_file: .prompts/strategist.md
+    input_from: [factor_miner, factor_validator]
+    tools: [read_file, write_file, run_backtest]
+  - id: backtest_reviewer
+    prompt_file: .prompts/anti_overfit_analyst.md
+    input_from: [factor_combiner]
+    tools: [read_file, list_history]
+dag:
+  factor_miner: []
+  factor_validator: []
+  factor_combiner: [factor_miner, factor_validator]
+  backtest_reviewer: [factor_combiner]

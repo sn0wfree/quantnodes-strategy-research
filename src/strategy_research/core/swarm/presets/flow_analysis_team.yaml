@@ -1,0 +1,21 @@
+name: flow_analysis_team
+description: 资金流分析团队 — 北向/融资融券/大宗交易三路并行 → 策略师综合
+agents:
+  - id: northbound
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, factor_analysis]
+  - id: margin_trading
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, compute_factor]
+  - id: block_trades
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: strategist
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [northbound, margin_trading, block_trades]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  northbound: []
+  margin_trading: []
+  block_trades: []
+  strategist: [northbound, margin_trading, block_trades]

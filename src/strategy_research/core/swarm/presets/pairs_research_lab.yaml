@@ -1,0 +1,22 @@
+name: pairs_research_lab
+description: 配对研究实验室 — 相关性/协整并行 → 配对策略师 → 微观结构审查
+agents:
+  - id: correlation_scan
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, factor_analysis]
+  - id: cointegration_test
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, compute_factor]
+  - id: pair_strategist
+    prompt_file: .prompts/strategist.md
+    input_from: [correlation_scan, cointegration_test]
+    tools: [read_file, write_file, run_backtest]
+  - id: microstructure_reviewer
+    prompt_file: .prompts/anti_overfit_analyst.md
+    input_from: [pair_strategist]
+    tools: [read_file, list_history]
+dag:
+  correlation_scan: []
+  cointegration_test: []
+  pair_strategist: [correlation_scan, cointegration_test]
+  microstructure_reviewer: [pair_strategist]

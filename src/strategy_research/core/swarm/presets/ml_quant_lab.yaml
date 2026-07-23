@@ -1,0 +1,22 @@
+name: ml_quant_lab
+description: ML 量化实验室 — 特征工程/模型设计并行 → 回测工程师
+agents:
+  - id: feature_engineer
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, compute_factor]
+  - id: model_designer
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, factor_analysis]
+  - id: backtest_engineer
+    prompt_file: .prompts/strategist.md
+    input_from: [feature_engineer, model_designer]
+    tools: [read_file, write_file, run_backtest]
+  - id: oos_validator
+    prompt_file: .prompts/anti_overfit_analyst.md
+    input_from: [backtest_engineer]
+    tools: [read_file, list_history]
+dag:
+  feature_engineer: []
+  model_designer: []
+  backtest_engineer: [feature_engineer, model_designer]
+  oos_validator: [backtest_engineer]

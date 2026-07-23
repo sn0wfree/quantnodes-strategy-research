@@ -1,0 +1,17 @@
+name: commodity_research_team
+description: 商品研究团队 — 供给/需求并行 → 周期策略师
+agents:
+  - id: supply_analyst
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, factor_analysis]
+  - id: demand_analyst
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, compute_factor]
+  - id: cycle_strategist
+    prompt_file: .prompts/strategist.md
+    input_from: [supply_analyst, demand_analyst]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  supply_analyst: []
+  demand_analyst: []
+  cycle_strategist: [supply_analyst, demand_analyst]

@@ -1,0 +1,29 @@
+name: technical_analysis_panel
+description: 技术分析面板 — 五方法(经典/一目/谐波/波浪/SMC)并行 → 信号聚合
+agents:
+  - id: classic_ta
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, pattern_recognition]
+  - id: ichimoku
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file]
+  - id: harmonic
+    prompt_file: .prompts/strategist.md
+    tools: [read_file]
+  - id: wave
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: smc
+    prompt_file: .prompts/portfolio_construction.md
+    tools: [read_file]
+  - id: signal_aggregator
+    prompt_file: .prompts/strategist.md
+    input_from: [classic_ta, ichimoku, harmonic, wave, smc]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  classic_ta: []
+  ichimoku: []
+  harmonic: []
+  wave: []
+  smc: []
+  signal_aggregator: [classic_ta, ichimoku, harmonic, wave, smc]

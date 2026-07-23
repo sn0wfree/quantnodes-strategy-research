@@ -1,0 +1,18 @@
+name: market_microstructure_team
+description: 市场微观结构团队 — 订单流/流动性/执行 三阶段顺序流
+agents:
+  - id: order_flow
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: liquidity
+    prompt_file: .prompts/factor_analyst.md
+    input_from: [order_flow]
+    tools: [read_file, compute_factor]
+  - id: execution
+    prompt_file: .prompts/strategist.md
+    input_from: [liquidity]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  order_flow: []
+  liquidity: [order_flow]
+  execution: [liquidity]

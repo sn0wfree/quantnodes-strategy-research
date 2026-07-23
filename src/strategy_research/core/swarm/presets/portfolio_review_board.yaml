@@ -1,0 +1,21 @@
+name: portfolio_review_board
+description: 组合审查委员会 — 业绩/风险/执行三路并行 → CIO 综合
+agents:
+  - id: performance_attribution
+    prompt_file: .prompts/attribution_analyst.md
+    tools: [read_file, list_history]
+  - id: risk_review
+    prompt_file: .prompts/risk_controller.md
+    tools: [read_file, factor_analysis]
+  - id: execution_quality
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: cio
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [performance_attribution, risk_review, execution_quality]
+    tools: [read_file]
+dag:
+  performance_attribution: []
+  risk_review: []
+  execution_quality: []
+  cio: [performance_attribution, risk_review, execution_quality]

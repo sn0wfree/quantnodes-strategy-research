@@ -1,0 +1,21 @@
+name: macro_rates_fx_desk
+description: 宏观利率外汇台 — 利率/外汇/商品三路并行 → 宏观 PM
+agents:
+  - id: rates_analyst
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: fx_analyst
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, factor_analysis]
+  - id: commodity_analyst
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+  - id: macro_pm
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [rates_analyst, fx_analyst, commodity_analyst]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  rates_analyst: []
+  fx_analyst: []
+  commodity_analyst: []
+  macro_pm: [rates_analyst, fx_analyst, commodity_analyst]

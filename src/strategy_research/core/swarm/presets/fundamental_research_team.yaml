@@ -1,0 +1,21 @@
+name: fundamental_research_team
+description: 基本面研究团队 — 财务/估值/质量三路并行 → 编辑整合
+agents:
+  - id: financial_analyst
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, factor_analysis]
+  - id: valuation_analyst
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: quality_analyst
+    prompt_file: .prompts/strategist.md
+    tools: [read_file]
+  - id: editor
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [financial_analyst, valuation_analyst, quality_analyst]
+    tools: [read_file]
+dag:
+  financial_analyst: []
+  valuation_analyst: []
+  quality_analyst: []
+  editor: [financial_analyst, valuation_analyst, quality_analyst]

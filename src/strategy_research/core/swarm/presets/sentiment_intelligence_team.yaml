@@ -1,0 +1,21 @@
+name: sentiment_intelligence_team
+description: 情绪情报团队 — 新闻/社交/资金流三路并行 → 综合分析师
+agents:
+  - id: news_intel
+    prompt_file: .prompts/researcher.md
+    tools: [read_file]
+  - id: social_sentiment
+    prompt_file: .prompts/strategist.md
+    tools: [read_file]
+  - id: capital_flows
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, factor_analysis]
+  - id: synthesizer
+    prompt_file: .prompts/portfolio_construction.md
+    input_from: [news_intel, social_sentiment, capital_flows]
+    tools: [read_file, write_file, run_backtest]
+dag:
+  news_intel: []
+  social_sentiment: []
+  capital_flows: []
+  synthesizer: [news_intel, social_sentiment, capital_flows]
