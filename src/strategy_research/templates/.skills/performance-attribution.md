@@ -1,3 +1,10 @@
+---
+name: performance-attribution
+category: analysis
+description: 业绩归因分析 — Brinson 模型 + 风格归因 + alpha/beta 分解
+tags: [attribution, brinson, alpha, beta, performance]
+---
+
 # Performance Attribution Analysis
 
 借鉴自 vibe-trading performance-attribution skill，适配 strategy-research 框架。

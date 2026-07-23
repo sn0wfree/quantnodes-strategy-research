@@ -1,3 +1,10 @@
+---
+name: risk-analysis
+category: analysis
+description: 风险度量与压力测试 — VaR/CVaR + 压力测试 + 风险预算 + 集中度
+tags: [risk, var, cvar, stress-test, drawdown]
+---
+
 # Risk Measurement and Stress Testing
 
 借鉴自 vibe-trading risk-analysis skill，适配 strategy-research 框架。

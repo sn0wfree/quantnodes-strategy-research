@@ -1,3 +1,10 @@
+---
+name: research-discipline
+category: tool
+description: 研究纪律 — 单变量隔离 + 前视偏差 + 数据窥探 + 多重检验
+tags: [discipline, look-ahead, data-snooping, multiple-testing]
+---
+
 # Research Discipline
 
 研究纪律 — 偏见自检清单。

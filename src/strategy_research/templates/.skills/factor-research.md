@@ -1,3 +1,10 @@
+---
+name: factor-research
+category: strategy
+description: 因子研究方法论 — IC/IR 验证 + 6 维评分 + 单调性 + 衰减分析
+tags: [factor, ic, ir, validation, alpha]
+---
+
 # Factor Research Framework
 
 借鉴自 vibe-trading factor-research skill，适配 strategy-research 框架。

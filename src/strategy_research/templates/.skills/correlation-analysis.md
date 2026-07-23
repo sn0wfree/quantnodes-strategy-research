@@ -1,3 +1,10 @@
+---
+name: correlation-analysis
+category: analysis
+description: 相关性与协整分析 — Pearson/Spearman 相关 + Engle-Granger/Johansen 协整检验
+tags: [correlation, cointegration, pairs, statistics]
+---
+
 # Correlation and Cointegration Analysis
 
 借鉴自 vibe-trading correlation-analysis skill，适配 strategy-research 框架。

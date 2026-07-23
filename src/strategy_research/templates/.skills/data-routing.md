@@ -1,3 +1,10 @@
+---
+name: data-routing
+category: data-source
+description: 数据源路由 — 10 个数据源 (tushare/akshare/yfinance/ccxt/eastmoney/...) 的选型矩阵
+tags: [data, source, routing, loader, fallback]
+---
+
 # Data Routing
 
 借鉴自 vibe-trading data-routing skill，适配 strategy-research 框架。

@@ -1,3 +1,10 @@
+---
+name: ml-strategy
+category: strategy
+description: ML 预测策略 — 特征工程 + 标签构建 + Walk-forward 训练 + OOS 验证
+tags: [ml, machine-learning, walk-forward, classification, regression]
+---
+
 # Machine Learning Predictive Strategy
 
 借鉴自 vibe-trading ml-strategy skill，适配 strategy-research 框架。

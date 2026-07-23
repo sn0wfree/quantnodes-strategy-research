@@ -1,3 +1,10 @@
+---
+name: quant-statistics
+category: analysis
+description: 量化统计方法 — ADF 单位根 + Hurst 指数 + Newey-West + Bootstrap
+tags: [statistics, adf, hurst, bootstrap, newey-west]
+---
+
 # Quantitative Statistical Methods
 
 借鉴自 vibe-trading quant-statistics skill，适配 strategy-research 框架。

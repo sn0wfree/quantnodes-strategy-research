@@ -1,3 +1,10 @@
+---
+name: backtest-diagnose
+category: analysis
+description: 回测诊断工作流 — 从 metrics.json / run.log / strategy.py 识别失败原因并修复
+tags: [backtest, diagnose, debug, metrics, log]
+---
+
 # Backtest Diagnosis
 
 借鉴自 vibe-trading backtest-diagnose skill，适配 strategy-research 框架。

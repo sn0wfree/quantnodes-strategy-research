@@ -1,3 +1,10 @@
+---
+name: sector-rotation
+category: strategy
+description: 行业轮动分析 — 申万/中信行业分类 + 行业动量 + 资金流 + 风格切换
+tags: [sector, rotation, regime, momentum, style, sw, citics]
+---
+
 # Sector Rotation Analysis
 
 借鉴自 vibe-trading sector-rotation skill，适配 strategy-research 框架。
