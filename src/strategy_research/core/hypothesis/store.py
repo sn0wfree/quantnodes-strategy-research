@@ -318,27 +318,27 @@ class HypothesisStore:
         with self._lock:
             existing_ids = {row["hypothesis_id"] for row in
                             self._conn.execute("SELECT hypothesis_id FROM hypotheses").fetchall()}
-        from .registry import _new_hypothesis_id
-        now = _utc_now()
-        hyp = Hypothesis(
-            hypothesis_id=_new_hypothesis_id(title, now, existing_ids),
-            title=title,
-            thesis=thesis,
-            status=_validate_status(status),
-            universe=universe.strip(),
-            signal_definition=signal_definition.strip(),
-            data_sources=_coerce_str_list(data_sources),
-            skills=_coerce_str_list(skills),
-            invalidation_notes=invalidation_notes.strip(),
-            parent_hypothesis_id=parent_hypothesis_id,
-            related_ids=_coerce_str_list(related_ids),
-            contradicts_ids=_coerce_str_list(contradicts_ids),
-            goal_id=goal_id,
-            created_at=now,
-            updated_at=now,
-        )
-        with self._write_transaction():
-            self._insert_raw(hyp)
+            from .registry import _new_hypothesis_id
+            now = _utc_now()
+            hyp = Hypothesis(
+                hypothesis_id=_new_hypothesis_id(title, now, existing_ids),
+                title=title,
+                thesis=thesis,
+                status=_validate_status(status),
+                universe=universe.strip(),
+                signal_definition=signal_definition.strip(),
+                data_sources=_coerce_str_list(data_sources),
+                skills=_coerce_str_list(skills),
+                invalidation_notes=invalidation_notes.strip(),
+                parent_hypothesis_id=parent_hypothesis_id,
+                related_ids=_coerce_str_list(related_ids),
+                contradicts_ids=_coerce_str_list(contradicts_ids),
+                goal_id=goal_id,
+                created_at=now,
+                updated_at=now,
+            )
+            with self._write_transaction():
+                self._insert_raw(hyp)
         return hyp
 
     def update(
@@ -371,42 +371,42 @@ class HypothesisStore:
                 return None
             hyp = self._row_to_hyp(row)
 
-        if title is not None:
-            hyp.title = title.strip()
-        if thesis is not None:
-            hyp.thesis = thesis.strip()
-        if status is not None:
-            new_status = _validate_status(status)
-            if new_status != hyp.status:
-                allowed = VALID_TRANSITIONS.get(hyp.status, set())
-                if new_status not in allowed:
-                    raise ValueError(
-                        f"invalid transition: {hyp.status} -> {new_status}. "
-                        f"Allowed: {sorted(allowed) or '(terminal)'}"
-                    )
-            hyp.status = new_status
-        if universe is not None:
-            hyp.universe = universe.strip()
-        if signal_definition is not None:
-            hyp.signal_definition = signal_definition.strip()
-        if data_sources is not None:
-            hyp.data_sources = _coerce_str_list(data_sources)
-        if skills is not None:
-            hyp.skills = _coerce_str_list(skills)
-        if invalidation_notes is not None:
-            hyp.invalidation_notes = invalidation_notes.strip()
-        if parent_hypothesis_id is not None:
-            hyp.parent_hypothesis_id = parent_hypothesis_id or None
-        if related_ids is not None:
-            hyp.related_ids = _coerce_str_list(related_ids)
-        if contradicts_ids is not None:
-            hyp.contradicts_ids = _coerce_str_list(contradicts_ids)
-        if goal_id is not None:
-            hyp.goal_id = goal_id or None
-        hyp.updated_at = _utc_now()
+            if title is not None:
+                hyp.title = title.strip()
+            if thesis is not None:
+                hyp.thesis = thesis.strip()
+            if status is not None:
+                new_status = _validate_status(status)
+                if new_status != hyp.status:
+                    allowed = VALID_TRANSITIONS.get(hyp.status, set())
+                    if new_status not in allowed:
+                        raise ValueError(
+                            f"invalid transition: {hyp.status} -> {new_status}. "
+                            f"Allowed: {sorted(allowed) or '(terminal)'}"
+                        )
+                hyp.status = new_status
+            if universe is not None:
+                hyp.universe = universe.strip()
+            if signal_definition is not None:
+                hyp.signal_definition = signal_definition.strip()
+            if data_sources is not None:
+                hyp.data_sources = _coerce_str_list(data_sources)
+            if skills is not None:
+                hyp.skills = _coerce_str_list(skills)
+            if invalidation_notes is not None:
+                hyp.invalidation_notes = invalidation_notes.strip()
+            if parent_hypothesis_id is not None:
+                hyp.parent_hypothesis_id = parent_hypothesis_id or None
+            if related_ids is not None:
+                hyp.related_ids = _coerce_str_list(related_ids)
+            if contradicts_ids is not None:
+                hyp.contradicts_ids = _coerce_str_list(contradicts_ids)
+            if goal_id is not None:
+                hyp.goal_id = goal_id or None
+            hyp.updated_at = _utc_now()
 
-        with self._write_transaction():
-            self._insert_raw(hyp)
+            with self._write_transaction():
+                self._insert_raw(hyp)
         return hyp
 
     def link_backtest(
