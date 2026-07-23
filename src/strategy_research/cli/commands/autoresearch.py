@@ -17,6 +17,101 @@ from pathlib import Path
 import yaml
 
 
+def _append_backtest_evidence(
+    session_id: str,
+    run_name: str,
+    metrics: dict,
+    strategist_output: dict,
+) -> None:
+    """Append evidence for the active goal (P3-D3: autoresearch ↔ GoalStore).
+
+    Failures are swallowed — the autoresearch loop must not break on evidence
+    append failures.
+    """
+    try:
+        from strategy_research.core.goal import (
+            AuditRow, EvidenceInput, GoalStore,
+        )
+        store = GoalStore()
+        goal = store.get_current_goal(session_id)
+        if goal is None:
+            return
+        # Build a concise evidence text
+        text = (
+            f"Backtest {run_name}: "
+            f"Calmar={metrics.get('calmar', 'N/A')} "
+            f"Sharpe={metrics.get('sharpe', 'N/A')} "
+            f"MaxDD={metrics.get('max_dd', 'N/A')}"
+        )
+        criteria = store.list_criteria(goal.goal_id)
+        criterion_id = criteria[0].criterion_id if criteria else None
+        store.append_evidence(
+            session_id=session_id,
+            goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id,
+            evidence=EvidenceInput(
+                text=text,
+                criterion_id=criterion_id,
+                evidence_type="backtest",
+                run_id=run_name,
+                source_provider="autoresearch",
+                source_type="backtest_run",
+                artifact_path=strategist_output.get("hypothesis", "")[:200],
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug(
+            "append_backtest_evidence skipped: %s", exc,
+        )
+
+
+def _register_researcher_hypothesis(
+    session_id: str,
+    researcher_output: dict,
+    run_name: str,
+) -> None:
+    """Register the researcher's hypothesis in the registry and link to active goal.
+
+    Failures are swallowed — the autoresearch loop must not break on registry errors.
+    """
+    try:
+        from strategy_research.core.goal import GoalStore
+        from strategy_research.core.hypothesis import HypothesisRegistry
+
+        thesis = researcher_output.get("hypothesis", "")
+        if not thesis:
+            return
+
+        registry = HypothesisRegistry()
+        # Check if a hypothesis with this title+thesis already exists (idempotent)
+        title = f"{run_name}: {thesis[:60]}"
+        existing = None
+        for h in registry.list():
+            if h.title == title:
+                existing = h
+                break
+        if existing is None:
+            hyp = registry.create(
+                title=title,
+                thesis=thesis[:200],
+                status="exploring",
+            )
+        else:
+            hyp = existing
+
+        # Link to active goal if present
+        goal_store = GoalStore()
+        goal = goal_store.get_current_goal(session_id)
+        if goal is not None and hyp.goal_id != goal.goal_id:
+            registry.link_goal(hyp.hypothesis_id, goal.goal_id)
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug(
+            "register_researcher_hypothesis skipped: %s", exc,
+        )
+
+
 def cmd_autoresearch(args: argparse.Namespace) -> int:
     """执行 autoresearch 命令 - 运行自动化研究循环。"""
     from strategy_research.core.autoresearch import (
@@ -127,6 +222,13 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         print(f"  action: {researcher_output.get('action', '?')}")
         print(f"  hypothesis: {researcher_output.get('hypothesis', '?')[:50]}...")
 
+        # P3-D3: Register researcher hypothesis in registry + link to active goal
+        _register_researcher_hypothesis(
+            session_id=f"autoresearch-{strategy_name}",
+            researcher_output=researcher_output,
+            run_name=run_name,
+        )
+
         # Step 3: 执行 (强制执行所有 Agent)
         print("\n[Step 3] 执行...")
 
@@ -209,6 +311,14 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
             print(f"  Calmar: {metrics.get('calmar', 'N/A')}")
             print(f"  Sharpe: {metrics.get('sharpe', 'N/A')}")
             print(f"  MaxDD: {metrics.get('max_dd', 'N/A')}")
+
+            # P3-D3: Append goal evidence for active session goal
+            _append_backtest_evidence(
+                session_id=f"autoresearch-{strategy_name}",
+                run_name=run_name,
+                metrics=metrics,
+                strategist_output=strategist_output,
+            )
         else:
             print(f"  ❌ 回测失败: {backtest_result.get('error', 'unknown')}")
             metrics = {}

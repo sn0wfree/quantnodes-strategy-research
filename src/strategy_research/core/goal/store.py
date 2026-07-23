@@ -864,10 +864,49 @@ class GoalStore:
             # P3-B: Recompute progress_percent after status update
             self._update_progress(goal_id)
 
+            # P3-D2: On COMPLETE, trigger goal completion hooks (hypothesis monitoring)
+            if status is GoalStatus.COMPLETE:
+                self._on_goal_complete(session_id, goal_id)
+
         updated = self.get_goal(goal_id)
         if updated is None:
             raise RuntimeError("updated goal could not be reloaded")
         return updated
+
+    def _on_goal_complete(self, session_id: str, goal_id: str) -> None:
+        """Hook fired when a goal reaches COMPLETE status.
+
+        P3-D2: Auto-transition linked hypotheses to monitoring.
+        Failures are swallowed (logged at most) to avoid breaking the loop.
+        """
+        try:
+            from ..hypothesis import HypothesisRegistry
+            registry = HypothesisRegistry()
+            linked = registry.list_by_goal(goal_id)
+            for hyp in linked:
+                # Only transition if in a continuable state
+                if hyp.status in ("validated", "testing"):
+                    try:
+                        registry.update(
+                            hyp.hypothesis_id,
+                            status="monitoring",
+                            invalidation_notes=(
+                                f"{hyp.invalidation_notes}\nGoal {goal_id} completed"
+                                if hyp.invalidation_notes
+                                else f"Goal {goal_id} completed"
+                            ),
+                        )
+                        logger.info(
+                            "Goal-complete hook: hypothesis %s -> monitoring",
+                            hyp.hypothesis_id,
+                        )
+                    except ValueError as exc:
+                        logger.debug(
+                            "Hypothesis %s transition skipped: %s",
+                            hyp.hypothesis_id, exc,
+                        )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Goal-complete hook failed: %s", exc)
 
     @_synchronized
     def account_usage(

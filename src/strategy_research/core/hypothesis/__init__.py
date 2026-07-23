@@ -12,15 +12,21 @@ from __future__ import annotations
 from .auto_create import HypothesisAutoCreator
 from .registry import (
     HYPOTHESIS_STATUSES,
+    VALID_TRANSITIONS,
     Hypothesis,
     HypothesisRegistry,
     default_hypotheses_path,
 )
+from .validator import DEFAULT_CRITERIA, ValidationResult, validate_hypothesis
 
 __all__ = [
+    "DEFAULT_CRITERIA",
     "HYPOTHESIS_STATUSES",
+    "VALID_TRANSITIONS",
     "Hypothesis",
     "HypothesisAutoCreator",
     "HypothesisRegistry",
+    "ValidationResult",
     "default_hypotheses_path",
+    "validate_hypothesis",
 ]
