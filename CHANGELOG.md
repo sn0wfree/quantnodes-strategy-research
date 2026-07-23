@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-23
+
+### Added
+- **P3-B/C/D/E unit test coverage** — 117 new tests.
+  - `tests/test_goal_p3b.py`: progress_percent, decompose_goal, sub/parent goals (13).
+  - `tests/test_hypothesis_p3c.py`: VALID_TRANSITIONS, derive/link/contradicts (35).
+  - `tests/test_hypothesis_store.py`: SQLite CRUD, FTS5 search, JSON migration (37).
+  - `tests/test_hypothesis_validator.py`: validate_hypothesis auto-validation pipeline (20).
+  - `tests/test_goal_hook_p3d.py`: _on_goal_complete hook, autoresearch CLI helpers (12).
+- **HypothesisStore concurrency smoke tests** — 5 tests for parallel create/update/search.
+  - `tests/test_hypothesis_store_concurrent.py`.
+- **API router behavior tests** — 18 new tests in `tests/test_api.py`: goal
+  list/evidence/complete, hypothesis create/list/search/update.
+
+### Fixed
+- **HypothesisStore concurrency safety**: `create()` and `update()` now hold
+  `self._lock` across the entire method body (SELECT + write). Previously,
+  releasing the lock between SELECT and BEGIN IMMEDIATE caused
+  `OperationalError('cannot start a transaction within a transaction')`
+  under parallel writes.
+- **API router error codes**:
+  - `hypothesis_update`: returns 404 for missing ID (was 500).
+  - `goal_complete`: returns 409 for stale goal (was 500), 400 for
+    invalid state (was 500).
+- **API router alignment with P3 stores**:
+  - `goal_list` actually calls `store.list_goals()` (was hardcoded `[]`).
+  - `goal_evidence` uses `EvidenceInput` + `append_evidence()` (was
+    deprecated `add_evidence`).
+  - `goal_complete` uses `update_status()` (was deprecated
+    `transition_status`).
+  - `hypothesis_create` accepts `universe`/`signal_definition` (was
+    legacy `tags`/`metadata`).
+  - Hypothesis serialization uses `to_dict()` (was `__dict__`, which
+    broke datetime JSON serialization).
+
+### Changed
+- `GoalStore._on_goal_complete`: added missing `logger` import.
+- `HypothesisStore._migrate_from_json`: JSON fallback path now derives
+  from `db_path.parent` (was hardcoded `~/.quantnodes-research/`),
+  enabling test isolation via `tmp_path`.
+
+### Tests
+- Total tests: 5,491 → 5,631 (+140 new tests).
+
 ## [0.3.0] - 2026-07-22
 
 ### Added
@@ -87,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release: workspace init, baseline backtest, AgentLoop, 6 tools.
 
+[0.4.0]: https://github.com/sn0wfree/quantnodes-strategy-research/releases/tag/v0.4.0
 [0.3.0]: https://github.com/sn0wfree/quantnodes-strategy-research/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sn0wfree/quantnodes-strategy-research/releases/tag/v0.2.0
 [0.1.0]: https://github.com/sn0wfree/quantnodes-strategy-research/releases/tag/v0.1.0
