@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     CLOSE - DELAY(CLOSE,20)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -4,11 +4,9 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-import numpy as np
 import pandas as pd
-
 
 # ============================================================
 # 连接管理
@@ -550,7 +548,7 @@ def save_weight_history(
             conn.close()
             return True
 
-        df = pd.DataFrame(rows)
+        pd.DataFrame(rows)
         conn.execute("""
             INSERT OR REPLACE INTO weight_history
             (strategy_name, run, date, asset_code, weight)
@@ -612,7 +610,7 @@ def save_nav_history(
         return False
 
     try:
-        df = pd.DataFrame({
+        pd.DataFrame({
             "strategy_name": strategy_name,
             "run": run,
             "date": nav.index,

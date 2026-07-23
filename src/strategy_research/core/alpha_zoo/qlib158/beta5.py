@@ -9,7 +9,8 @@
 from __future__ import annotations
 
 import pandas as pd
-from ..alpha_zoo_ops import safe_div, delta
+
+from ..alpha_zoo_ops import delta, safe_div
 
 __alpha_meta__ = {
     'id': 'qlib158_beta5',

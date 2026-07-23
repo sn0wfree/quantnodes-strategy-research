@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .market import MarketType
@@ -119,7 +120,7 @@ def _build_synthetic_trades(run_dir: Path) -> list[TradeInput]:
         logging.getLogger(__name__).debug("Failed to read metrics.json: %s", e)
         return []
     ann_return = float(metrics.get("ann_return", 0.0))
-    sharpe = float(metrics.get("sharpe", 0.0))
+    float(metrics.get("sharpe", 0.0))
     n_synthetic = 20
     base = ann_return / max(n_synthetic, 1)
     trades = []

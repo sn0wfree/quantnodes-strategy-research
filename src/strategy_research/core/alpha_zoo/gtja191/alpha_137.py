@@ -66,7 +66,7 @@ def compute(panel):
     dc1 = c.shift(1)
     do1 = o.shift(1)
     dl1 = l.shift(1)
-    dh1 = h.shift(1)
+    h.shift(1)
     abs_hdc = (h - dc1).abs()
     abs_ldc = (l - dc1).abs()
     abs_hdl1 = (h - dl1).abs()

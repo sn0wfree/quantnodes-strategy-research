@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from .models import (
     AuditRow,
@@ -1082,7 +1082,6 @@ class GoalStore:
         Returns:
             Float in [0.0, 100.0]. Goals with no required criteria return 100.0.
         """
-        from .context import criterion_is_covered, goal_progress_tuple
 
         # Read-only queries — use direct connection access (no transaction needed)
         goal_row = self._conn.execute(

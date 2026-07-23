@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .unified import UnifiedHook
 from .composite import NoOpHook
 from .context import AgentHookContext
+from .unified import UnifiedHook
 
 
 class AgentHookAdapter(UnifiedHook):

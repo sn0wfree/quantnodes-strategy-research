@@ -7,8 +7,8 @@ from pathlib import Path
 
 from .agents import AgentExecutor, AgentRegistry
 from .dag import topological_layers
-from .types import AgentCall, AgentStatus, RoundResult
-from .worker import SwarmWorker, WorkerResult, WorkerStatus
+from .types import AgentCall, AgentStatus
+from .worker import SwarmWorker, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -289,8 +289,8 @@ class WorkflowController:
         imported (e.g. during minimal scaffolding).
         """
         try:
-            from ..agent.tools import ToolRegistry
             from ..agent.builtin_tools import build_default_registry
+            from ..agent.tools import ToolRegistry
         except Exception as exc:                                # noqa: BLE001
             logger.debug("default registry import failed: %s", exc)
             from ..agent.tools import ToolRegistry

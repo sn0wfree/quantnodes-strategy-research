@@ -9,7 +9,6 @@ Contains:
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 
@@ -72,7 +71,7 @@ def cmd_swarm_inspect(args) -> int:
 
 def cmd_swarm_run(args) -> int:
     """执行 swarm preset。"""
-    from strategy_research.core.swarm import load_preset, SwarmRuntime
+    from strategy_research.core.swarm import SwarmRuntime, load_preset
 
     presets_dir = Path(__file__).parent.parent.parent / "core" / "swarm" / "presets"
     preset = None
@@ -95,7 +94,7 @@ def cmd_swarm_run(args) -> int:
     runtime = SwarmRuntime()
     result = runtime.execute(preset, workspace, task)
 
-    print(f"=== Swarm 执行完成 ===")
+    print("=== Swarm 执行完成 ===")
     print(f"Run ID:  {result.run_id}")
     print(f"Preset:  {result.preset_name}")
     print(f"耗时:    {result.elapsed_s}s")

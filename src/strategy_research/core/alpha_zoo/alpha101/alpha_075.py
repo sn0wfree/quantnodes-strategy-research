@@ -56,7 +56,7 @@ def compute(panel: dict) -> pd.DataFrame:
     low = panel["low"]
     volume = panel["volume"]
     vwap = panel["vwap"]
-    adv5 = ts_mean(volume, 5)
+    ts_mean(volume, 5)
     adv50 = ts_mean(volume, 50)
 
     # Helper aliases (local closures keep the file standalone & purity-safe).

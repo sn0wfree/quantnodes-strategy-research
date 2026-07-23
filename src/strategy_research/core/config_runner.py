@@ -11,11 +11,13 @@ import yaml
 
 from .db import load_price_data
 from .utils.backtest_config import (
-    BacktestConfig, CostConfig, VolTargetingConfig, TrendFilterConfig, StopLossConfig,
+    BacktestConfig,
+    CostConfig,
+    StopLossConfig,
+    TrendFilterConfig,
+    VolTargetingConfig,
 )
-from .utils.strategy_engine import StrategyEngine, BacktestResult
-from .utils.backtest_engine import run_backtest as run_callbacks_backtest
-
+from .utils.strategy_engine import BacktestResult, StrategyEngine
 
 # ============================================================
 # 1. YAML 加载
@@ -154,8 +156,8 @@ class FactorStrategy:
         nav_history: pd.Series,
     ) -> dict[str, float]:
         """计算权重."""
-        from .compute_factor import compute_factor
         from .alpha_zoo_adapter import AlphaZooAdapter
+        from .compute_factor import compute_factor
 
         # 1. 计算因子值
         factor_values = {}

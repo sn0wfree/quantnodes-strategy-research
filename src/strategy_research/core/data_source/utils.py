@@ -10,9 +10,6 @@ import re
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
-
-
 # ============================================================
 # Token 管理
 # ============================================================

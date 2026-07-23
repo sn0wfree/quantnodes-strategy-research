@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (-1 * ((RANK((SUM(DELAY(CLOSE, 5), 20) / 20)) * CORR(CLOSE, VOLUME, 2)) * RANK(CORR(SUM(CLOSE, 5), SUM(CLOSE, 20), 2))))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

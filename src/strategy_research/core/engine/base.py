@@ -17,7 +17,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from .models import EquitySnapshot, Position, TradeRecord

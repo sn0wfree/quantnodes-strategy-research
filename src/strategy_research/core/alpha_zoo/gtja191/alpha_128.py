@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     100-100/(1+SUM(((H+L+C)/3*V) if up else 0,14)/SUM((... if down else 0),14))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

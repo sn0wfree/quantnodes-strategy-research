@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((RANK(DELAY(((HIGH-LOW)/(SUM(CLOSE,5)/5)),2)) * RANK(RANK(VOLUME))) / (((HIGH-LOW)/(SUM(CLOSE,5)/5))/(VWAP-CLOSE)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -19,16 +19,17 @@
 from __future__ import annotations
 
 import logging
+
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 try:
-    from QuantOPT.models.model_RiskParity import RiskParity
-    from QuantOPT.models.model_MVO import MVO
     from QuantOPT.models.model_MaxIR import MaxIR
     from QuantOPT.models.model_MaxRiskAdjReturn import MaxRiskAdjReturn
+    from QuantOPT.models.model_MVO import MVO
+    from QuantOPT.models.model_RiskParity import RiskParity
     _HAS_QUANTOPT = True
 except ImportError:
     _HAS_QUANTOPT = False

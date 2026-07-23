@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     RANK(((((-1 * RET) * MEAN(VOLUME,20)) * VWAP) * (HIGH - CLOSE)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

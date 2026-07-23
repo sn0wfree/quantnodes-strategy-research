@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((RANK(DECAYLINEAR(DELTA((((LOW*0.7)+(VWAP*0.3))),3),20))-TSRANK(DECAYLINEAR(TSRANK(CORR(TSRANK(LOW,8),TSRANK(MEAN(VOLUME,60),17),5),19),16),7))*-1)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

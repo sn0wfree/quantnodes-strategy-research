@@ -6,11 +6,9 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-
 
 # ============================================================
 # 时序算子 (per-asset)
@@ -420,7 +418,6 @@ def ts_trim_mean(series: pd.Series, window: int, pct: float = 0.1) -> pd.Series:
 
 def ts_huber_mean(series: pd.Series, window: int, k: float = 1.345) -> pd.Series:
     """Huber 鲁棒均值: 使用 Huber 权重迭代重新加权, k 是 Huber 阈值。"""
-    from scipy import optimize as _opt  # 用 scipy 最小化; 实际也可手写 50 行
 
     def _huber(x):
         valid = x[~np.isnan(x)]
@@ -744,9 +741,7 @@ OPERATORS = {
     "cross_sectional_std": cross_sectional_std,
 
     # 数学算子
-    "abs": abs_op,
     "log": log,
-    "sign": sign,
     "sqrt": sqrt,
     "clip": clip,
     "fill_null": fill_null,

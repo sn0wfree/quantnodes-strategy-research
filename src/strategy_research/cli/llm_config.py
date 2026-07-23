@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 
-
 _LLM_PARENT = argparse.ArgumentParser(
     add_help=False,
     prog="quantnodes-research (LLM flags)",
@@ -51,7 +50,7 @@ def _cli_overrides_from_args(args: argparse.Namespace | None) -> dict:
 
 def build_llm_config(args: argparse.Namespace | None = None,
                      *, profile: str | None = None,
-                     cli_overrides: dict | None = None) -> "LLMConfig":
+                     cli_overrides: dict | None = None) -> "LLMConfig":  # noqa: F821
     """Build an LLMConfig from CLI args + 4-layer merge.
 
     Args:

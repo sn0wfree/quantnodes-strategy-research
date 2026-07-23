@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     MAX(SUMAC(CLOSE-MEAN(CLOSE,24))) - MIN(SUMAC(CLOSE-MEAN(CLOSE,24))) / STD(CLOSE,24)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

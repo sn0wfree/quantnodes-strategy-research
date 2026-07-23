@@ -88,7 +88,7 @@ def compute(panel: dict) -> pd.DataFrame:
     open_ = panel["open"]
     volume = panel["volume"]
     vwap = panel["vwap"]
-    adv15 = ts_mean(volume, 15)
+    ts_mean(volume, 15)
     adv150 = ts_mean(volume, 150)
 
     # Helper aliases (local closures keep the file standalone & purity-safe).

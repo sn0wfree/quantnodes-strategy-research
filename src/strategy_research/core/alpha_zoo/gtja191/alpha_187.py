@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SUM((OPEN<=DELAY(OPEN,1) ? 0 : MAX(HIGH-OPEN, OPEN-DELAY(OPEN,1))), 20)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

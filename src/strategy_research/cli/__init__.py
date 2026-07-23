@@ -9,21 +9,33 @@ from pathlib import Path
 import yaml
 
 from strategy_research import _TEMPLATES_DIR
-from .llm_config import _LLM_PARENT, _cli_overrides_from_args, build_llm_config, _cmd_llm_list_profiles
-from .commands.autoresearch import cmd_autoresearch, _spawn_agent
-from .commands.session import (
-    cmd_session_stats, cmd_session_list, cmd_session_show,
-    cmd_session_search, cmd_session_delete,
-)
-from .commands.skills import cmd_skills_list, cmd_skills_show, cmd_skills_search
-from .commands.swarm import (
-    cmd_swarm_list, cmd_swarm_inspect, cmd_swarm_run, cmd_swarm_cancel,
-)
-from .commands.server import (
-    cmd_webui_serve, cmd_api_serve, cmd_mcp_serve, cmd_mcp_list_tools,
-)
-from .commands.export import cmd_export
 
+from .commands.autoresearch import _spawn_agent as _spawn_agent
+from .commands.autoresearch import cmd_autoresearch
+from .commands.export import cmd_export
+from .commands.server import (
+    cmd_api_serve,
+    cmd_mcp_list_tools,
+    cmd_mcp_serve,
+    cmd_webui_serve,
+)
+from .commands.session import (
+    cmd_session_delete,
+    cmd_session_list,
+    cmd_session_search,
+    cmd_session_show,
+    cmd_session_stats,
+)
+from .commands.skills import cmd_skills_list, cmd_skills_search, cmd_skills_show
+from .commands.swarm import (
+    cmd_swarm_cancel,
+    cmd_swarm_inspect,
+    cmd_swarm_list,
+    cmd_swarm_run,
+)
+from .llm_config import _LLM_PARENT, _cmd_llm_list_profiles
+from .llm_config import _cli_overrides_from_args as _cli_overrides_from_args
+from .llm_config import build_llm_config as build_llm_config
 
 # ============================================================
 # 模板内容 (从文件加载或内嵌)
@@ -147,8 +159,8 @@ def _init_git(path: Path) -> None:
 
 def _run_baseline_backtest(workspace_path: Path, strategy_name: str, strategy_dir: Path) -> None:
     """运行 baseline 回测 (默认 momentum_20_60 因子)。"""
-    from strategy_research.core.data_import import generate_sample_data, import_dataframe
     from strategy_research.core.backtest import run_backtest_script
+    from strategy_research.core.data_import import generate_sample_data, import_dataframe
 
     # 生成模拟数据 (10 资产 × 504 天)
     prices = generate_sample_data(n_assets=10, n_days=504, start_date="2022-01-01")
@@ -324,7 +336,7 @@ risk:
         except Exception as e:
             print(f"⚠️  baseline 回测失败: {e}")
 
-    print(f"\n✅ 工作区初始化完成!")
+    print("\n✅ 工作区初始化完成!")
     print(f"   请阅读 {path / 'README.md'} 开始研究。")
     return 0
 
@@ -381,9 +393,9 @@ def cmd_status(args: argparse.Namespace) -> int:
                 else:
                     print(f"    实验: {len(runs)} 个目录")
             else:
-                print(f"    实验: 无")
+                print("    实验: 无")
         else:
-            print(f"    实验: 无 runs 目录")
+            print("    实验: 无 runs 目录")
 
     # DuckDB 状态
     db_path = path / "data.duckdb"
@@ -404,7 +416,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"  ⚠️  读取失败: {e}")
     else:
-        print(f"\n🗄️  DuckDB: 不存在")
+        print("\n🗄️  DuckDB: 不存在")
 
     return 0
 
@@ -620,6 +632,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 1
 
     import pandas as pd
+
     from strategy_research.core.factor_validate import validate_factor
 
     # 加载价格数据 (简单示例: 从 CSV 加载)
@@ -647,12 +660,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
     print(f"   综合评分: {result['overall_score']:.4f}")
 
     if result["fail_reasons"]:
-        print(f"\n   失败原因:")
+        print("\n   失败原因:")
         for reason in result["fail_reasons"]:
             print(f"     - {reason}")
 
     if result["scores"]:
-        print(f"\n   6 维评分:")
+        print("\n   6 维评分:")
         for k, v in result["scores"].items():
             print(f"     {k}: {v:.4f}")
 
@@ -680,12 +693,12 @@ def cmd_list(args: argparse.Namespace) -> int:
             print("❌ 未指定策略名称，请使用 --strategy <name>")
             return 1
 
-    from strategy_research.core.backtest import get_experiment_history, get_best_experiment
+    from strategy_research.core.backtest import get_best_experiment, get_experiment_history
 
     experiments = get_experiment_history(path, strategy_name, limit=args.limit)
 
     if not experiments:
-        print(f"📭 没有实验记录")
+        print("📭 没有实验记录")
         return 0
 
     print(f"\n📋 实验记录 ({strategy_name}):")
@@ -723,8 +736,15 @@ def cmd_import(args: argparse.Namespace) -> int:
         return 1
 
     from strategy_research.core.data_import import (
-        import_csv, import_parquet, generate_sample_data, import_dataframe,
-        import_tushare, import_ifind, import_fred, import_akshare, import_from_source,
+        generate_sample_data,
+        import_akshare,
+        import_csv,
+        import_dataframe,
+        import_fred,
+        import_from_source,
+        import_ifind,
+        import_parquet,
+        import_tushare,
     )
     from strategy_research.core.db import init_db
 
@@ -820,11 +840,11 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     else:
         print(f"❌ 未知数据源: {source}")
-        print(f"   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
+        print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
         return 1
 
     if success:
-        print(f"\n✅ 数据导入完成")
+        print("\n✅ 数据导入完成")
         from strategy_research.core.db import get_price_data_info
         info = get_price_data_info(path, strategy_name)
         if info:
@@ -833,7 +853,7 @@ def cmd_import(args: argparse.Namespace) -> int:
             print(f"   时间范围: {info.get('start_date')} ~ {info.get('end_date')}")
         return 0
     else:
-        print(f"\n❌ 数据导入失败")
+        print("\n❌ 数据导入失败")
         return 1
 
 
@@ -982,7 +1002,7 @@ def main() -> int:
     swarm_parser = subparsers.add_parser("swarm", help="多智能体协同")
     swarm_subparsers = swarm_parser.add_subparsers(dest="swarm_command", help="swarm 命令")
 
-    swarm_list_parser = swarm_subparsers.add_parser("list", help="列出所有 preset")
+    swarm_subparsers.add_parser("list", help="列出所有 preset")
 
     swarm_inspect_parser = swarm_subparsers.add_parser("inspect", help="显示 preset 结构")
     swarm_inspect_parser.add_argument("name", help="preset 名称")
@@ -1003,7 +1023,7 @@ def main() -> int:
     mcp_serve_parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio", help="传输方式")
     mcp_serve_parser.add_argument("--port", type=int, default=8900, help="SSE 端口")
 
-    mcp_list_tools_parser = mcp_subparsers.add_parser("list-tools", help="列出所有 MCP 工具")
+    mcp_subparsers.add_parser("list-tools", help="列出所有 MCP 工具")
 
     # export
     export_parser = subparsers.add_parser("export", help="导出策略")
@@ -1137,12 +1157,12 @@ def main() -> int:
         return cmd_export(args)
     elif args.command == "schedule":
         from strategy_research.core.scheduled_research.cli import (
-            cmd_schedule_create,
-            cmd_schedule_list,
-            cmd_schedule_show,
             cmd_schedule_cancel,
+            cmd_schedule_create,
             cmd_schedule_delete,
+            cmd_schedule_list,
             cmd_schedule_run,
+            cmd_schedule_show,
             cmd_schedule_start,
         )
         if args.schedule_command == "create":
@@ -1160,7 +1180,6 @@ def main() -> int:
         elif args.schedule_command == "start":
             return cmd_schedule_start(args)
         else:
-            schedule_parser.print_help()
             return 0
     elif args.command == "goal":
         from strategy_research.core.goal.cli import (
@@ -1180,7 +1199,7 @@ def main() -> int:
             "complete": cmd_goal_complete,
             "list": cmd_goal_list,
             "cancel": cmd_goal_cancel,
-        }.get(args.goal_command, lambda a: (goal_parser.print_help(), 0)[1])(args)
+        }.get(args.goal_command, lambda a: 1)(args)
     elif args.command == "hypothesis":
         from strategy_research.core.hypothesis.cli import (
             cmd_hypothesis_create,
@@ -1197,7 +1216,7 @@ def main() -> int:
             "update": cmd_hypothesis_update,
             "search": cmd_hypothesis_search,
             "link": cmd_hypothesis_link,
-        }.get(args.hypothesis_command, lambda a: (hypothesis_parser.print_help(), 0)[1])(args)
+        }.get(args.hypothesis_command, lambda a: 1)(args)
     elif args.command == "validate-run":
         from strategy_research.core.validation.cli import cmd_validate_run
         return cmd_validate_run(args)

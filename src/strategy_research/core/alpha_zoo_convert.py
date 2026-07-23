@@ -6,13 +6,10 @@
 from __future__ import annotations
 
 import ast
-import re
-import textwrap
 from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 # ============================================================
 # Python AST 分析
@@ -48,7 +45,7 @@ class ComputeFunctionAnalyzer(ast.NodeVisitor):
     def _post_process_refs(self):
         """后处理: 将重赋值变量链化。
 
-        例如: inner=a, inner_2=b(inner), inner_3=c(inner_2) 
+        例如: inner=a, inner_2=b(inner), inner_3=c(inner_2)
         -> 保持原样，因为转换时已经通过序号链化了引用。
         但需要确保 inner_7 引用的是 inner_6，不是 inner_7 本身。
         """
@@ -497,7 +494,7 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
                 return {"op": op_name, "args": yaml_args}
 
             if method == "quantile":
-                q_val = _convert(args[0]) if args else {"value": 0.5}
+                _convert(args[0]) if args else {"value": 0.5}
                 return {"op": "ts_rank", "args": [inner_obj, rolling_span_or_window]}
 
             if method == "apply":

@@ -12,7 +12,7 @@ import pandas as pd
 
 from .base import validate_date_range
 from .registry import register
-from .utils import is_us, is_hk, is_crypto
+from .utils import is_crypto, is_hk, is_us
 
 logger = logging.getLogger(__name__)
 

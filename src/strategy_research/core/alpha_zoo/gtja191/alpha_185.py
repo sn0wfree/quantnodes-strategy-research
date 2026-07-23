@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     RANK((-1*((1-(OPEN/CLOSE))^2)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

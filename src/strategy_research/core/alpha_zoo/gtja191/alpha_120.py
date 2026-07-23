@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (RANK((VWAP - CLOSE)) / RANK((VWAP + CLOSE)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

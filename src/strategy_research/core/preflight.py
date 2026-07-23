@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 # ============================================================
 # 结果结构
@@ -109,7 +109,7 @@ def _check_duckdb_writable(workspace_path: Path) -> CheckResult:
 def _check_data_sources(workspace_path: Path) -> CheckResult:
     """检查至少一个数据源 is_available()=True。"""
     try:
-        from .data_source import list_loaders, LOADER_REGISTRY
+        from .data_source import LOADER_REGISTRY, list_loaders
         # 触发懒加载
         list_loaders()
     except Exception as e:
@@ -253,7 +253,7 @@ def _print_results(results: list[CheckResult]) -> None:
     use_color = sys.stdout.isatty()
 
     print("\n" + "=" * 70)
-    print(f"  quantnodes-research Pre-flight Check")
+    print("  quantnodes-research Pre-flight Check")
     print("=" * 70)
 
     for r in results:

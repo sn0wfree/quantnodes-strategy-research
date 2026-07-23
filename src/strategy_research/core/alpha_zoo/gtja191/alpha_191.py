@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((CORR(MEAN(VOLUME,20), LOW, 5) + ((HIGH + LOW) / 2)) - CLOSE)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

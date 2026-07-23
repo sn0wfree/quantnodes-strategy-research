@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import pandas as pd
+
 from ..alpha_zoo_ops import ts_argmax
 
 __alpha_meta__ = {

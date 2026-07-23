@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (-1 * CORR(OPEN, VOLUME, 10))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -31,6 +31,7 @@ async def hypothesis_create(req: HypothesisCreateRequest, request: Request):
     """创建新 hypothesis。"""
     try:
         from pathlib import Path
+
         from ...core.hypothesis import HypothesisRegistry
 
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
@@ -56,6 +57,7 @@ async def hypothesis_list(
     """列出 hypotheses。"""
     try:
         from pathlib import Path
+
         from ...core.hypothesis import HypothesisRegistry
 
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
@@ -80,6 +82,7 @@ async def hypothesis_search(
     """搜索 hypotheses。"""
     try:
         from pathlib import Path
+
         from ...core.hypothesis import HypothesisRegistry
 
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
@@ -99,6 +102,7 @@ async def hypothesis_get(hypothesis_id: str, request: Request):
     """获取单个 hypothesis。"""
     try:
         from pathlib import Path
+
         from ...core.hypothesis import HypothesisRegistry
 
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
@@ -118,6 +122,7 @@ async def hypothesis_update(req: HypothesisUpdateRequest, request: Request):
     """更新 hypothesis。"""
     try:
         from pathlib import Path
+
         from ...core.hypothesis import HypothesisRegistry
 
         hyp_path = getattr(request.app.state, "hypotheses_path", None)

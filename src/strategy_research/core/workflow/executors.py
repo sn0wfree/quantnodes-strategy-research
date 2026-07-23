@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from .agents import AgentExecutor
-
 
 class AgentLoopExecutor:
     def __init__(
@@ -50,8 +48,8 @@ class CLIExecutor:
         return self._name
 
     def run(self, prompt: str, context: dict) -> dict:
-        import subprocess
         import shlex
+        import subprocess
 
         cmd = self._command or f"echo 'Agent {self._name} executed'"
         try:

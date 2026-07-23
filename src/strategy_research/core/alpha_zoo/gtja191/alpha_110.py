@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SUM(MAX(0,HIGH-DELAY(CLOSE,1)),20) / SUM(MAX(0,DELAY(CLOSE,1)-LOW),20) * 100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

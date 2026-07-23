@@ -9,7 +9,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-
 CovMethod = Literal["sample", "ledoit_wolf", "ewma", "diagonal"]
 
 

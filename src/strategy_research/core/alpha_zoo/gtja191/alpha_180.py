@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((MEAN(VOLUME,20) < VOLUME) ? ((-1*TSRANK(ABS(DELTA(CLOSE,7)),60)) * SIGN(DELTA(CLOSE,7))) : (-1*VOLUME))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

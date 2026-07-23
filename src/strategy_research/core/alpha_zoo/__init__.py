@@ -14,7 +14,6 @@ import importlib
 from pathlib import Path
 from typing import Optional
 
-
 ALPHA_ZOOS = {
     "alpha101": "Kakushadze 101 公式化因子",
     "gtja191": "国泰君安 191 A 股截面因子",
@@ -125,13 +124,13 @@ def list_alphas(zoo: Optional[str] = None) -> list[dict]:
     return results
 
 
-def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
+def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":  # noqa: F821
     """计算单个因子。
 
     加载优先级: YAML 优先，.py 作为 fallback。
     """
-    import pandas as pd
     import numpy as np
+    import pandas as pd
 
     parts = alpha_id.split("_", 1)
     if len(parts) != 2:
@@ -151,7 +150,7 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
     yaml_file = _find_yaml_file(zoo_name, alpha_name)
     if yaml_file:
         try:
-            from .alpha_zoo_yaml import load_alpha_yaml, compute_alpha_from_yaml
+            from .alpha_zoo_yaml import compute_alpha_from_yaml, load_alpha_yaml
             config = load_alpha_yaml(yaml_file)
             result = compute_alpha_from_yaml(config, panel)
 

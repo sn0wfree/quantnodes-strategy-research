@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SMA(VOL*((CLOSE-LOW)-(HIGH-CLOSE))/(HIGH-LOW),11,2) - SMA(VOL*((CLOSE-LOW)-(HIGH-CLOSE))/(HIGH-LOW),4,2)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -9,7 +9,8 @@
 from __future__ import annotations
 
 import pandas as pd
-from ..alpha_zoo_ops import ts_rank, rank
+
+from ..alpha_zoo_ops import rank, ts_rank
 
 __alpha_meta__ = {
     'id': 'qlib158_rank5',

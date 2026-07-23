@@ -120,6 +120,7 @@ async def hypotheses_list(request: Request):
     hypotheses = []
     try:
         from pathlib import Path
+
         from ..core.hypothesis import HypothesisRegistry
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)

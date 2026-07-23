@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..alpha_zoo_ops import safe_div
-from ..alpha_zoo_ops import zscore
+from ..alpha_zoo_ops import safe_div, zscore
 
 __alpha_meta__ = {
     "id": "fund_earnings_yield",

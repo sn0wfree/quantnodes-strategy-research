@@ -11,7 +11,6 @@ import pandas as pd
 
 from .futures_base import FuturesBaseEngine
 
-
 # 全球期货乘数表 (部分)
 _GLOBAL_FUTURES_MULTIPLIERS = {
     "ES": 50.0, "NQ": 20.0, "YM": 5.0, "RTY": 50.0,  # CME 股指

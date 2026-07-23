@@ -11,7 +11,10 @@ import numpy as np
 import pandas as pd
 
 from .backtest_config import (
-    CostConfig, VolTargetingConfig, TrendFilterConfig, StopLossConfig,
+    CostConfig,
+    StopLossConfig,
+    TrendFilterConfig,
+    VolTargetingConfig,
 )
 from .backtest_utils import calculate_turnover, generate_rebalance_dates
 from .metrics import extended_metrics

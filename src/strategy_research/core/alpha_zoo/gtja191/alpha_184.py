@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (RANK(CORR(DELAY((OPEN - CLOSE), 1), CLOSE, 200)) + RANK((OPEN - CLOSE)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

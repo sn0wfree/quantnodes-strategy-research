@@ -37,7 +37,7 @@ class ScheduledResearchStore:
         try:
             raw = self._path.read_text(encoding="utf-8")
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError:
             # Corrupt file — rename and start fresh
             corrupt_path = self._path.with_suffix(
                 f".corrupt-{int(time.time())}"

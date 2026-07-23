@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import pandas as pd
+
 from ..alpha_zoo_ops import safe_div
 
 __alpha_meta__ = {
@@ -25,7 +26,7 @@ __alpha_meta__ = {
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Return qlib158 KSFT2 on the supplied OHLCV panel."""
-    o = panel['open']
+    panel['open']
     c = panel['close']
     h = panel['high']
     lo = panel['low']

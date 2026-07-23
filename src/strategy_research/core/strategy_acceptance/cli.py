@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from . import (
-    DEFAULT_CONFIG,
     decide,
     load_config,
 )

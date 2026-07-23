@@ -19,7 +19,6 @@ from typing import Any
 
 from .registry import (
     HYPOTHESIS_STATUSES,
-    Hypothesis,
     HypothesisRegistry,
     default_hypotheses_path,
 )

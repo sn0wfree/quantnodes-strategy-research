@@ -151,7 +151,6 @@ class MCPServer:
                 if goal is None:
                     return json.dumps({"status": "no_active_goal", "session_id": session_id}, ensure_ascii=False)
                 return json.dumps({
-                    "status": "ok",
                     "goal_id": goal.goal_id,
                     "session_id": session_id,
                     "objective": goal.objective,
@@ -236,7 +235,7 @@ class MCPServer:
                 return json.dumps({"status": "error", "error": "run_dir 是必需参数"}, ensure_ascii=False)
             try:
                 from .validation import MarketType, run_validation
-                from .validation.cli import _load_nav_synthetic, _build_synthetic_trades
+                from .validation.cli import _build_synthetic_trades, _load_nav_synthetic
 
                 run_path = Path(run_dir).resolve()
                 market_enum = MarketType(market)

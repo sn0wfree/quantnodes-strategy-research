@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (-1*VOLUME/MEAN(VOLUME,20))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

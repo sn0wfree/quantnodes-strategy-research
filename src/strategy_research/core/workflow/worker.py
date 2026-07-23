@@ -32,9 +32,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..llm import LLMResponse, OpenAICompatClient, ToolCall
-from ..llm.errors import LLMError
 from ..agent.tools import ToolRegistry
+from ..llm import LLMResponse, ToolCall
+from ..llm.errors import LLMError
 
 logger = logging.getLogger(__name__)
 

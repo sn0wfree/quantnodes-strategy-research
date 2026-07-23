@@ -88,7 +88,7 @@ async def goal_list(
 ):
     """列出 goals。"""
     try:
-        from ...core.goal import GoalStore, GoalStatus
+        from ...core.goal import GoalStatus, GoalStore
 
         db_path = getattr(request.app.state, "goal_db_path", None)
         store = GoalStore(db_path=db_path)

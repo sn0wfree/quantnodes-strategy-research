@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (MEAN(CLOSE,3)+MEAN(CLOSE,6)+MEAN(CLOSE,12)+MEAN(CLOSE,24))/4
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

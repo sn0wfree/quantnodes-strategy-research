@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     MEAN(ABS(CLOSE-MEAN(CLOSE,6)),6)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

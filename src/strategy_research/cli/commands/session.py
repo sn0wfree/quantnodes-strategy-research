@@ -10,14 +10,10 @@ Contains:
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
-
 
 def cmd_session_stats(args) -> int:
     """查看写入统计。"""
-    from strategy_research.core.session import SessionDB, MetricsLogger
-    from strategy_research.core.session.metrics import MetricsLogger as ML
+    from strategy_research.core.session import SessionDB
 
     db = SessionDB()
     stats = db.metrics_logger.get_stats()
@@ -81,7 +77,7 @@ def cmd_session_show(args) -> int:
     created = datetime.fromtimestamp(session.created_at).strftime("%Y-%m-%d %H:%M:%S")
     updated = datetime.fromtimestamp(session.updated_at).strftime("%Y-%m-%d %H:%M:%S")
 
-    print(f"=== 会话详情 ===")
+    print("=== 会话详情 ===")
     print(f"  ID:        {session.id}")
     print(f"  创建时间:  {created}")
     print(f"  更新时间:  {updated}")

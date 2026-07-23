@@ -14,7 +14,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
 # ============================================================
 # 目标函数 (Agent 不改)
 # ============================================================
@@ -218,7 +217,7 @@ def evaluate(params: dict, factor_exprs: list[dict],
     weight_changes = []
 
     for i in range(rebalance_freq, len(prices)):
-        date = prices.index[i]
+        prices.index[i]
 
         # 调仓日: 选股 + 计算权重
         if (i - rebalance_freq) % rebalance_freq == 0:

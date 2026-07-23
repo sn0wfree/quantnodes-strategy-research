@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (RANK(DECAYLINEAR(CORR((H+L)/2,MEAN(V,40),9),10))/RANK(DECAYLINEAR(CORR(RANK(VWAP),RANK(V),7),3)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

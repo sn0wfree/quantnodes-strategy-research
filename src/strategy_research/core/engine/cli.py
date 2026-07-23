@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from ...core.engine.config import BacktestConfigSchema
 
@@ -96,7 +95,7 @@ def cmd_engine_run_backtest(args: argparse.Namespace) -> int:
     if args.json_output:
         print(json.dumps(result, indent=2, default=str))
     else:
-        print(f"✅ 回测完成")
+        print("✅ 回测完成")
         print(f"   sharpe:   {result.get('sharpe_ratio', 'N/A')}")
         print(f"   max_dd:   {result.get('max_drawdown', 'N/A')}")
         print(f"   calmar:   {result.get('calmar_ratio', 'N/A')}")

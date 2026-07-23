@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SMA(VOLUME,13,2)-SMA(VOLUME,27,2)-SMA(SMA(VOLUME,13,2)-SMA(VOLUME,27,2),10,2)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

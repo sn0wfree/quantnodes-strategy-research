@@ -8,12 +8,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
+from ..workflow.agents import AgentRegistry
 from ..workflow.controller import WorkflowController
 from ..workflow.grounding import GroundingProvider
 from ..workflow.types import AgentCall, AgentStatus
-from ..workflow.agents import AgentRegistry
 
 logger = logging.getLogger(__name__)
 

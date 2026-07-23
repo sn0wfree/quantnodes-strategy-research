@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .backtest_config import BacktestConfig, CostConfig
+from .backtest_config import BacktestConfig
 from .backtest_utils import (
     apply_max_weight,
     calculate_turnover,

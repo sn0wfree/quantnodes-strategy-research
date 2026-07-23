@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import pandas as pd
+
 from ..alpha_zoo_ops import safe_div
 
 __alpha_meta__ = {

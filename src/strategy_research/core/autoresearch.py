@@ -9,8 +9,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-
+from typing import Any
 
 # 默认配置: 保留最近 N 轮详细数据 (其他轮次优先读取 summary.json)
 DEFAULT_KEEP_RECENT = 10
@@ -152,7 +151,7 @@ def read_current_state(
         if content:
             lines = content.split("\n")
 
-    header = lines[0] if lines else ""
+    lines[0] if lines else ""
     recent_runs = "\n".join(lines[-10:]) if len(lines) > 1 else ""
 
     # 解析最佳 Calmar
@@ -467,7 +466,7 @@ def detect_lazy_behavior(
 
         # 检查 overfit_passed 是否连续 false
         recent_overfit = [h.get("overfit_passed") for h in recent_outputs if "overfit_passed" in h]
-        if recent_overfit and all(v == False for v in recent_overfit):
+        if recent_overfit and all(not v for v in recent_overfit):
             lazy_score += 0.3
             issues.append("overfit_passed 连续 false")
 

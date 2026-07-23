@@ -13,15 +13,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
-
 from .db import (
-    save_backtest_result, get_backtest_results,
-    save_weight_history, save_nav_history,
+    save_backtest_result,
+    save_nav_history,
+    save_weight_history,
 )
-from .git import git_commit, git_commit_rich, git_get_hash
+from .git import git_commit as git_commit, git_commit_rich, git_get_hash
 from .run_card import write_run_card
-
 
 # ============================================================
 # 子进程环境变量白名单

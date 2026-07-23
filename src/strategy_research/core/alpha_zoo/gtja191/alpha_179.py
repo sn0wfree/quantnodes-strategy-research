@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     RANK(CORR(VWAP,VOLUME,4))*RANK(CORR(RANK(LOW),RANK(MEAN(VOLUME,50)),12))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

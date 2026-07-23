@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (CLOSE+HIGH+LOW)/3
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

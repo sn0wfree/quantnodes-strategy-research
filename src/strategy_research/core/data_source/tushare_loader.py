@@ -10,9 +10,9 @@ from typing import Optional
 
 import pandas as pd
 
-from .base import validate_date_range, normalize_ohlcv
+from .base import validate_date_range
 from .registry import register
-from .utils import is_a_share, is_etf, is_index, is_hk, get_token, load_tokens
+from .utils import get_token, is_etf, is_hk, is_index, load_tokens
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,6 @@ import logging
 import time
 from typing import Optional, Protocol, runtime_checkable
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)

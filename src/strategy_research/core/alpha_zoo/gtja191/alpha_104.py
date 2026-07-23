@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (-1 * (DELTA(CORR(high, volume,5),5) * RANK(STD(close,20))))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

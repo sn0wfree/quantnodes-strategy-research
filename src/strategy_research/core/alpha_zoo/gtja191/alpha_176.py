@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     CORR(RANK(((CLOSE-TSMIN(LOW,12))/(TSMAX(HIGH,12)-TSMIN(LOW,12)))),RANK(VOLUME),6)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

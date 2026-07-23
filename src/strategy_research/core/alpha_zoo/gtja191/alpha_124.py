@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (CLOSE-VWAP)/DECAYLINEAR(RANK(TSMAX(CLOSE,30)),2)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -14,7 +14,6 @@ from .china_a import ChinaAEngine
 from .crypto import CryptoEngine
 from .forex import ForexEngine
 from .global_equity import GlobalEquityEngine
-from .models import Position
 
 
 def _detect_market_simple(symbol: str) -> str:

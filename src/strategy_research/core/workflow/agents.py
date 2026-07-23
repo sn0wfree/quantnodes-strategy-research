@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from .types import AgentStatus
-
 
 @runtime_checkable
 class AgentExecutor(Protocol):

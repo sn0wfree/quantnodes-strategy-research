@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SMA(MEAN(DELAY(SMA(DELAY(CLOSE/DELAY(CLOSE,9),1),9,1),1),12)-MEAN(DELAY(SMA(DELAY(CLOSE/DELAY(CLOSE,9),1),9,1),1),26),9,1)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

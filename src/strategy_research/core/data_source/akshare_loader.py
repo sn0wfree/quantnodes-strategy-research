@@ -10,9 +10,9 @@ from typing import Optional
 
 import pandas as pd
 
-from .base import validate_date_range, normalize_ohlcv
+from .base import validate_date_range
 from .registry import register
-from .utils import is_a_share, is_etf, is_index, is_hk, is_us, is_forex, is_crypto
+from .utils import is_a_share, is_crypto, is_etf, is_forex, is_hk, is_index, is_us
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,6 @@ class AKShareLoader:
         self, code: str, start_date: str, end_date: str
     ) -> Optional[pd.DataFrame]:
         """获取单个代码的数据"""
-        import akshare as ak
 
         # 去掉横线
         sd = start_date.replace("-", "")

@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (RANK(DECAYLINEAR(CORR(VWAP,MEAN(VOLUME,80),17),20))/RANK(DECAYLINEAR(DELTA(((CLOSE*0.5)+(VWAP*0.5)),3),16)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

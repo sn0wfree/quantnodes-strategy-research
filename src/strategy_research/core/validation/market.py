@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import warnings
 from enum import Enum
-from typing import Any
 
 
 class MarketType(str, Enum):

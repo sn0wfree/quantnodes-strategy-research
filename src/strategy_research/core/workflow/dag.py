@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import deque
 
 
 def validate_dag(adj: dict[str, list[str]]) -> None:

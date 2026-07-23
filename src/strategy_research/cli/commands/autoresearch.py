@@ -30,7 +30,8 @@ def _append_backtest_evidence(
     """
     try:
         from strategy_research.core.goal import (
-            AuditRow, EvidenceInput, GoalStore,
+            EvidenceInput,
+            GoalStore,
         )
         store = GoalStore()
         goal = store.get_current_goal(session_id)
@@ -115,10 +116,18 @@ def _register_researcher_hypothesis(
 def cmd_autoresearch(args: argparse.Namespace) -> int:
     """执行 autoresearch 命令 - 运行自动化研究循环。"""
     from strategy_research.core.autoresearch import (
-        build_agent_prompt, save_agent_record, read_current_state,
-        parse_agent_output, retry_agent_spawn, get_cooldown_seconds,
-        should_run_lazy_detection, read_agent_history, detect_lazy_behavior, save_laziness_report,
-        generate_run_summary, save_run_summary, load_run_summary, DEFAULT_KEEP_RECENT,
+        DEFAULT_KEEP_RECENT,
+        detect_lazy_behavior,
+        generate_run_summary,
+        get_cooldown_seconds,
+        load_run_summary,
+        read_agent_history,
+        read_current_state,
+        retry_agent_spawn,
+        save_agent_record,
+        save_laziness_report,
+        save_run_summary,
+        should_run_lazy_detection,
     )
     from strategy_research.core.backtest import run_backtest_script
 
@@ -147,7 +156,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
     min_cooldown = args.min_cooldown or 1.0
     max_retries = args.max_retries or 3
 
-    print(f"\n🚀 启动 autoresearch 循环")
+    print("\n🚀 启动 autoresearch 循环")
     print(f"   策略: {strategy_name}")
     print(f"   cooldown: {base_cooldown}s ± {jitter}s (MIN={min_cooldown}s)")
     print(f"   max_retries: {max_retries}")
@@ -204,7 +213,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
                     lazy_results.append({"agent": agent_name, **lazy_result})
                     if lazy_result["issues"]:
                         print(f"  ⚠️ {agent_name}: {lazy_result['issues']}")
-            
+
             # 保存报告
             if lazy_results:
                 overall_score = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
@@ -403,8 +412,9 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
 
         # 2) 调用 decide() (传入 stagnation_count 让连续 reject 自动停止)
         from strategy_research.core.strategy_acceptance import (
-            AcceptanceConfig,
             decide as make_decision,
+        )
+        from strategy_research.core.strategy_acceptance import (
             load_config as load_acceptance_config,
         )
         acceptance_cfg = load_acceptance_config(
@@ -468,7 +478,7 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         # Phase C-2: 把 decision breakdown 写入 summary (供审计)
         summary["acceptance_decision"] = decision.to_dict()
         save_run_summary(run_dir, summary)
-        print(f"  summary.json 已保存")
+        print("  summary.json 已保存")
 
         print(f"\n✅ 第 {round_num} 轮完成 ({run_name})")
         print(f"  verdict: {verdict}")
@@ -513,9 +523,8 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
     返回: JSON 字符串, 调用方 parse_agent_output() 解码.
     """
     from strategy_research.core.agent.role_factory import (
-        should_use_real_llm,
         run_agent_via_llm,
-        build_agent_loop,
+        should_use_real_llm,
     )
 
     # Phase C-1: 真 LLM 路径

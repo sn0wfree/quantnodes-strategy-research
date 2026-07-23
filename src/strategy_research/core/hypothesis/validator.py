@@ -91,7 +91,7 @@ def validate_hypothesis(
     Returns:
         ValidationResult with decision, metrics, reasons, and raw results.
     """
-    from .registry import Hypothesis, VALID_TRANSITIONS, _check_transition
+    from .registry import VALID_TRANSITIONS, Hypothesis
 
     if not isinstance(hyp, Hypothesis):
         raise TypeError("hyp must be a Hypothesis instance")
@@ -167,7 +167,6 @@ def validate_hypothesis(
     # If 2+ checks pass (no reject reason), validate. If 2+ fail, reject.
     # Inconclusive otherwise.
     fail_count = sum(1 for r in reasons if r)
-    total_checks = 3
     if fail_count == 0:
         decision = "validated"
     elif fail_count >= 2:

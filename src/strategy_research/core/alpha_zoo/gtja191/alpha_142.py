@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (((-1*RANK(TSRANK(CLOSE,10)))*RANK(DELTA(DELTA(CLOSE,1),1)))*RANK(TSRANK((VOLUME/MEAN(VOLUME,20)),5)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

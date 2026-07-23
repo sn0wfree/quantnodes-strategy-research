@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (MEAN(VOLUME,9)-MEAN(VOLUME,26))/MEAN(VOLUME,12)*100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (SUM(CLOSE-DELAY(CLOSE,1) if up else 0,12) - SUM(ABS if down else 0,12)) / (SUM up + SUM down) * 100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

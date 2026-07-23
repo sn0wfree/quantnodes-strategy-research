@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (RANK(CORR(RANK(HIGH),RANK(MEAN(VOLUME,15)),9))*-1)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

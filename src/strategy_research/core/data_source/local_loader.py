@@ -10,7 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .base import validate_date_range, normalize_ohlcv, validate_ohlc
+from .base import normalize_ohlcv, validate_date_range, validate_ohlc
 from .registry import register
 
 logger = logging.getLogger(__name__)

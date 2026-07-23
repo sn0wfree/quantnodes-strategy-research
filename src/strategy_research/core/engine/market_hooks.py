@@ -12,7 +12,6 @@ import pandas as pd
 
 from .models import Position
 
-
 # ── Crypto ────────────────────────────────────────────
 
 FUNDING_HOURS = {0, 8, 16}

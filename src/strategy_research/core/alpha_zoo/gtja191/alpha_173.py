@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     3*SMA(CLOSE,13,2)-2*SMA(SMA(CLOSE,13,2),13,2)+SMA(SMA(SMA(LOG(CLOSE),13,2),13,2),13,2)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

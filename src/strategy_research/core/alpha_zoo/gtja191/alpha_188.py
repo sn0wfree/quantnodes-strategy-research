@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (HIGH-LOW-SMA(HIGH-LOW,11,2))/SMA(HIGH-LOW,11,2)*100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     RANK(DECAYLINEAR(CORR(VWAP,SUM(MEAN(VOLUME,5),26),5),7)) - RANK(DECAYLINEAR(TSRANK(MIN(CORR(RANK(OPEN),RANK(MEAN(VOLUME,15)),21),9),7),8))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

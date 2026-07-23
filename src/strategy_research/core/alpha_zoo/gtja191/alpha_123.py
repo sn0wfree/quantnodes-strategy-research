@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((RANK(CORR(SUM(((HIGH+LOW)/2),20),SUM(MEAN(VOLUME,60),20),9)) < RANK(CORR(LOW,VOLUME,6))) * -1)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

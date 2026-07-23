@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((HIGH-SMA(CLOSE,15,2))-(LOW-SMA(CLOSE,15,2)))/CLOSE
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

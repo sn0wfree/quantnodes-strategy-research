@@ -9,7 +9,6 @@ import pandas as pd
 
 from .futures_base import FuturesBaseEngine
 
-
 # 品种乘数表 (部分)
 _CN_FUTURES_MULTIPLIERS = {
     "IF": 300.0, "IC": 200.0, "IM": 200.0, "IH": 300.0,  # 股指

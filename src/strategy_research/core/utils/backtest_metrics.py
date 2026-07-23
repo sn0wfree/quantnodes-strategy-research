@@ -13,7 +13,6 @@ import pandas as pd
 
 from .backtest_models import TradeRecord
 
-
 # ─── Bars/year 表（7 源 × 7 周期）───
 
 _TRADING_DAYS = {

@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((RANK(CORR((OPEN), SUM(MEAN(VOLUME,60), 9), 6)) < RANK((OPEN - MIN(OPEN, 14)))) * -1)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

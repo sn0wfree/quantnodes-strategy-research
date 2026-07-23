@@ -165,18 +165,15 @@ def _avg_dd(nav: pd.Series) -> float:
         return 0.0
 
     # 提取每段回撤的平均深度
-    in_dd = False
     cur_dds = []
     depths = []
     for v, flag in zip(dd.values, is_dd.values):
         if flag:
             cur_dds.append(v)
-            in_dd = True
         else:
             if cur_dds:
                 depths.append(np.mean(cur_dds))
                 cur_dds = []
-            in_dd = False
     if cur_dds:
         depths.append(np.mean(cur_dds))
     return float(np.mean(depths)) if depths else 0.0

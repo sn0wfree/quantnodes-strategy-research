@@ -21,9 +21,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from .compute_factor import OPERATORS
 from .alpha_zoo_ops import ALPHA_ZOO_OPS
-
+from .compute_factor import OPERATORS
 
 # ============================================================
 # YAML 加载

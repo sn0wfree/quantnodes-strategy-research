@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((RANK((VWAP-MIN(VWAP,12)))^TSRANK(CORR(TSRANK(VWAP,20),TSRANK(MEAN(VOLUME,60),2),18),3))*-1)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

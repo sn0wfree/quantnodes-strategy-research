@@ -13,7 +13,6 @@ upstream responses to the OpenAI Chat Completions shape before parsing.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
 import re

@@ -21,20 +21,18 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from ...backtest import run_backtest_from_yaml
+from ...compute_factor import compute_factor
 from ..sandbox import (
-    ASTValidationError,
     PathValidationError,
     PathWhitelist,
     validate_python_source,
 )
 from ..tools import BaseTool, ToolRegistry
-from ...compute_factor import compute_factor
-from ...backtest import run_backtest_from_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -878,8 +876,6 @@ class OptionsPricingTool(BaseTool):
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
-        import math
-
         try:
             spot = float(kwargs["spot"])
             strike = float(kwargs["strike"])
@@ -895,7 +891,8 @@ class OptionsPricingTool(BaseTool):
         if T <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
             return _err("spot, strike, volatility, and time_to_expiry must be positive")
 
-        from math import log, sqrt, exp
+        from math import exp, log, sqrt
+
         from scipy.stats import norm
 
         d1 = (log(spot / strike) + (rate + 0.5 * vol**2) * T) / (vol * sqrt(T))

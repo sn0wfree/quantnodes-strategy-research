@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (CLOSE-DELAY(CLOSE,1))/DELAY(CLOSE,1)*VOLUME
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

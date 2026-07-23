@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
-from typing import List
 
-from .cron_parser import validate_cron, next_cron_trigger
+from .cron_parser import next_cron_trigger, validate_cron
 from .models import JobStatus, ScheduledResearchJob
 from .store import ScheduledResearchStore
 
@@ -96,7 +95,7 @@ def cmd_schedule_show(args) -> int:
         print(f"任务 '{args.job_id}' 不存在")
         return 1
 
-    print(f"=== 定时任务详情 ===")
+    print("=== 定时任务详情 ===")
     print(f"  ID:        {job.id}")
     print(f"  工作区:    {job.workspace}")
     print(f"  策略:      {job.strategy_name}")
@@ -179,10 +178,10 @@ def cmd_schedule_start(args) -> int:
         print(f"恢复了 {recovered} 个中断的任务")
 
     jobs = store.list_jobs(status=JobStatus.PENDING)
-    print(f"=== 启动调度器 ===")
+    print("=== 启动调度器 ===")
     print(f"  待执行任务: {len(jobs)} 个")
     print(f"  Tick 间隔:  {args.tick}s")
-    print(f"  按 Ctrl+C 停止")
+    print("  按 Ctrl+C 停止")
     print()
 
     executor.start()

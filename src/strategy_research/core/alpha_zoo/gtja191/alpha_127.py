@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (MEAN((100*(CLOSE-MAX(CLOSE,12))/MAX(CLOSE,12))^2,12))^(1/2)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

@@ -15,9 +15,9 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional
 
 from ..agent.frontmatter import parse_frontmatter as _parse_frontmatter
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +251,6 @@ class PersistentMemory:
         Returns:
             Top-scoring memory entries.
         """
-        import time
 
         entries = self._scan_entries()
         if not entries:
@@ -270,8 +269,8 @@ class PersistentMemory:
     ) -> List[MemoryEntry]:
         """Embedding-based semantic search. Returns [] if unavailable."""
         try:
-            from sentence_transformers import SentenceTransformer
             import numpy as np
+            from sentence_transformers import SentenceTransformer
         except ImportError:
             return []
 

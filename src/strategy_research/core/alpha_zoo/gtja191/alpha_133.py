@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((20-HIGHDAY(HIGH,20))/20)*100 - ((20-LOWDAY(LOW,20))/20)*100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

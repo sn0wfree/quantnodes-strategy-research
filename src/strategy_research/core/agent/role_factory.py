@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 # 9 角色对应的 templates/.prompts/<role>.md 文件名
 _ROLE_PROMPT_FILES = {
     "researcher": "researcher.md",
@@ -100,7 +99,7 @@ def build_agent_loop(
     llm_config: Any | None = None,
     session_manager: Any | None = None,
     max_iterations: int = 8,
-) -> "AgentLoop | None":
+) -> "AgentLoop | None":  # noqa: F821
     """为 role 构造 AgentLoop.
 
     Args:
@@ -207,7 +206,6 @@ def run_agent_via_llm(
 
 
 __all__ = [
-    "ROLE_TOOL_WHITELIST",
     "build_agent_loop",
     "run_agent_via_llm",
     "should_use_real_llm",

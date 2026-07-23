@@ -389,7 +389,7 @@ class HypothesisRegistry:
         """Mark two hypotheses as contradicting (one-way from hyp_id's perspective)."""
         records = self.list()
         hyp_a = self._find_required(records, hyp_id)
-        hyp_b = self._find_required(records, other_id)
+        self._find_required(records, other_id)
         if other_id not in hyp_a.contradicts_ids:
             hyp_a.contradicts_ids.append(other_id)
         hyp_a.invalidation_notes = (

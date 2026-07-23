@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((-1*((LOW-CLOSE)*(OPEN^5)))/((CLOSE-HIGH)*(CLOSE^5)))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

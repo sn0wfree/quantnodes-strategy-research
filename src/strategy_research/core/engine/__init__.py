@@ -3,6 +3,7 @@
 from .artifacts import write_all_artifacts
 from .base import BaseEngine
 from .china_a import ChinaAEngine
+from .china_futures import ChinaFuturesEngine
 from .composite import CompositeEngine
 from .config import BacktestConfigSchema
 from .crypto import CryptoEngine
@@ -11,7 +12,6 @@ from .futures_base import FuturesBaseEngine
 from .global_equity import GlobalEquityEngine
 from .global_futures import GlobalFuturesEngine
 from .india_equity import IndiaEquityEngine
-from .china_futures import ChinaFuturesEngine
 from .market_hooks import calc_crypto_funding_fee, check_crypto_liquidation
 from .models import EquitySnapshot, Position, TradeRecord
 from .runner import _create_market_engine, _load_signal_engine, _validate_signal_engine_source, run_engine_backtest

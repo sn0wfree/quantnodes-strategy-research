@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     (((-1 * RANK((OPEN - DELAY(HIGH, 1)))) * RANK((OPEN - DELAY(CLOSE, 1)))) * RANK((OPEN - DELAY(LOW, 1))))
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

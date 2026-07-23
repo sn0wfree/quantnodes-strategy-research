@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -83,7 +81,7 @@ class IFindLoader:
 
         session_id = resp.headers.get("Mcp-Session-Id")
         if not session_id:
-            raise RuntimeError(f"初始化失败: 未返回 session ID")
+            raise RuntimeError("初始化失败: 未返回 session ID")
 
         self._sessions[server] = session_id
 

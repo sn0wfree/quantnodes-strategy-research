@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SMA(((CLOSE>DELAY(CLOSE,1))?1/(CLOSE-DELAY(CLOSE,1)):1) - MIN(...,12))/(HIGH-LOW)*100, 13, 2)
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

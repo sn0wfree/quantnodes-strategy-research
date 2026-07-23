@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     ((CLOSE-SUM(MIN(LOW,DELAY(CLOSE,1)),6))/SUM(MAX(HIGH,DELAY(CLOSE,1))-MIN(LOW,DELAY(CLOSE,1)),6))*12*24 + similar over 12 and 24 windows /(6*12+6*24+12*24)*100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

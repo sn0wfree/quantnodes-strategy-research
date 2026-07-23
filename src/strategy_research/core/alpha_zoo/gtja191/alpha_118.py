@@ -9,7 +9,7 @@
 Formula (verbatim from the report):
     SUM(HIGH-OPEN,20)/SUM(OPEN-LOW,20)*100
 
-Notes: 
+Notes:
 """
 from __future__ import annotations
 

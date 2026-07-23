@@ -19,7 +19,7 @@ from typing import Any
 
 from .context import format_goal_context
 from .models import AuditRow, EvidenceInput, GoalStatus, RiskTier
-from .policy import normalize_required_text, reject_live_execution_objective
+from .policy import normalize_required_text
 from .store import GoalStore
 
 
@@ -140,8 +140,8 @@ def cmd_goal_audit(args: argparse.Namespace) -> int:
         return 1
 
     # Write audit row directly via raw SQL (no status change)
-    import json as _json
     from datetime import datetime, timezone
+
     from .store import _id, _json_dumps
     audit_id = _id("audit")
     now = datetime.now(timezone.utc).isoformat()

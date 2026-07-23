@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from .bootstrap import bootstrap_sharpe_ci
 from .market import (
-    MarketType,
     SUPPORTED_MARKETS,
+    MarketType,
     bars_per_year,
     warn_if_unsupported_market,
 )

@@ -21,12 +21,10 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .registry import (
-    HYPOTHESIS_STATUSES,
     VALID_TRANSITIONS,
     Hypothesis,
     _coerce_str_list,

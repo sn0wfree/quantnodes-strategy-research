@@ -27,23 +27,21 @@ Exception handling policy:
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import json
 import logging
-import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..git import git_commit
 from ..hooks.composite import CompositeHook
 from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
-from ..git import git_commit
 from .context import ContextBuilder, estimate_tokens
 from .progress import HeartbeatTimer
 from .tools import ToolRegistry
@@ -287,8 +285,8 @@ class AgentLoop:
                 goal_snapshot = self._get_goal_snapshot()
                 if goal_snapshot is not None:
                     from ..goal.context import (
-                        goal_needs_continuation,
                         format_goal_continuation_prompt,
+                        goal_needs_continuation,
                     )
                     if goal_needs_continuation(goal_snapshot):
                         # Inject continuation prompt instead of stopping
