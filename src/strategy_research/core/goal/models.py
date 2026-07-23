@@ -60,6 +60,8 @@ class GoalRecord:
     updated_at: str = ""
     completed_at: str | None = None
     recap: str | None = None
+    progress_percent: float = 0.0
+    parent_goal_id: str | None = None
 
 
 @dataclass(frozen=True)

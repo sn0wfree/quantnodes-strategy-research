@@ -38,6 +38,7 @@ def format_goal_context(snapshot: dict[str, Any]) -> str:
         f"status: {goal['status']}",
         f"objective: {goal['objective']}",
         f"risk_tier: {goal.get('risk_tier', 'research_general')}",
+        f"progress: {goal.get('progress_percent', 0.0):.1f}%",
         f"evidence_count: {snapshot.get('evidence_count', len(evidence))}",
         "criteria:",
     ]

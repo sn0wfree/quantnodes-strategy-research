@@ -146,8 +146,8 @@ class TestGoalRecord:
         assert is_dataclass(record)
 
     def test_field_count(self):
-        """GoalRecord has 19 fields (per the model definition)."""
-        assert len(fields(GoalRecord)) == 19
+        """GoalRecord has 21 fields (per the model definition, including progress_percent + parent_goal_id)."""
+        assert len(fields(GoalRecord)) == 21
 
 
 # ─── GoalClaim ────────────────────────────────────────────────────────────

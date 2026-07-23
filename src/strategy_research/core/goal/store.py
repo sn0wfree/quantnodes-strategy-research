@@ -171,7 +171,9 @@ class GoalStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     completed_at TEXT,
-                    recap TEXT
+                    recap TEXT,
+                    progress_percent REAL NOT NULL DEFAULT 0.0,
+                    parent_goal_id TEXT
                 );
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_goals_one_current_per_session
@@ -268,6 +270,25 @@ class GoalStore:
                 self._conn.execute("PRAGMA user_version=1")
             self._conn.commit()
 
+        # P3-B migration: add progress_percent and parent_goal_id columns if missing
+        self._migrate_p3b()
+
+    def _migrate_p3b(self) -> None:
+        """Add progress_percent and parent_goal_id columns to existing goals table."""
+        cols = [
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(goals)").fetchall()
+        ]
+        if "progress_percent" not in cols:
+            self._conn.execute(
+                "ALTER TABLE goals ADD COLUMN progress_percent REAL NOT NULL DEFAULT 0.0"
+            )
+        if "parent_goal_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE goals ADD COLUMN parent_goal_id TEXT"
+            )
+        self._conn.commit()
+
     @contextmanager
     def _write_transaction(self):
         """Open an immediate write transaction for cross-connection safety."""
@@ -294,6 +315,7 @@ class GoalStore:
         token_budget: int | None = None,
         turn_budget: int | None = None,
         time_budget_seconds: int | None = None,
+        parent_goal_id: str | None = None,
     ) -> GoalRecord:
         """Supersede the current goal and create a new active goal.
 
@@ -308,6 +330,7 @@ class GoalStore:
             token_budget: Optional token budget.
             turn_budget: Optional turn budget.
             time_budget_seconds: Optional wall-clock budget.
+            parent_goal_id: Optional parent goal for sub-goal decomposition.
 
         Returns:
             The newly active goal.
@@ -354,9 +377,10 @@ class GoalStore:
                 INSERT INTO goals (
                     goal_id, session_id, status, objective, ui_summary, source,
                     protocol, risk_tier, token_budget, turn_budget,
-                    time_budget_seconds, created_at, updated_at
+                    time_budget_seconds, created_at, updated_at, progress_percent,
+                    parent_goal_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     goal_id,
@@ -372,6 +396,8 @@ class GoalStore:
                     time_budget_seconds,
                     now,
                     now,
+                    0.0,
+                    parent_goal_id,
                 ),
             )
             self._conn.execute(
@@ -746,6 +772,9 @@ class GoalStore:
                     (now, goal_id, session_id, evidence.criterion_id),
                 )
 
+            # P3-B: Recompute progress_percent after evidence addition
+            self._update_progress(goal_id)
+
         record = self._get_evidence(evidence_id)
         if record is None:
             raise RuntimeError("created evidence could not be reloaded")
@@ -815,6 +844,9 @@ class GoalStore:
                         """,
                         (row.result, now, goal_id, session_id, row.criterion_id),
                     )
+
+            # P3-B: Recompute progress_percent after status update
+            self._update_progress(goal_id)
 
         updated = self.get_goal(goal_id)
         if updated is None:
@@ -984,6 +1016,174 @@ class GoalStore:
         ).fetchone()
         return self._evidence_from_row(row) if row else None
 
+    # ── Progress computation (P3-B) ─────────────────────────
+
+    def _compute_progress(self, goal_id: str) -> float:
+        """Compute progress_percent for a goal based on covered required criteria.
+
+        Returns:
+            Float in [0.0, 100.0]. Goals with no required criteria return 100.0.
+        """
+        from .context import criterion_is_covered, goal_progress_tuple
+
+        # Read-only queries — use direct connection access (no transaction needed)
+        goal_row = self._conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (goal_id,)
+        ).fetchone()
+        if goal_row is None:
+            return 0.0
+
+        criteria_rows = self._conn.execute(
+            "SELECT * FROM goal_criteria WHERE goal_id = ? ORDER BY created_at",
+            (goal_id,),
+        ).fetchall()
+        evidence_rows = self._conn.execute(
+            "SELECT * FROM goal_evidence WHERE goal_id = ? ORDER BY created_at",
+            (goal_id,),
+        ).fetchall()
+
+        covered = 0
+        required_total = 0
+        for crit_row in criteria_rows:
+            if not crit_row["required"]:
+                continue
+            required_total += 1
+            criterion_id = crit_row["criterion_id"]
+            if crit_row["status"] not in {"", "pending", "open", "unsatisfied", "missing", "stale", "too_weak"}:
+                covered += 1
+                continue
+            for ev_row in evidence_rows:
+                if ev_row["criterion_id"] == criterion_id:
+                    covered += 1
+                    break
+
+        if required_total == 0:
+            return 100.0
+        return round(min(100.0, max(0.0, covered / required_total * 100.0)), 2)
+
+    def _update_progress(self, goal_id: str) -> None:
+        """Recompute and persist progress_percent for a goal.
+
+        Must be called within an open write transaction (BEGIN IMMEDIATE).
+        """
+        pct = self._compute_progress(goal_id)
+        self._conn.execute(
+            "UPDATE goals SET progress_percent = ?, updated_at = ? WHERE goal_id = ?",
+            (pct, _now_iso(), goal_id),
+        )
+
+    def get_current_snapshot_by_id(self, goal_id: str) -> dict[str, Any] | None:
+        """Return a snapshot dict for any goal by id (not just current)."""
+        goal_row = self._conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (goal_id,)
+        ).fetchone()
+        if goal_row is None:
+            return None
+        goal = self._goal_from_row(goal_row)
+        criteria_rows = self._conn.execute(
+            "SELECT * FROM goal_criteria WHERE goal_id = ? ORDER BY created_at",
+            (goal_id,),
+        ).fetchall()
+        evidence_rows = self._conn.execute(
+            "SELECT * FROM goal_evidence WHERE goal_id = ? ORDER BY created_at",
+            (goal_id,),
+        ).fetchall()
+        return {
+            "goal": _to_json_dict(goal),
+            "criteria": [dict(r) for r in criteria_rows],
+            "evidence": [dict(r) for r in evidence_rows],
+            "evidence_count": len(evidence_rows),
+        }
+
+    # ── Sub-goal decomposition (P3-B) ────────────────────────
+
+    @_synchronized
+    def decompose_goal(
+        self,
+        *,
+        parent_goal_id: str,
+        sub_objectives: list[str],
+        default_criteria: list[str] | None = None,
+    ) -> list[GoalRecord]:
+        """Decompose a parent goal into multiple sub-goals.
+
+        Each sub-objective becomes a new active goal with the parent_goal_id set.
+        Sub-goals share the parent's session_id.
+
+        Args:
+            parent_goal_id: The goal to decompose.
+            sub_objectives: List of sub-goal objectives (must be non-empty).
+            default_criteria: Criteria applied to each sub-goal. Defaults to
+                ``default_goal_criteria()``.
+
+        Returns:
+            List of newly created sub-goals.
+        """
+        parent_row = self._conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (parent_goal_id,)
+        ).fetchone()
+        if parent_row is None:
+            raise ValueError(f"unknown parent_goal_id: {parent_goal_id}")
+        parent = self._goal_from_row(parent_row)
+
+        if not sub_objectives:
+            raise ValueError("sub_objectives cannot be empty")
+
+        from .context import default_goal_criteria
+        criteria = default_criteria if default_criteria is None else default_criteria
+
+        sub_goals: list[GoalRecord] = []
+        for obj in sub_objectives:
+            sub = self.replace_goal(
+                session_id=parent.session_id,
+                objective=obj,
+                criteria=criteria,
+                ui_summary=f"[sub of {parent_goal_id}] {obj[:60]}",
+                source="decomposition",
+                protocol=parent.protocol,
+                risk_tier=parent.risk_tier,
+                token_budget=parent.token_budget,
+                turn_budget=parent.turn_budget,
+                time_budget_seconds=parent.time_budget_seconds,
+                parent_goal_id=parent_goal_id,
+            )
+            sub_goals.append(sub)
+        return sub_goals
+
+    @_synchronized
+    def list_sub_goals(self, parent_goal_id: str) -> list[GoalRecord]:
+        """Return all sub-goals of a parent goal (any status)."""
+        rows = self._conn.execute(
+            "SELECT * FROM goals WHERE parent_goal_id = ? ORDER BY created_at",
+            (parent_goal_id,),
+        ).fetchall()
+        return [self._goal_from_row(r) for r in rows]
+
+    def list_parent_goals(self, child_goal_id: str) -> list[GoalRecord]:
+        """Return the chain of ancestors for a sub-goal (parent, grandparent, ...)."""
+        chain: list[GoalRecord] = []
+        current_id: str | None = child_goal_id
+        seen: set[str] = set()
+        while current_id and current_id not in seen:
+            seen.add(current_id)
+            row = self._conn.execute(
+                "SELECT * FROM goals WHERE goal_id = ?", (current_id,)
+            ).fetchone()
+            if row is None:
+                break
+            goal = self._goal_from_row(row)
+            if goal.parent_goal_id is None:
+                break
+            parent_row = self._conn.execute(
+                "SELECT * FROM goals WHERE goal_id = ?", (goal.parent_goal_id,)
+            ).fetchone()
+            if parent_row is None:
+                break
+            parent = self._goal_from_row(parent_row)
+            chain.append(parent)
+            current_id = parent.parent_goal_id
+        return chain
+
     @staticmethod
     def _goal_from_row(row: sqlite3.Row) -> GoalRecord:
         return GoalRecord(
@@ -1006,6 +1206,8 @@ class GoalStore:
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],
             recap=row["recap"],
+            progress_percent=float(row["progress_percent"]) if row["progress_percent"] is not None else 0.0,
+            parent_goal_id=row["parent_goal_id"] if "parent_goal_id" in row.keys() else None,
         )
 
     @staticmethod
