@@ -104,10 +104,10 @@ class TestRouterEntrypoints:
         assert rc == 0
 
     def test_run_with_args_calls_search(self):
-        rc = run("hello", "world")
+        rc = run(None, "hello", "world")
         # Will return 0 or 1 depending on whether db is configured.
         assert rc in (0, 1)
 
     def test_run_with_single_arg(self):
-        rc = run("term")
+        rc = run(None, "term")
         assert rc in (0, 1)
