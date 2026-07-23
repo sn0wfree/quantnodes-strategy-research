@@ -154,9 +154,9 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
 @router.post("/complete")
 async def goal_complete(req: GoalCompleteRequest, request: Request):
     """完成 goal。"""
-    try:
-        from ...core.goal import GoalStatus, GoalStore
+    from ...core.goal import GoalStatus, GoalStore, StaleGoalError
 
+    try:
         db_path = getattr(request.app.state, "goal_db_path", None)
         store = GoalStore(db_path=db_path)
         current = store.get_current_goal(req.session_id)
@@ -185,5 +185,9 @@ async def goal_complete(req: GoalCompleteRequest, request: Request):
         }
     except HTTPException:
         raise
+    except StaleGoalError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

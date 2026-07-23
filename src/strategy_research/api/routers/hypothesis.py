@@ -133,5 +133,11 @@ async def hypothesis_update(req: HypothesisUpdateRequest, request: Request):
         return {"status": "ok", "hypothesis": hyp.to_dict()}
     except HTTPException:
         raise
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        msg = str(e).lower()
+        code = 404 if "not found" in msg else 400
+        raise HTTPException(status_code=code, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

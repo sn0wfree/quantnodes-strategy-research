@@ -350,24 +350,14 @@ class TestHypothesisRouter:
         assert "run_cards" in hyp
         assert "related_ids" in hyp
 
-    def test_hypothesis_update_missing_id_returns_error(self, client_with_hypothesis):
-        """Updating a nonexistent id should return an HTTP error (not silently 200).
-
-        Currently the router returns 500 because registry.update() raises
-        ValueError; the router converts every Exception to 500 with the
-        ValueError message in the detail. Either 404 or 500 is acceptable,
-        but the response must signal failure.
-        """
+    def test_hypothesis_update_returns_404_for_missing_id(self, client_with_hypothesis):
+        """Updating a nonexistent id should return 404, not 500."""
         r = client_with_hypothesis.put("/api/hypothesis/update", json={
             "hypothesis_id": "hyp_does_not_exist",
             "status": "testing",
         })
-        assert r.status_code >= 400
-        # Body must contain an error detail (not the OK status payload)
-        body = r.json()
-        assert body.get("status") != "ok"
-        # The detail should mention the missing id
-        detail = body.get("detail", "") or ""
+        assert r.status_code == 404
+        detail = r.json().get("detail", "")
         assert "hyp_does_not_exist" in detail or "not found" in detail.lower()
 
     def test_hypothesis_search_with_query_returns_results(self, client_with_hypothesis):
