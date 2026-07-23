@@ -69,7 +69,7 @@
 - **Python 3.10+**
 - **数据**：DuckDB / SQLite / Pandas
 - **LLM**：OpenAI 兼容（httpx 零依赖）
-- **测试**：pytest（3,770+ 测试）
+- **测试**：pytest（5,536+ 测试）
 - **借鉴**：vibe-trading-ai 0.1.11（HKUDS，MIT）/ llmwikify（Hook 系统）
 
 ---
@@ -148,7 +148,7 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 ✓ 创建 README.md
 ✓ 创建 config.yaml
 ✓ 创建 .prompts/ (11 个提示词)
-✓ 创建 .skills/ (10 份方法论)
+✓ 创建 .skills/ (27 份方法论)
 ✓ 创建 strategies/test_strat/
 ✓ 初始化 DuckDB: /tmp/demo_ws/data.duckdb
 ✓ 初始化 Git 仓库
@@ -257,7 +257,7 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 │   ├── anti_overfit_analyst.md
 │   ├── backtest_diagnostics.md
 │   └── critic.md
-└── .skills/               # 10 份方法论
+└── .skills/               # 27 份方法论
     ├── data-routing.md
     ├── factor-research.md
     ├── backtest-diagnose.md
@@ -348,6 +348,46 @@ factors:
     alpha_ids: [alpha101_001, gtja191_010]
     combination: equal
 ```
+
+---
+
+## Swarm Presets (31 个)
+
+`quantnodes-research swarm run --preset <name>` 启动内置多 agent 团队。每个 preset 是 YAML DAG（节点 + 依赖 + 工具白名单），由 `SwarmRuntime` 按拓扑层并行执行。
+
+| 类别 | 数量 | 示例 |
+|------|------|------|
+| Equity 研究 | 5 | `equity_research_team`、`value_investing_committee`、`fundamental_research_team` |
+| Quant 策略 | 4 | `quant_research_team`、`ml_quant_lab`、`pairs_research_lab`、`statistical_arbitrage_desk` |
+| 衍生品/加密 | 3 | `crypto_trading_desk`、`derivatives_strategy_desk`、`convertible_bond_team` |
+| 宏观/全球 | 5 | `macro_strategy_forum`、`global_allocation_committee`、`commodity_research_team` |
+| 情绪/资金流 | 3 | `sentiment_intelligence_team`、`flow_analysis_team`、`social_alpha_team` |
+| 投资委员会 | 4 | `investment_committee`、`risk_committee`、`portfolio_review_board`、`asset_allocation_committee` |
+| 技术分析 | 2 | `technical_analysis_panel`、`market_microstructure_team` |
+| Pipeline | 3 | `full_pipeline`、`crypto_lab`、`sector_rotation` |
+| Event/ETF | 2 | `event_driven_task_force`、`etf_allocation_desk` |
+
+完整列表与 DAG 见 `src/strategy_research/core/swarm/presets/`。Phase D (2026-07) 与 vibe-trading 30 preset 持平（+1 bonus `convertible_bond_team`）。
+
+---
+
+## MCP 集成 (13 个工具)
+
+`quantnodes-research mcp serve` 通过 [Model Context Protocol](https://modelcontextprotocol.io) 暴露 13 个研究工具，支持 stdio + SSE 传输。所有工具均**研究只读**（无下单/撮合/交易）— 安全语义借鉴 vibe-trading。
+
+| 工具 | 真接实现 | 用途 |
+|------|----------|------|
+| `list_skills` / `load_skill` | `SkillRegistry` | 浏览/加载 27 个 Skill |
+| `list_hypotheses` | `HypothesisRegistry` | 列出研究假说 |
+| `start_research_goal` / `get_research_goal` | `GoalStore` (SQLite) | 启动/查询研究目标 |
+| `run_backtest` | `core.backtest.run_backtest_script` | 执行回测 |
+| `validate_run` | `core.validation.runner` | Monte Carlo + Bootstrap + Walk-Forward |
+| `compute_factor` | `core.compute_factor` + DuckDB | 计算因子值 |
+| `search_memory` / `add_memory` | `PersistentMemory` | 跨会话记忆 |
+| `list_sessions` / `search_messages` | `SessionDB` (SQLite + FTS5) | 会话搜索 |
+| `list_swarm_presets` | `swarm.preset_loader` | 浏览 31 个 swarm preset |
+
+Phase B (2026-07) 把 7 个原 stub 工具接入真实现，告别"假数据"。
 
 ---
 
@@ -461,7 +501,7 @@ $ quantnodes-research session list
 
 ### 测试统计
 
-- **4,311+ 测试通过**
+- **5,536+ 测试通过**
 - **0 回归**
 - 测试覆盖：P0 + P1 + P1.5 + P2 + P3 + backtest-overhaul + P4 + Backtest Engine 全覆盖
 - CLI 子命令：13 → **32**（+7 goal + 6 hypothesis + 1 validate-run + 4 portfolio + 1 api + 1 webui）
@@ -492,7 +532,7 @@ pip install -e ".[dev]"
 
 ```bash
 # 全部测试
-pytest                                    # 3,770 passed
+pytest                                    # 5,536 passed
 
 # 单跑特定模块
 pytest tests/test_preflight.py -v         # preflight 测试
@@ -514,7 +554,7 @@ ruff check .
 mypy src/strategy_research/
 ```
 
-### 测试覆盖（3,770+ 个测试）
+### 测试覆盖（5,536+ 个测试）
 
 | 模块 | 测试数 | 状态 |
 |---|---|---|
