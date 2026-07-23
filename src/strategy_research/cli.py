@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from . import _TEMPLATES_DIR
+
 
 # ============================================================
 # 模板内容 (从文件加载或内嵌)
@@ -264,16 +266,30 @@ risk:
     # .skills/
     skills_dir = path / ".skills"
     skills_dir.mkdir(exist_ok=True)
-    for skill_name in [
-        "data-routing.md", "factor-research.md", "backtest-diagnose.md",
-        "correlation-analysis.md", "ml-strategy.md", "performance-attribution.md",
-        "quant-statistics.md", "risk-analysis.md", "sector-rotation.md",
-        "research-discipline.md",
-    ]:
-        skill_content = _load_template(f".skills/{skill_name}")
-        if skill_content:
-            (skills_dir / skill_name).write_text(skill_content, encoding="utf-8")
-    print("✓ 创建 .skills/ (10 份方法论)")
+
+    # 复制 templates/.skills/ 下全部 skill (Phase A-2: 全量复制)
+    templates_skills = _TEMPLATES_DIR / ".skills"
+    copied_skills: list[str] = []
+    if templates_skills.is_dir():
+        for skill_file in sorted(templates_skills.glob("*.md")):
+            content = skill_file.read_text(encoding="utf-8")
+            (skills_dir / skill_file.name).write_text(content, encoding="utf-8")
+            copied_skills.append(skill_file.name)
+
+    # 若全量复制失败（如 templates 损坏），降级为硬编码子集 (P5 时期的 10 个)
+    if not copied_skills:
+        for skill_name in [
+            "data-routing.md", "factor-research.md", "backtest-diagnose.md",
+            "correlation-analysis.md", "ml-strategy.md", "performance-attribution.md",
+            "quant-statistics.md", "risk-analysis.md", "sector-rotation.md",
+            "research-discipline.md",
+        ]:
+            skill_content = _load_template(f".skills/{skill_name}")
+            if skill_content:
+                (skills_dir / skill_name).write_text(skill_content, encoding="utf-8")
+                copied_skills.append(skill_name)
+
+    print(f"✓ 创建 .skills/ ({len(copied_skills)} 份方法论)")
 
     # 策略目录
     _create_strategy(path, strategy_name, strategy_type, goal_metric)
@@ -1420,6 +1436,25 @@ def _spawn_agent(agent_name: str, workspace_path: Path, strategy_name: str,
             "fix_suggestion": "N/A",
             "confidence": 1.0
         })
+    elif agent_name == "critic":
+        # Phase A-3: 评审 / 风险门禁 — 把现有 critic.md prompt 接到 stub
+        if behavior == "improving" and round_num >= 2:
+            approved = True
+        else:
+            approved = round_num >= 1
+        return json.dumps({
+            "approved": approved,
+            "risk_rating": "low" if approved else "high",
+            "concerns": [] if approved else ["过度拟合", "样本外未验证"],
+            "suggested_fixes": [] if approved else ["延长样本", "加入 walk-forward 验证"],
+            "confidence": 0.7 if approved else 0.4,
+            "review_dimensions": {
+                "risk": "pass" if approved else "fail",
+                "attribution": "pass",
+                "diagnostics": "pass" if approved else "fail",
+                "statistics": "pass",
+            },
+        })
     else:
         return json.dumps({"error": f"Unknown agent: {agent_name}"})
 
@@ -2140,6 +2175,10 @@ def main() -> int:
     # strategy acceptance (P6 Step 0) — 离线验收调试工具
     from .core.strategy_acceptance.cli import add_accept_subparsers
     add_accept_subparsers(subparsers)
+
+    # portfolio (P3-d) — 组合回测 / 策略相关性
+    from .core.portfolio.cli import add_portfolio_subparsers
+    add_portfolio_subparsers(subparsers)
 
     # api serve
     api_parser = subparsers.add_parser("api", help="HTTP API 服务器")

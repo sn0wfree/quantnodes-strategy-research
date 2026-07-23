@@ -302,10 +302,11 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
 
 `FALLBACK_CHAINS`（自动 fallback 链）：
 ```python
-"a_share": ["tencent", "mootdx", "eastmoney", "baostock", "akshare", "tushare", "local"]
-"hk":     ["eastmoney", "yahoo", "futu", "yfinance", "akshare", "local"]
-"us":     ["yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp", "finnhub", "alphavantage", "akshare", "local"]
-"crypto": ["okx", "ccxt", "yfinance", "local"]
+"a_share": ["tencent", "eastmoney", "akshare", "tushare", "local"]
+"hk":     ["eastmoney", "yfinance", "akshare", "ifind", "local"]
+"us":     ["yfinance", "akshare", "ifind", "local"]
+"macro":  ["fred", "ifind", "akshare", "tushare", "local"]
+"crypto": ["yfinance", "akshare", "local"]
 ```
 
 ---

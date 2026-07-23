@@ -145,11 +145,16 @@ class TestCmdInit:
         ]:
             assert expected in prompt_files, f"{expected} missing"
 
-    def test_copies_all_10_skills(
+    def test_copies_all_skills_from_templates(
         self, workspace_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """.skills/ 应包含 10 个 markdown。"""
+        """.skills/ 应包含 templates/.skills/ 下全部 skill (Phase A-2: 27 个)。
+
+        从 v0.3.0 起, init 不再硬编码 10 个 skill 列表, 而是从 templates/.skills/
+        全量复制, 让新 workspace 立刻看到所有可用方法论。
+        """
         from strategy_research.cli import cmd_init
+        from strategy_research import _TEMPLATES_DIR
         monkeypatch.setattr("builtins.input", lambda _: "test_strat")
 
         cmd_init(_make_args(workspace_path))
@@ -157,7 +162,35 @@ class TestCmdInit:
         skills_dir = workspace_path / ".skills"
         assert skills_dir.exists()
         skill_files = sorted(p.name for p in skills_dir.iterdir() if p.suffix == ".md")
-        assert len(skill_files) == 10
+
+        # 期望: workspace 下 .skills 数 == templates 下 .skills 数
+        template_skills = sorted(p.name for p in (_TEMPLATES_DIR / ".skills").iterdir() if p.suffix == ".md")
+        assert len(skill_files) == len(template_skills), (
+            f"workspace 复制了 {len(skill_files)} 个 skill, "
+            f"但 templates 下有 {len(template_skills)} 个"
+        )
+        # 验证内容一致
+        for skill_name in template_skills:
+            assert (skills_dir / skill_name).exists(), f"{skill_name} missing"
+            workspace_content = (skills_dir / skill_name).read_text(encoding="utf-8")
+            template_content = (_TEMPLATES_DIR / ".skills" / skill_name).read_text(encoding="utf-8")
+            assert workspace_content == template_content, f"{skill_name} content differs"
+
+    def test_init_copies_more_than_legacy_10_skills(
+        self, workspace_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Regression: 确保 init 不再退回到 10 skill 硬编码列表。"""
+        from strategy_research.cli import cmd_init
+        monkeypatch.setattr("builtins.input", lambda _: "test_strat")
+
+        cmd_init(_make_args(workspace_path))
+
+        skills_dir = workspace_path / ".skills"
+        skill_files = list(skills_dir.glob("*.md"))
+        assert len(skill_files) >= 20, (
+            f"Expected ≥20 skills (Phase 2 升级后), got {len(skill_files)}. "
+            f"Possible cause: cmd_init 退回硬编码 10 个列表。"
+        )
 
     def test_creates_strategy_with_rendered_templates(
         self, workspace_path: Path, monkeypatch: pytest.MonkeyPatch
