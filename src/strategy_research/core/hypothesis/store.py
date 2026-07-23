@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import uuid
@@ -39,7 +40,20 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "hypotheses.db"
 _ENV_PATH = "QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH"
-_JSON_FALLBACK_PATH = Path.home() / ".quantnodes-research" / "hypotheses.json"
+
+
+def _json_fallback_path(db_path: Path | None = None) -> Path:
+    """Return the path to the legacy JSON file for migration.
+
+    Looks at the same directory as the SQLite DB by default, so tests can
+    use tmp_path directories without polluting ~/.quantnodes-research/.
+    """
+    env_db = os.environ.get(_ENV_PATH, "").strip()
+    if env_db:
+        return Path(env_db).expanduser().parent / "hypotheses.json"
+    if db_path is not None:
+        return db_path.parent / "hypotheses.json"
+    return Path.home() / ".quantnodes-research" / "hypotheses.json"
 
 
 def _id(prefix: str) -> str:
@@ -142,7 +156,7 @@ class HypothesisStore:
         If a hypotheses.json exists and the SQLite DB is empty, import all
         records and rename the JSON file with .bak suffix.
         """
-        json_path = Path(_JSON_FALLBACK_PATH)
+        json_path = _json_fallback_path(self.db_path)
         if not json_path.exists():
             return
         # Check if DB already has data
@@ -434,9 +448,10 @@ class HypothesisStore:
         """FTS5 search across title, thesis, universe, signal, notes."""
         status_filter = _validate_status(status) if status else None
 
-        if query.strip():
+        tokens = _tokenize(query) if query.strip() else set()
+        if tokens:
             # FTS5 MATCH query
-            fts_query = " ".join(f'"{tok}"' for tok in _tokenize(query))
+            fts_query = " ".join(f'"{tok}"' for tok in tokens)
             sql = (
                 "SELECT h.* FROM hypotheses h "
                 "JOIN hypotheses_fts f ON h.hypothesis_id = f.hypothesis_id "

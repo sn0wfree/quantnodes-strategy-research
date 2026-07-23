@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -28,6 +29,8 @@ from .models import (
     StaleGoalError,
 )
 from .policy import normalize_required_text, reject_live_execution_objective
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "goals.db"
 _DB_PATH_ENV = "QUANTNODES_RESEARCH_GOAL_DB_PATH"
@@ -1185,7 +1188,7 @@ class GoalStore:
             raise ValueError("sub_objectives cannot be empty")
 
         from .context import default_goal_criteria
-        criteria = default_criteria if default_criteria is None else default_criteria
+        criteria = default_criteria or default_goal_criteria()
 
         sub_goals: list[GoalRecord] = []
         for obj in sub_objectives:
@@ -1236,7 +1239,7 @@ class GoalStore:
                 break
             parent = self._goal_from_row(parent_row)
             chain.append(parent)
-            current_id = parent.parent_goal_id
+            current_id = parent.goal_id
         return chain
 
     @staticmethod
