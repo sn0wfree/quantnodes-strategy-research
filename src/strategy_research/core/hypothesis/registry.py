@@ -25,8 +25,32 @@ HYPOTHESIS_STATUSES = (
     "monitoring",
 )
 _STATUS_SET = set(HYPOTHESIS_STATUSES)
+
+# P3-C1: Valid status transitions (state machine)
+VALID_TRANSITIONS: dict[str, set[str]] = {
+    "exploring": {"testing", "rejected"},
+    "testing": {"validated", "rejected", "exploring"},
+    "validated": {"monitoring"},
+    "monitoring": {"testing", "rejected"},
+    "rejected": set(),  # terminal
+}
+
 _ENV_PATH = "QUANTNODES_RESEARCH_HYPOTHESES_PATH"
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]")
+
+
+def _check_transition(from_status: str, to_status: str) -> None:
+    """Validate that a status transition is legal.
+
+    Raises:
+        ValueError: If the transition is not in VALID_TRANSITIONS.
+    """
+    allowed = VALID_TRANSITIONS.get(from_status, set())
+    if to_status not in allowed:
+        raise ValueError(
+            f"invalid hypothesis transition: {from_status} -> {to_status}. "
+            f"Allowed from {from_status}: {sorted(allowed) or '(terminal)'}"
+        )
 
 
 def default_hypotheses_path() -> Path:
@@ -94,6 +118,10 @@ class Hypothesis:
         skills: Relevant quant-research skills.
         run_cards: Linked backtest/run-card artifacts.
         invalidation_notes: Notes describing rejection or invalidation logic.
+        parent_hypothesis_id: Parent in the hypothesis graph (for derived hypotheses).
+        related_ids: Manually linked related hypotheses.
+        contradicts_ids: Hypotheses this one contradicts.
+        goal_id: Associated research goal id (if any).
         created_at: UTC creation timestamp.
         updated_at: UTC last update timestamp.
     """
@@ -108,6 +136,10 @@ class Hypothesis:
     skills: list[str] = field(default_factory=list)
     run_cards: list[dict[str, Any]] = field(default_factory=list)
     invalidation_notes: str = ""
+    parent_hypothesis_id: str | None = None
+    related_ids: list[str] = field(default_factory=list)
+    contradicts_ids: list[str] = field(default_factory=list)
+    goal_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
 
@@ -130,6 +162,10 @@ class Hypothesis:
             skills=_coerce_str_list(data.get("skills")),
             run_cards=list(data.get("run_cards") or data.get("backtests") or []),
             invalidation_notes=str(data.get("invalidation_notes", "")),
+            parent_hypothesis_id=data.get("parent_hypothesis_id") or None,
+            related_ids=_coerce_str_list(data.get("related_ids")),
+            contradicts_ids=_coerce_str_list(data.get("contradicts_ids")),
+            goal_id=data.get("goal_id") or None,
             created_at=str(data.get("created_at") or now),
             updated_at=str(data.get("updated_at") or data.get("created_at") or now),
         )
@@ -159,6 +195,10 @@ class HypothesisRegistry:
         data_sources: list[str] | None = None,
         skills: list[str] | None = None,
         invalidation_notes: str = "",
+        parent_hypothesis_id: str | None = None,
+        related_ids: list[str] | None = None,
+        contradicts_ids: list[str] | None = None,
+        goal_id: str | None = None,
     ) -> Hypothesis:
         """Create and persist a new hypothesis."""
         title = title.strip()
@@ -180,6 +220,10 @@ class HypothesisRegistry:
             data_sources=_coerce_str_list(data_sources),
             skills=_coerce_str_list(skills),
             invalidation_notes=invalidation_notes.strip(),
+            parent_hypothesis_id=parent_hypothesis_id,
+            related_ids=_coerce_str_list(related_ids),
+            contradicts_ids=_coerce_str_list(contradicts_ids),
+            goal_id=goal_id,
             created_at=now,
             updated_at=now,
         )
@@ -199,8 +243,17 @@ class HypothesisRegistry:
         data_sources: list[str] | None = None,
         skills: list[str] | None = None,
         invalidation_notes: str | None = None,
+        parent_hypothesis_id: str | None = None,
+        related_ids: list[str] | None = None,
+        contradicts_ids: list[str] | None = None,
+        goal_id: str | None = None,
     ) -> Hypothesis:
-        """Update an existing hypothesis."""
+        """Update an existing hypothesis.
+
+        P3-C: status changes are validated against VALID_TRANSITIONS.
+        P3-C: parent_hypothesis_id / related_ids / contradicts_ids / goal_id
+              can be set or cleared (None clears).
+        """
         records = self.list()
         hyp = self._find_required(records, hypothesis_id)
         if title is not None:
@@ -208,7 +261,10 @@ class HypothesisRegistry:
         if thesis is not None:
             hyp.thesis = thesis.strip()
         if status is not None:
-            hyp.status = _validate_status(status)
+            new_status = _validate_status(status)
+            if new_status != hyp.status:
+                _check_transition(hyp.status, new_status)
+            hyp.status = new_status
         if universe is not None:
             hyp.universe = universe.strip()
         if signal_definition is not None:
@@ -219,6 +275,14 @@ class HypothesisRegistry:
             hyp.skills = _coerce_str_list(skills)
         if invalidation_notes is not None:
             hyp.invalidation_notes = invalidation_notes.strip()
+        if parent_hypothesis_id is not None:
+            hyp.parent_hypothesis_id = parent_hypothesis_id or None
+        if related_ids is not None:
+            hyp.related_ids = _coerce_str_list(related_ids)
+        if contradicts_ids is not None:
+            hyp.contradicts_ids = _coerce_str_list(contradicts_ids)
+        if goal_id is not None:
+            hyp.goal_id = goal_id or None
         hyp.updated_at = _utc_now()
         self._save(records)
         return hyp
@@ -247,6 +311,105 @@ class HypothesisRegistry:
         hyp.updated_at = _utc_now()
         self._save(records)
         return hyp
+
+    # ── P3-C: Relationship graph operations ─────────────────────
+
+    def derive(
+        self,
+        *,
+        parent_id: str,
+        title: str,
+        thesis: str,
+        signal_definition: str = "",
+    ) -> Hypothesis:
+        """Create a child hypothesis derived from a parent.
+
+        Inherits parent's universe, data_sources, and skills. Sets
+        parent_hypothesis_id on the new hypothesis.
+        """
+        records = self.list()
+        parent = self._find_required(records, parent_id)
+        now = _utc_now()
+        hyp = Hypothesis(
+            hypothesis_id=_new_hypothesis_id(title, now, {h.hypothesis_id for h in records}),
+            title=title.strip(),
+            thesis=thesis.strip(),
+            status="exploring",
+            universe=parent.universe,
+            signal_definition=signal_definition.strip() or parent.signal_definition,
+            data_sources=list(parent.data_sources),
+            skills=list(parent.skills),
+            parent_hypothesis_id=parent_id,
+            created_at=now,
+            updated_at=now,
+        )
+        records.append(hyp)
+        self._save(records)
+        return hyp
+
+    def link(self, hyp_id: str, related_id: str) -> Hypothesis:
+        """Mark two hypotheses as related (bidirectional)."""
+        records = self.list()
+        hyp_a = self._find_required(records, hyp_id)
+        hyp_b = self._find_required(records, related_id)
+        if related_id not in hyp_a.related_ids:
+            hyp_a.related_ids.append(related_id)
+        if hyp_id not in hyp_b.related_ids:
+            hyp_b.related_ids.append(hyp_id)
+        hyp_a.updated_at = hyp_b.updated_at = _utc_now()
+        self._save(records)
+        return hyp_a
+
+    def unlink(self, hyp_id: str, related_id: str) -> Hypothesis:
+        """Remove bidirectional related link."""
+        records = self.list()
+        hyp_a = self._find_required(records, hyp_id)
+        hyp_b = self._find_required(records, related_id)
+        hyp_a.related_ids = [x for x in hyp_a.related_ids if x != related_id]
+        hyp_b.related_ids = [x for x in hyp_b.related_ids if x != hyp_id]
+        hyp_a.updated_at = hyp_b.updated_at = _utc_now()
+        self._save(records)
+        return hyp_a
+
+    def contradicts(self, hyp_id: str, other_id: str, notes: str = "") -> Hypothesis:
+        """Mark two hypotheses as contradicting (one-way from hyp_id's perspective)."""
+        records = self.list()
+        hyp_a = self._find_required(records, hyp_id)
+        hyp_b = self._find_required(records, other_id)
+        if other_id not in hyp_a.contradicts_ids:
+            hyp_a.contradicts_ids.append(other_id)
+        hyp_a.invalidation_notes = (
+            f"{hyp_a.invalidation_notes}\nContradicts {other_id}: {notes}"
+            if hyp_a.invalidation_notes
+            else f"Contradicts {other_id}: {notes}"
+        ).strip()
+        hyp_a.updated_at = _utc_now()
+        self._save(records)
+        return hyp_a
+
+    def link_goal(self, hyp_id: str, goal_id: str) -> Hypothesis:
+        """Associate a hypothesis with a research goal."""
+        records = self.list()
+        hyp = self._find_required(records, hyp_id)
+        hyp.goal_id = goal_id
+        hyp.updated_at = _utc_now()
+        self._save(records)
+        return hyp
+
+    def list_by_goal(self, goal_id: str) -> list[Hypothesis]:
+        """Return all hypotheses linked to a given goal."""
+        return [h for h in self.list() if h.goal_id == goal_id]
+
+    def list_children(self, parent_id: str) -> list[Hypothesis]:
+        """Return all child hypotheses of a parent."""
+        return [h for h in self.list() if h.parent_hypothesis_id == parent_id]
+
+    def list_contradictions(self, hyp_id: str) -> list[Hypothesis]:
+        """Return all hypotheses that this one contradicts."""
+        records = self.list()
+        hyp = self._find_required(records, hyp_id)
+        by_id = {h.hypothesis_id: h for h in records}
+        return [by_id[cid] for cid in hyp.contradicts_ids if cid in by_id]
 
     def search(
         self,

@@ -247,6 +247,7 @@ class GoalStore:
                     confidence TEXT,
                     caveat TEXT,
                     contradicts_claim_ids_json TEXT NOT NULL DEFAULT '[]',
+                    hypothesis_id TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(goal_id) REFERENCES goals(goal_id)
                 );
@@ -286,6 +287,20 @@ class GoalStore:
         if "parent_goal_id" not in cols:
             self._conn.execute(
                 "ALTER TABLE goals ADD COLUMN parent_goal_id TEXT"
+            )
+
+        # P3-C: hypothesis_id on goal_evidence
+        ev_cols = [
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(goal_evidence)").fetchall()
+        ]
+        if "hypothesis_id" not in ev_cols:
+            self._conn.execute(
+                "ALTER TABLE goal_evidence ADD COLUMN hypothesis_id TEXT"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_goal_evidence_hypothesis "
+                "ON goal_evidence(hypothesis_id) WHERE hypothesis_id IS NOT NULL"
             )
         self._conn.commit()
 
@@ -727,9 +742,9 @@ class GoalStore:
                     timeframe, method, assumptions_json, artifact_path,
                     artifact_hash, retrieved_at, data_as_of, freshness_status,
                     verification_status, confidence, caveat,
-                    contradicts_claim_ids_json, created_at
+                    contradicts_claim_ids_json, hypothesis_id, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     evidence_id,
@@ -758,6 +773,7 @@ class GoalStore:
                     evidence.confidence,
                     evidence.caveat,
                     _json_dumps(evidence.contradicts_claim_ids),
+                    evidence.hypothesis_id,
                     now,
                 ),
             )
@@ -1267,5 +1283,6 @@ class GoalStore:
             confidence=row["confidence"],
             caveat=row["caveat"],
             contradicts_claim_ids=list(_json_loads(row["contradicts_claim_ids_json"], [])),
+            hypothesis_id=row["hypothesis_id"] if "hypothesis_id" in row.keys() else None,
             created_at=row["created_at"],
         )

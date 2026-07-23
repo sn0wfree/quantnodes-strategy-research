@@ -118,6 +118,7 @@ class EvidenceInput:
     confidence: str | None = None
     caveat: str | None = None
     contradicts_claim_ids: list[str] = field(default_factory=list)
+    hypothesis_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,7 @@ class EvidenceRecord:
     confidence: str | None = None
     caveat: str | None = None
     contradicts_claim_ids: list[str] = field(default_factory=list)
+    hypothesis_id: str | None = None
     created_at: str = ""
 
 
