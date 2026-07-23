@@ -13,8 +13,28 @@ from typing import Any
 from ..workflow.controller import WorkflowController
 from ..workflow.grounding import GroundingProvider
 from ..workflow.types import AgentCall, AgentStatus
+from ..workflow.agents import AgentRegistry
 
 logger = logging.getLogger(__name__)
+
+
+# ── Default controller factory (P6 Phase 1-A3) ────────────────────────
+
+
+def _build_default_controller() -> WorkflowController | None:
+    """Build a default WorkflowController backed by SwarmWorker + LLM.
+
+    Returns None if the LLM client cannot be initialised (e.g. missing
+    API key in the test environment). Caller should handle the None
+    gracefully (fall back to stub).
+    """
+    try:
+        from ..workflow.controller import ControllerConfig
+        cfg = ControllerConfig(timeout_seconds=60.0)
+        return WorkflowController(registry=AgentRegistry(), adj={}, config=cfg)
+    except Exception as exc:                                    # noqa: BLE001
+        logger.debug("default controller init failed: %s", exc)
+        return None
 
 
 @dataclass
@@ -72,6 +92,8 @@ class SwarmRuntime:
         self._grounding = grounding
         self._max_workers = max_workers
         self._active_runs: dict[str, bool] = {}
+        # Lazily-instantiated default controller (created on first use)
+        self._owns_default_controller = controller is None
 
     def execute(
         self,
@@ -180,10 +202,35 @@ class SwarmRuntime:
                 )
                 full_task = f"上游输出:\n{upstream_ctx}\n\n当前任务: {task}"
 
-            # Use controller if available, otherwise stub
+            # Use controller if available; lazily create a default one
+            # backed by SwarmWorker + LLMConfig.
+            if self._controller is None and self._owns_default_controller:
+                self._controller = _build_default_controller()
+
             if self._controller is not None:
-                output = self._controller.execute_agent(agent_call, full_task, workspace)
+                if self._owns_default_controller:
+                    # Default controller: convert failures into "[error]"
+                    # so DAG layers stay alive (otherwise a transient
+                    # LLM hiccup would poison downstream agents).
+                    try:
+                        output = self._controller.execute_agent(
+                            agent_call, full_task, workspace,
+                        )
+                    except Exception as exc:                    # noqa: BLE001
+                        logger.warning(
+                            "default controller.execute_agent "
+                            "failed for %s: %s",
+                            agent_call.agent_name, exc,
+                        )
+                        output = f"[error] {agent_call.agent_name}: {exc}"
+                else:
+                    # User-supplied controller: propagate failures so
+                    # callers can observe them via agent_results[*].error.
+                    output = self._controller.execute_agent(
+                        agent_call, full_task, workspace,
+                    )
             else:
+                # No controller → stub fallback (tests, dry-runs)
                 output = f"[stub] {agent_call.agent_name}: completed"
 
             return AgentResult(

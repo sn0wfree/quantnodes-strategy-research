@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .agents import AgentExecutor, AgentRegistry
 from .dag import topological_layers
 from .types import AgentCall, AgentStatus, RoundResult
+from .worker import SwarmWorker, WorkerResult, WorkerStatus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -159,3 +164,183 @@ class WorkflowController:
         exec_.status = AgentStatus.ERROR
         exec_.duration_ms = (time.time() - start) * 1000
         return exec_
+
+    # ── swarm execute_agent (P6 Phase 1-A2) ─────────────────────────
+
+    def execute_agent(
+        self,
+        agent_call: AgentCall,
+        task: str,
+        workspace: Path | str | None = None,
+    ) -> str:
+        """Execute a single swarm agent via SwarmWorker.
+
+        This method is the bridge between ``SwarmRuntime`` (DAG executor)
+        and the LLM. It:
+
+            1. Reads the prompt file pointed to by ``agent_call.prompt``
+               (relative to ``workspace`` if provided, else a templates
+               lookup).
+            2. Applies the tool whitelist from ``agent_call.context["tools"]``.
+            3. Builds a fresh ``SwarmWorker`` and runs the task.
+            4. Returns the worker's summary (or full answer as fallback).
+
+        Parameters
+        ----------
+        agent_call:
+            The DAG node spec. ``agent_call.prompt`` is treated as a path
+            to a markdown prompt template (e.g. ``.prompts/researcher.md``).
+        task:
+            The runtime task string (typically includes upstream context).
+        workspace:
+            Optional filesystem root for resolving prompt paths and (later)
+            for tool invocations. May be a ``Path`` or string.
+
+        Returns
+        -------
+        str
+            A JSON-serialisable dict (or plain text) summarising the worker's
+            output. Failures degrade to a dict ``{"status": "error", ...}``
+            instead of raising, so DAG layers stay alive.
+        """
+        ws_path = Path(workspace) if workspace is not None else None
+
+        # 1) Resolve system prompt
+        try:
+            system_prompt = self._resolve_prompt(agent_call.prompt, ws_path)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("execute_agent: prompt resolution failed: %s", exc)
+            return self._error_output(
+                f"prompt resolution failed: {exc}",
+                agent=agent_call.agent_name,
+            )
+
+        # 2) Apply tool whitelist
+        try:
+            registry = self._build_tool_registry(
+                agent_call.context.get("tools", []) if agent_call.context else [],
+            )
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("execute_agent: tool whitelist failed: %s", exc)
+            registry = self._build_tool_registry([])  # fall back to empty
+
+        # 3) Instantiate worker
+        try:
+            client = self._build_llm_client()
+        except Exception as exc:                                # noqa: BLE001
+            return self._error_output(
+                f"llm client init failed: {exc}",
+                agent=agent_call.agent_name,
+            )
+
+        worker = SwarmWorker(
+            client=client,
+            registry=registry,
+            system_prompt=system_prompt,
+            upstream_context="",  # task string already includes upstream
+            max_iterations=20,
+            timeout_s=self._config.timeout_seconds,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+
+        # 4) Run
+        result: WorkerResult = worker.run(task)
+
+        # 5) Format output
+        return self._format_worker_output(result, agent_call.agent_name)
+
+    # ── helpers ─────────────────────────────────────────────────
+
+    def _resolve_prompt(
+        self,
+        prompt_field: str,
+        workspace: Path | None,
+    ) -> str:
+        """Resolve a prompt_file string into markdown body text.
+
+        Lookup order:
+            1. ``workspace / prompt_field`` (if workspace given)
+            2. ``templates / prompt_field`` (package default)
+        """
+        from ... import _TEMPLATES_DIR  # lazy import; package-level constant
+
+        candidates: list[Path] = []
+        if workspace is not None:
+            candidates.append(workspace / prompt_field)
+        candidates.append(_TEMPLATES_DIR / prompt_field)
+
+        for path in candidates:
+            try:
+                if path.is_file():
+                    return path.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.debug("prompt read failed for %s: %s", path, exc)
+
+        raise FileNotFoundError(
+            f"prompt file not found: {prompt_field!r} "
+            f"(tried {', '.join(str(p) for p in candidates)})"
+        )
+
+    def _build_tool_registry(self, whitelist: list[str]) -> "object":
+        """Build a ToolRegistry filtered by ``whitelist``.
+
+        Falls back to an empty registry if the default registry can't be
+        imported (e.g. during minimal scaffolding).
+        """
+        try:
+            from ..agent.tools import ToolRegistry
+            from ..agent.builtin_tools import build_default_registry
+        except Exception as exc:                                # noqa: BLE001
+            logger.debug("default registry import failed: %s", exc)
+            from ..agent.tools import ToolRegistry
+            return ToolRegistry()
+
+        full = build_default_registry()
+        if not whitelist:
+            # Empty whitelist = no tools (text-only worker).
+            from ..agent.tools import ToolRegistry
+            return ToolRegistry()
+
+        # Build a new registry with only the whitelisted tools
+        filtered = ToolRegistry()
+        for name in whitelist:
+            tool = full.get(name)
+            if tool is None:
+                logger.debug("whitelisted tool not found: %s", name)
+                continue
+            filtered.register(tool)
+        return filtered
+
+    def _build_llm_client(self) -> object:
+        """Instantiate an OpenAICompatClient using LLMConfig.load()."""
+        from ..llm import LLMConfig, OpenAICompatClient
+        cfg = LLMConfig.load()
+        return OpenAICompatClient(cfg)
+
+    def _format_worker_output(
+        self,
+        result: WorkerResult,
+        agent_name: str,
+    ) -> str:
+        """Convert WorkerResult → string for SwarmRuntime consumption."""
+        import json
+        payload = {
+            "agent": agent_name,
+            "status": result.status.value,
+            "answer": result.answer,
+            "summary": result.summary,
+            "iterations": result.iterations,
+            "tool_calls_made": result.tool_calls_made,
+        }
+        if result.error:
+            payload["error"] = result.error
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _error_output(error: str, agent: str = "") -> str:
+        import json
+        return json.dumps(
+            {"agent": agent, "status": "error", "error": error},
+            ensure_ascii=False,
+        )
