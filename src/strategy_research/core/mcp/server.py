@@ -122,26 +122,68 @@ class MCPServer:
         ))
 
     def _register_goal_tools(self) -> None:
-        def start_research_goal(objective: str = "", **kwargs: Any) -> str:
-            return json.dumps({"status": "ok", "objective": objective}, ensure_ascii=False)
+        def start_research_goal(objective: str = "", session_id: str = "default", **kwargs: Any) -> str:
+            # Phase B: 真接 GoalStore (替代旧 stub 返回假数据)
+            try:
+                from ..goal import GoalStore, RiskTier
+                store = GoalStore()
+                goal = store.replace_goal(
+                    session_id=session_id,
+                    objective=objective,
+                    criteria=["backtest_profitable", "risk_within_limits"],
+                    source="mcp",
+                    risk_tier=RiskTier.RESEARCH_GENERAL,
+                )
+                return json.dumps({
+                    "status": "ok",
+                    "goal_id": goal.goal_id,
+                    "session_id": session_id,
+                    "objective": goal.objective,
+                }, ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
-        def get_research_goal(**kwargs: Any) -> str:
-            return json.dumps({"status": "no_active_goal"}, ensure_ascii=False)
+        def get_research_goal(session_id: str = "default", **kwargs: Any) -> str:
+            try:
+                from ..goal import GoalStore
+                store = GoalStore()
+                goal = store.get_current_goal(session_id)
+                if goal is None:
+                    return json.dumps({"status": "no_active_goal", "session_id": session_id}, ensure_ascii=False)
+                return json.dumps({
+                    "status": "ok",
+                    "goal_id": goal.goal_id,
+                    "session_id": session_id,
+                    "objective": goal.objective,
+                    "ui_summary": goal.ui_summary,
+                    "status": goal.status.value,
+                    "criteria": store.list_criteria(goal.goal_id),
+                }, ensure_ascii=False, default=str)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
         self.register(MCPTool(
             name="start_research_goal",
-            description="创建研究目标",
+            description="创建研究目标（写入 GoalStore SQLite）",
             parameters={
                 "type": "object",
-                "properties": {"objective": {"type": "string", "description": "研究目标"}},
+                "properties": {
+                    "objective": {"type": "string", "description": "研究目标"},
+                    "session_id": {"type": "string", "description": "会话 ID", "default": "default"},
+                },
                 "required": ["objective"],
             },
             handler=start_research_goal,
         ))
         self.register(MCPTool(
             name="get_research_goal",
-            description="获取当前研究目标",
-            parameters={"type": "object", "properties": {}},
+            description="获取当前会话的研究目标",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "会话 ID", "default": "default"},
+                },
+            },
             handler=get_research_goal,
         ))
 
@@ -160,73 +202,205 @@ class MCPServer:
         ))
 
     def _register_backtest_tools(self) -> None:
-        def run_backtest(workspace: str = "", **kwargs: Any) -> str:
-            return json.dumps({"status": "ok", "workspace": workspace, "message": "Backtest submitted"}, ensure_ascii=False)
+        def run_backtest(workspace: str = "", strategy: str = "", **kwargs: Any) -> str:
+            # Phase B: 真接 core.backtest.run_backtest_script (替代旧 stub)
+            if not workspace or not strategy:
+                return json.dumps({
+                    "status": "error",
+                    "error": "workspace 和 strategy 都是必需参数",
+                }, ensure_ascii=False)
+            try:
+                from ..backtest import run_backtest_script
+                ws_path = Path(workspace).resolve()
+                result = run_backtest_script(
+                    workspace_path=ws_path,
+                    strategy_name=strategy,
+                    action="mcp",
+                    description="MCP-triggered backtest",
+                    timeout=300,
+                )
+                return json.dumps({
+                    "status": "ok" if result.get("success") else "error",
+                    "workspace": workspace,
+                    "strategy": strategy,
+                    "run": result.get("run", ""),
+                    "metrics": result.get("metrics", {}),
+                    "error": result.get("error"),
+                }, ensure_ascii=False, default=str)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
-        def validate_run(run_dir: str = "", **kwargs: Any) -> str:
-            return json.dumps({"status": "ok", "run_dir": run_dir, "message": "Validation submitted"}, ensure_ascii=False)
+        def validate_run(run_dir: str = "", market: str = "a_share", **kwargs: Any) -> str:
+            # Phase B: 真接 core.validation.runner (替代旧 stub)
+            if not run_dir:
+                return json.dumps({"status": "error", "error": "run_dir 是必需参数"}, ensure_ascii=False)
+            try:
+                from .validation import MarketType, run_validation
+                from .validation.cli import _load_nav_synthetic, _build_synthetic_trades
+
+                run_path = Path(run_dir).resolve()
+                market_enum = MarketType(market)
+
+                equity_curve = _load_nav_synthetic(run_path)
+                trades = _build_synthetic_trades(run_path)
+                if equity_curve is None or len(equity_curve) == 0:
+                    return json.dumps({
+                        "status": "error",
+                        "error": f"无法从 {run_dir} 加载 NAV 时间序列",
+                    }, ensure_ascii=False)
+
+                config = {"validation": {"monte_carlo": True, "bootstrap": True}}
+                results = run_validation(
+                    config=config,
+                    equity_curve=equity_curve,
+                    trades=trades,
+                    market=market_enum,
+                )
+                return json.dumps({
+                    "status": "ok",
+                    "run_dir": run_dir,
+                    "validation": results,
+                }, ensure_ascii=False, default=str)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
         self.register(MCPTool(
             name="run_backtest",
-            description="执行回测",
+            description="执行回测（真接 core.backtest.run_backtest_script）",
             parameters={
                 "type": "object",
-                "properties": {"workspace": {"type": "string", "description": "工作区路径"}},
-                "required": ["workspace"],
+                "properties": {
+                    "workspace": {"type": "string", "description": "工作区路径"},
+                    "strategy": {"type": "string", "description": "策略名称"},
+                },
+                "required": ["workspace", "strategy"],
             },
             handler=run_backtest,
         ))
         self.register(MCPTool(
             name="validate_run",
-            description="验证回测结果",
+            description="验证回测结果（Monte Carlo + Bootstrap + Walk-Forward）",
             parameters={
                 "type": "object",
-                "properties": {"run_dir": {"type": "string", "description": "回测运行目录"}},
+                "properties": {
+                    "run_dir": {"type": "string", "description": "回测运行目录"},
+                    "market": {"type": "string", "description": "市场类型", "default": "a_share"},
+                },
                 "required": ["run_dir"],
             },
             handler=validate_run,
         ))
 
     def _register_factor_tools(self) -> None:
-        def compute_factor(expression: str = "", **kwargs: Any) -> str:
-            return json.dumps({"status": "ok", "expression": expression, "message": "Factor computed"}, ensure_ascii=False)
+        def compute_factor(expression: str = "", workspace: str = "", asset: str = "", **kwargs: Any) -> str:
+            # Phase B: 真接 core.compute_factor + core.db.load_price_data
+            if not workspace or not asset:
+                return json.dumps({
+                    "status": "error",
+                    "error": "workspace 和 asset 都是必需参数",
+                }, ensure_ascii=False)
+            try:
+                from ..compute_factor import compute_factor as _compute
+                from ..db import load_price_data
+
+                ws_path = Path(workspace).resolve()
+                prices = load_price_data(ws_path, asset)
+                if prices is None or len(prices) == 0:
+                    return json.dumps({
+                        "status": "error",
+                        "error": f"无法从 {workspace} 加载 {asset} 的价格数据",
+                    }, ensure_ascii=False)
+
+                result = _compute(expression, prices, factor_name=asset)
+                # 转成 list 以便 JSON 序列化
+                return json.dumps({
+                    "status": "ok",
+                    "expression": expression,
+                    "asset": asset,
+                    "factor_name": result.name,
+                    "n_total": len(result),
+                    "n_non_null": int(result.notna().sum()),
+                    "first_date": str(result.index[0]) if len(result) > 0 else None,
+                    "last_date": str(result.index[-1]) if len(result) > 0 else None,
+                    "preview": result.dropna().head(5).to_list(),
+                }, ensure_ascii=False, default=str)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
         self.register(MCPTool(
             name="compute_factor",
-            description="计算因子值",
+            description="计算因子值（真接 core.compute_factor + DuckDB）",
             parameters={
                 "type": "object",
-                "properties": {"expression": {"type": "string", "description": "因子表达式"}},
-                "required": ["expression"],
+                "properties": {
+                    "expression": {"type": "string", "description": "因子表达式 (DSL)"},
+                    "workspace": {"type": "string", "description": "工作区路径"},
+                    "asset": {"type": "string", "description": "标的代码"},
+                },
+                "required": ["expression", "workspace", "asset"],
             },
             handler=compute_factor,
         ))
 
     def _register_memory_tools(self) -> None:
-        def search_memory(query: str = "", **kwargs: Any) -> str:
-            return json.dumps({"results": [], "query": query}, ensure_ascii=False)
+        def search_memory(query: str = "", limit: int = 5, **kwargs: Any) -> str:
+            # Phase B: 真接 PersistentMemory.find_relevant (替代旧 stub 空列表)
+            try:
+                from ..memory import PersistentMemory
+                mem = PersistentMemory()
+                entries = mem.find_relevant(query, max_results=limit)
+                return json.dumps({
+                    "query": query,
+                    "n_results": len(entries),
+                    "results": [
+                        {
+                            "title": e.title,
+                            "type": e.memory_type,
+                            "description": e.description,
+                            "preview": e.body[:200],
+                        }
+                        for e in entries
+                    ],
+                }, ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
-        def add_memory(title: str = "", content: str = "", **kwargs: Any) -> str:
-            return json.dumps({"status": "ok", "title": title}, ensure_ascii=False)
+        def add_memory(title: str = "", content: str = "", memory_type: str = "project", **kwargs: Any) -> str:
+            try:
+                from ..memory import PersistentMemory
+                mem = PersistentMemory()
+                path = mem.add(title, content, memory_type=memory_type)
+                return json.dumps({
+                    "status": "ok",
+                    "title": title,
+                    "path": str(path),
+                    "memory_type": memory_type,
+                }, ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
         self.register(MCPTool(
             name="search_memory",
-            description="搜索记忆",
+            description="搜索持久化记忆（keyword scoring + recency boost）",
             parameters={
                 "type": "object",
-                "properties": {"query": {"type": "string", "description": "搜索关键词"}},
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"},
+                    "limit": {"type": "integer", "description": "返回数量上限", "default": 5},
+                },
                 "required": ["query"],
             },
             handler=search_memory,
         ))
         self.register(MCPTool(
             name="add_memory",
-            description="添加记忆",
+            description="添加持久化记忆",
             parameters={
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "标题"},
                     "content": {"type": "string", "description": "内容"},
+                    "memory_type": {"type": "string", "description": "类型 (user/feedback/project/reference)", "default": "project"},
                 },
                 "required": ["title", "content"],
             },
