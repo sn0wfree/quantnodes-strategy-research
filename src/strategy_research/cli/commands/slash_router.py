@@ -121,10 +121,16 @@ def match_commands(input_text: str, *, limit: int = 8) -> list[Command]:
 
     Scoring tiers (highest wins): prefix > substring > subsequence.
     Returns an empty list if nothing matches.
+
+    A bare ``/`` (no query yet) returns all commands up to ``limit``
+    so the typeahead can show the full menu immediately after ``/``.
     """
     query = _parse_token(input_text)
-    if not query:
+    text = input_text.lstrip()
+    if not text.startswith("/"):
         return []
+    if not query:
+        return list(SLASH_COMMANDS[:limit])
     scored: list[tuple[int, int, Command]] = []
     for idx, cmd in enumerate(SLASH_COMMANDS):
         s = _score(query, cmd.name)
