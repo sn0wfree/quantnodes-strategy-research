@@ -165,6 +165,14 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
             total = result.size
             if total > 0 and n_inf / total > 0.30:
                 raise ValueError(f"Alpha {alpha_id}: {n_inf}/{total} inf values ({n_inf/total:.1%})")
+            # 校验 NaN 比例 — 超过 98% NaN 仅警告 (warmup期允许高NaN)
+            n_nan = int(np.isnan(result.values).sum())
+            if total > 0 and n_nan / total > 0.98:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Alpha %s: %d/%d NaN values (%.1f%%), mostly empty",
+                    alpha_id, n_nan, total, n_nan / total * 100,
+                )
 
             return result
         except Exception as e:
@@ -197,6 +205,13 @@ def compute_alpha(alpha_id: str, panel: dict) -> "pd.DataFrame":
         total = result.size
         if total > 0 and n_inf / total > 0.30:
             raise ValueError(f"Alpha {alpha_id}: {n_inf}/{total} inf values ({n_inf/total:.1%})")
+        n_nan = int(np.isnan(result.values).sum())
+        if total > 0 and n_nan / total > 0.98:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Alpha %s: %d/%d NaN values (%.1f%%), mostly empty",
+                alpha_id, n_nan, total, n_nan / total * 100,
+            )
 
         return result
 

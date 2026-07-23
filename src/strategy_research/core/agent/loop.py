@@ -33,6 +33,7 @@ import json
 import logging
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,8 @@ logger = logging.getLogger(__name__)
 # ── Compression thresholds (relative to threshold_tokens) ───────────
 
 MICROCOMPACT_RATIO = 0.5    # at 50% of budget: trim large tool results
-COLLAPSE_RATIO = 0.7        # at 70% of budget: summarize old messages
+COLLAPSE_RATIO = 0.7        # at 70% of budget: summarize old messages (string)
+LLM_SUMMARIZE_RATIO = 0.8   # at 80% of budget: LLM-structured summary
 HARD_TRUNCATE_RATIO = 0.9   # at 90% of budget: keep only recent N
 MICROCOMPACT_TOOL_RESULT_LIMIT = 500  # chars to keep per tool result in L1
 COLLAPSE_KEEP_RECENT = 4            # keep last N messages verbatim in L2
@@ -279,8 +281,29 @@ class AgentLoop:
                 "content_preview": (response.content or "")[:200],
             })
 
-            # No tool_calls → final answer
+            # No tool_calls → check goal continuation before final answer
             if not response.has_tool_calls():
+                # Check if goal needs continuation
+                goal_snapshot = self._get_goal_snapshot()
+                if goal_snapshot is not None:
+                    from ..goal.context import (
+                        goal_needs_continuation,
+                        format_goal_continuation_prompt,
+                    )
+                    if goal_needs_continuation(goal_snapshot):
+                        # Inject continuation prompt instead of stopping
+                        continuation = format_goal_continuation_prompt(
+                            goal_snapshot, previous_answer=response.content or "",
+                        )
+                        messages.append({"role": "user", "content": continuation})
+                        result.messages.append({"role": "user", "content": continuation})
+                        self._trace({
+                            "type": "goal_continuation",
+                            "iteration": iteration,
+                            "goal_id": goal_snapshot.get("goal", {}).get("goal_id", ""),
+                        })
+                        continue  # next iteration
+
                 result.answer = response.content
                 result.finished_reason = "stop"
                 # P2-b: Hook — after_iteration (before break)
@@ -293,9 +316,10 @@ class AgentLoop:
             self._fire_hooks("before_execute_tools", hook_ctx)
 
             tool_hashes_this_iter: list[str] = []
-            for tc in response.tool_calls:
+            tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
+
+            for tc, tool_result_msg in zip(response.tool_calls, tool_result_msgs):
                 tool_hashes_this_iter.append(_tool_call_hash(tc))
-                tool_result_msg = self._execute_tool_with_heartbeat(tc, result)
 
                 # P2-b: Hook — after_tool_executed or on_tool_error
                 if tool_result_msg.get("content", "").startswith('{"status": "error"'):
@@ -442,6 +466,64 @@ class AgentLoop:
         ):
             return self._execute_tool_call(tc, result)
 
+    def _execute_tool_batch(
+        self, tool_calls: list[ToolCall], result: LoopResult
+    ) -> list[dict[str, Any]]:
+        """Execute tool_calls with read-only parallelism.
+
+        Read-only tools are dispatched in parallel via ThreadPoolExecutor.
+        Write tools (is_readonly=False) run serially to prevent races.
+        Results are returned in the same order as tool_calls.
+        """
+        if not tool_calls:
+            return []
+
+        # Single tool: no batching overhead
+        if len(tool_calls) == 1:
+            return [self._execute_tool_with_heartbeat(tool_calls[0], result)]
+
+        # Classify each tool_call as readonly or write
+        readonly_indices: list[int] = []
+        write_indices: list[int] = []
+        for i, tc in enumerate(tool_calls):
+            tool = self.registry.get(tc.name)
+            if tool is not None and not getattr(tool, "is_readonly", True):
+                write_indices.append(i)
+            else:
+                readonly_indices.append(i)
+
+        # Prepare result slots (preserves order)
+        results: list[dict[str, Any] | None] = [None] * len(tool_calls)
+
+        # Dispatch readonly tools in parallel
+        if readonly_indices:
+            max_workers = min(len(readonly_indices), 4)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(self._execute_tool_with_heartbeat, tool_calls[i], result): i
+                    for i in readonly_indices
+                }
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    try:
+                        results[idx] = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("parallel tool %s failed", tool_calls[idx].name)
+                        results[idx] = {
+                            "role": "tool",
+                            "tool_call_id": tool_calls[idx].id,
+                            "content": json.dumps(
+                                {"status": "error", "error": f"{type(exc).__name__}: {exc}"},
+                                ensure_ascii=False,
+                            ),
+                        }
+
+        # Dispatch write tools serially
+        for i in write_indices:
+            results[i] = self._execute_tool_with_heartbeat(tool_calls[i], result)
+
+        return [r for r in results if r is not None]
+
     def _detect_no_progress(self) -> bool:
         """Return True if last N tool_calls all have the same hash."""
         if len(self._recent_hashes) < self.no_progress_window:
@@ -475,6 +557,21 @@ class AgentLoop:
             if len(messages) < old_len:
                 applied.append(f"collapse({old_len}->{len(messages)})")
 
+        # L2.5: Fix orphaned tool_call/tool_result pairs
+        pre_fix_len = len(messages)
+        messages = self._fix_tool_pairs(messages)
+        if len(messages) < pre_fix_len:
+            applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
+
+        # L4: LLM-structured summary (between L2 and L3)
+        tokens = estimate_tokens(messages)
+        if tokens >= self.threshold_tokens * LLM_SUMMARIZE_RATIO:
+            old_len = len(messages)
+            summarized = self._llm_summarize(messages)
+            if summarized is not None and len(summarized) < old_len:
+                messages = summarized
+                applied.append(f"llm_summarize({old_len}->{len(messages)})")
+
         # L3: Hard truncate — keep only recent N + system message
         tokens = estimate_tokens(messages)
         if tokens >= self.threshold_tokens * HARD_TRUNCATE_RATIO:
@@ -482,6 +579,12 @@ class AgentLoop:
             messages = self._hard_truncate(messages)
             if len(messages) < old_len:
                 applied.append(f"truncate({old_len}->{len(messages)})")
+
+        # L3.5: Fix again after truncation
+        pre_fix_len = len(messages)
+        messages = self._fix_tool_pairs(messages)
+        if len(messages) < pre_fix_len:
+            applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
 
         return messages, applied
 
@@ -540,6 +643,150 @@ class AgentLoop:
         system_msgs = [m for m in messages if m.get("role") == "system"]
         non_system = [m for m in messages if m.get("role") != "system"]
         return system_msgs + non_system[-COLLAPSE_KEEP_RECENT:]
+
+    # ── Tool pair repair after compression ─────────
+
+    def _fix_tool_pairs(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Repair orphaned tool_call / tool_result pairs after compression.
+
+        After L2 collapse or L3 truncation, assistant messages with tool_calls
+        may be removed while their tool results survive (or vice versa).
+        This method:
+          1. Collects all tool_call_ids from assistant messages
+          2. Collects all tool_call_ids from tool result messages
+          3. Removes orphaned tool results (no matching tool_call)
+          4. Removes orphaned tool_calls from assistant messages (no matching result)
+        """
+        # Build sets of tool_call_ids from both sides
+        assistant_call_ids: set[str] = set()
+        result_ids: set[str] = set()
+
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    tc_id = tc.get("id") if isinstance(tc, dict) else None
+                    if tc_id:
+                        assistant_call_ids.add(tc_id)
+            elif msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id:
+                    result_ids.add(tc_id)
+
+        # Find orphans
+        orphan_results = result_ids - assistant_call_ids
+        orphan_calls = assistant_call_ids - result_ids
+
+        if not orphan_results and not orphan_calls:
+            return messages
+
+        logger.debug(
+            "fix_tool_pairs: removing %d orphan results, %d orphan calls",
+            len(orphan_results), len(orphan_calls),
+        )
+        self._trace({
+            "type": "fix_tool_pairs",
+            "orphan_results": len(orphan_results),
+            "orphan_calls": len(orphan_calls),
+        })
+
+        fixed: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+
+            # Remove orphaned tool results
+            if role == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id in orphan_results:
+                    continue
+                fixed.append(msg)
+                continue
+
+            # Remove orphaned tool_calls from assistant messages
+            if role == "assistant" and orphan_calls:
+                tool_calls = msg.get("tool_calls") or []
+                if tool_calls:
+                    cleaned = []
+                    for tc in tool_calls:
+                        tc_id = tc.get("id") if isinstance(tc, dict) else None
+                        if tc_id and tc_id not in orphan_calls:
+                            cleaned.append(tc)
+                    if cleaned:
+                        msg = dict(msg, tool_calls=cleaned)
+                    elif not msg.get("content"):
+                        # assistant message with only orphaned tool_calls and no content: drop entirely
+                        continue
+
+            fixed.append(msg)
+
+        return fixed
+
+    # ── L4: LLM-based structured summary ──────────
+
+    _LLM_SUMMARIZE_PROMPT = (
+        "Summarize the following conversation into a concise structured note. "
+        "Preserve: key decisions, tool results (metrics, data findings), "
+        "file paths modified, and any open questions. "
+        "Output 3-8 bullet points in plaintext. "
+        "Do NOT include the system prompt or meta-instructions.\n\n"
+        "{conversation}"
+    )
+
+    def _llm_summarize(
+        self, messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]] | None:
+        """L4: Use LLM to summarize old messages into a structured note.
+
+        Returns compressed messages or None on failure.
+        Keeps: system messages + last COLLAPSE_KEEP_RECENT messages.
+        Replaces: everything in between with LLM-generated summary.
+        """
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        non_system = [m for m in messages if m.get("role") != "system"]
+
+        if len(non_system) <= COLLAPSE_KEEP_RECENT:
+            return None
+
+        recent = non_system[-COLLAPSE_KEEP_RECENT:]
+        old = non_system[:-COLLAPSE_KEEP_RECENT]
+
+        if not old:
+            return None
+
+        # Build conversation text for summarization (truncated for token safety)
+        parts: list[str] = []
+        for m in old:
+            role = m.get("role", "?")
+            content = m.get("content", "")
+            if role == "user":
+                parts.append(f"User: {(content or '')[:300]}")
+            elif role == "assistant":
+                if content:
+                    parts.append(f"Assistant: {content[:300]}")
+                for tc in m.get("tool_calls") or []:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    args_str = fn.get("arguments", "")[:100]
+                    parts.append(f"ToolCall: {fn.get('name', '?')}({args_str})")
+            elif role == "tool":
+                tc_id = m.get("tool_call_id", "?")
+                parts.append(f"ToolResult[{tc_id}]: {(content or '')[:200]}")
+
+        conversation = "\n".join(parts)
+        prompt = self._LLM_SUMMARIZE_PROMPT.format(conversation=conversation)
+
+        try:
+            summary_response = self.client.chat([
+                {"role": "system", "content": "You are a concise conversation summarizer."},
+                {"role": "user", "content": prompt},
+            ])
+            summary_text = summary_response.content or ""
+            if not summary_text.strip():
+                return None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("LLM summarize failed: %s", exc)
+            return None
+
+        summary_msg = {"role": "assistant", "content": f"[LLM summary]\n{summary_text}"}
+        return system_msgs + [summary_msg] + recent
 
     # ── Trace helpers ──────────────────────────────
 
@@ -614,6 +861,21 @@ class AgentLoop:
                 "error": str(exc),
             })
             return ""
+
+    def _get_goal_snapshot(self) -> dict[str, Any] | None:
+        """Return the raw goal snapshot for continuation checks.
+
+        Returns None when no active goal exists or on failure.
+        """
+        if not self.enable_goal_injection:
+            return None
+        if not self.session_id:
+            return None
+        try:
+            from ..goal.store import GoalStore
+            return GoalStore().get_current_snapshot(self.session_id)
+        except Exception:  # noqa: BLE001
+            return None
 
     # ── Git commit after run ──────────────────────
 

@@ -326,8 +326,16 @@ def run_engine_backtest(
     if optimizer and optimizer != "none":
         from .optimizers import optimize_weights
 
+        # 从 config 读取优化器参数
+        opt_lookback = int(config.get("optimizer_lookback", 0))
+        opt_sign_preservation = bool(config.get("optimizer_sign_preservation", True))
+
         def _opt_func(ret_df, pos_df, dates):
-            return optimize_weights(ret_df, pos_df, dates, method=optimizer)
+            return optimize_weights(
+                ret_df, pos_df, dates, method=optimizer,
+                lookback=opt_lookback,
+                sign_preservation=opt_sign_preservation,
+            )
         opt_func = _opt_func
 
     # 6. Run

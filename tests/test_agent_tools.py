@@ -1,4 +1,4 @@
-"""Tests for the 6 BaseTool tools + registry."""
+"""Tests for the 11 BaseTool tools + registry."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ from strategy_research.core.agent.builtin_tools import (
     ComputeFactorTool,
     GitDiffTool,
     ListHistoryTool,
+    ListSkillsTool,
+    LoadSkillTool,
     ReadFileTool,
     RunBacktestTool,
     WriteFileTool,
@@ -46,15 +48,15 @@ def parse_result(result: str) -> dict:
 
 
 class TestRegistry:
-    def test_build_default_has_all_nine(self):
+    def test_build_default_has_all_eleven(self):
         r = build_default_registry()
         names = sorted(r.tool_names)
         assert names == [
             "compute_factor", "factor_analysis", "git_diff", "list_history",
-            "options_pricing", "pattern_recognition", "read_file",
-            "run_backtest", "write_file",
+            "list_skills", "load_skill", "options_pricing", "pattern_recognition",
+            "read_file", "run_backtest", "write_file",
         ]
-        assert len(r) == 9
+        assert len(r) == 11
 
     def test_registry_contains(self):
         r = build_default_registry()

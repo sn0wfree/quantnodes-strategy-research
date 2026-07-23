@@ -57,15 +57,15 @@ class TestRunCardWhitelist:
         assert card["config"]["action"] == "baseline"
 
     def test_run_card_schema_version_bumped(self, tmp_path: Path):
-        """SCHEMA_VERSION 应升级到 0.2（白名单扩展）。"""
+        """SCHEMA_VERSION 应升级到 0.3（数据溯源 + artifact refs）。"""
         from strategy_research.core.run_card import SCHEMA_VERSION, write_run_card
 
-        assert SCHEMA_VERSION == "0.2", "schema version should be bumped to 0.2"
+        assert SCHEMA_VERSION == "0.3", "schema version should be bumped to 0.3"
 
         run_dir = tmp_path / "runs" / "run_0001"
         run_dir.mkdir(parents=True)
         card = write_run_card(run_dir, config={"run": "x"}, metrics={})
-        assert card["schema_version"] == "0.2"
+        assert card["schema_version"] == "0.3"
 
     def test_run_card_md_contains_new_keys(self, tmp_path: Path):
         """生成的 Markdown 应包含 run/strategy/action 表格行。"""

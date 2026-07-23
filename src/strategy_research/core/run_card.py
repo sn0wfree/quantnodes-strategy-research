@@ -1,4 +1,4 @@
-"""Trust Layer Run Card 生成器 — 借鉴自 vibe-trading backtest/run_card.py (极简版).
+"""Trust Layer Run Card 生成器 — 借鉴自 vibe-trading backtest/run_card.py.
 
 每次回测运行后,生成 run_card.{json,md} 到 run_dir.
 
@@ -7,21 +7,22 @@
 - config summary (codes/start_date/end_date/interval/engine/initial_cash/source)
 - config_hash (SHA-256) — 防 config 改动未审计
 - strategy_hash (SHA-256 of strategy.py / config.yaml) — 防代码改动未审计
+- data_provenance — 数据来源溯源 (loader, fetched_at, cache_key, rows)
+- artifact_refs — 输出产物引用 (文件名, SHA-256, 大小)
 - 标量 metrics (排除嵌套 dict)
 - warnings (异常标签等)
-
-不做: artifact_refs, content_filter_warnings, IRR-AGL 元数据.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 
-SCHEMA_VERSION = "0.2"
+SCHEMA_VERSION = "0.3"
 BACKTEST_SUMMARY_KEYS = (
     # 回测元数据
     "run",
@@ -60,6 +61,27 @@ def _hash_file(path: Optional[Path]) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def _collect_artifact_refs(run_dir: Path) -> list[dict[str, Any]]:
+    """Collect output artifact references with SHA-256 hashes and sizes."""
+    refs: list[dict[str, Any]] = []
+    for f in sorted(run_dir.iterdir()):
+        if not f.is_file():
+            continue
+        # Skip run_card itself and large binary files
+        if f.name.startswith("run_card"):
+            continue
+        try:
+            stat = f.stat()
+            refs.append({
+                "filename": f.name,
+                "sha256": _hash_file(f),
+                "size_bytes": stat.st_size,
+            })
+        except OSError:
+            continue
+    return refs
+
+
 def write_run_card(
     run_dir: Path,
     config: Mapping[str, Any],
@@ -67,6 +89,10 @@ def write_run_card(
     *,
     strategy_paths: Optional[Sequence[Path]] = None,
     warnings: Optional[Sequence[str]] = None,
+    data_source: str = "",
+    fetched_at: str = "",
+    data_rows: int = 0,
+    cache_key: str = "",
 ) -> dict[str, Any]:
     """写 run_card.json + run_card.md 到 run_dir.
 
@@ -77,6 +103,10 @@ def write_run_card(
         strategy_paths: 策略相关文件路径列表, e.g. [Path("strategy.py"), Path("config.yaml")].
             所有存在的文件都会计算 SHA-256.
         warnings: 异常 / 告警标签 list.
+        data_source: 数据来源名称 (如 "tushare", "akshare").
+        fetched_at: 数据获取时间 (ISO 格式).
+        data_rows: 获取的数据行数.
+        cache_key: 缓存键 (如 SHA-256 hash).
 
     Returns:
         写入 run_card.json 的 payload dict (供测试验证).
@@ -93,6 +123,20 @@ def write_run_card(
             if sp.exists() and sp.is_file():
                 strategy_hashes[sp.name] = _hash_file(sp)
 
+    # Data provenance
+    data_provenance: dict[str, Any] = {}
+    if data_source:
+        data_provenance["source"] = data_source
+    if fetched_at:
+        data_provenance["fetched_at"] = fetched_at
+    if data_rows > 0:
+        data_provenance["rows"] = data_rows
+    if cache_key:
+        data_provenance["cache_key"] = cache_key
+
+    # Artifact references
+    artifact_refs = _collect_artifact_refs(run_dir)
+
     run_card = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -100,6 +144,8 @@ def write_run_card(
         "config": config_summary,
         "config_hash": _hash_dict(config_summary),
         "strategy_hashes": strategy_hashes,
+        "data_provenance": data_provenance or None,
+        "artifact_refs": artifact_refs or None,
         "metrics": {k: v for k, v in metrics.items() if not isinstance(v, (dict, list))},
         "warnings": list(warnings or []),
     }
@@ -126,6 +172,12 @@ def write_run_card(
             md_lines.append(f"  - `{name}`: `{h[:16]}...`")
     else:
         md_lines.append("- Strategy hashes: (none)")
+
+    # Data provenance
+    if data_provenance:
+        md_lines += ["", "## Data Provenance", ""]
+        for k, v in data_provenance.items():
+            md_lines.append(f"- `{k}`: `{v}`")
 
     md_lines += [
         "",
@@ -155,6 +207,19 @@ def write_run_card(
                 md_lines.append(f"| `{k}` | `{v}` |")
     else:
         md_lines.append("| _empty_ | _none_ |")
+
+    # Artifact refs
+    if artifact_refs:
+        md_lines += [
+            "",
+            "## Artifacts",
+            "",
+            "| File | Size | SHA-256 |",
+            "|------|------|---------|",
+        ]
+        for ref in artifact_refs:
+            size_kb = ref["size_bytes"] / 1024
+            md_lines.append(f"| `{ref['filename']}` | {size_kb:.1f} KB | `{ref['sha256'][:16]}...` |")
 
     if warnings:
         md_lines += ["", "## Warnings", ""]

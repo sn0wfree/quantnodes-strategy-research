@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -20,6 +21,44 @@ from .db import (
 )
 from .git import git_commit, git_commit_rich, git_get_hash
 from .run_card import write_run_card
+
+
+# ============================================================
+# 子进程环境变量白名单
+# ============================================================
+
+# Only these env vars are passed to backtest subprocesses.
+# Security boundary: LLM keys, API server, broker, and live-trading
+# credentials are explicitly excluded.
+_ALLOWED_ENV_KEYS: set[str] = {
+    # OS / Python basics
+    "PATH", "PYTHONPATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE",
+    "SHELL", "TMPDIR", "TEMP", "TMP",
+    # Python internals
+    "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED", "PYTHONIOENCODING",
+    # Proxy / certificates (read-only, safe to forward)
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    # Market data (read-only tokens, safe to forward)
+    "TUSHARE_TOKEN", "TUSHARE_API_KEY",
+    "IFIND_TOKEN", "IFIND_API_KEY",
+    "FRED_API_KEY",
+    "YAHOO_FINANCE_API_KEY",
+    # Encoding
+    "PYTHONUTF8",
+}
+
+
+def _build_restricted_env() -> dict[str, str]:
+    """Build a restricted environment for subprocess execution.
+
+    Only whitelisted env vars are included. This prevents accidental
+    leakage of LLM keys, broker credentials, or API server tokens
+    into generated strategy code.
+    """
+    base = os.environ.copy()
+    return {k: v for k, v in base.items() if k in _ALLOWED_ENV_KEYS}
 
 
 # ============================================================
@@ -183,6 +222,7 @@ def run_strategy(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=_build_restricted_env(),
         )
 
         output = result.stdout + "\n" + result.stderr
@@ -272,6 +312,7 @@ def run_backtest_script(
             "run": run_name,
             "strategy": strategy_name,
             "action": action,
+            "source": metrics.get("source", ""),
         },
         metrics=metrics,
         strategy_paths=[
@@ -279,6 +320,10 @@ def run_backtest_script(
             run_dir / "config.yaml",
         ],
         warnings=_extract_warnings(metrics, output),
+        data_source=metrics.get("source", ""),
+        fetched_at=metrics.get("fetched_at", ""),
+        data_rows=int(metrics.get("data_rows", 0)),
+        cache_key=metrics.get("cache_key", ""),
     )
 
     return {
@@ -363,12 +408,17 @@ def run_backtest_from_yaml(
                 "run": run_name,
                 "strategy": strategy_name,
                 "action": action,
+                "source": metrics.get("source", ""),
             },
             metrics=metrics,
             strategy_paths=[
                 run_dir / "strategy.py",
                 run_dir / "config.yaml",
             ],
+            data_source=metrics.get("source", ""),
+            fetched_at=metrics.get("fetched_at", ""),
+            data_rows=int(metrics.get("data_rows", 0)),
+            cache_key=metrics.get("cache_key", ""),
         )
 
         return {

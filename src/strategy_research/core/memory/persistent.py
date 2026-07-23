@@ -236,9 +236,13 @@ class PersistentMemory:
         return True
 
     def find_relevant(self, query: str, max_results: int = MAX_RESULTS) -> List[MemoryEntry]:
-        """Keyword search across all memory entries.
+        """Search across all memory entries using semantic or keyword matching.
 
-        Scoring: metadata_hits * 2.0 + body_hits * 1.0, with recency boost.
+        Tries embedding-based semantic search first (if sentence-transformers
+        is installed). Falls back to token-overlap keyword matching.
+
+        Scoring (keyword): metadata_hits * 2.0 + body_hits * 1.0, with recency boost.
+        Scoring (semantic): cosine similarity * recency boost.
 
         Args:
             query: Search query.
@@ -249,18 +253,86 @@ class PersistentMemory:
         """
         import time
 
+        entries = self._scan_entries()
+        if not entries:
+            return []
+
+        # Try semantic search first
+        semantic_results = self._find_semantic(query, entries, max_results)
+        if semantic_results:
+            return semantic_results
+
+        # Fallback: token-overlap keyword search
+        return self._find_keyword(query, entries, max_results)
+
+    def _find_semantic(
+        self, query: str, entries: List[MemoryEntry], max_results: int,
+    ) -> List[MemoryEntry]:
+        """Embedding-based semantic search. Returns [] if unavailable."""
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+        except ImportError:
+            return []
+
+        try:
+            # Lazy-load model (cached across calls)
+            if not hasattr(self, "_embedding_model"):
+                self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+                self._embedding_cache: dict[str, list[float]] = {}
+
+            model = self._embedding_model
+
+            # Encode query
+            query_vec = model.encode(query, normalize_embeddings=True)
+
+            # Encode entries (with cache)
+            import time as _time
+            now = _time.time()
+            scored: list[tuple[float, MemoryEntry]] = []
+
+            for entry in entries:
+                cache_key = str(entry.path)
+                if cache_key not in self._embedding_cache:
+                    text = f"{entry.title} {entry.description} {entry.body[:500]}"
+                    vec = model.encode(text, normalize_embeddings=True)
+                    self._embedding_cache[cache_key] = vec.tolist()
+                else:
+                    vec = np.array(self._embedding_cache[cache_key])
+
+                # Cosine similarity (already normalized → dot product)
+                sim = float(np.dot(query_vec, vec))
+
+                # Recency boost
+                days_since = (now - entry.modified_at) / 86400
+                recency = 1.0 / (1 + days_since / 7)
+                score = sim * recency
+                scored.append((score, entry))
+
+            scored.sort(key=lambda x: -x[0])
+            return [entry for _, entry in scored[:max_results]]
+
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("semantic search failed, falling back to keyword: %s", exc)
+            return []
+
+    def _find_keyword(
+        self, query: str, entries: List[MemoryEntry], max_results: int,
+    ) -> List[MemoryEntry]:
+        """Token-overlap keyword search with recency boost."""
+        import time
+
         query_tokens = _tokenize(query)
         if not query_tokens:
             return []
 
         now = time.time()
         scored: list[tuple[float, MemoryEntry]] = []
-        for entry in self._scan_entries():
+        for entry in entries:
             meta_tokens = _tokenize(f"{entry.title} {entry.description}")
             body_tokens = _tokenize(entry.body)
             token_score = len(query_tokens & meta_tokens) * METADATA_WEIGHT + len(query_tokens & body_tokens)
             if token_score > 0:
-                # Recency boost: 1.0 / (1 + days_since_modified / 7)
                 days_since = (now - entry.modified_at) / 86400
                 recency_score = 1.0 / (1 + days_since / 7)
                 score = token_score * recency_score

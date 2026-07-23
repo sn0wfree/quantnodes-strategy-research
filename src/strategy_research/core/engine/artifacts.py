@@ -1,14 +1,96 @@
-"""Artifacts — 写回测产物到 run_dir (OHLCV/equity/trades CSV)。"""
+"""Artifacts — 写回测产物到 run_dir (OHLCV/equity/trades CSV)。
+
+包含 schema 定义和校验，确保产物完整性。
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
 
 from .models import TradeRecord
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Artifact Schema 定义
+# ============================================================
+
+ARTIFACTS_SPEC: dict[str, dict[str, Any]] = {
+    "equity_curve.csv": {
+        "required": True,
+        "columns": ["capital", "unrealized", "equity", "positions"],
+        "min_rows": 1,
+    },
+    "trades.csv": {
+        "required": True,
+        "columns": [
+            "symbol", "direction", "entry_price", "exit_price",
+            "entry_time", "exit_time", "size", "leverage",
+            "pnl", "pnl_pct", "exit_reason", "holding_bars", "commission",
+        ],
+        "min_rows": 0,  # 0 trades is valid
+    },
+    "metrics.json": {
+        "required": True,
+        "fields": ["final_value", "total_return", "sharpe", "max_dd"],
+        "min_rows": 1,
+    },
+}
+
+
+def validate_artifacts(run_dir: Path) -> list[str]:
+    """Validate backtest artifacts against schema.
+
+    Returns a list of warning strings. Empty list = all OK.
+    """
+    warnings: list[str] = []
+
+    for filename, spec in ARTIFACTS_SPEC.items():
+        filepath = run_dir / filename
+        if not filepath.exists():
+            if spec.get("required", False):
+                warnings.append(f"missing_required: {filename}")
+            continue
+
+        try:
+            if filename.endswith(".csv"):
+                df = pd.read_csv(filepath)
+                expected_cols = spec.get("columns", [])
+                missing_cols = [c for c in expected_cols if c not in df.columns]
+                if missing_cols:
+                    warnings.append(f"{filename}: missing columns {missing_cols}")
+                min_rows = spec.get("min_rows", 0)
+                if len(df) < min_rows:
+                    warnings.append(f"{filename}: {len(df)} rows < min_rows {min_rows}")
+                # Check for inf values in numeric columns
+                for col in df.select_dtypes(include=["float64", "float32"]).columns:
+                    if df[col].isin([float("inf"), float("-inf")]).any():
+                        warnings.append(f"{filename}: inf values in column '{col}'")
+
+            elif filename.endswith(".json"):
+                with open(filepath, encoding="utf-8") as f:
+                    data = json.load(f)
+                expected_fields = spec.get("fields", [])
+                missing = [k for k in expected_fields if k not in data]
+                if missing:
+                    warnings.append(f"{filename}: missing fields {missing}")
+                # Check for NaN/Inf in metric values
+                for k, v in data.items():
+                    if isinstance(v, float):
+                        if v != v:  # NaN
+                            warnings.append(f"{filename}: NaN in field '{k}'")
+                        elif v == float("inf") or v == float("-inf"):
+                            warnings.append(f"{filename}: inf in field '{k}'")
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{filename}: validation error: {exc}")
+
+    return warnings
 
 
 def write_equity_curve(
@@ -99,16 +181,29 @@ def write_all_artifacts(
     data_map: Dict[str, pd.DataFrame],
     codes: List[str],
     metrics: Dict[str, Any],
-) -> None:
-    """写所有回测产物。"""
+) -> list[str]:
+    """写所有回测产物并校验 schema。
+
+    Returns:
+        List of warning strings. Empty = all OK.
+    """
     run_dir.mkdir(parents=True, exist_ok=True)
     write_equity_curve(run_dir, engine.equity_snapshots)
     write_trades_csv(run_dir, engine.trades)
     write_ohlcv_snapshots(run_dir, data_map, codes)
     write_metrics_json(run_dir, metrics)
 
+    warnings = validate_artifacts(run_dir)
+    if warnings:
+        for w in warnings:
+            logger.warning("artifact validation: %s", w)
+
+    return warnings
+
 
 __all__ = [
+    "ARTIFACTS_SPEC",
+    "validate_artifacts",
     "write_equity_curve",
     "write_trades_csv",
     "write_ohlcv_snapshots",

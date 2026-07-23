@@ -1,17 +1,19 @@
-"""6 BaseTool tools for agent code interaction.
+"""11 BaseTool tools for agent code interaction.
 
 All tools accept `workspace` (Path-like) via kwargs injection by AgentLoop.
 Each tool returns a JSON string (success or error envelope).
 
 Tools:
-    ReadFileTool      - read files inside workspace
-    WriteFileTool     - write files (sandbox + AST guard for .py)
-    RunBacktestTool   - invoke core.backtest.run_backtest_from_yaml
-    ComputeFactorTool - invoke core.compute_factor.compute_factor
-    GitDiffTool       - subprocess wrapper for git diff
-    ListHistoryTool   - list runs from results.tsv + runs/ directory
+    ReadFileTool       - read files inside workspace
+    WriteFileTool      - write files (sandbox + AST guard for .py)
+    RunBacktestTool    - invoke core.backtest.run_backtest_from_yaml
+    ComputeFactorTool  - invoke core.compute_factor.compute_factor
+    GitDiffTool        - subprocess wrapper for git diff
+    ListHistoryTool    - list runs from results.tsv + runs/ directory
     FactorAnalysisTool - factor IC/IR analysis
     PatternRecognitionTool - detect chart patterns
+    ListSkillsTool     - list available methodology skills
+    LoadSkillTool      - load full skill content by name
     OptionsPricingTool - Black-Scholes options pricing
 """
 
@@ -723,7 +725,135 @@ class PatternRecognitionTool(BaseTool):
         })
 
 
-# ── 9. OptionsPricingTool ──────────────────────────────────────────
+# ── 9. ListSkillsTool ─────────────────────────────────────────────
+
+
+class ListSkillsTool(BaseTool):
+    """List available skills (name + one-line description)."""
+
+    name = "list_skills"
+    description = (
+        "List all available methodology skills. Returns skill names, categories, "
+        "and one-line descriptions. Use load_skill to get full content."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "category": {"type": "string", "description": "Filter by category."},
+        },
+        "required": ["workspace"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        category = kwargs.get("category")
+
+        try:
+            from ...skills import SkillRegistry
+            registry = SkillRegistry()
+
+            # Load from workspace .skills/ first, then bundled templates
+            workspace_skills = workspace / ".skills"
+            if workspace_skills.is_dir():
+                registry.load_directory(workspace_skills)
+
+            bundled_skills = Path(__file__).parent.parent.parent / "templates" / ".skills"
+            if bundled_skills.is_dir():
+                registry.load_directory(bundled_skills)
+
+            if category:
+                skills = registry.by_category(category)
+            else:
+                skills = registry.list_all()
+
+            skill_list = [
+                {
+                    "name": s.name,
+                    "category": s.category,
+                    "description": s.description[:120] if s.description else "",
+                }
+                for s in skills
+            ]
+
+            return _ok({
+                "n_skills": len(skill_list),
+                "categories": registry.categories(),
+                "skills": skill_list,
+            })
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"list_skills failed: {exc}")
+
+
+# ── 10. LoadSkillTool ─────────────────────────────────────────────
+
+
+class LoadSkillTool(BaseTool):
+    """Load full skill content by name."""
+
+    name = "load_skill"
+    description = (
+        "Load a skill's full content by name. Returns the complete markdown "
+        "documentation including API contracts, workflows, and examples."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "name": {"type": "string", "description": "Skill name to load."},
+        },
+        "required": ["workspace", "name"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        name = kwargs.get("name")
+        if not isinstance(name, str) or not name:
+            return _err("missing or invalid 'name'")
+
+        try:
+            from ...skills import SkillRegistry
+            registry = SkillRegistry()
+
+            # Load from workspace .skills/ first (user overrides), then bundled
+            workspace_skills = workspace / ".skills"
+            if workspace_skills.is_dir():
+                registry.load_directory(workspace_skills)
+
+            bundled_skills = Path(__file__).parent.parent.parent / "templates" / ".skills"
+            if bundled_skills.is_dir():
+                registry.load_directory(bundled_skills)
+
+            skill = registry.get(name)
+            if skill is None:
+                available = [s.name for s in registry.list_all()][:20]
+                return _err(
+                    f"skill '{name}' not found",
+                    available=available,
+                )
+
+            return _ok({
+                "name": skill.name,
+                "category": skill.category,
+                "description": skill.description,
+                "tags": skill.tags,
+                "content": skill.content,
+            })
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"load_skill failed: {exc}")
+
+
+# ── 11. OptionsPricingTool ──────────────────────────────────────────
 
 
 class OptionsPricingTool(BaseTool):
@@ -808,7 +938,7 @@ class OptionsPricingTool(BaseTool):
 
 
 def build_default_registry() -> ToolRegistry:
-    """Build a ToolRegistry with all 9 tools.
+    """Build a ToolRegistry with all 11 tools.
 
     Tools are stateless; AgentLoop injects `workspace` per call.
     No workspace is bound at construction time.
@@ -822,6 +952,8 @@ def build_default_registry() -> ToolRegistry:
     r.register(ListHistoryTool())
     r.register(FactorAnalysisTool())
     r.register(PatternRecognitionTool())
+    r.register(ListSkillsTool())
+    r.register(LoadSkillTool())
     r.register(OptionsPricingTool())
     return r
 
@@ -835,6 +967,8 @@ __all__ = [
     "ListHistoryTool",
     "FactorAnalysisTool",
     "PatternRecognitionTool",
+    "ListSkillsTool",
+    "LoadSkillTool",
     "OptionsPricingTool",
     "build_default_registry",
 ]
