@@ -14,8 +14,8 @@ class HypothesisCreateRequest(BaseModel):
     title: str
     thesis: str = ""
     status: str = "exploring"
-    tags: Optional[list[str]] = None
-    metadata: Optional[dict] = None
+    universe: str = ""
+    signal_definition: str = ""
 
 
 class HypothesisUpdateRequest(BaseModel):
@@ -23,7 +23,6 @@ class HypothesisUpdateRequest(BaseModel):
     status: Optional[str] = None
     title: Optional[str] = None
     thesis: Optional[str] = None
-    tags: Optional[list[str]] = None
     conclusion: Optional[str] = None
 
 
@@ -40,6 +39,8 @@ async def hypothesis_create(req: HypothesisCreateRequest, request: Request):
             title=req.title,
             thesis=req.thesis,
             status=req.status,
+            universe=req.universe,
+            signal_definition=req.signal_definition,
         )
         return {"status": "ok", "hypothesis_id": hyp.hypothesis_id}
     except Exception as e:
@@ -60,10 +61,12 @@ async def hypothesis_list(
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)
         items = registry.list()
-        # Filter by status if provided
         if status:
             items = [h for h in items if h.status == status]
-        return {"status": "ok", "hypotheses": [h.__dict__ for h in items[:limit]]}
+        return {
+            "status": "ok",
+            "hypotheses": [h.to_dict() for h in items[:limit]],
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -82,7 +85,11 @@ async def hypothesis_search(
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)
         results = registry.search(query=q)
-        return {"status": "ok", "results": [h.__dict__ for h in results[:limit]], "query": q}
+        return {
+            "status": "ok",
+            "results": [h.to_dict() for h in results[:limit]],
+            "query": q,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -99,7 +106,7 @@ async def hypothesis_get(hypothesis_id: str, request: Request):
         hyp = registry.get(hypothesis_id)
         if hyp is None:
             raise HTTPException(status_code=404, detail=f"Hypothesis {hypothesis_id} not found")
-        return {"status": "ok", "hypothesis": hyp.__dict__}
+        return {"status": "ok", "hypothesis": hyp.to_dict()}
     except HTTPException:
         raise
     except Exception as e:
@@ -115,8 +122,16 @@ async def hypothesis_update(req: HypothesisUpdateRequest, request: Request):
 
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)
-        updates = {k: v for k, v in req.dict().items() if v is not None and k != "hypothesis_id"}
+        updates = {
+            k: v
+            for k, v in req.dict().items()
+            if v is not None and k != "hypothesis_id"
+        }
         hyp = registry.update(req.hypothesis_id, **updates)
-        return {"status": "ok", "hypothesis": hyp.__dict__}
+        if hyp is None:
+            raise HTTPException(status_code=404, detail=f"Hypothesis {req.hypothesis_id} not found")
+        return {"status": "ok", "hypothesis": hyp.to_dict()}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
