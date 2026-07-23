@@ -1087,7 +1087,41 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
 
         # Step 6: 提交
         print("\n[Step 6] 提交...")
-        verdict = anti_overfit_analyst_output.get("verdict", "discard")
+
+        # Phase C-2: 用 decide() 替代内嵌 verdict 逻辑
+        # 1) 从 anti_overfit_analyst_output 提取 llm_verdict (如有)
+        aoa_llm_verdict = None
+        if isinstance(anti_overfit_analyst_output, dict):
+            aoa_llm_verdict = {
+                "passed": bool(anti_overfit_analyst_output.get("overfit_passed", False)),
+                "score": float(anti_overfit_analyst_output.get("overfit_score", 0.5) or 0.5),
+                "reason": anti_overfit_analyst_output.get("verdict_reason", ""),
+                "concerns": anti_overfit_analyst_output.get("methods_passed", []),
+                "source": "anti_overfit_analyst",
+            }
+
+        # 2) 调用 decide() (传入 stagnation_count 让连续 reject 自动停止)
+        from .core.strategy_acceptance import (
+            AcceptanceConfig,
+            decide as make_decision,
+            load_config as load_acceptance_config,
+        )
+        acceptance_cfg = load_acceptance_config(
+            workspace_config=path / "acceptance.yaml",
+        )
+
+        decision = make_decision(
+            metrics=metrics,
+            llm_verdict=aoa_llm_verdict,
+            cfg=acceptance_cfg,
+            stagnation_count=int(anti_overfit_analyst_output.get("stagnation_count", 0) or 0)
+                if isinstance(anti_overfit_analyst_output, dict) else 0,
+        )
+
+        verdict = "keep" if decision.accept else "discard"
+        print(f"  decision.accept: {decision.accept}")
+        print(f"  decision.reason: {decision.reason}")
+        print(f"  decision.stagnation_triggered: {decision.stagnation_triggered}")
         print(f"  verdict: {verdict}")
 
         # 更新 results.tsv (覆盖 backtest 写入的 pending 行为,使用最终 verdict)
@@ -1130,6 +1164,8 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         summary = generate_run_summary(
             agent_outputs, metrics, verdict, round_num, previous_summary
         )
+        # Phase C-2: 把 decision breakdown 写入 summary (供审计)
+        summary["acceptance_decision"] = decision.to_dict()
         save_run_summary(run_dir, summary)
         print(f"  summary.json 已保存")
 
@@ -1142,6 +1178,11 @@ def cmd_autoresearch(args: argparse.Namespace) -> int:
         # 检查停止条件
         if args.max_rounds and round_num >= args.max_rounds:
             print(f"\n🛑 达到最大轮数 ({args.max_rounds}),停止")
+            break
+
+        # Phase C-2: stagnation stop — 连续 N 轮 reject 触发自动停止
+        if decision.stagnation_triggered:
+            print(f"\n🛑 stagnation 触发 ({decision.reason}), 停止 autoresearch")
             break
 
         # 轮间 cooldown
