@@ -91,9 +91,21 @@ class TestArgParsing:
         from strategy_research.cli import cmd_autoresearch
         args = _make_args(workspace, max_rounds=1, strategy=None)
         rc = cmd_autoresearch(args)
-        # Should succeed using the config default strategy
         assert rc == 0
         assert _run_dir(workspace, 1).exists()
+
+    def test_no_strategy_no_default_returns_1(self, workspace, monkeypatch):
+        """When strategy is None and config has no default_strategy → returns 1."""
+        import yaml
+        cfg_path = workspace / "config.yaml"
+        config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        config.setdefault("workspace", {}).pop("default_strategy", None)
+        cfg_path.write_text(yaml.dump(config), encoding="utf-8")
+
+        from strategy_research.cli import cmd_autoresearch
+        args = _make_args(workspace, max_rounds=1, strategy=None)
+        rc = cmd_autoresearch(args)
+        assert rc == 1
 
 
 # ─── 单轮 ────────────────────────────────────────────────────────────
@@ -166,9 +178,23 @@ class TestMultiRound:
         cmd_autoresearch(args)
 
         reg = HypothesisRegistry()
-        # Should have at least 1 hypothesis from the rounds
         all_hyps = reg.list()
         assert len(all_hyps) >= 1
+
+    def test_hypothesis_created_with_title(self, workspace):
+        from strategy_research.cli import cmd_autoresearch
+        from strategy_research.core.hypothesis import HypothesisRegistry
+
+        args = _make_args(workspace, max_rounds=2)
+        cmd_autoresearch(args)
+
+        reg = HypothesisRegistry()
+        all_hyps = reg.list()
+        # Each round registers a hypothesis with title format "run_NNNN: <thesis>"
+        assert len(all_hyps) >= 1
+        for h in all_hyps:
+            assert h.title.startswith("run_")
+            assert len(h.thesis) > 0
 
 
 # ─── 停止条件 ────────────────────────────────────────────────────────
