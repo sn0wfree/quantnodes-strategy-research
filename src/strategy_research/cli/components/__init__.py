@@ -5,6 +5,18 @@ Mirrors ``vibe-trading/cli/components/__init__.py``.
 
 from __future__ import annotations
 
+from strategy_research.cli.components.tool_event import (
+    beautify_tool_name,
+    render_tool_event,
+    render_tool_events,
+    summarize_args,
+)
 from strategy_research.cli.components.working_indicator import ThinkingSpinner
 
-__all__ = ["ThinkingSpinner"]
+__all__ = [
+    "ThinkingSpinner",
+    "beautify_tool_name",
+    "render_tool_event",
+    "render_tool_events",
+    "summarize_args",
+]
