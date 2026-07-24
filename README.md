@@ -251,6 +251,33 @@ app.run()
 
 TUI 的 `/halt` 拦截 + 三态 `Ctrl+C`（清空 / 提示 / 退出）+ `(r)esume / (n)ew` 上回会话 + 数字 mandate pick + 全套 16 slash 命令 — 都从 `vibe-trading-ai 0.1.11` 直接 mirror，零行为差异。
 
+### 🔣 Unicode ↔ ASCII fallback
+
+少数组件发 Unicode glyph（`●`、`×`、`…`、`·`、`→`）。在 ASCII-only 终端
+（老 vt100、串口控制台、`LANG=C`）上，这些字符会变成乱码。
+新加的 `cli.utils.ascii_compat` 模块会在以下情况自动降级到 ASCII 同义字符：
+
+| Unicode | ASCII | 用途 |
+|---|---|---|
+| `●` | `*` | 状态 marker（running / ok） |
+| `×` | `x` | 错误 marker |
+| `…` | `...` | 截断省略号 |
+| `·` | `-` | 行间分隔符 |
+| `→` | `->` | 箭头（如 `/journal` / `/shadow` 提示） |
+
+**触发条件**（按优先级）：
+
+1. `register_ascii_mode(True)` 程序化覆盖（线程局部）
+2. `STRATEGY_ASCII_MODE=1` 环境变量
+3. `LANG=POSIX` / `LANG=C` 且 `LC_ALL` 不指向 UTF-8
+4. `sys.stdout.encoding` 报告 `ascii` / `ANSI_X3.4` / `646`
+
+显式关闭：
+
+```bash
+STRATEGY_ASCII_MODE=1 quantnodes-research       # 强制 ASCII 输出（即使 LANG=en_US.UTF-8）
+```
+
 ### 生成 TUI 截图（开发 / 文档）
 
 ```bash

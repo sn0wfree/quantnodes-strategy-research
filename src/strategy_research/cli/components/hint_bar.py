@@ -12,6 +12,13 @@ from typing import Optional
 
 from rich.text import Text
 
+# Mode-aware ellipsis: "…" in Unicode mode, "..." in ASCII mode.
+from strategy_research.cli.utils.ascii_compat import (
+    ELLIPSIS_ASCII as _ELL_ASCII,
+    ELLIPSIS_UNICODE as _ELL_UNI,
+    is_ascii_mode,
+)
+
 
 def _resolve_width(width: Optional[int]) -> int:
     if width is not None and width > 0:
@@ -23,6 +30,10 @@ def _resolve_width(width: Optional[int]) -> int:
     except (OSError, ValueError):
         pass
     return 80
+
+
+def _ellipsis_glyph() -> str:
+    return _ELL_ASCII if is_ascii_mode() else _ELL_UNI
 
 
 def render_hint_bar(
@@ -39,22 +50,23 @@ def render_hint_bar(
     """
     text = Text()
     width = _resolve_width(width)
+    ellipsis_glyph = _ellipsis_glyph()
 
     if not right:
         # Just left
         if len(left) > width:
-            left = left[: max(0, width - 1)] + "…"
+            left = left[: max(0, width - len(ellipsis_glyph))] + ellipsis_glyph
         text.append(left)
         return text
 
     # Reserve at least 1 space between left and right.
     if len(left) + len(right) + 1 > width:
         # Truncate left to fit
-        max_left = max(0, width - len(right) - 2)  # space + ellipsis
+        max_left = max(0, width - len(right) - 1 - len(ellipsis_glyph))
         if max_left <= 0:
             text.append(right[:width])
             return text
-        left = (left[: max_left - 1] + "…") if len(left) > max_left else left
+        left = (left[: max_left - 1] + ellipsis_glyph) if len(left) > max_left else left
 
     padding = max(1, width - len(left) - len(right))
     text.append(left, style="muted")

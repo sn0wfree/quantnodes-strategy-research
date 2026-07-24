@@ -12,7 +12,29 @@ The ``quantnodes-research`` binary now launches a real Textual-based
 full-screen terminal UI by default (TTY only). All 16 slash commands
 plus the streaming LLM bridge live inside the same Textual app.
 
-- **`cli.tui.app.ResearchApp`** — top-level ``textual.App`` subclass
+### Added (Unicode ↔ ASCII fallback)
+Components that emit a small set of Unicode glyphs (``●``, ``×``,
+``…``, ``·``, ``→``) now auto-detect ASCII-only terminals and substitute
+one-character ASCII lookalikes (``*``, ``x``, ``...``, ``-``, ``->``)
+so non-UTF-8 environments (legacy ``vt100``, plain serial consoles,
+``LANG=C`` locales) render readable output.
+
+- **`cli.utils.ascii_compat`** — new module. ``is_ascii_mode()`` probes
+  three signals in order: per-thread ``register_ascii_mode``
+  override → ``STRATEGY_ASCII_MODE=1`` env → ``LANG/LC_ALL/LANGUAGE``
+  starting with ``C`` or ``POSIX`` → ``sys.stdout.encoding``.
+- `ELLIPSIS_*`, `MIDDOT_*`, `ARROW_*` symbol pairs exposed for direct
+  lookup. ``status_marker(status)`` returns the matching glyph pair.
+- ``ascii_fallback(text)`` substitutes Unicode glyphs in arbitrary
+  strings (e.g. user-supplied log content).
+- Consumers wired up:
+  - ``cli.components.tool_event.render_tool_event`` picks the live
+    marker glyph at call time so post-import mode changes are picked
+    up; ``summarize_args`` uses the live ellipsis.
+  - ``cli.components.hint_bar.render_hint_bar`` uses the live ellipsis
+    when truncating the left side to fit width.
+
+##- **`cli.tui.app.ResearchApp`** — top-level ``textual.App`` subclass
   composing Header + Horizontal(Sidebar / Transcript / Rail) +
   ChatInput + HintFooter. CSS at ``cli/tui/styles.tcss``.
 - **`cli.tui.widgets`** — six thin Textual-native wrappers:
@@ -117,9 +139,11 @@ plus the streaming LLM bridge live inside the same Textual app.
   ``ResearchApp.write_transcript`` contract.
 
 ### Tests
-- +545 new tests (`5683 → 6228`). All CLI modules now have dedicated
+- +573 new tests (`5683 → 6256`). All CLI modules now have dedicated
   suites including the full Textual TUI lifecycle
-  (``run_test`` mount + handler dispatch + LLM stub integration).
+  (``run_test`` mount + handler dispatch + LLM stub integration) and
+  the Unicode ↔ ASCII auto-fallback layer (28 tests in
+  ``test_cli_ascii_compat``).
 
 ## [0.4.0] - 2026-07-23
 

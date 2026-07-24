@@ -4,9 +4,25 @@ Mirrors ``vibe-trading/cli/utils/__init__.py`` — flat re-export so callers
 write ``from cli.utils import format_duration`` instead of going through the
 submodule.
 """
-
 from __future__ import annotations
 
+from strategy_research.cli.utils.ascii_compat import (
+    ARROW_ASCII,
+    ARROW_UNICODE,
+    ELLIPSIS_ASCII,
+    ELLIPSIS_UNICODE,
+    MIDDOT_ASCII,
+    MIDDOT_UNICODE,
+    STATUS_MARKERS_ASCII,
+    STATUS_MARKERS_UNICODE,
+    arrow,
+    ascii_fallback,
+    ellipsis,
+    is_ascii_mode,
+    middot,
+    register_ascii_mode,
+    status_marker,
+)
 from strategy_research.cli.utils.format import (
     abbreviate_num,
     format_duration,
@@ -18,9 +34,24 @@ from strategy_research.cli.utils.thinking_verbs import (
 )
 
 __all__ = [
+    "ARROW_ASCII",
+    "ARROW_UNICODE",
+    "ELLIPSIS_ASCII",
+    "ELLIPSIS_UNICODE",
+    "MIDDOT_ASCII",
+    "MIDDOT_UNICODE",
+    "STATUS_MARKERS_ASCII",
+    "STATUS_MARKERS_UNICODE",
     "abbreviate_num",
+    "arrow",
+    "ascii_fallback",
+    "ellipsis",
     "format_duration",
     "format_tokens",
-    "THINKING_VERBS",
+    "is_ascii_mode",
+    "middot",
     "pick_thinking_verb",
+    "register_ascii_mode",
+    "status_marker",
+    "THINKING_VERBS",
 ]

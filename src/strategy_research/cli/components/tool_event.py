@@ -20,6 +20,19 @@ from typing import Any, Mapping, Optional
 
 from rich.text import Text
 
+# Mode-aware ellipsis (Unicode "…" or ASCII "...") so non-UTF-8
+# terminals don't render mojibake.
+from strategy_research.cli.utils.ascii_compat import (
+    ELLIPSIS_ASCII as _ELL_ASCII,
+    ELLIPSIS_UNICODE as _ELL_UNI,
+    is_ascii_mode,
+    status_marker,
+)
+
+
+def _ellipsis_glyph() -> str:
+    return _ELL_ASCII if is_ascii_mode() else _ELL_UNI
+
 _PREFIX_RE = re.compile(r"^(get_|run_|do_|fetch_|load_|build_|compute_|calc_|find_|list_)+")
 
 # Tokens that should stay UPPER in the pretty name.
@@ -31,11 +44,29 @@ _STATUS_STYLE: dict[str, str] = {
     "error": "danger",
 }
 
+# Status markers are Unicode ●/× by default. The :func:`status_marker`
+# helper picks the right glyph per current mode (Unicode vs ASCII).
+from strategy_research.cli.utils.ascii_compat import status_marker
+
 _STATUS_MARKER: dict[str, str] = {
-    "running": "●",
-    "ok": "●",
-    "error": "×",
+    "running": status_marker("running"),
+    "ok": status_marker("ok"),
+    "error": status_marker("error"),
 }
+
+
+def _live_status_marker(status: str) -> str:
+    """Resolve the status marker glyph at call time.
+
+    Module-level ``_STATUS_MARKER`` is computed at import time, so once
+    bound it ignores later env changes. This wrapper re-resolves via
+    :func:`status_marker` so callsites pick up ``STRATEGY_ASCII_MODE=1``
+    toggled after import (the common tests scenario).
+    """
+    return status_marker(status)
+
+
+# Tokens that should stay UPPER in the pretty name.
 
 _PREFERRED_ARG_KEYS = (
     "query",
@@ -114,7 +145,7 @@ def summarize_args(
 
     joined = " ".join(parts) if parts else ""
     if len(joined) > max_len:
-        joined = joined[: max_len - 1] + "…"
+        joined = joined[: max_len - 1] + _ellipsis_glyph()
     return joined
 
 
@@ -136,7 +167,7 @@ def render_tool_event(
         result_summary: Optional short text describing the result.
     """
     text = Text()
-    marker = _STATUS_MARKER.get(status, "●")
+    marker = _live_status_marker(status)
     style = _STATUS_STYLE.get(status, "muted")
     text.append(f"{marker} ", style=style)
     text.append(beautify_tool_name(name), style="bold")

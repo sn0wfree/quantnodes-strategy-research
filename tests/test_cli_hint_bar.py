@@ -7,6 +7,22 @@ from rich.console import Console
 from rich.text import Text
 
 from strategy_research.cli.components.hint_bar import render_hint_bar
+from strategy_research.cli.utils.ascii_compat import (
+    ELLIPSIS_ASCII,
+    ELLIPSIS_UNICODE,
+    register_ascii_mode,
+)
+
+
+@pytest.fixture(autouse=True)
+def _force_unicode_mode_for_legacy_tests():
+    """The Unicode-vs-ASCII choice is per-thread; pin ``Unicode`` so the
+    pre-ASCII-fallback legacy tests in this module stay deterministic.
+    Newer tests should use :func:`register_ascii_mode` explicitly.
+    """
+    register_ascii_mode(False)
+    yield
+    register_ascii_mode(None)
 
 
 def _plain(text: Text) -> str:
@@ -35,7 +51,7 @@ class TestHintBar:
         out = _plain(render_hint_bar(left, right, width=20))
         assert "END" in out
         # 'x' * 100 truncated — should still contain many xs but with ellipsis
-        assert "…" in out
+        assert ELLIPSIS_UNICODE in out
 
     def test_preserves_right_when_overflow(self):
         left = "a" * 80

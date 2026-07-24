@@ -82,10 +82,17 @@ class TestSummarizeArgs:
         assert "bar" in s
 
     def test_truncation(self):
+        from strategy_research.cli.utils.ascii_compat import (
+            ELLIPSIS_ASCII,
+            ELLIPSIS_UNICODE,
+            register_ascii_mode,
+        )
+        # Force Unicode mode for the legacy assertions.
+        register_ascii_mode(False)
         long = "x" * 200
         s = summarize_args({"query": long}, max_len=20)
-        assert len(s) <= 21  # includes the trailing …
-        assert s.endswith("…")
+        assert len(s) <= 21  # includes the trailing single-char "…"
+        assert s.endswith(ELLIPSIS_UNICODE)
 
     def test_skip_none_or_empty(self):
         s = summarize_args({"query": "", "prompt": None, "foo": "bar"})
@@ -103,15 +110,26 @@ class TestRenderToolEvent:
         assert isinstance(text, Text)
 
     def test_renders_status_marker(self):
+        from strategy_research.cli.utils.ascii_compat import (
+            register_ascii_mode,
+            status_marker,
+        )
+        # Force unicode mode so the test asserts the unicode glyph.
+        register_ascii_mode(False)
         text = render_tool_event("get_financials", status="running")
         out = _render_plain(text)
-        assert "●" in out  # running/ok marker
+        assert status_marker("running") in out
         assert "Financials" in out
 
     def test_error_status_uses_x_marker(self):
+        from strategy_research.cli.utils.ascii_compat import (
+            register_ascii_mode,
+            status_marker,
+        )
+        register_ascii_mode(False)
         text = render_tool_event("get_financials", status="error")
         out = _render_plain(text)
-        assert "×" in out
+        assert status_marker("error") in out
 
     def test_includes_args(self):
         text = render_tool_event("get_financials", {"symbol": "AAPL"})
