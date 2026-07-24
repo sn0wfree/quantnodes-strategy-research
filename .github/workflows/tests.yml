@@ -32,3 +32,11 @@ jobs:
           python -m pytest tests/ \
             --ignore=tests/test_session_triggers.py \
             -q --tb=short
+
+      - name: Upload TUI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-screenshots-py${{ matrix.python-version }}
+          path: tui-captures/
+          retention-days: 30

@@ -59,10 +59,10 @@ class ActivityRail(Log):
 
         line = render_tool_event(
             pretty,
-            arg_sum,
-            status,
-            duration_ms,
-            preview,
+            args,
+            status=status,
+            duration_ms=duration_ms,
+            result_summary=preview,
         )
         prefix = {
             "call": "↪",
