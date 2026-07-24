@@ -95,7 +95,7 @@ def _maybe_run_onboarding(console) -> bool:
     if _first_existing_env_path() is not None:
         return True
 
-    written = run_onboarding(console=console)
+    written = run_onboarding()
     if written is None:
         return False
 
