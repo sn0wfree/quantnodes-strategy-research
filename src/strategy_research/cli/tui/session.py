@@ -21,15 +21,23 @@ shell:
   ``/journal`` / ``/shadow`` queue-a-prompt), it re-enters
   immediately with that prompt so the user does not have to
   round-trip through stdin.
+
+Handler output capture (Commit 3)
+* Handlers still write to the singleton via ``console.print(...)``. In
+  TUI mode we wrap each turn in :func:`cli.theme.captured_console` so
+  :func:`cli.theme.get_console` returns a recording console for the
+  duration. Anything the handler prints accumulates inside that
+  console and is then forwarded to the app's TranscriptView.
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from strategy_research.cli.halt import clear_halt as _clear_halt
 from strategy_research.cli.halt import is_halted as _is_halted
 from strategy_research.cli.halt import trip_halt as _trip_halt
 from strategy_research.cli.interactive.main import process_turn
+from strategy_research.cli.theme import captured_console
 from strategy_research.cli.tui.messages import SynthesizeInput, WriteTranscript
 
 
@@ -51,9 +59,11 @@ class ChatSession:
         *,
         app: Any = None,
         session_logger: Any = None,
+        transcript_width: int = 120,
     ) -> None:
         self.ctx = ctx
         self.app = app
+        self.transcript_width = transcript_width
         # ``session_logger`` is an optional callable taking
         # ``(session_id, role, content)``. Reserved for Commit 5 (TTY
         # guard integration); unused here.
@@ -64,11 +74,7 @@ class ChatSession:
     # ------------------------------------------------------------------ API
 
     def enqueue(self, text: str) -> None:
-        """Queue text for the next :meth:`dispatch` cycle.
-
-        Used by :class:`ResumeOrNewModal` to inject a "first message"
-        into the loop without going through the input bar.
-        """
+        """Queue text for the next :meth:`dispatch` cycle."""
         self._pending_input = text
 
     async def dispatch(self, text: str) -> int:
@@ -79,14 +85,17 @@ class ChatSession:
         ``ctx.pending_prompt`` after a slash turn (``/journal``,
         ``/shadow``), the queued prompt is dispatched recursively.
         """
-        rc = process_turn(text, self.ctx)
+        rc, captured_text = self._dispatch_with_capture(text)
+
+        # Forward captured handler output to the TUI transcript.
+        stripped = captured_text.strip("\n").strip()
+        if stripped:
+            self._write_captured(stripped)
 
         # Drain ``ctx.pending_prompt`` queued by slash handlers.
         queued = getattr(self.ctx, "pending_prompt", None)
         if queued:
             self.ctx.pending_prompt = ""
-            # Recursive drain — but we shouldn't recurse forever; cap at
-            # 8 levels (way more than any realistic handler chain).
             return await self._drain(queued, depth=0, accumulator=rc)
 
         if rc == QUIT_RC and self.app is not None:
@@ -99,6 +108,19 @@ class ChatSession:
 
     # ------------------------------------------------------------------ helpers
 
+    def _dispatch_with_capture(self, text: str) -> tuple[int, str]:
+        """Run ``process_turn`` inside a captured console.
+
+        Returns ``(rc, captured_text)``. ``captured_text`` is the raw
+        text the handler emitted through ``get_console()`` (empty for
+        plain text turns that only append to history).
+        """
+        text_str = (text or "").strip()
+        with captured_console(width=self.transcript_width) as rec:
+            rc = process_turn(text_str, self.ctx)
+            captured = rec.export_text(clear=False, styles=False)
+        return rc, captured
+
     async def _drain(self, prompt: str, *, depth: int, accumulator: int) -> int:
         """Run a queued prompt, allowing up to 8 levels of re-queueing."""
         if depth >= 8:
@@ -106,7 +128,10 @@ class ChatSession:
                 "[warning]Prompt queue depth exceeded — discarding remaining.[/]"
             )
             return accumulator
-        rc = process_turn(prompt, self.ctx)
+        rc, captured = self._dispatch_with_capture(prompt)
+        stripped = captured.strip("\n").strip()
+        if stripped:
+            self._write_captured(stripped)
         next_queued = getattr(self.ctx, "pending_prompt", None)
         if next_queued:
             self.ctx.pending_prompt = ""
@@ -119,6 +144,10 @@ class ChatSession:
         """Post a transcript line via the app's widget, if available."""
         if self.app is not None:
             self.app.write_transcript(content)
+
+    def _write_captured(self, captured_text: str) -> None:
+        """Render the captured ANSI/marked-up text into the transcript."""
+        self._write_transcript(captured_text)
 
     # ------------------------------------------------------------------ halt API
 

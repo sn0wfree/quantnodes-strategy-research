@@ -18,9 +18,11 @@ Environment variables honored:
 from __future__ import annotations
 
 import os
+import contextvars
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterator, Optional
 
 from rich.console import Console
 from rich.theme import Theme as _RichThemeType
@@ -29,6 +31,15 @@ from rich.theme import Theme as _RichThemeType
 # Brand palette — kept in sync with strategy-research frontend.
 _BRAND_HEX = "#d97706"
 _BRAND_HEX_DARK = "#fa9842"
+
+
+# Per-call override for ``get_console()``. The TUI installs a recording
+# console via :func:`captured_console` so handler output can be captured
+# into the chat transcript without disturbing the singleton lookups in
+# the legacy REPL path.
+_CURRENT_CONSOLE = contextvars.ContextVar(
+    "_strategy_research_captured_console", default=None
+)
 
 
 @dataclass(frozen=True)
@@ -204,7 +215,10 @@ def get_console(*, force_terminal: bool = False) -> Console:
             return _CONSOLE_FORCED
         if _CONSOLE is None:
             _CONSOLE = _make_console(force_terminal=False)
-        return _CONSOLE
+    override = _CURRENT_CONSOLE.get()
+    if override is not None:
+        return override
+    return _CONSOLE
 
 
 def _make_console(*, force_terminal: bool) -> Console:
@@ -235,10 +249,64 @@ def _make_console(*, force_terminal: bool) -> Console:
     )
 
 
+def captured_console(*, width: int = 120) -> Iterator[Console]:
+    """Install a recording Console as the singleton override for one turn.
+
+    Within the ``with`` block, ``get_console()`` returns a fresh Rich
+    ``Console(record=True, ...)`` so handlers writing via ``console=``
+    or ``_resolve_console(None)`` accumulate their output into the
+    returned Console. Use ``console.export_text(...)`` / ``export(...)``
+    to extract the captured Renderable.
+
+    Example::
+
+        with captured_console() as rec:
+            handler(ctx, *args)
+        renderable = Text.from_ansi(rec.export_text(clear=False))
+
+    The Textual TUI calls this from :class:`ChatSession.dispatch` so
+    that handler output written via the singleton flows into the
+    ``TranscriptView`` rather than the underlying TTY.
+    """
+    @contextmanager
+    def _ctx():
+        rec = Console(
+            record=True,
+            force_terminal=False,
+            no_color=_no_color_requested(),
+            width=width,
+            soft_wrap=False,
+            highlight=False,
+            emoji=False,
+            markup=True,
+            theme=_RichThemeType(
+                {
+                    "primary": Theme.primary,
+                    "primary.dim": Theme.primary_dim,
+                    "success": Theme.success,
+                    "danger": Theme.danger,
+                    "warning": Theme.warning,
+                    "info": Theme.info,
+                    "muted": Theme.muted,
+                    "bold": Theme.bold,
+                    "label": Theme.label,
+                    "accent.bg": Theme.accent_bg,
+                }
+            ),
+        )
+        token = _CURRENT_CONSOLE.set(rec)
+        try:
+            yield rec
+        finally:
+            _CURRENT_CONSOLE.reset(token)
+    return _ctx()
+
+
 __all__ = [
     "Theme",
     "get_console",
     "is_dark",
     "force_dark",
     "clear_force_dark",
+    "captured_console",
 ]
