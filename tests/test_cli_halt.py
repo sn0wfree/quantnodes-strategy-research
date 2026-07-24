@@ -14,14 +14,6 @@ from strategy_research.cli.halt import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _reset_halt():
-    """Reset HALT before and after every test."""
-    clear_halt()
-    yield
-    clear_halt()
-
-
 # ─── Trip / clear / is_halted ──────────────────────────────────────────
 
 

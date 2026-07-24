@@ -6,7 +6,6 @@ all import from one place.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from textual.message import Message

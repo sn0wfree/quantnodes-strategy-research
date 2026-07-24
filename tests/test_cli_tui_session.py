@@ -50,14 +50,6 @@ class _FakeApp:
         self.write_calls.append(content)  # type: ignore[attr-defined]
 
 
-@pytest.fixture(autouse=True)
-def _reset_halt():
-    """Each test starts with HALT cleared."""
-    clear_halt()
-    yield
-    clear_halt()
-
-
 # ─── session.dispatch() basic routing ───────────────────────────────
 
 

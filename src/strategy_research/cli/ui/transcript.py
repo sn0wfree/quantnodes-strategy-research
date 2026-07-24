@@ -13,8 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, Optional
 
-from rich.console import Console, RenderResult
-from rich.panel import Panel
+from rich.console import RenderResult
 from rich.table import Table
 from rich.text import Text
 

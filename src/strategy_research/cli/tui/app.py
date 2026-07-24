@@ -21,7 +21,7 @@ Public API:
 from __future__ import annotations
 
 import os
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from textual.app import App
 from textual.containers import Horizontal
@@ -33,7 +33,7 @@ from strategy_research.cli.tui.messages import (
     SynthesizeInput,
     WriteTranscript,
 )
-from strategy_research.cli.tui.session import ChatSession, QUIT_RC
+from strategy_research.cli.tui.session import ChatSession
 from strategy_research.cli.tui.widgets import (
     ActivityRail,
     Banner,
@@ -234,7 +234,7 @@ class ResearchApp(App):
             from rich.console import Console as RichConsole
             import io
             buf = io.StringIO()
-            rc = render_help_table(console=RichConsole(file=buf, force_terminal=False))
+            render_help_table(console=RichConsole(file=buf, force_terminal=False))
             if buf.getvalue():
                 self.write_transcript(buf.getvalue())
         except Exception:

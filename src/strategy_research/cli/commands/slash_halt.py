@@ -16,7 +16,6 @@ from rich.console import Console
 
 from strategy_research.cli.halt import (
     clear_halt,
-    is_halted,
     trip_halt,
 )
 from strategy_research.cli.theme import get_console

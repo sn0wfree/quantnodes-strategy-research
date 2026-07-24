@@ -15,14 +15,6 @@ from strategy_research.cli.commands.slash_halt import (
 from strategy_research.cli.halt import is_halted
 
 
-@pytest.fixture(autouse=True)
-def _reset_halt():
-    from strategy_research.cli.halt import clear_halt
-    clear_halt()
-    yield
-    clear_halt()
-
-
 # ─── is_halt_command / is_resume_command ──────────────────────────────
 
 

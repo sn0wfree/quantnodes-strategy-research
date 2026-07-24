@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from strategy_research.cli.commands.slash_router import SLASH_COMMANDS
-from strategy_research.cli.theme import Theme, get_console
+from strategy_research.cli.theme import get_console
 
 _SHORTCUTS: tuple[tuple[str, str], ...] = (
     ("⏎ Send", "Enter"),

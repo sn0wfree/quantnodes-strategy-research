@@ -54,7 +54,6 @@ class ActivityRail(Log):
         preview = event.get("preview", "") if isinstance(event, dict) else ""
 
         pretty = beautify_tool_name(tool)
-        arg_sum = summarize_args(args) if args is not None else ""
         phase = event.get("phase", "call") if isinstance(event, dict) else "call"
 
         line = render_tool_event(

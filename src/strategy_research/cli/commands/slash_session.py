@@ -12,7 +12,6 @@ legacy argparse-based session commands (``cmd_session_*``) live in
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any, Optional
 
 from rich.console import Console

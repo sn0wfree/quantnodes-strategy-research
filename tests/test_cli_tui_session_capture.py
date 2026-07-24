@@ -41,13 +41,6 @@ class _StubApp:
         self.writes.append(content)
 
 
-@pytest.fixture(autouse=True)
-def _reset_halt():
-    clear_halt()
-    yield
-    clear_halt()
-
-
 # ─── dispatch() output capture ─────────────────────────────────────
 
 

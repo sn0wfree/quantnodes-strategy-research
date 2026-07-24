@@ -229,14 +229,6 @@ async def test_stream_chat_to_tui_empty_response_does_not_crash():
 # ─── ChatSession LLM integration ────────────────────────────────────
 
 
-@pytest.fixture(autouse=True)
-def _reset_halt():
-    from strategy_research.cli.halt import clear_halt
-    clear_halt()
-    yield
-    clear_halt()
-
-
 @pytest.mark.asyncio
 async def test_chat_session_dispatches_plain_text_to_llm():
     """When ``llm_client`` is bound, plain-text turns go through the LLM bridge."""
