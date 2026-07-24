@@ -97,22 +97,30 @@ async def test_write_transcript_message_appends_to_log():
 
 @pytest.mark.asyncio
 async def test_synthesize_input_echoes_to_transcript():
-    """Sidebar ``SynthesizeInput`` clicks echo to the transcript in v1.
+    """Sidebar ``SynthesizeInput`` clicks dispatch through the session.
 
-    Note: Textual's test pilot under pytest-asyncio processes posted
-    messages only after explicit ``await pilot.pause()`` cycles. We
-    invoke the handler directly via :meth:`on_synthesize_input` to
-    keep the test fast and deterministic.
+    Commit 2 wires ``on_synthesize_input`` to :class:`ChatSession.dispatch`
+    (the real ``process_turn`` dispatcher). For plain text input, this
+    lands in ``ctx.history`` as a {role: user} entry. We verify the
+    history is populated rather than the transcript (the help panel
+    rendering lives in Commit 3).
     """
     app = ResearchApp(model="m", version="0.4.0")
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.on_synthesize_input(SynthesizeInput(text="/help"))
+        # Manually wire the session — Commit 2 wires it in on_mount, but
+        # since the test app skips banner rendering we initialize it.
+        if app.session is None:
+            from strategy_research.cli.tui.session import ChatSession
+
+            app.session = ChatSession(app.ctx, app=app)
         await pilot.pause()
+        await app.on_synthesize_input(SynthesizeInput(text="hi-from-sidebar"))
         await pilot.pause()
-        transcript = app.query_one(TranscriptView)
-        joined = " ".join(str(line) for line in transcript.lines)
-        assert "/help" in joined, f"/help not echoed in transcript: {joined!r}"
+        # Plain text lands in ctx.history.
+        assert any(
+            m.get("content") == "hi-from-sidebar" for m in app.ctx.history
+        ), f"history missing entry: {app.ctx.history!r}"
 
 
 @pytest.mark.asyncio
