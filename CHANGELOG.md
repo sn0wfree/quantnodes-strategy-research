@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-24
+
+### Changed
+- **`quantnodes-research init`** rewritten as a 5-step TTY credentials wizard
+  (mirrors vibe-trading). Two init paths now share a single backend:
+  - A. Explicit: `quantnodes-research init` → `cli.cmd_run_onboarding`
+    (Rich prompt_toolkit wizard, `--force` flag)
+  - B. Implicit: `quantnodes-research` bare TTY → `cli._auto_onboard.
+    _maybe_run_onboarding` (auto-trigger when no `.env` candidate exists)
+- Both paths write `~/.quantnodes/strategy_research/.env` with chmod 0600,
+  atomic `.env.partial → os.replace`.
+
+### Removed
+- Workspace scaffold helpers from `cli/__init__.py`:
+  `_load_template`, `_render_template`, `_create_strategy`,
+  `_init_duckdb`, `_init_git`, `_run_baseline_backtest`.
+  These are dead code as of v0.5.0 — `init` no longer creates config.yaml,
+  .prompts/, .skills/, strategies/, DuckDB, or git repos.
+- Test classes that tested the removed scaffold:
+  `TestRenderTemplate`, `TestCmdInit`, `TestCmdInitNoBaseline`,
+  `TestCmdInitConfigYAML`.
+
+### Added
+- `cli/_auto_onboard.py` — auto-trigger wizard on bare TTY launch.
+- `tests/test_init_wizard.py` — 25 test cases covering wizard flow,
+  migration, overwrite, auto-trigger, and cancel paths.
+- `docs/research/v0.5.0-init-literature.md` — literature survey
+  (Red Hat CLI UX guide, python-prompt_toolkit docs, dotenv README).
+- `docs/PLAN-phase1-4.md §5` — init rewrite design doc.
+
+### Fixed
+- Legacy users with `~/.strategy-research/.env` are silently migrated to
+  `~/.quantnodes/strategy_research/.env` on first wizard run (old file
+  left intact).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added (Textual TUI — full-screen multi-pane interface)

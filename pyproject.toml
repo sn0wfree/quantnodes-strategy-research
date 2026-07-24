@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantnodes-strategy-research"
-version = "0.4.2"
+version = "0.5.0"
 description = "通用策略自动研究框架 — Karpathy autoresearch 极简 + 多 Agent 增强 + Rich CLI"
 readme = "README.md"
 requires-python = ">=3.10"
