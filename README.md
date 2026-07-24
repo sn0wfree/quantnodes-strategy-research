@@ -12,6 +12,7 @@
 - [核心特性](#核心特性)
 - [安装](#安装)
 - [快速开始](#快速开始-30-秒)
+- [🖥️ Interactive TUI](#🖥️-interactive-tuiv040-新增)
 - [CLI 命令](#cli-命令13-个)
 - [工作区结构](#工作区结构)
 - [数据源](#数据源)
@@ -55,6 +56,7 @@
 ### 🎯 核心能力
 
 - ✅ **完整工作区管理**：`init` / `evaluate` / `reproduce` / `run` 全流程
+- ✅ **Full-screen Textual TUI**（v0.4.0）：default entry `quantnodes-research` 即启用 multi-pane 交互界面，slash 命令 + LLM 流式响应 + resume/halt 拦截全在一处
 - ✅ **多数据源**：Tencent / Eastmoney / Akshare / Tushare / YFinance / Local / FRED / iFinD
 - ✅ **460+ 因子库**：Alpha101 / GTJA191 / Qlib158 / Academic / Fundamental
 - ✅ **AI Agent 真跑**：6 个工具 + 沙箱 + 3 层上下文压缩
@@ -69,6 +71,7 @@
 - **Python 3.10+**
 - **数据**：DuckDB / SQLite / Pandas
 - **LLM**：OpenAI 兼容（httpx 零依赖）
+- **TUI**：Textual ≥ 0.50（full-screen multi-pane）+ prompt_toolkit（legacy REPL fallback）
 - **测试**：pytest（5,536+ 测试）
 - **借鉴**：vibe-trading-ai 0.1.11（HKUDS，MIT）/ llmwikify（Hook 系统）
 
@@ -156,6 +159,117 @@ quantnodes-research reproduce /tmp/demo_ws run_0001
   baseline: Calmar=0.599 Sharpe=0.927 MaxDD=-0.155 AnnRet=0.093
 ✓ 运行 baseline 回测 (buy and hold HS300)
 ```
+
+---
+
+## 🖥️ Interactive TUI（v0.4.0 新增）
+
+不传子命令直接运行 `quantnodes-research` 会启动一个 **Textual 写的 full-screen multi-pane TUI**：
+左侧命令栏 / 中间 transcript / 右侧 activity rail / 底部 prompt 输入。
+
+```bash
+quantnodes-research            # TTY → Textual TUI 默认入口
+quantnodes-research --repl     # 强制走 prompt_toolkit 老式 REPL（兼容路径）
+quantnodes-research --help     # 显示 argparse help
+```
+
+**布局：**
+
+```
+┌─ quantnodes-research · v0.4.0 ──────────────────────────────────────────────┐
+│ [8 行 ASCII 大字渐变 banner : strategy-research logo]                       │
+├──── Commands ──┬──── Transcript ──────────────┬──── Activity ─────────────┤
+│ /help          │ User: hello                   │ ⚙ tool_call              │
+│ /goal start    │ ⏳ thinking…                  │ ✔ tool_result_ok         │
+│ /history       │ Assistant: Hi! How can I ...   │ ✘ tool_result_error      │
+│ /show          │ `(elapsed 0.5s · 7 chars)`      │                            │
+│ /model         │                                │                            │
+│ /halt          │ User: /help                    │                            │
+│ /resume        │ [/help table rendered]         │                            │
+│ /quit          │                                │                            │
+├────────────────┴────────────────────────────────┴──────────────────────────┤
+│ ❯ type a question or /command…                                              │
+├────────────────────────────────────────────────────────────────────────────┤
+│ F1 help · Ctrl+C halt · Ctrl+D quit · /quit                                 │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 操作
+
+| 行为 | 触发 | 副作用 |
+|---|---|---|
+| 启动 TUI | `quantnodes-research`（TTY） | banner 显示；询问 (r)esume / (n)ew（如有历史 session） |
+| 弹出 help | `F1` 或侧栏 `/help` | 渲染到 transcript |
+| 退出 | `Ctrl+D` 或 `/quit` | 干净退出（rc=0） |
+| 终止 LLM 长跑 | `Ctrl+C` 或输入 `停` | HALT tripped，不退出 |
+| 恢复 LLM | 输入 `/resume` 或 `Ctrl+R` | HALT cleared |
+| 清屏 + 历史 | `/clear` 或 `Ctrl+L` | 清 transcript + ctx.history |
+| Mandate 投票 | 数字 `1`/`2`/`3`（有 pending proposal 时） | 不进 LLM，proposal 清空 |
+| 调 LLM | 在 prompt_toolkit 输入 `OpenAI_API_KEY` 之后输入普通文本 | 流式响应写入 transcript |
+
+### 路由表
+
+```text
+quantnodes-research          → TUI（TTY）/ argparse help（非 TTY）
+quantnodes-research --repl   → legacy prompt_toolkit REPL
+quantnodes-research --banner → legacy REPL（保留 v0.3.x 别名）
+quantnodes-research status   → argparse 子命令（不影响）
+quantnodes-research goal ... → argparse 子命令
+echo "" | quantnodes-research → argparse help（无 TTY 不进 TUI）
+```
+
+### 配置 LLM 流式响应
+
+设置环境变量（任一）：
+
+```bash
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=https://api.openai.com/v1     # 默认；可指向 DeepSeek / Kimi / Qwen / 自建
+export OPENAI_MODEL=gpt-4o                          # 默认
+
+# 或 DeepSeek
+export OPENAI_API_KEY=...
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export OPENAI_MODEL=deepseek-chat
+```
+
+然后在 TUI 里输入纯文本（不以 `/` 或 `停` 开头）就会触发 LLM 流式响应。
+
+### 程序化接入
+
+```python
+from strategy_research.cli.tui import ResearchApp
+from strategy_research.core.llm.openai_client import OpenAICompatClient
+
+# 直接以 API 启动 TUI
+client = OpenAICompatClient()  # reads OPENAI_API_KEY etc.
+app = ResearchApp(model="gpt-4o", version="0.4.0", llm_client=client)
+app.run()
+```
+
+### 已镜像的 `vibe-trading` 体感
+
+TUI 的 `/halt` 拦截 + 三态 `Ctrl+C`（清空 / 提示 / 退出）+ `(r)esume / (n)ew` 上回会话 + 数字 mandate pick + 全套 16 slash 命令 — 都从 `vibe-trading-ai 0.1.11` 直接 mirror，零行为差异。
+
+### 生成 TUI 截图（开发 / 文档）
+
+```bash
+# 直接打开 TUI 拍一张 banner 截图
+python -c "
+import asyncio
+from strategy_research.cli.tui.app import ResearchApp
+async def main():
+    app = ResearchApp(model='gpt-4o', version='0.4.0')
+    async with app.run_test() as pilot:
+        for _ in range(4): await pilot.pause()
+        app.save_screenshot('tui.svg')
+asyncio.run(main())
+"
+# SVG 写到 ./tui.svg (~80 KB)
+```
+
+CI 也有等价校验：`tests/test_cli_tui_app.py::test_app_save_screenshot_produces_valid_svg`
+确认 `App.save_screenshot` 写出非空 SVG。
 
 ---
 

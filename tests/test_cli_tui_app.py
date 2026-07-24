@@ -144,6 +144,33 @@ async def test_app_mount_renders_banner_in_transcript():
         assert app.banner is not None
 
 
+@pytest.mark.asyncio
+async def test_app_save_screenshot_produces_valid_svg(tmp_path):
+    """``App.save_screenshot(path)`` writes a non-empty SVG; we sample
+    one to keep CI honest that the renderer emits an actual layout
+    (CSS OK, widgets painted, no exceptions).
+    """
+    app = ResearchApp(model="gpt-4o", version="0.4.0")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+        svg_path = tmp_path / "snapshot.svg"
+        app.save_screenshot(str(svg_path))
+        # SVG is non-trivial (the empty banner alone is ~80 KB).
+        assert svg_path.exists()
+        assert svg_path.stat().st_size > 1024
+        assert svg_path.read_text(encoding="utf-8", errors="ignore").startswith(
+            "<svg"
+        ) or "<svg" in svg_path.read_text(encoding="utf-8", errors="ignore")[:200]
+
+
+# Cheap non-asyncio test: brand primary must not be the literal Rich bold prefix.
+def test_active_primary_is_clean_hex():
+    p = active_primary()
+    assert not p.lower().startswith("bold ")
+    assert p.startswith("#")
+
+
 # Cheap non-asyncio test: brand primary must not be the literal Rich bold prefix.
 def test_active_primary_is_clean_hex():
     p = active_primary()

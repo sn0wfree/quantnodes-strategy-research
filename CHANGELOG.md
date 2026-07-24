@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-07-24
 
+### Added (Textual TUI — full-screen multi-pane interface)
+The ``quantnodes-research`` binary now launches a real Textual-based
+full-screen terminal UI by default (TTY only). All 16 slash commands
+plus the streaming LLM bridge live inside the same Textual app.
+
+- **`cli.tui.app.ResearchApp`** — top-level ``textual.App`` subclass
+  composing Header + Horizontal(Sidebar / Transcript / Rail) +
+  ChatInput + HintFooter. CSS at ``cli/tui/styles.tcss``.
+- **`cli.tui.widgets`** — six thin Textual-native wrappers:
+  - `Banner(Static)` — gradient logo Renderable at transcript top.
+  - `TranscriptView(RichLog)` — scrolling chat log (write messages).
+  - `ActivityRail(Log)` — right-panel ticker; ``write_event()`` formats
+    via the existing `tool_event.beautify_tool_name` /
+    `summarize_args` / `render_tool_event` helpers.
+  - `CommandSidebar(ListView)` — clickable list of slash commands.
+  - `ChatInput(Input)` — bottom prompt; submits via ``SynthesizeInput``.
+  - `HintFooter(Footer)` — Textual standard footer with our brand.
+- **`cli.tui.session.ChatSession`** — async turn dispatcher. Wraps
+  ``cli.interactive.main.process_turn``; on ``rc == 2`` invokes
+  ``app.exit()``; on ``ctx.pending_prompt`` (queued by ``/journal`` /
+  ``/shadow``) re-dispatches automatically.
+- **`cli.theme.captured_console(width=120)`** — contextvars-based
+  context manager that installs a recording Console as the singleton
+  override for one turn. ``ChatSession.dispatch`` uses it to capture
+  handler output without disturbing the legacy REPL path.
+- **`cli.llm_streaming.stream_chat_to_tui`** — async bridge that runs
+  the configured ``OpenAICompatClient.stream`` from a worker thread
+  (via ``asyncio.to_thread`` so the Textual event loop never blocks
+  on the network), posts a "thinking" line + the final assistant
+  reply to the TranscriptView, and appends the reply to ``ctx.history``
+  for future-turn context.
+- **`cli.tui.widgets.ResumeOrNewModal`** — Textual ``ModalScreen``
+  mirroring the legacy ``(r)esume / (n)ew`` prompt. Pushes the most
+  recent session title via the latest ``core/session/db.py``
+  ``list_sessions(limit=1)``.
+- **`cli/__main__.py`** — TTY-aware dispatcher:
+  - TTY + bare argv → ``ResearchApp().run()`` (the TUI).
+  - TTY + ``--repl`` / ``--banner`` → legacy prompt_toolkit REPL
+    (escape hatch for terminals that don't support mouse / truecolor).
+  - TTY + subcommand/``--help``/``--llm-list-profiles`` → argparse CLI.
+  - Non-TTY (piped / CI) → argparse help (no hang).
+  - All branches exit cleanly via ``SystemExit`` propagation; the
+    ``sys.argv`` stub is restored in a ``finally``.
+- New dependency in base ``dependencies``: ``textual>=0.50``.
+- Test suite: 5 new files, +61 tests (``test_cli_tui_app``,
+  ``test_cli_tui_session``, ``test_cli_tui_session_capture``,
+  ``test_cli_captured_console``, ``test_cli_llm_streaming``) +
+  rewrite of ``test_cli_entry_dispatch`` (29 tests, TTY-injection).
+  All 25+ legacy handler tests in ``test_cli_chat_cmd``,
+  ``test_cli_show_cmd``, ``test_cli_help``, ``test_cli_goal_cmd``,
+  ``test_cli_memory_cmd``, ``test_cli_session_cmd`` continue to pass
+  because the capture context is opt-in via the session dispatcher
+  rather than baked into the handlers themselves.
+
 ### Added (Rich CLI / vibe-trading parity)
 - **`cli.theme`** — Rich stylesheet + dark-mode detection (`is_dark()`, `force_dark()`).
 - **`cli.utils.format`** — `format_duration(ms/s)`, `format_tokens(n)`, `abbreviate_num(n, currency=)`
@@ -56,9 +110,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "provider loop reads too many lines" bug.
 - `cli.slash_goal`: `append_evidence` switched from positional to keyword-only
   `session_id/goal_id/expected_goal_id/evidence` to match store API.
+- TUI dispatch: ``app.post_message(WriteTranscript)`` does not reach
+  nested widget children; the streaming bridge resolves the
+  ``TranscriptView`` via ``app.query_one(...)`` and posts directly
+  to the widget, mirroring the existing
+  ``ResearchApp.write_transcript`` contract.
 
 ### Tests
-- +484 new tests (`5683 → 6167`). All CLI modules now have dedicated suites.
+- +545 new tests (`5683 → 6228`). All CLI modules now have dedicated
+  suites including the full Textual TUI lifecycle
+  (``run_test`` mount + handler dispatch + LLM stub integration).
 
 ## [0.4.0] - 2026-07-23
 
