@@ -42,7 +42,13 @@ class Banner(Static):
         self._mode = mode
         self._refresh()
 
-    def update_model(self, *, model: Optional[str] = None, version: Optional[str] = None, mode: Optional[str] = None) -> None:
+    def update_model(
+        self,
+        *,
+        model: Optional[str] = None,
+        version: Optional[str] = None,
+        mode: Optional[str] = None,
+    ) -> None:
         if model is not None:
             self._model = model
         if version is not None:

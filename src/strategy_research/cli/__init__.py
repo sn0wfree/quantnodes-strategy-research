@@ -957,8 +957,14 @@ def main() -> int:
     autoresearch_parser.add_argument("--min-cooldown", type=float, default=1.0, help="最小 cooldown (秒)")
     autoresearch_parser.add_argument("--max-retries", type=int, default=3, help="最大重试次数")
     autoresearch_parser.add_argument("--max-rounds", type=int, help="最大轮数 (不指定则无限循环)")
-    autoresearch_parser.add_argument("--lazy-detection-interval", type=int, default=10, help="懒惰检测间隔 (轮数, 默认 10)")
-    autoresearch_parser.add_argument("--keep-recent", type=int, default=10, help="读取时保留最近 N 轮详细数据 (其他轮次读取 summary.json, 默认 10)")
+    autoresearch_parser.add_argument(
+        "--lazy-detection-interval", type=int, default=10,
+        help="懒惰检测间隔 (轮数, 默认 10)",
+    )
+    autoresearch_parser.add_argument(
+        "--keep-recent", type=int, default=10,
+        help="读取时保留最近 N 轮详细数据 (其他轮次读取 summary.json, 默认 10)",
+    )
 
     # session
     session_parser = subparsers.add_parser("session", help="会话管理")
