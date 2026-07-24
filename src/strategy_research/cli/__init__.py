@@ -67,7 +67,7 @@ def cmd_run_onboarding(args: argparse.Namespace) -> int:
             return 0
         _wipe_existing_env(_DEFAULT_ENV_DIR)
 
-    written = run_onboarding(console=console)
+    written = run_onboarding()
     if written is None:
         return 1
 
