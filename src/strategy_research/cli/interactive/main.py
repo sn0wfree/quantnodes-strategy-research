@@ -63,6 +63,7 @@ from strategy_research.cli.commands.slash_session import (
     cmd_search as session_search,
 )
 from strategy_research.cli.halt import clear_halt, trip_halt
+from strategy_research.cli.mandate import capture_pick
 from strategy_research.cli.ui.banner import print_banner
 
 
@@ -190,6 +191,9 @@ def process_turn(input_text: str, ctx: Optional[InteractiveContext] = None) -> i
     Bare-word kill switch intercept: ``停``/``stop``/``kill``/``halt``/
     ``停手`` → trip HALT. ``resume``/``continue``/``go`` → clear HALT.
     These never reach the LLM.
+
+    Proposal intercept: a bare integer when ``ctx.pending_proposal`` is
+    set is consumed as a numbered pick — never reaches the LLM.
     """
     ctx = ctx or InteractiveContext()
     if not input_text or not input_text.strip():
@@ -200,6 +204,13 @@ def process_turn(input_text: str, ctx: Optional[InteractiveContext] = None) -> i
     if is_resume_command(input_text):
         clear_halt()
         return 0
+    # Proposal intercept: bare integer → numbered pick.
+    proposal = getattr(ctx, "pending_proposal", None)
+    if proposal is not None and input_text.strip().isdigit():
+        pick = capture_pick(input_text, proposal)
+        if pick is not None:
+            ctx.pending_proposal = None
+            return 0
     if input_text.lstrip().startswith("/"):
         name = _parse_token(input_text)
         from strategy_research.cli.commands.slash_router import _ALIASES
