@@ -54,6 +54,55 @@ def _build_logo(width: int) -> Text:
     return text
 
 
+def render_banner(
+    *,
+    model: str = "unknown",
+    version: str = "0.4.0",
+    mode: str = "cli",
+    width: Optional[int] = None,
+    theme: Optional[object] = None,
+) -> Text:
+    """Build the centered logo + version/header line as a Rich ``Text``.
+
+    Pure renderer — does not touch a ``Console``. Use :func:`print_banner`
+    for the legacy REPL path, or feed the result directly to a Textual
+    ``Static`` / ``RichLog`` for the TUI path.
+
+    ``theme`` is an optional ``Theme`` instance (or any object exposing
+    ``primary``, ``muted``, ``primary_dim`` attrs). When ``None`` (default),
+    plain hex colors are used so the result is portable across Rich
+    consoles *and* Textual's internal Rich console (which does NOT have
+    our brand theme registered).
+    """
+    if width is None:
+        try:
+            width = max(40, shutil.get_terminal_size().columns)
+        except (OSError, ValueError):
+            width = 80
+
+    body = _build_logo(width)
+
+    if theme is None:
+        primary_hex = "#d97706"
+        primary_dim_hex = "#fa9842"
+        muted_hex = "#888888"
+        primary_style = f"bold {primary_hex}"
+        primary_dim_style = primary_dim_hex
+        muted_style = muted_hex
+    else:
+        # Legacy path uses Rich theme names (when console has our theme).
+        primary_style = getattr(theme, "primary", "bold #d97706")
+        primary_dim_style = getattr(theme, "primary_dim", "#fa9842")
+        muted_style = getattr(theme, "muted", "#888888")
+
+    header = Text()
+    header.append("strategy-research", style=primary_style)
+    header.append(f"  v{version}  ·  {mode}  ·  ", style=muted_style)
+    header.append(model, style=primary_dim_style)
+    body.append_text(header)
+    return body
+
+
 def print_banner(
     console: Console,
     *,
@@ -63,20 +112,16 @@ def print_banner(
     width: Optional[int] = None,
 ) -> None:
     """Print the centered logo + version/header line."""
-    if width is None:
-        try:
-            width = max(40, shutil.get_terminal_size().columns)
-        except (OSError, ValueError):
-            width = 80
-
-    logo = _build_logo(width)
-    console.print(logo, justify="center")
-
-    header = Text()
-    header.append("strategy-research", style="primary")
-    header.append(f"  v{version}  ·  {mode}  ·  ", style="muted")
-    header.append(model, style="primary.dim")
-    console.print(header, justify="center")
+    # Pass our theme so the legacy console gets the brand styling it knows.
+    from strategy_research.cli.theme import Theme
+    console.print(
+        render_banner(
+            model=model, version=version, mode=mode, width=width, theme=Theme
+        ),
+        justify="center",
+    )
 
 
-__all__ = ["print_banner"]
+__all__ = ["render_banner", "print_banner"]
+
+

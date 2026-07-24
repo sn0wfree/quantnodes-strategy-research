@@ -1,0 +1,118 @@
+/* Textual CSS for the strategy-research TUI.
+ *
+ * Layout:
+ *   Screen
+ *     ├─ Header  (top, height 1)
+ *     ├─ #main-row  (horizontal split, fills)
+ *     │    ├─ #sidebar  (24 cols)
+ *     │    ├─ #transcript  (1fr — chat log)
+ *     │    └─ #rail  (32 cols — activity ticker)
+ *     ├─ #input  (height 3 — bottom prompt)
+ *     └─ HintFooter  (1 row — hint bar / status)
+ */
+
+Screen {
+    layout: vertical;
+    background: $surface;
+}
+
+Header {
+    dock: top;
+    height: 1;
+    background: $primary 25%;
+    color: $text;
+}
+
+#main-row {
+    layout: horizontal;
+    height: 1fr;
+    background: $surface;
+}
+
+#sidebar {
+    width: 26;
+    border: round $primary;
+    border-title-align: left;
+    background: $primary 8%;
+    padding: 0 1;
+}
+
+#transcript {
+    width: 1fr;
+    border: round $primary;
+    border-title-align: left;
+    background: $surface;
+    padding: 0 1;
+}
+
+#rail {
+    width: 36;
+    border: round $primary;
+    border-title-align: left;
+    background: $primary 8%;
+    padding: 0 1;
+}
+
+#input {
+    height: 3;
+    border: round $primary;
+    border-title-align: left;
+    background: $surface;
+}
+
+.sidebar-item {
+    height: 1;
+    padding: 0 1;
+}
+
+.sidebar-item.--highlight {
+    background: $primary 30%;
+    text-style: bold;
+}
+
+.transcript-line {
+    height: auto;
+    color: $text;
+}
+
+.transcript-line.system {
+    color: $secondary;
+}
+
+.transcript-line.user {
+    color: $text;
+    text-style: bold;
+}
+
+.transcript-line.assistant {
+    color: $success;
+}
+
+.transcript-line.error {
+    color: $error;
+    text-style: bold;
+}
+
+.rail-event.tool-call {
+    color: $accent;
+}
+
+.rail-event.tool-result-ok {
+    color: $success;
+}
+
+.rail-event.tool-result-error {
+    color: $error;
+}
+
+.rail-event.thinking {
+    color: $text-muted;
+    text-style: italic;
+}
+
+HintFooter {
+    dock: bottom;
+    height: 1;
+    background: $primary 15%;
+    color: $text;
+}
