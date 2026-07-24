@@ -22,26 +22,66 @@ import pytest
 
 
 def _build_workspace(tmp_path: Path) -> Path:
-    """构造一个最小可用的 cmd_init workspace (含 strategies/momentum_baseline/strategy.py)。"""
-    import argparse
-    import strategy_research.cli as cli
+    """构造一个最小可用 workspace (含 strategies/momentum_baseline/strategy.py)。
+
+    v0.5.0 dropped the workspace-scaffold ``cli.cmd_init`` helper, so the
+    autoresearch test fixtures write the files ``cmd_autoresearch``
+    actually needs directly: ``config.yaml`` (with
+    ``workspace.default_strategy``), ``strategies/<name>/{strategy.py,
+    prepare.py}``, a ``strategies/<name>/runs/`` directory, AND a
+    populated DuckDB seeded with sample price data — without that,
+    downstream ``run_backtest_script`` returns empty metrics and
+    ``decide()`` receives ``{}`` (rather than the real-metrics this test
+    asserts on).
+    """
+    from strategy_research.core.db import init_db
+    from strategy_research.core.data_import import (
+        generate_sample_data,
+        import_dataframe,
+    )
 
     workspace = tmp_path / "ws"
     workspace.mkdir(exist_ok=True)
-    args = argparse.Namespace(path=str(workspace), force=False, no_baseline=True)
 
-    # mock input 多次: strategy_name / strategy_type / goal_metric
-    import itertools
-    inputs = iter(["momentum_baseline", "momentum", "calmar"])
-    orig_input = __import__("builtins").input
-    __import__("builtins").input = lambda _: next(inputs)
+    config_yaml = (
+        "workspace:\n"
+        "  name: test_ws\n"
+        "  default_strategy: momentum_baseline\n"
+        "strategies:\n"
+        "  - name: momentum_baseline\n"
+        "    type: selection\n"
+        "    goal_metric: calmar\n"
+        "    goal_direction: maximize\n"
+        "data:\n"
+        "  source: duckdb\n"
+        "rebalance:\n"
+        "  freq: M\n"
+        "  min_history: 60\n"
+        "top_n: 5\n"
+        "max_weight: 0.20\n"
+        "weight_method: inverse_vol\n"
+    )
+    (workspace / "config.yaml").write_text(config_yaml, encoding="utf-8")
 
-    try:
-        rc = cli.cmd_init(args)
-        if rc != 0:
-            pytest.skip(f"cmd_init failed with rc={rc}")
-    finally:
-        __import__("builtins").input = orig_input
+    strategy_dir = workspace / "strategies" / "momentum_baseline"
+    runs_dir = strategy_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    templates_dir = (
+        Path(__file__).resolve().parents[1] / "src"
+        / "strategy_research" / "templates"
+    )
+    for src_name in ("strategy.py", "prepare.py"):
+        src = templates_dir / src_name
+        dst = strategy_dir / src_name
+        text = src.read_text(encoding="utf-8")
+        text = text.replace("{strategy_name}", "momentum_baseline")
+        text = text.replace("{goal_metric}", "calmar")
+        dst.write_text(text, encoding="utf-8")
+
+    init_db(workspace)
+    prices = generate_sample_data(n_assets=10, n_days=504, start_date="2022-01-01")
+    import_dataframe(workspace, "momentum_baseline", prices)
 
     return workspace
 

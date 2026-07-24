@@ -256,10 +256,15 @@ class TestMainCLI:
                 pass
 
     def test_subcommand_without_llm_flags(self):
-        with patch("sys.argv", ["prog", "init", "/tmp/nonexistent_ws_test"]):
-            # init will create a workspace; should succeed or fail at fs level
+        # v0.5.0: `init` no longer takes a positional workspace path —
+        # it now runs the 5-step credentials TTY wizard. Drive it with
+        # ``--help`` so the assertion stays purely about argparse
+        # accepting the subcommand without LLM flags.
+        with patch("sys.argv", ["prog", "init", "--help"]):
             try:
                 main()
+            except SystemExit as exc:
+                assert exc.code == 0, "init --help should exit 0"
             except Exception:
                 pass
 

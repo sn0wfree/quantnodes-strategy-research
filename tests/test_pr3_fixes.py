@@ -216,86 +216,9 @@ class TestFactorStrategyAlphaZoo:
         assert isinstance(weights, dict)
 
 
-# ============================================================
-# 3. cmd_init --no-baseline 选项 (G10)
-# ============================================================
 
 
-class TestCmdInitNoBaseline:
-    """cmd_init --no-baseline 应跳过 baseline 回测。"""
-
-    def test_no_baseline_skips_run_creation(self, tmp_path: Path, monkeypatch):
-        """--no-baseline 时不创建任何 run。"""
-        from strategy_research.cli import cmd_init
-
-        inputs = iter(["test_strat", "rotation", "calmar"])
-        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
-
-        ws = tmp_path / "ws"
-        args = __import__("argparse").Namespace(
-            path=str(ws), force=True, no_baseline=True,
-        )
-        rc = cmd_init(args)
-        assert rc == 0
-
-        runs_dir = ws / "strategies" / "test_strat" / "runs"
-        runs = sorted(p.name for p in runs_dir.iterdir() if p.is_dir() and p.name.startswith("run_"))
-        # 应只有 results.tsv，无 run_XXXX 目录
-        assert "run_0001" not in runs
-        assert "run_0000" not in runs
-
-    def test_default_runs_baseline(self, tmp_path: Path, monkeypatch):
-        """默认（不带 --no-baseline）应跑 baseline。"""
-        from strategy_research.cli import cmd_init
-
-        inputs = iter(["test_strat", "rotation", "calmar"])
-        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
-
-        ws = tmp_path / "ws"
-        args = __import__("argparse").Namespace(
-            path=str(ws), force=True, no_baseline=False,
-        )
-        rc = cmd_init(args)
-        assert rc == 0
-
-        runs_dir = ws / "strategies" / "test_strat" / "runs"
-        runs = sorted(p.name for p in runs_dir.iterdir() if p.is_dir() and p.name.startswith("run_"))
-        assert len(runs) >= 1, f"baseline 应创建至少 1 个 run，实际 {runs}"
-
-
-# ============================================================
-# 4. cmd_init 配置 config.yaml 完整字段 (G12)
-# ============================================================
-
-
-class TestCmdInitConfigYAML:
-    """cmd_init 生成的 config.yaml 应包含 data / rebalance / risk 字段。"""
-
-    def test_config_yaml_has_data_section(self, tmp_path: Path, monkeypatch):
-        from strategy_research.cli import cmd_init
-
-        inputs = iter(["test_strat", "rotation", "calmar"])
-        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
-
-        ws = tmp_path / "ws"
-        args = __import__("argparse").Namespace(
-            path=str(ws), force=True, no_baseline=True,
-        )
-        cmd_init(args)
-
-        try:
-            import yaml
-        except ImportError:
-            pytest.skip("pyyaml not installed")
-
-        config = yaml.safe_load((ws / "config.yaml").read_text(encoding="utf-8"))
-        assert "workspace" in config
-        assert "data" in config
-        assert config["data"]["source"] == "duckdb"
-        assert "rebalance" in config
-        assert config["rebalance"]["freq"] == "M"
-        assert "top_n" in config
-        assert "max_weight" in config
-        assert "weight_method" in config
-        assert "cost" in config
-        assert "risk" in config
+# Note: TestCmdInitNoBaseline / TestCmdInitConfigYAML were
+# removed in v0.5.0 — they tested the removed workspace-scaffold
+# cmd_init. The v0.5.0 cmd_run_onboarding wizard does not write a
+# config.yaml at all (config.yaml is no longer part of v0.5.0 flow).

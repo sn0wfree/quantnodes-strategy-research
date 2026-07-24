@@ -111,6 +111,14 @@ def main(
     * non-TTY → delegate to argparse.
     * subcommand / unknown flag → delegate to argparse.
 
+    First-launch onboarding (v0.5.0):
+
+    When ``raw_argv`` qualifies for an interactive surface (bare or one
+    of the recognised REPL/TUI flags) and no ``.env`` candidate exists
+    at any of the three locations, the credentials wizard runs before
+    the surface launches. The wizard mirrors
+    ``vibe-trading/cli/main.py:268 _maybe_run_onboarding``.
+
     Args:
         argv: The argument list (defaults to ``sys.argv[1:]``).
         is_tty: Test-injection hook; defaults to a real TTY probe.
@@ -119,6 +127,19 @@ def main(
         Process exit code.
     """
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+
+    # First-launch onboarding (v0.5.0). Mirrors vibe-trading's
+    # _maybe_run_onboarding: if no .env exists and we are routing to an
+    # interactive surface, run the 5-step wizard before the TUI/REPL.
+    _interactive_dispatch = (
+        _is_interactive_invocation(raw_argv, is_tty=is_tty)
+        or _wants_legacy_repl(raw_argv)
+    )
+    if _interactive_dispatch:
+        from strategy_research.cli._auto_onboard import _maybe_run_onboarding
+        from strategy_research.cli.theme import get_console
+        if not _maybe_run_onboarding(get_console()):
+            return 0  # user cancelled wizard cleanly
 
     # TUI dispatch (preferred) — full-screen interactive.
     if _is_interactive_invocation(

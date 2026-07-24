@@ -8,8 +8,6 @@ from pathlib import Path
 
 import yaml
 
-from strategy_research import _TEMPLATES_DIR
-
 from .commands.autoresearch import _spawn_agent as _spawn_agent
 from .commands.autoresearch import cmd_autoresearch
 from .commands.export import cmd_export
@@ -38,307 +36,62 @@ from .llm_config import _cli_overrides_from_args as _cli_overrides_from_args
 from .llm_config import build_llm_config as build_llm_config
 
 # ============================================================
-# 模板内容 (从文件加载或内嵌)
+# init 命令 — 5 步 TTY 向导，仿 vibe-trading cli/onboard.py:361
 # ============================================================
 
-def _load_template(name: str) -> str:
-    """加载模板文件。"""
-    template_dir = Path(__file__).parent.parent / "templates"
-    template_file = template_dir / name
-    if template_file.exists():
-        return template_file.read_text(encoding="utf-8")
-    return ""
+def cmd_run_onboarding(args: argparse.Namespace) -> int:
+    """`quantnodes-research init` — 5 步凭证 TTY 向导。
 
-
-def _render_template(template: str, **kwargs) -> str:
-    """替换 {key} 占位符，但保留 {} 字面量 (Python dict literal 等)。
-
-    与 str.format() 的区别：本函数用 str.replace 逐个替换已知的 {key} 占位符，
-    不会把 Python 代码中的空 dict {} 误判为位置参数。
+    Mirrors ``vibe-trading/cli/_legacy.py:4948 cmd_init``（Rich 版）写入
+    ``~/.quantnodes/strategy_research/.env`` 单一职责。
     """
-    for key, value in kwargs.items():
-        template = template.replace("{" + key + "}", str(value))
-    return template
+    from dotenv import load_dotenv
+    from rich.prompt import Confirm
+    from rich.table import Table
+    from rich.panel import Panel
 
-
-# ============================================================
-# DuckDB 初始化 SQL
-# ============================================================
-# 注意：DUCKDB_INIT_SQL 的权威定义在 core.db.DUCKDB_INIT_SQL（含 price_data /
-# factor_data / weight_history / nav_history / import_meta 共 8 张表）。
-# 这里不再重复定义，_init_duckdb() 直接调用 core.db.init_db()。
-
-
-# ============================================================
-# 初始化逻辑
-# ============================================================
-
-def _create_strategy(path: Path, strategy_name: str, strategy_type: str,
-                     goal_metric: str) -> None:
-    """创建策略目录和文件。"""
-    strategy_dir = path / "strategies" / strategy_name
-    strategy_dir.mkdir(parents=True, exist_ok=True)
-    (strategy_dir / "runs").mkdir(exist_ok=True)
-
-    # program.md
-    program_template = _load_template("program.md")
-    if program_template:
-        (strategy_dir / "program.md").write_text(
-            _render_template(
-                program_template,
-                strategy_name=strategy_name,
-                strategy_type=strategy_type,
-                goal_metric=goal_metric,
-            ),
-            encoding="utf-8",
-        )
-
-    # prepare.py
-    prepare_template = _load_template("prepare.py")
-    if prepare_template:
-        (strategy_dir / "prepare.py").write_text(
-            _render_template(
-                prepare_template,
-                strategy_name=strategy_name,
-                goal_metric=goal_metric,
-            ),
-            encoding="utf-8",
-        )
-
-    # strategy.py
-    strategy_template = _load_template("strategy.py")
-    if strategy_template:
-        (strategy_dir / "strategy.py").write_text(
-            _render_template(strategy_template, strategy_name=strategy_name),
-            encoding="utf-8",
-        )
-
-    # results.tsv (header only)
-    results_path = strategy_dir / "runs" / "results.tsv"
-    if not results_path.exists():
-        results_path.write_text(
-            "run\tcommit\taction\tcalmar\tsharpe\tmax_dd\t"
-            "ann_return\tturnover\tfactors_added\tfactors_removed\t"
-            "params_changed\tstatus\tdescription\n",
-            encoding="utf-8",
-        )
-
-
-def _init_duckdb(path: Path) -> None:
-    """初始化 DuckDB 表结构。委托给 core.db.init_db() 使用完整 schema。"""
-    from strategy_research.core.db import init_db
-
-    ok = init_db(path)
-    if ok:
-        print(f"✓ 初始化 DuckDB: {path / 'data.duckdb'}")
-
-
-def _init_git(path: Path) -> None:
-    """初始化 Git 仓库。"""
-    import subprocess
-
-    git_dir = path / ".git"
-    if git_dir.exists():
-        print("✓ Git 仓库已存在，跳过初始化")
-        return
-
-    try:
-        subprocess.run(
-            ["git", "init"],
-            cwd=str(path),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        print("✓ 初始化 Git 仓库")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  Git 初始化失败，请手动执行: git init")
-
-
-
-
-def _run_baseline_backtest(workspace_path: Path, strategy_name: str, strategy_dir: Path) -> None:
-    """运行 baseline 回测 (默认 momentum_20_60 因子)。"""
-    from strategy_research.core.backtest import run_backtest_script
-    from strategy_research.core.data_import import generate_sample_data, import_dataframe
-
-    # 生成模拟数据 (10 资产 × 504 天)
-    prices = generate_sample_data(n_assets=10, n_days=504, start_date="2022-01-01")
-
-    # 灌入 DuckDB (close 面板)
-    import_dataframe(workspace_path, strategy_name, prices)
-
-    # 运行 baseline 回测
-    result = run_backtest_script(
-        workspace_path=workspace_path,
-        strategy_name=strategy_name,
-        action="baseline",
-        description="Default momentum_20_60 baseline",
+    from strategy_research.cli.theme import get_console
+    from strategy_research.cli.onboard import (
+        run_onboarding,
+        is_onboarded,
+        _DEFAULT_ENV_PATH,
+        _DEFAULT_ENV_DIR,
     )
 
-    if result.get("success"):
-        m = result["metrics"]
-        print(f"  baseline: Calmar={m.get('calmar', 0):.3f} "
-              f"Sharpe={m.get('sharpe', 0):.3f} "
-              f"MaxDD={m.get('max_dd', 0):.3f} "
-              f"AnnRet={m.get('ann_return', 0):.3f}")
-    else:
-        print(f"  baseline 回测失败: {result.get('error', 'unknown')}")
+    console = get_console()
 
-def cmd_init(args: argparse.Namespace) -> int:
-    """执行 init 命令。"""
-    path = Path(args.path).resolve()
+    if is_onboarded() and not getattr(args, "force", False):
+        console.print(f"[yellow]Config already exists:[/yellow] {_DEFAULT_ENV_PATH}")
+        if not Confirm.ask("Overwrite?", default=False):
+            console.print("[dim]Aborted.[/dim]")
+            return 0
+        _wipe_existing_env(_DEFAULT_ENV_DIR)
 
-    # 检查路径
-    if path.exists() and any(path.iterdir()):
-        if not args.force:
-            print(f"❌ 目录不为空: {path}")
-            print("   使用 --force 强制初始化")
-            return 1
-        print(f"⚠️  强制初始化: {path}")
+    written = run_onboarding(console=console)
+    if written is None:
+        return 1
 
-    # 交互式输入
-    print(f"\n创建工作区: {path}\n")
+    load_dotenv(written, override=True)
 
-    strategy_name = input("策略名称: ").strip()
-    if not strategy_name:
-        strategy_name = "my_strategy"
-        print(f"  (使用默认: {strategy_name})")
-
-    strategy_type = input("策略类型 (rotation/selection/timing/industry): ").strip()
-    if not strategy_type:
-        strategy_type = "rotation"
-        print(f"  (使用默认: {strategy_type})")
-
-    goal_metric = input("目标函数 [calmar]: ").strip()
-    if not goal_metric:
-        goal_metric = "calmar"
-        print(f"  (使用默认: {goal_metric})")
-
-    # 创建目录结构
-    path.mkdir(parents=True, exist_ok=True)
-
-    # README.md
-    readme_template = _load_template("README.md")
-    if readme_template:
-        (path / "README.md").write_text(
-            _render_template(readme_template, strategy=strategy_name),
-            encoding="utf-8",
-        )
-    print("✓ 创建 README.md")
-
-    # config.yaml
-    workspace_name = path.name
-    config_content = f"""workspace:
-  name: {workspace_name}
-  default_strategy: {strategy_name}
-
-strategies:
-  - name: {strategy_name}
-    type: {strategy_type}
-    goal_metric: {goal_metric}
-    goal_direction: maximize
-
-# 数据源 (cmd import 时使用)
-data:
-  source: duckdb
-  incremental: true
-  codes:
-    - 000300.SH  # 沪深 300（示例，可改为具体股票）
-
-# 回测参数 (cmd run / cmd evaluate 时使用)
-rebalance:
-  freq: M                      # M=月度, W=周度, Q=季度
-  min_history: 252
-
-top_n: 10
-max_weight: 0.25
-weight_method: inverse_vol     # inverse_vol/equal
-
-# 交易成本
-cost:
-  enabled: true
-  commission_bp: 5
-  slippage_bp: 10
-  impact_factor: 0.1
-
-# 风险控制
-risk:
-  vol_targeting:
-    enabled: false
-    target_vol: 0.15
-  trend_filter:
-    enabled: false
-  stop_loss:
-    enabled: false
-"""
-    (path / "config.yaml").write_text(config_content, encoding="utf-8")
-    print("✓ 创建 config.yaml")
-
-    # .prompts/
-    prompts_dir = path / ".prompts"
-    prompts_dir.mkdir(exist_ok=True)
-    for prompt_name in [
-        "orchestrator.md", "data_quality.md", "researcher.md", "factor_analyst.md",
-        "strategist.md", "portfolio_construction.md", "risk_controller.md",
-        "attribution_analyst.md", "anti_overfit_analyst.md", "backtest_diagnostics.md",
-        "critic.md",
-    ]:
-        prompt_content = _load_template(f".prompts/{prompt_name}")
-        if prompt_content:
-            (prompts_dir / prompt_name).write_text(prompt_content, encoding="utf-8")
-    print("✓ 创建 .prompts/ (11 个提示词)")
-
-    # .skills/
-    skills_dir = path / ".skills"
-    skills_dir.mkdir(exist_ok=True)
-
-    # 复制 templates/.skills/ 下全部 skill (Phase A-2: 全量复制)
-    templates_skills = _TEMPLATES_DIR / ".skills"
-    copied_skills: list[str] = []
-    if templates_skills.is_dir():
-        for skill_file in sorted(templates_skills.glob("*.md")):
-            content = skill_file.read_text(encoding="utf-8")
-            (skills_dir / skill_file.name).write_text(content, encoding="utf-8")
-            copied_skills.append(skill_file.name)
-
-    # 若全量复制失败（如 templates 损坏），降级为硬编码子集 (P5 时期的 10 个)
-    if not copied_skills:
-        for skill_name in [
-            "data-routing.md", "factor-research.md", "backtest-diagnose.md",
-            "correlation-analysis.md", "ml-strategy.md", "performance-attribution.md",
-            "quant-statistics.md", "risk-analysis.md", "sector-rotation.md",
-            "research-discipline.md",
-        ]:
-            skill_content = _load_template(f".skills/{skill_name}")
-            if skill_content:
-                (skills_dir / skill_name).write_text(skill_content, encoding="utf-8")
-                copied_skills.append(skill_name)
-
-    print(f"✓ 创建 .skills/ ({len(copied_skills)} 份方法论)")
-
-    # 策略目录
-    _create_strategy(path, strategy_name, strategy_type, goal_metric)
-    print(f"✓ 创建 strategies/{strategy_name}/")
-
-    # DuckDB
-    _init_duckdb(path)
-
-    # Git
-    _init_git(path)
-
-    # Baseline 回测 (buy and hold HS300)
-    if not args.no_baseline:
-        try:
-            strategy_dir = path / "strategies" / strategy_name
-            _run_baseline_backtest(path, strategy_name, strategy_dir)
-            print("✓ 运行 baseline 回测 (buy and hold HS300)")
-        except Exception as e:
-            print(f"⚠️  baseline 回测失败: {e}")
-
-    print("\n✅ 工作区初始化完成!")
-    print(f"   请阅读 {path / 'README.md'} 开始研究。")
+    panel = Table.grid(expand=True)
+    panel.add_column(width=10, style="dim")
+    panel.add_column(ratio=1)
+    panel.add_row("Config", f"[cyan]{written}[/cyan]")
+    panel.add_row("Run",    "[bold]quantnodes-research[/bold]")
+    console.print(Panel(panel, title="Setup complete",
+                        border_style="green", padding=(0, 1)))
     return 0
+
+
+def _wipe_existing_env(env_dir: Path) -> None:
+    """把现有 .env 改名 (.env.prev) 防 _finalize 跨 rename 冲突。"""
+    env_path = env_dir / ".env"
+    if env_path.exists():
+        target = env_dir / ".env.prev"
+        try:
+            env_path.rename(target)
+        except OSError:
+            env_path.unlink()
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -878,11 +631,22 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
     # init
-    init_parser = subparsers.add_parser("init", help="初始化工作区")
-    init_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    init_parser.add_argument("--force", action="store_true", help="强制初始化（非空目录）")
-    init_parser.add_argument("--no-baseline", action="store_true",
-                              help="跳过默认 baseline 回测（更快初始化）")
+    init_parser = subparsers.add_parser(
+        "init",
+        help="5-step TTY wizard: provider → model → API key → timeout → (Tushare)",
+        description=(
+            "Run the credentials wizard that writes "
+            "~/.quantnodes/strategy_research/.env. Mirrors "
+            "vibe-trading's init UX (single-responsibility: no workspace "
+            "scaffolding, no auto backtest, no auto git init). Use `--force` "
+            "to overwrite an existing .env."
+        ),
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing ~/.quantnodes/strategy_research/.env",
+    )
 
     # status
     status_parser = subparsers.add_parser("status", help="查看工作区状态")
@@ -1096,7 +860,7 @@ def main() -> int:
         return _cmd_llm_list_profiles()
 
     if args.command == "init":
-        return cmd_init(args)
+        return cmd_run_onboarding(args)
     elif args.command == "status":
         return cmd_status(args)
     elif args.command == "reproduce":
