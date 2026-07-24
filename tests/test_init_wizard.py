@@ -467,3 +467,230 @@ class TestCmdRunOnboarding:
         args = argparse.Namespace(force=False)
         rc = cmd_run_onboarding(args)
         assert rc == 1
+
+
+# ============================================================
+# TTY-mode: run_onboarding(inputs=None) with mocked selectors
+# ============================================================
+
+
+class TestRunOnboardingTTY:
+    """Test the prompt_toolkit TTY branch of run_onboarding."""
+
+    def test_tty_full_flow_openai(self, tmp_path: Path, monkeypatch):
+        """Simulate full TTY flow: OpenAI → gpt-4o → key → 300s → skip tushare."""
+        from strategy_research.cli.onboard import (
+            _step_provider, _step_model, _step_key, _step_timeout, _step_tushare,
+            _save_partial,
+        )
+
+        # Mock TTY detection
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+        # Mock selectors to return predetermined values
+        call_count = {"n": 0}
+
+        def mock_select(prompt, choices, *, default_index=0):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # provider
+                return "openai"
+            if call_count["n"] == 2:  # model
+                return "gpt-4o"
+            if call_count["n"] == 5:  # tushare
+                return "__skip__"
+            return choices[0][0]  # default for timeout
+
+        def mock_secret(prompt):
+            return "sk-test1234567890"
+
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._select_with_back", mock_select,
+        )
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._prompt_secret", mock_secret,
+        )
+
+        # Mock stdin.isatty and stdout.isatty for run_onboarding
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+        result = run_onboarding(env_dir=tmp_path)
+        assert result is not None
+        assert result == tmp_path / ".env"
+        text = result.read_text(encoding="utf-8")
+        assert "LANGCHAIN_PROVIDER=openai" in text
+        assert "OPENAI_API_KEY=sk-test1234567890" in text
+
+    def test_tty_cancel_returns_none(self, tmp_path: Path, monkeypatch):
+        """CANCEL at step 1 → returns None."""
+        from strategy_research.cli.onboard import CANCEL
+
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._select_with_back",
+            lambda *a, **kw: CANCEL,
+        )
+
+        result = run_onboarding(env_dir=tmp_path)
+        assert result is None
+
+    def test_tty_back_at_step0_returns_none(self, tmp_path: Path, monkeypatch):
+        """BACK at step 0 → returns None (same as cancel)."""
+        from strategy_research.cli.onboard import BACK
+
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._select_with_back",
+            lambda *a, **kw: BACK,
+        )
+
+        result = run_onboarding(env_dir=tmp_path)
+        assert result is None
+
+    def test_tty_back_goes_to_previous_step(self, tmp_path: Path, monkeypatch):
+        """BACK at step 2 goes back to step 1, then select again."""
+        from strategy_research.cli.onboard import BACK
+
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+        # Track which step function is being called
+        step_names = []
+        step_calls = {"provider": 0, "model": 0, "timeout": 0, "tushare": 0}
+
+        original_step_provider = None
+
+        def mock_select(prompt, choices, *, default_index=0):
+            # Detect which step by looking at the prompt text
+            if "provider" in prompt.lower():
+                step_names.append("provider")
+                step_calls["provider"] += 1
+                if step_calls["provider"] == 1:
+                    return "openai"  # first time: select openai
+                return "openai"  # after BACK: select openai again
+            if "model" in prompt.lower():
+                step_names.append("model")
+                step_calls["model"] += 1
+                if step_calls["model"] == 1:
+                    return BACK  # first time: BACK
+                return "gpt-4o"  # after BACK: select gpt-4o
+            if "timeout" in prompt.lower():
+                step_names.append("timeout")
+                step_calls["timeout"] += 1
+                return "300"
+            if "tushare" in prompt.lower():
+                step_names.append("tushare")
+                step_calls["tushare"] += 1
+                return "__skip__"
+            return choices[0][0]
+
+        def mock_secret(prompt):
+            return "sk-test1234567890"
+
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._select_with_back", mock_select,
+        )
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._prompt_secret", mock_secret,
+        )
+
+        result = run_onboarding(env_dir=tmp_path)
+        assert result is not None
+        text = result.read_text(encoding="utf-8")
+        assert "LANGCHAIN_PROVIDER=openai" in text
+        assert "OPENAI_API_KEY=sk-test1234567890" in text
+        # Verify BACK happened: provider was called twice
+        assert step_calls["provider"] == 2
+        assert step_calls["model"] == 2
+
+    def test_tty_ollama_skips_key_step(self, tmp_path: Path, monkeypatch):
+        """Ollama has no key_env → _step_key prints hint and returns ok."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+        step = {"n": 0}
+
+        def mock_select(prompt, choices, *, default_index=0):
+            step["n"] += 1
+            if step["n"] == 1:
+                return "ollama"  # provider
+            if step["n"] == 2:
+                return "qwen2.5:32b"  # model
+            if step["n"] == 3:
+                return "300"  # timeout
+            if step["n"] == 4:
+                return "__skip__"  # tushare
+            return choices[0][0]
+
+        monkeypatch.setattr(
+            "strategy_research.cli.onboard._select_with_back", mock_select,
+        )
+
+        result = run_onboarding(env_dir=tmp_path)
+        assert result is not None
+        text = result.read_text(encoding="utf-8")
+        assert "LANGCHAIN_PROVIDER=ollama" in text
+        assert "API_KEY" not in text
+
+    def test_tty_non_tty_raises_runtime_error(self, tmp_path: Path, monkeypatch):
+        """Non-TTY input raises RuntimeError."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+        with pytest.raises(RuntimeError, match="non-TTY"):
+            run_onboarding(env_dir=tmp_path)
+
+
+# ============================================================
+# TTY helper functions
+# ============================================================
+
+
+class TestTTYHelpers:
+    """Test the TTY helper functions."""
+
+    def test_validate_key_valid(self):
+        from strategy_research.cli.onboard import Provider, _validate_key
+        p = Provider(
+            "openai", "OpenAI", "GPT-4o", "gpt-4o",
+            "OPENAI_API_KEY", "OPENAI_BASE_URL",
+            "https://api.openai.com/v1", "sk-",
+            ("gpt-4o",),
+        )
+        assert _validate_key(p, "sk-test1234567890") is None
+
+    def test_validate_key_empty(self):
+        from strategy_research.cli.onboard import Provider, _validate_key
+        p = Provider(
+            "openai", "OpenAI", "GPT-4o", "gpt-4o",
+            "OPENAI_API_KEY", "OPENAI_BASE_URL",
+            "https://api.openai.com/v1", "sk-",
+            ("gpt-4o",),
+        )
+        err = _validate_key(p, "")
+        assert "empty" in err.lower()
+
+    def test_validate_key_wrong_prefix(self):
+        from strategy_research.cli.onboard import Provider, _validate_key
+        p = Provider(
+            "openai", "OpenAI", "GPT-4o", "gpt-4o",
+            "OPENAI_API_KEY", "OPENAI_BASE_URL",
+            "https://api.openai.com/v1", "sk-",
+            ("gpt-4o",),
+        )
+        err = _validate_key(p, "wrong-prefix-123456")
+        assert "sk-" in err
+
+    def test_validate_key_too_short(self):
+        from strategy_research.cli.onboard import Provider, _validate_key
+        p = Provider(
+            "openai", "OpenAI", "GPT-4o", "gpt-4o",
+            "OPENAI_API_KEY", "OPENAI_BASE_URL",
+            "https://api.openai.com/v1", "sk-",
+            ("gpt-4o",),
+        )
+        err = _validate_key(p, "sk-short")
+        assert "short" in err.lower()
