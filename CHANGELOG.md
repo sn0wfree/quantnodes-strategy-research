@@ -12,6 +12,13 @@ The ``quantnodes-research`` binary now launches a real Textual-based
 full-screen terminal UI by default (TTY only). All 16 slash commands
 plus the streaming LLM bridge live inside the same Textual app.
 
+### Added (TUI startup capture tests — CI artifact upload)
+``tests/test_cli_tui_startup_capture.py`` captures the TUI at 7 lifecycle
+states (mount, tool event, LLM streaming, halt, full lifecycle, ASCII
+fallback, responsive sizes) and saves SVG screenshots + transcript text
+to ``tui-captures/``.  The GitHub Actions workflow uploads these as
+build artifacts (30-day retention) for visual regression review.
+
 ### Added (Unicode ↔ ASCII fallback)
 Components that emit a small set of Unicode glyphs (``●``, ``×``,
 ``…``, ``·``, ``→``) now auto-detect ASCII-only terminals and substitute
@@ -128,6 +135,9 @@ so non-UTF-8 environments (legacy ``vt100``, plain serial consoles,
   console_script: `quantnodes-research` (v0.4.0).
 
 ### Fixed
+- ``data_source_registry.get_loader_or_fallback``: unknown source names
+  (e.g. ``data_fusion``) now raise ``DataSourceNotFoundError`` immediately
+  instead of silently falling back to tushare.
 - `cli.onboard.run_onboarding`: step 1 now consumes one input (not N), fixing the
   "provider loop reads too many lines" bug.
 - `cli.slash_goal`: `append_evidence` switched from positional to keyword-only
@@ -137,17 +147,26 @@ so non-UTF-8 environments (legacy ``vt100``, plain serial consoles,
   ``TranscriptView`` via ``app.query_one(...)`` and posts directly
   to the widget, mirroring the existing
   ``ResearchApp.write_transcript`` contract.
+- ``cli.tui.widgets.rail.ActivityRail.write_event``: pass keyword args
+  (``status=``, ``duration_ms=``, ``result_summary=``) matching the
+  updated ``render_tool_event`` signature.
+
+### Changed (code cleanup)
+- Remove 9 unused imports (F401) across ``cli/`` modules.
+- Remove 2 unused variables (F841): ``rc`` in ``action_show_help``,
+  ``arg_sum`` in ``rail.py``.
+- Extract 5 duplicate ``_reset_halt`` fixtures into ``tests/conftest.py``
+  (autouse).
+- Fix E501 long lines in ``banner.py`` and ``__init__.py``.
+- Add ``tui-captures/`` to ``.gitignore``.
 
 ### Tests
-- +573 new tests (`5683 → 6256`). All CLI modules now have dedicated
+- +629 new tests (`5683 → 6212`). All CLI modules now have dedicated
   suites including the full Textual TUI lifecycle
-  (``run_test`` mount + handler dispatch + LLM stub integration) and
+  (``run_test`` mount + handler dispatch + LLM stub integration),
   the Unicode ↔ ASCII auto-fallback layer (28 tests in
-  ``test_cli_ascii_compat``).
-
-## [0.4.0] - 2026-07-23
-
-### Added
+  ``test_cli_ascii_compat``), and 7 TUI startup capture tests
+  (``test_cli_tui_startup_capture``) that save SVG artifacts for CI.
 - **P3-B/C/D/E unit test coverage** — 117 new tests.
   - `tests/test_goal_p3b.py`: progress_percent, decompose_goal, sub/parent goals (13).
   - `tests/test_hypothesis_p3c.py`: VALID_TRANSITIONS, derive/link/contradicts (35).
@@ -160,34 +179,63 @@ so non-UTF-8 environments (legacy ``vt100``, plain serial consoles,
   list/evidence/complete, hypothesis create/list/search/update.
 
 ### Fixed
-- **HypothesisStore concurrency safety**: `create()` and `update()` now hold
-  `self._lock` across the entire method body (SELECT + write). Previously,
-  releasing the lock between SELECT and BEGIN IMMEDIATE caused
-  `OperationalError('cannot start a transaction within a transaction')`
-  under parallel writes.
+- ``data_source_registry.get_loader_or_fallback``: unknown source names
+  (e.g. ``data_fusion``) now raise ``DataSourceNotFoundError`` immediately
+  instead of silently falling back to tushare.
+- `cli.onboard.run_onboarding`: step 1 now consumes one input (not N), fixing the
+  "provider loop reads too many lines" bug.
+- `cli.slash_goal`: `append_evidence` switched from positional to keyword-only
+  `session_id/goal_id/expected_goal_id/evidence` to match store API.
+- TUI dispatch: ``app.post_message(WriteTranscript)`` does not reach
+  nested widget children; the streaming bridge resolves the
+  ``TranscriptView`` via ``app.query_one(...)`` and posts directly
+  to the widget, mirroring the existing
+  ``ResearchApp.write_transcript`` contract.
+- ``cli.tui.widgets.rail.ActivityRail.write_event``: pass keyword args
+  (``status=``, ``duration_ms=``, ``result_summary=``) matching the
+  updated ``render_tool_event`` signature.
+- **HypothesisStore concurrency safety**: ``create()`` and ``update()``
+  now hold ``self._lock`` across the entire method body (SELECT + write).
+  Previously, releasing the lock between SELECT and BEGIN IMMEDIATE
+  caused ``OperationalError`` under parallel writes.
 - **API router error codes**:
-  - `hypothesis_update`: returns 404 for missing ID (was 500).
-  - `goal_complete`: returns 409 for stale goal (was 500), 400 for
+  - ``hypothesis_update``: returns 404 for missing ID (was 500).
+  - ``goal_complete``: returns 409 for stale goal (was 500), 400 for
     invalid state (was 500).
 - **API router alignment with P3 stores**:
-  - `goal_list` actually calls `store.list_goals()` (was hardcoded `[]`).
-  - `goal_evidence` uses `EvidenceInput` + `append_evidence()` (was
-    deprecated `add_evidence`).
-  - `goal_complete` uses `update_status()` (was deprecated
-    `transition_status`).
-  - `hypothesis_create` accepts `universe`/`signal_definition` (was
-    legacy `tags`/`metadata`).
-  - Hypothesis serialization uses `to_dict()` (was `__dict__`, which
+  - ``goal_list`` actually calls ``store.list_goals()`` (was hardcoded ``[]``).
+  - ``goal_evidence`` uses ``EvidenceInput`` + ``append_evidence()`` (was
+    deprecated ``add_evidence``).
+  - ``goal_complete`` uses ``update_status()`` (was deprecated
+    ``transition_status``).
+  - ``hypothesis_create`` accepts ``universe``/``signal_definition`` (was
+    legacy ``tags``/``metadata``).
+  - Hypothesis serialization uses ``to_dict()`` (was ``__dict__``, which
     broke datetime JSON serialization).
 
 ### Changed
-- `GoalStore._on_goal_complete`: added missing `logger` import.
-- `HypothesisStore._migrate_from_json`: JSON fallback path now derives
-  from `db_path.parent` (was hardcoded `~/.quantnodes-research/`),
-  enabling test isolation via `tmp_path`.
+- ``GoalStore._on_goal_complete``: added missing ``logger`` import.
+- ``HypothesisStore._migrate_from_json``: JSON fallback path now derives
+  from ``db_path.parent`` (was hardcoded ``~/.quantnodes-research/``),
+  enabling test isolation via ``tmp_path``.
+- Remove 9 unused imports (F401) across ``cli/`` modules.
+- Remove 2 unused variables (F841): ``rc`` in ``action_show_help``,
+  ``arg_sum`` in ``rail.py``.
+- Extract 5 duplicate ``_reset_halt`` fixtures into ``tests/conftest.py``
+  (autouse).
+- Fix E501 long lines in ``banner.py`` and ``__init__.py``.
+- Add ``tui-captures/`` to ``.gitignore``.
 
 ### Tests
-- Total tests: 5,491 → 5,631 (+140 new tests).
+- +629 new tests (`5683 → 6212`). All CLI modules now have dedicated
+  suites including the full Textual TUI lifecycle
+  (``run_test`` mount + handler dispatch + LLM stub integration),
+  the Unicode ↔ ASCII auto-fallback layer (28 tests in
+  ``test_cli_ascii_compat``), and 7 TUI startup capture tests
+  (``test_cli_tui_startup_capture``) that save SVG artifacts for CI.
+- P3-B/C/D/E unit test coverage: goal progress/decompose, hypothesis
+  transitions/derive/link, SQLite CRUD/FTS5, auto-validation pipeline,
+  goal hook, concurrency smoke, API router behavior (140 new tests).
 
 ## [0.3.0] - 2026-07-22
 

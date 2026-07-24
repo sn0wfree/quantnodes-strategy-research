@@ -64,7 +64,7 @@
 - ✅ **Hook 系统**：借鉴 llmwikify 13 事件点
 - ✅ **Memory 系统**：FTS5 + Recency boost + Write dedup
 - ✅ **Session 管理**：SQLite + FTS5 + 触发器同步 + 限流 + 监控
-- ✅ **PyPI 发布**：已发布 v0.2.0（自动发布 workflow）
+- ✅ **PyPI 发布**：已发布 v0.3.0（自动发布 workflow）；v0.4.0 待发布
 
 ### 🏗️ 技术栈
 
@@ -642,9 +642,9 @@ $ quantnodes-research session list
 
 ### 测试统计
 
-- **5,536+ 测试通过**
+- **6,212+ 测试通过**
 - **0 回归**
-- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 + backtest-overhaul + P4 + Backtest Engine 全覆盖
+- 测试覆盖：P0 + P1 + P1.5 + P2 + P3 + backtest-overhaul + P4 + Backtest Engine + TUI + ASCII fallback 全覆盖
 - CLI 子命令：13 → **32**（+7 goal + 6 hypothesis + 1 validate-run + 4 portfolio + 1 api + 1 webui）
 
 ### 版本发布
@@ -653,11 +653,13 @@ $ quantnodes-research session list
 |---|---|---|
 | **v0.2.0** | 2026-07-22 | 已发布到 PyPI（自动发布 workflow） |
 | **v0.3.0** | 2026-07-22 | 本地 marker，未推送 PyPI；包含 P3 + backtest-overhaul + P4（Portfolio / API / WebUI）|
+| **v0.4.0** | 2026-07-24 | Textual TUI + Unicode/ASCII fallback + vibe-trading parity + CI capture tests（6212 tests）|
 
 ### 下一步计划
 
-1. **合回主仓库** sn0wfree/quantnodes：v0.4.0 稳定后启动
-2. **持续优化**：性能 + 用户体验 + 更多 validation 市场（CRYPTO/FUTURES/FOREX）
+1. **发布 v0.4.0 到 PyPI**：tag + build + upload
+2. **合回主仓库** sn0wfree/quantnodes：v0.4.0 稳定后启动
+3. **持续优化**：性能 + 用户体验 + 更多 validation 市场（CRYPTO/FUTURES/FOREX）
 
 ---
 
