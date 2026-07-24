@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-24
+
+### Added (Rich CLI / vibe-trading parity)
+- **`cli.theme`** — Rich stylesheet + dark-mode detection (`is_dark()`, `force_dark()`).
+- **`cli.utils.format`** — `format_duration(ms/s)`, `format_tokens(n)`, `abbreviate_num(n, currency=)`
+  with banker's rounding + 3-decimal precision.
+- **`cli.utils.thinking_verbs`** — verb pool + `pick_thinking_verb(seed=)` for seeded determinism.
+- **`cli.components`** —
+  - `WorkingIndicator` (`ThinkingSpinner`).
+  - `tool_event.py` — `beautify_tool_name`, `summarize_args`, `render_tool_event(s)`.
+  - `hint_bar.py` — left+right hint bar with overflow truncation.
+  - `chat_log.py` — turn replay rendering.
+- **`cli.ui`** —
+  - `banner.py` — 8-line gradient logo + version line, `#258BFF→#A5CFFF` lerp.
+  - `transcript.py` — markdown answer renderer (pipe-table upgrade, **bold**/*italic*/`code`/--- strip).
+  - `rail.py` — `RailRunDashboard` event dispatcher (tool_call/text_delta/tool_progress/
+    tool_heartbeat/tool_result/thinking_done/llm_usage/compact).
+- **`cli.commands`** —
+  - `slash_router.py` — 16-entry `SLASH_COMMANDS` registry, fuzzy matcher
+    (prefix > substring > subsequence), `_ALIASES` (q/exit/:q → quit, ? → help),
+    `match_commands` (bare `/` returns full list).
+  - `help.py` — `render_help_table`: commands grid + shortcuts grid.
+  - `show.py` — `/show`, `/pine`, `/skill` with `_locate_run`.
+  - `slash_session.py` — `/history`, `/search`, `/export`.
+  - `slash_memory.py` — `/memory list/show/search/forget` (refuses when `yes=False`).
+  - `slash_goal.py` — `/goal status/start/evidence/complete/cancel/help`.
+  - `slash_chat.py` — `/model`, `/clear(ctx)`, `/quit → 2`, `/debug(ctx)` toggle,
+    `/journal`, `/shadow` (queues prompt on `ctx.pending_prompt`).
+  - `slash_halt.py` — bare-word kill switch (`停/停手/stop/kill/halt`) + `/resume/continue/go`.
+- **`cli.interactive`** —
+  - `completer.py` — `SlashCompleter(max_suggestions=8)` for prompt_toolkit.
+  - `main.py` — `InteractiveContext` dataclass, `_DISPATCH` table (16 handlers),
+    `dispatch_slash()`, `process_turn()` (single-turn driver, halt/resume intercept,
+    proposal pick intercept, plain text → `ctx.history`), `main(argv)` (`--banner` flag).
+- **`cli.onboard`** — 5-step onboarding wizard (provider → model → key → timeout →
+  optional tushare). `Provider` × 5, `BACK`/`CANCEL` sentinels, `run_onboarding(env_dir,
+  inputs, skip_tushare)`, `is_onboarded(env_dir)`. Skips step 3 if `key_env is None`.
+- **`cli.halt`** — thread-safe `HALT` sentinel + `trip_halt(reason=)`/`clear_halt()`/
+  `is_halted()`/`require_not_halted(operation=)` + `HaltError`.
+- **`cli.mandate`** — research-proposal intercept: `Proposal`, `make_proposal`,
+  `is_pick(input, proposal)`, `capture_pick(input, proposal)` returning
+  `{index, label, payload, context}` or `None`, `has_pending_proposal(ctx)`.
+- **Entry dispatcher** — `cli/__main__.main()` picks Rich REPL when argv is empty or
+  contains only `--banner`; otherwise delegates to argparse `cli.main()`. New
+  console_script: `quantnodes-research` (v0.4.0).
+
+### Fixed
+- `cli.onboard.run_onboarding`: step 1 now consumes one input (not N), fixing the
+  "provider loop reads too many lines" bug.
+- `cli.slash_goal`: `append_evidence` switched from positional to keyword-only
+  `session_id/goal_id/expected_goal_id/evidence` to match store API.
+
+### Tests
+- +484 new tests (`5683 → 6167`). All CLI modules now have dedicated suites.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added
