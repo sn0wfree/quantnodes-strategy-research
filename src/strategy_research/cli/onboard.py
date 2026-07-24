@@ -1,8 +1,8 @@
 """First-launch onboarding wizard.
 
 Mirrors ``vibe-trading/cli/onboard.py``. Triggered when
-``~/.strategy-research/.env`` is missing or when ``strategy-research init``
-is run with no arguments.
+``~/.quantnodes/strategy_research/.env`` is missing or when
+``quantnodes-research init`` is run with no arguments.
 
 Five back-steppable steps (provider → model → key → timeout → optional
 Tushare for China A-share data). Each step persists immediately to
@@ -30,7 +30,7 @@ BACK = object()
 CANCEL = object()
 
 
-_DEFAULT_ENV_DIR = Path.home() / ".strategy-research"
+_DEFAULT_ENV_DIR = Path.home() / ".quantnodes" / "strategy_research"
 _DEFAULT_ENV_PATH = _DEFAULT_ENV_DIR / ".env"
 _DEFAULT_PARTIAL_PATH = _DEFAULT_ENV_DIR / ".env.partial"
 

@@ -19,7 +19,7 @@ def load_tokens(workspace_path: Optional[Path] = None) -> dict:
 
     查找顺序:
     1. workspace_path/.env
-    2. ~/.strategy-research/.env
+    2. ~/.quantnodes/strategy_research/.env
     3. 环境变量
     """
     tokens = {}
@@ -28,7 +28,7 @@ def load_tokens(workspace_path: Optional[Path] = None) -> dict:
     env_paths = []
     if workspace_path:
         env_paths.append(workspace_path / ".env")
-    env_paths.append(Path.home() / ".strategy-research" / ".env")
+    env_paths.append(Path.home() / ".quantnodes" / "strategy_research" / ".env")
 
     for env_path in env_paths:
         if env_path.exists():

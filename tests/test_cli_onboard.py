@@ -21,9 +21,9 @@ from strategy_research.cli.onboard import (
 
 @pytest.fixture
 def fresh_env_dir(tmp_path, monkeypatch):
-    """Use a fresh env_dir for each test (don't touch ~/.strategy-research)."""
-    d = tmp_path / ".strategy-research"
-    d.mkdir()
+    """Use a fresh env_dir for each test (don't touch ~/.quantnodes/strategy_research)."""
+    d = tmp_path / ".quantnodes" / "strategy_research"
+    d.mkdir(parents=True)
     return d
 
 
