@@ -129,34 +129,34 @@ export OPENAI_MODEL=deepseek-chat
 ## 快速开始（30 秒）
 
 ```bash
-# 1. 启动前检查
-quantnodes-research preflight /path/to/ws
+# 1. 配置 LLM 凭证（5 步 TTY 向导，vibe-trading 风格）
+quantnodes-research init
 
-# 2. 初始化工作区（自动跑 baseline 回测）
-quantnodes-research init /tmp/demo_ws
+# 2. 启动交互式 REPL（在你的策略工作区内）
+cd /path/to/strategy
+quantnodes-research
 
-# 3. 查看状态
-quantnodes-research status /tmp/demo_ws
+# 3. 手动复跑（修改 strategy.py 后）
+quantnodes-research evaluate /path/to/strategy
 
-# 4. 手动复跑（修改 strategy.py 后）
-quantnodes-research evaluate /tmp/demo_ws
-
-# 5. 复现某个历史 run
-quantnodes-research reproduce /tmp/demo_ws run_0001
+# 4. 复现某个历史 run
+quantnodes-research reproduce /path/to/strategy run_0001
 ```
 
-**首次运行输出：**
+**首次运行 init 输出：**
 
 ```
-✓ 创建 README.md
-✓ 创建 config.yaml
-✓ 创建 .prompts/ (11 个提示词)
-✓ 创建 .skills/ (27 份方法论)
-✓ 创建 strategies/test_strat/
-✓ 初始化 DuckDB: /tmp/demo_ws/data.duckdb
-✓ 初始化 Git 仓库
-✓ 导入 DataFrame: 10 个资产, 504 个日期
-  baseline: Calmar=0.599 Sharpe=0.927 MaxDD=-0.155 AnnRet=0.093
+? Pick a model provider > OpenAI
+? Enter your OpenAI API key (saved to ~/.quantnodes/strategy_research/.env, never logged)
+? Default request timeout > 300s (5 min — normal autoresearch, recommended)
+? Enable Tushare for China A-share data? > No, skip (most users)
+✓ Wrote ~/.quantnodes/strategy_research/.env
+
+  Config    ~/.quantnodes/strategy_research/.env
+  Run       quantnodes-research
+```
+
+> **注意**：v0.5.0 起 `init` 不再创建工作区文件（config.yaml / .prompts/ / .skills/ / strategies/）。这些文件由 `autoresearch` 按需 lazy 创建。workspace scaffold 可能回归为独立子命令 `quantnodes-research workspace create`（v0.6.0 待定）。
 ✓ 运行 baseline 回测 (buy and hold HS300)
 ```
 

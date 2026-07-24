@@ -285,3 +285,36 @@ tests/test_mcp_data_tools.py
 tests/test_mcp_swarm_tools.py
 docs/PLAN-phase1-4.md
 ```
+
+---
+
+## 5. v0.5.0 — Init Wizard Rewrite (2026-07-24)
+
+### 5.1 目标
+
+把 `quantnodes-research init` 从 workspace scaffold（3 个 blocking prompts + 11 template copy + 27 skill copy + DuckDB init + git init + baseline backtest）改为 vibe-trading 风格的 5 步 TTY 向导。
+
+### 5.2 两条 init 路径
+
+| 路径 | 入口 | UI | 写 |
+|---|---|---|---|
+| A（显式 CLI） | `quantnodes-research init` | Rich prompt_toolkit | `~/.quantnodes/strategy_research/.env` |
+| B（首启自动） | `quantnodes-research`（TTY + 无 `.env`） | prompt_toolkit | `~/.quantnodes/strategy_research/.env` |
+
+### 5.3 文件影响
+
+| 文件 | 操作 |
+|---|---|
+| `cli/__init__.py` | 删 scaffold helpers (69-186)，重写 cmd_init → cmd_run_onboarding |
+| `cli/_auto_onboard.py` | 新建：_maybe_run_onboarding + _migrate_legacy_env |
+| `cli/__main__.py` | 顶插 _maybe_run_onboarding 调用 |
+| `tests/test_init_wizard.py` | 新建：25 个测试用例 |
+| `tests/test_autoresearch.py` | fixture 改为手动构造（config.yaml + templates + DuckDB seed） |
+| `tests/test_cli_init.py` | 删 TestRenderTemplate + TestCmdInit，保留 TestCmdEvaluate |
+| `tests/test_pr3_fixes.py` | 删 TestCmdInitNoBaseline + TestCmdInitConfigYAML |
+
+### 5.4 向后兼容
+
+- `~/.strategy-research/.env` 在首次 wizard 时 silent 迁移到 `~/.quantnodes/strategy_research/.env`（旧文件不删）
+- `--help` 输出 "Run the credentials wizard that writes ~/.quantnodes/strategy_research/.env"
+- workspace scaffold（config.yaml / .prompts/ / .skills/ / strategies/）**不再由 init 创建**——留待 `autoresearch` 按需 lazy init
