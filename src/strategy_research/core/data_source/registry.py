@@ -165,14 +165,24 @@ def resolve_loader_with_fallback(source: str):
 
 
 def get_loader_or_fallback(source: str):
-    """获取 loader，不可用时自动 fallback。"""
+    """获取 loader，不可用时自动 fallback 到 tushare。
+
+    Unknown sources (not in :data:`LOADER_REGISTRY`) are a hard error:
+    silently falling back to tushare for nonsense names like
+    ``"xz_abc"`` masks configuration mistakes. Fallback to tushare
+    applies only when the requested source is registered but
+    temporarily unavailable (e.g. token not set, network down).
+    """
     _ensure_registered()
+
+    if source not in LOADER_REGISTRY:
+        raise NoAvailableSourceError(f"未知数据源: {source}")
 
     try:
         return resolve_loader_with_fallback(source)
     except NoAvailableSourceError:
         # 最后手段: 尝试 tushare
-        if "tushare" in LOADER_REGISTRY:
+        if "tushare" in LOADER_REGISTRY and source != "tushare":
             try:
                 instance = LOADER_REGISTRY["tushare"]()
                 if instance.is_available():
