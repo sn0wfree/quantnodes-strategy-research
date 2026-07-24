@@ -112,7 +112,7 @@ class TestRunOnboarding:
     def test_no_inputs_raises_runtime_error_in_non_tty(self, tmp_path: Path):
         """``inputs=None`` is the live-TTY path; out-of-TTY callers must
         supply pre-canned inputs."""
-        with pytest.raises(RuntimeError, match="needs `inputs`"):
+        with pytest.raises(RuntimeError, match="TTY"):
             run_onboarding(inputs=None, env_dir=tmp_path)
 
     def test_exhausted_inputs_raises_runtime_error(self, tmp_path: Path):
@@ -636,11 +636,11 @@ class TestRunOnboardingTTY:
         assert "API_KEY" not in text
 
     def test_tty_non_tty_raises_runtime_error(self, tmp_path: Path, monkeypatch):
-        """Non-TTY input raises RuntimeError."""
+        """Non-TTY input raises RuntimeError with friendly message."""
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
 
-        with pytest.raises(RuntimeError, match="non-TTY"):
+        with pytest.raises(RuntimeError, match="TTY"):
             run_onboarding(env_dir=tmp_path)
 
 
@@ -694,3 +694,49 @@ class TestTTYHelpers:
         )
         err = _validate_key(p, "sk-short")
         assert "short" in err.lower()
+
+
+class TestStepProviderSwitch:
+    """Verify _step_provider drops stale keys when the user BACK-reselects."""
+
+    def test_switch_from_openai_to_ollama_drops_openai_keys(self, tmp_path):
+        """OpenAI 残留 → BACK → Ollama → .env 不带 OPENAI_API_KEY。"""
+        from strategy_research.cli.onboard import (
+            PROVIDERS, _step_provider, _save_partial,
+            _DEFAULT_ENV_DIR,
+        )
+
+        # 准备：模拟 user 已经先填了 OpenAI 的密钥、URL、模型
+        from pathlib import Path
+        env_dir = tmp_path / "env"
+        import strategy_research.cli.onboard as onboard_mod
+        monkey_target = env_dir  # we just need a target dir for _save_partial
+        onboard_mod._DEFAULT_ENV_DIR = monkey_target  # type: ignore[attr-defined]
+
+        values = {
+            "LANGCHAIN_PROVIDER": "openai",
+            "LANGCHAIN_MODEL_NAME": "gpt-4o",
+            "OPENAI_API_KEY": "sk-residual1234567890",
+            "OPENAI_BASE_URL": "https://api.openai.com/v1",
+        }
+        state: dict = {
+            "provider": next(p for p in PROVIDERS if p.key == "openai"),
+        }
+
+        # 第一次调 _step_provider 把 provider 改成 ollama（即 BACK 重选场景）
+        # 我们需要 mock _select_with_back 返回 "ollama"
+        import unittest.mock as _mock
+        with _mock.patch.object(
+            onboard_mod, "_select_with_back", return_value="ollama"
+        ):
+            result = _step_provider(values, state, skip_tushare=False)
+
+        assert result == "ok"
+        assert values["LANGCHAIN_PROVIDER"] == "ollama"
+
+        # 关键断言：旧 provider 的键必须不存在
+        assert "OPENAI_API_KEY" not in values
+        assert "OPENAI_BASE_URL" not in values
+        # LANGCHAIN_MODEL_NAME 也应该被清（用户重新选 provider 会再选 model）
+        assert "LANGCHAIN_MODEL_NAME" not in values
+

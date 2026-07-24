@@ -146,6 +146,17 @@ def _finalize(values: dict[str, str], *, env_dir: Path | None = None) -> Path:
         except OSError:
             pass
         raise
+
+    # Tidy: drop the live .env.partial snapshot now that .env is committed.
+    # _save_partial leaves it on disk throughout the run for crash recovery,
+    # but it shouldn't linger once the final write has succeeded.
+    partial = env_dir / ".env.partial"
+    if partial.exists():
+        try:
+            partial.unlink()
+        except OSError:
+            pass
+
     return final_path
 
 
@@ -234,11 +245,11 @@ def _select_with_back(
         state["result"] = CANCEL
         event.app.exit()
 
-    brand_hex = Theme.brand_hex if hasattr(Theme, "brand_hex") else "258BFF"
+    brand_hex = Theme.brand_hex if hasattr(Theme, "brand_hex") else "#258BFF"
     style = PTStyle.from_dict(
         {
-            "cursor": f"#{brand_hex} bold",
-            "selected": f"#{brand_hex} bold",
+            "cursor": f"{brand_hex} bold",
+            "selected": f"{brand_hex} bold",
             "option": "",
             "hint": "#808080",
         }
@@ -385,6 +396,17 @@ def _step_provider(
     if result in (BACK, CANCEL):
         return result
     provider = next(p for p in PROVIDERS if p.key == result)
+
+    # When switching providers via BACK, drop keys associated with the
+    # previously selected provider so the final .env doesn't keep stale
+    # credentials for the old backend (otherwise an Ollama config can
+    # still carry an OPENAI_API_KEY + OPENAI_BASE_URL).
+    old = state.get("provider")
+    if old is not None and old != provider:
+        for k in (old.key_env, old.base_env, "LANGCHAIN_MODEL_NAME"):
+            if k:
+                values.pop(k, None)
+
     values["LANGCHAIN_PROVIDER"] = provider.key
     if provider.base_env:
         values[provider.base_env] = provider.base_url
@@ -573,7 +595,10 @@ def run_onboarding(
     import sys
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        raise RuntimeError("run_onboarding needs `inputs` in non-TTY contexts")
+        raise RuntimeError(
+            "init wizard requires a TTY (both stdin and stdout must be "
+            "real terminals); redirecting or piping prevents it from running"
+        )
 
     values = {}
     state: dict[str, object] = {"provider": None}

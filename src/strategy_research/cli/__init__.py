@@ -67,7 +67,20 @@ def cmd_run_onboarding(args: argparse.Namespace) -> int:
             return 0
         _wipe_existing_env(_DEFAULT_ENV_DIR)
 
-    written = run_onboarding()
+    try:
+        written = run_onboarding()
+    except RuntimeError as exc:
+        # TTY branch raises if stdin/stdout aren't real terminals (e.g.
+        # `init --force > log.txt`). Translate to a friendly message
+        # rather than dumping a traceback.
+        msg = str(exc)
+        if "TTY" in msg or "non-TTY" in msg or "inputs" in msg:
+            console.print(
+                "[yellow]init wizard requires an interactive terminal; "
+                "redirecting or piping prevents it from running.[/yellow]"
+            )
+            return 1
+        raise
     if written is None:
         return 1
 
@@ -84,14 +97,28 @@ def cmd_run_onboarding(args: argparse.Namespace) -> int:
 
 
 def _wipe_existing_env(env_dir: Path) -> None:
-    """把现有 .env 改名 (.env.prev) 防 _finalize 跨 rename 冲突。"""
+    """Rotate .env → timestamped .env.prev-YYYYMMDD-HHMMSS so consecutive
+    overwrites don't silently clobber the previous backup.
+    """
     env_path = env_dir / ".env"
-    if env_path.exists():
-        target = env_dir / ".env.prev"
+    if not env_path.exists():
+        return
+    # Timestamp suffix keeps every backup; collisions get a numeric tail.
+    from datetime import datetime
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = env_dir / f".env.prev-{stamp}"
+    n = 1
+    while target.exists():
+        target = env_dir / f".env.prev-{stamp}-{n}"
+        n += 1
+    try:
+        env_path.rename(target)
+    except OSError:
+        # Last resort: unlink so _finalize can proceed.
         try:
-            env_path.rename(target)
-        except OSError:
             env_path.unlink()
+        except OSError:
+            pass
 
 
 def cmd_status(args: argparse.Namespace) -> int:

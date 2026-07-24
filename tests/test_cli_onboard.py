@@ -105,6 +105,9 @@ class TestFinalize:
         assert "A=1" in content
 
     def test_no_partial_left(self, fresh_env_dir):
+        # First seed the .env.partial as a previous-step snapshot would.
+        _save_partial({"A": "1"}, env_dir=fresh_env_dir)
+        assert (fresh_env_dir / ".env.partial").exists()
         _finalize({"A": "1"}, env_dir=fresh_env_dir)
         assert not (fresh_env_dir / ".env.partial").exists()
 
@@ -193,7 +196,7 @@ class TestRunOnboarding:
             run_onboarding(env_dir=fresh_env_dir, inputs=inputs)
 
     def test_no_inputs_in_non_tty_raises(self, fresh_env_dir):
-        with pytest.raises(RuntimeError, match="inputs"):
+        with pytest.raises(RuntimeError, match="TTY"):
             run_onboarding(env_dir=fresh_env_dir, inputs=None)
 
     def test_exhausted_inputs_raises(self, fresh_env_dir):
