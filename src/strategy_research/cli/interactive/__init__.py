@@ -1,4 +1,4 @@
-"""Top-level public re-exports for the interactive REPL layer."""
+"""Public re-exports for the interactive REPL layer."""
 
 from __future__ import annotations
 
@@ -9,6 +9,15 @@ from strategy_research.cli.interactive.main import (
     main as interactive_main,
     process_turn,
 )
+from strategy_research.cli.onboard import (
+    BACK,
+    CANCEL,
+    PROVIDERS,
+    TIMEOUT_CHOICES,
+    Provider,
+    is_onboarded,
+    run_onboarding,
+)
 
 __all__ = [
     "SlashCompleter",
@@ -16,4 +25,11 @@ __all__ = [
     "dispatch_slash",
     "interactive_main",
     "process_turn",
+    "BACK",
+    "CANCEL",
+    "PROVIDERS",
+    "TIMEOUT_CHOICES",
+    "Provider",
+    "is_onboarded",
+    "run_onboarding",
 ]
