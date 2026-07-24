@@ -31,6 +31,8 @@ dependencies = [
     "httpx>=0.27",          # OpenAI-compatible LLM client (PR5)
     "prompt-toolkit>=3.0",  # REPL input layer (Phase A)
     "textual>=0.50",        # Full-screen Textual TUI (Phase B v0.4.0)
+    "markdownify>=0.13",    # HTML → Markdown (Phase 2: Web I/O)
+    "duckduckgo-search>=7.0",  # Free web search, no API key (Phase 2: Web I/O)
 ]
 
 [project.optional-dependencies]

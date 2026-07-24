@@ -935,7 +935,7 @@ class OptionsPricingTool(BaseTool):
 
 
 def build_default_registry() -> ToolRegistry:
-    """Build a ToolRegistry with all 11 tools.
+    """Build a ToolRegistry with all tools.
 
     Tools are stateless; AgentLoop injects `workspace` per call.
     No workspace is bound at construction time.
@@ -952,6 +952,18 @@ def build_default_registry() -> ToolRegistry:
     r.register(ListSkillsTool())
     r.register(LoadSkillTool())
     r.register(OptionsPricingTool())
+    # Phase 2: Web I/O tools (conditional on dependencies)
+    try:
+        from .web_tools import register_web_tools
+        register_web_tools(r)
+    except Exception:
+        pass
+    # Phase 3: Market data tools
+    try:
+        from .data_tools import register_data_tools
+        register_data_tools(r)
+    except Exception:
+        pass
     return r
 
 
