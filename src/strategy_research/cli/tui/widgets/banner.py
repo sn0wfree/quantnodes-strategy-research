@@ -1,4 +1,4 @@
-"""Banner widget — renders the strategy-research ASCII logo at the top
+"""Banner widget — renders the QuantNodes-Research ASCII logo at the top
 of the transcript view.
 
 Wraps :func:`strategy_research.cli.ui.banner.print_banner`. The widget
@@ -35,7 +35,7 @@ class Banner(Static):
     }
     """
 
-    def __init__(self, *, model: str = "unknown", version: str = "0.4.0", mode: str = "tui", **kwargs: object) -> None:
+    def __init__(self, *, model: str = "unknown", version: str = "0.4.2", mode: str = "tui", **kwargs: object) -> None:
         super().__init__(**kwargs)
         self._model = model
         self._version = version

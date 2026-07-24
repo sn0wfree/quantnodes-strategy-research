@@ -1,4 +1,4 @@
-"""Textual full-screen TUI for strategy-research.
+"""Textual full-screen TUI for QuantNodes-Research.
 
 Public API:
 - :class:`ResearchApp` — the top-level Textual ``App``.
@@ -23,7 +23,7 @@ from strategy_research.cli.tui.app import ResearchApp
 def run_tui(
     *,
     model: str = "unknown",
-    version: str = "0.4.0",
+    version: str = "0.4.2",
     session_db_path: Optional[str] = None,
 ) -> int:
     """Mount the TUI and run it.

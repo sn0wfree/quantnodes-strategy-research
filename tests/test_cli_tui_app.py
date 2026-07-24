@@ -70,7 +70,7 @@ def test_tui_bindings_are_well_formed():
 @pytest.mark.asyncio
 async def test_research_app_run_test_mounts_widgets():
     """End-to-end: app.run_test() mounts the full skeleton."""
-    app = ResearchApp(model="gpt-4o", version="0.4.0")
+    app = ResearchApp(model="gpt-4o", version="0.4.2")
     async with app.run_test() as pilot:
         await pilot.pause()
         # All 5 named inner widgets are present (header + footer are auto-mounted).
@@ -83,7 +83,7 @@ async def test_research_app_run_test_mounts_widgets():
 @pytest.mark.asyncio
 async def test_write_transcript_message_appends_to_log():
     """Posting a ``WriteTranscript`` message lands inside the transcript widget."""
-    app = ResearchApp(model="m", version="0.4.0")
+    app = ResearchApp(model="m", version="0.4.2")
     async with app.run_test() as pilot:
         await pilot.pause()
         text_marker = "TI_MARKER_HELLO"
@@ -105,7 +105,7 @@ async def test_synthesize_input_echoes_to_transcript():
     history is populated rather than the transcript (the help panel
     rendering lives in Commit 3).
     """
-    app = ResearchApp(model="m", version="0.4.0")
+    app = ResearchApp(model="m", version="0.4.2")
     async with app.run_test() as pilot:
         await pilot.pause()
         # Manually wire the session — Commit 2 wires it in on_mount, but
@@ -131,16 +131,16 @@ async def test_app_mount_renders_banner_in_transcript():
     CSS loads, widgets mount, on_mount runs, and the banner Rich
     ``Text`` lands inside the chat log as the first scrollback entry.
     """
-    app = ResearchApp(model="gpt-4o", version="0.4.0")
+    app = ResearchApp(model="gpt-4o", version="0.4.2")
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
         tv = app.query_one(TranscriptView)
         assert len(tv.lines) > 0, "banner should produce at least one line"
         joined = " ".join(str(s) for line in tv.lines for s in line)
-        # Brand line "strategy-research" should appear verbatim.
-        assert "strategy-research" in joined
-        assert "0.4.0" in joined
+        # Brand line "QuantNodes-Research" should appear verbatim.
+        assert "QuantNodes-Research" in joined
+        assert "0.4.2" in joined
         assert app.banner is not None
 
 
@@ -150,7 +150,7 @@ async def test_app_save_screenshot_produces_valid_svg(tmp_path):
     one to keep CI honest that the renderer emits an actual layout
     (CSS OK, widgets painted, no exceptions).
     """
-    app = ResearchApp(model="gpt-4o", version="0.4.0")
+    app = ResearchApp(model="gpt-4o", version="0.4.2")
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.pause()

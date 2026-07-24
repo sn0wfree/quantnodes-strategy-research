@@ -1,4 +1,4 @@
-"""Textual widget package for the strategy-research TUI.
+"""Textual widget package for the QuantNodes-Research TUI.
 
 Each widget is a thin Textual-native wrapper over existing CLI building
 blocks (banner renderer, tool event formatter, etc.). The goal is that

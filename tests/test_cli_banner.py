@@ -62,11 +62,11 @@ class TestLogo:
 
 class TestPrintBanner:
     def test_prints_no_crash(self, console):
-        print_banner(console, model="minimax", version="0.4.0")
+        print_banner(console, model="minimax", version="0.4.2")
         out = console.export_text()
         assert "minimax" in out
-        assert "0.4.0" in out
-        assert "strategy-research" in out
+        assert "0.4.2" in out
+        assert "QuantNodes-Research" in out
 
     def test_default_model(self, console):
         print_banner(console)
@@ -78,7 +78,7 @@ class TestPrintBanner:
         print_banner(console, width=40)
         # Should not crash
         out = console.export_text()
-        assert "strategy-research" in out
+        assert "QuantNodes-Research" in out
 
     def test_mode_label(self, console):
         print_banner(console, mode="chat")

@@ -50,7 +50,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 class ResearchApp(App):
-    """Top-level Textual app for strategy-research."""
+    """Top-level Textual app for QuantNodes-Research."""
 
     CSS_PATH = os.path.join(_HERE, "styles.tcss")
     TITLE = "QuantNodes Strategy-Research"
@@ -61,7 +61,7 @@ class ResearchApp(App):
         self,
         *,
         model: str = "unknown",
-        version: str = "0.4.0",
+        version: str = "0.4.2",
         session_db_path: Optional[str] = None,
         skip_resume: bool = False,
         llm_client: Optional[Any] = None,

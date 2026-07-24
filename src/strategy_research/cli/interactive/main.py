@@ -234,12 +234,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     script and is exercised manually / by an integration test.
     """
     parser = argparse.ArgumentParser(
-        prog="strategy-research-interactive",
+        prog="quantnodes-research-interactive",
         description="Interactive REPL driver (slim testable wrapper).",
     )
     parser.add_argument("--banner", action="store_true", help="Print the startup banner and exit")
     parser.add_argument("--model", default=os.environ.get("LANGCHAIN_MODEL_NAME", "unknown"))
-    parser.add_argument("--version", default="0.4.0")
+    parser.add_argument("--version", default="0.4.2")
     parser.add_argument("input", nargs="?", help="Optional single-line input to dispatch")
 
     args = parser.parse_args(argv)

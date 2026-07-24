@@ -174,7 +174,7 @@ def test_resume_modal_callback_resume_branch(monkeypatch):
     from strategy_research.cli.tui.app import ResearchApp
 
     # Build a fresh app context, skip_resume=True to avoid the real prompt.
-    app = ResearchApp(model="m", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="m", version="0.4.2", skip_resume=True)
     app.session = ChatSession(app.ctx, app=app)
 
     # Stub the resume-loading helper so we don't touch the real DB.
@@ -202,7 +202,7 @@ def test_resume_modal_callback_new_branch(monkeypatch):
     """``_on_resume_choice((False, None))`` writes a "fresh session" line."""
     from strategy_research.cli.tui.app import ResearchApp
 
-    app = ResearchApp(model="m", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="m", version="0.4.2", skip_resume=True)
     app.session = ChatSession(app.ctx, app=app)
 
     write_calls = []
@@ -220,7 +220,7 @@ def test_resume_modal_callback_pending_input_enqueues(monkeypatch):
     """``_on_resume_choice((False, 'hi'))`` enqueues 'hi' on the session."""
     from strategy_research.cli.tui.app import ResearchApp
 
-    app = ResearchApp(model="m", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="m", version="0.4.2", skip_resume=True)
     app.session = ChatSession(app.ctx, app=app)
 
     monkeypatch.setattr(
@@ -241,7 +241,7 @@ async def test_tui_input_submitted_routes_through_session(monkeypatch):
     from strategy_research.cli.tui.app import ResearchApp
     from strategy_research.cli.tui.messages import SynthesizeInput
 
-    app = ResearchApp(model="m", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="m", version="0.4.2", skip_resume=True)
     async with app.run_test() as pilot:
         await pilot.pause()
         # Skip banner render-time: instantiate the session eagerly.
@@ -261,7 +261,7 @@ async def test_tui_ctrl_d_quits_app():
     """``Ctrl+D`` (``action_quit_app``) exits the TUI cleanly."""
     from strategy_research.cli.tui.app import ResearchApp
 
-    app = ResearchApp(model="m", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="m", version="0.4.2", skip_resume=True)
     async with app.run_test() as pilot:
         await pilot.pause()
         app.action_quit_app()
@@ -273,7 +273,7 @@ async def test_tui_ctrl_c_trips_halt(monkeypatch):
     """``Ctrl+C`` (``action_halt``) trips the kill switch via the session."""
     from strategy_research.cli.tui.app import ResearchApp
 
-    app = ResearchApp(model="m", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="m", version="0.4.2", skip_resume=True)
     async with app.run_test() as pilot:
         await pilot.pause()
         app.session = ChatSession(app.ctx, app=app)

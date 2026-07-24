@@ -80,7 +80,7 @@ def _capture_svg(app: ResearchApp, pilot, tag: str) -> str:
 @pytest.mark.asyncio
 async def test_capture_mount_state():
     """Capture the TUI immediately after mount (banner + empty transcript)."""
-    app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -95,7 +95,7 @@ async def test_capture_mount_state():
         tv = app.query_one(TranscriptView)
         assert len(tv.lines) > 0, "banner should produce at least one line"
         joined = " ".join(str(s) for line in tv.lines for s in line)
-        assert "strategy-research" in joined
+        assert "QuantNodes-Research" in joined
 
         # Capture SVG
         svg_path = _ensure_captures() / "01_mount.svg"
@@ -119,7 +119,7 @@ async def test_capture_mount_state():
 @pytest.mark.asyncio
 async def test_capture_tool_event_state():
     """Capture the TUI after a tool event has been posted to the rail."""
-    app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -161,7 +161,7 @@ async def test_capture_tool_event_state():
 @pytest.mark.asyncio
 async def test_capture_llm_streaming_state():
     """Capture the TUI while an LLM stream is actively emitting tokens."""
-    app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -199,7 +199,7 @@ async def test_capture_llm_streaming_state():
 @pytest.mark.asyncio
 async def test_capture_halt_state():
     """Capture the TUI after /halt is invoked."""
-    app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -242,7 +242,7 @@ async def test_capture_halt_state():
 @pytest.mark.asyncio
 async def test_capture_full_lifecycle():
     """Capture the TUI through a complete interaction lifecycle."""
-    app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+    app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -317,7 +317,7 @@ async def test_capture_ascii_fallback_mode():
     """Capture the TUI in ASCII fallback mode for non-UTF-8 terminals."""
     register_ascii_mode(True)
     try:
-        app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+        app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause()
             await pilot.pause()
@@ -372,7 +372,7 @@ async def test_capture_various_sizes():
         ("wide", 200, 50),
     ]
     for tag, width, height in sizes:
-        app = ResearchApp(model="gpt-4o", version="0.4.0", skip_resume=True)
+        app = ResearchApp(model="gpt-4o", version="0.4.2", skip_resume=True)
         async with app.run_test(size=(width, height)) as pilot:
             await pilot.pause()
             await pilot.pause()

@@ -132,7 +132,7 @@ class TestMainEntrypoint:
         rc = main(["--banner"])
         assert rc == 0
         out = capsys.readouterr().out
-        assert "strategy-research" in out
+        assert "QuantNodes-Research" in out
 
     def test_help_no_args(self, capsys):
         rc = main([])

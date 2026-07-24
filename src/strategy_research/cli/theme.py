@@ -28,7 +28,7 @@ from rich.console import Console
 from rich.theme import Theme as _RichThemeType
 
 
-# Brand palette — kept in sync with strategy-research frontend.
+# Brand palette — kept in sync with QuantNodes-Research frontend.
 _BRAND_HEX = "#d97706"
 _BRAND_HEX_DARK = "#fa9842"
 

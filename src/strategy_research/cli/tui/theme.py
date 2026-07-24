@@ -1,4 +1,4 @@
-"""Brand bridge — maps strategy-research theme tokens to Textual primitives.
+"""Brand bridge — maps QuantNodes-Research theme tokens to Textual primitives.
 
 Textual widgets need CSS-friendly color tokens (hex / ANSI names) rather
 than the Rich-style tokens stored on :class:`strategy_research.cli.theme.Theme`.

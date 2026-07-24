@@ -12,15 +12,15 @@ from typing import Optional
 from rich.console import Console
 from rich.text import Text
 
-# 8-line ASCII art for "STRATEGY-RESEARCH".
+# ASCII art for "QuantNodes-Research".
+# Minimalist 4-line design with version/mode/model on line 4.
 # Designed to fit an 80-col terminal; truncation logic in ``print_banner``
 # keeps it usable on narrower consoles.
 _LOGO_LINES = [
-    " ____  _ _      ____                       _            ",
-    "/ ___|| (_) ___|  _ \\  ___  _ __ ___   __ _(_)_   _____ ",
-    "\\\\___ \\| | |/ _ \\ |_) |/ _ \\| '_ ` _ \\ / _` | \\ \\ / / _ \\",
-    " ___) | | |  __/  _ <| (_) | | | | | | (_| | |\\ V /  __/",
-    "|____/|_|_|\\___|_| \\_\\\\___/|_| |_| |_|\\__,_|_| \\_/ \\___|",
+    "QuantNodes-Research",
+    "===================",
+    "策略研究 · Quant · Nodes",
+    "",
 ]
 
 def _gradient_color(step: float) -> str:
@@ -57,7 +57,7 @@ def _build_logo(width: int) -> Text:
 def render_banner(
     *,
     model: str = "unknown",
-    version: str = "0.4.0",
+    version: str = "0.4.2",
     mode: str = "cli",
     width: Optional[int] = None,
     theme: Optional[object] = None,
@@ -96,7 +96,7 @@ def render_banner(
         muted_style = getattr(theme, "muted", "#888888")
 
     header = Text()
-    header.append("strategy-research", style=primary_style)
+    header.append("QuantNodes-Research", style=primary_style)
     header.append(f"  v{version}  ·  {mode}  ·  ", style=muted_style)
     header.append(model, style=primary_dim_style)
     body.append_text(header)
@@ -107,7 +107,7 @@ def print_banner(
     console: Console,
     *,
     model: str = "unknown",
-    version: str = "0.4.0",
+    version: str = "0.4.2",
     mode: str = "cli",
     width: Optional[int] = None,
 ) -> None:

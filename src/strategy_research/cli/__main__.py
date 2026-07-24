@@ -1,4 +1,4 @@
-"""Top-level entry-point for the strategy-research binary.
+"""Top-level entry-point for the QuantNodes-Research CLI.
 
 Invocation matrix (mirrors vibe-trading):
 
