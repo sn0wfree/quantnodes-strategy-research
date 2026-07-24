@@ -34,6 +34,12 @@ from strategy_research.cli.commands.slash_chat import (
     cmd_quit,
     cmd_shadow,
 )
+from strategy_research.cli.commands.slash_halt import (
+    cmd_halt,
+    cmd_resume,
+    is_halt_command,
+    is_resume_command,
+)
 from strategy_research.cli.commands.slash_goal import (
     cmd_cancel,
     cmd_complete,
@@ -56,6 +62,7 @@ from strategy_research.cli.commands.slash_session import (
     cmd_history,
     cmd_search as session_search,
 )
+from strategy_research.cli.halt import clear_halt, trip_halt
 from strategy_research.cli.ui.banner import print_banner
 
 
@@ -150,6 +157,8 @@ _DISPATCH: dict[str, Any] = {
     "export": lambda ctx, *a: cmd_export(),
     "debug": lambda ctx, *a: cmd_debug(ctx),
     "quit": lambda ctx, *a: cmd_quit(),
+    "halt": lambda ctx, *a: cmd_halt(" ".join(a)),
+    "resume": lambda ctx, *a: cmd_resume(),
 }
 
 
@@ -177,9 +186,19 @@ def process_turn(input_text: str, ctx: Optional[InteractiveContext] = None) -> i
     Returns ``cmd_quit``'s sentinel (``2``) for ``/quit``; otherwise the
     handler's rc value. Non-slash input is appended to ``ctx.history``
     (no LLM call here — that lives in the real REPL driver).
+
+    Bare-word kill switch intercept: ``停``/``stop``/``kill``/``halt``/
+    ``停手`` → trip HALT. ``resume``/``continue``/``go`` → clear HALT.
+    These never reach the LLM.
     """
     ctx = ctx or InteractiveContext()
     if not input_text or not input_text.strip():
+        return 0
+    if is_halt_command(input_text):
+        trip_halt(reason="user typed halt keyword")
+        return 0
+    if is_resume_command(input_text):
+        clear_halt()
         return 0
     if input_text.lstrip().startswith("/"):
         name = _parse_token(input_text)

@@ -42,6 +42,8 @@ SLASH_COMMANDS: tuple[Command, ...] = (
     Command("shadow", "Train / view shadow account", "cli.commands.chat"),
     Command("export", "Export current session (md / json)", "cli.commands.session"),
     Command("debug", "Toggle debug panel (token usage / latency)", "cli.commands.chat"),
+    Command("halt", "Kill switch — halt long-running loops now", "cli.commands.slash_halt"),
+    Command("resume", "Clear the kill switch", "cli.commands.slash_halt"),
     Command("quit", "Exit (also: q, exit, :q)", "cli.commands.chat"),
 )
 

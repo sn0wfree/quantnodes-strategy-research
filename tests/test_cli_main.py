@@ -107,6 +107,22 @@ class TestProcessTurn:
         rc = process_turn("/search hello")
         assert rc in (0, 1)
 
+    def test_bare_word_halt_trips(self):
+        from strategy_research.cli.halt import clear_halt, is_halted
+        clear_halt()
+        rc = process_turn("halt")
+        assert rc == 0
+        assert is_halted() is True
+        clear_halt()
+
+    def test_bare_word_resume_clears(self):
+        from strategy_research.cli.halt import trip_halt, clear_halt, is_halted
+        trip_halt()
+        rc = process_turn("resume")
+        assert rc == 0
+        assert is_halted() is False
+        clear_halt()
+
 
 # ─── main() entrypoint ─────────────────────────────────────────────────
 
