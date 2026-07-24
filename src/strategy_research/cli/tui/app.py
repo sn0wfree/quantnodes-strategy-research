@@ -64,6 +64,7 @@ class ResearchApp(App):
         version: str = "0.4.0",
         session_db_path: Optional[str] = None,
         skip_resume: bool = False,
+        llm_client: Optional[Any] = None,
     ) -> None:
         super().__init__()
         self._model = model
@@ -77,6 +78,8 @@ class ResearchApp(App):
         # by the ``--repl`` legacy escape hatch when resuming a specific
         # session by id (handled in a later commit).
         self._skip_resume = skip_resume
+        # Optional OpenAI-compat client for streaming plain-text turns.
+        self._llm_client = llm_client
 
     def compose(self):
         yield TUIHeader(show_clock=False)
@@ -100,7 +103,9 @@ class ResearchApp(App):
         transcript.write(banner_text)
 
         # 2) Construct the session and bind it to the dispatch surface.
-        self.session = ChatSession(self.ctx, app=self)
+        self.session = ChatSession(
+            self.ctx, app=self, llm_client=self._llm_client,
+        )
 
         # 3) Decide whether to push the resume modal.
         if self._skip_resume:

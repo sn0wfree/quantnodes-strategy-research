@@ -28,6 +28,14 @@ Handler output capture (Commit 3)
   :func:`cli.theme.get_console` returns a recording console for the
   duration. Anything the handler prints accumulates inside that
   console and is then forwarded to the app's TranscriptView.
+
+LLM streaming (Commit 5)
+* Plain-text turns (``rc == 0`` and ``process_turn`` has appended the
+  user turn to ``ctx.history``) are routed through
+  :mod:`cli.llm_streaming.stream_chat_to_tui` which posts token deltas
+  to the TranscriptView and appends the final assistant message back to
+  ``ctx.history``. No-op when an LLM client has not been installed
+  (e.g. in tests); the session falls back to plain chat history.
 """
 from __future__ import annotations
 
@@ -50,7 +58,9 @@ class ChatSession:
 
     Holds a reference to the running :class:`ResearchApp` so it can
     request ``app.exit()`` on ``/quit`` and post messages back into
-    the widget tree.
+    the widget tree. Optionally holds an :class:`OpenAICompatClient` so
+    plain-text turns can stream from the configured LLM into the
+    TranscriptView.
     """
 
     def __init__(
@@ -58,12 +68,17 @@ class ChatSession:
         ctx: Any,
         *,
         app: Any = None,
+        llm_client: Any = None,
         session_logger: Any = None,
         transcript_width: int = 120,
     ) -> None:
         self.ctx = ctx
         self.app = app
         self.transcript_width = transcript_width
+        # Optional OpenAICompatClient. When set, plain-text turns are
+        # streamed via ``stream_chat_to_tui``. When None, plain-text
+        # turns append to history only.
+        self.llm_client = llm_client
         # ``session_logger`` is an optional callable taking
         # ``(session_id, role, content)``. Reserved for Commit 5 (TTY
         # guard integration); unused here.
@@ -84,6 +99,9 @@ class ChatSession:
         the app to exit (if bound). On the session observing
         ``ctx.pending_prompt`` after a slash turn (``/journal``,
         ``/shadow``), the queued prompt is dispatched recursively.
+        On a successful plain-text turn (``rc == 0`` with ``llm_client``
+        bound), the session routes the messages payload through the
+        streaming bridge so the LLM reply reaches the TranscriptView.
         """
         rc, captured_text = self._dispatch_with_capture(text)
 
@@ -91,6 +109,28 @@ class ChatSession:
         stripped = captured_text.strip("\n").strip()
         if stripped:
             self._write_captured(stripped)
+
+        # If plain text and an LLM client is bound, route the user
+        # turn through the streaming bridge.
+        if (
+            rc == 0
+            and self.llm_client is not None
+            and self.app is not None
+            and text.strip()
+            and not text.strip().startswith("/")
+            and not text.strip().startswith("停")
+        ):
+            from strategy_research.cli.llm_streaming import (
+                _build_messages,
+                stream_chat_to_tui,
+            )
+            try:
+                messages = _build_messages(self.ctx)
+                await stream_chat_to_tui(
+                    self.llm_client, messages, app=self.app, ctx=self.ctx,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._write_transcript(f"[red]LLM bridge error:[/red] {exc}")
 
         # Drain ``ctx.pending_prompt`` queued by slash handlers.
         queued = getattr(self.ctx, "pending_prompt", None)
