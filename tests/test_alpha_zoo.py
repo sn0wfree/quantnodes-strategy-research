@@ -23,26 +23,38 @@ from strategy_research.core.factor_validate import compute_ic
 
 warnings.filterwarnings("ignore")
 
-N_DAYS = 252
-N_ASSETS = 5
+N_DAYS = 500
+N_ASSETS = 50
 SEED = 42
 
 
 @pytest.fixture(scope="module")
 def panel() -> dict[str, pd.DataFrame]:
-    """统一的测试 panel (60d x 3 stocks)。"""
+    """统一的测试 panel — 50 assets x 500 days。
+
+    使用均值回归 (OU) 过程生成价格，确保截面排名频繁变化。
+    同时包含 fund:* 列用于 fundamental alpha 测试。
+    """
     rng = np.random.default_rng(SEED)
     dates = pd.bdate_range("2024-01-01", periods=N_DAYS)
     cols = [f"S{i}" for i in range(N_ASSETS)]
 
-    drift = 0.0005
+    # OU 过程: 均值回归到 10.0，确保排名不锁定
+    prices = np.zeros((N_DAYS, N_ASSETS))
+    prices[0] = 10.0 + rng.normal(0, 0.5, N_ASSETS)
+    mean_rev_speed = 0.05
     vol = 0.02
-    rets = rng.normal(drift, vol, (N_DAYS, N_ASSETS))
-    prices = 10.0 * np.exp(np.cumsum(rets, axis=0))
+    for t in range(1, N_DAYS):
+        drift = mean_rev_speed * (10.0 - prices[t - 1])
+        prices[t] = prices[t - 1] * (1.0 + drift + rng.normal(0, vol, N_ASSETS))
+
     close = pd.DataFrame(prices, index=dates, columns=cols)
     high = close * (1 + np.abs(rng.normal(0, 0.005, (N_DAYS, N_ASSETS))))
     low = close * (1 - np.abs(rng.normal(0, 0.005, (N_DAYS, N_ASSETS))))
-    open_ = close.shift(1).fillna(close.iloc[0])
+
+    # open_ = 前一天 close + 小随机扰动（避免恒等于 shift(close) 导致恒零输出）
+    open_ = close.shift(1).fillna(close.iloc[0]) * (1 + rng.normal(0, 0.002, (N_DAYS, N_ASSETS)))
+
     volume = pd.DataFrame(rng.uniform(1e6, 1e8, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
     amount = pd.DataFrame(rng.uniform(1e7, 1e9, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
 
@@ -58,6 +70,14 @@ def panel() -> dict[str, pd.DataFrame]:
     }
     for w in [5, 10, 15, 20, 30, 50, 60]:
         data[f"adv{w}"] = volume.rolling(w).mean().fillna(volume.mean())
+
+    # fund:* 列用于 fundamental alpha 测试
+    data["fund:roe"] = pd.DataFrame(rng.uniform(0.05, 0.25, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
+    data["fund:gross_profitability"] = pd.DataFrame(rng.uniform(0.05, 0.40, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
+    data["fund:asset_growth"] = pd.DataFrame(rng.uniform(-0.10, 0.30, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
+    data["fund:net_income"] = pd.DataFrame(rng.uniform(1e6, 1e9, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
+    data["fund:shares_diluted"] = pd.DataFrame(rng.uniform(1e7, 1e10, (N_DAYS, N_ASSETS)), index=dates, columns=cols)
+
     return data
 
 
@@ -80,8 +100,6 @@ def pytest_generate_tests(metafunc):
 def test_alpha_runs(alpha_meta, panel):
     """每个 alpha 都能成功执行，输出为 DataFrame."""
     aid = alpha_meta["id"]
-    if aid.startswith("fundamental_"):
-        pytest.xfail(f"{aid} requires external fund:* data")
     try:
         result = compute_alpha(aid, panel)
     except Exception as e:
@@ -97,8 +115,6 @@ def test_alpha_runs(alpha_meta, panel):
 def test_alpha_no_inf(alpha_meta, panel):
     """结果不应包含过多 inf 值（≤30%）"""
     aid = alpha_meta["id"]
-    if aid.startswith("fundamental_"):
-        pytest.xfail(f"{aid} requires external fund:* data")
 
     try:
         result = compute_alpha(aid, panel)
@@ -116,8 +132,6 @@ def test_alpha_no_inf(alpha_meta, panel):
 def test_alpha_nan_ratio(alpha_meta, panel):
     """结果 NaN 比例应根据 warmup_bars 自适应放宽."""
     aid = alpha_meta["id"]
-    if aid.startswith("fundamental_"):
-        pytest.xfail(f"{aid}: requires external fund:* data")
 
     try:
         result = compute_alpha(aid, panel)
@@ -154,8 +168,6 @@ def test_alpha_nan_ratio(alpha_meta, panel):
 def test_alpha_index_matches(panel, alpha_meta):
     """结果的 index/columns 应与输入一致。"""
     aid = alpha_meta["id"]
-    if aid.startswith("fundamental_"):
-        pytest.xfail(f"{aid}: requires external fund:* data")
 
     try:
         result = compute_alpha(aid, panel)
@@ -175,11 +187,11 @@ def _try_compute_py_fallback(alpha_id, panel):
     """Try .py fallback directly (skipping YAML)."""
     import importlib
     import re
-    # Match alpha_XNN patterns
-    m = re.match(r"^([a-z]+)(\d+)_([a-z0-9_]+)$", alpha_id)
+    # Match alpha101_alpha_003 / fundamental_roe / academic_name patterns
+    m = re.match(r"^([a-z]+)(?:(\d+)_)?([a-z0-9_]+)$", alpha_id)
     if not m:
         return None
-    zoo_num, short = m.group(1) + m.group(2), m.group(3)
+    zoo_num, short = (m.group(1) + (m.group(2) or "")), m.group(3)
     # Try multiple module-path conventions
     candidates = []
     for zid in ["alpha101", "gtja191", "qlib158", "academic", "fundamental"]:
@@ -200,22 +212,17 @@ def _try_compute_py_fallback(alpha_id, panel):
     return None
 
 
-# 已知 corr=NaN 或难计算的 alpha (数据质量问题, ts_corr/ewm_corr 零方差窗口)
+# 已知 YAML/Py 不一致的 alpha (ind_neutralize 差异, 非数据质量问题)
 _KNOWN_CORR_NAN = {
-    "alpha101_alpha_003", "alpha101_alpha_055", "alpha101_alpha_100",
-    "gtja191_alpha_015", "gtja191_alpha_105", "gtja191_alpha_176",
+    "alpha101_alpha_100",
 }
-# 已知有效点过少的 alpha (长窗口 + 252 天数据 = 稀疏)
-_KNOWN_TOO_FEW = {
-    "alpha101_alpha_019", "alpha101_alpha_039", "alpha101_alpha_048",
-}
+# 已知有效点过少的 alpha: 现在 panel 有 500 天, 这些应该能通过
+_KNOWN_TOO_FEW: set[str] = set()
 
 
 def test_alpha_yaml_py_consistency(alpha_meta, panel):
-    """当 YAML 和 .py 都存在时，结果应高度相关（corr > 0.95 或 NaN 比例匹配）。"""
+    """当 YAML 和 .py 都存在时，结果应高度相关（corr > 0.93 或 NaN 比例匹配）。"""
     aid = alpha_meta["id"]
-    if aid.startswith("fundamental_"):
-        pytest.xfail(f"{aid}: requires external fund:* data")
     # academic alphas 只有 .py, 没有 YAML, 跳过 cross-validation
     if aid.startswith("academic_"):
         if alpha_meta["format"] != "yaml":

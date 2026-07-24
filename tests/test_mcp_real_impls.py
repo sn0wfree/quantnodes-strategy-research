@@ -267,3 +267,163 @@ class TestStubRemoved:
         # 真接实现 → 报错
         assert body["status"] == "error"
         assert "submitted" not in json.dumps(body)
+
+
+# ============================================================
+# add_goal_evidence / update_research_goal_status (Goal CRUD)
+# ============================================================
+
+class TestGoalEvidenceTools:
+    """MCP add_goal_evidence 工具接入 GoalStore.append_evidence。"""
+
+    def _create_goal(self, server, session_id: str = "evidence-test-session") -> str | None:
+        """Helper: 创建一个活跃目标并返回 goal_id。"""
+        result = server.call_tool("start_research_goal", {
+            "objective": "Test goal for evidence testing",
+            "session_id": session_id,
+        })
+        body = _extract_body(result)
+        if body["status"] != "ok":
+            return None
+        return body["goal_id"]
+
+    def test_add_goal_evidence_happy_path(self, server):
+        """正常追加证据。"""
+        sid = "evidence-happy-session"
+        goal_id = self._create_goal(server, sid)
+        if not goal_id:
+            pytest.skip("start_research_goal 失败")
+
+        result = server.call_tool("add_goal_evidence", {
+            "session_id": sid,
+            "goal_id": goal_id,
+            "text": "Backtest shows 15% annual return with Sharpe 1.2",
+            "source_type": "backtest",
+            "confidence": "high",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "ok"
+        assert "evidence_id" in body
+        assert body["goal_id"] == goal_id
+
+    def test_add_goal_evidence_updates_criterion(self, server):
+        """追加带 criterion_id 的证据 → criterion 状态变 covered。"""
+        sid = "evidence-criterion-session"
+        goal_id = self._create_goal(server, sid)
+        if not goal_id:
+            pytest.skip("start_research_goal 失败")
+
+        # 直接用 GoalStore 获取 criterion_id (避免 JSON 序列化格式问题)
+        from strategy_research.core.goal import GoalStore
+        store = GoalStore()
+        criteria = store.list_criteria(goal_id)
+        if not criteria:
+            pytest.skip("no criteria on goal")
+
+        criterion_id = criteria[0].criterion_id
+
+        result = server.call_tool("add_goal_evidence", {
+            "session_id": sid,
+            "goal_id": goal_id,
+            "text": "Criterion satisfied by backtest result",
+            "criterion_id": criterion_id,
+        })
+        body = _extract_body(result)
+        assert body["status"] == "ok"
+
+    def test_add_goal_evidence_empty_text_fails(self, server):
+        """空文本应报错。"""
+        sid = "evidence-empty-text-session"
+        goal_id = self._create_goal(server, sid)
+        if not goal_id:
+            pytest.skip("start_research_goal 失败")
+
+        result = server.call_tool("add_goal_evidence", {
+            "session_id": sid,
+            "goal_id": goal_id,
+            "text": "",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "error"
+
+    def test_add_goal_evidence_no_active_goal_fails(self, server):
+        """无活跃目标时报错。"""
+        result = server.call_tool("add_goal_evidence", {
+            "session_id": "nonexistent-session-99999",
+            "goal_id": "nonexistent_goal_id",
+            "text": "Some evidence",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "error"
+
+    def test_add_goal_evidence_missing_goal_id(self, server):
+        """缺 goal_id 应报错。"""
+        result = server.call_tool("add_goal_evidence", {
+            "text": "Some evidence",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "error"
+        assert "goal_id" in body["error"]
+
+
+class TestGoalStatusTools:
+    """MCP update_research_goal_status 工具接入 GoalStore.update_status。"""
+
+    def _create_goal(self, server, session_id: str = "status-test-session") -> str | None:
+        result = server.call_tool("start_research_goal", {
+            "objective": "Test goal for status update",
+            "session_id": session_id,
+        })
+        body = _extract_body(result)
+        if body["status"] != "ok":
+            return None
+        return body["goal_id"]
+
+    def test_update_goal_status_to_cancelled(self, server):
+        """更新为 cancelled。"""
+        sid = "status-cancel-session"
+        goal_id = self._create_goal(server, sid)
+        if not goal_id:
+            pytest.skip("start_research_goal 失败")
+
+        result = server.call_tool("update_research_goal_status", {
+            "session_id": sid,
+            "goal_id": goal_id,
+            "status": "cancelled",
+            "recap": "No longer relevant",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "ok"
+        assert body["new_status"] == "cancelled"
+
+    def test_update_goal_status_invalid_value(self, server):
+        """无效状态值报错。"""
+        sid = "status-invalid-session"
+        goal_id = self._create_goal(server, sid)
+        if not goal_id:
+            pytest.skip("start_research_goal 失败")
+
+        result = server.call_tool("update_research_goal_status", {
+            "session_id": sid,
+            "goal_id": goal_id,
+            "status": "totally_invalid_status",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "error"
+        assert "invalid status" in body["error"].lower() or "invalid" in body["error"].lower()
+
+    def test_update_goal_status_no_active_goal(self, server):
+        """无活跃目标时报错。"""
+        result = server.call_tool("update_research_goal_status", {
+            "session_id": "nonexistent-session-99999",
+            "goal_id": "nonexistent_goal_id",
+            "status": "complete",
+        })
+        body = _extract_body(result)
+        assert body["status"] == "error"
+
+    def test_update_goal_status_missing_params(self, server):
+        """缺参数应报错。"""
+        result = server.call_tool("update_research_goal_status", {})
+        body = _extract_body(result)
+        assert body["status"] == "error"

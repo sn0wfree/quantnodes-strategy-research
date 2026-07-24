@@ -81,13 +81,17 @@ def ts_rank(df: pd.DataFrame, n: int) -> pd.DataFrame:
 
 
 def ts_corr(x: pd.DataFrame, y: pd.DataFrame, n: int) -> pd.DataFrame:
-    """滚动 Pearson 相关系数。"""
-    return x.rolling(window=n, min_periods=n).corr(y)
+    """滚动 Pearson 相关系数。零方差窗口输出 NaN（而非 inf）。"""
+    result = x.rolling(window=n, min_periods=n).corr(y)
+    # pandas rolling().corr() 在 float64 精度边界可能产出 inf
+    # 替换为 NaN 以保持与 ts_cov/ts_std 一致的 NaN 传播行为
+    return result.replace([np.inf, -np.inf], np.nan)
 
 
 def ts_cov(x: pd.DataFrame, y: pd.DataFrame, n: int) -> pd.DataFrame:
-    """滚动样本协方差。"""
-    return x.rolling(window=n, min_periods=n).cov(y)
+    """滚动样本协方差。零方差窗口输出 NaN（而非 inf）。"""
+    result = x.rolling(window=n, min_periods=n).cov(y)
+    return result.replace([np.inf, -np.inf], np.nan)
 
 
 def ts_mean(df: pd.DataFrame, n: int) -> pd.DataFrame:

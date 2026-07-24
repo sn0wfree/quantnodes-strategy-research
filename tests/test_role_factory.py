@@ -55,10 +55,12 @@ class TestToolWhitelist:
         assert "read_file" in wl
 
     def test_data_quality_minimal(self):
-        """data_quality 是只读 agent, 最小工具集."""
+        """data_quality 是只读 agent, 包含 read_file + web tools."""
         from strategy_research.core.agent.role_factory import _get_tool_whitelist
         wl = _get_tool_whitelist("data_quality")
-        assert wl == ["read_file"]
+        assert "read_file" in wl
+        assert "web_search" in wl
+        assert "read_url" in wl
 
     def test_critic_is_readonly(self):
         """critic 不能 write_file."""

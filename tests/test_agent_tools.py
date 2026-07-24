@@ -51,12 +51,21 @@ class TestRegistry:
     def test_build_default_has_all_eleven(self):
         r = build_default_registry()
         names = sorted(r.tool_names)
-        assert names == [
+        # 11 original tools + 3 web tools (web_search, read_url, read_document)
+        expected_core = [
             "compute_factor", "factor_analysis", "git_diff", "list_history",
             "list_skills", "load_skill", "options_pricing", "pattern_recognition",
             "read_file", "run_backtest", "write_file",
         ]
-        assert len(r) == 11
+        # All core tools must be present
+        for name in expected_core:
+            assert name in names, f"missing core tool: {name}"
+        # Web tools may be present if dependencies are installed
+        web_tools = ["web_search", "read_url", "read_document"]
+        for name in web_tools:
+            if name in names:
+                expected_core.append(name)
+        assert len(r) >= 11
 
     def test_registry_contains(self):
         r = build_default_registry()

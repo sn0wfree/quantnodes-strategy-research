@@ -239,8 +239,8 @@ class TestRealisticEstimation:
         )
         msgs = b.build_initial_messages("a moderately long task description " * 10)
         n = b.estimate_tokens(msgs)
-        # System prompt alone ~700-900 tokens; user msg ~50; total ~750-950
-        assert 500 < n < 1500
+        # System prompt ~700-1200 tokens (varies with tool count); user msg ~50; total ~750-1250
+        assert 500 < n < 2000
 
     def test_estimation_grows_with_messages(self, tmp_path):
         (tmp_path / "strategies").mkdir()

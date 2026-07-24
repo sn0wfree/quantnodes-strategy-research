@@ -114,6 +114,18 @@ class AlphaZooAdapter:
                     0, index=prices.index, columns=prices.columns
                 )
 
+        # Auto-fill derived columns that many alphas need
+        if "vwap" not in panel:
+            panel["vwap"] = (panel["high"] + panel["low"] + panel["close"]) / 3.0
+        if "amount" not in panel:
+            panel["amount"] = panel["volume"] * panel["close"]
+        if "returns" not in panel:
+            panel["returns"] = panel["close"].pct_change().fillna(0)
+        for w in [5, 10, 15, 20, 30, 50, 60]:
+            key = f"adv{w}"
+            if key not in panel:
+                panel[key] = panel["volume"].rolling(w).mean().fillna(panel["volume"].mean())
+
         zoo_name, alpha_name = self._parse_id(alpha_id)
         module_path = f"strategy_research.core.alpha_zoo.{zoo_name}.{alpha_name}"
         mod = importlib.import_module(module_path)
