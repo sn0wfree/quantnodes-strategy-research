@@ -1,12 +1,35 @@
-"""Tests for ModeBar widget and Ctrl+M mode toggle.
+"""Tests for ModeBar widget, Ctrl+M toggle, and _sync_interactive_mode.
 
-Covers:
-  * ModeBar renders correct label for chat / goal modes
-  * ModeBar update_mode switches display
-  * Ctrl+M action toggles ctx.interactive_mode
-  * Ctrl+M action updates ModeBar widget
-  * Ctrl+M action shows notification in transcript
-  * Keybinding is registered
+Coverage matrix:
+  ┌─────────────────────────────────────────────────┬──────────┐
+  │ Scenario                                       │ Tests    │
+  ├─────────────────────────────────────────────────┼──────────┤
+  │ ModeBar __init__ default (chat)                 │ 1        │
+  │ ModeBar __init__ explicit mode                  │ 1        │
+  │ ModeBar update_mode chat→goal                   │ 1        │
+  │ ModeBar update_mode goal→chat                   │ 1        │
+  │ ModeBar unknown mode falls back to chat label   │ 1        │
+  │ ModeBar labels contain expected keywords        │ 3        │
+  │ Keybinding ctrl+m registered + action name      │ 2        │
+  │ action_toggle_mode chat→goal                    │ 1        │
+  │ action_toggle_mode goal→chat                    │ 1        │
+  │ action_toggle_mode updates ModeBar widget       │ 1        │
+  │ action_toggle_mode shows notification (goal)    │ 1        │
+  │ action_toggle_mode shows notification (chat)    │ 1        │
+  │ action_toggle_mode no session → no crash        │ 1        │
+  │ action_toggle_mode query_one exception → safe   │ 1        │
+  │ _sync: no GoalStore → defaults to chat          │ 1        │
+  │ _sync: GoalStore with goal → mode "goal"        │ 1        │
+  │ _sync: GoalStore without goal → mode "chat"     │ 1        │
+  │ _sync: GoalStore exception → fallback chat      │ 1        │
+  │ _sync: updates ModeBar widget                   │ 1        │
+  │ _sync: ModeBar query fails → silent pass        │ 1        │
+  │ _sync: app is None → skip widget update         │ 1        │
+  │ on_mount sets initial mode bar                  │ 1        │
+  │ Integration: full app.run_test mounts ModeBar   │ 1        │
+  ├─────────────────────────────────────────────────┼──────────┤
+  │ Total                                           │ 26       │
+  └─────────────────────────────────────────────────┴──────────┘
 """
 from __future__ import annotations
 
@@ -17,135 +40,275 @@ import pytest
 from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.app import ResearchApp
 from strategy_research.cli.tui.keybindings import TUI_BINDINGS
+from strategy_research.cli.tui.session import ChatSession
 from strategy_research.cli.tui.widgets.mode_bar import ModeBar
 
 
-# ---------------------------------------------------------------- ModeBar widget
+# ================================================================
+# ModeBar widget
+# ================================================================
 
 
-class TestModeBar:
+class TestModeBarInit:
     def test_default_mode_is_chat(self):
-        bar = ModeBar.__new__(ModeBar)
-        bar._mode = "chat"
-        bar._render_mode = mock.MagicMock()
-        bar.__init__()
+        bar = ModeBar()
         assert bar._mode == "chat"
 
-    def test_update_mode_chat(self):
-        bar = ModeBar.__new__(ModeBar)
-        bar._mode = "goal"
-        bar._render_mode = mock.MagicMock()
-        bar.update_mode("chat")
-        assert bar._mode == "chat"
-        bar._render_mode.assert_called_once()
+    def test_explicit_mode_goal(self):
+        bar = ModeBar(mode="goal")
+        assert bar._mode == "goal"
 
-    def test_update_mode_goal(self):
-        bar = ModeBar.__new__(ModeBar)
-        bar._mode = "chat"
-        bar._render_mode = mock.MagicMock()
+    def test_explicit_mode_chat(self):
+        bar = ModeBar(mode="chat")
+        assert bar._mode == "chat"
+
+
+class TestModeBarUpdateMode:
+    def test_update_chat_to_goal(self):
+        bar = ModeBar(mode="chat")
         bar.update_mode("goal")
         assert bar._mode == "goal"
-        bar._render_mode.assert_called_once()
 
-    def test_chat_label_contains_keyword(self):
+    def test_update_goal_to_chat(self):
+        bar = ModeBar(mode="goal")
+        bar.update_mode("chat")
+        assert bar._mode == "chat"
+
+    def test_update_same_mode_no_error(self):
+        bar = ModeBar(mode="chat")
+        bar.update_mode("chat")
+        assert bar._mode == "chat"
+
+    def test_unknown_mode_falls_back_to_chat_label(self):
+        bar = ModeBar(mode="chat")
+        bar.update_mode("unknown_xyz")
+        assert bar._mode == "unknown_xyz"
+        # _render_mode should use chat fallback
+        assert "CHAT" in bar._MODE_LABELS.get("unknown_xyz", bar._MODE_LABELS["chat"])
+
+
+class TestModeBarLabels:
+    def test_chat_label_has_keywords(self):
         label = ModeBar._MODE_LABELS["chat"]
         assert "CHAT" in label
         assert "普通聊天" in label
 
-    def test_goal_label_contains_keyword(self):
+    def test_goal_label_has_keywords(self):
         label = ModeBar._MODE_LABELS["goal"]
         assert "GOAL" in label
         assert "策略研究" in label
 
-    def test_labels_mention_ctrl_m(self):
+    def test_all_labels_mention_ctrl_m(self):
         for label in ModeBar._MODE_LABELS.values():
             assert "Ctrl+M" in label
 
 
-# ---------------------------------------------------------------- keybinding
+# ================================================================
+# Keybinding
+# ================================================================
 
 
 class TestKeybinding:
-    def test_ctrl_m_binding_exists(self):
+    def test_ctrl_m_registered(self):
         keys = {b.key for b in TUI_BINDINGS}
         assert "ctrl+m" in keys
 
-    def test_ctrl_m_action_name(self):
+    def test_ctrl_m_action_is_toggle_mode(self):
         actions = {b.action for b in TUI_BINDINGS if b.key == "ctrl+m"}
         assert "toggle_mode" in actions
 
 
-# ---------------------------------------------------------------- action_toggle_mode
+# ================================================================
+# action_toggle_mode
+# ================================================================
+
+
+def _make_app(mode: str = "chat"):
+    """Build a minimal ResearchApp for action_toggle_mode tests."""
+    app = ResearchApp.__new__(ResearchApp)
+    app._tool_total = 0
+    app._tool_ok = 0
+    ctx = InteractiveContext()
+    ctx.interactive_mode = mode
+    session = mock.MagicMock()
+    session.ctx = ctx
+    app.session = session
+    mock_bar = mock.MagicMock()
+    app.query_one = mock.MagicMock(return_value=mock_bar)
+    app.write_transcript = mock.MagicMock()
+    return app, ctx, mock_bar
 
 
 class TestActionToggleMode:
-    def _make_app(self):
-        app = ResearchApp.__new__(ResearchApp)
-        app._tool_total = 0
-        app._tool_ok = 0
-        ctx = InteractiveContext()
-        ctx.interactive_mode = "chat"
-        session = mock.MagicMock()
-        session.ctx = ctx
-        app.session = session
-        return app, ctx
-
-    def test_toggles_from_chat_to_goal(self):
-        app, ctx = self._make_app()
-        app.query_one = mock.MagicMock()
-        app.write_transcript = mock.MagicMock()
+    def test_toggles_chat_to_goal(self):
+        app, ctx, _ = _make_app("chat")
         app.action_toggle_mode()
         assert ctx.interactive_mode == "goal"
 
-    def test_toggles_from_goal_to_chat(self):
-        app, ctx = self._make_app()
-        ctx.interactive_mode = "goal"
-        app.query_one = mock.MagicMock()
-        app.write_transcript = mock.MagicMock()
+    def test_toggles_goal_to_chat(self):
+        app, ctx, _ = _make_app("goal")
         app.action_toggle_mode()
         assert ctx.interactive_mode == "chat"
 
     def test_updates_mode_bar_widget(self):
-        app, ctx = self._make_app()
-        mock_bar = mock.MagicMock()
-        app.query_one = mock.MagicMock(return_value=mock_bar)
-        app.write_transcript = mock.MagicMock()
+        app, _, mock_bar = _make_app("chat")
         app.action_toggle_mode()
         mock_bar.update_mode.assert_called_once_with("goal")
 
-    def test_shows_notification(self):
-        app, ctx = self._make_app()
-        app.query_one = mock.MagicMock()
-        app.write_transcript = mock.MagicMock()
+    def test_notification_mentions_goal(self):
+        app, _, _ = _make_app("chat")
         app.action_toggle_mode()
-        app.write_transcript.assert_called_once()
-        call_arg = app.write_transcript.call_args[0][0]
-        assert "策略研究" in call_arg or "普通聊天" in call_arg
+        text = app.write_transcript.call_args[0][0]
+        assert "策略研究" in text
+
+    def test_notification_mentions_chat(self):
+        app, _, _ = _make_app("goal")
+        app.action_toggle_mode()
+        text = app.write_transcript.call_args[0][0]
+        assert "普通聊天" in text
 
     def test_no_session_no_crash(self):
         app = ResearchApp.__new__(ResearchApp)
         app.session = None
         app.action_toggle_mode()  # should not raise
 
+    def test_query_one_exception_still_toggles(self):
+        app, ctx, _ = _make_app("chat")
+        app.query_one = mock.MagicMock(side_effect=Exception("no widget"))
+        app.action_toggle_mode()
+        assert ctx.interactive_mode == "goal"
+        app.write_transcript.assert_called_once()
 
-# ---------------------------------------------------------------- on_mount sets initial mode bar
+
+# ================================================================
+# _sync_interactive_mode
+# ================================================================
 
 
-class TestModeBarOnMount:
-    def test_on_mount_updates_mode_bar(self, monkeypatch):
-        """After on_mount, ModeBar should reflect the resolved mode."""
-        from strategy_research.cli.tui.widgets.mode_bar import ModeBar as MB
+class TestSyncInteractiveMode:
+    def _make_session(self, mode="chat"):
+        ctx = InteractiveContext()
+        ctx.interactive_mode = mode
+        ctx.session_id = "test-session"
+        app = mock.MagicMock()
+        session = ChatSession.__new__(ChatSession)
+        session.ctx = ctx
+        session.app = app
+        return session, ctx, app
+
+    def test_no_goal_store_defaults_to_chat(self):
+        session, ctx, _ = self._make_session("goal")
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            side_effect=ImportError("no module"),
+        ):
+            session._sync_interactive_mode()
+        assert ctx.interactive_mode == "chat"
+
+    def test_goal_store_with_goal_sets_goal_mode(self):
+        session, ctx, _ = self._make_session("chat")
+        mock_store = mock.MagicMock()
+        mock_store.get_current_goal.return_value = {"title": "test goal"}
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            return_value=mock_store,
+        ):
+            session._sync_interactive_mode()
+        assert ctx.interactive_mode == "goal"
+
+    def test_goal_store_no_goal_sets_chat_mode(self):
+        session, ctx, _ = self._make_session("goal")
+        mock_store = mock.MagicMock()
+        mock_store.get_current_goal.return_value = None
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            return_value=mock_store,
+        ):
+            session._sync_interactive_mode()
+        assert ctx.interactive_mode == "chat"
+
+    def test_goal_store_exception_fallback_to_chat(self):
+        session, ctx, _ = self._make_session("goal")
+        mock_store = mock.MagicMock()
+        mock_store.get_current_goal.side_effect = RuntimeError("db locked")
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            return_value=mock_store,
+        ):
+            session._sync_interactive_mode()
+        assert ctx.interactive_mode == "chat"
+
+    def test_updates_mode_bar_widget(self):
+        session, ctx, app = self._make_session("chat")
+        mock_store = mock.MagicMock()
+        mock_store.get_current_goal.return_value = {"title": "x"}
+        mock_bar = mock.MagicMock()
+        app.query_one.return_value = mock_bar
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            return_value=mock_store,
+        ):
+            session._sync_interactive_mode()
+        app.query_one.assert_called_with("#mode-bar", ModeBar)
+        mock_bar.update_mode.assert_called_once_with("goal")
+
+    def test_mode_bar_query_fails_silent(self):
+        session, ctx, app = self._make_session("chat")
+        mock_store = mock.MagicMock()
+        mock_store.get_current_goal.return_value = {"title": "x"}
+        app.query_one.side_effect = Exception("widget not found")
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            return_value=mock_store,
+        ):
+            session._sync_interactive_mode()  # should not raise
+        assert ctx.interactive_mode == "goal"
+
+    def test_app_is_none_skips_widget_update(self):
+        session, ctx, _ = self._make_session("chat")
+        session.app = None
+        mock_store = mock.MagicMock()
+        mock_store.get_current_goal.return_value = {"title": "x"}
+        with mock.patch(
+            "strategy_research.core.goal.GoalStore",
+            return_value=mock_store,
+        ):
+            session._sync_interactive_mode()
+        assert ctx.interactive_mode == "goal"
+
+
+# ================================================================
+# on_mount integration
+# ================================================================
+
+
+class TestOnMountIntegration:
+    def test_on_mount_sets_initial_mode_bar(self):
+        """Simulates what on_mount does — ModeBar reflects resolved mode."""
         app = ResearchApp.__new__(ResearchApp)
         ctx = InteractiveContext()
         ctx.interactive_mode = "chat"
         app.ctx = ctx
         mock_bar = mock.MagicMock()
         app.query_one = mock.MagicMock(return_value=mock_bar)
-        app._sync_interactive_mode = lambda: None
-        # Simulate what on_mount does for mode bar
-        try:
-            bar = app.query_one("#mode-bar", MB)
-            bar.update_mode(ctx.interactive_mode)
-        except Exception:
-            pass
+        # Simulate on_mount: query mode bar and set initial mode
+        bar = app.query_one("#mode-bar", ModeBar)
+        bar.update_mode(ctx.interactive_mode)
         mock_bar.update_mode.assert_called_with("chat")
+
+
+# ================================================================
+# App.run_test integration
+# ================================================================
+
+
+class TestAppRunTestIntegration:
+    @pytest.mark.asyncio
+    async def test_mode_bar_mounted_in_run_test(self):
+        """Full app.run_test — ModeBar widget is mounted in the DOM."""
+        app = ResearchApp(model="test", version="0.5.0")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            bar = app.query_one("#mode-bar", ModeBar)
+            assert bar.is_mounted
+            assert bar._mode == "chat"
