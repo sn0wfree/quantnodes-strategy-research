@@ -104,35 +104,20 @@ class ResearchApp(App):
     # ------------------------------------------------------------------ on_mount
 
     async def on_mount(self) -> None:
-        # 0) Resolve model from LLMConfig eagerly so the banner + header
+        # 0) Resolve model + session id eagerly so the banner + header
         #    show the real provider (e.g. "minimax-M3") instead of the
-        #    "unknown" default. Failures fall back to "unknown" silently.
-        from strategy_research.cli.ui.banner import render_banner
-        try:
-            from strategy_research.core.llm.config import LLMConfig
-            cfg = LLMConfig.load()
-            if cfg.model:
-                self._model = cfg.model
-        except Exception:
-            pass
-
-        # 0a) Generate a fresh session id at startup so the header shows
-        #     a real "sid:cli-xxxxxxxx" instead of the bare "cli"
-        #     default. We deliberately don't touch ctx.session_id if it
-        #     was already set (e.g. by a test fixture or a future
-        #     resume-from-disk path).
-        if self.ctx.session_id == "cli":
-            try:
-                import uuid
-                self.ctx.session_id = f"cli-{uuid.uuid4().hex[:8]}"
-            except Exception:
-                self.ctx.session_id = "cli-fallback"
+        #    "unknown" default, and "sid:cli-xxxxxxxx" instead of the
+        #    bare "cli" placeholder. The pure logic lives in
+        #    ``_resolve_session_identity`` so it is unit-testable in
+        #    isolation (see tests/test_session_id_init.py).
+        model, sid = self._resolve_session_identity()
 
         # 1) Banner Renderable sits as the first row inside the transcript.
+        from strategy_research.cli.ui.banner import render_banner
         transcript = self.query_one(TranscriptView)
-        self.banner = Banner(model=self._model, version=self._version, mode="tui")
+        self.banner = Banner(model=model, version=self._version, mode="tui")
         banner_text = render_banner(
-            model=self._model, version=self._version, mode="tui"
+            model=model, version=self._version, mode="tui"
         )
         transcript.write(banner_text)
 
@@ -142,8 +127,8 @@ class ResearchApp(App):
         #     ``_update_header_stats``).
         try:
             self.update_header(
-                model=self._model,
-                session_id=self.ctx.session_id,
+                model=model,
+                session_id=sid,
                 connection_status="idle",
             )
         except Exception:
@@ -166,6 +151,57 @@ class ResearchApp(App):
         # Push the modal; the callback wires the user's choice into the session.
         modal = ResumeOrNewModal(latest_session=latest_title)
         self.push_screen(modal, self._on_resume_choice)
+
+    # ------------------------------------------------------------------ identity
+
+    def _resolve_session_identity(self) -> tuple[str, str]:
+        """Resolve ``(model, session_id)`` at startup.
+
+        Pure side-effects: only mutates ``self._model`` and
+        ``self.ctx.session_id``. Returns the resolved values so the
+        caller (``on_mount``) can apply them to Banner / StatusHeader
+        widgets in one place.
+
+        Resolution rules:
+
+        1. **model** — read from ``LLMConfig.load().model``. If the
+           config has no model or the load fails, keep whatever was
+           passed to ``__init__`` (typically ``"unknown"``).
+        2. **session_id** — only generate a fresh ``cli-xxxxxxxx``
+           when the current value is the bare ``"cli"`` default. We
+           never overwrite a pre-existing id (set by a test fixture,
+           the resume-from-disk path, or a future ``--sid=...`` CLI
+           flag). If UUID generation fails, fall back to the literal
+           ``"cli-fallback"`` so the header still has *something*
+           to display.
+
+        Returns:
+            ``(model, session_id)`` — what was actually used after
+            resolution (so the caller can reuse the values without
+            re-reading ``self._model`` / ``self.ctx.session_id``).
+        """
+        # 1) Resolve model
+        model = self._model
+        try:
+            from strategy_research.core.llm.config import LLMConfig
+            cfg = LLMConfig.load()
+            if cfg.model:
+                model = cfg.model
+                self._model = model
+        except Exception:
+            pass
+
+        # 2) Generate fresh session id if still the bare "cli"
+        sid = self.ctx.session_id
+        if sid == "cli":
+            try:
+                import uuid
+                sid = f"cli-{uuid.uuid4().hex[:8]}"
+            except Exception:
+                sid = "cli-fallback"
+            self.ctx.session_id = sid
+
+        return model, sid
 
     # ------------------------------------------------------------------ resume
 

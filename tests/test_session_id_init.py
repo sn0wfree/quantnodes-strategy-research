@@ -1,228 +1,286 @@
-"""Tests for session ID + model name initialization on TUI startup.
+"""Tests for session ID + model name resolution at TUI startup.
 
-Verifies that:
-  1. ``ResearchApp.on_mount`` resolves the model from LLMConfig and
-     stores it on ``self._model`` (not "unknown")
-  2. ``ResearchApp.on_mount`` generates a fresh session id
-     (``cli-xxxxxxxx``) when ``ctx.session_id`` is the bare ``"cli"``
-     default
-  3. The pre-existing ``ctx.session_id`` is NOT overwritten (e.g.
-     resume-from-disk path / test fixture)
-  4. The StatusHeader receives the correct model + session id via
-     ``update_header`` during ``on_mount``
-  5. Failures in LLMConfig.load fall back gracefully (model stays as
-     whatever was passed to __init__)
+The production logic lives in :meth:`ResearchApp._resolve_session_identity`
+(extracted from ``on_mount`` for testability). These tests call that
+method directly so they exercise the actual production code path —
+no copy-pasted logic, no "tests test themselves" anti-pattern.
+
+Three layers:
+
+  1. **Unit tests** for ``_resolve_session_identity`` — patches
+     ``LLMConfig.load`` and ``uuid.uuid4`` via ``monkeypatch``.
+  2. **Header push tests** — verifies the resolved values are forwarded
+     to ``update_header`` with the correct kwarg names.
+  3. **Integration test** — runs the full ``ResearchApp.run_test()``
+     and checks that the mounted ``StatusHeader`` reflects the resolved
+     values from the very first frame.
+
+A separate :class:`TestBuildLlmClientTupleReturn` covers the
+``_build_llm_client`` tuple return contract (CLI entry point).
 """
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.app import ResearchApp
+from strategy_research.cli.tui.widgets import StatusHeader
 
 
+# Pattern for generated session ids: "cli-" + 1..8 hex chars.
 _SESSION_ID_RE = re.compile(r"^cli-[a-f0-9]{1,8}$")
 
 
-def _make_app(monkeypatch, *, model="unknown", skip_resume=True,
-              session_id="cli"):
-    """Build a ResearchApp with mocked internal collaborators.
+# ---------------------------------------------------------------- fixtures
 
-    We monkey-patch everything that touches the filesystem or LLM
-    so this fixture stays offline. The real ``on_mount`` is not
-    invoked — instead we replicate its key logic in a helper below
-    so we can test the side effects directly.
+
+def _make_app(*, model="unknown", session_id="cli"):
+    """Build a ResearchApp with no Textual mount.
+
+    Bypasses the full ``__init__`` lifecycle (which would try to
+    query widgets) but still constructs the InteractiveContext so
+    ``_resolve_session_identity`` has something to operate on.
     """
-    app = ResearchApp(model=model, skip_resume=skip_resume)
+    app = ResearchApp.__new__(ResearchApp)
+    app._model = model
+    app._version = "0.4.2"
+    app._skip_resume = True
+    app._session_db_path = None
+    app._llm_client = None
+    app.banner = None
+    app.session = None
+    app._tool_total = 0
+    app._tool_ok = 0
     app.ctx = InteractiveContext()
     app.ctx.session_id = session_id
     return app
 
 
-def _run_on_mount_init(app, monkeypatch, *, fake_model="minimax-M3"):
-    """Replicate the model + session_id resolution steps from
-    ``ResearchApp.on_mount``.
+def _patch_llm_load(monkeypatch, *, model=None, raises=False):
+    """Patch ``LLMConfig.load`` to return a SimpleNamespace with ``.model``.
 
-    These three steps (resolve model → generate sid → push to header)
-    are pure side-effecting logic that does not need the full Textual
-    app lifecycle. We exercise them directly.
+    Set ``model=None`` to make ``cfg.model`` empty/falsy (no override).
+    Set ``raises=True`` to make ``LLMConfig.load`` raise.
     """
-    # Mirror of the real on_mount steps 0/0a/1a (banner/query_one/etc.
-    # require a mounted app and are not part of the contract under test).
+    if raises:
+        monkeypatch.setattr(
+            "strategy_research.core.llm.config.LLMConfig.load",
+            mock.MagicMock(side_effect=RuntimeError("simulated load failure")),
+        )
+        return
+
     def fake_load():
-        m = mock.MagicMock()
-        m.model = fake_model
-        return m
+        return SimpleNamespace(model=model)
 
     monkeypatch.setattr(
         "strategy_research.core.llm.config.LLMConfig.load",
         fake_load,
     )
 
-    # Step 0: resolve model
-    try:
-        from strategy_research.core.llm.config import LLMConfig
-        cfg = LLMConfig.load()
-        if cfg.model:
-            app._model = cfg.model
-    except Exception:
-        pass
 
-    # Step 0a: generate session id if bare "cli"
-    if app.ctx.session_id == "cli":
-        try:
-            import uuid
-            app.ctx.session_id = f"cli-{uuid.uuid4().hex[:8]}"
-        except Exception:
-            app.ctx.session_id = "cli-fallback"
+def _patch_uuid(monkeypatch, *, hex_value="abcdef12", raises=False):
+    """Patch ``uuid.uuid4`` so generated session ids are deterministic.
 
-    # Step 1a: push to header (capture the call without needing the
-    # real StatusHeader widget)
-    app.update_header = mock.MagicMock()
-    try:
-        app.update_header(
-            model=app._model,
-            session_id=app.ctx.session_id,
-            connection_status="idle",
+    Default ``hex_value="abcdef12"`` → session id becomes ``"cli-abcdef12"``.
+    """
+    if raises:
+        monkeypatch.setattr(
+            "uuid.uuid4",
+            mock.MagicMock(side_effect=RuntimeError("uuid failed")),
         )
-    except Exception:
-        pass
+        return
 
-    return app
+    import uuid as _uuid
+
+    # Build a real uuid.UUID from the supplied hex so production code's
+    # ``uuid.uuid4().hex[:8]`` resolves correctly. MagicMock auto-creates
+    # ``.hex`` as a MagicMock attribute which shadows our intended value.
+    def fake_uuid4():
+        # Pad/truncate to a valid 32-char hex if needed
+        h = (hex_value * 4)[:32]
+        return _uuid.UUID(hex=h)
+
+    monkeypatch.setattr("uuid.uuid4", fake_uuid4)
 
 
-# ---------------------------------------------------------------- model resolution
+# ---------------------------------------------------------------- _resolve_session_identity
 
 
-class TestModelResolution:
-    def test_on_mount_resolves_model_from_llm_config(self, monkeypatch):
-        app = _make_app(monkeypatch, model="unknown")
-        app = _run_on_mount_init(app, monkeypatch, fake_model="minimax-M3")
+class TestResolveModel:
+    def test_resolves_model_from_llm_config(self, monkeypatch):
+        _patch_llm_load(monkeypatch, model="minimax-M3")
+        app = _make_app(model="unknown")
+        app._resolve_session_identity()
         assert app._model == "minimax-M3"
 
-    def test_on_mount_keeps_init_model_if_config_load_fails(self, monkeypatch):
-        def boom():
-            raise RuntimeError("simulated load failure")
-
-        monkeypatch.setattr(
-            "strategy_research.core.llm.config.LLMConfig.load",
-            boom,
-        )
-        app = _make_app(monkeypatch, model="gpt-4o-mini")
-        # Manually run only the model-resolution step
-        try:
-            from strategy_research.core.llm.config import LLMConfig
-            cfg = LLMConfig.load()
-            if cfg.model:
-                app._model = cfg.model
-        except Exception:
-            pass
+    def test_keeps_init_model_when_config_load_fails(self, monkeypatch):
+        _patch_llm_load(monkeypatch, raises=True)
+        app = _make_app(model="gpt-4o-mini")
+        app._resolve_session_identity()
         assert app._model == "gpt-4o-mini"
 
-    def test_on_mount_pushes_model_to_header(self, monkeypatch):
-        app = _make_app(monkeypatch, model="unknown")
-        app = _run_on_mount_init(app, monkeypatch, fake_model="minimax-M3")
-        # update_header was called with the resolved model
-        app.update_header.assert_called()
-        call_kwargs = app.update_header.call_args.kwargs
-        assert call_kwargs["model"] == "minimax-M3"
+    def test_keeps_init_model_when_config_returns_empty(self, monkeypatch):
+        _patch_llm_load(monkeypatch, model="")
+        app = _make_app(model="gpt-4o-mini")
+        app._resolve_session_identity()
+        assert app._model == "gpt-4o-mini"
+
+    def test_keeps_init_model_when_config_returns_none(self, monkeypatch):
+        _patch_llm_load(monkeypatch, model=None)
+        app = _make_app(model="gpt-4o-mini")
+        app._resolve_session_identity()
+        assert app._model == "gpt-4o-mini"
 
 
-# ---------------------------------------------------------------- session id
-
-
-class TestSessionIdGeneration:
+class TestResolveSessionId:
     def test_generates_fresh_id_when_ctx_session_id_is_cli(self, monkeypatch):
-        app = _make_app(monkeypatch, session_id="cli")
-        app = _run_on_mount_init(app, monkeypatch)
-        assert app.ctx.session_id != "cli"
-        assert _SESSION_ID_RE.match(app.ctx.session_id), (
-            f"unexpected session_id format: {app.ctx.session_id}"
-        )
+        _patch_uuid(monkeypatch, hex_value="deadbeef")
+        app = _make_app(session_id="cli")
+        model, sid = app._resolve_session_identity()
+        assert sid == "cli-deadbeef"
+        assert app.ctx.session_id == "cli-deadbeef"
+        assert _SESSION_ID_RE.match(sid)
 
     def test_does_not_overwrite_existing_session_id(self, monkeypatch):
-        app = _make_app(monkeypatch, session_id="cli-existing-12345")
-        app = _run_on_mount_init(app, monkeypatch)
+        _patch_uuid(monkeypatch)
+        app = _make_app(session_id="cli-existing-12345")
+        _, sid = app._resolve_session_identity()
+        assert sid == "cli-existing-12345"
         assert app.ctx.session_id == "cli-existing-12345"
 
     def test_does_not_overwrite_uuid_session_id(self, monkeypatch):
         # Real session IDs from SessionDB are 32-char hex
-        app = _make_app(
-            monkeypatch,
-            session_id="abcdef0123456789abcdef0123456789",
-        )
-        app = _run_on_mount_init(app, monkeypatch)
-        assert app.ctx.session_id == "abcdef0123456789abcdef0123456789"
+        _patch_uuid(monkeypatch)
+        app = _make_app(session_id="abcdef0123456789abcdef0123456789")
+        _, sid = app._resolve_session_identity()
+        assert sid == "abcdef0123456789abcdef0123456789"
 
-    def test_session_id_pushed_to_header(self, monkeypatch):
-        app = _make_app(monkeypatch, session_id="cli")
-        app = _run_on_mount_init(app, monkeypatch)
-        call_kwargs = app.update_header.call_args.kwargs
-        assert call_kwargs["session_id"] == app.ctx.session_id
-        assert call_kwargs["session_id"] != "cli"
-
-    def test_uuid_generation_failure_falls_back(self, monkeypatch):
-        app = _make_app(monkeypatch, session_id="cli")
-        # Monkey-patch uuid to raise
-        import uuid as uuid_mod
-        original_hex = uuid_mod.uuid4
-
-        def boom():
-            raise RuntimeError("uuid failed")
-
-        monkeypatch.setattr(uuid_mod, "uuid4", boom)
-        # Manual fallback path
-        if app.ctx.session_id == "cli":
-            try:
-                app.ctx.session_id = f"cli-{uuid_mod.uuid4().hex[:8]}"
-            except Exception:
-                app.ctx.session_id = "cli-fallback"
+    def test_uuid_failure_falls_back_to_cli_fallback(self, monkeypatch):
+        _patch_uuid(monkeypatch, raises=True)
+        app = _make_app(session_id="cli")
+        _, sid = app._resolve_session_identity()
+        assert sid == "cli-fallback"
         assert app.ctx.session_id == "cli-fallback"
-        # Restore so pytest teardown is clean
-        monkeypatch.setattr(uuid_mod, "uuid4", original_hex)
+
+    def test_returns_tuple_with_resolved_values(self, monkeypatch):
+        _patch_llm_load(monkeypatch, model="deepseek-chat")
+        _patch_uuid(monkeypatch, hex_value="12345678")
+        app = _make_app(model="unknown", session_id="cli")
+        model, sid = app._resolve_session_identity()
+        assert model == "deepseek-chat"
+        assert sid == "cli-12345678"
 
 
-# ---------------------------------------------------------------- combined
+# ---------------------------------------------------------------- header push
 
 
-class TestOnMountCombined:
-    def test_full_init_resolves_both(self, monkeypatch):
-        app = _make_app(monkeypatch, model="unknown", session_id="cli")
-        app = _run_on_mount_init(app, monkeypatch, fake_model="deepseek-chat")
-        assert app._model == "deepseek-chat"
-        assert _SESSION_ID_RE.match(app.ctx.session_id)
+class TestHeaderPush:
+    def test_resolved_values_pushed_to_header(self, monkeypatch):
+        _patch_llm_load(monkeypatch, model="qwen-plus")
+        _patch_uuid(monkeypatch, hex_value="abcd1234")
+        app = _make_app(model="unknown", session_id="cli")
+        app.update_header = mock.MagicMock()
 
-    def test_header_gets_both_at_once(self, monkeypatch):
-        app = _make_app(monkeypatch, model="unknown", session_id="cli")
-        app = _run_on_mount_init(app, monkeypatch, fake_model="qwen-plus")
-        call_kwargs = app.update_header.call_args.kwargs
-        assert call_kwargs["model"] == "qwen-plus"
-        assert call_kwargs["session_id"] != "cli"
-        assert call_kwargs["connection_status"] == "idle"
+        app._resolve_session_identity()
+
+        # update_header must have been called with the resolved values
+        # (but note: on_mount, not _resolve_session_identity, is what
+        # actually pushes to header — so we exercise it through the
+        # dedicated integration test below).
+        # Here we just confirm the method itself doesn't call update_header.
+        app.update_header.assert_not_called()
+
+    def test_pure_method_no_widget_access(self, monkeypatch):
+        """_resolve_session_identity must NOT touch any widget — pure logic."""
+        _patch_llm_load(monkeypatch, model="minimax-M3")
+        _patch_uuid(monkeypatch)
+        app = _make_app()
+
+        # If this method tries to query_one / write / update_header it
+        # will crash since no widgets are mounted.
+        model, sid = app._resolve_session_identity()
+
+        assert model == "minimax-M3"
+        assert sid.startswith("cli-")
 
 
-# ---------------------------------------------------------------- __main__ tuple return
+# ---------------------------------------------------------------- integration test
+
+
+@pytest.mark.asyncio
+async def test_mounted_app_header_has_real_model_and_sid(monkeypatch):
+    """End-to-end: mounted StatusHeader shows resolved values from frame 1.
+
+    This is the test that proves the on_mount wiring actually feeds the
+    widget tree correctly — not just that the resolver returns the
+    right values.
+    """
+    _patch_llm_load(monkeypatch, model="minimax-M3")
+    _patch_uuid(monkeypatch, hex_value="feedbeef")
+
+    app = ResearchApp(model="unknown", skip_resume=True)
+    app.ctx.session_id = "cli"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # StatusHeader is yielded in compose() with id="status-header"
+        header = app.query_one("#status-header", StatusHeader)
+        assert header._model == "minimax-M3"
+        assert header._session_id == "cli-feedbeef"
+        assert header._session_id != "cli"
+
+
+@pytest.mark.asyncio
+async def test_mounted_app_keeps_existing_session_id(monkeypatch):
+    """End-to-end: pre-set session id is NOT overwritten by mount."""
+    _patch_llm_load(monkeypatch, model="minimax-M3")
+    _patch_uuid(monkeypatch, hex_value="cafebabe")
+
+    app = ResearchApp(model="unknown", skip_resume=True)
+    app.ctx.session_id = "resumed-from-disk-1234"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        header = app.query_one("#status-header", StatusHeader)
+        assert header._session_id == "resumed-from-disk-1234"
+
+
+@pytest.mark.asyncio
+async def test_mounted_app_banner_includes_real_model(monkeypatch):
+    """End-to-end: the transcript banner shows the resolved model."""
+    _patch_llm_load(monkeypatch, model="minimax-M3")
+
+    app = ResearchApp(model="unknown", skip_resume=True)
+    app.ctx.session_id = "cli-test"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        from strategy_research.cli.tui.widgets import TranscriptView
+        tv = app.query_one(TranscriptView)
+        # Banner Text was written as the first line(s); check the joined
+        # text mentions the resolved model.
+        joined = " ".join(str(line) for line in tv.lines)
+        assert "minimax-M3" in joined, (
+            f"banner did not include resolved model: {joined[:200]!r}"
+        )
+
+
+# ---------------------------------------------------------------- _build_llm_client tuple
 
 
 class TestBuildLlmClientTupleReturn:
-    """Verify that ``_build_llm_client`` now returns (client, model_name)."""
+    """Verify that ``_build_llm_client`` now returns ``(client, model_name)``."""
 
     def test_returns_tuple(self, monkeypatch):
         from strategy_research.cli.__main__ import _build_llm_client
 
-        fake_cfg = mock.MagicMock()
-        fake_cfg.api_key = "sk-test"
-        fake_cfg.model = "minimax-M3"
-
-        def fake_load():
-            return fake_cfg
-
         monkeypatch.setattr(
             "strategy_research.core.llm.config.LLMConfig.load",
-            fake_load,
+            lambda: SimpleNamespace(api_key="sk-test", model="minimax-M3"),
         )
         # Stub OpenAICompatClient so __init__ doesn't hit the network
         monkeypatch.setattr(
@@ -238,12 +296,9 @@ class TestBuildLlmClientTupleReturn:
     def test_returns_unknown_when_load_fails(self, monkeypatch):
         from strategy_research.cli.__main__ import _build_llm_client
 
-        def boom():
-            raise RuntimeError("config load fail")
-
         monkeypatch.setattr(
             "strategy_research.core.llm.config.LLMConfig.load",
-            boom,
+            mock.MagicMock(side_effect=RuntimeError("config load fail")),
         )
         result = _build_llm_client()
         assert result == (None, "unknown")
@@ -251,13 +306,9 @@ class TestBuildLlmClientTupleReturn:
     def test_returns_model_even_when_no_api_key(self, monkeypatch):
         from strategy_research.cli.__main__ import _build_llm_client
 
-        fake_cfg = mock.MagicMock()
-        fake_cfg.api_key = ""        # no key → no client
-        fake_cfg.model = "minimax-M3"
-
         monkeypatch.setattr(
             "strategy_research.core.llm.config.LLMConfig.load",
-            lambda: fake_cfg,
+            lambda: SimpleNamespace(api_key="", model="minimax-M3"),
         )
         client, model = _build_llm_client()
         assert client is None
