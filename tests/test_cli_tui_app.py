@@ -32,6 +32,7 @@ from strategy_research.cli.tui.widgets import (
     ChatInput,
     CommandSidebar,
     HintFooter,
+    ModeBar,
     TranscriptView,
 )
 
@@ -75,8 +76,8 @@ async def test_research_app_run_test_mounts_widgets():
         await pilot.pause()
         # All 5 named inner widgets are present (header + footer are auto-mounted).
         assert app.query_one(TranscriptView).is_mounted
-        assert app.query_one(ActivityRail).is_mounted
         assert app.query_one(CommandSidebar).is_mounted
+        assert app.query_one("#mode-bar", ModeBar).is_mounted
         assert app.query_one("#input").is_mounted  # ChatInput uses id="input"
 
 
