@@ -241,15 +241,24 @@ class ResearchApp(App):
     def route_agent_event(self, event_type: str, data: dict) -> None:
         """Route AgentLoop events to the appropriate widget."""
         if event_type == "text_delta":
-            self.update_streaming_delta(data.get("text", ""))
+            # Strip <think> / <reasoning> / <thinking> / <|reasoning|>
+            # etc. before forwarding to the streamer so the user never
+            # sees the model's internal monologue during typing.
+            from strategy_research.cli.tui.text_filters import strip_thinking_tags
+            self.update_streaming_delta(strip_thinking_tags(data.get("text", "")))
         elif event_type == "thinking_done":
             # Transition marker: thinking → text. Streaming already started.
             pass
         elif event_type == "assistant_message":
             # Final assistant content (non-streaming path or stream close).
-            # Convert any active streamer to a folder; non-streaming path
-            # creates a one-shot streamer and immediately folds it.
-            self._finalize_assistant_message(data.get("content", ""))
+            # Strip thinking tags and render as Markdown (no fold).
+            from strategy_research.cli.tui.text_filters import strip_thinking_tags
+            content = strip_thinking_tags(data.get("content", ""))
+            try:
+                tv = self.query_one(TranscriptView)
+                tv.write_assistant_message(content)
+            except Exception:
+                pass
         elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat"):
             # Stage C: tool calls are rendered inline in the transcript,
             # not the side rail. See TranscriptView.append_tool_call /
@@ -290,22 +299,6 @@ class ResearchApp(App):
                 ))
             except Exception:
                 pass
-
-    def _finalize_assistant_message(self, content: str) -> None:
-        """Convert the active streaming session into a foldable folder.
-
-        - Streaming path: streamer already holds accumulated text; just end it.
-        - Non-streaming path: create a fresh streamer, write full content,
-          immediately fold it.
-        """
-        try:
-            tv = self.query_one(TranscriptView)
-            if tv._streamer is None:
-                tv.begin_streaming()
-            tv._streamer.update_streaming(content or "")
-            tv.end_streaming()
-        except Exception:
-            pass
 
     def _route_tool_event(self, event_type: str, data: dict) -> None:
         """Inline tool events into TranscriptView (stage C)."""

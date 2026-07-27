@@ -133,6 +133,10 @@ class ChatSession:
                 await self._run_agent_loop(text.strip())
             except Exception as exc:  # noqa: BLE001
                 self._write_transcript(f"[red]Agent error:[/red] {exc}")
+            # Refresh header stats now that the assistant message has
+            # been appended to ctx.history (Stage D fix: previously the
+            # header only reflected pre-arun state, leaving "0 msg").
+            self._update_header_stats()
 
         # Drain ``ctx.pending_prompt`` queued by slash handlers.
         queued = getattr(self.ctx, "pending_prompt", None)

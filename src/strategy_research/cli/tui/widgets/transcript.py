@@ -31,6 +31,12 @@ Inline tool calls (Stage C):
 
     State is tracked in ``_tool_lines: {call_id: line_index}`` so the
     result line can be replaced in-place via ``_truncate_to``.
+
+Body content as Markdown (streaming v2):
+    The assistant's final answer is rendered as Rich ``Markdown`` via
+    ``write_assistant_message`` so headers / bold / lists / code blocks
+    / tables display correctly. Body content is **not** folded — the
+    RichLog handles overflow natively via wrap + scroll.
 """
 from __future__ import annotations
 
@@ -104,6 +110,63 @@ class TranscriptView(RichLog):
     def append_done(self) -> None:
         """Write a ``Done.`` marker line to close a turn."""
         self.write("[dim]\u2022 Done.[/dim]")
+
+    # ------------------------------------------------------------------ markdown body
+
+    def write_markdown(self, content: str) -> None:
+        """Render ``content`` as Rich Markdown and append (no fold).
+
+        Markdown features supported out of the box:
+            * ATX / Setext headers (# ## ###)
+            * **bold**, *italic*, ~~strike~~
+            * `inline code` (Python lexer fallback)
+            * ``` fenced code blocks ``` with monokai syntax highlighting
+            * bullet + numbered lists
+            * GFM tables
+            * blockquotes
+            * links
+
+        Empty input renders a ``(empty response)`` muted hint so the
+        user gets explicit feedback rather than silent failure.
+        """
+        from rich.markdown import Markdown
+
+        if not content or not content.strip():
+            self.write("[muted](empty response)[/muted]")
+            return
+        # Strip trailing whitespace; Rich Markdown renders trailing
+        # blank lines as extra vertical space.
+        cleaned = content.rstrip()
+        md = Markdown(
+            cleaned,
+            code_theme="monokai",
+            inline_code_lexer="python",
+            justify="left",
+        )
+        self.write(md)
+
+    def write_assistant_message(self, content: str) -> None:
+        """Final assistant message: replace streaming area with Markdown.
+
+        Three steps:
+
+        1. End any active streamer (text_delta preview has been
+           accumulating plain text into the streaming session).
+        2. Truncate the streaming baseline — those raw preview lines
+           are superseded by the formatted Markdown renderable.
+        3. Append the Markdown-rendered content.
+
+        The net effect: during generation the user sees a typewriter
+        preview; on completion the preview is replaced by the same
+        text rendered with headers / bold / code formatting intact.
+        No fold is applied to body content — overflow is handled by
+        RichLog's native wrapping + scroll.
+        """
+        if self._streamer is not None:
+            self._truncate_to(self._stream_baseline)
+            self._streamer = None
+            self._stream_baseline = None
+        self.write_markdown(content)
 
     # ------------------------------------------------------------------ inline tools (Stage C)
 
