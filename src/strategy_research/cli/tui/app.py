@@ -294,9 +294,12 @@ class ResearchApp(App):
             try:
                 tv = self.query_one(TranscriptView)
                 from strategy_research.cli.tui.messages import WriteTranscript
-                tv.post_message(WriteTranscript(
-                    content=f"[red]Agent error:[/red] {data.get('message', 'unknown')}"
-                ))
+                message = data.get("message", "unknown")
+                if "quota" in message.lower():
+                    friendly = "[yellow]\u26a0 MiniMax \u914d\u989d\u5df2\u7528\u5b8c\uff085\u5c0f\u65f6\u9650\u989d\uff09\u3002\u8bf7\u7a0d\u540e\u91cd\u8bd5\u6216\u5207\u6362 provider\u3002[/yellow]"
+                else:
+                    friendly = f"[red]Agent error:[/red] {message}"
+                tv.post_message(WriteTranscript(content=friendly))
             except Exception:
                 pass
 

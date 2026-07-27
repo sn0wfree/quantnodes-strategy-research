@@ -6,8 +6,9 @@ Public API:
     LLMResponse         - parsed non-streaming response
     StreamChunk         - one streaming chunk
     ToolCall            - one tool invocation from LLM
-    Errors              - LLMAuthError / LLMRateLimitError / LLMTimeoutError
-                          / LLMServerError / LLMMalformedResponseError / LLMConfigError
+    Errors              - LLMAuthError / LLMRateLimitError / LLMQuotaError
+                          / LLMTimeoutError / LLMServerError
+                          / LLMMalformedResponseError / LLMConfigError
 
 Layered configuration (higher overrides lower):
     1. Code defaults        (LLMConfig field defaults)
@@ -34,6 +35,7 @@ from .errors import (
     LLMConfigError,
     LLMError,
     LLMMalformedResponseError,
+    LLMQuotaError,
     LLMRateLimitError,
     LLMServerError,
     LLMTimeoutError,
@@ -51,6 +53,7 @@ __all__ = [
     "LLMAuthError",
     "LLMConfigError",
     "LLMMalformedResponseError",
+    "LLMQuotaError",
     "LLMRateLimitError",
     "LLMServerError",
     "LLMTimeoutError",

@@ -32,6 +32,7 @@ from .errors import (
     LLMConfigError,
     LLMError,
     LLMMalformedResponseError,
+    LLMQuotaError,
     LLMRateLimitError,
     LLMServerError,
     LLMTimeoutError,
@@ -112,6 +113,23 @@ def _build_payload(
     return payload
 
 
+def _extract_error_code(body: Any) -> str:
+    """Extract error code from provider response body (lowercased).
+
+    Handles common shapes:
+        {"error": {"code": "quota_exceeded", ...}}
+        {"error": "some message", "code": "quota_exceeded"}
+        {"code": "quota_exceeded"}
+    Returns empty string when no code is found.
+    """
+    if not isinstance(body, dict):
+        return ""
+    error_section = body.get("error", {})
+    if isinstance(error_section, dict):
+        return str(error_section.get("code", "")).lower()
+    return str(body.get("code", "")).lower()
+
+
 def _raise_for_status(response: httpx.Response) -> None:
     """Map httpx status to LLM-specific exception."""
     status = response.status_code
@@ -123,8 +141,16 @@ def _raise_for_status(response: httpx.Response) -> None:
         body = {"raw": response.text[:500]}
 
     if status in (401, 403):
+        # Some providers (MiniMax, etc.) use 403 to signal quota exhaustion.
+        error_code = _extract_error_code(body)
+        if "quota" in error_code or "billing" in error_code:
+            raise LLMQuotaError(f"quota exceeded ({status}): {body}")
         raise LLMAuthError(f"auth failed ({status}): {body}")
     if status == 429:
+        # MiniMax quota vs per-minute rate limit: distinguish by error code.
+        error_code = _extract_error_code(body)
+        if "quota" in error_code or "billing" in error_code:
+            raise LLMQuotaError(f"quota exceeded (429): {body}")
         raise LLMRateLimitError(f"rate limited (429): {body}")
     if 500 <= status < 600:
         raise LLMServerError(f"server error ({status}): {body}")
@@ -235,12 +261,19 @@ class OpenAICompatClient:
             with httpx.Client(**client_kwargs) as client:
                 with client.stream("POST", url, json=payload, headers=headers) as response:
                     _raise_for_status(response)
-                    for line in response.iter_lines():
-                        chunk = parse_stream_chunk(line)
-                        if chunk is not None:
-                            yield chunk
-                            if chunk.finish_reason:
-                                return
+                    try:
+                        for line in response.iter_lines():
+                            chunk = parse_stream_chunk(line)
+                            if chunk is not None:
+                                yield chunk
+                                if chunk.finish_reason:
+                                    return
+                    finally:
+                        try:
+                            for _ in response.iter_lines():
+                                pass
+                        except Exception:  # noqa: BLE001
+                            pass  # Cleanup failure must not mask original error
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError(
                 f"stream timed out after {self.config.timeout_s}s"
@@ -269,12 +302,23 @@ class OpenAICompatClient:
         async with httpx.AsyncClient(**client_kwargs) as client:
             async with client.stream("POST", url, json=payload, headers=headers) as response:
                 _raise_for_status(response)
-                async for line in response.aiter_lines():
-                    chunk = parse_stream_chunk(line)
-                    if chunk is not None:
-                        yield chunk
-                        if chunk.finish_reason:
-                            return
+                try:
+                    async for line in response.aiter_lines():
+                        chunk = parse_stream_chunk(line)
+                        if chunk is not None:
+                            yield chunk
+                            if chunk.finish_reason:
+                                return
+                finally:
+                    # Ensure the remaining response body is consumed to
+                    # prevent httpx's __aexit__ from raising "Attempted
+                    # to access streaming response content, without having
+                    # called 'read()'." when the context manager closes.
+                    try:
+                        async for _ in response.aiter_lines():
+                            pass
+                    except Exception:  # noqa: BLE001
+                        pass  # Cleanup failure must not mask original error
 
     def with_config(self, **kwargs: Any) -> "OpenAICompatClient":
         """Return a new client with overridden config fields."""

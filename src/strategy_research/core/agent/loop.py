@@ -460,9 +460,10 @@ class AgentLoop:
         from ..llm.errors import (
             LLMAuthError,
             LLMConfigError,
+            LLMQuotaError,
             LLMRateLimitError,
         )
-        return isinstance(exc, (LLMAuthError, LLMRateLimitError, LLMConfigError))
+        return isinstance(exc, (LLMAuthError, LLMRateLimitError, LLMConfigError, LLMQuotaError))
 
     def _append_assistant_msg(
         self, response: LLMResponse, messages: list[dict[str, Any]],

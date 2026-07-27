@@ -15,6 +15,15 @@ class LLMRateLimitError(LLMError):
     """429 — rate limit hit. Client should back off and retry."""
 
 
+class LLMQuotaError(LLMError):
+    """Quota / billing limit exceeded (distinct from per-minute rate limit).
+
+    Raised when the provider returns a specific quota-exceeded error,
+    e.g. MiniMax's 5-hour quota limit. The error body is preserved in
+    ``self.args[0]`` for upstream logging.
+    """
+
+
 class LLMTimeoutError(LLMError):
     """Request timed out (after configured timeout_s)."""
 
