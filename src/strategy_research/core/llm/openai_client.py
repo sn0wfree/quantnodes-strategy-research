@@ -264,6 +264,8 @@ class OpenAICompatClient:
         try:
             with httpx.Client(**client_kwargs) as client:
                 with client.stream("POST", url, json=payload, headers=headers) as response:
+                    if response.status_code >= 400:
+                        response.read()
                     try:
                         _raise_for_status(response)
                         for line in response.iter_lines():
@@ -305,6 +307,12 @@ class OpenAICompatClient:
 
         async with httpx.AsyncClient(**client_kwargs) as client:
             async with client.stream("POST", url, json=payload, headers=headers) as response:
+                # Buffer error responses so _raise_for_status can call
+                # response.json() without httpx raising "Attempted to
+                # access streaming response content, without having
+                # called 'read()'."
+                if response.status_code >= 400:
+                    await response.aread()
                 try:
                     _raise_for_status(response)
                     async for line in response.aiter_lines():
@@ -314,9 +322,6 @@ class OpenAICompatClient:
                             if chunk.finish_reason:
                                 return
                 finally:
-                    # Consume remaining response body to prevent httpx
-                    # __aexit__ raising "Attempted to access streaming
-                    # response content, without having called 'read()'."
                     try:
                         async for _ in response.aiter_lines():
                             pass
