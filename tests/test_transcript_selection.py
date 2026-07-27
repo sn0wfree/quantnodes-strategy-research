@@ -47,7 +47,7 @@ def _make_tv() -> TranscriptView:
     tv._start_line = 0
     tv._deferred_renders = []
 
-    def fake_base_write(content, **kwargs):
+    def fake_base_write(content, *args, **kwargs):
         """Simulate RichLog.write: append a Strip to _lines."""
         text = str(content)
         segments = [Segment(text)]
@@ -55,7 +55,7 @@ def _make_tv() -> TranscriptView:
         tv._lines.append(strip)
         return tv
 
-    def patched_write(content, **kwargs):
+    def patched_write(content, *args, **kwargs):
         """TranscriptView.write: store plain text, then base write."""
         if isinstance(content, str):
             tv._plain_lines.append(content)
@@ -67,7 +67,7 @@ def _make_tv() -> TranscriptView:
                 tv._plain_lines.append(buf.getvalue().rstrip("\n"))
             except Exception:
                 tv._plain_lines.append(str(content))
-        fake_base_write(content, **kwargs)
+        fake_base_write(content, *args, **kwargs)
         return tv
 
     tv.write = patched_write
@@ -151,3 +151,42 @@ class TestSelectionSourceLevel:
         """write must store plain text in _plain_lines."""
         src = inspect.getsource(TranscriptView.write)
         assert "_plain_lines" in src
+
+
+# ---------------------------------------------------------------- RichLog.on_resize regression
+
+
+class TestWriteAcceptsRichLogPositionalArgs:
+    """Regression for: TypeError: TranscriptView.write() takes 2 positional
+    arguments but 6 were given.
+
+    ``RichLog.on_resize`` replays deferred writes via::
+
+        self.write(*deferred_render)
+
+    where ``deferred_render`` is a ``DeferredRender`` namedtuple with
+    fields ``(content, width, expand, shrink, scroll_end)`` — i.e. 5
+    positional args. Our override must accept them via ``*args``.
+    """
+
+    def test_write_accepts_5_positional_args_from_deferred_render(self):
+        from textual.widgets._rich_log import DeferredRender
+
+        tv = _make_tv()
+        deferred = DeferredRender(
+            content="hello",
+            width=80,
+            expand=False,
+            shrink=True,
+            scroll_end=None,
+        )
+        # This call shape is exactly what RichLog.on_resize does.
+        tv.write(*deferred)
+        assert tv._plain_lines == ["hello"]
+
+    def test_write_accepts_all_kinds_of_positional_args(self):
+        """Width/expand/shrink/scroll_end/animate variants must also work."""
+        tv = _make_tv()
+        # Content + 5 trailing positional args (matches RichLog signature)
+        tv.write("x", None, False, True, None, False)
+        assert tv._plain_lines == ["x"]

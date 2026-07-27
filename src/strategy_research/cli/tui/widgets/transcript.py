@@ -116,9 +116,21 @@ class TranscriptView(RichLog):
 
     # ------------------------------------------------------------------ mouse selection
 
-    def write(self, content: RenderableType | str, **kwargs: Any) -> "TranscriptView":
-        """Override write to also store plain text for mouse selection."""
-        # Store plain text mirror for get_selection()
+    def write(
+        self,
+        content: RenderableType | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> "TranscriptView":
+        """Override write to also store plain text for mouse selection.
+
+        ``*args`` is required: ``RichLog.on_resize`` replays deferred
+        writes via ``self.write(*deferred_render)`` which unpacks
+        ``DeferredRender(content, width, expand, shrink, scroll_end)``
+        as 5 positional args. Without ``*args`` this raises
+        ``TypeError: takes 2 positional arguments but 6 were given``
+        at resize time.
+        """
         if isinstance(content, str):
             self._plain_lines.append(content)
         else:
@@ -131,7 +143,7 @@ class TranscriptView(RichLog):
                 self._plain_lines.append(buf.getvalue().rstrip("\n"))
             except Exception:
                 self._plain_lines.append(str(content))
-        return super().write(content, **kwargs)
+        return super().write(content, *args, **kwargs)
 
     def render_line(self, y: int) -> "Strip":
         """Render a line with offset metadata for mouse selection.
