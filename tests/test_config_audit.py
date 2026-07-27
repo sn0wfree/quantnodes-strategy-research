@@ -168,6 +168,46 @@ class TestDetectIssues:
         # OPENAI_BASE_URL should NOT be flagged when provider=openai
         assert "C5" not in codes
 
+    def test_c6_max_tokens_below_recommendation(self, tmp_path):
+        """C6 fires when user sets max_tokens below the provider's recommendation."""
+        llm = _write_llm(tmp_path, {
+            "provider": "minimax",
+            "api_key": "env:LLM_API_KEY",
+            "max_tokens": 1024,
+        })
+        env = _write_env(tmp_path, "LLM_API_KEY=sk-real-key-12345abcdefghijklmnopqrst\n")
+        issues = detect_issues(llm_json_path=llm, env_path=env)
+        codes = [i.code for i in issues]
+        assert "C6" in codes
+        c6 = next(i for i in issues if i.code == "C6")
+        assert c6.severity == "info"
+        assert c6.fixable is True
+        assert "1024" in c6.description
+        assert "32000" in c6.description  # minimax recommendation
+
+    def test_c6_not_fired_when_meets_recommendation(self, tmp_path):
+        """C6 should not fire when user sets a sufficient max_tokens."""
+        from strategy_research.core.llm.config import PROVIDER_DEFAULTS
+        recommended = PROVIDER_DEFAULTS["minimax"]["max_tokens"]
+        llm = _write_llm(tmp_path, {
+            "provider": "minimax",
+            "api_key": "env:LLM_API_KEY",
+            "max_tokens": recommended,
+        })
+        env = _write_env(tmp_path, "LLM_API_KEY=sk-real-key-12345abcdefghijklmnopqrst\n")
+        issues = detect_issues(llm_json_path=llm, env_path=env)
+        assert "C6" not in [i.code for i in issues]
+
+    def test_c6_not_fired_when_unset(self, tmp_path):
+        """C6 should not fire when user hasn't set max_tokens (bridge will fallback)."""
+        llm = _write_llm(tmp_path, {
+            "provider": "minimax",
+            "api_key": "env:LLM_API_KEY",
+        })
+        env = _write_env(tmp_path, "LLM_API_KEY=sk-real-key-12345abcdefghijklmnopqrst\n")
+        issues = detect_issues(llm_json_path=llm, env_path=env)
+        assert "C6" not in [i.code for i in issues]
+
     def test_all_fixable_flags(self, tmp_path):
         """C1, C2, C4, C5 are fixable; C3 is not."""
         llm = _write_llm(tmp_path, {
@@ -240,6 +280,31 @@ class TestFixIssues:
         assert "LANGCHAIN_PROVIDER" not in new_env
         assert "TIMEOUT_SECONDS" not in new_env
         assert "MAX_RETRIES" not in new_env
+
+    def test_c6_fix(self, tmp_path):
+        """C6 fix bumps max_tokens to the provider recommendation."""
+        from strategy_research.core.llm.config import PROVIDER_DEFAULTS
+        recommended = PROVIDER_DEFAULTS["minimax"]["max_tokens"]
+        llm_data = {
+            "provider": "minimax",
+            "api_key": "env:LLM_API_KEY",
+            "max_tokens": 1024,
+        }
+        llm = _write_llm(tmp_path, llm_data)
+        env = _write_env(tmp_path, "LLM_API_KEY=sk-real-key-12345abcdefghijklmnopqrst\n")
+        issues = detect_issues(llm_json_path=llm, env_path=env)
+        assert "C6" in [i.code for i in issues]
+        fixed = fix_issues(issues, llm_json_path=llm, env_path=env)
+
+        # Reload llm.json and check max_tokens was bumped
+        import json
+        new_llm = json.loads(llm.read_text())
+        assert new_llm["llm"]["max_tokens"] == recommended
+
+        # Check fix_summary populated
+        c6 = next(i for i in fixed if i.code == "C6")
+        assert c6.fix_summary
+        assert str(recommended) in c6.fix_summary
 
     def test_fix_populates_fix_summary(self, tmp_path):
         llm = _write_llm(tmp_path, {"provider": "minimax", "api_key": "sk-test-fake-placeholder"})

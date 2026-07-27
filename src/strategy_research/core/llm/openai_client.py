@@ -89,7 +89,11 @@ def _build_payload(
         payload["temperature"] = overrides.get("temperature", config.temperature)
     if "top_p" in overrides or config.top_p != 1.0:
         payload["top_p"] = overrides.get("top_p", config.top_p)
-    payload["max_tokens"] = overrides.get("max_tokens", config.max_tokens)
+    # ``max_tokens`` may be ``None`` if neither user nor provider set it.
+    # Skip the field entirely in that case so the provider uses its own default.
+    _max_tokens = overrides.get("max_tokens", config.max_tokens)
+    if _max_tokens is not None:
+        payload["max_tokens"] = _max_tokens
     if config.frequency_penalty:
         payload["frequency_penalty"] = config.frequency_penalty
     if config.presence_penalty:

@@ -68,18 +68,30 @@ ENV_PROFILE: str = "STRATEGY_RESEARCH_LLM_PROFILE"     # no longer read
 LEGACY_DEFAULT_PROFILE: str = "default"                  # always returns "default"
 
 # Supported providers (used for hinting/defaults; any string OK).
+# ``max_tokens`` is a recommended output budget per provider — users
+# override via ``~/.quantnodes/llm.json`` or ``max_tokens`` override.
 PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
     "openai":   {"base_url": "https://api.openai.com/v1",
-                 "model": "gpt-4o-mini"},
+                 "model": "gpt-4o-mini",
+                 "max_tokens": 16384},
     "deepseek": {"base_url": "https://api.deepseek.com/v1",
-                 "model": "deepseek-chat"},
+                 "model": "deepseek-chat",
+                 "max_tokens": 8192},
     "kimi":     {"base_url": "https://api.moonshot.cn/v1",
-                 "model": "moonshot-v1-8k"},
+                 "model": "moonshot-v1-8k",
+                 "max_tokens": 8192},
     "qwen":     {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                 "model": "qwen-plus"},
+                 "model": "qwen-plus",
+                 "max_tokens": 8192},
     "minimax":  {"base_url": "https://api.minimaxi.com/v1",
-                 "model": "minimax-M3"},
+                 "model": "minimax-M3",
+                 "max_tokens": 32000},
 }
+
+# Global conservative fallback when neither user config nor provider
+# recommendation supplies ``max_tokens``.  Safe for most chat workloads
+# without being so low that long answers get truncated.
+_DEFAULT_MAX_TOKENS = 8192
 
 
 # ── LLMConfig dataclass ─────────────────────────────────────────────
@@ -102,7 +114,7 @@ class LLMConfig:
     # ── Sampling ────────────────────────────────
     temperature: float = 0.7
     top_p: float = 1.0
-    max_tokens: int = 4096
+    max_tokens: int | None = None
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     stop: tuple[str, ...] | None = None
@@ -205,6 +217,10 @@ class LLMConfig:
         # then to whatever the bridge resolved. Never from yaml.
         if not cfg.api_key:
             cfg = cfg.with_config(api_key=load_api_key_from_env(env_map))
+
+        # Global fallback for max_tokens when no layer supplied it.
+        if cfg.max_tokens is None:
+            cfg = cfg.with_config(max_tokens=_DEFAULT_MAX_TOKENS)
 
         return cfg
 
@@ -318,13 +334,16 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
         except (TypeError, ValueError):
             logger.debug("bridge: cannot parse max_tokens %r as int", v)
 
-    # Provider→base_url/model fallback when the JSON didn't supply them
-    if not out.get("base_url") and (p := out.get("provider")):
+    # Provider→base_url/model/max_tokens fallback when the JSON omitted them.
+    if (p := out.get("provider")):
         defaults = PROVIDER_DEFAULTS.get(p)
         if defaults:
-            out["base_url"] = defaults["base_url"]
+            if not out.get("base_url"):
+                out["base_url"] = defaults["base_url"]
             if not out.get("model") and defaults.get("model"):
                 out["model"] = defaults["model"]
+            if out.get("max_tokens") is None and defaults.get("max_tokens"):
+                out["max_tokens"] = defaults["max_tokens"]
 
     return out
 

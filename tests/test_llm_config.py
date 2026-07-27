@@ -31,6 +31,7 @@ from strategy_research.core.llm.config import (
     ENV_LLM_API_KEY,
     ENV_MODEL,
     ENV_PROFILE,
+    PROVIDER_DEFAULTS,
     _cli_to_overrides,
     _env_to_overrides,
     apply_api_key,
@@ -74,7 +75,10 @@ class TestCodeDefaults:
         assert cfg.base_url == "https://api.openai.com/v1"
         assert cfg.model == "gpt-4o-mini"
         assert cfg.temperature == 0.7
-        assert cfg.max_tokens == 4096
+        # max_tokens falls through to the global conservative default when
+        # no provider is specified (provider="auto" → no provider default).
+        from strategy_research.core.llm.config import _DEFAULT_MAX_TOKENS
+        assert cfg.max_tokens == _DEFAULT_MAX_TOKENS
         assert cfg.timeout_s == 60.0
         assert cfg.max_retries == 3
         assert cfg.stream is True

@@ -7,11 +7,13 @@ Detects:
     C4: Missing required fields in llm.json (base_url / timeout / max_retries).
     C5: Dead legacy keys in .env (LANGCHAIN_* / TIMEOUT_SECONDS / MAX_RETRIES /
         OPENAI_BASE_URL when provider != openai).
+    C6: ``max_tokens`` is below the provider's recommended budget (long
+        answers may be truncated at the cap).
 
 Design:
     - Pure functions, no CLI dependencies.
     - Atomic writes (mkstemp + os.replace) + chmod 0600.
-    - PROVIDER_DEFAULTS imported from config.py for C4 fallback.
+    - PROVIDER_DEFAULTS imported from config.py for C4/C6 fallback.
 """
 from __future__ import annotations
 
@@ -215,6 +217,29 @@ def detect_issues(
             fixable=True,
         ))
 
+    # ── C6: max_tokens below provider recommendation ──
+    # Only fires if the user explicitly set a value that's lower than the
+    # provider's recommended budget.  We don't flag the default 8192 (which
+    # is set by the bridge fallback) because that's already a sane default.
+    recommended = PROVIDER_DEFAULTS.get(provider, {}).get("max_tokens")
+    user_max_tokens = llm.get("max_tokens")
+    if (
+        recommended
+        and isinstance(user_max_tokens, int)
+        and user_max_tokens > 0
+        and user_max_tokens < recommended
+    ):
+        issues.append(AuditIssue(
+            code="C6",
+            severity="info",
+            description=(
+                f"max_tokens={user_max_tokens} is below the {provider} "
+                f"recommendation ({recommended}).  Long answers may be "
+                f"truncated at the cap."
+            ),
+            fixable=True,
+        ))
+
     return issues
 
 
@@ -349,6 +374,18 @@ def fix_issues(
                     removed.append(k)
                     env_changed = True
             issue = dataclasses.replace(issue, fix_summary=f"Deleted: {', '.join(removed)}")
+
+        # ── C6: max_tokens below provider recommendation → bump up ──
+        elif issue.code == "C6":
+            provider = llm.get("provider", "")
+            recommended = PROVIDER_DEFAULTS.get(provider, {}).get("max_tokens")
+            if recommended:
+                llm["max_tokens"] = recommended
+                llm_changed = True
+                issue = dataclasses.replace(
+                    issue,
+                    fix_summary=f"Set max_tokens to {recommended} (provider recommendation)",
+                )
 
         updated.append(issue)
 
