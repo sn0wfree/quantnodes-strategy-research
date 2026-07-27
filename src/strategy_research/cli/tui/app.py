@@ -251,12 +251,22 @@ class ResearchApp(App):
             pass
         elif event_type == "assistant_message":
             # Final assistant content (non-streaming path or stream close).
-            # Strip thinking tags and render as Markdown (no fold).
-            from strategy_research.cli.tui.text_filters import strip_thinking_tags
-            content = strip_thinking_tags(data.get("content", ""))
+            # Extract think tags (preserved as a foldable section) and
+            # render the remaining body as Markdown (no fold). Streaming
+            # preview (text_delta) still strips think tags so the user
+            # never sees internal reasoning during typing.
+            from strategy_research.cli.tui.text_filters import extract_thinking_tags
+            raw_content = data.get("content", "") or ""
+            think_content, body_content = extract_thinking_tags(raw_content)
             try:
                 tv = self.query_one(TranscriptView)
-                tv.write_assistant_message(content)
+                # Step 1: render think content as a foldable section
+                # (collapsed by default; Ctrl+E to expand).
+                if think_content:
+                    tv.append_thinking(think_content)
+                # Step 2: render body as Markdown, replacing the
+                # streaming preview in-place.
+                tv.write_assistant_message(body_content)
             except Exception:
                 pass
         elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat"):

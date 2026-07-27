@@ -250,6 +250,55 @@ class TranscriptView(RichLog):
             self._stream_baseline = None
         self.write_markdown(content)
 
+    # ------------------------------------------------------------------ thinking folder
+
+    def append_thinking(self, content: str) -> None:
+        """Render think content as a foldable section (collapsed by default).
+
+        Pushes a :class:`StreamingText` folder into ``_folders`` so the
+        existing :meth:`toggle_fold` (Ctrl+E) can expand/collapse it like
+        any other turn record. While folded, only the header line is
+        visible — the actual reasoning content is hidden until the user
+        explicitly opts in.
+
+        Args:
+            content: Raw think content extracted from ``<think>...</think>``
+                or unclosed tag variants. Should already be stripped of
+                tag delimiters. Empty / whitespace-only input is a no-op.
+
+        Side effects:
+            * Appends one header line to the RichLog.
+            * Registers the folder in ``_folders`` / ``_fold_baselines``
+              / ``_fold_line_counts`` with ``_active_folder_idx`` left at
+              ``None`` (the think folder does not steal focus from the
+              currently active streaming folder).
+            * Existing :meth:`toggle_fold` will pick up the new folder on
+              next invocation (it activates the last folder when no
+              folder is active).
+        """
+        if not content or not content.strip():
+            return
+
+        # Build a StreamingText folder with the think content.
+        folder = StreamingText()
+        folder.start()
+        folder.append_delta(content)
+        self._folders.append(folder)
+
+        # Record the line boundary for in-place re-rendering on
+        # Ctrl+E. Initial line_count = 1 (just the header line).
+        start = len(self.lines)
+        self._fold_baselines.append(start)
+        self._fold_line_counts.append(1)
+
+        # Header: 💭 thinking (N chars · ctrl+e to expand)
+        n_chars = len(content)
+        n_lines = content.count("\n") + 1
+        self.write(
+            f"[dim]\U0001f4ad thinking "
+            f"({n_chars} chars \u00b7 {n_lines} lines \u00b7 ctrl+e to expand)[/dim]"
+        )
+
     # ------------------------------------------------------------------ inline tools (Stage C)
 
     def append_tool_call(self, call_id: str, tool: str, args: dict) -> None:
