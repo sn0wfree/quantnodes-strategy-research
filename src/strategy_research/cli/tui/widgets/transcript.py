@@ -60,6 +60,7 @@ class TranscriptView(RichLog):
         self._streamer: StreamingText | None = None
         self._folders: list[StreamingText] = []
         self._fold_baselines: list[int] = []
+        self._fold_line_counts: list[int] = []
         self._active_folder_idx: int | None = None
 
     def append(self, content: RenderableType | str) -> None:
@@ -78,7 +79,12 @@ class TranscriptView(RichLog):
         self._streamer = None
         self._folders = []
         self._fold_baselines = []
+        self._fold_line_counts = []
         self._active_folder_idx = None
+
+    def append_done(self) -> None:
+        """Write a ``Done.`` marker line to close a turn."""
+        self.write("[dim]\u2022 Done.[/dim]")
 
     # ------------------------------------------------------------------ streaming
 
@@ -119,8 +125,10 @@ class TranscriptView(RichLog):
             return ""
         full_text = self._streamer.full_text
         self._truncate_to(self._stream_baseline)
+        start = self._stream_baseline
         self._folders.append(self._streamer)
-        self._fold_baselines.append(self._stream_baseline)
+        self._fold_baselines.append(start)
+        self._fold_line_counts.append(len(self.lines) - start)
         self._streamer = None
         self._stream_baseline = None
         rendered = self._folders[-1].render()
@@ -140,7 +148,8 @@ class TranscriptView(RichLog):
 
         * No active folder: activate the last folder, expand it.
         * Active folder expanded: fold it, move cursor to the previous
-          folder (cyclic), expand that one.
+          folder (cyclic), expand that one.  If the cursor lands on the
+          same folder (only one folder), leave it folded.
         * Active folder folded: expand it.
         """
         if not self._folders:
@@ -153,26 +162,28 @@ class TranscriptView(RichLog):
             folder = self._folders[idx]
             if folder.expanded:
                 self._re_render_folder(idx, expand=False)
-                self._active_folder_idx = (idx - 1) % len(self._folders)
-                self._re_render_folder(self._active_folder_idx, expand=True)
+                next_idx = (idx - 1) % len(self._folders)
+                if next_idx != idx:
+                    self._active_folder_idx = next_idx
+                    self._re_render_folder(next_idx, expand=True)
             else:
                 self._re_render_folder(idx, expand=True)
 
     # ------------------------------------------------------------------ internal
 
     def _re_render_folder(self, idx: int, expand: bool) -> None:
-        """Re-render a single folder in-place.
+        """Re-render a single folder in-place using precise line boundaries.
 
-        Truncates lines to the folder's baseline, writes the new
-        (folded/expanded) content, then restores subsequent lines
-        and adjusts later baselines for the line-count delta.
+        Truncates only the folder's own lines (``baseline[i]`` through
+        ``baseline[i] + line_count[i]``), writes the new content, then
+        restores any non-folder lines that came after.  This preserves
+        blank lines, user messages, and other content that lives
+        between folders.
         """
         start = self._fold_baselines[idx]
-        if idx + 1 < len(self._fold_baselines):
-            end = self._fold_baselines[idx + 1]
-        else:
-            end = len(self.lines)
-        after = self.lines[end:]
+        line_count = self._fold_line_counts[idx]
+        folder_end = min(start + line_count, len(self.lines))
+        after = self.lines[folder_end:]
         self._truncate_to(start)
         folder = self._folders[idx]
         if expand:
@@ -182,7 +193,7 @@ class TranscriptView(RichLog):
         rendered = folder.render()
         if rendered:
             self.write(rendered)
-        old_end = end
+        old_end = folder_end
         new_end = len(self.lines)
         self.lines.extend(after)
         delta = new_end - old_end

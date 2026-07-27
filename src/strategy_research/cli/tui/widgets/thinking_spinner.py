@@ -1,16 +1,30 @@
-"""ThinkingSpinner — inline spinner shown in TranscriptView while waiting for LLM.
+"""ThinkingSpinner - inline spinner shown in TranscriptView while waiting for LLM.
 
 Displays a brand-colored spinning indicator with elapsed time until the first
 token arrives. Auto-hides when thinking_end event fires.
+
+Verb pool: cycles through a set of action verbs every 2s to give the
+user a sense of progress.
 """
 from __future__ import annotations
 
+import random
 import time
-from typing import Any
+from typing import Any, List
 
 from textual.widgets import Static
 
 from strategy_research.cli.tui.theme import brand_tokens
+
+_VERB_POOL: List[str] = [
+    "thinking",
+    "analyzing",
+    "searching",
+    "reasoning",
+    "writing",
+]
+
+_VERB_INTERVAL_S: float = 2.0
 
 
 class ThinkingSpinner(Static):
@@ -29,17 +43,25 @@ class ThinkingSpinner(Static):
         self._active = False
         self._start_time: float = 0.0
         self._timer: Any = None
+        self._verb_timer: Any = None
         self._verb: str = "thinking"
+        self._verb_idx: int = 0
 
-    def start(self, verb: str = "thinking") -> None:
+    def start(self, verb: str = "") -> None:
         """Start the spinner."""
         self._active = True
-        self._verb = verb
+        if verb:
+            self._verb = verb
+        else:
+            self._verb_idx = 0
+            self._verb = _VERB_POOL[0]
         self._start_time = time.time()
         self.visible = True
         self._tick()
         if self._timer is None:
             self._timer = self.set_interval(0.1, self._tick)
+        if self._verb_timer is None:
+            self._verb_timer = self.set_interval(_VERB_INTERVAL_S, self._rotate_verb)
 
     def stop(self) -> None:
         """Stop the spinner."""
@@ -48,6 +70,14 @@ class ThinkingSpinner(Static):
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
+        if self._verb_timer is not None:
+            self._verb_timer.cancel()
+            self._verb_timer = None
+
+    def _rotate_verb(self) -> None:
+        """Cycle to the next verb in the pool."""
+        self._verb_idx = (self._verb_idx + 1) % len(_VERB_POOL)
+        self._verb = _VERB_POOL[self._verb_idx]
 
     def _tick(self) -> None:
         """Update spinner display."""

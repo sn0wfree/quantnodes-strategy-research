@@ -1,30 +1,27 @@
-"""ToolsRail — right-side panel showing Goal progress and Tool Timeline.
+"""ToolsRail - right-side panel showing Goal progress + unified Timeline.
 
-Replaces the old ActivityRail with a more structured layout:
-- Goal Progress: shows current research goal, milestones, and progress
-- Tool Timeline: shows recent tool calls with status and elapsed time
+Replaces the old GOAL+TOOLS split with a single timeline that shows
+every agent action in chronological order (vibe-trading style):
 
-Layout:
-    ┌──────────────────────────────────────────┐
-    │ GOAL                                     │
-    │ 研究A股低回撤量化策略                    │
-    │ [======------] 55%  3/5                  │
-    │ ● step_5 ⏳ running                     │
-    │ ● step_4 ✔ done                         │
-    ├──────────────────────────────────────────┤
-    │ TOOLS                                    │
-    │ ⏳ risk_analysis ...                     │
-    │ ✔ backtest_result 5.2s                  │
-    ├──────────────────────────────────────────┤
-    │ 10/12 tools(2 running)                  │
-    └──────────────────────────────────────────┘
+    ┌──────────────────────────────────────┐
+    │ GOAL                                 │
+    │ 研究A股低回撤量化策略                │
+    │ [======------] 55%  3/5              │
+    ├──────────────────────────────────────┤
+    │ TIMELINE                             │
+    │ • backtest 5.2s                      │
+    │   └ progress: 50% done               │
+    │ • compacted (12k→4k)                 │
+    │ ⏳ risk_analysis ...                 │
+    ├──────────────────────────────────────┤
+    │ iter 2/10  3 tools                   │
+    └──────────────────────────────────────┘
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from textual.widget import Widget
 from textual.widgets import Static
 
 from strategy_research.cli.tui.theme import brand_tokens
@@ -38,12 +35,14 @@ class Milestone:
 
 
 @dataclass
-class ToolEvent:
-    """A single tool call event."""
-    tool: str
-    status: str  # "call" | "result" | "error"
+class TimelineEntry:
+    """A single entry in the unified timeline."""
+    kind: str  # "tool" | "compact" | "info"
+    label: str  # tool name or compact summary
+    status: str  # "running" | "done" | "error" | "info"
     duration_ms: Optional[int] = None
-    preview: str = ""
+    detail: str = ""  # last progress detail (shown as └ sub-line)
+    iter: Optional[int] = None
 
 
 def _format_duration(ms: Optional[int]) -> str:
@@ -66,17 +65,18 @@ def _milestone_icon(status: str) -> str:
     }.get(status, "○")
 
 
-def _tool_icon(status: str) -> str:
-    """Return icon for tool event status."""
+def _entry_icon(status: str) -> str:
+    """Return icon for timeline entry status."""
     return {
-        "call": "⏳",
-        "result": "✔",
+        "running": "⏳",
+        "done": "•",
         "error": "✘",
-    }.get(status, "·")
+        "info": "•",
+    }.get(status, "•")
 
 
 class ToolsRail(Static):
-    """Right-panel showing Goal progress and Tool Timeline."""
+    """Right-panel showing Goal progress + unified Timeline."""
 
     DEFAULT_CSS = """
     ToolsRail {
@@ -99,9 +99,11 @@ class ToolsRail(Static):
         self._goal_criteria_total: int = 0
         self._goal_criteria_done: int = 0
         self._milestones: List[Milestone] = []
-        self._tools: List[ToolEvent] = []
+        self._timeline: List[TimelineEntry] = []
         self._max_milestones: int = 5
-        self._max_tools: int = 10
+        self._max_timeline: int = 12
+        self._iter: int = 0
+        self._iter_max: int = 0
 
     def update_goal(
         self,
@@ -125,51 +127,82 @@ class ToolsRail(Static):
             self._milestones = milestones
         self._refresh()
 
-    def add_tool_event(self, event: ToolEvent) -> None:
-        """Add a tool event to the timeline."""
-        self._tools.append(event)
-        # Keep only the last N events
-        if len(self._tools) > self._max_tools:
-            self._tools = self._tools[-self._max_tools:]
+    def set_iter(self, iteration: int, max_iterations: int = 0) -> None:
+        """Update the current iteration counter."""
+        self._iter = iteration
+        if max_iterations:
+            self._iter_max = max_iterations
         self._refresh()
 
     def handle_event(self, event_type: str, data: dict) -> None:
-        """Handle events from AgentLoop (tool_call / tool_result)."""
+        """Handle events from AgentLoop."""
         if event_type == "tool_call":
-            self.add_tool_event(ToolEvent(
-                tool=data.get("tool", "?"),
-                status="call",
+            self._timeline.append(TimelineEntry(
+                kind="tool",
+                label=data.get("tool", "?"),
+                status="running",
+                iter=data.get("iter"),
             ))
+            self._trim_timeline()
+            self._refresh()
         elif event_type == "tool_result":
-            # Find the last matching tool with status "call" and update it
-            for event in reversed(self._tools):
-                if event.tool == data.get("tool") and event.status == "call":
-                    event.status = "result" if data.get("ok", True) else "error"
-                    event.duration_ms = data.get("elapsed_ms")
+            tool_name = data.get("tool", "?")
+            for entry in reversed(self._timeline):
+                if entry.kind == "tool" and entry.label == tool_name and entry.status == "running":
+                    entry.status = "done" if data.get("status", "ok") == "ok" else "error"
+                    if data.get("status") == "error":
+                        entry.status = "error"
+                    entry.duration_ms = data.get("elapsed_ms")
                     break
             self._refresh()
+        elif event_type == "tool_progress":
+            detail = data.get("detail", data.get("message", ""))
+            if not detail:
+                return
+            for entry in reversed(self._timeline):
+                if entry.kind == "tool" and entry.status == "running":
+                    entry.detail = detail
+                    break
+            self._refresh()
+        elif event_type == "tool_heartbeat":
+            for entry in reversed(self._timeline):
+                if entry.kind == "tool" and entry.status == "running":
+                    if data.get("detail"):
+                        entry.detail = data["detail"]
+                    break
+            self._refresh()
+        elif event_type == "compact":
+            before = data.get("before_tokens", "?")
+            after = data.get("after_tokens", "?")
+            self._timeline.append(TimelineEntry(
+                kind="compact",
+                label=f"compacted ({before}k→{after}k)",
+                status="info",
+                iter=data.get("iter"),
+            ))
+            self._trim_timeline()
+            self._refresh()
+        elif event_type == "iter_start":
+            self.set_iter(data.get("iteration", 0), data.get("max_iterations", 0))
+        elif event_type == "iter_end":
+            pass
 
-    def clear_tools(self) -> None:
-        """Clear all tool events."""
-        self._tools.clear()
+    def clear_timeline(self) -> None:
+        """Clear all timeline entries."""
+        self._timeline.clear()
         self._refresh()
+
+    def _trim_timeline(self) -> None:
+        if len(self._timeline) > self._max_timeline:
+            self._timeline = self._timeline[-self._max_timeline:]
 
     def _refresh(self) -> None:
         """Re-render the entire rail content."""
         parts: List[str] = []
-
-        # Goal section
         parts.append(self._render_goal())
-
-        # Separator
         parts.append("[dim]──────────────────────────────[/dim]")
-
-        # Tools section
-        parts.append(self._render_tools())
-
-        # Footer
+        parts.append(self._render_timeline())
         parts.append(self._render_footer())
-
         content = "\n".join(parts)
         self.update(content)
 
@@ -191,7 +224,6 @@ class ToolsRail(Static):
                 f"{self._goal_criteria_done}/{self._goal_criteria_total}"
             )
 
-        # Milestones (newest first, max 5)
         visible = self._milestones[:self._max_milestones]
         for m in visible:
             icon = _milestone_icon(m.status)
@@ -205,29 +237,39 @@ class ToolsRail(Static):
 
         return "\n".join(lines)
 
-    def _render_tools(self) -> str:
-        """Render the tools section."""
+    def _render_timeline(self) -> str:
+        """Render the unified timeline section."""
         lines: List[str] = []
-        lines.append("[bold]TOOLS[/bold]")
+        lines.append("[bold]TIMELINE[/bold]")
 
-        for event in self._tools[-self._max_tools:]:
-            icon = _tool_icon(event.status)
-            name = event.tool[:15] + "..." if len(event.tool) > 15 else event.tool
-            duration = _format_duration(event.duration_ms)
-            lines.append(f"{icon} {name}  {duration}")
+        for entry in self._timeline[-self._max_timeline:]:
+            icon = _entry_icon(entry.status)
+            if entry.status == "running":
+                lines.append(f"{icon} {entry.label} ...")
+            else:
+                duration = _format_duration(entry.duration_ms)
+                lines.append(f"{icon} {entry.label} {duration}")
+            if entry.detail:
+                lines.append(f"  [dim]└ {entry.detail}[/dim]")
+
+        if not self._timeline:
+            lines.append("[dim](idle)[/dim]")
 
         return "\n".join(lines)
 
     def _render_footer(self) -> str:
-        """Render the footer with tool counts."""
-        total = len(self._tools)
-        running = sum(1 for t in self._tools if t.status == "call")
-        done = sum(1 for t in self._tools if t.status == "result")
-        error = sum(1 for t in self._tools if t.status == "error")
-
+        """Render the footer with iter + tool counts."""
+        parts: List[str] = []
+        if self._iter_max > 0:
+            parts.append(f"iter {self._iter}/{self._iter_max}")
+        total = len(self._timeline)
+        running = sum(1 for t in self._timeline if t.status == "running")
+        done = sum(1 for t in self._timeline if t.status == "done")
         if running > 0:
-            return f"{done}/{total} tools({running} running)"
-        return f"{total} tools"
+            parts.append(f"{done}/{total} tools({running} running)")
+        elif total > 0:
+            parts.append(f"{total} tools")
+        return "  ".join(parts) if parts else ""
 
 
 def _progress_bar(value: int, max_value: int, width: int = 10) -> str:
@@ -239,4 +281,4 @@ def _progress_bar(value: int, max_value: int, width: int = 10) -> str:
     return "[" + "=" * filled + "-" * (width - filled) + "]"
 
 
-__all__ = ["ToolsRail", "Milestone", "ToolEvent"]
+__all__ = ["ToolsRail", "Milestone", "TimelineEntry"]

@@ -6,13 +6,14 @@
  *     ├─ #main-row  (horizontal split, fills)
  *     │    ├─ #sidebar  (26 cols, hidden by default, Ctrl+1)
  *     │    ├─ #transcript  (1fr - persistent chat log, no max_lines)
- *     │    └─ #rail  (36 cols - goal + tools, Ctrl+2)
+ *     │    └─ #rail  (36 cols - goal + timeline, Ctrl+2)
  *     ├─ ThinkingSpinner  (height 1 - spinner, hidden when idle)
  *     ├─ #input  (height 3 - bottom prompt)
  *     └─ HintFooter  (1 row - hint bar / status)
  *
  * Streaming + fold happen inside TranscriptView (no separate widget).
  * Ctrl+E toggles fold/expand of the most recent folded record.
+ * ToolsRail shows a unified timeline (vibe-trading style).
  *
  * See docs/tui-display-philosophy.md for design principles.
  */

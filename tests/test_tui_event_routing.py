@@ -1,0 +1,317 @@
+"""Tests for Stage 2 — TUI event routing via AgentLoop.
+
+Verifies that ``app.route_agent_event`` correctly dispatches AgentLoop
+events to the right widgets, and that ``ChatSession._run_agent_loop``
+wires the callback properly.
+"""
+from __future__ import annotations
+
+from typing import Any
+from unittest import mock
+
+import pytest
+
+from strategy_research.cli.tui.app import ResearchApp
+from strategy_research.cli.tui.widgets.tools_rail import TimelineEntry
+
+
+class _CaptureSink:
+    """Collect every event passed to on_event."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    def __call__(self, event_type: str, data: dict[str, Any]) -> None:
+        self.events.append((event_type, dict(data)))
+
+
+class TestRouteAgentEvent:
+    def _app(self) -> ResearchApp:
+        return ResearchApp(skip_resume=True)
+
+    def test_text_delta_calls_update_streaming_delta(self):
+        app = self._app()
+        with mock.patch.object(app, "update_streaming_delta") as m:
+            app.route_agent_event("text_delta", {"text": "hi"})
+        m.assert_called_once_with("hi")
+
+    def test_tool_call_dispatches_to_write_rail(self):
+        app = self._app()
+        with mock.patch.object(app, "write_rail") as m:
+            app.route_agent_event(
+                "tool_call",
+                {"tool": "read_file", "arguments": {"p": "/x"}, "call_id": "c1"},
+            )
+        m.assert_called_once()
+        event_type, payload = m.call_args.args[0], m.call_args.args[1]
+        assert event_type == "tool_call"
+        assert payload["tool"] == "read_file"
+
+    def test_tool_result_dispatches_to_write_rail(self):
+        app = self._app()
+        with mock.patch.object(app, "write_rail") as m:
+            app.route_agent_event(
+                "tool_result",
+                {
+                    "tool": "read_file",
+                    "call_id": "c1",
+                    "status": "ok",
+                    "ok": True,
+                    "elapsed_ms": 100,
+                    "preview": "data",
+                },
+            )
+        m.assert_called_once()
+        event_type, payload = m.call_args.args[0], m.call_args.args[1]
+        assert event_type == "tool_result"
+        assert payload["tool"] == "read_file"
+
+    def test_tool_progress_dispatches_to_write_rail(self):
+        app = self._app()
+        with mock.patch.object(app, "write_rail") as m:
+            app.route_agent_event(
+                "tool_progress",
+                {
+                    "tool": "dl",
+                    "call_id": "c1",
+                    "stage": "fetch",
+                    "current": 5,
+                    "total": 10,
+                    "message": "downloading",
+                },
+            )
+        m.assert_called_once()
+
+    def test_tool_heartbeat_dispatches_to_write_rail(self):
+        app = self._app()
+        with mock.patch.object(app, "write_rail") as m:
+            app.route_agent_event(
+                "tool_heartbeat",
+                {"tool": "t", "call_id": "c1", "elapsed_s": 5.2},
+            )
+        m.assert_called_once()
+
+    def test_compact_dispatches_to_write_rail(self):
+        app = self._app()
+        with mock.patch.object(app, "write_rail") as m:
+            app.route_agent_event(
+                "compact",
+                {"layer": "microcompact", "iteration": 1, "summary": "ctx"},
+            )
+        m.assert_called_once()
+
+    def test_iter_start_calls_start_thinking(self):
+        app = self._app()
+        with mock.patch.object(app, "start_thinking") as m:
+            app.route_agent_event("iter_start", {"iteration": 1})
+        m.assert_called_once()
+
+    def test_iter_end_calls_stop_thinking(self):
+        app = self._app()
+        with mock.patch.object(app, "stop_thinking") as m:
+            app.route_agent_event("iter_end", {"iteration": 1})
+        m.assert_called_once()
+
+    def test_iter_end_calls_append_done(self):
+        app = self._app()
+        mock_tv = mock.MagicMock()
+        with mock.patch.object(app, "stop_thinking"), \
+             mock.patch.object(app, "query_one", return_value=mock_tv):
+            app.route_agent_event("iter_end", {"iteration": 1})
+        mock_tv.append_done.assert_called_once()
+
+    def test_thinking_start_calls_start_thinking(self):
+        app = self._app()
+        with mock.patch.object(app, "start_thinking") as m:
+            app.route_agent_event("thinking_start", {})
+        m.assert_called_once()
+
+    def test_thinking_end_calls_stop_thinking(self):
+        app = self._app()
+        with mock.patch.object(app, "stop_thinking") as m:
+            app.route_agent_event("thinking_end", {})
+        m.assert_called_once()
+
+    def test_llm_usage_updates_header_token_count(self):
+        app = self._app()
+        with mock.patch.object(app, "update_header") as m:
+            app.route_agent_event(
+                "llm_usage", {"output_tokens": 500}
+            )
+        m.assert_called_once_with(token_used=500)
+
+    def test_error_posts_message_to_transcript(self):
+        app = self._app()
+        with mock.patch.object(app, "query_one") as q:
+            tv = mock.MagicMock()
+            q.return_value = tv
+            app.route_agent_event(
+                "error", {"message": "rate limit", "fatal": True}
+            )
+        # Verify a WriteTranscript message was posted with the error
+        tv.post_message.assert_called_once()
+        msg = tv.post_message.call_args.args[0]
+        assert "rate limit" in str(msg.content)
+
+    def test_thinking_done_is_silent(self):
+        """thinking_done is a transition marker — no widget dispatch."""
+        app = self._app()
+        with mock.patch.object(app, "start_thinking") as s, \
+             mock.patch.object(app, "stop_thinking") as p, \
+             mock.patch.object(app, "write_rail") as w, \
+             mock.patch.object(app, "update_streaming_delta") as u:
+            app.route_agent_event("thinking_done", {})
+        s.assert_not_called()
+        p.assert_not_called()
+        w.assert_not_called()
+        u.assert_not_called()
+
+
+class TestUpdateStreamingDelta:
+    def test_starts_streaming_if_idle(self):
+        """First delta after no active session begins a new streaming line."""
+        from strategy_research.cli.tui.widgets.transcript import TranscriptView
+
+        app = ResearchApp(skip_resume=True)
+        tv = mock.MagicMock(spec=TranscriptView)
+        tv._streamer = None
+        tv._stream_baseline = 0
+        # Simulate: begin_streaming creates a new streamer
+        new_streamer = mock.MagicMock()
+        tv.begin_streaming.side_effect = lambda: setattr(tv, "_streamer", new_streamer)
+        with mock.patch.object(app, "query_one", return_value=tv):
+            app.update_streaming_delta("hello")
+        # begin_streaming should be invoked since no active streamer
+        tv.begin_streaming.assert_called_once()
+        new_streamer.append_delta.assert_called_once_with("hello")
+        # Write rendered text
+        tv.write.assert_called()
+
+    def test_appends_to_existing_streamer(self):
+        """Subsequent deltas append to the active streamer."""
+        from strategy_research.cli.tui.widgets.streaming_text import StreamingText
+
+        app = ResearchApp(skip_resume=True)
+        tv = mock.MagicMock()
+        st = mock.MagicMock(spec=StreamingText)
+        tv._streamer = st
+        tv._stream_baseline = 0
+        with mock.patch.object(app, "query_one", return_value=tv):
+            app.update_streaming_delta("more")
+        st.append_delta.assert_called_once_with("more")
+        # No new streaming session
+        tv.begin_streaming.assert_not_called()
+
+
+class TestSessionRunAgentLoop:
+    """Smoke test that ChatSession._run_agent_loop wires on_event."""
+
+    def test_session_builds_agent_loop_with_routing(self):
+        from strategy_research.cli.tui.session import ChatSession
+
+        app = ResearchApp(skip_resume=True)
+        # Stub out app route so we can observe calls
+        captured: list[tuple[str, dict]] = []
+        app.route_agent_event = lambda et, data: captured.append((et, data))
+
+        ctx = mock.MagicMock()
+        history_list: list[dict] = []
+        ctx.history = history_list
+        ctx.session_id = "test-sid"
+
+        llm_client = mock.MagicMock()
+        llm_client.config = mock.MagicMock()
+
+        session = ChatSession(ctx, app=app, llm_client=llm_client)
+
+        # Patch AgentLoop to return a fake result
+        fake_result = mock.MagicMock()
+        fake_result.answer = "hello"
+        fake_result.error = None
+        with mock.patch(
+            "strategy_research.core.agent.loop.AgentLoop"
+        ) as MockLoop:
+            instance = mock.MagicMock()
+            instance.arun = mock.AsyncMock(return_value=fake_result)
+            MockLoop.return_value = instance
+
+            import asyncio
+            asyncio.run(session._run_agent_loop("hi"))
+
+        # AgentLoop was constructed with on_event = app.route_agent_event
+        ctor_kwargs = MockLoop.call_args.kwargs
+        assert ctor_kwargs["on_event"] is app.route_agent_event
+        assert ctor_kwargs["stream_mode"] is False
+        assert ctor_kwargs["max_iterations"] == 1
+        assert ctor_kwargs["session_id"] == "test-sid"
+
+        # arun() was called with the task
+        instance.arun.assert_called_once_with("hi")
+
+        # Result appended to ctx.history
+        assert len(history_list) == 1
+        assert history_list[0]["role"] == "assistant"
+        assert history_list[0]["content"] == "hello"
+
+    def test_session_emits_done_after_loop(self):
+        """end_streaming + stop_thinking are called after loop completes."""
+        from strategy_research.cli.tui.session import ChatSession
+
+        app = ResearchApp(skip_resume=True)
+        ctx = mock.MagicMock()
+        ctx.history = []
+        ctx.session_id = "x"
+
+        llm_client = mock.MagicMock()
+        llm_client.config = mock.MagicMock()
+
+        session = ChatSession(ctx, app=app, llm_client=llm_client)
+
+        fake_result = mock.MagicMock()
+        fake_result.answer = "answer"
+        fake_result.error = None
+
+        with mock.patch(
+            "strategy_research.core.agent.loop.AgentLoop"
+        ) as MockLoop:
+            instance = mock.MagicMock()
+            instance.arun = mock.AsyncMock(return_value=fake_result)
+            MockLoop.return_value = instance
+
+            with mock.patch.object(app, "stop_thinking") as st, \
+                 mock.patch.object(app, "end_streaming") as es:
+                import asyncio
+                asyncio.run(session._run_agent_loop("task"))
+
+        st.assert_called_once()
+        es.assert_called_once()
+
+
+class TestEventTypeMatrix:
+    """All expected event types should be handled (no AttributeError)."""
+
+    EVENT_TYPES = [
+        "iter_start",
+        "iter_end",
+        "thinking_start",
+        "thinking_done",
+        "thinking_end",
+        "text_delta",
+        "llm_usage",
+        "tool_call",
+        "tool_result",
+        "tool_progress",
+        "tool_heartbeat",
+        "compact",
+        "error",
+    ]
+
+    def test_all_event_types_handled_gracefully(self):
+        app = ResearchApp(skip_resume=True)
+        for et in self.EVENT_TYPES:
+            try:
+                app.route_agent_event(et, {})
+            except Exception as exc:
+                pytest.fail(
+                    f"route_agent_event crashed on {et!r}: {type(exc).__name__}: {exc}"
+                )

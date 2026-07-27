@@ -44,7 +44,7 @@ from strategy_research.cli.tui.widgets import (
     ResumeOrNewModal,
     StatusHeader,
     ThinkingSpinner,
-    ToolEvent,
+    TimelineEntry,
     ToolsRail,
     TranscriptView,
 )
@@ -200,21 +200,22 @@ class ResearchApp(App):
             return
         transcript.post_message(WriteTranscript(content=content))
 
-    def write_rail(self, event: Any) -> None:
-        """Forward an event into the mounted ToolsRail."""
+    def _write_transcript(self, content: Any) -> None:
+        """Internal alias used by ``on_mount`` resume helpers.
+
+        Delegates to the public :meth:`write_transcript` so internal
+        callers (``_on_resume_choice``, ``_resume_most_recent_session``)
+        can post session-info lines without hitting ``AttributeError``.
+        """
+        self.write_transcript(content)
+
+    def write_rail(self, event_type: str, data: dict) -> None:
+        """Forward an agent event into the mounted ToolsRail."""
         try:
             rail = self.query_one(ToolsRail)
         except Exception:
             return
-        from strategy_research.cli.tui.widgets.tools_rail import ToolEvent
-        if isinstance(event, dict):
-            tool_event = ToolEvent(
-                tool=event.get("tool", "?"),
-                status=event.get("phase", "call"),
-                duration_ms=event.get("duration_ms"),
-                preview=event.get("preview", ""),
-            )
-            rail.add_tool_event(tool_event)
+        rail.handle_event(event_type, data)
 
     def update_header(self, **kwargs: Any) -> None:
         """Update the StatusHeader with new values."""
@@ -236,14 +237,44 @@ class ResearchApp(App):
         """Route AgentLoop events to the appropriate widget."""
         if event_type == "text_delta":
             self.update_streaming_delta(data.get("text", ""))
-        elif event_type in ("tool_call", "tool_result", "tool_progress"):
-            self.write_rail(data)
+        elif event_type == "thinking_done":
+            # Transition marker: thinking → text. Streaming already started.
+            pass
+        elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat", "compact"):
+            self.write_rail(event_type, data)
         elif event_type == "llm_usage":
             self.update_header(token_used=data.get("output_tokens", 0))
+        elif event_type == "iter_start":
+            self.start_thinking()
+            self.update_header(
+                iter_count=data.get("iteration", 0),
+                iter_max=data.get("max_iterations", 0),
+            )
+            try:
+                rail = self.query_one(ToolsRail)
+                rail.set_iter(data.get("iteration", 0), data.get("max_iterations", 0))
+            except Exception:
+                pass
+        elif event_type == "iter_end":
+            self.stop_thinking()
+            try:
+                tv = self.query_one(TranscriptView)
+                tv.append_done()
+            except Exception:
+                pass
         elif event_type == "thinking_start":
             self.start_thinking()
         elif event_type == "thinking_end":
             self.stop_thinking()
+        elif event_type == "error":
+            try:
+                tv = self.query_one(TranscriptView)
+                from strategy_research.cli.tui.messages import WriteTranscript
+                tv.post_message(WriteTranscript(
+                    content=f"[red]Agent error:[/red] {data.get('message', 'unknown')}"
+                ))
+            except Exception:
+                pass
 
     def start_thinking(self) -> None:
         try:
@@ -279,7 +310,19 @@ class ResearchApp(App):
             pass
 
     def update_streaming_delta(self, delta: str) -> None:
-        pass
+        """Accumulate a text_delta into the active streaming session."""
+        try:
+            tv = self.query_one(TranscriptView)
+            if tv._streamer is None:
+                # No active streaming session — start one for this delta
+                tv.begin_streaming()
+            tv._streamer.append_delta(delta)
+            tv._truncate_to(tv._stream_baseline)
+            rendered = tv._streamer.render()
+            if rendered:
+                tv.write(rendered)
+        except Exception:
+            pass
 
     def end_streaming(self, suffix: str = "") -> str:
         try:

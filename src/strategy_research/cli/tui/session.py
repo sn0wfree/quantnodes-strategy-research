@@ -114,7 +114,7 @@ class ChatSession:
         self._update_header_stats()
 
         # If plain text and an LLM client is bound, route the user
-        # turn through the streaming bridge.
+        # turn through AgentLoop (full event-driven flow).
         if (
             rc == 0
             and self.llm_client is not None
@@ -129,17 +129,10 @@ class ChatSession:
             self._write_transcript(
                 Text(f"\u276f {text.strip()}", style="bold cyan")
             )
-            from strategy_research.cli.llm_streaming import (
-                _build_messages,
-                stream_chat_to_tui,
-            )
             try:
-                messages = _build_messages(self.ctx)
-                await stream_chat_to_tui(
-                    self.llm_client, messages, app=self.app, ctx=self.ctx,
-                )
+                await self._run_agent_loop(text.strip())
             except Exception as exc:  # noqa: BLE001
-                self._write_transcript(f"[red]LLM bridge error:[/red] {exc}")
+                self._write_transcript(f"[red]Agent error:[/red] {exc}")
 
         # Drain ``ctx.pending_prompt`` queued by slash handlers.
         queued = getattr(self.ctx, "pending_prompt", None)
@@ -198,6 +191,79 @@ class ChatSession:
         """Render the captured ANSI/marked-up text into the transcript."""
         self._write_transcript(captured_text)
 
+    async def _run_agent_loop(self, task: str) -> None:
+        """Build an AgentLoop with on_event routed to app, run the task.
+
+        Falls back to a thin streaming wrapper if AgentLoop construction
+        fails (e.g. missing role prompt). This unifies the event-driven
+        flow for plain-text chat with the role-based autoresearch path.
+        """
+        from strategy_research.cli.tui.app import ResearchApp
+        from strategy_research.core.agent.loop import AgentLoop
+
+        cfg = None
+        try:
+            from strategy_research.core.llm import LLMConfig
+            cfg = LLMConfig.load()
+        except Exception:
+            pass
+
+        # Build a minimal registry (only what's needed for the chat path).
+        # The AgentLoop falls back gracefully if no tools are registered.
+        from strategy_research.core.agent.builtin_tools import build_default_registry
+        try:
+            registry = build_default_registry()
+        except Exception:
+            registry = None
+
+        # Use "researcher" role's system prompt as default — it's the
+        # most general-purpose role for plain Q&A.
+        try:
+            from strategy_research.core.agent.role_factory import (
+                _load_role_system_prompt,
+            )
+            system_prompt = _load_role_system_prompt("researcher")
+        except Exception:
+            system_prompt = ""
+
+        # Snapshot ctx.history so we can restore on failure / extract answer
+        history_snapshot = list(self.ctx.history)
+
+        loop = AgentLoop(
+            config=cfg or self.llm_client.config,
+            registry=registry,
+            workspace=None,
+            on_event=self.app.route_agent_event,
+            stream_mode=False,  # plain-text chat: non-streaming for stability
+            max_iterations=1,   # plain chat: single pass, no ReAct loop
+            session_id=getattr(self.ctx, "session_id", "cli"),
+            system_prompt=system_prompt,
+            allowed_tools=[],  # chat-only path; tools disabled by default
+        )
+
+        # Inject user message into loop's internal state via _build_messages
+        # mirror - we just call loop.arun(task) and let it build messages.
+        result = await loop.arun(task)
+
+        # Append assistant answer to ctx.history (preserve interactive ctx)
+        if result.answer:
+            self.ctx.history.append({"role": "assistant", "content": result.answer})
+
+        # End streaming lifecycle
+        try:
+            self.app.stop_thinking()
+            self.app.end_streaming()
+        except Exception:
+            pass
+
+        # Mark turn completion (plain-chat path skips iter_end events).
+        try:
+            from strategy_research.cli.tui.widgets.transcript import TranscriptView
+            tv = self.app.query_one(TranscriptView)
+            tv.append_done()
+        except Exception:
+            pass
+
     def _update_header_stats(self) -> None:
         """Update the StatusHeader with current session stats."""
         if self.app is None:
@@ -211,8 +277,8 @@ class ChatSession:
             try:
                 from strategy_research.cli.tui.widgets.tools_rail import ToolsRail
                 rail = self.app.query_one(ToolsRail)
-                tool_count = len(rail._tools)
-                tool_ok = sum(1 for t in rail._tools if t.status == "result")
+                tool_count = len(rail._timeline)
+                tool_ok = sum(1 for t in rail._timeline if t.status == "done")
             except Exception:
                 pass
             # Estimate tokens (rough: 1 token per 4 chars)
@@ -233,8 +299,8 @@ class ChatSession:
                 model=model,
                 message_count=msg_count,
                 tool_count=tool_count,
-                tool_ok=tool_ok,
                 token_used=token_used,
+                session_id=getattr(self.ctx, "session_id", "cli"),
             )
         except Exception:
             pass

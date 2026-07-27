@@ -197,6 +197,7 @@ class _FakeTranscriptViewSink:
         self._streamer = None
         self._folders: list = []
         self._fold_baselines: list = []
+        self._fold_line_counts: list = []
         self._active_folder_idx: int | None = None
 
     def post_message(self, message) -> None:
@@ -233,8 +234,10 @@ class _FakeTranscriptViewSink:
             return ""
         full_text = self._streamer.full_text
         self._truncate_to(self._stream_baseline)
+        start = self._stream_baseline
         self._folders.append(self._streamer)
-        self._fold_baselines.append(self._stream_baseline)
+        self._fold_baselines.append(start)
+        self._fold_line_counts.append(len(self.lines) - start)
         self._streamer = None
         self._stream_baseline = None
         rendered = self._folders[-1].render()
@@ -258,18 +261,18 @@ class _FakeTranscriptViewSink:
             folder = self._folders[idx]
             if folder.expanded:
                 self._re_render_folder(idx, expand=False)
-                self._active_folder_idx = (idx - 1) % len(self._folders)
-                self._re_render_folder(self._active_folder_idx, expand=True)
+                next_idx = (idx - 1) % len(self._folders)
+                if next_idx != idx:
+                    self._active_folder_idx = next_idx
+                    self._re_render_folder(next_idx, expand=True)
             else:
                 self._re_render_folder(idx, expand=True)
 
     def _re_render_folder(self, idx: int, expand: bool) -> None:
         start = self._fold_baselines[idx]
-        if idx + 1 < len(self._fold_baselines):
-            end = self._fold_baselines[idx + 1]
-        else:
-            end = len(self.lines)
-        after = self.lines[end:]
+        line_count = self._fold_line_counts[idx]
+        folder_end = min(start + line_count, len(self.lines))
+        after = self.lines[folder_end:]
         self._truncate_to(start)
         folder = self._folders[idx]
         if expand:
@@ -279,7 +282,7 @@ class _FakeTranscriptViewSink:
         rendered = folder.render()
         if rendered:
             self.write(rendered)
-        old_end = end
+        old_end = folder_end
         new_end = len(self.lines)
         self.lines.extend(after)
         delta = new_end - old_end
@@ -496,12 +499,91 @@ async def test_begin_streaming_auto_folds_expanded_folder():
     assert tv._active_folder_idx is None
 
 
+@pytest.mark.asyncio
+async def test_user_messages_preserved_across_turns():
+    """Bug A: user messages written between folders survive auto-fold."""
+    app = _FakeApp()
+
+    # Turn 1: long text -> folder[0]
+    await stream_chat_to_tui(_FakeClient([_chunk("X" * 300)]), [], app=app)
+    tv = app._tv
+
+    # Simulate Turn 2 user message written after folder[0]
+    tv.write("")
+    tv.write("USER MSG TURN 2")
+
+    # Expand folder[0] so auto-fold has work to do
+    tv.toggle_fold()
+    assert tv._folders[0].expanded
+
+    # Auto-fold via begin_streaming
+    tv.begin_streaming()
+
+    # User message must survive
+    assert any("USER MSG TURN 2" in str(l) for l in tv.lines), \
+        f"User message lost! Lines: {tv.lines}"
+
+
+@pytest.mark.asyncio
+async def test_blank_lines_preserved_across_turns():
+    """Bug B: blank lines between folders survive auto-fold."""
+    app = _FakeApp()
+    await stream_chat_to_tui(_FakeClient([_chunk("Y" * 300)]), [], app=app)
+    tv = app._tv
+
+    tv.write("")
+    tv.write("MARKER LINE")
+
+    tv.toggle_fold()
+    tv.begin_streaming()
+
+    # Marker line preserved
+    assert any("MARKER LINE" in str(l) for l in tv.lines)
+    # Blank line preserved
+    assert "" in tv.lines
+
+
+@pytest.mark.asyncio
+async def test_re_render_preserves_inter_folder_content():
+    """Content between folders is preserved across re-renders."""
+    app = _FakeApp()
+    # Turn 1
+    await stream_chat_to_tui(_FakeClient([_chunk("A" * 300)]), [], app=app)
+    # User msg between turns
+    app._tv.write("")
+    app._tv.write("USER PROMPT")
+    # Turn 2
+    await stream_chat_to_tui(_FakeClient([_chunk("B" * 300)]), [], app=app)
+
+    tv = app._tv
+    assert len(tv._folders) == 2
+
+    # Re-render folder[0] (expand then fold)
+    tv.toggle_fold()  # expand last (folder[1])
+    tv.toggle_fold()  # fold folder[1], expand folder[0]
+    tv.toggle_fold()  # fold folder[0], expand folder[1]
+    tv.toggle_fold()  # fold folder[1], expand folder[0]
+
+    # User prompt still preserved
+    assert any("USER PROMPT" in str(l) for l in tv.lines)
+
+
+@pytest.mark.asyncio
+async def test_fake_app_write_transcript_helper():
+    """Bug C: ResearchApp._write_transcript delegates to write_transcript."""
+    from strategy_research.cli.tui.app import ResearchApp
+
+    app = ResearchApp(skip_resume=True)
+    # Should not raise AttributeError.
+    app._write_transcript("[muted]Started fresh session.[/muted]")
+
+
 # ─── ChatSession LLM integration ────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_chat_session_dispatches_plain_text_to_llm():
-    """When ``llm_client`` is bound, plain-text turns go through the LLM bridge."""
+    """When ``llm_client`` is bound, plain-text turns go through AgentLoop."""
     from strategy_research.cli.interactive.main import InteractiveContext
     from strategy_research.cli.tui.session import ChatSession
     from dataclasses import dataclass, field as dc_field
@@ -533,10 +615,16 @@ async def test_chat_session_dispatches_plain_text_to_llm():
         def update_streaming(self, full_text: str) -> None:
             pass
 
+        def update_streaming_delta(self, delta: str) -> None:
+            pass
+
         def end_streaming(self, suffix: str = "") -> str:
             return ""
 
         def update_header(self, **kw) -> None:
+            pass
+
+        def route_agent_event(self, event_type: str, data) -> None:
             pass
 
     @dataclass
@@ -546,8 +634,23 @@ async def test_chat_session_dispatches_plain_text_to_llm():
     ctx = _Ctx()
     app = _App()
     client = _FakeClient([_chunk("model reply here")])
+    # _run_agent_loop reads llm_client.config as a fallback
+    client.config = mock.MagicMock()
     s = ChatSession(ctx, app=app, llm_client=client)
-    rc = await s.dispatch("hi there")
+
+    # Stub AgentLoop to return a fake result
+    fake_result = mock.MagicMock()
+    fake_result.answer = "model reply here"
+    fake_result.error = None
+
+    # Patch at the source module since session.py imports lazily
+    with mock.patch("strategy_research.core.agent.loop.AgentLoop") as MockLoop, \
+         mock.patch("strategy_research.core.agent.builtin_tools.build_default_registry", return_value=None):
+        instance = mock.MagicMock()
+        instance.arun = mock.AsyncMock(return_value=fake_result)
+        MockLoop.return_value = instance
+        rc = await s.dispatch("hi there")
+
     assert rc == 0
     # Assistant reply appended.
     assert any(t.get("role") == "assistant" for t in ctx.history)

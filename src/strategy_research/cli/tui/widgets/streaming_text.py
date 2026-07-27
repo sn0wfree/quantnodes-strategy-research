@@ -8,26 +8,25 @@ representation. The host widget (:class:`TranscriptView`) calls
 Implements principles 2 (fold, not discard) and 3 (in-place replacement)
 from the TUI display philosophy.
 
-Render layout (when text exceeds ``_DISPLAY_CHARS``):
+Render layout (folded, when text exceeds ``_HEAD_CHARS + _TAIL_CHARS``):
 
-    [bold]一句话总结…[/bold]
-    [muted]↑ +N chars (ctrl+e to expand)[/muted]
-    ...tail content (last 200 chars)...
+    ...head content (first 80 chars)...
+    [muted]… +N chars (middle)  (ctrl+e to expand)[/muted]
+    ...tail content (last 120 chars)...
 
 When expanded:
 
-    [bold]一句话总结…[/bold]
     [muted]↓ N chars (ctrl+e to fold)[/muted]
     ...full text...
 
 Lifecycle:
-    * ``render()`` returns a truncated view with summary + fold indicator.
+    * ``render()`` returns a truncated view with head + middle + tail.
     * ``toggle_expand()`` / ``expand()`` / ``collapse()`` control state.
 """
 from __future__ import annotations
 
-_SUMMARY_CHARS = 60
-_DISPLAY_CHARS = 200
+_HEAD_CHARS = 80
+_TAIL_CHARS = 120
 
 
 class StreamingText:
@@ -68,41 +67,26 @@ class StreamingText:
     def expanded(self) -> bool:
         return self._expanded
 
-    def _summary(self) -> str:
-        """Extract a one-sentence summary (first sentence, capped at 60 chars)."""
-        text = self.full_text.strip()
-        if not text:
-            return ""
-        for sep in ("\n", "。", ". ", "！", "？", "!", "?"):
-            idx = text.find(sep)
-            if 0 < idx <= _SUMMARY_CHARS:
-                s = text[:idx].strip()
-                return s + "…" if idx < len(text) else s
-        if len(text) <= _SUMMARY_CHARS:
-            return text
-        return text[:_SUMMARY_CHARS].strip() + "…"
-
     def render(self) -> str:
         """Return the display string (folded or expanded)."""
         text = self.full_text
         if not text:
             return ""
-        if len(text) <= _DISPLAY_CHARS:
+        threshold = _HEAD_CHARS + _TAIL_CHARS
+        if len(text) <= threshold:
             return text
-        summary = self._summary()
         if self._expanded:
             return (
-                f"[bold]{summary}[/bold]\n"
                 f"[muted]\u2193 {len(text)} chars "
                 f"(ctrl+e to fold)[/muted]\n"
                 f"{text}"
             )
-        hidden = len(text) - _DISPLAY_CHARS
+        hidden = len(text) - _HEAD_CHARS - _TAIL_CHARS
         return (
-            f"[bold]{summary}[/bold]\n"
-            f"[muted]\u2191 +{hidden} chars "
+            f"{text[:_HEAD_CHARS]}\n"
+            f"[muted]\u2026 +{hidden} chars (middle)  "
             f"(ctrl+e to expand)[/muted]\n"
-            f"{text[-_DISPLAY_CHARS:]}"
+            f"{text[-_TAIL_CHARS:]}"
         )
 
 

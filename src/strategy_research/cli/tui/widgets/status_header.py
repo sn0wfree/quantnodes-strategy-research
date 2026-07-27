@@ -1,20 +1,19 @@
-"""StatusHeader — single-row header showing model, tokens, ctx, and stats.
+"""StatusHeader - single-row header showing model, tokens, ctx, and session id.
 
 Replaces the plain Textual Header with a status bar that displays:
 - Connection status (● live / idle / error)
 - Model name
 - Message count + tool count
 - Token usage + context window progress bar
-- Success rate
+- Session id (where the user can find it)
 
 Layout:
-    ● live  minimax-M3  │ 5 msg  3 tool │ 1.2k/128k [====] │ 2/3 ok
+    ● live  minimax-M3  │ 5 msg  3 tool │ 1.2k/128k [====] │ sid:cli
 """
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from textual.widget import Widget
 from textual.widgets import Static
 
 from strategy_research.cli.tui.theme import brand_tokens
@@ -39,14 +38,23 @@ def _format_token_count(n: int) -> str:
 def _status_dot(status: str) -> str:
     """Return colored status dot."""
     if status == "live":
-        return "[green]●[/green]"
+        return "[green]\u25cf[/green]"
     elif status == "error":
-        return "[red]●[/red]"
-    return "[dim]●[/dim]"
+        return "[red]\u25cf[/red]"
+    return "[dim]\u25cf[/dim]"
+
+
+def _short_sid(sid: str | None) -> str:
+    """Shorten a session id for the header (keep last 8 chars if long)."""
+    if not sid:
+        return "cli"
+    if len(sid) <= 12:
+        return sid
+    return "\u2026" + sid[-8:]
 
 
 class StatusHeader(Static):
-    """Single-row status header with model, tokens, ctx, and stats."""
+    """Single-row status header with model, tokens, ctx, and session id."""
 
     DEFAULT_CSS = """
     StatusHeader {
@@ -64,10 +72,11 @@ class StatusHeader(Static):
         self._model: str = "unknown"
         self._message_count: int = 0
         self._tool_count: int = 0
-        self._tool_ok: int = 0
         self._token_used: int = 0
         self._token_total: int = 128000
-        self._success_rate: str = ""
+        self._session_id: str = "cli"
+        self._iter_count: int = 0
+        self._iter_max: int = 0
 
     def update_status(
         self,
@@ -76,9 +85,11 @@ class StatusHeader(Static):
         model: Optional[str] = None,
         message_count: Optional[int] = None,
         tool_count: Optional[int] = None,
-        tool_ok: Optional[int] = None,
         token_used: Optional[int] = None,
         token_total: Optional[int] = None,
+        session_id: Optional[str] = None,
+        iter_count: Optional[int] = None,
+        iter_max: Optional[int] = None,
     ) -> None:
         """Update header fields and re-render."""
         if connection_status is not None:
@@ -89,42 +100,39 @@ class StatusHeader(Static):
             self._message_count = message_count
         if tool_count is not None:
             self._tool_count = tool_count
-        if tool_ok is not None:
-            self._tool_ok = tool_ok
         if token_used is not None:
             self._token_used = token_used
         if token_total is not None:
             self._token_total = token_total
-
-        # Compute success rate
-        if self._tool_count > 0:
-            self._success_rate = f"{self._tool_ok}/{self._tool_count}"
-        else:
-            self._success_rate = "0/0"
+        if session_id is not None:
+            self._session_id = session_id
+        if iter_count is not None:
+            self._iter_count = iter_count
+        if iter_max is not None:
+            self._iter_max = iter_max
 
         self._refresh()
 
     def _refresh(self) -> None:
         """Re-render the header content."""
-        tokens = brand_tokens()
-
-        # Build sections
         status_dot = _status_dot(self._connection_status)
         model = self._model
         msgs = f"{self._message_count} msg"
         tools = f"{self._tool_count} tool"
         token_str = f"{_format_token_count(self._token_used)}/{_format_token_count(self._token_total)}"
         bar = _progress_bar(self._token_used, self._token_total, width=8)
-        rate = self._success_rate
+        sid = _short_sid(self._session_id)
 
-        # Compose with separators
-        content = (
-            f"{status_dot} {model}"
-            f"  [dim]│[/dim]  {msgs}  {tools}"
-            f"  [dim]│[/dim]  {token_str} {bar}"
-            f"  [dim]│[/dim]  {rate}"
-        )
+        parts = [
+            f"{status_dot} {model}",
+            f"  [dim]\u2502[/dim]  {msgs}  {tools}",
+            f"  [dim]\u2502[/dim]  {token_str} {bar}",
+        ]
+        if self._iter_max > 0:
+            parts.append(f"  [dim]\u2502[/dim]  iter {self._iter_count}/{self._iter_max}")
+        parts.append(f"  [dim]\u2502[/dim]  sid:{sid}")
 
+        content = "".join(parts)
         self.update(content)
 
 
