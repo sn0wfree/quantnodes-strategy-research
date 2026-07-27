@@ -327,7 +327,13 @@ class ResearchApp(App):
             # render the remaining body as Markdown (no fold). Streaming
             # preview (text_delta) still strips think tags so the user
             # never sees internal reasoning during typing.
+            #
+            # Body content often contains inline JSON which Rich
+            # Markdown renders as garbled paragraph text.  We detect and
+            # reformat it into a fenced ```json``` block before passing
+            # to write_markdown.
             from strategy_research.cli.tui.text_filters import extract_thinking_tags
+            from strategy_research.cli.tui.content_formatter import reformat_body_content
             raw_content = data.get("content", "") or ""
             think_content, body_content = extract_thinking_tags(raw_content)
             try:
@@ -336,9 +342,10 @@ class ResearchApp(App):
                 # (collapsed by default; Ctrl+E to expand).
                 if think_content:
                     tv.append_thinking(think_content)
-                # Step 2: render body as Markdown, replacing the
-                # streaming preview in-place.
-                tv.write_assistant_message(body_content)
+                # Step 2: reformat JSON in body → fenced code block,
+                # then render as Markdown, replacing the streaming
+                # preview in-place.
+                tv.write_assistant_message(reformat_body_content(body_content))
             except Exception:
                 pass
         elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat"):
