@@ -77,6 +77,7 @@ class InteractiveContext:
     pending_prompt: str = ""
     pending_proposal: Optional[dict] = None
     last_recap_history_len: int = 0
+    interactive_mode: str = "chat"   # "chat" | "goal"
 
 
 # ─── Slash dispatch table ────────────────────────────────────────────────

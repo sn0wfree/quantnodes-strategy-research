@@ -113,6 +113,11 @@ class ChatSession:
         # Update header stats after each turn
         self._update_header_stats()
 
+        # Sync interactive mode (chat/goal) based on active GoalStore state.
+        # Must run AFTER process_turn (which may create/complete a goal)
+        # and BEFORE _run_agent_loop (which needs the mode to select prompt).
+        self._sync_interactive_mode()
+
         # If plain text and an LLM client is bound, route the user
         # turn through AgentLoop (full event-driven flow).
         if (
@@ -220,15 +225,24 @@ class ChatSession:
         except Exception:
             registry = None
 
-        # Use "researcher" role's system prompt as default — it's the
-        # most general-purpose role for plain Q&A.
-        try:
-            from strategy_research.core.agent.role_factory import (
-                _load_role_system_prompt,
-            )
-            system_prompt = _load_role_system_prompt("researcher")
-        except Exception:
-            system_prompt = ""
+        # Select system prompt based on interactive mode.
+        # Chat mode → conversational prompt (natural language output).
+        # Goal mode → researcher prompt (structured JSON output).
+        mode = getattr(self.ctx, "interactive_mode", "chat")
+        if mode == "goal":
+            try:
+                from strategy_research.core.agent.role_factory import (
+                    _load_role_system_prompt,
+                )
+                system_prompt = _load_role_system_prompt("researcher")
+            except Exception:
+                system_prompt = ""
+        else:
+            try:
+                from strategy_research.cli.tui import _CHAT_PROMPT_PATH
+                system_prompt = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
+            except Exception:
+                system_prompt = ""
 
         # Snapshot ctx.history so we can restore on failure / extract answer
         history_snapshot = list(self.ctx.history)
@@ -264,6 +278,27 @@ class ChatSession:
         # Done. marker is emitted by ``iter_end`` route handler — no
         # redundant append_done() here (which previously caused the
         # "• Done." ×2 bug).
+
+    def _sync_interactive_mode(self) -> None:
+        """Sync ``ctx.interactive_mode`` with GoalStore.
+
+        Called after each turn (post-``process_turn``, pre-``_run_agent_loop``)
+        so the mode reflects the current goal state.
+
+        - No active goal → ``"chat"`` (conversational prompt)
+        - Active goal   → ``"goal"``   (researcher prompt, JSON output)
+
+        Failures default to ``"chat"`` (safe fallback — the user always
+        gets *some* response, even if the goal DB is temporarily
+        unreachable).
+        """
+        try:
+            from strategy_research.core.goal import GoalStore
+            store = GoalStore()
+            goal = store.get_current_goal(self.ctx.session_id)
+            self.ctx.interactive_mode = "goal" if goal is not None else "chat"
+        except Exception:
+            self.ctx.interactive_mode = "chat"
 
     def _update_header_stats(self) -> None:
         """Update the StatusHeader with current session stats.
