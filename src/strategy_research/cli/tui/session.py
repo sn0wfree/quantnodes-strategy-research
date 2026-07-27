@@ -288,6 +288,9 @@ class ChatSession:
         - No active goal → ``"chat"`` (conversational prompt)
         - Active goal   → ``"goal"``   (researcher prompt, JSON output)
 
+        Also updates the ModeBar widget so the user always sees the
+        current mode.
+
         Failures default to ``"chat"`` (safe fallback — the user always
         gets *some* response, even if the goal DB is temporarily
         unreachable).
@@ -299,6 +302,14 @@ class ChatSession:
             self.ctx.interactive_mode = "goal" if goal is not None else "chat"
         except Exception:
             self.ctx.interactive_mode = "chat"
+        # Update the mode bar widget if available
+        if self.app is not None:
+            try:
+                from strategy_research.cli.tui.widgets.mode_bar import ModeBar
+                bar = self.app.query_one("#mode-bar", ModeBar)
+                bar.update_mode(self.ctx.interactive_mode)
+            except Exception:
+                pass
 
     def _update_header_stats(self) -> None:
         """Update the StatusHeader with current session stats.

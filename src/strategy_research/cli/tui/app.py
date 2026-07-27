@@ -41,6 +41,7 @@ from strategy_research.cli.tui.widgets import (
     CommandSidebar,
     HintFooter,
     Milestone,
+    ModeBar,
     ResumeOrNewModal,
     StatusHeader,
     ThinkingSpinner,
@@ -93,6 +94,7 @@ class ResearchApp(App):
 
     def compose(self):
         yield StatusHeader(id="status-header")
+        yield ModeBar(id="mode-bar")
         with Horizontal(id="main-row"):
             yield CommandSidebar(id="sidebar", classes="hidden")
             yield TranscriptView(id="transcript")
@@ -566,6 +568,23 @@ class ResearchApp(App):
             tv.toggle_fold()
         except Exception:
             pass
+
+    def action_toggle_mode(self) -> None:
+        """Ctrl+M — toggle chat/goal interactive mode."""
+        if self.session is None:
+            return
+        ctx = self.session.ctx
+        new_mode = "goal" if ctx.interactive_mode == "chat" else "chat"
+        ctx.interactive_mode = new_mode
+        # Update the mode bar
+        try:
+            bar = self.query_one("#mode-bar", ModeBar)
+            bar.update_mode(new_mode)
+        except Exception:
+            pass
+        # Show brief notification in transcript
+        label = "策略研究（JSON 输出）" if new_mode == "goal" else "普通聊天（自然语言）"
+        self.write_transcript(f"[dim]已切换到 {label} 模式[/dim]")
 
 
 __all__ = ["ResearchApp"]
