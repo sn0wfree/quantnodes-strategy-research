@@ -93,7 +93,9 @@ def _is_interactive_invocation(
 def _build_llm_client():
     """Build an OpenAICompatClient from the resolved LLMConfig.
 
-    Returns None if config has no api_key (e.g. test/CI environment).
+    Returns ``(client, model_name)``. Either can be None (e.g. in
+    test/CI environment with no api_key, or when config load fails).
+    Callers that don't need the model name should use ``[0]`` only.
     """
     try:
         from dotenv import load_dotenv
@@ -106,10 +108,10 @@ def _build_llm_client():
         from strategy_research.core.llm.openai_client import OpenAICompatClient
         cfg = LLMConfig.load()
         if not cfg.api_key:
-            return None
-        return OpenAICompatClient(cfg)
+            return None, cfg.model or "unknown"
+        return OpenAICompatClient(cfg), cfg.model or "unknown"
     except Exception:
-        return None
+        return None, "unknown"
 
 
 def _wants_legacy_repl(argv: Sequence[str]) -> bool:
@@ -168,8 +170,11 @@ def main(
         raw_argv, is_tty=is_tty
     ) and not _wants_legacy_repl(raw_argv):
         try:
-            llm_client = _build_llm_client()
-            app = ResearchApp(llm_client=llm_client)
+            llm_client, model_name = _build_llm_client()
+            app = ResearchApp(
+                model=model_name or "unknown",
+                llm_client=llm_client,
+            )
             return app.run() or 0
         except SystemExit as exc:
             return int(exc.code or 0)

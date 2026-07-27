@@ -104,14 +104,50 @@ class ResearchApp(App):
     # ------------------------------------------------------------------ on_mount
 
     async def on_mount(self) -> None:
-        # 1) Banner Renderable sits as the first row inside the transcript.
+        # 0) Resolve model from LLMConfig eagerly so the banner + header
+        #    show the real provider (e.g. "minimax-M3") instead of the
+        #    "unknown" default. Failures fall back to "unknown" silently.
         from strategy_research.cli.ui.banner import render_banner
+        try:
+            from strategy_research.core.llm.config import LLMConfig
+            cfg = LLMConfig.load()
+            if cfg.model:
+                self._model = cfg.model
+        except Exception:
+            pass
+
+        # 0a) Generate a fresh session id at startup so the header shows
+        #     a real "sid:cli-xxxxxxxx" instead of the bare "cli"
+        #     default. We deliberately don't touch ctx.session_id if it
+        #     was already set (e.g. by a test fixture or a future
+        #     resume-from-disk path).
+        if self.ctx.session_id == "cli":
+            try:
+                import uuid
+                self.ctx.session_id = f"cli-{uuid.uuid4().hex[:8]}"
+            except Exception:
+                self.ctx.session_id = "cli-fallback"
+
+        # 1) Banner Renderable sits as the first row inside the transcript.
         transcript = self.query_one(TranscriptView)
         self.banner = Banner(model=self._model, version=self._version, mode="tui")
         banner_text = render_banner(
             model=self._model, version=self._version, mode="tui"
         )
         transcript.write(banner_text)
+
+        # 1a) Push the resolved model + session id into the header so it
+        #     is correct from the very first frame (not only after the
+        #     first user input which would lazily trigger
+        #     ``_update_header_stats``).
+        try:
+            self.update_header(
+                model=self._model,
+                session_id=self.ctx.session_id,
+                connection_status="idle",
+            )
+        except Exception:
+            pass
 
         # 2) Construct the session and bind it to the dispatch surface.
         self.session = ChatSession(

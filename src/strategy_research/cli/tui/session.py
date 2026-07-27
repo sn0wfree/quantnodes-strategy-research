@@ -272,9 +272,15 @@ class ChatSession:
         (incremented in ``ResearchApp._route_tool_event``) rather than
         from the ToolsRail timeline — tools are now rendered inline in
         TranscriptView and the rail no longer tracks them.
+
+        Failures are logged at WARNING (not silently swallowed as
+        before) so we don't ship another "header stuck on unknown" bug
+        without a trace.
         """
         if self.app is None:
             return
+        import logging
+        _log = logging.getLogger(__name__)
         try:
             # Count messages in history
             msg_count = len(self.ctx.history)
@@ -292,8 +298,8 @@ class ChatSession:
                 from strategy_research.core.llm.config import LLMConfig
                 cfg = LLMConfig.load()
                 model = cfg.model
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("LLMConfig.load failed: %s", exc)
             self.app.update_header(
                 connection_status="live",
                 model=model,
@@ -303,8 +309,8 @@ class ChatSession:
                 token_used=token_used,
                 session_id=getattr(self.ctx, "session_id", "cli"),
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("_update_header_stats failed: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------ halt API
 
