@@ -2,13 +2,19 @@
  *
  * Layout:
  *   Screen
- *     ├─ Header  (top, height 1)
+ *     ├─ StatusHeader  (top, height 1 - model, tokens, ctx, stats)
  *     ├─ #main-row  (horizontal split, fills)
- *     │    ├─ #sidebar  (24 cols)
- *     │    ├─ #transcript  (1fr — chat log)
- *     │    └─ #rail  (32 cols — activity ticker)
- *     ├─ #input  (height 3 — bottom prompt)
- *     └─ HintFooter  (1 row — hint bar / status)
+ *     │    ├─ #sidebar  (26 cols, hidden by default, Ctrl+1)
+ *     │    ├─ #transcript  (1fr - persistent chat log, no max_lines)
+ *     │    └─ #rail  (36 cols - goal + tools, Ctrl+2)
+ *     ├─ ThinkingSpinner  (height 1 - spinner, hidden when idle)
+ *     ├─ #input  (height 3 - bottom prompt)
+ *     └─ HintFooter  (1 row - hint bar / status)
+ *
+ * Streaming + fold happen inside TranscriptView (no separate widget).
+ * Ctrl+E toggles fold/expand of the most recent folded record.
+ *
+ * See docs/tui-display-philosophy.md for design principles.
  */
 
 Screen {
@@ -16,11 +22,12 @@ Screen {
     background: $surface;
 }
 
-Header {
+StatusHeader {
     dock: top;
     height: 1;
     background: $primary 25%;
     color: $text;
+    padding: 0 1;
 }
 
 #main-row {
@@ -37,6 +44,10 @@ Header {
     padding: 0 1;
 }
 
+#sidebar.hidden {
+    display: none;
+}
+
 #transcript {
     width: 1fr;
     border: round $primary;
@@ -51,6 +62,10 @@ Header {
     border-title-align: left;
     background: $primary 8%;
     padding: 0 1;
+}
+
+#rail.hidden {
+    display: none;
 }
 
 #input {

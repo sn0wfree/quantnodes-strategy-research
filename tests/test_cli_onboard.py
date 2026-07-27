@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,20 +12,21 @@ from strategy_research.cli.onboard import (
     CANCEL,
     PROVIDERS,
     TIMEOUT_CHOICES,
-    _finalize,
-    _render_env,
+    _finalize_llm_json,
     _save_partial,
+    _save_tokens_to_dotenv,
     is_onboarded,
     run_onboarding,
 )
 
 
 @pytest.fixture
-def fresh_env_dir(tmp_path, monkeypatch):
-    """Use a fresh env_dir for each test (don't touch ~/.quantnodes/strategy_research)."""
-    d = tmp_path / ".quantnodes" / "strategy_research"
-    d.mkdir(parents=True)
-    return d
+def fresh_paths(tmp_path, monkeypatch):
+    """Use fresh llm.json + .env paths for each test."""
+    qn = tmp_path / ".quantnodes"
+    llm_path = qn / "llm.json"
+    env_path = qn / ".env"
+    return llm_path, env_path
 
 
 # ─── Sentinels + catalog ───────────────────────────────────────────────
@@ -65,140 +67,214 @@ class TestSentinels:
 # ─── Filesystem helpers ────────────────────────────────────────────────
 
 
-class TestRenderEnv:
-    def test_empty_dict(self):
-        assert _render_env({}) == "\n"
-
-    def test_one_value(self):
-        out = _render_env({"FOO": "bar"})
-        assert "FOO=bar" in out
-
-    def test_skip_falsy_values(self):
-        out = _render_env({"FOO": "bar", "EMPTY": "", "NONE": "0"})
-        assert "FOO=bar" in out
-        assert "EMPTY" not in out  # empty string is filtered
-
-    def test_order_preserved(self):
-        out = _render_env({"Z": "1", "A": "2"})
-        lines = out.strip().splitlines()
-        assert lines.index("Z=1") < lines.index("A=2")
-
-
 class TestSavePartial:
-    def test_creates_partial_file(self, fresh_env_dir):
-        values = {"LANGCHAIN_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test"}
-        _save_partial(values, env_dir=fresh_env_dir)
-        partial = fresh_env_dir / ".env.partial"
+    def test_creates_partial_file(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        llm_section = {"provider": "openai", "model": "gpt-4o"}
+        _save_partial(llm_section, llm_json_path=llm_path)
+        partial = llm_path.parent / f"{llm_path.name}.partial"
         assert partial.exists()
-        content = partial.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=openai" in content
-        assert "OPENAI_API_KEY=sk-test" in content
+        data = json.loads(partial.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
 
 
 class TestFinalize:
-    def test_writes_dot_env(self, fresh_env_dir):
-        values = {"A": "1", "B": "2"}
-        path = _finalize(values, env_dir=fresh_env_dir)
-        assert path == fresh_env_dir / ".env"
+    def test_writes_llm_json(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        llm_section = {"provider": "openai", "model": "gpt-4o", "timeout": 300}
+        path = _finalize_llm_json(llm_section, llm_json_path=llm_path)
+        assert path == llm_path
         assert path.exists()
-        content = path.read_text(encoding="utf-8")
-        assert "A=1" in content
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
+        assert data["llm"]["timeout"] == 300
 
-    def test_no_partial_left(self, fresh_env_dir):
-        # First seed the .env.partial as a previous-step snapshot would.
-        _save_partial({"A": "1"}, env_dir=fresh_env_dir)
-        assert (fresh_env_dir / ".env.partial").exists()
-        _finalize({"A": "1"}, env_dir=fresh_env_dir)
-        assert not (fresh_env_dir / ".env.partial").exists()
+    def test_no_partial_left(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        _save_partial({"A": "1"}, llm_json_path=llm_path)
+        partial = llm_path.parent / f"{llm_path.name}.partial"
+        assert partial.exists()
+        _finalize_llm_json({"A": "1"}, llm_json_path=llm_path)
+        assert not partial.exists()
+
+    def test_preserves_other_top_level_keys(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        # Seed file with B-side top-level keys
+        llm_path.parent.mkdir(parents=True)
+        llm_path.write_text(json.dumps({
+            "tools": ["mcp__server1__tool1"],
+            "agents": {"planner": {"model": "haiku"}},
+        }))
+        _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
+        data = json.loads(llm_path.read_text(encoding="utf-8"))
+        assert data["tools"] == ["mcp__server1__tool1"]
+        assert data["agents"]["planner"]["model"] == "haiku"
+        assert data["llm"]["provider"] == "openai"
+
+
+class TestSaveTokensToDotenv:
+    def test_writes_new_keys(self, fresh_paths):
+        _, env_path = fresh_paths
+        path = _save_tokens_to_dotenv({"LLM_API_KEY": "sk-test"}, dotenv_path=env_path)
+        assert path == env_path
+        content = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-test" in content
+
+    def test_preserves_existing_keys(self, fresh_paths):
+        _, env_path = fresh_paths
+        env_path.parent.mkdir(parents=True)
+        env_path.write_text("IFIND_MCP_TOKEN=keepme\nLLM_API_KEY=stale\n")
+        _save_tokens_to_dotenv({"TUSHARE_TOKEN": "newtoken"}, dotenv_path=env_path)
+        content = env_path.read_text(encoding="utf-8")
+        assert "IFIND_MCP_TOKEN=keepme" in content
+        assert "TUSHARE_TOKEN=newtoken" in content
+        # new write of same key replaces old
+        assert "LLM_API_KEY=stale" in content
+
+    def test_empty_value_skipped(self, fresh_paths):
+        _, env_path = fresh_paths
+        _save_tokens_to_dotenv({"LLM_API_KEY": ""}, dotenv_path=env_path)
+        content = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY" not in content
 
 
 class TestIsOnboarded:
-    def test_false_when_no_env(self, fresh_env_dir):
-        assert is_onboarded(env_dir=fresh_env_dir) is False
+    def test_false_when_no_file(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        assert is_onboarded(llm_json_path=llm_path) is False
 
-    def test_true_after_finalize(self, fresh_env_dir):
-        _finalize({"X": "1"}, env_dir=fresh_env_dir)
-        assert is_onboarded(env_dir=fresh_env_dir) is True
+    def test_false_when_empty_llm_section(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        llm_path.parent.mkdir(parents=True)
+        llm_path.write_text(json.dumps({"llm": {}}))
+        assert is_onboarded(llm_json_path=llm_path) is False
+
+    def test_true_after_finalize(self, fresh_paths):
+        llm_path, _ = fresh_paths
+        _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
+        assert is_onboarded(llm_json_path=llm_path) is True
 
 
 # ─── Full flow ────────────────────────────────────────────────────────
 
 
 class TestRunOnboarding:
-    def test_minimal_openai(self, fresh_env_dir):
-        inputs = [
-            "OpenAI",  # provider label
-            "",  # model → uses default
-            "sk-test1234",  # API key
-            "300",  # timeout
-            "",  # tushare (empty → skip)
-        ]
-        result = run_onboarding(env_dir=fresh_env_dir, inputs=inputs)
-        assert result.exists()
-        content = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=openai" in content
-        assert "OPENAI_API_KEY=sk-test1234" in content
-        assert "OPENAI_BASE_URL=https://api.openai.com/v1" in content
-        assert "LANGCHAIN_MODEL_NAME=gpt-4o" in content
-        assert "TIMEOUT_SECONDS=300" in content
-        assert "MAX_RETRIES=2" in content
-        # Tushare token was empty → not in .env
-        assert "TUSHARE_TOKEN" not in content
-
-    def test_ollama_no_key(self, fresh_env_dir):
-        inputs = [
-            "Ollama",
-            "llama3.3:70b",  # explicit model
-            # Ollama has key_env=None → step 3 skipped
-            "120",  # timeout
-            "",  # tushare (empty)
-        ]
-        result = run_onboarding(env_dir=fresh_env_dir, inputs=inputs)
-        content = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=ollama" in content
-        assert "LANGCHAIN_MODEL_NAME=llama3.3:70b" in content
-        # Ollama has base_env=None → no OLLAMA_BASE_URL written
-        assert "OLLAMA_BASE_URL" not in content
-        # No API key either
-        assert "OLLAMA_API_KEY" not in content
-
-    def test_skip_tushare(self, fresh_env_dir):
-        inputs = [
-            "OpenAI",
-            "gpt-4o-mini",
-            "sk-test",
-            "120",
-            # no tushare step at all
-        ]
-        result = run_onboarding(
-            env_dir=fresh_env_dir, inputs=inputs, skip_tushare=True
-        )
-        content = result.read_text(encoding="utf-8")
-        assert "TIMEOUT_SECONDS=120" in content
-        # No tushare step ran
-        assert "TUSHARE_TOKEN" not in content
-
-    def test_tushare_when_provided(self, fresh_env_dir):
+    def test_minimal_openai(self, fresh_paths):
+        llm_path, env_path = fresh_paths
         inputs = [
             "OpenAI",
             "",
-            "sk-test",
+            "sk-test1234",
             "300",
-            "tushare_token_xyz",  # provided
+            "",
         ]
-        result = run_onboarding(env_dir=fresh_env_dir, inputs=inputs)
-        content = result.read_text(encoding="utf-8")
-        assert "TUSHARE_TOKEN=tushare_token_xyz" in content
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs
+        )
+        assert result == llm_path
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
+        assert data["llm"]["base_url"] == "https://api.openai.com/v1"
+        assert data["llm"]["model"] == "gpt-4o"
+        assert data["llm"]["api_key"] == "env:LLM_API_KEY"
+        assert data["llm"]["timeout"] == 300
+        assert data["llm"]["max_retries"] == 2
 
-    def test_unknown_provider_raises(self, fresh_env_dir):
+        env_content = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-test1234" in env_content
+        assert "TUSHARE_TOKEN" not in env_content
+
+    def test_ollama_no_key(self, fresh_paths):
+        llm_path, env_path = fresh_paths
+        inputs = [
+            "Ollama",
+            "llama3.3:70b",
+            "120",
+            "",
+        ]
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs
+        )
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "ollama"
+        assert data["llm"]["model"] == "llama3.3:70b"
+        # Ollama has key_required=False → no api_key field
+        assert "api_key" not in data["llm"]
+
+    def test_skip_tushare(self, fresh_paths):
+        llm_path, env_path = fresh_paths
+        inputs = ["OpenAI", "gpt-4o-mini", "sk-test", "120"]
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path,
+            inputs=inputs, skip_tushare=True,
+        )
+        env_content = env_path.read_text(encoding="utf-8")
+        assert "TUSHARE_TOKEN" not in env_content
+
+    def test_tushare_when_provided(self, fresh_paths):
+        llm_path, env_path = fresh_paths
+        inputs = ["OpenAI", "", "sk-test", "300", "tushare_token_xyz"]
+        run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs
+        )
+        env_content = env_path.read_text(encoding="utf-8")
+        assert "TUSHARE_TOKEN=tushare_token_xyz" in env_content
+
+    def test_unknown_provider_raises(self, fresh_paths):
+        llm_path, env_path = fresh_paths
         inputs = ["NonexistentProvider", "", "key", "300", ""]
         with pytest.raises(ValueError):
-            run_onboarding(env_dir=fresh_env_dir, inputs=inputs)
+            run_onboarding(
+                llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs
+            )
 
-    def test_no_inputs_in_non_tty_raises(self, fresh_env_dir):
+    def test_no_inputs_in_non_tty_raises(self, fresh_paths):
+        llm_path, env_path = fresh_paths
         with pytest.raises(RuntimeError, match="TTY"):
-            run_onboarding(env_dir=fresh_env_dir, inputs=None)
+            run_onboarding(
+                llm_json_path=llm_path, dotenv_path=env_path, inputs=None
+            )
 
-    def test_exhausted_inputs_raises(self, fresh_env_dir):
+    def test_exhausted_inputs_raises(self, fresh_paths):
+        llm_path, env_path = fresh_paths
         with pytest.raises(RuntimeError, match="ran out"):
-            run_onboarding(env_dir=fresh_env_dir, inputs=[])
+            run_onboarding(
+                llm_json_path=llm_path, dotenv_path=env_path, inputs=[]
+            )
+
+    def test_plaintext_migrate_yes(self, fresh_paths):
+        llm_path, env_path = fresh_paths
+        # Pre-seed llm.json with plaintext
+        llm_path.parent.mkdir(parents=True)
+        llm_path.write_text(json.dumps({"llm": {"api_key": "sk-existing"}}))
+        inputs = [
+            "OpenAI", "", "sk-new", "300", "",
+            "y",  # migrate → yes
+        ]
+        run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs
+        )
+        data = json.loads(llm_path.read_text(encoding="utf-8"))
+        assert data["llm"]["api_key"] == "env:LLM_API_KEY"
+        env_content = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-new" in env_content
+
+    def test_plaintext_migrate_no(self, fresh_paths):
+        llm_path, env_path = fresh_paths
+        llm_path.parent.mkdir(parents=True)
+        llm_path.write_text(json.dumps({"llm": {"api_key": "sk-existing"}}))
+        inputs = [
+            "OpenAI", "", "sk-new", "300", "",
+            "n",  # migrate → no
+        ]
+        run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs
+        )
+        data = json.loads(llm_path.read_text(encoding="utf-8"))
+        # Step 0 auto-fixes C1 (plaintext → env:LLM_API_KEY) before wizard runs,
+        # so by K3 time there's no plaintext left to migrate. The wizard then
+        # sets api_key=env:LLM_API_KEY (from _LLM_API_KEY_REF) and the real
+        # key goes to .env via _save_tokens_to_dotenv.
+        assert data["llm"]["api_key"] == "env:LLM_API_KEY"
+        env_content = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-new" in env_content

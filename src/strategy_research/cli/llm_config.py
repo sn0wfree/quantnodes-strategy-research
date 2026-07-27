@@ -4,12 +4,13 @@ Contains:
 - _LLM_PARENT (argparse parent parser for --llm-* flags)
 - _cli_overrides_from_args
 - build_llm_config
-- _cmd_llm_list_profiles
+- _cmd_llm_list_profiles (always prints "no profile system; edit ~/.quantnodes/llm.json")
 """
 
 from __future__ import annotations
 
 import argparse
+
 
 _LLM_PARENT = argparse.ArgumentParser(
     add_help=False,
@@ -17,8 +18,6 @@ _LLM_PARENT = argparse.ArgumentParser(
     description="LLM configuration overrides",
 )
 _llm_g = _LLM_PARENT.add_argument_group("LLM configuration")
-_llm_g.add_argument("--llm-profile", default=None,
-                    help="激活的 LLM profile (从 ~/.quantnodes-research/llm.yaml)")
 _llm_g.add_argument("--llm-model", default=None, help="覆盖 model")
 _llm_g.add_argument("--llm-base-url", default=None, help="覆盖 base_url")
 _llm_g.add_argument("--llm-temperature", type=float, default=None,
@@ -49,13 +48,15 @@ def _cli_overrides_from_args(args: argparse.Namespace | None) -> dict:
 
 
 def build_llm_config(args: argparse.Namespace | None = None,
-                     *, profile: str | None = None,
-                     cli_overrides: dict | None = None) -> "LLMConfig":  # noqa: F821
+                     *, cli_overrides: dict | None = None) -> "LLMConfig":  # noqa: F821
     """Build an LLMConfig from CLI args + 4-layer merge.
+
+    Profile concept was retired in v0.5.0 (config now lives in
+    ``~/.quantnodes/llm.json``). For backward compatibility, callers
+    passing ``profile=`` should drop the kwarg.
 
     Args:
         args: argparse Namespace (with --llm-* attributes).
-        profile: Explicit profile name override (highest priority).
         cli_overrides: Explicit override dict (alternative to args).
 
     Returns:
@@ -63,24 +64,17 @@ def build_llm_config(args: argparse.Namespace | None = None,
     """
     from strategy_research.core.llm import LLMConfig
     overrides = cli_overrides if cli_overrides is not None else _cli_overrides_from_args(args)
-    return LLMConfig.load(profile=profile, cli_overrides=overrides)
+    return LLMConfig.load(cli_overrides=overrides)
 
 
 def _cmd_llm_list_profiles() -> int:
-    """Print all available LLM profiles from yaml config."""
-    from strategy_research.core.llm.config import (
-        DEFAULT_LLM_CONFIG_PATH,
-        get_default_profile,
-        list_profiles,
-    )
-    profiles = list_profiles()
-    default = get_default_profile()
-    print(f"# LLM profiles from {DEFAULT_LLM_CONFIG_PATH}")
-    if not profiles:
-        print("(no llm.yaml found — using code defaults)")
-    else:
-        for name in profiles:
-            marker = " *" if name == default else ""
-            print(f"  {name}{marker}")
-        print(f"\ndefault: {default}")
+    """Print a notice pointing users to ``~/.quantnodes/llm.json``.
+
+    The yaml/profile system was retired in v0.5.0. This command is kept
+    for backward compatibility with any user muscle memory / scripts.
+    """
+    from strategy_research.core.llm.config import find_llm_config_path
+    p = find_llm_config_path()
+    print(f"# LLM config now lives at: {p}")
+    print("# (profile system retired; use `quantnodes-research init` to reconfigure)")
     return 0

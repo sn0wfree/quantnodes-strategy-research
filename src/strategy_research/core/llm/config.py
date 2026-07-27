@@ -1,17 +1,30 @@
 """LLMConfig — immutable LLM configuration with 4-layer merge.
 
 Layers (high priority overrides low):
-    1. CLI overrides      (argparse namespace dict)
-    2. Environment vars   (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL,
-                           STRATEGY_RESEARCH_LLM_PROFILE)
-    3. YAML profile       (~/.quantnodes-research/llm.yaml)
+    1. CLI overrides      (argparse namespace dict; ``llm_*`` keys)
+    2. Environment vars   (OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL /
+                           LLM_API_KEY for credentials)
+    3. Bridge layer       (``~/.quantnodes/llm.json`` via quantnodes_bridge,
+                           which internally reads the canonical QuantNodes
+                           config and also applies QUANTNODES__LLM__* env
+                           overrides). Translator turns the bridge output
+                           into the keys this dataclass uses.
     4. Code defaults      (dataclass field defaults)
 
+Bridge layer sources of truth (lazy-read by the QuantNodes reader):
+    - ``~/.quantnodes/llm.json`` (canonical; honoured via
+      ``STRATEGY_RESEARCH_LLM_CONFIG`` override for tests).
+    - ``QUANTNODES__LLM__*`` env vars (applied inside the bridge).
+    - Wizard writes the same JSON file at "~/.quantnodes/llm.json" via
+      ``cli/onboard.py`` after init.
+
 Design notes:
-    - frozen=True: every override returns a NEW instance (no mutation)
-    - API key never comes from YAML (always env var)
-    - YAML schema is intentionally flat inside each profile
-    - .env loading is best-effort (python-dotenv is optional)
+    - frozen=True: every override returns a NEW instance (no mutation).
+    - api_key resolution priority: OPENAI_API_KEY > LLM_API_KEY
+      > bridge-resolved env:VAR.
+    - provider→base_url / provider→model fallbacks are applied after the
+      bridge load (the canonical JSON may omit base_url).
+    - .env loading is best-effort (python-dotenv is optional).
 """
 
 from __future__ import annotations
@@ -22,22 +35,39 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-import yaml
+from .quantnodes_bridge import (
+    CONFIG_PATH as QUANTNODES_LLM_JSON,
+    load_quantnodes_llm_config,
+)
 
 logger = logging.getLogger(__name__)
 
 # ── Public constants ────────────────────────────────────────────────
 
-DEFAULT_LLM_CONFIG_PATH = Path.home() / ".quantnodes-research" / "llm.yaml"
+# Legacy alias kept for compatibility: tests / external CLI callers that
+# still set STRATEGY_RESEARCH_LLM_CONFIG to point at the LLM config.
+DEFAULT_LLM_CONFIG_PATH = QUANTNODES_LLM_JSON
 
-# Env var names (only these are read from environment)
+# Env var names (only these are read from environment for direct overrides)
 ENV_API_KEY = "OPENAI_API_KEY"
 ENV_BASE_URL = "OPENAI_BASE_URL"
 ENV_MODEL = "OPENAI_MODEL"
-ENV_PROFILE = "STRATEGY_RESEARCH_LLM_PROFILE"
 ENV_CONFIG_PATH = "STRATEGY_RESEARCH_LLM_CONFIG"
 
-# Supported providers (just used for hinting/defaults; any string OK)
+# Wizard writes this into ~/.quantnodes/strategy_research/.env; we accept
+# it as a credential source so users with the new wizard don't need to
+# also export OPENAI_API_KEY (which would defeat the point of putting
+# the secret in the local .env). Precedence still prefers OPENAI_API_KEY.
+ENV_LLM_API_KEY = "LLM_API_KEY"
+
+# ── Back-compat aliases (legacy yaml/profile knobs kept for tests + 3rd-party) ──
+# The old yaml/profile system was retired in favor of the bridge to
+# ~/.quantnodes/llm.json. These names are preserved so existing callers
+# (and tests) don't have to change simultaneously with the migration.
+ENV_PROFILE: str = "STRATEGY_RESEARCH_LLM_PROFILE"     # no longer read
+LEGACY_DEFAULT_PROFILE: str = "default"                  # always returns "default"
+
+# Supported providers (used for hinting/defaults; any string OK).
 PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
     "openai":   {"base_url": "https://api.openai.com/v1",
                  "model": "gpt-4o-mini"},
@@ -47,6 +77,8 @@ PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
                  "model": "moonshot-v1-8k"},
     "qwen":     {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
                  "model": "qwen-plus"},
+    "minimax":  {"base_url": "https://api.minimaxi.com/v1",
+                 "model": "minimax-M3"},
 }
 
 
@@ -63,9 +95,9 @@ class LLMConfig:
 
     # ── Endpoint ─────────────────────────────────
     base_url: str = "https://api.openai.com/v1"
-    api_key: str = ""                              # only from env (OPENAI_API_KEY)
+    api_key: str = ""
     model: str = "gpt-4o-mini"
-    provider: str = "auto"                         # auto|openai|deepseek|kimi|qwen|custom
+    provider: str = "auto"                         # auto|openai|deepseek|kimi|qwen|minimax|custom
 
     # ── Sampling ────────────────────────────────
     temperature: float = 0.7
@@ -87,9 +119,6 @@ class LLMConfig:
     parallel_tool_calls: bool = True
     tool_choice: str = "auto"                      # auto|required|none|{"name":..}
 
-    # ── Meta ────────────────────────────────────
-    profile: str = "default"
-
     # ── Methods ──────────────────────────────────
 
     def with_config(self, **kwargs: Any) -> "LLMConfig":
@@ -98,8 +127,7 @@ class LLMConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a plain dict representation (api_key included for debug)."""
-        d = dataclasses.asdict(self)
-        return d
+        return dataclasses.asdict(self)
 
     def masked_dict(self) -> dict[str, Any]:
         """Return a dict with api_key masked (for logging)."""
@@ -118,7 +146,6 @@ class LLMConfig:
     def load(
         cls,
         *,
-        profile: str | None = None,
         cli_overrides: Mapping[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
         yaml_path: Path | None = None,
@@ -127,19 +154,22 @@ class LLMConfig:
         """Construct an LLMConfig by merging 4 layers.
 
         Args:
-            profile:      Override profile name (priority over env STRATEGY_RESEARCH_LLM_PROFILE).
-            cli_overrides: argparse-namespace dict (e.g. vars(args)); only truthy keys applied.
+            cli_overrides: argparse-namespace dict (e.g. vars(args)); only
+                           truthy keys applied.
             env:           Custom env mapping (defaults to os.environ).
-            yaml_path:     Override path to llm.yaml (priority over env STRATEGY_RESEARCH_LLM_CONFIG).
-            load_dotenv:   Whether to call dotenv.load_dotenv() (no-op if not installed).
+            yaml_path:     Legacy kwarg, kept for compatibility. When given,
+                           it overrides the bridge path (otherwise defaults
+                           to ``$STRATEGY_RESEARCH_LLM_CONFIG`` → ``~/.quantnodes/llm.json``).
+            load_dotenv:   Whether to call dotenv.load_dotenv() (no-op if
+                           not installed).
 
         Returns:
             Fully merged LLMConfig instance.
 
         Raises:
-            ValueError: If specified profile does not exist in YAML.
-            yaml.YAMLError: If YAML file is malformed (transparent from PyYAML).
-            FileNotFoundError: Not raised; missing YAML is silent.
+            OSError: If the bridge path exists but is unreadable and the
+                     underlying error is not JSON/OS decode related (the
+                     reader swallows JSON/OS errors silently by design).
         """
         env_map = dict(env if env is not None else os.environ)
 
@@ -149,36 +179,15 @@ class LLMConfig:
         # 1) Code defaults
         cfg = cls()
 
-        # Resolve effective yaml_path & profile
-        eff_yaml_path = Path(yaml_path) if yaml_path is not None else _resolve_yaml_path(env_map)
-
-        # 2) YAML profile layer
-        yaml_default_profile = _yaml_default_profile(eff_yaml_path) if eff_yaml_path.exists() else "default"
-
-        eff_profile = (
-            profile
-            or env_map.get(ENV_PROFILE)
-            or yaml_default_profile
-            or cfg.profile
+        # 2) Bridge layer (~/.quantnodes/llm.json)
+        eff_bridge_path = (
+            Path(yaml_path).expanduser()
+            if yaml_path is not None
+            else _resolve_bridge_path(env_map)
         )
-
-        # Load yaml profile if file exists.
-        # Silent fallback ONLY when: file missing OR (no explicit profile AND implicit
-        #   resolution picked a profile that doesn't exist). Structural errors always raise.
-        if eff_yaml_path.exists():
-            try:
-                yaml_data = _load_yaml_profile(eff_yaml_path, eff_profile)
-            except ValueError as exc:
-                msg = str(exc)
-                # "profile not found" is recoverable silently when profile was implicit
-                is_not_found = "not found" in msg
-                if profile is not None or not is_not_found:
-                    raise
-                yaml_data = {}  # implicit + profile missing → silent fallback
-            if yaml_data:
-                cfg = cfg._merge_flat(yaml_data)
-                cfg = cfg.with_config(profile=eff_profile)
-        # else: no yaml → keep code defaults
+        bridge_data = _load_bridge_dict(eff_bridge_path)
+        if bridge_data:
+            cfg = cfg._merge_flat(bridge_data)
 
         # 3) Env var layer (only the documented env vars)
         env_overrides = _env_to_overrides(env_map)
@@ -191,7 +200,9 @@ class LLMConfig:
             if cli_flat:
                 cfg = cfg._merge_flat(cli_flat)
 
-        # api_key is loaded separately from env (never from yaml)
+        # api_key handled separately: prefer direct OPENAI_API_KEY, fall
+        # back to LLM_API_KEY (QuantNodes convention / wizard output),
+        # then to whatever the bridge resolved. Never from yaml.
         if not cfg.api_key:
             cfg = cfg.with_config(api_key=load_api_key_from_env(env_map))
 
@@ -221,12 +232,17 @@ class LLMConfig:
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _resolve_yaml_path(env: Mapping[str, str]) -> Path:
-    """Resolve config path: STRATEGY_RESEARCH_LLM_CONFIG > default."""
+def _resolve_bridge_path(env: Mapping[str, str]) -> Path:
+    """Resolve the bridge (llm.json) path.
+
+    Precedence:
+      1. ``STRATEGY_RESEARCH_LLM_CONFIG`` env var (legacy override kept for tests/tooling).
+      2. ``~/.quantnodes/llm.json`` (canonical QuantNodes location).
+    """
     p = env.get(ENV_CONFIG_PATH)
     if p:
         return Path(p).expanduser()
-    return DEFAULT_LLM_CONFIG_PATH
+    return QUANTNODES_LLM_JSON
 
 
 def _try_load_dotenv() -> None:
@@ -242,73 +258,89 @@ def _try_load_dotenv() -> None:
         logger.debug("dotenv load failed: %s", exc)
 
 
-def _yaml_default_profile(path: Path) -> str:
-    """Read default_profile key from yaml (without raising)."""
-    if not path.exists():
-        return "default"
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except yaml.YAMLError:
-        return "default"
-    if not isinstance(data, dict):
-        return "default"
-    default = data.get("default_profile", "default")
-    return str(default) if default else "default"
+def _load_bridge_dict(path: Path) -> dict[str, Any]:
+    """Read the bridge config and translate into A dataclass field names.
 
+    Translator rules:
+        provider   → provider
+        model      → model
+        base_url   → base_url
+        api_key    → api_key   (env:VAR already resolved by the bridge)
+        timeout    → timeout_s (float)
+        max_retries→ max_retries (int)
+        max_tokens → max_tokens (int)
+        enabled=False → empty dict (caller treats as disabled)
+    Plus: provider→base_url fallback when the JSON omitted base_url.
 
-def _load_yaml_profile(path: Path, profile: str | None) -> dict[str, Any]:
-    """Load the named profile from a YAML config file.
-
-    Returns empty dict if file missing.
-    Raises ValueError on structural errors (root not mapping, profiles wrong type,
-    profile not found, profile entry wrong type).
+    Returns {} silently when the file is missing or the section is empty —
+    callers (the load() cascade) then fall through to env vars and code
+    defaults.
     """
-    if not path.exists():
+    raw = load_quantnodes_llm_config(path)
+    if not raw:
         return {}
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"llm.yaml root must be a mapping, got {type(data).__name__}")
+    if raw.get("enabled") is False:
+        return {}
 
-    # Resolve profile: explicit arg > env > yaml default_profile > "default"
-    profiles = data.get("profiles")
-    if profiles is None:
-        profiles = {}
-    elif not isinstance(profiles, dict):
-        raise ValueError("llm.yaml 'profiles' must be a mapping")
+    out: dict[str, Any] = {}
 
-    if profile is None:
-        # No explicit profile → use default_profile from yaml
-        profile = data.get("default_profile", "default")
+    provider = raw.get("provider")
+    if provider:
+        out["provider"] = str(provider)
 
-    if profile in profiles:
-        chosen = profiles[profile]
-    else:
-        available = sorted(profiles.keys())
-        raise ValueError(
-            f"LLM profile '{profile}' not found in {path}; available: {available}"
-        )
+    model = raw.get("model")
+    if model:
+        out["model"] = str(model)
 
-    if not isinstance(chosen, dict):
-        raise ValueError(f"profile '{profile}' must be a mapping")
-    return dict(chosen)
+    base_url = raw.get("base_url")
+    if base_url:
+        out["base_url"] = str(base_url)
+
+    api_key = raw.get("api_key")
+    if api_key:
+        out["api_key"] = str(api_key)
+
+    if (v := raw.get("timeout")) is not None and v != "":
+        try:
+            out["timeout_s"] = float(v)
+        except (TypeError, ValueError):
+            logger.debug("bridge: cannot parse timeout %r as float", v)
+
+    if (v := raw.get("max_retries")) is not None and v != "":
+        try:
+            out["max_retries"] = int(v)
+        except (TypeError, ValueError):
+            logger.debug("bridge: cannot parse max_retries %r as int", v)
+
+    if (v := raw.get("max_tokens")) is not None and v != "":
+        try:
+            out["max_tokens"] = int(v)
+        except (TypeError, ValueError):
+            logger.debug("bridge: cannot parse max_tokens %r as int", v)
+
+    # Provider→base_url/model fallback when the JSON didn't supply them
+    if not out.get("base_url") and (p := out.get("provider")):
+        defaults = PROVIDER_DEFAULTS.get(p)
+        if defaults:
+            out["base_url"] = defaults["base_url"]
+            if not out.get("model") and defaults.get("model"):
+                out["model"] = defaults["model"]
+
+    return out
 
 
 def _env_to_overrides(env: Mapping[str, str]) -> dict[str, Any]:
     """Translate the documented env vars to config overrides.
 
-    Only handles explicit env vars (OPENAI_*, STRATEGY_RESEARCH_LLM_PROFILE).
-    Unrelated env vars are ignored.
+    Handles only the direct env vars (OPENAI_*). QUANTNODES__LLM__* is
+    applied inside the bridge layer; STRATEGY_RESEARCH_LLM_PROFILE is
+    retired (no profile concept anymore).
     """
     overrides: dict[str, Any] = {}
-    if ENV_BASE_URL in env:
+    if ENV_BASE_URL in env and env[ENV_BASE_URL]:
         overrides["base_url"] = env[ENV_BASE_URL]
-    if ENV_MODEL in env:
+    if ENV_MODEL in env and env[ENV_MODEL]:
         overrides["model"] = env[ENV_MODEL]
-    if ENV_PROFILE in env:
-        overrides["profile"] = env[ENV_PROFILE]
-    # api_key handled separately via load() because it's outside the merge path
     return overrides
 
 
@@ -334,7 +366,7 @@ def _cli_to_overrides(cli: Mapping[str, Any]) -> dict[str, Any]:
             overrides["stream"] = not bool(value)
             continue
         if field == "list_profiles":
-            # handled separately by CLI; not a config field
+            # legacy CLI flag; no profile concept anymore — ignored
             continue
         if field == "temperature":
             overrides["temperature"] = float(value)
@@ -352,8 +384,6 @@ def _cli_to_overrides(cli: Mapping[str, Any]) -> dict[str, Any]:
             overrides["model"] = str(value)
         elif field == "base_url":
             overrides["base_url"] = str(value)
-        elif field == "profile":
-            overrides["profile"] = str(value)
         else:
             # Pass through unknown llm_* keys (forward compat)
             overrides[field] = value
@@ -361,41 +391,16 @@ def _cli_to_overrides(cli: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def load_api_key_from_env(env: Mapping[str, str] | None = None) -> str:
-    """Load OPENAI_API_KEY from env (api_key is never from yaml)."""
-    env_map = env if env is not None else os.environ
-    return env_map.get(ENV_API_KEY, "")
+    """Load the API key.
 
-
-def list_profiles(yaml_path: Path | None = None) -> list[str]:
-    """List all profile names defined in the yaml config.
-
-    Returns empty list if file missing.
+    Precedence:
+      1. ``OPENAI_API_KEY`` (legacy / direct).
+      2. ``LLM_API_KEY`` (QuantNodes convention; written by the wizard
+         into ``~/.quantnodes/strategy_research/.env``).
+    Returns "" if neither is set.
     """
-    p = yaml_path if yaml_path is not None else DEFAULT_LLM_CONFIG_PATH
-    if not p.exists():
-        return []
-    with open(p, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    profiles = data.get("profiles") or {}
-    if not isinstance(profiles, dict):
-        return []
-    return sorted(profiles.keys())
-
-
-def get_default_profile(yaml_path: Path | None = None) -> str:
-    """Return the default_profile from yaml, or 'default' if missing."""
-    p = yaml_path if yaml_path is not None else DEFAULT_LLM_CONFIG_PATH
-    if not p.exists():
-        return "default"
-    try:
-        with open(p, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except yaml.YAMLError:
-        return "default"
-    if not isinstance(data, dict):
-        return "default"
-    default = data.get("default_profile", "default")
-    return str(default) if default else "default"
+    env_map = env if env is not None else os.environ
+    return env_map.get(ENV_API_KEY) or env_map.get(ENV_LLM_API_KEY, "")
 
 
 def apply_api_key(cfg: LLMConfig, env: Mapping[str, str] | None = None) -> LLMConfig:
@@ -406,3 +411,41 @@ def apply_api_key(cfg: LLMConfig, env: Mapping[str, str] | None = None) -> LLMCo
     if not key:
         return cfg
     return cfg.with_config(api_key=key)
+
+
+def find_llm_config_path() -> Path:
+    """Return the path the bridge layer will read from.
+
+    Useful for tooling to display "you can edit this file" hints.
+    """
+    return _resolve_bridge_path(os.environ)
+
+
+# ── Back-compat stubs (yaml/profile API removed in v0.5.0) ───────────
+#
+# The wizard now writes ~/.quantnodes/llm.json (QuantNodes canonical
+# location). The legacy ~/.quantnodes-research/llm.yaml format is no
+# longer consumed. These helpers are kept as no-ops so that any third-
+# party code that still imports them won't AttributeError; they always
+# indicate "no yaml profile system exists".
+
+def _yaml_default_profile(path: Path) -> str:
+    """Legacy no-op; returns LEGACY_DEFAULT_PROFILE.
+
+    The yaml-profile system was retired in favor of the bridge layer.
+    This stub is kept so existing imports keep working.
+    """
+    return LEGACY_DEFAULT_PROFILE
+
+
+def list_profiles(yaml_path: Path | None = None) -> list[str]:
+    """Legacy no-op; returns empty list.
+
+    The yaml-profile system was retired. No profiles are defined.
+    """
+    return []
+
+
+def get_default_profile(yaml_path: Path | None = None) -> str:
+    """Legacy no-op; returns LEGACY_DEFAULT_PROFILE."""
+    return LEGACY_DEFAULT_PROFILE

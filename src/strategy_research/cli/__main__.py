@@ -90,6 +90,28 @@ def _is_interactive_invocation(
     return False
 
 
+def _build_llm_client():
+    """Build an OpenAICompatClient from the resolved LLMConfig.
+
+    Returns None if config has no api_key (e.g. test/CI environment).
+    """
+    try:
+        from dotenv import load_dotenv
+        from strategy_research.cli.onboard import _QUANTNODES_DOTENV_PATH
+        load_dotenv(_QUANTNODES_DOTENV_PATH, override=True)
+    except Exception:
+        pass
+    try:
+        from strategy_research.core.llm.config import LLMConfig
+        from strategy_research.core.llm.openai_client import OpenAICompatClient
+        cfg = LLMConfig.load()
+        if not cfg.api_key:
+            return None
+        return OpenAICompatClient(cfg)
+    except Exception:
+        return None
+
+
 def _wants_legacy_repl(argv: Sequence[str]) -> bool:
     """``--repl`` and ``--banner`` (legacy REPL) opt out of TUI."""
     return bool(argv) and argv[0] in _REPL_ONLY_FLAGS
@@ -146,7 +168,8 @@ def main(
         raw_argv, is_tty=is_tty
     ) and not _wants_legacy_repl(raw_argv):
         try:
-            app = ResearchApp()
+            llm_client = _build_llm_client()
+            app = ResearchApp(llm_client=llm_client)
             return app.run() or 0
         except SystemExit as exc:
             return int(exc.code or 0)

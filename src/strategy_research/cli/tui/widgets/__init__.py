@@ -14,6 +14,10 @@ from strategy_research.cli.tui.widgets.input_bar import ChatInput
 from strategy_research.cli.tui.widgets.rail import ActivityRail
 from strategy_research.cli.tui.widgets.resume_dialog import ResumeOrNewModal
 from strategy_research.cli.tui.widgets.sidebar import CommandSidebar
+from strategy_research.cli.tui.widgets.status_header import StatusHeader
+from strategy_research.cli.tui.widgets.streaming_text import StreamingText
+from strategy_research.cli.tui.widgets.thinking_spinner import ThinkingSpinner
+from strategy_research.cli.tui.widgets.tools_rail import ToolsRail, Milestone, ToolEvent
 from strategy_research.cli.tui.widgets.transcript import TranscriptView
 
 __all__ = [
@@ -23,5 +27,11 @@ __all__ = [
     "HintFooter",
     "ActivityRail",
     "ResumeOrNewModal",
+    "StatusHeader",
+    "StreamingText",
+    "ThinkingSpinner",
+    "ToolsRail",
+    "Milestone",
+    "ToolEvent",
     "TranscriptView",
 ]

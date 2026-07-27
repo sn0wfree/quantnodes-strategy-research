@@ -82,7 +82,10 @@ class TestShouldUseRealLlm:
         """没设 AUTORESEARCH_BEHAVIOR + 无 api key → 走 stub."""
         monkeypatch.delenv("AUTORESEARCH_BEHAVIOR", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         monkeypatch.delenv("STRATEGY_RESEARCH_LLM_PROFILE", raising=False)
+        # conftest._isolate_llm_bridge already points the bridge at a
+        # disabled fixture, so LLMConfig.load() returns no api_key.
         from strategy_research.core.agent.role_factory import should_use_real_llm
         assert should_use_real_llm() is False
 
@@ -97,6 +100,8 @@ class TestShouldUseRealLlm:
         """api_key 是占位符 → 走 stub."""
         monkeypatch.delenv("AUTORESEARCH_BEHAVIOR", raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "your-api-key-here")
+        # conftest._isolate_llm_bridge disables the bridge, so the
+        # placeholder OPENAI_API_KEY is the only credential source.
         from strategy_research.core.agent.role_factory import should_use_real_llm
         assert should_use_real_llm() is False
 
@@ -222,6 +227,8 @@ class TestSpawnAgentFallback:
         """_spawn_agent() 在无 API key 时仍返回合法 JSON (走 stub)."""
         monkeypatch.delenv("AUTORESEARCH_BEHAVIOR", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        # conftest._isolate_llm_bridge disables the bridge, so no api_key
+        # is available -> should_use_real_llm() returns False -> stub.
         from strategy_research.cli import _spawn_agent
 
         for role in ["researcher", "data_quality", "factor_analyst",

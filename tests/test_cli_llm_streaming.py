@@ -28,7 +28,8 @@ def _chunk(content: str, *, finish: str | None = None) -> StreamChunk:
 class _FakeClient:
     """Mimics :class:`OpenAICompatClient.stream` yielding deltas.
 
-    Optionally supports ``astream`` for the async tests.
+    Supports both sync ``stream`` and async ``astream`` so the
+    streaming bridge can exercise the real per-token path.
     """
 
     def __init__(self, chunks: Iterable[StreamChunk] | None = None, *, error: Exception | None = None):
@@ -36,6 +37,12 @@ class _FakeClient:
         self._error = error
 
     def stream(self, messages, **kw):
+        if self._error is not None:
+            raise self._error
+        for c in self._chunks:
+            yield c
+
+    async def astream(self, messages, **kw):
         if self._error is not None:
             raise self._error
         for c in self._chunks:
@@ -139,43 +146,161 @@ class TestConsumeSyncStream:
 class _FakeApp:
     """Minimal Textual app stub that collects WriteTranscript posts.
 
-    Mirrors :meth:`ResearchApp.write_transcript`'s contract — resolves
-    the TranscriptView via ``query_one`` and forwards each message to
-    its :meth:`on_write_transcript` handler (which we shim). This
-    matches what happens in a real :class:`ResearchApp` mount cycle.
+    Delegates streaming lifecycle to the TranscriptView stub so the
+    bridge exercises the full begin/update/end flow.  The
+    ``_FakeTranscriptViewSink`` simulates the RichLog ``lines`` list
+    and ``write()`` so fold/truncate logic can be tested.
     """
 
     def __init__(self) -> None:
         self.writes: list = []
         self.exit_count = 0
         self._tv = _FakeTranscriptViewSink(self)
+        self.thinking_started = False
 
     def query_one(self, *_args, **_kw):
         return self._tv
 
     def post_message(self, message) -> None:
-        # App-level post_message is not used by the streaming bridge
-        # (we route through query_one); we keep this for compatibility.
         self.writes.append(message)
+
+    def start_thinking(self) -> None:
+        self.thinking_started = True
+
+    def stop_thinking(self) -> None:
+        self.thinking_started = False
+
+    def start_streaming(self) -> None:
+        self._tv.begin_streaming()
+
+    def update_streaming(self, full_text: str) -> None:
+        self._tv.update_streaming(full_text)
+
+    def update_streaming_delta(self, delta: str) -> None:
+        pass
+
+    def end_streaming(self, suffix: str = "") -> str:
+        return self._tv.end_streaming(suffix=suffix)
 
 
 class _FakeTranscriptViewSink:
     """Stand-in for the :class:`TranscriptView` widget.
 
-    The bridge calls ``app.query_one(TranscriptView).post_message(...)``
-    so we forward every ``WriteTranscript`` to the parent app's
-    ``writes`` collection.
+    Mirrors the multi-folder + cursor logic of the real TranscriptView
+    so streaming/fold/cursor tests can run without a Textual mount cycle.
     """
 
     def __init__(self, app: _FakeApp) -> None:
         self._app = app
+        self.lines: list = []
+        self._stream_baseline: int | None = None
+        self._streamer = None
+        self._folders: list = []
+        self._fold_baselines: list = []
+        self._active_folder_idx: int | None = None
 
     def post_message(self, message) -> None:
         self._app.writes.append(message)
 
+    def write(self, content) -> None:
+        self.lines.append(content)
+        self._app.writes.append(
+            type("M", (), {"content": content})()
+        )
+
+    def begin_streaming(self) -> None:
+        if self._active_folder_idx is not None:
+            idx = self._active_folder_idx
+            if self._folders[idx].expanded:
+                self._re_render_folder(idx, expand=False)
+        self._active_folder_idx = None
+        self._stream_baseline = len(self.lines)
+        from strategy_research.cli.tui.widgets.streaming_text import StreamingText
+        self._streamer = StreamingText()
+        self._streamer.start()
+
+    def update_streaming(self, text: str) -> None:
+        if self._streamer is None:
+            return
+        self._streamer.update_streaming(text)
+        self._truncate_to(self._stream_baseline)
+        rendered = self._streamer.render()
+        if rendered:
+            self.write(rendered)
+
+    def end_streaming(self, suffix: str = "") -> str:
+        if self._streamer is None:
+            return ""
+        full_text = self._streamer.full_text
+        self._truncate_to(self._stream_baseline)
+        self._folders.append(self._streamer)
+        self._fold_baselines.append(self._stream_baseline)
+        self._streamer = None
+        self._stream_baseline = None
+        rendered = self._folders[-1].render()
+        if rendered:
+            if suffix:
+                self.write(f"{rendered}  {suffix}")
+            else:
+                self.write(rendered)
+        elif suffix:
+            self.write(suffix)
+        return full_text
+
+    def toggle_fold(self) -> None:
+        if not self._folders:
+            return
+        if self._active_folder_idx is None:
+            self._active_folder_idx = len(self._folders) - 1
+            self._re_render_folder(self._active_folder_idx, expand=True)
+        else:
+            idx = self._active_folder_idx
+            folder = self._folders[idx]
+            if folder.expanded:
+                self._re_render_folder(idx, expand=False)
+                self._active_folder_idx = (idx - 1) % len(self._folders)
+                self._re_render_folder(self._active_folder_idx, expand=True)
+            else:
+                self._re_render_folder(idx, expand=True)
+
+    def _re_render_folder(self, idx: int, expand: bool) -> None:
+        start = self._fold_baselines[idx]
+        if idx + 1 < len(self._fold_baselines):
+            end = self._fold_baselines[idx + 1]
+        else:
+            end = len(self.lines)
+        after = self.lines[end:]
+        self._truncate_to(start)
+        folder = self._folders[idx]
+        if expand:
+            folder.expand()
+        else:
+            folder.collapse()
+        rendered = folder.render()
+        if rendered:
+            self.write(rendered)
+        old_end = end
+        new_end = len(self.lines)
+        self.lines.extend(after)
+        delta = new_end - old_end
+        for i in range(idx + 1, len(self._fold_baselines)):
+            self._fold_baselines[i] += delta
+
+    def _truncate_to(self, baseline) -> None:
+        if baseline is None:
+            return
+        if len(self.lines) > baseline:
+            self.lines = self.lines[:baseline]
+
 
 @pytest.mark.asyncio
 async def test_stream_chat_to_tui_writes_thinking_and_final():
+    """Streamed text lands in the transcript as one complete record.
+
+    The 'thinking' phase is now handled by ThinkingSpinner (process
+    layer) and does NOT write to the transcript. Only the final
+    complete text + stats line should appear.
+    """
     app = _FakeApp()
     client = _FakeClient([
         _chunk("Hello"),
@@ -184,8 +309,10 @@ async def test_stream_chat_to_tui_writes_thinking_and_final():
     rc = await stream_chat_to_tui(client, [], app=app)
     assert rc == 0
     contents = [str(m.content) for m in app.writes]
-    assert any("thinking" in c for c in contents)
-    assert any("Hello, world" in c for c in contents)
+    joined = "".join(contents)
+    # Full text in transcript (record layer)
+    assert "Hello, world" in joined
+    # Stats line
     assert any("chars" in c for c in contents)
 
 
@@ -221,9 +348,152 @@ async def test_stream_chat_to_tui_empty_response_does_not_crash():
     client = _FakeClient([])  # no chunks
     rc = await stream_chat_to_tui(client, [], app=app)
     assert rc == 0
-    # Should have written the thinking line plus an "(empty response)" hint.
+    # Should have written an "(empty response)" hint.
     contents = [str(m.content) for m in app.writes]
     assert any("empty response" in c for c in contents)
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_to_tui_uses_astream_when_available():
+    """When the client has ``astream``, the async streaming path is used.
+
+    The streaming lifecycle (begin_streaming -> update_streaming ->
+    end_streaming) should be exercised, and the full text should end
+    up in the transcript as a folded record.
+    """
+    app = _FakeApp()
+    client = _FakeClient([
+        _chunk("line1\n"),
+        _chunk("line2\n"),
+        _chunk("line3"),
+    ])
+    assert hasattr(client, "astream")
+    rc = await stream_chat_to_tui(client, [], app=app)
+    assert rc == 0
+    # Full text in transcript record (folded, but short enough to be visible)
+    contents = [str(m.content) for m in app.writes]
+    joined = "".join(contents)
+    assert "line1" in joined
+    assert "line3" in joined
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_to_tui_falls_back_to_sync_without_astream():
+    """When the client has no ``astream``, the sync ``stream`` path is used."""
+    app = _FakeApp()
+
+    class _SyncOnlyClient:
+        def __init__(self, chunks):
+            self._chunks = chunks
+
+        def stream(self, messages, **kw):
+            for c in self._chunks:
+                yield c
+
+    client = _SyncOnlyClient([_chunk("sync reply")])
+    rc = await stream_chat_to_tui(client, [], app=app)
+    assert rc == 0
+    contents = [str(m.content) for m in app.writes]
+    joined = "".join(contents)
+    assert "sync reply" in joined
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_to_tui_long_text_shows_fold_indicator():
+    """Long streamed text (>200 chars) gets a fold indicator + summary."""
+    app = _FakeApp()
+    long_text = "A" * 300 + " tail"
+    client = _FakeClient([_chunk(long_text)])
+    rc = await stream_chat_to_tui(client, [], app=app)
+    assert rc == 0
+    contents = [str(m.content) for m in app.writes]
+    joined = "".join(contents)
+    # Fold indicator present
+    assert "ctrl+e to expand" in joined
+    # Tail visible
+    assert "tail" in joined
+    # ctx.history gets the FULL text (zero data loss)
+    from dataclasses import dataclass, field as dc_field
+
+    @dataclass
+    class _Ctx:
+        history: list = dc_field(default_factory=list)
+
+    ctx2 = _Ctx()
+    app2 = _FakeApp()
+    client2 = _FakeClient([_chunk(long_text)])
+    await stream_chat_to_tui(client2, [], app=app2, ctx=ctx2)
+    assert ctx2.history[-1]["content"] == long_text
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_to_tui_long_text_shows_summary():
+    """Folded long text includes a one-sentence summary."""
+    app = _FakeApp()
+    long_text = "A股低回撤量化策略的核心思路是通过多因子模型筛选低波动股票。然后进行回测验证。" + "B" * 300
+    client = _FakeClient([_chunk(long_text)])
+    rc = await stream_chat_to_tui(client, [], app=app)
+    assert rc == 0
+    contents = [str(m.content) for m in app.writes]
+    joined = "".join(contents)
+    # Summary (first sentence) present
+    assert "A股低回撤量化策略的核心思路是通过多因子模型筛选低波动股票" in joined
+
+
+@pytest.mark.asyncio
+async def test_toggle_fold_cycles_through_multiple_folders():
+    """Ctrl+E cycles: expand last -> fold + expand prev -> cycle."""
+    from strategy_research.cli.tui.widgets.streaming_text import StreamingText
+
+    app = _FakeApp()
+
+    # Turn 1: long text -> folder[0]
+    long1 = "X" * 300
+    await stream_chat_to_tui(_FakeClient([_chunk(long1)]), [], app=app)
+    tv = app._tv
+    assert len(tv._folders) == 1
+
+    # Turn 2: long text -> folder[1]
+    long2 = "Y" * 300
+    app2 = app
+    await stream_chat_to_tui(_FakeClient([_chunk(long2)]), [], app=app2)
+    assert len(tv._folders) == 2
+    assert tv._active_folder_idx is None
+
+    # Ctrl+E #1: activate last (idx=1), expand
+    tv.toggle_fold()
+    assert tv._active_folder_idx == 1
+    assert tv._folders[1].expanded
+
+    # Ctrl+E #2: fold idx=1, activate idx=0, expand
+    tv.toggle_fold()
+    assert not tv._folders[1].expanded
+    assert tv._active_folder_idx == 0
+    assert tv._folders[0].expanded
+
+    # Ctrl+E #3: fold idx=0, cycle back to idx=1, expand
+    tv.toggle_fold()
+    assert not tv._folders[0].expanded
+    assert tv._active_folder_idx == 1
+    assert tv._folders[1].expanded
+
+
+@pytest.mark.asyncio
+async def test_begin_streaming_auto_folds_expanded_folder():
+    """New input auto-folds the currently expanded folder."""
+    app = _FakeApp()
+    long_text = "Z" * 300
+    await stream_chat_to_tui(_FakeClient([_chunk(long_text)]), [], app=app)
+    tv = app._tv
+
+    # Expand the folder
+    tv.toggle_fold()
+    assert tv._folders[0].expanded
+
+    # New streaming session: should auto-fold
+    tv.begin_streaming()
+    assert not tv._folders[0].expanded
+    assert tv._active_folder_idx is None
 
 
 # ─── ChatSession LLM integration ────────────────────────────────────
@@ -242,6 +512,32 @@ async def test_chat_session_dispatches_plain_text_to_llm():
 
         def post_message(self, message) -> None:
             self.writes.append(message)
+
+        def write_transcript(self, content) -> None:
+            self.writes.append(content)
+
+        def query_one(self, *_args, **_kw):
+            return type("TV", (), {
+                "post_message": lambda self, msg: None,
+            })()
+
+        def start_thinking(self) -> None:
+            pass
+
+        def stop_thinking(self) -> None:
+            pass
+
+        def start_streaming(self) -> None:
+            pass
+
+        def update_streaming(self, full_text: str) -> None:
+            pass
+
+        def end_streaming(self, suffix: str = "") -> str:
+            return ""
+
+        def update_header(self, **kw) -> None:
+            pass
 
     @dataclass
     class _Ctx:

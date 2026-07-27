@@ -125,6 +125,8 @@ class AgentLoop:
         enable_hypothesis_auto_create: bool = True,
         hooks: CompositeHook | None = None,
         session_manager: Any | None = None,
+        on_event: Any | None = None,
+        stream_mode: bool = True,
     ):
         self.config = config
         self.memory = memory
@@ -140,6 +142,8 @@ class AgentLoop:
         self.enable_hypothesis_auto_create = enable_hypothesis_auto_create
         self._hooks = hooks
         self._session_manager = session_manager
+        self._on_event = on_event
+        self._stream_mode = stream_mode
 
         # Tool filtering: allowed_tools > readonly > all
         if allowed_tools is not None:
@@ -190,6 +194,88 @@ class AgentLoop:
                     loop.close()
         except Exception:  # noqa: BLE001
             logger.warning("Hook %s failed", method_name, exc_info=True)
+
+    def _emit(self, event_type: str, data: dict | None = None) -> None:
+        """Emit an event to the on_event callback (if set)."""
+        if self._on_event is not None:
+            try:
+                self._on_event(event_type, data or {})
+            except Exception:  # noqa: BLE001
+                logger.warning("on_event callback failed for %s", event_type, exc_info=True)
+
+    def _stream_chat(self, messages: list[dict[str, Any]], iteration: int) -> Any:
+        """Stream chat completion and emit text_delta events.
+
+        Returns an LLMResponse-like object with content and tool_calls.
+        """
+        from ..llm.parser import LLMResponse
+
+        self._emit("thinking_start", {})
+        full_content = ""
+        accumulated_tool_calls: list[dict[str, Any]] = []
+        usage: dict[str, int] | None = None
+
+        try:
+            for chunk in self.client.stream(messages):
+                if chunk.delta_content:
+                    full_content += chunk.delta_content
+                    self._emit("text_delta", {"text": chunk.delta_content})
+
+                if chunk.delta_tool_calls:
+                    for tc_delta in chunk.delta_tool_calls:
+                        idx = tc_delta.get("index", 0)
+                        while len(accumulated_tool_calls) <= idx:
+                            accumulated_tool_calls.append({
+                                "id": tc_delta.get("id", ""),
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            })
+                        tc = accumulated_tool_calls[idx]
+                        if tc_delta.get("id"):
+                            tc["id"] = tc_delta["id"]
+                        if tc_delta.get("type"):
+                            tc["type"] = tc_delta["type"]
+                        func_delta = tc_delta.get("function", {})
+                        if func_delta.get("name"):
+                            tc["function"]["name"] = func_delta["name"]
+                        if func_delta.get("arguments"):
+                            tc["function"]["arguments"] += func_delta["arguments"]
+
+                if chunk.usage:
+                    usage = chunk.usage
+                    self._emit("llm_usage", chunk.usage)
+
+                if chunk.finish_reason:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            self._emit("thinking_end", {})
+            raise
+
+        self._emit("thinking_end", {})
+
+        # Convert accumulated tool_calls to LLMResponse format
+        from ..llm.parser import parse_chat_response
+        raw_response: dict[str, Any] = {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": full_content,
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": tc["type"],
+                            "function": tc["function"],
+                        }
+                        for tc in accumulated_tool_calls if tc["function"]["name"]
+                    ] or None,
+                },
+                "finish_reason": "stop" if not accumulated_tool_calls else "tool_calls",
+            }]
+        }
+        if usage:
+            raw_response["usage"] = usage
+
+        return parse_chat_response(raw_response)
 
     def _build_hook_context(
         self, iteration: int, messages: list[dict[str, Any]],
@@ -253,13 +339,18 @@ class AgentLoop:
 
             # Trace: iteration start
             self._trace({"type": "iter_start", "iteration": iteration, "tokens": estimate_tokens(messages)})
+            self._emit("iter_start", {"iteration": iteration})
 
             try:
-                response = self.client.chat(messages)
+                if self._stream_mode:
+                    response = self._stream_chat(messages, iteration)
+                else:
+                    response = self.client.chat(messages)
             except LLMError as exc:
                 result.finished_reason = "error"
                 result.error = f"{type(exc).__name__}: {exc}"
                 self._trace({"type": "error", "iteration": iteration, "error": str(exc)})
+                self._emit("error", {"message": str(exc), "fatal": True})
                 # P2-b: Hook — on_error
                 self._fire_hooks("on_error", hook_ctx, exc)
                 break
@@ -409,6 +500,7 @@ class AgentLoop:
         if tool is None:
             logger.warning("tool '%s' not in registry", tc.name)
             self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
+            self._emit("tool_result", {"tool": tc.name, "call_id": tc.id, "ok": False, "elapsed_ms": 0})
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -417,6 +509,9 @@ class AgentLoop:
                     ensure_ascii=False,
                 ),
             }
+
+        # Emit tool_call event
+        self._emit("tool_call", {"tool": tc.name, "args": tc.arguments, "call_id": tc.id})
 
         # Inject workspace kwarg if not present
         kwargs = dict(tc.arguments)
@@ -433,6 +528,10 @@ class AgentLoop:
                 ensure_ascii=False,
             )
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Emit tool_result event
+        is_error = isinstance(output, str) and output.startswith('{"status": "error"')
+        self._emit("tool_result", {"tool": tc.name, "call_id": tc.id, "ok": not is_error, "elapsed_ms": elapsed_ms})
 
         # Trace tool result
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]

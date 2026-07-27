@@ -110,6 +110,9 @@ class ChatSession:
         if stripped:
             self._write_captured(stripped)
 
+        # Update header stats after each turn
+        self._update_header_stats()
+
         # If plain text and an LLM client is bound, route the user
         # turn through the streaming bridge.
         if (
@@ -120,6 +123,12 @@ class ChatSession:
             and not text.strip().startswith("/")
             and not text.strip().startswith("停")
         ):
+            from rich.text import Text
+
+            self._write_transcript("")
+            self._write_transcript(
+                Text(f"\u276f {text.strip()}", style="bold cyan")
+            )
             from strategy_research.cli.llm_streaming import (
                 _build_messages,
                 stream_chat_to_tui,
@@ -188,6 +197,47 @@ class ChatSession:
     def _write_captured(self, captured_text: str) -> None:
         """Render the captured ANSI/marked-up text into the transcript."""
         self._write_transcript(captured_text)
+
+    def _update_header_stats(self) -> None:
+        """Update the StatusHeader with current session stats."""
+        if self.app is None:
+            return
+        try:
+            # Count messages in history
+            msg_count = len(self.ctx.history)
+            # Count tool events from the tools rail
+            tool_count = 0
+            tool_ok = 0
+            try:
+                from strategy_research.cli.tui.widgets.tools_rail import ToolsRail
+                rail = self.app.query_one(ToolsRail)
+                tool_count = len(rail._tools)
+                tool_ok = sum(1 for t in rail._tools if t.status == "result")
+            except Exception:
+                pass
+            # Estimate tokens (rough: 1 token per 4 chars)
+            token_used = sum(
+                len(str(turn.get("content", ""))) // 4
+                for turn in self.ctx.history
+            )
+            # Get model from LLM config
+            model = "unknown"
+            try:
+                from strategy_research.core.llm.config import LLMConfig
+                cfg = LLMConfig.load()
+                model = cfg.model
+            except Exception:
+                pass
+            self.app.update_header(
+                connection_status="live",
+                model=model,
+                message_count=msg_count,
+                tool_count=tool_count,
+                tool_ok=tool_ok,
+                token_used=token_used,
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ halt API
 

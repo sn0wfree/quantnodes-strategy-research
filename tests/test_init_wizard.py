@@ -5,20 +5,23 @@ Covers:
 * :func:`strategy_research.cli.onboard.run_onboarding` (the prompt-toolkit
   5-step wizard used by both init paths).
 * :func:`strategy_research.cli.onboard.is_onboarded`.
-* :func:`strategy_research.cli.onboard._save_partial` and
-  :func:`_finalize` (atomic .env.partial → .env, chmod 0o600).
+* :func:`strategy_research.cli.onboard._save_partial` /
+  :func:`_finalize_llm_json` / :func:`_save_tokens_to_dotenv`
+  (atomic JSON write + dotenv write, both chmod 0600).
 * :func:`strategy_research.cli._auto_onboard._maybe_run_onboarding`
   (the auto-trigger on bare ``quantnodes-research`` invocations).
 * :func:`strategy_research.cli._auto_onboard._migrate_legacy_env`
-  (one-shot copy of ``~/.strategy-research/.env``).
+  (one-shot copy of legacy ``.env`` files).
 * :func:`strategy_research.cli.__init__.cmd_run_onboarding` (the explicit
   CLI path driven by ``quantnodes-research init``).
+
+All tests operate against ``llm_json_path`` + ``dotenv_path`` (test-only
+overrides; defaults point at ``~/.quantnodes/{llm.json,.env}``).
 """
 from __future__ import annotations
 
 import argparse
-import io
-import os
+import json
 import stat
 import sys
 from pathlib import Path
@@ -27,20 +30,30 @@ from unittest.mock import patch
 import pytest
 
 from strategy_research.cli._auto_onboard import (
-    _DEFAULT_ENV_DIR,
-    _DEFAULT_ENV_PATH,
-    _first_existing_env_path,
+    _QUANTNODES_LLM_JSON_PATH,
+    _QUANTNODES_DOTENV_PATH,
+    _first_existing_dotenv_path,
     _maybe_run_onboarding,
     _migrate_legacy_env,
 )
 from strategy_research.cli.onboard import (
     PROVIDERS,
     TIMEOUT_CHOICES,
-    _finalize,
+    _finalize_llm_json,
     _save_partial,
+    _save_tokens_to_dotenv,
     is_onboarded,
     run_onboarding,
 )
+
+
+@pytest.fixture
+def fresh(tmp_path, monkeypatch):
+    """Use fresh llm.json + .env paths for each test."""
+    qn = tmp_path / ".quantnodes"
+    llm_path = qn / "llm.json"
+    env_path = qn / ".env"
+    return llm_path, env_path
 
 
 # ============================================================
@@ -52,73 +65,87 @@ class TestRunOnboarding:
     """The prompt_toolkit-style wizard. Inputs are pre-canned via the
     test-mode ``inputs`` parameter."""
 
-    def test_minimal_5_step_flow_writes_env(self, tmp_path: Path):
-        """Inputs: OpenAI / gpt-4o / sk-test123 / 300 / (skip tushare)."""
+    def test_minimal_5_step_flow_writes_llm_json(self, fresh):
+        llm_path, env_path = fresh
         result = run_onboarding(
             inputs=["OpenAI", "gpt-4o", "sk-test123", "300", ""],
-            env_dir=tmp_path,
+            llm_json_path=llm_path,
+            dotenv_path=env_path,
         )
-        assert result == tmp_path / ".env"
-        text = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=openai" in text
-        assert "LANGCHAIN_MODEL_NAME=gpt-4o" in text
-        assert "OPENAI_API_KEY=sk-test123" in text
-        assert "OPENAI_BASE_URL=" in text
-        assert "TIMEOUT_SECONDS=300" in text
-        assert "MAX_RETRIES=2" in text
-        assert "TUSHARE_TOKEN" not in text  # skipped on empty input
+        assert result == llm_path
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
+        assert data["llm"]["model"] == "gpt-4o"
+        assert data["llm"]["api_key"] == "env:LLM_API_KEY"
+        assert "base_url" in data["llm"]
+        assert data["llm"]["timeout"] == 300
+        assert data["llm"]["max_retries"] == 2
+        # Token side
+        env_text = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-test123" in env_text
+        assert "TUSHARE_TOKEN" not in env_text
 
-    def test_unknown_provider_raises_value_error(self, tmp_path: Path):
-        """Step 1 fails cleanly when the user selects a non-existent
-        provider label."""
+    def test_unknown_provider_raises_value_error(self, fresh):
+        llm_path, env_path = fresh
         with pytest.raises(ValueError, match="provider not selected"):
-            run_onboarding(inputs=["__not_a_provider__"], env_dir=tmp_path)
+            run_onboarding(
+                inputs=["__not_a_provider__"],
+                llm_json_path=llm_path,
+                dotenv_path=env_path,
+            )
 
-    def test_ollama_provider_skips_key_step(self, tmp_path: Path):
-        """Ollama has ``key_env = None`` and ``base_env = None`` so the
-        wizard must not prompt for an API key or set a base_url — only 4
-        inputs suffice."""
+    def test_ollama_provider_skips_key_step(self, fresh):
+        """Ollama has ``key_required=False`` so wizard must not prompt for
+        an API key — only 4 inputs suffice."""
+        llm_path, env_path = fresh
         result = run_onboarding(
-            inputs=["Ollama", "qwen2.5:32b", "300", ""],   # no key, 4 inputs
-            env_dir=tmp_path,
+            inputs=["Ollama", "qwen2.5:32b", "300", ""],
+            llm_json_path=llm_path,
+            dotenv_path=env_path,
         )
-        text = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=ollama" in text
-        assert "LANGCHAIN_MODEL_NAME=qwen2.5:32b" in text
-        # Ollama has base_env=None → base_url never written to .env
-        assert "OLLAMA_BASE_URL" not in text
-        assert "API_KEY" not in text  # no key column populated
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "ollama"
+        assert data["llm"]["model"] == "qwen2.5:32b"
+        assert "api_key" not in data["llm"]
 
-    def test_tushare_token_optional(self, tmp_path: Path):
-        """User supplies a Tushare token → it ends up in .env."""
-        result = run_onboarding(
-            inputs=["OpenAI", "gpt-4o", "sk-test", "300",
-                    "tushare_token_xyz"],
-            env_dir=tmp_path,
+    def test_tushare_token_optional(self, fresh):
+        llm_path, env_path = fresh
+        run_onboarding(
+            inputs=["OpenAI", "gpt-4o", "sk-test", "300", "tushare_token_xyz"],
+            llm_json_path=llm_path,
+            dotenv_path=env_path,
         )
-        text = result.read_text(encoding="utf-8")
-        assert "TUSHARE_TOKEN=tushare_token_xyz" in text
+        env_text = env_path.read_text(encoding="utf-8")
+        assert "TUSHARE_TOKEN=tushare_token_xyz" in env_text
 
-    def test_skip_tushare_short_circuits_final_step(self, tmp_path: Path):
-        """When skip_tushare=True, only the first 4 inputs are consumed."""
-        result = run_onboarding(
+    def test_skip_tushare_short_circuits_final_step(self, fresh):
+        llm_path, env_path = fresh
+        run_onboarding(
             inputs=["OpenAI", "gpt-4o", "sk-test", "300"],
             skip_tushare=True,
-            env_dir=tmp_path,
+            llm_json_path=llm_path,
+            dotenv_path=env_path,
         )
-        text = result.read_text(encoding="utf-8")
-        assert "TUSHARE_TOKEN" not in text
+        env_text = env_path.read_text(encoding="utf-8")
+        assert "TUSHARE_TOKEN" not in env_text
 
-    def test_no_inputs_raises_runtime_error_in_non_tty(self, tmp_path: Path):
-        """``inputs=None`` is the live-TTY path; out-of-TTY callers must
-        supply pre-canned inputs."""
+    def test_no_inputs_raises_runtime_error_in_non_tty(self, fresh):
+        llm_path, env_path = fresh
         with pytest.raises(RuntimeError, match="TTY"):
-            run_onboarding(inputs=None, env_dir=tmp_path)
+            run_onboarding(
+                inputs=None,
+                llm_json_path=llm_path,
+                dotenv_path=env_path,
+            )
 
-    def test_exhausted_inputs_raises_runtime_error(self, tmp_path: Path):
-        """If the wizard needs more inputs than supplied, fail loudly."""
+    def test_exhausted_inputs_raises_runtime_error(self, fresh):
+        llm_path, env_path = fresh
         with pytest.raises(RuntimeError, match="ran out"):
-            run_onboarding(inputs=[], env_dir=tmp_path)
+            run_onboarding(
+                inputs=[],
+                llm_json_path=llm_path,
+                dotenv_path=env_path,
+            )
 
 
 # ============================================================
@@ -127,55 +154,79 @@ class TestRunOnboarding:
 
 
 class TestIsOnboarded:
-    def test_false_when_no_env(self, tmp_path: Path):
-        assert not is_onboarded(env_dir=tmp_path)
+    def test_false_when_no_file(self, fresh):
+        llm_path, _ = fresh
+        assert not is_onboarded(llm_json_path=llm_path)
 
-    def test_true_when_env_exists(self, tmp_path: Path):
-        (tmp_path / ".env").write_text("LANGCHAIN_PROVIDER=openai\n")
-        assert is_onboarded(env_dir=tmp_path)
+    def test_false_when_empty_llm_section(self, fresh):
+        llm_path, _ = fresh
+        llm_path.parent.mkdir(parents=True, exist_ok=True)
+        llm_path.write_text(json.dumps({"llm": {}}))
+        assert not is_onboarded(llm_json_path=llm_path)
+
+    def test_true_when_llm_section_present(self, fresh):
+        llm_path, _ = fresh
+        _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
+        assert is_onboarded(llm_json_path=llm_path)
 
 
 # ============================================================
-# _save_partial / _finalize (atomic write, chmod 0o600)
+# _save_partial / _finalize_llm_json / _save_tokens_to_dotenv
 # ============================================================
 
 
 class TestFileHelpers:
-    def test_finalize_creates_env_atomic(self, tmp_path: Path):
-        """After finalize: .env exists, .env.partial is gone."""
-        values = {"LANGCHAIN_PROVIDER": "openai", "OPENAI_API_KEY": "sk-x"}
-        path = _finalize(values, env_dir=tmp_path)
-        assert path == tmp_path / ".env"
+    def test_finalize_creates_llm_json_atomic(self, fresh):
+        llm_path, _ = fresh
+        llm_section = {"provider": "openai", "api_key": "env:LLM_API_KEY"}
+        path = _finalize_llm_json(llm_section, llm_json_path=llm_path)
+        assert path == llm_path
         assert path.exists()
-        assert not (tmp_path / ".env.partial").exists()
-        assert "LANGCHAIN_PROVIDER=openai" in path.read_text(encoding="utf-8")
+        assert not (llm_path.parent / f"{llm_path.name}.partial").exists()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
 
-    def test_save_partial_leaves_artifact(self, tmp_path: Path):
-        """.env.partial stays until finalize clears it."""
-        values = {"LANGCHAIN_PROVIDER": "openai"}
-        _save_partial(values, env_dir=tmp_path)
-        assert (tmp_path / ".env.partial").exists()
-        assert "LANGCHAIN_PROVIDER=openai" in (
-            tmp_path / ".env.partial"
-        ).read_text(encoding="utf-8")
+    def test_save_partial_leaves_artifact(self, fresh):
+        llm_path, _ = fresh
+        _save_partial({"provider": "openai"}, llm_json_path=llm_path)
+        partial = llm_path.parent / f"{llm_path.name}.partial"
+        assert partial.exists()
+        data = json.loads(partial.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
 
-    def test_finalize_sets_mode_0o600_best_effort(self, tmp_path: Path):
-        """On POSIX, _finalize should chmod the .env to 0600."""
+    def test_finalize_sets_mode_0o600_best_effort(self, fresh):
+        llm_path, _ = fresh
         if sys.platform == "win32":
             pytest.skip("chmod semantics differ on Windows")
-        values = {"LANGCHAIN_PROVIDER": "openai"}
-        path = _finalize(values, env_dir=tmp_path)
+        path = _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
         mode = stat.S_IMODE(path.stat().st_mode)
         assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
 
-    def test_finalize_overwrites_existing(self, tmp_path: Path):
-        """_finalize replaces the existing .env atomically."""
-        (tmp_path / ".env").write_text("OLD_KEY=old")
-        values = {"LANGCHAIN_PROVIDER": "openai"}
-        _finalize(values, env_dir=tmp_path)
-        text = (tmp_path / ".env").read_text(encoding="utf-8")
-        assert "OLD_KEY" not in text
-        assert "LANGCHAIN_PROVIDER=openai" in text
+    def test_finalize_preserves_other_top_level_keys(self, fresh):
+        llm_path, _ = fresh
+        llm_path.parent.mkdir(parents=True, exist_ok=True)
+        llm_path.write_text(json.dumps({"tools": ["mcp_tool"], "cron": []}))
+        _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
+        data = json.loads(llm_path.read_text(encoding="utf-8"))
+        assert data["tools"] == ["mcp_tool"]
+        assert data["cron"] == []
+        assert data["llm"]["provider"] == "openai"
+
+    def test_save_tokens_writes_new_keys(self, fresh):
+        _, env_path = fresh
+        path = _save_tokens_to_dotenv({"LLM_API_KEY": "sk-x"}, dotenv_path=env_path)
+        assert path == env_path
+        content = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-x" in content
+
+    def test_save_tokens_preserves_existing_keys(self, fresh):
+        _, env_path = fresh
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_text("IFIND_MCP_TOKEN=keepme\n")
+        _save_tokens_to_dotenv({"TUSHARE_TOKEN": "new"}, dotenv_path=env_path)
+        content = env_path.read_text(encoding="utf-8")
+        assert "IFIND_MCP_TOKEN=keepme" in content
+        assert "TUSHARE_TOKEN=new" in content
 
 
 # ============================================================
@@ -185,132 +236,122 @@ class TestFileHelpers:
 
 class TestEnvProbe:
     def test_first_existing_returns_home_first(self, tmp_path: Path, monkeypatch):
-        """If both HOME and cwd/.env exist, HOME wins."""
-        # TMP/.env (rebranded by module-level import)
-        (tmp_path / "home.env").write_text("LANGCHAIN_PROVIDER=openai")
+        home_env = tmp_path / "home.env"
+        home_env.write_text("LLM_API_KEY=sk-home")
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_PATH",
-            tmp_path / "home.env",
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
+            home_env,
         )
         cwd_env = tmp_path / "cwd.env"
-        cwd_env.write_text("LANGCHAIN_PROVIDER=anthropic")
+        cwd_env.write_text("LLM_API_KEY=sk-cwd")
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._CWD_ENV_PATH",
+            "strategy_research.cli._auto_onboard._CWD_DOTENV_PATH",
             cwd_env,
         )
-        # project env should be lower priority
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._PROJECT_ENV_PATH",
+            "strategy_research.cli._auto_onboard._PROJECT_DOTENV_PATH",
             tmp_path / "missing.env",
         )
-        assert _first_existing_env_path() == tmp_path / "home.env"
+        assert _first_existing_dotenv_path() == tmp_path / "home.env"
 
     def test_first_existing_returns_none_when_all_missing(
         self, tmp_path: Path, monkeypatch
     ):
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_PATH",
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
             tmp_path / "missing1.env",
         )
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._PROJECT_ENV_PATH",
+            "strategy_research.cli._auto_onboard._PROJECT_DOTENV_PATH",
             tmp_path / "missing2.env",
         )
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._CWD_ENV_PATH",
+            "strategy_research.cli._auto_onboard._CWD_DOTENV_PATH",
             tmp_path / "missing3.env",
         )
-        assert _first_existing_env_path() is None
+        assert _first_existing_dotenv_path() is None
 
 
 class TestMigrateLegacyEnv:
     def test_copies_legacy_to_new_path(self, tmp_path: Path, monkeypatch):
-        # Legacy path: <home>/.strategy-research/.env
         legacy_dir = tmp_path / ".strategy-research"
         legacy_dir.mkdir()
         legacy_file = legacy_dir / ".env"
-        legacy_file.write_text(
-            "LANGCHAIN_PROVIDER=openai\nOPENAI_API_KEY=sk-legacy\n"
-        )
+        legacy_file.write_text("LLM_API_KEY=sk-legacy\n")
 
-        # Make Path.home() return tmp_path so the function finds the
-        # legacy file at tmp_path/.strategy-research/.env
         monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
 
-        # Point the rebrand destination to a NEW dir so the copy target
-        # doesn't already exist.
-        new_dir = tmp_path / "new_env"
+        new_path = tmp_path / "new_env" / ".env"
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_DIR", new_dir,
-        )
-        new_path = new_dir / ".env"
-        monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_PATH", new_path,
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
+            new_path,
         )
 
         _migrate_legacy_env()
 
         assert new_path.exists(), "new .env was not created"
-        assert new_path.read_text(encoding="utf-8") == (
-            "LANGCHAIN_PROVIDER=openai\nOPENAI_API_KEY=sk-legacy\n"
+        assert new_path.read_text(encoding="utf-8") == "LLM_API_KEY=sk-legacy\n"
+        assert legacy_file.exists()  # legacy NOT deleted
+
+    def test_copies_post_rebrand_legacy(self, tmp_path: Path, monkeypatch):
+        """The v0.4.x path ``~/.quantnodes/strategy_research/.env`` is also migrated."""
+        legacy_dir = tmp_path / ".quantnodes" / "strategy_research"
+        legacy_dir.mkdir(parents=True)
+        legacy_file = legacy_dir / ".env"
+        legacy_file.write_text("LLM_API_KEY=sk-postrebrand\n")
+
+        monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
+
+        new_path = tmp_path / "new_env" / ".env"
+        monkeypatch.setattr(
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
+            new_path,
         )
-        # legacy NOT deleted (left for user to mv/rm)
-        assert legacy_file.exists()
+
+        _migrate_legacy_env()
+
+        assert new_path.exists()
+        assert new_path.read_text(encoding="utf-8") == "LLM_API_KEY=sk-postrebrand\n"
 
     def test_idempotent_when_new_already_exists(
         self, tmp_path: Path, monkeypatch
     ):
-        """If new path already has content, leave it alone."""
-        legacy_dir = tmp_path / "legacy"
+        legacy_dir = tmp_path / ".strategy-research"
         legacy_dir.mkdir()
-        (legacy_dir / ".env").write_text("OLD=legacy")
+        (legacy_dir / ".env").write_text("LLM_API_KEY=sk-legacy")
 
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-        new_path = new_dir / ".env"
-        new_path.write_text("NEW=current")
+        new_path = tmp_path / "new" / ".env"
+        new_path.parent.mkdir(parents=True)
+        new_path.write_text("LLM_API_KEY=sk-current")
 
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard.Path.home", lambda: tmp_path,
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
+            new_path,
         )
-        monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_DIR", new_dir,
-        )
-        monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_PATH", new_path,
-        )
+        monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
 
         _migrate_legacy_env()
-        # New content untouched
-        assert new_path.read_text(encoding="utf-8") == "NEW=current"
+        assert new_path.read_text(encoding="utf-8") == "LLM_API_KEY=sk-current"
 
     def test_no_op_when_legacy_missing(self, tmp_path: Path, monkeypatch):
+        new_path = tmp_path / "new" / ".env"
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard.Path.home", lambda: tmp_path,
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
+            new_path,
         )
-        new_dir = tmp_path / "new"
-        monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_DIR", new_dir,
-        )
-        new_path = new_dir / ".env"
-        monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_PATH", new_path,
-        )
+        monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
         _migrate_legacy_env()
         assert not new_path.exists()
 
 
 class TestMaybeRunOnboarding:
     def test_skips_when_env_exists(self, tmp_path: Path, monkeypatch):
-        """If HOME/.env exists, _maybe_run_onboarding returns True
-        without consulting the wizard."""
         home_env = tmp_path / "home.env"
-        home_env.write_text("LANGCHAIN_PROVIDER=openai")
+        home_env.write_text("LLM_API_KEY=sk-x")
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._DEFAULT_ENV_PATH",
+            "strategy_research.cli._auto_onboard._QUANTNODES_DOTENV_PATH",
             home_env,
         )
-        # Even if the wizard would blow up, we shouldn't reach it.
         monkeypatch.setattr(
             "strategy_research.cli._auto_onboard.run_onboarding",
             lambda **kw: pytest.fail("wizard was invoked"),
@@ -318,21 +359,17 @@ class TestMaybeRunOnboarding:
         assert _maybe_run_onboarding(console=None) is True
 
     def test_returns_true_in_non_tty(self, tmp_path: Path, monkeypatch):
-        """Non-TTY invocations must NOT prompt — return True so the
-        caller falls through to whatever it would have done."""
-        # Ensure no env candidate exists
-        for attr in ("_DEFAULT_ENV_PATH", "_PROJECT_ENV_PATH", "_CWD_ENV_PATH"):
+        for attr in ("_QUANTNODES_DOTENV_PATH",
+                     "_PROJECT_DOTENV_PATH",
+                     "_CWD_DOTENV_PATH"):
             monkeypatch.setattr(
                 f"strategy_research.cli._auto_onboard.{attr}",
                 tmp_path / f"nonexistent_{attr}.env",
             )
-        # stdin is NOT a tty → _maybe_run_onboarding returns True
-        # immediately without consulting the wizard.
         monkeypatch.setattr(
             "strategy_research.cli._auto_onboard.sys.stdin",
             type("Mock", (), {"isatty": staticmethod(lambda: False)})(),
         )
-        # Wizard must not be reached.
         monkeypatch.setattr(
             "strategy_research.cli._auto_onboard.run_onboarding",
             lambda **kw: (_ for _ in ()).throw(
@@ -341,16 +378,13 @@ class TestMaybeRunOnboarding:
         )
         assert _maybe_run_onboarding(console=None) is True
 
-    def test_returns_false_when_wizard_returns_none(self, tmp_path: Path, monkeypatch):
-        """On wizard CANCEL (run_onboarding returns None), return False
-        so the CLI exits 0."""
-        # Force _first_existing_env_path to return None so the wizard path
-        # is actually reached.
+    def test_returns_false_when_wizard_returns_none(
+        self, tmp_path: Path, monkeypatch
+    ):
         monkeypatch.setattr(
-            "strategy_research.cli._auto_onboard._first_existing_env_path",
+            "strategy_research.cli._auto_onboard._first_existing_dotenv_path",
             lambda: None,
         )
-        # Pretend stdin+stdout are real TTYs
         monkeypatch.setattr(
             "strategy_research.cli._auto_onboard.sys.stdin",
             type("Mock", (), {"isatty": staticmethod(lambda: True)})(),
@@ -359,8 +393,8 @@ class TestMaybeRunOnboarding:
             "strategy_research.cli._auto_onboard.sys.stdout",
             type("Mock", (), {"isatty": staticmethod(lambda: True)})(),
         )
-        # Wizard returns None → user cancelled
         monkeypatch.setattr(
+            "strategy_research.cli._auto_onboarding.run_onboarding" if False else
             "strategy_research.cli._auto_onboard.run_onboarding",
             lambda **kw: None,
         )
@@ -374,7 +408,6 @@ class TestMaybeRunOnboarding:
 
 class TestCmdRunOnboarding:
     def test_help_describes_wizard(self, capsys):
-        """The argparse help text must mention the credentials wizard."""
         from strategy_research.cli import main as cli_main
         with patch.object(sys, "argv", ["prog", "init", "--help"]):
             with pytest.raises(SystemExit) as exc:
@@ -384,80 +417,48 @@ class TestCmdRunOnboarding:
         assert "credentials wizard" in captured.out
         assert "vibe-trading" in captured.out
 
-    def test_overwrite_existing_requires_force(self, tmp_path: Path, monkeypatch):
-        """When .env exists and user declines Overwrite, return 0
-        without changing the file."""
-        env_dir = tmp_path / "env_dir"
-        env_dir.mkdir()
-        env_path = env_dir / ".env"
-        env_path.write_text("ORIGINAL=keep_me\n")
+    def test_overwrite_existing_requires_force(self, fresh, monkeypatch):
+        llm_path, _ = fresh
+        llm_path.parent.mkdir(parents=True, exist_ok=True)
+        _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
 
-        monkeypatch.setattr(
-            "strategy_research.cli.onboard._DEFAULT_ENV_DIR", env_dir,
-        )
-        monkeypatch.setattr(
-            "strategy_research.cli.onboard._DEFAULT_ENV_PATH", env_path,
-        )
-        # Confirm.ask returns False
-        with patch(
-            "rich.prompt.Confirm.ask",
-            return_value=False,
-        ):
+        with patch("rich.prompt.Confirm.ask", return_value=False):
             from strategy_research.cli import cmd_run_onboarding
             args = argparse.Namespace(force=False)
             rc = cmd_run_onboarding(args)
         assert rc == 0
-        assert env_path.read_text(encoding="utf-8") == "ORIGINAL=keep_me\n"
+        # File untouched
+        data = json.loads(llm_path.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
 
-    def test_force_overwrites(self, tmp_path: Path, monkeypatch):
-        """With --force, the wizard runs even if .env exists."""
-        env_dir = tmp_path / "env_dir"
-        env_dir.mkdir()
-        env_path = env_dir / ".env"
-        env_path.write_text("OLD=value\n")
+    def test_force_overwrites(self, fresh, monkeypatch):
+        llm_path, env_path = fresh
+        llm_path.parent.mkdir(parents=True, exist_ok=True)
+        _finalize_llm_json({"provider": "openai", "model": "old"},
+                           llm_json_path=llm_path)
 
-        monkeypatch.setattr(
-            "strategy_research.cli.onboard._DEFAULT_ENV_DIR", env_dir,
-        )
-        monkeypatch.setattr(
-            "strategy_research.cli.onboard._DEFAULT_ENV_PATH", env_path,
-        )
-
-        # Patch run_onboarding at the module level — cmd_run_onboarding
-        # re-imports it on every call, so patching the module attribute
-        # is sufficient.
-        original_run = run_onboarding
-
-        def fake_run_onboarding(*, console=None, env_dir=None, **_):
-            # Use _DEFAULT_ENV_DIR as fallback when env_dir is not passed
-            # (cmd_run_onboarding omits it from its call).
-            from strategy_research.cli.onboard import _DEFAULT_ENV_DIR
-            d = env_dir or _DEFAULT_ENV_DIR
-            (d / ".env").write_text("NEW=fresh\n")
-            return d / ".env"
+        def fake_run(*, console=None, **_):
+            _finalize_llm_json(
+                {"provider": "anthropic", "model": "new"},
+                llm_json_path=llm_path,
+            )
+            return llm_path
 
         monkeypatch.setattr(
-            "strategy_research.cli.onboard.run_onboarding",
-            fake_run_onboarding,
+            "strategy_research.cli.onboard.run_onboarding", fake_run,
         )
         from strategy_research.cli import cmd_run_onboarding
         args = argparse.Namespace(force=True)
         rc = cmd_run_onboarding(args)
         assert rc == 0
-        assert "NEW=fresh" in env_path.read_text(encoding="utf-8")
+        data = json.loads(llm_path.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "anthropic"
 
-    def test_wizard_cancel_returns_nonzero(self, tmp_path: Path, monkeypatch):
-        """run_onboarding returns None on CANCEL → cmd returns 1."""
-        env_dir = tmp_path / "env_dir"
-        env_dir.mkdir()
-        env_path = env_dir / ".env"
-        env_path.unlink(missing_ok=True)
-
+    def test_wizard_cancel_returns_nonzero(self, fresh, monkeypatch):
+        # is_onboarded() reads real ~/.quantnodes/llm.json; force False
+        # so cmd_run_onboarding reaches run_onboarding without prompting.
         monkeypatch.setattr(
-            "strategy_research.cli.onboard._DEFAULT_ENV_DIR", env_dir,
-        )
-        monkeypatch.setattr(
-            "strategy_research.cli.onboard._DEFAULT_ENV_PATH", env_path,
+            "strategy_research.cli.onboard.is_onboarded", lambda **kw: False,
         )
         monkeypatch.setattr(
             "strategy_research.cli.onboard.run_onboarding",
@@ -477,171 +478,176 @@ class TestCmdRunOnboarding:
 class TestRunOnboardingTTY:
     """Test the prompt_toolkit TTY branch of run_onboarding."""
 
-    def test_tty_full_flow_openai(self, tmp_path: Path, monkeypatch):
-        """Simulate full TTY flow: OpenAI → gpt-4o → key → 300s → skip tushare."""
-        from strategy_research.cli.onboard import (
-            _step_provider, _step_model, _step_key, _step_timeout, _step_tushare,
-            _save_partial,
-        )
+    def test_tty_full_flow_openai(self, fresh, monkeypatch):
+        llm_path, env_path = fresh
 
-        # Mock TTY detection
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
 
-        # Mock selectors to return predetermined values
         call_count = {"n": 0}
 
         def mock_select(prompt, choices, *, default_index=0):
             call_count["n"] += 1
-            if call_count["n"] == 1:  # provider
+            if call_count["n"] == 1:
                 return "openai"
-            if call_count["n"] == 2:  # model
+            if call_count["n"] == 2:
                 return "gpt-4o"
-            if call_count["n"] == 5:  # tushare
+            if call_count["n"] == 5:
                 return "__skip__"
-            return choices[0][0]  # default for timeout
-
-        def mock_secret(prompt):
-            return "sk-test1234567890"
+            return choices[0][0]
 
         monkeypatch.setattr(
             "strategy_research.cli.onboard._select_with_back", mock_select,
         )
         monkeypatch.setattr(
-            "strategy_research.cli.onboard._prompt_secret", mock_secret,
+            "strategy_research.cli.onboard._prompt_secret",
+            lambda prompt: "sk-test1234567890",
+        )
+        # Mock Step 0 auto-fix prompt (prompt_toolkit.prompt)
+        monkeypatch.setattr(
+            "prompt_toolkit.prompt",
+            lambda *a, **kw: "y",
         )
 
-        # Mock stdin.isatty and stdout.isatty for run_onboarding
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-
-        result = run_onboarding(env_dir=tmp_path)
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path,
+        )
         assert result is not None
-        assert result == tmp_path / ".env"
-        text = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=openai" in text
-        assert "OPENAI_API_KEY=sk-test1234567890" in text
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "openai"
+        assert data["llm"]["api_key"] == "env:LLM_API_KEY"
+        env_text = env_path.read_text(encoding="utf-8")
+        assert "LLM_API_KEY=sk-test1234567890" in env_text
 
-    def test_tty_cancel_returns_none(self, tmp_path: Path, monkeypatch):
-        """CANCEL at step 1 → returns None."""
+    def test_tty_cancel_returns_none(self, fresh, monkeypatch):
         from strategy_research.cli.onboard import CANCEL
+        llm_path, env_path = fresh
 
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr(
+            "prompt_toolkit.prompt",
+            lambda *a, **kw: "y",
+        )
         monkeypatch.setattr(
             "strategy_research.cli.onboard._select_with_back",
             lambda *a, **kw: CANCEL,
         )
 
-        result = run_onboarding(env_dir=tmp_path)
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path,
+        )
         assert result is None
 
-    def test_tty_back_at_step0_returns_none(self, tmp_path: Path, monkeypatch):
-        """BACK at step 0 → returns None (same as cancel)."""
+    def test_tty_back_at_step0_returns_none(self, fresh, monkeypatch):
         from strategy_research.cli.onboard import BACK
+        llm_path, env_path = fresh
 
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr(
+            "prompt_toolkit.prompt",
+            lambda *a, **kw: "y",
+        )
         monkeypatch.setattr(
             "strategy_research.cli.onboard._select_with_back",
             lambda *a, **kw: BACK,
         )
 
-        result = run_onboarding(env_dir=tmp_path)
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path,
+        )
         assert result is None
 
-    def test_tty_back_goes_to_previous_step(self, tmp_path: Path, monkeypatch):
-        """BACK at step 2 goes back to step 1, then select again."""
+    def test_tty_back_goes_to_previous_step(self, fresh, monkeypatch):
         from strategy_research.cli.onboard import BACK
+        llm_path, env_path = fresh
 
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr(
+            "prompt_toolkit.prompt",
+            lambda *a, **kw: "y",
+        )
 
-        # Track which step function is being called
-        step_names = []
         step_calls = {"provider": 0, "model": 0, "timeout": 0, "tushare": 0}
 
-        original_step_provider = None
-
         def mock_select(prompt, choices, *, default_index=0):
-            # Detect which step by looking at the prompt text
             if "provider" in prompt.lower():
-                step_names.append("provider")
                 step_calls["provider"] += 1
-                if step_calls["provider"] == 1:
-                    return "openai"  # first time: select openai
-                return "openai"  # after BACK: select openai again
+                return "openai"
             if "model" in prompt.lower():
-                step_names.append("model")
                 step_calls["model"] += 1
                 if step_calls["model"] == 1:
-                    return BACK  # first time: BACK
-                return "gpt-4o"  # after BACK: select gpt-4o
+                    return BACK
+                return "gpt-4o"
             if "timeout" in prompt.lower():
-                step_names.append("timeout")
                 step_calls["timeout"] += 1
                 return "300"
             if "tushare" in prompt.lower():
-                step_names.append("tushare")
                 step_calls["tushare"] += 1
                 return "__skip__"
             return choices[0][0]
-
-        def mock_secret(prompt):
-            return "sk-test1234567890"
 
         monkeypatch.setattr(
             "strategy_research.cli.onboard._select_with_back", mock_select,
         )
         monkeypatch.setattr(
-            "strategy_research.cli.onboard._prompt_secret", mock_secret,
+            "strategy_research.cli.onboard._prompt_secret",
+            lambda prompt: "sk-test1234567890",
         )
 
-        result = run_onboarding(env_dir=tmp_path)
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path,
+        )
         assert result is not None
-        text = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=openai" in text
-        assert "OPENAI_API_KEY=sk-test1234567890" in text
-        # Verify BACK happened: provider was called twice
         assert step_calls["provider"] == 2
         assert step_calls["model"] == 2
 
-    def test_tty_ollama_skips_key_step(self, tmp_path: Path, monkeypatch):
-        """Ollama has no key_env → _step_key prints hint and returns ok."""
+    def test_tty_ollama_skips_key_step(self, fresh, monkeypatch):
+        llm_path, env_path = fresh
+
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr(
+            "prompt_toolkit.prompt",
+            lambda *a, **kw: "y",
+        )
 
         step = {"n": 0}
 
         def mock_select(prompt, choices, *, default_index=0):
             step["n"] += 1
             if step["n"] == 1:
-                return "ollama"  # provider
+                return "ollama"
             if step["n"] == 2:
-                return "qwen2.5:32b"  # model
+                return "qwen2.5:32b"
             if step["n"] == 3:
-                return "300"  # timeout
+                return "300"
             if step["n"] == 4:
-                return "__skip__"  # tushare
+                return "__skip__"
             return choices[0][0]
 
         monkeypatch.setattr(
             "strategy_research.cli.onboard._select_with_back", mock_select,
         )
 
-        result = run_onboarding(env_dir=tmp_path)
+        result = run_onboarding(
+            llm_json_path=llm_path, dotenv_path=env_path,
+        )
         assert result is not None
-        text = result.read_text(encoding="utf-8")
-        assert "LANGCHAIN_PROVIDER=ollama" in text
-        assert "API_KEY" not in text
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["provider"] == "ollama"
+        assert "api_key" not in data["llm"]
 
-    def test_tty_non_tty_raises_runtime_error(self, tmp_path: Path, monkeypatch):
-        """Non-TTY input raises RuntimeError with friendly message."""
+    def test_tty_non_tty_raises_runtime_error(self, fresh, monkeypatch):
+        llm_path, env_path = fresh
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-
         with pytest.raises(RuntimeError, match="TTY"):
-            run_onboarding(env_dir=tmp_path)
+            run_onboarding(
+                llm_json_path=llm_path, dotenv_path=env_path,
+            )
 
 
 # ============================================================
@@ -653,90 +659,53 @@ class TestTTYHelpers:
     """Test the TTY helper functions."""
 
     def test_validate_key_valid(self):
-        from strategy_research.cli.onboard import Provider, _validate_key
-        p = Provider(
-            "openai", "OpenAI", "GPT-4o", "gpt-4o",
-            "OPENAI_API_KEY", "OPENAI_BASE_URL",
-            "https://api.openai.com/v1", "sk-",
-            ("gpt-4o",),
-        )
-        assert _validate_key(p, "sk-test1234567890") is None
+        from strategy_research.cli.onboard import _validate_key
+        assert _validate_key("sk-", "sk-test1234567890") is None
 
     def test_validate_key_empty(self):
-        from strategy_research.cli.onboard import Provider, _validate_key
-        p = Provider(
-            "openai", "OpenAI", "GPT-4o", "gpt-4o",
-            "OPENAI_API_KEY", "OPENAI_BASE_URL",
-            "https://api.openai.com/v1", "sk-",
-            ("gpt-4o",),
-        )
-        err = _validate_key(p, "")
+        from strategy_research.cli.onboard import _validate_key
+        err = _validate_key("sk-", "")
         assert "empty" in err.lower()
 
     def test_validate_key_wrong_prefix(self):
-        from strategy_research.cli.onboard import Provider, _validate_key
-        p = Provider(
-            "openai", "OpenAI", "GPT-4o", "gpt-4o",
-            "OPENAI_API_KEY", "OPENAI_BASE_URL",
-            "https://api.openai.com/v1", "sk-",
-            ("gpt-4o",),
-        )
-        err = _validate_key(p, "wrong-prefix-123456")
+        from strategy_research.cli.onboard import _validate_key
+        err = _validate_key("sk-", "wrong-prefix-123456")
         assert "sk-" in err
 
     def test_validate_key_too_short(self):
-        from strategy_research.cli.onboard import Provider, _validate_key
-        p = Provider(
-            "openai", "OpenAI", "GPT-4o", "gpt-4o",
-            "OPENAI_API_KEY", "OPENAI_BASE_URL",
-            "https://api.openai.com/v1", "sk-",
-            ("gpt-4o",),
-        )
-        err = _validate_key(p, "sk-short")
+        from strategy_research.cli.onboard import _validate_key
+        err = _validate_key("sk-", "sk-short")
         assert "short" in err.lower()
 
 
 class TestStepProviderSwitch:
     """Verify _step_provider drops stale keys when the user BACK-reselects."""
 
-    def test_switch_from_openai_to_ollama_drops_openai_keys(self, tmp_path):
-        """OpenAI 残留 → BACK → Ollama → .env 不带 OPENAI_API_KEY。"""
-        from strategy_research.cli.onboard import (
-            PROVIDERS, _step_provider, _save_partial,
-            _DEFAULT_ENV_DIR,
-        )
-
-        # 准备：模拟 user 已经先填了 OpenAI 的密钥、URL、模型
-        from pathlib import Path
-        env_dir = tmp_path / "env"
-        import strategy_research.cli.onboard as onboard_mod
-        monkey_target = env_dir  # we just need a target dir for _save_partial
-        onboard_mod._DEFAULT_ENV_DIR = monkey_target  # type: ignore[attr-defined]
-
-        values = {
-            "LANGCHAIN_PROVIDER": "openai",
-            "LANGCHAIN_MODEL_NAME": "gpt-4o",
-            "OPENAI_API_KEY": "sk-residual1234567890",
-            "OPENAI_BASE_URL": "https://api.openai.com/v1",
-        }
-        state: dict = {
-            "provider": next(p for p in PROVIDERS if p.key == "openai"),
-        }
-
-        # 第一次调 _step_provider 把 provider 改成 ollama（即 BACK 重选场景）
-        # 我们需要 mock _select_with_back 返回 "ollama"
+    def test_switch_from_openai_to_ollama_drops_openai_keys(self, fresh, monkeypatch):
+        """OpenAI 残留 → BACK → Ollama → llm.json 不带 api_key/base_url。"""
+        from strategy_research.cli.onboard import _step_provider
         import unittest.mock as _mock
+        import strategy_research.cli.onboard as onboard_mod
+
+        llm_path, env_path = fresh
         with _mock.patch.object(
-            onboard_mod, "_select_with_back", return_value="ollama"
+            onboard_mod, "_select_with_back", return_value="ollama",
         ):
-            result = _step_provider(values, state, skip_tushare=False)
+            llm = {
+                "provider": "openai",
+                "model": "gpt-4o",
+                "api_key": "env:LLM_API_KEY",
+                "base_url": "https://api.openai.com/v1",
+            }
+            state: dict = {"provider_key": "openai"}
 
-        assert result == "ok"
-        assert values["LANGCHAIN_PROVIDER"] == "ollama"
+            result = _step_provider(llm, state, skip_tushare=False)
 
-        # 关键断言：旧 provider 的键必须不存在
-        assert "OPENAI_API_KEY" not in values
-        assert "OPENAI_BASE_URL" not in values
-        # LANGCHAIN_MODEL_NAME 也应该被清（用户重新选 provider 会再选 model）
-        assert "LANGCHAIN_MODEL_NAME" not in values
-
+            assert result == "ok"
+            assert llm["provider"] == "ollama"
+            # api_key (OpenAI credential) dropped — Ollama has no key
+            assert "api_key" not in llm
+            # base_url now points to Ollama's default (not OpenAI's)
+            assert llm["base_url"] == "http://localhost:11434"
+            # model was re-cleared so user re-picks in step 2
+            assert "model" not in llm

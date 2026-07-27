@@ -1,33 +1,19 @@
 """LLM streaming bridge between :class:`ChatSession` and the Textual TUI.
 
-The Textual TUI's chat input is async (Textual awaits ``on_input_submitted``
-handlers), so the streaming wrapper is built around
-:func:`asyncio.to_thread` + the existing async generator
-:class:`OpenAICompatClient.astream`.
+Implements the TUI display philosophy (see ``docs/tui-display-philosophy.md``):
 
-The bridge is responsible for:
-
-* Mounting a thinking-spinner while the first token arrives.
-* Posting each ``delta_content`` token to the TUI transcript in real
-  time so the user sees a typewriter-like effect.
-* Accumulating the final assistant content and appending it (after the
-  user turn) to :attr:`InteractiveContext.history`.
+* **Principle 1 - process/record separation**: streaming tokens update
+  the *process layer* (StreamingText, in-place replacement); the final
+  text is written to the *record layer* (TranscriptView, append-once).
+* **Principle 3 - in-place, not append**: each token delta calls
+  ``app.update_streaming(full_text)`` which re-renders a single Static
+  widget. No new lines are created during streaming.
+* **Principle 4 - lifecycle**: thinking spinner -> streaming text ->
+  transcript record, with explicit start/end transitions.
 
 The module exposes a single public function:
 
 >>> await stream_chat_to_tui(client, messages, *, app, ctx)
-
-with the contract:
-
-* The Textual app is bound via :mod:`cli.tui.messages`. The function
-  never touches the app directly — it resolves the ``TranscriptView``
-  widget via ``app.query_one(TranscriptView)`` and posts
-  :class:`WriteTranscript` messages to the widget (which is the
-  routed-once boundary Textual honours).
-* ``ctx.history`` is mutated *in place* so subsequent turns see the
-  assistant response in ``ctx.history`` for the LLM's own context.
-* Errors from the LLM are caught and rendered as :class:`WriteTranscript`
-  lines so the TUI never crashes on a transient network failure.
 """
 from __future__ import annotations
 
@@ -45,6 +31,8 @@ from strategy_research.core.llm.parser import StreamChunk
 
 logger = logging.getLogger(__name__)
 
+_FLUSH_INTERVAL = 0.04  # 40ms between StreamingText re-renders
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Streaming primitives
@@ -52,11 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 def _chunks_to_messages(chunks: Iterable[StreamChunk]) -> tuple[str, int]:
-    """Fold stream chunks into ``(full_content, char_count)``.
-
-    Tool-call deltas are accumulated but ignored here; Commit 6 will
-    dispatch them to the rail.
-    """
+    """Fold stream chunks into ``(full_content, char_count)``."""
     parts: List[str] = []
     char_count = 0
     for c in chunks:
@@ -69,9 +53,8 @@ def _chunks_to_messages(chunks: Iterable[StreamChunk]) -> tuple[str, int]:
 def _build_messages(ctx: InteractiveContext) -> list[dict[str, Any]]:
     """Build a chat-completions messages list from :attr:`InteractiveContext.history`.
 
-    Truncated to the most recent ~6 user/assistant turns so the prompt
-    stays small enough to fit a typical 8k context window with room for
-    the answer.
+    Truncated to the most recent ~12 turns so the prompt stays small
+    enough to fit a typical 8k context window with room for the answer.
     """
     out: list[dict[str, Any]] = []
     for turn in ctx.history[-12:]:
@@ -96,18 +79,18 @@ async def stream_chat_to_tui(
     app: Any,
     ctx: Optional[InteractiveContext] = None,
 ) -> int:
-    """Stream a chat completion into the bound TUI app's TranscriptView.
+    """Stream a chat completion into the bound TUI app.
 
-    Args:
-        client: An :class:`OpenAICompatClient` (or any object that
-            exposes ``astream(messages, ...)``).
-        messages: The chat-completions messages list.
-        app: The Textual app. We post :class:`WriteTranscript` messages
-            via ``app.post_message`` so the widget tree can forward
-            them to TranscriptView.
-        ctx: Optional :class:`InteractiveContext`. When supplied, the
-            final assistant content is appended to ``ctx.history`` so
-            subsequent turns have full LLM-side context.
+    Lifecycle (philosophy principle 4):
+
+    1. **thinking** - show ThinkingSpinner while waiting for first token.
+    2. **streaming** - hide spinner, show StreamingText, update in-place
+       on every token (principle 3).
+    3. **done** - hide StreamingText, write full text to TranscriptView
+       as a single record (principle 1 - record layer gets complete data).
+
+    Falls back to sync ``client.stream()`` via a thread when the client
+    has no ``astream``.
 
     Returns:
         ``0`` if the stream produced content, ``1`` if it raised.
@@ -115,38 +98,116 @@ async def stream_chat_to_tui(
     write = _make_writer(app)
 
     start = time.perf_counter()
-    write("[muted]⏳ thinking…[/muted]")
+    _start_thinking(app)
 
+    full_text = ""
     try:
-        full_text, char_count = await asyncio.to_thread(
-            _consume_sync_stream, client, messages
-        )
+        astream = getattr(client, "astream", None)
+        if astream is not None:
+            full_text = await _consume_async_stream(astream, messages, app)
+        else:
+            full_text, _ = await asyncio.to_thread(
+                _consume_sync_stream, client, messages
+            )
+            _start_streaming(app)
+            _update_streaming(app, full_text)
     except LLMError as exc:
         elapsed = time.perf_counter() - start
-        # Replace the thinking line with an error line.
+        _stop_thinking(app)
         write(f"[red]LLM error after {elapsed:.1f}s:[/red] {exc}")
         return 1
     except Exception as exc:  # noqa: BLE001
         elapsed = time.perf_counter() - start
+        _stop_thinking(app)
         write(f"[red]unexpected error after {elapsed:.1f}s:[/red] {exc}")
         return 1
 
     elapsed = time.perf_counter() - start
+    _stop_thinking(app)
 
-    # Replace the thinking line with the final content. We render
-    # content as a single write — pure typewriter chunking is left
-    # for a future iteration; chunking through the post_message
-    # boundary adds latency rather than value at this scale.
-    write(
-        f"[italic]{full_text or '[dim](empty response)'}[/italic]"
-        f"  [muted]({char_count} chars · {elapsed:.1f}s)[/muted]"
-    )
+    if full_text:
+        suffix = f"[muted]({len(full_text)} chars \u00b7 {elapsed:.1f}s)[/muted]"
+        _end_streaming(app, suffix)
+    else:
+        _end_streaming(app)
+        write("[dim](empty response)[/dim]")
 
-    # Append to ctx.history so future turns see this assistant reply.
     if ctx is not None and full_text:
         ctx.history.append({"role": "assistant", "content": full_text})
 
     return 0
+
+
+async def _consume_async_stream(astream, messages, app) -> str:
+    """Drive ``client.astream()`` and update the StreamingText in-place.
+
+    Tokens are accumulated into ``full_text`` and the StreamingText widget
+    is re-rendered at most every ``_FLUSH_INTERVAL`` (40ms) to avoid
+    flooding the Textual message queue (philosophy principle 3).
+
+    The first token triggers the transition from ThinkingSpinner to
+    StreamingText (principle 4).
+    """
+    full_text = ""
+    last_flush = time.perf_counter()
+    started = False
+
+    async for chunk in astream(messages):
+        if not chunk.delta_content:
+            continue
+        if not started:
+            started = True
+            _start_streaming(app)
+        full_text += chunk.delta_content
+        now = time.perf_counter()
+        if (now - last_flush) >= _FLUSH_INTERVAL:
+            _update_streaming(app, full_text)
+            last_flush = now
+
+    if started:
+        _update_streaming(app, full_text)
+
+    return full_text
+
+
+# ──────────────────────────────────────────────────────────────────────
+# App lifecycle helpers (thin wrappers that swallow errors)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _start_thinking(app: Any) -> None:
+    try:
+        app.start_thinking()
+    except Exception:
+        pass
+
+
+def _stop_thinking(app: Any) -> None:
+    try:
+        app.stop_thinking()
+    except Exception:
+        pass
+
+
+def _start_streaming(app: Any) -> None:
+    try:
+        app.start_streaming()
+    except Exception:
+        pass
+
+
+def _update_streaming(app: Any, full_text: str) -> None:
+    try:
+        app.update_streaming(full_text)
+    except Exception:
+        pass
+
+
+def _end_streaming(app: Any, suffix: str = "") -> None:
+    try:
+        app.end_streaming(suffix=suffix)
+    except Exception:
+        pass
 
 
 def _make_writer(app: Any):
@@ -154,15 +215,13 @@ def _make_writer(app: Any):
 
     Resolves the ``TranscriptView`` widget on every call so the writer
     works even when the chat session is created before ``on_mount``
-    has finished running. Captures ``app`` by closure.
+    has finished running.
     """
 
     def _write(content: Any) -> None:
         try:
             tv = app.query_one(TranscriptView)
         except Exception:
-            # App is not yet mounted (post-on_mount state, off-screen
-            # test fixture, etc.). Silently drop.
             return
         try:
             tv.post_message(WriteTranscript(content=content))

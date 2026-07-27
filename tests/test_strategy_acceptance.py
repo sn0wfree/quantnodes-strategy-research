@@ -351,12 +351,18 @@ class TestEvaluateOrSkip:
     def test_enabled_no_client_returns_fail_when_no_key(self, monkeypatch):
         """When enabled and no client + no API key, returns fail verdict (not raise)."""
         cfg = DEFAULT_CONFIG.with_overrides(llm_enabled=True)
-        # Force LLMConfig.load() to return a config with no api_key
-        import strategy_research.core.strategy_acceptance.llm_eval as mod
+        # Force LLMConfig.load() to return a config with no api_key.
+        # Patch the symbol at the canonical import location
+        # (strategy_research.core.llm) — evaluate_or_skip does a local
+        # ``from ..llm import LLMConfig``, so patching the llm_eval module
+        # attribute alone is ineffective.
+        import strategy_research.core.llm as llm_mod
         stub_cfg = MagicMock()
         stub_cfg.api_key = ""  # simulate missing key
-        monkeypatch.setattr(mod, "LLMConfig", MagicMock(load=MagicMock(return_value=stub_cfg)),
-                            raising=False)
+        monkeypatch.setattr(
+            llm_mod, "LLMConfig",
+            MagicMock(load=MagicMock(return_value=stub_cfg)),
+        )
         v = evaluate_or_skip({"calmar": 1.0}, None, cfg)
         # Should return a fail verdict (not raise)
         assert v is not None

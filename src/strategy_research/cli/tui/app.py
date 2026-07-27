@@ -40,7 +40,12 @@ from strategy_research.cli.tui.widgets import (
     ChatInput,
     CommandSidebar,
     HintFooter,
+    Milestone,
     ResumeOrNewModal,
+    StatusHeader,
+    ThinkingSpinner,
+    ToolEvent,
+    ToolsRail,
     TranscriptView,
 )
 
@@ -82,11 +87,12 @@ class ResearchApp(App):
         self._llm_client = llm_client
 
     def compose(self):
-        yield TUIHeader(show_clock=False)
+        yield StatusHeader(id="status-header")
         with Horizontal(id="main-row"):
-            yield CommandSidebar(id="sidebar")
+            yield CommandSidebar(id="sidebar", classes="hidden")
             yield TranscriptView(id="transcript")
-            yield ActivityRail(id="rail")
+            yield ToolsRail(id="rail")
+        yield ThinkingSpinner(id="thinking-spinner")
         yield ChatInput(id="input")
         yield HintFooter()
 
@@ -195,13 +201,92 @@ class ResearchApp(App):
         transcript.post_message(WriteTranscript(content=content))
 
     def write_rail(self, event: Any) -> None:
-        """Forward an event into the mounted ActivityRail."""
+        """Forward an event into the mounted ToolsRail."""
         try:
-            rail = self.query_one(ActivityRail)
+            rail = self.query_one(ToolsRail)
         except Exception:
             return
-        from strategy_research.cli.tui.messages import WriteRail
-        rail.post_message(WriteRail(event=event))
+        from strategy_research.cli.tui.widgets.tools_rail import ToolEvent
+        if isinstance(event, dict):
+            tool_event = ToolEvent(
+                tool=event.get("tool", "?"),
+                status=event.get("phase", "call"),
+                duration_ms=event.get("duration_ms"),
+                preview=event.get("preview", ""),
+            )
+            rail.add_tool_event(tool_event)
+
+    def update_header(self, **kwargs: Any) -> None:
+        """Update the StatusHeader with new values."""
+        try:
+            header = self.query_one(StatusHeader)
+        except Exception:
+            return
+        header.update_status(**kwargs)
+
+    def update_tools_rail_goal(self, **kwargs: Any) -> None:
+        """Update the ToolsRail goal section."""
+        try:
+            rail = self.query_one(ToolsRail)
+        except Exception:
+            return
+        rail.update_goal(**kwargs)
+
+    def route_agent_event(self, event_type: str, data: dict) -> None:
+        """Route AgentLoop events to the appropriate widget."""
+        if event_type == "text_delta":
+            self.update_streaming_delta(data.get("text", ""))
+        elif event_type in ("tool_call", "tool_result", "tool_progress"):
+            self.write_rail(data)
+        elif event_type == "llm_usage":
+            self.update_header(token_used=data.get("output_tokens", 0))
+        elif event_type == "thinking_start":
+            self.start_thinking()
+        elif event_type == "thinking_end":
+            self.stop_thinking()
+
+    def start_thinking(self) -> None:
+        try:
+            spinner = self.query_one(ThinkingSpinner)
+            spinner.start()
+        except Exception:
+            pass
+
+    def stop_thinking(self) -> None:
+        try:
+            spinner = self.query_one(ThinkingSpinner)
+            spinner.stop()
+        except Exception:
+            pass
+
+    def start_streaming(self) -> None:
+        try:
+            spinner = self.query_one(ThinkingSpinner)
+            spinner.stop()
+        except Exception:
+            pass
+        try:
+            tv = self.query_one(TranscriptView)
+            tv.begin_streaming()
+        except Exception:
+            pass
+
+    def update_streaming(self, full_text: str) -> None:
+        try:
+            tv = self.query_one(TranscriptView)
+            tv.update_streaming(full_text)
+        except Exception:
+            pass
+
+    def update_streaming_delta(self, delta: str) -> None:
+        pass
+
+    def end_streaming(self, suffix: str = "") -> str:
+        try:
+            tv = self.query_one(TranscriptView)
+            return tv.end_streaming(suffix=suffix)
+        except Exception:
+            return ""
 
     async def on_synthesize_input(self, message: SynthesizeInput) -> None:
         """Route ``ChatInput.Submitted`` / sidebar clicks to the session."""
@@ -250,6 +335,36 @@ class ResearchApp(App):
         # Also wipe memory for the session so re-runs start clean.
         if self.session is not None:
             self.ctx.history = []
+
+    def action_toggle_sidebar(self) -> None:
+        """Ctrl+1 — toggle the Commands sidebar visibility."""
+        try:
+            sidebar = self.query_one("#sidebar")
+            if "hidden" in sidebar.classes:
+                sidebar.remove_class("hidden")
+            else:
+                sidebar.add_class("hidden")
+        except Exception:
+            pass
+
+    def action_toggle_tools_rail(self) -> None:
+        """Ctrl+2 - toggle the ToolsRail visibility."""
+        try:
+            rail = self.query_one("#rail")
+            if "hidden" in rail.classes:
+                rail.remove_class("hidden")
+            else:
+                rail.add_class("hidden")
+        except Exception:
+            pass
+
+    def action_toggle_fold(self) -> None:
+        """Ctrl+E - expand/collapse the most recent folded record."""
+        try:
+            tv = self.query_one(TranscriptView)
+            tv.toggle_fold()
+        except Exception:
+            pass
 
 
 __all__ = ["ResearchApp"]

@@ -42,8 +42,9 @@ from .llm_config import build_llm_config as build_llm_config
 def cmd_run_onboarding(args: argparse.Namespace) -> int:
     """`quantnodes-research init` — 5 步凭证 TTY 向导。
 
-    Mirrors ``vibe-trading/cli/_legacy.py:4948 cmd_init``（Rich 版）写入
-    ``~/.quantnodes/strategy_research/.env`` 单一职责。
+    写入：
+    - LLM 结构化字段 → ``~/.quantnodes/llm.json``（保留其它顶层 key）
+    - 凭证 token → ``~/.quantnodes/.env``（chmod 0600）
     """
     from dotenv import load_dotenv
     from rich.prompt import Confirm
@@ -54,18 +55,20 @@ def cmd_run_onboarding(args: argparse.Namespace) -> int:
     from strategy_research.cli.onboard import (
         run_onboarding,
         is_onboarded,
-        _DEFAULT_ENV_PATH,
-        _DEFAULT_ENV_DIR,
+        _QUANTNODES_LLM_JSON_PATH,
+        _QUANTNODES_DOTENV_PATH,
     )
 
     console = get_console()
 
     if is_onboarded() and not getattr(args, "force", False):
-        console.print(f"[yellow]Config already exists:[/yellow] {_DEFAULT_ENV_PATH}")
+        console.print(
+            f"[yellow]Config already exists:[/yellow] {_QUANTNODES_LLM_JSON_PATH}"
+        )
         if not Confirm.ask("Overwrite?", default=False):
             console.print("[dim]Aborted.[/dim]")
             return 0
-        _wipe_existing_env(_DEFAULT_ENV_DIR)
+        _wipe_existing_env()
 
     try:
         written = run_onboarding()
@@ -84,41 +87,35 @@ def cmd_run_onboarding(args: argparse.Namespace) -> int:
     if written is None:
         return 1
 
-    load_dotenv(written, override=True)
+    # Load the dotenv sidecar so LLM_API_KEY (and TUSHARE_TOKEN) enter
+    # os.environ before the bridge resolves "env:LLM_API_KEY" in llm.json.
+    load_dotenv(_QUANTNODES_DOTENV_PATH, override=True)
 
     panel = Table.grid(expand=True)
     panel.add_column(width=10, style="dim")
     panel.add_column(ratio=1)
-    panel.add_row("Config", f"[cyan]{written}[/cyan]")
-    panel.add_row("Run",    "[bold]quantnodes-research[/bold]")
+    panel.add_row("LLM config", f"[cyan]{written}[/cyan]")
+    panel.add_row("Tokens",     f"[cyan]{_QUANTNODES_DOTENV_PATH}[/cyan]")
+    panel.add_row("Run",        "[bold]quantnodes-research[/bold]")
     console.print(Panel(panel, title="Setup complete",
                         border_style="green", padding=(0, 1)))
     return 0
 
 
-def _wipe_existing_env(env_dir: Path) -> None:
-    """Rotate .env → timestamped .env.prev-YYYYMMDD-HHMMSS so consecutive
-    overwrites don't silently clobber the previous backup.
+def _wipe_existing_env() -> None:
+    """On overwrite, also nuke the now-orphaned
+    ``~/.quantnodes/strategy_research/`` directory that the wizard no
+    longer writes to. Idempotent.
     """
-    env_path = env_dir / ".env"
-    if not env_path.exists():
+    from strategy_research.cli.onboard import _QUANTNODES_LLM_JSON_PATH
+    legacy_dir = _QUANTNODES_LLM_JSON_PATH.parent / "strategy_research"
+    if not legacy_dir.exists():
         return
-    # Timestamp suffix keeps every backup; collisions get a numeric tail.
-    from datetime import datetime
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = env_dir / f".env.prev-{stamp}"
-    n = 1
-    while target.exists():
-        target = env_dir / f".env.prev-{stamp}-{n}"
-        n += 1
+    import shutil
     try:
-        env_path.rename(target)
+        shutil.rmtree(legacy_dir)
     except OSError:
-        # Last resort: unlink so _finalize can proceed.
-        try:
-            env_path.unlink()
-        except OSError:
-            pass
+        pass
 
 
 def cmd_status(args: argparse.Namespace) -> int:

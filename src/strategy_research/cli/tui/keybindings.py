@@ -21,6 +21,9 @@ TUI_BINDINGS: Tuple[Binding, ...] = (
     Binding("tab", "focus_next", "Tab", show=False),
     Binding("shift+tab", "focus_previous", "Back-Tab", show=False),
     Binding("ctrl+l", "clear_transcript", "Clear", show=True),
+    Binding("ctrl+1", "toggle_sidebar", "Cmds", show=True),
+    Binding("ctrl+2", "toggle_tools_rail", "Tools", show=True),
+    Binding("ctrl+e", "toggle_fold", "Fold", show=True),
 )
 
 

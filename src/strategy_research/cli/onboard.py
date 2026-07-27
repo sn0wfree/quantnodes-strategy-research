@@ -1,12 +1,21 @@
 """First-launch onboarding wizard.
 
 Mirrors ``vibe-trading/cli/onboard.py``. Triggered when
-``~/.quantnodes/strategy_research/.env`` is missing or when
+``~/.quantnodes/llm.json`` has no ``"llm"`` top-level key, or when
 ``quantnodes-research init`` is run with no arguments.
 
 Five back-steppable steps (provider → model → key → timeout → optional
-Tushare for China A-share data). Each step persists immediately to
-``.env.partial`` and is atomically renamed to ``.env`` on completion.
+Tushare for China A-share data).
+
+Outputs:
+
+* **LLM structured config** (``provider`` / ``model`` / ``api_key`` /
+  ``base_url`` / ``timeout`` / ``max_retries`` / ``enabled``) →
+  ``~/.quantnodes/llm.json`` at top-level key ``"llm"``. Other top-level
+  keys (``"tools"``, ``"agents"``, ``"cron"``, …) are preserved.
+
+* **Tokens** (``LLM_API_KEY``, ``TUSHARE_TOKEN``) → ``~/.quantnodes/.env``
+  (chmod 0600).
 
 Public API:
 
@@ -14,11 +23,12 @@ Public API:
 * :data:`PROVIDERS` — provider catalogue.
 * :data:`TIMEOUT_CHOICES` — timeout preset offerings.
 * :func:`run_onboarding` — full interactive flow.
-* :func:`is_onboarded` — check whether ``.env`` already exists.
+* :func:`is_onboarded` — check whether ``llm.json["llm"]`` already exists.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from dataclasses import dataclass
@@ -30,9 +40,15 @@ BACK = object()
 CANCEL = object()
 
 
-_DEFAULT_ENV_DIR = Path.home() / ".quantnodes" / "strategy_research"
-_DEFAULT_ENV_PATH = _DEFAULT_ENV_DIR / ".env"
-_DEFAULT_PARTIAL_PATH = _DEFAULT_ENV_DIR / ".env.partial"
+_QUANTNODES_DIR: Final[Path] = Path.home() / ".quantnodes"
+_QUANTNODES_LLM_JSON_PATH: Final[Path] = _QUANTNODES_DIR / "llm.json"
+_QUANTNODES_LLM_JSON_PARTIAL: Final[Path] = _QUANTNODES_DIR / "llm.json.partial"
+_QUANTNODES_DOTENV_PATH: Final[Path] = _QUANTNODES_DIR / ".env"
+
+# Field written into llm.json["llm"]["api_key"] so the bridge resolves it
+# via the dotenv file. Real key is stored in ~/.quantnodes/.env as
+# LLM_API_KEY=<key>.
+_LLM_API_KEY_REF: Final[str] = "env:LLM_API_KEY"
 
 
 # ─── Provider catalogue ────────────────────────────────────────────────
@@ -46,48 +62,51 @@ class Provider:
     label: str
     description: str
     default_model: str
-    key_env: str | None
-    base_env: str | None
-    base_url: str
     key_prefix: str | None
     suggested_models: tuple[str, ...]
+    base_url: str | None     # None for Ollama (could be configured)
+    key_required: bool       # False for Ollama
+
+
+# Default base URLs for each provider. Ollama is None (auto-detected at runtime).
+_DEFAULT_BASE_URLS: Final[dict[str, str]] = {
+    "openai":     "https://api.openai.com/v1",
+    "anthropic":  "https://api.anthropic.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "minimax":    "https://api.minimaxi.com/v1",
+}
 
 
 PROVIDERS: Final[tuple[Provider, ...]] = (
     Provider(
         "openai", "OpenAI", "GPT-4o direct",
-        "gpt-4o",
-        "OPENAI_API_KEY", "OPENAI_BASE_URL",
-        "https://api.openai.com/v1", "sk-",
+        "gpt-4o", "sk-",
         ("gpt-4o", "gpt-4o-mini", "gpt-4.1"),
+        _DEFAULT_BASE_URLS["openai"], True,
     ),
     Provider(
         "anthropic", "Anthropic", "Claude direct",
-        "claude-3-5-sonnet-latest",
-        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
-        "https://api.anthropic.com/v1", "sk-ant-",
+        "claude-3-5-sonnet-latest", "sk-ant-",
         ("claude-3-5-sonnet-latest", "claude-3-opus-latest"),
+        _DEFAULT_BASE_URLS["anthropic"], True,
     ),
     Provider(
         "openrouter", "OpenRouter", "200+ models via single API key",
-        "deepseek/deepseek-chat",
-        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL",
-        "https://openrouter.ai/api/v1", "sk-or-",
+        "deepseek/deepseek-chat", "sk-or-",
         ("deepseek/deepseek-chat", "openai/gpt-4o", "anthropic/claude-3.5-sonnet"),
+        _DEFAULT_BASE_URLS["openrouter"], True,
     ),
     Provider(
         "minimax", "MiniMax", "minimax provider",
-        "MiniMax-M3",
-        "MINIMAX_API_KEY", "MINIMAX_BASE_URL",
-        "https://api.minimaxi.com/v1", "sk-",
+        "MiniMax-M3", "sk-",
         ("MiniMax-M3", "MiniMax-Text-01"),
+        _DEFAULT_BASE_URLS["minimax"], True,
     ),
     Provider(
         "ollama", "Ollama", "Local — free, no API key",
-        "qwen2.5:32b",
-        None, None,
-        "http://localhost:11434", None,
+        "qwen2.5:32b", None,
         ("qwen2.5:32b", "llama3.3:70b", "deepseek-r1:14b"),
+        "http://localhost:11434", False,
     ),
 )
 
@@ -96,27 +115,45 @@ TIMEOUT_CHOICES: Final[tuple[tuple[str, str], ...]] = (
     ("600", "600s (10 min — large backtests / swarm runs)"),
     ("300", "300s (5 min — normal autoresearch, recommended)"),
     ("120", "120s (2 min — quick lookup mode)"),
-    ("60", "60s (1 min — smoke test only)"),
+    ("60",  "60s (1 min — smoke test only)"),
 )
 
 
 # ─── Filesystem helpers ────────────────────────────────────────────────
 
 
-def _render_env(values: dict[str, str]) -> str:
-    """Render values as a stable ``.env`` body (KEY=value lines)."""
-    return "\n".join(
-        f"{k}={v}" for k, v in values.items() if v
-    ) + "\n"
+def _read_llm_json(path: Path) -> dict:
+    """Read existing llm.json (or return {} if missing/malformed).
 
-
-def _save_partial(values: dict[str, str], *, env_dir: Path | None = None) -> None:
-    """Best-effort write to ``.env.partial`` (crash-resilience nicety)."""
-    env_dir = env_dir or _DEFAULT_ENV_DIR
-    partial = env_dir / ".env.partial"
+    Never raises; caller gets a fresh dict to mutate.
+    """
+    if not path.exists():
+        return {}
     try:
-        env_dir.mkdir(parents=True, exist_ok=True)
-        partial.write_text(_render_env(values), encoding="utf-8")
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_partial(
+    llm_section: dict[str, object],
+    *,
+    llm_json_path: Path | None = None,
+) -> None:
+    """Best-effort write to ``llm.json.partial`` (crash-resilience nicety).
+
+    The partial mirrors the would-be-committed ``"llm"`` top-level
+    section (NOT the full file), so on recovery we can resume cleanly.
+    """
+    path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    partial = path.parent / f"{path.name}.partial"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_text(
+            json.dumps({"llm": llm_section}, indent=2),
+            encoding="utf-8",
+        )
         try:
             partial.chmod(0o600)
         except OSError:
@@ -125,19 +162,32 @@ def _save_partial(values: dict[str, str], *, env_dir: Path | None = None) -> Non
         pass
 
 
-def _finalize(values: dict[str, str], *, env_dir: Path | None = None) -> Path:
-    """Atomically write ``.env``. Returns the final path."""
-    env_dir = env_dir or _DEFAULT_ENV_DIR
-    env_dir.mkdir(parents=True, exist_ok=True)
-    content = _render_env(values)
-    fd, tmp_name = tempfile.mkstemp(prefix=".env.", dir=str(env_dir))
-    final_path = env_dir / ".env"
+def _finalize_llm_json(
+    llm_section: dict[str, object],
+    *,
+    llm_json_path: Path | None = None,
+) -> Path:
+    """Atomically merge ``llm_section`` into ``llm.json["llm"]``.
+
+    Preserves any other top-level keys (``"tools"``, ``"agents"``,
+    ``"cron"``, …) that QuantNodes may have written.
+
+    Returns the final llm.json path.
+    """
+    path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = _read_llm_json(path)
+    existing["llm"] = dict(llm_section)
+
+    fd, tmp_name = tempfile.mkstemp(prefix=".llm.json.", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_name, final_path)
+            json.dump(existing, f, indent=2)
+            f.write("\n")
+        os.replace(tmp_name, path)
         try:
-            final_path.chmod(0o600)
+            path.chmod(0o600)
         except OSError:
             pass
     except Exception:
@@ -147,23 +197,131 @@ def _finalize(values: dict[str, str], *, env_dir: Path | None = None) -> Path:
             pass
         raise
 
-    # Tidy: drop the live .env.partial snapshot now that .env is committed.
-    # _save_partial leaves it on disk throughout the run for crash recovery,
-    # but it shouldn't linger once the final write has succeeded.
-    partial = env_dir / ".env.partial"
+    # Tidy: drop the live partial now that .json is committed.
+    partial = path.parent / f"{path.name}.partial"
     if partial.exists():
         try:
             partial.unlink()
         except OSError:
             pass
 
-    return final_path
+    return path
 
 
-def is_onboarded(*, env_dir: Path | None = None) -> bool:
-    """True iff ``.env`` exists in the configured env_dir."""
-    env_dir = env_dir or _DEFAULT_ENV_DIR
-    return (env_dir / ".env").exists()
+def _save_tokens_to_dotenv(
+    tokens: dict[str, str],
+    *,
+    dotenv_path: Path | None = None,
+) -> Path:
+    """Write key=value lines to ``~/.quantnodes/.env`` (chmod 0600).
+
+    Existing keys with non-empty values are preserved; new keys are
+    appended. Atomic write via mkstemp + os.replace.
+    """
+    path = dotenv_path or _QUANTNODES_DOTENV_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict[str, str] = {}
+    if path.exists():
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                existing[k.strip()] = v
+        except OSError:
+            existing = {}
+
+    for k, v in tokens.items():
+        if v:
+            existing[k] = v
+
+    content = "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n"
+
+    fd, tmp_name = tempfile.mkstemp(prefix=".env.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_name, path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def is_onboarded(*, llm_json_path: Path | None = None) -> bool:
+    """True iff ``llm.json`` exists and has a non-empty ``"llm"`` section."""
+    p = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    if not p.exists():
+        return False
+    data = _read_llm_json(p)
+    llm_section = data.get("llm")
+    return isinstance(llm_section, dict) and bool(llm_section)
+
+
+# ─── Plaintext-key migration (K3) ──────────────────────────────────────
+
+
+def _detect_plaintext_api_key(
+    llm_json_path: Path | None = None,
+) -> str | None:
+    """Return the plaintext api_key in llm.json["llm"] if present and not
+    an ``env:VAR`` reference. Returns None otherwise.
+    """
+    p = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    data = _read_llm_json(p)
+    section = data.get("llm")
+    if not isinstance(section, dict):
+        return None
+    key = section.get("api_key")
+    if not isinstance(key, str) or not key:
+        return None
+    if key.startswith("env:"):
+        return None
+    return key
+
+
+def _prompt_migrate_plaintext(
+    existing_plaintext: str, *, inputs: list[str] | None = None
+) -> bool:
+    """Return True if user agrees to migrate plaintext → env:VAR.
+
+    In test mode (``inputs`` provided), pops the next item. Accepts
+    ``"y"/"yes"/"true"/"1"`` → True, anything else → False.
+    """
+    if inputs is not None:
+        if not inputs:
+            raise RuntimeError("ran out of onboarding inputs")
+        answer = inputs.pop(0).strip().lower()
+        return answer in ("y", "yes", "true", "1")
+
+    # TTY mode
+    try:
+        from rich.prompt import Confirm
+        return Confirm.ask(
+            "Existing plaintext API key found in llm.json — migrate to "
+            "env:LLM_API_KEY (safer, reference only)?",
+            default=True,
+        )
+    except ImportError:
+        # stdin fallback
+        print(
+            "? Existing plaintext API key found in llm.json — migrate to "
+            "env:LLM_API_KEY? [Y/n]"
+        )
+        try:
+            raw = input("> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return raw in ("", "y", "yes", "true", "1")
 
 
 # ─── TTY selectors (prompt_toolkit) ──────────────────────────────────
@@ -373,12 +531,12 @@ def _prompt_text(prompt: str, *, default: str = "") -> str | object:
             return CANCEL
 
 
-def _validate_key(provider: Provider, key: str) -> str | None:
+def _validate_key(prefix: str | None, key: str) -> str | None:
     """Return error message or None if key looks plausible."""
     if not key:
         return "API key cannot be empty."
-    if provider.key_prefix and not key.startswith(provider.key_prefix):
-        return f"Expected key to start with '{provider.key_prefix}'."
+    if prefix and not key.startswith(prefix):
+        return f"Expected key to start with '{prefix}'."
     if len(key) < 12:
         return "That key looks too short."
     return None
@@ -388,7 +546,7 @@ def _validate_key(provider: Provider, key: str) -> str | None:
 
 
 def _step_provider(
-    values: dict[str, str], state: dict, skip_tushare: bool
+    llm: dict[str, object], state: dict, skip_tushare: bool
 ) -> object:
     """Step 1: select LLM provider."""
     choices = [(p.key, f"{p.label:<14}  {p.description}") for p in PROVIDERS]
@@ -397,26 +555,25 @@ def _step_provider(
         return result
     provider = next(p for p in PROVIDERS if p.key == result)
 
-    # When switching providers via BACK, drop keys associated with the
-    # previously selected provider so the final .env doesn't keep stale
-    # credentials for the old backend (otherwise an Ollama config can
-    # still carry an OPENAI_API_KEY + OPENAI_BASE_URL).
-    old = state.get("provider")
-    if old is not None and old != provider:
-        for k in (old.key_env, old.base_env, "LANGCHAIN_MODEL_NAME"):
-            if k:
-                values.pop(k, None)
+    # When switching providers via BACK, drop fields that belong to the
+    # previously selected provider so the final llm.json doesn't keep
+    # stale credentials for the old backend.
+    old_key = state.get("provider_key")
+    if old_key is not None and old_key != provider.key:
+        for k in ("api_key", "base_url", "model"):
+            llm.pop(k, None)
 
-    values["LANGCHAIN_PROVIDER"] = provider.key
-    if provider.base_env:
-        values[provider.base_env] = provider.base_url
+    llm["provider"] = provider.key
+    if provider.base_url:
+        llm["base_url"] = provider.base_url
     state["provider"] = provider
-    _save_partial(values)
+    state["provider_key"] = provider.key
+    _save_partial(llm)
     return "ok"
 
 
 def _step_model(
-    values: dict[str, str], state: dict, skip_tushare: bool
+    llm: dict[str, object], state: dict, skip_tushare: bool
 ) -> object:
     """Step 2: select model."""
     provider: Provider = state["provider"]
@@ -438,17 +595,17 @@ def _step_model(
         model = str(custom) or provider.default_model
     else:
         model = str(result)
-    values["LANGCHAIN_MODEL_NAME"] = model
-    _save_partial(values)
+    llm["model"] = model
+    _save_partial(llm)
     return "ok"
 
 
 def _step_key(
-    values: dict[str, str], state: dict, skip_tushare: bool
+    llm: dict[str, object], state: dict, skip_tushare: bool
 ) -> object:
     """Step 3: enter API key (skip for providers with no key)."""
     provider: Provider = state["provider"]
-    if provider.key_env is None:
+    if not provider.key_required:
         from rich.console import Console
         from strategy_research.cli.theme import Theme
 
@@ -462,14 +619,15 @@ def _step_key(
     while True:
         key = _prompt_secret(
             f"Paste your {provider.label} API key "
-            "(saved to ~/.quantnodes/strategy_research/.env, never logged)"
+            "(saved to ~/.quantnodes/.env, never logged)"
         )
         if key in (BACK, CANCEL):
             return key
-        err = _validate_key(provider, str(key))
+        err = _validate_key(provider.key_prefix, str(key))
         if err is None:
-            values[provider.key_env] = str(key)
-            _save_partial(values)
+            llm["api_key"] = _LLM_API_KEY_REF
+            state["api_key_value"] = str(key)
+            _save_partial(llm)
             return "ok"
         from rich.console import Console
         from strategy_research.cli.theme import Theme
@@ -480,21 +638,21 @@ def _step_key(
 
 
 def _step_timeout(
-    values: dict[str, str], state: dict, skip_tushare: bool
+    llm: dict[str, object], state: dict, skip_tushare: bool
 ) -> object:
     """Step 4: select request timeout."""
     choices = [(v, label) for v, label in TIMEOUT_CHOICES]
     result = _select_with_back("Default request timeout", choices, default_index=1)
     if result in (BACK, CANCEL):
         return result
-    values["TIMEOUT_SECONDS"] = str(result)
-    values["MAX_RETRIES"] = "2"
-    _save_partial(values)
+    llm["timeout"] = int(str(result))
+    llm["max_retries"] = 2
+    _save_partial(llm)
     return "ok"
 
 
 def _step_tushare(
-    values: dict[str, str], state: dict, skip_tushare: bool
+    llm: dict[str, object], state: dict, skip_tushare: bool
 ) -> object:
     """Step 5: optional Tushare token (China A-share data)."""
     if skip_tushare:
@@ -513,8 +671,7 @@ def _step_tushare(
         if token in (BACK, CANCEL):
             return token
         if str(token).strip():
-            values["TUSHARE_TOKEN"] = str(token).strip()
-            _save_partial(values)
+            state["tushare_token_value"] = str(token).strip()
     return "ok"
 
 
@@ -523,7 +680,8 @@ def _step_tushare(
 
 def run_onboarding(
     *,
-    env_dir: Path | None = None,
+    llm_json_path: Path | None = None,
+    dotenv_path: Path | None = None,
     inputs: list[str] | None = None,
     skip_tushare: bool = False,
 ) -> Path | None:
@@ -537,18 +695,30 @@ def run_onboarding(
       with BACK/CANCEL support. Returns ``None`` when the user cancels.
 
     Args:
-        env_dir: Override the env directory (used by tests).
-        inputs: Optional pre-canned sequence of user inputs (used by tests).
-        skip_tushare: If True, omit the optional Tushare step.
+        llm_json_path: Override the llm.json path (used by tests).
+        dotenv_path:   Override the .env path (used by tests).
+        inputs:        Optional pre-canned sequence of user inputs.
+        skip_tushare:  If True, omit the optional Tushare step.
 
     Returns:
-        Path of the final ``.env`` file, or ``None`` on cancel.
+        Path of the final ``llm.json`` file, or ``None`` on cancel.
     """
-    env_dir = env_dir or _DEFAULT_ENV_DIR
+    llm_path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    env_path = dotenv_path or _QUANTNODES_DOTENV_PATH
 
-    # ─── Test-mode branch (existing, unchanged) ────────────────────────
+    # ─── Test-mode branch ─────────────────────────────────────────────
     if inputs is not None:
-        values: dict[str, str] = {}
+        # ── Step 0: config audit (auto-apply in test mode) ──────────────
+        from strategy_research.core.llm.config_audit import (
+            detect_issues,
+            fix_issues,
+        )
+        _issues = detect_issues(llm_json_path=llm_path, env_path=env_path)
+        if _issues:
+            fix_issues(_issues, llm_json_path=llm_path, env_path=env_path)
+
+        llm: dict[str, object] = {}
+        collected: dict[str, object] = {}
 
         def _next() -> str:
             if not inputs:
@@ -556,40 +726,58 @@ def run_onboarding(
             return inputs.pop(0)
 
         # Step 1: provider
-        chosen = None
-        first_choice = _next().strip()
-        for p in PROVIDERS:
-            if first_choice == p.label:
-                values["LANGCHAIN_PROVIDER"] = p.key
-                if p.base_env:
-                    values[p.base_env] = p.base_url
-                chosen = p
-                break
+        chosen_label = _next().strip()
+        chosen = next((p for p in PROVIDERS if chosen_label == p.label), None)
         if chosen is None:
-            raise ValueError("provider not selected")
+            raise ValueError(f"provider not selected: {chosen_label!r}")
+        llm["provider"] = chosen.key
+        if chosen.base_url:
+            llm["base_url"] = chosen.base_url
+        collected["provider"] = chosen
 
         # Step 2: model
         model = _next().strip() or chosen.default_model
-        values["LANGCHAIN_MODEL_NAME"] = model
+        llm["model"] = model
 
         # Step 3: API key (skip for providers with no key)
-        if chosen.key_env:
+        if chosen.key_required:
             key = _next().strip()
             if key:
-                values[chosen.key_env] = key
+                llm["api_key"] = _LLM_API_KEY_REF
+                collected["api_key_value"] = key
 
         # Step 4: timeout
         timeout = _next().strip() or "300"
-        values["TIMEOUT_SECONDS"] = timeout
-        values["MAX_RETRIES"] = "2"
+        llm["timeout"] = int(timeout)
+        llm["max_retries"] = 2
 
         # Optional Step 5: Tushare (China A-share)
         if not skip_tushare:
             tushare = _next().strip()
             if tushare:
-                values["TUSHARE_TOKEN"] = tushare
+                collected["tushare_token_value"] = tushare
 
-        return _finalize(values, env_dir=env_dir)
+        # K3: plaintext-key migration (test mode: read next input)
+        existing_plain = _detect_plaintext_api_key(llm_path)
+        if existing_plain:
+            migrate = _prompt_migrate_plaintext(existing_plain, inputs=inputs)
+            if migrate and "api_key_value" in collected:
+                # user agreed → write env: form to llm.json (already set above)
+                pass
+            elif not migrate and "api_key_value" in collected:
+                # user declined → use plaintext form in llm.json
+                llm["api_key"] = collected["api_key_value"]
+
+        # Write tokens to .env (always)
+        tokens: dict[str, str] = {}
+        if "api_key_value" in collected:
+            tokens["LLM_API_KEY"] = collected["api_key_value"]
+        if "tushare_token_value" in collected:
+            tokens["TUSHARE_TOKEN"] = collected["tushare_token_value"]
+        if tokens:
+            _save_tokens_to_dotenv(tokens, dotenv_path=env_path)
+
+        return _finalize_llm_json(llm, llm_json_path=llm_path)
 
     # ─── TTY-mode branch (prompt_toolkit with BACK/CANCEL) ─────────────
     import sys
@@ -600,8 +788,45 @@ def run_onboarding(
             "real terminals); redirecting or piping prevents it from running"
         )
 
-    values = {}
-    state: dict[str, object] = {"provider": None}
+    # ── Step 0: config audit (detect + fix C1-C5) ──────────────────────
+    from strategy_research.core.llm.config_audit import (
+        detect_issues,
+        fix_issues,
+        format_report,
+    )
+
+    _issues = detect_issues(llm_json_path=llm_path, env_path=env_path)
+    if _issues:
+        from rich.console import Console
+        from rich.panel import Panel
+        from strategy_research.cli.theme import Theme
+
+        console = Console()
+        console.print(
+            Panel(
+                format_report(_issues, use_color=console.is_terminal),
+                title="Config audit",
+                border_style="yellow",
+                padding=(0, 1),
+            )
+        )
+        from prompt_toolkit import prompt as _pt_prompt
+        _ans = _pt_prompt(
+            "Apply auto-fixes? [Y/n]: ",
+            default="y",
+        ).strip().lower()
+        if _ans in ("", "y", "yes"):
+            _issues = fix_issues(
+                _issues, llm_json_path=llm_path, env_path=env_path
+            )
+            console.print(
+                "[green]Auto-fixes applied.[/green]"
+            )
+        else:
+            console.print("[dim]Skipped auto-fixes.[/dim]")
+
+    llm = {}
+    state: dict[str, object] = {}
     steps = [
         _step_provider,
         _step_model,
@@ -611,7 +836,7 @@ def run_onboarding(
     ]
     i = 0
     while i < len(steps):
-        result = steps[i](values, state, skip_tushare)
+        result = steps[i](llm, state, skip_tushare)
         if result is CANCEL:
             return None
         if result is BACK:
@@ -621,7 +846,27 @@ def run_onboarding(
             continue
         i += 1
 
-    return _finalize(values, env_dir=env_dir)
+    # K3: plaintext-key migration prompt (TTY)
+    existing_plain = _detect_plaintext_api_key(llm_path)
+    if existing_plain and "api_key_value" in state:
+        if _prompt_migrate_plaintext(existing_plain):
+            # agreed → keep llm["api_key"] = "env:LLM_API_KEY" (already set)
+            pass
+        else:
+            # declined → write the plaintext back to llm.json
+            llm["api_key"] = state["api_key_value"]
+            _save_partial(llm)
+
+    # Write tokens to .env (always)
+    tokens: dict[str, str] = {}
+    if "api_key_value" in state:
+        tokens["LLM_API_KEY"] = state["api_key_value"]
+    if "tushare_token_value" in state:
+        tokens["TUSHARE_TOKEN"] = state["tushare_token_value"]
+    if tokens:
+        _save_tokens_to_dotenv(tokens, dotenv_path=env_path)
+
+    return _finalize_llm_json(llm, llm_json_path=llm_path)
 
 
 __all__ = [
