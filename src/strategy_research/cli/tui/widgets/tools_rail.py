@@ -1,21 +1,25 @@
-"""ToolsRail - right-side panel showing Goal progress + unified Timeline.
+"""ToolsRail - right-side panel showing Goal progress + ITER + COMPACT.
 
-Replaces the old GOAL+TOOLS split with a single timeline that shows
-every agent action in chronological order (vibe-trading style):
+Stage C: tool-call events now flow inline to TranscriptView (see
+``TranscriptView.append_tool_call`` / ``update_tool_result``).
+The rail no longer renders the tool timeline; it keeps only the
+higher-level state — GOAL milestones, current ITER, and CONTEXT
+COMPACTION events.
 
     ┌──────────────────────────────────────┐
     │ GOAL                                 │
     │ 研究A股低回撤量化策略                │
     │ [======------] 55%  3/5              │
     ├──────────────────────────────────────┤
-    │ TIMELINE                             │
-    │ • backtest 5.2s                      │
-    │   └ progress: 50% done               │
-    │ • compacted (12k→4k)                 │
-    │ ⏳ risk_analysis ...                 │
+    │ (tool calls shown inline)            │
     ├──────────────────────────────────────┤
-    │ iter 2/10  3 tools                   │
+    │ iter 2/10                            │
     └──────────────────────────────────────┘
+
+A residual ``TIMELINE`` section is still rendered for ``compact``
+events (and any future non-tool timeline entries), so the rail keeps
+its structural integrity while delegating the per-tool line of
+detail to the main transcript.
 """
 from __future__ import annotations
 
@@ -135,43 +139,14 @@ class ToolsRail(Static):
         self._refresh()
 
     def handle_event(self, event_type: str, data: dict) -> None:
-        """Handle events from AgentLoop."""
-        if event_type == "tool_call":
-            self._timeline.append(TimelineEntry(
-                kind="tool",
-                label=data.get("tool", "?"),
-                status="running",
-                iter=data.get("iter"),
-            ))
-            self._trim_timeline()
-            self._refresh()
-        elif event_type == "tool_result":
-            tool_name = data.get("tool", "?")
-            for entry in reversed(self._timeline):
-                if entry.kind == "tool" and entry.label == tool_name and entry.status == "running":
-                    entry.status = "done" if data.get("status", "ok") == "ok" else "error"
-                    if data.get("status") == "error":
-                        entry.status = "error"
-                    entry.duration_ms = data.get("elapsed_ms")
-                    break
-            self._refresh()
-        elif event_type == "tool_progress":
-            detail = data.get("detail", data.get("message", ""))
-            if not detail:
-                return
-            for entry in reversed(self._timeline):
-                if entry.kind == "tool" and entry.status == "running":
-                    entry.detail = detail
-                    break
-            self._refresh()
-        elif event_type == "tool_heartbeat":
-            for entry in reversed(self._timeline):
-                if entry.kind == "tool" and entry.status == "running":
-                    if data.get("detail"):
-                        entry.detail = data["detail"]
-                    break
-            self._refresh()
-        elif event_type == "compact":
+        """Handle events from AgentLoop (Stage C: tools moved to TranscriptView).
+
+        Only ``compact`` and ``iter_start`` are processed here. Tool
+        events (``tool_call``, ``tool_result``, ``tool_progress``,
+        ``tool_heartbeat``) are routed to ``TranscriptView`` for inline
+        rendering — see ``ResearchApp.route_agent_event``.
+        """
+        if event_type == "compact":
             before = data.get("before_tokens", "?")
             after = data.get("after_tokens", "?")
             self._timeline.append(TimelineEntry(
@@ -184,8 +159,6 @@ class ToolsRail(Static):
             self._refresh()
         elif event_type == "iter_start":
             self.set_iter(data.get("iteration", 0), data.get("max_iterations", 0))
-        elif event_type == "iter_end":
-            pass
 
     def clear_timeline(self) -> None:
         """Clear all timeline entries."""
@@ -238,7 +211,11 @@ class ToolsRail(Static):
         return "\n".join(lines)
 
     def _render_timeline(self) -> str:
-        """Render the unified timeline section."""
+        """Render the non-tool timeline (currently just ``compact`` events).
+
+        Tool calls themselves are rendered inline in TranscriptView; this
+        section now shows only meta-events (e.g. context compression).
+        """
         lines: List[str] = []
         lines.append("[bold]TIMELINE[/bold]")
 
@@ -253,22 +230,20 @@ class ToolsRail(Static):
                 lines.append(f"  [dim]└ {entry.detail}[/dim]")
 
         if not self._timeline:
-            lines.append("[dim](idle)[/dim]")
+            lines.append("[dim](tool calls shown inline)[/dim]")
 
         return "\n".join(lines)
 
     def _render_footer(self) -> str:
-        """Render the footer with iter + tool counts."""
+        """Render the footer with iter counter + (optional) timeline summary."""
         parts: List[str] = []
         if self._iter_max > 0:
             parts.append(f"iter {self._iter}/{self._iter_max}")
-        total = len(self._timeline)
-        running = sum(1 for t in self._timeline if t.status == "running")
-        done = sum(1 for t in self._timeline if t.status == "done")
-        if running > 0:
-            parts.append(f"{done}/{total} tools({running} running)")
-        elif total > 0:
-            parts.append(f"{total} tools")
+        # Compact-event count (only non-tool entries; tool totals come
+        # from TranscriptView / App._tool_total via StatusHeader).
+        non_tool = [t for t in self._timeline if t.kind != "tool"]
+        if non_tool:
+            parts.append(f"{len(non_tool)} meta")
         return "  ".join(parts) if parts else ""
 
 

@@ -85,6 +85,11 @@ class ResearchApp(App):
         self._skip_resume = skip_resume
         # Optional OpenAI-compat client for streaming plain-text turns.
         self._llm_client = llm_client
+        # Tool-call totals (used by StatusHeader). Updated in
+        # ``_bump_tool_count`` when ``tool_call`` / ``tool_result`` events
+        # arrive via ``route_agent_event``.
+        self._tool_total: int = 0
+        self._tool_ok: int = 0
 
     def compose(self):
         yield StatusHeader(id="status-header")
@@ -240,8 +245,18 @@ class ResearchApp(App):
         elif event_type == "thinking_done":
             # Transition marker: thinking → text. Streaming already started.
             pass
-        elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat", "compact"):
-            self.write_rail(event_type, data)
+        elif event_type == "assistant_message":
+            # Final assistant content (non-streaming path or stream close).
+            # Convert any active streamer to a folder; non-streaming path
+            # creates a one-shot streamer and immediately folds it.
+            self._finalize_assistant_message(data.get("content", ""))
+        elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat"):
+            # Stage C: tool calls are rendered inline in the transcript,
+            # not the side rail. See TranscriptView.append_tool_call /
+            # update_tool_result.
+            self._route_tool_event(event_type, data)
+        elif event_type == "compact":
+            self.write_rail("compact", data)
         elif event_type == "llm_usage":
             self.update_header(token_used=data.get("output_tokens", 0))
         elif event_type == "iter_start":
@@ -275,6 +290,64 @@ class ResearchApp(App):
                 ))
             except Exception:
                 pass
+
+    def _finalize_assistant_message(self, content: str) -> None:
+        """Convert the active streaming session into a foldable folder.
+
+        - Streaming path: streamer already holds accumulated text; just end it.
+        - Non-streaming path: create a fresh streamer, write full content,
+          immediately fold it.
+        """
+        try:
+            tv = self.query_one(TranscriptView)
+            if tv._streamer is None:
+                tv.begin_streaming()
+            tv._streamer.update_streaming(content or "")
+            tv.end_streaming()
+        except Exception:
+            pass
+
+    def _route_tool_event(self, event_type: str, data: dict) -> None:
+        """Inline tool events into TranscriptView (stage C)."""
+        try:
+            tv = self.query_one(TranscriptView)
+        except Exception:
+            return
+        if event_type == "tool_call":
+            call_id = data.get("call_id", "")
+            tool = data.get("tool", "?")
+            args = data.get("args", {}) or {}
+            tv.append_tool_call(call_id, tool, args)
+            self._record_tool_start()
+        elif event_type == "tool_result":
+            call_id = data.get("call_id", "")
+            ok = bool(data.get("ok", True))
+            elapsed_ms = int(data.get("elapsed_ms", 0))
+            tv.update_tool_result(call_id, ok, elapsed_ms)
+            self._record_tool_result(ok=ok)
+
+    def _record_tool_start(self) -> None:
+        """Increment the tool-call counter and refresh the header."""
+        try:
+            self._tool_total += 1
+            self.update_header(
+                tool_count=self._tool_total,
+                tool_ok=self._tool_ok,
+            )
+        except Exception:
+            pass
+
+    def _record_tool_result(self, *, ok: bool) -> None:
+        """Increment the tool-success counter (only on success)."""
+        try:
+            if ok:
+                self._tool_ok += 1
+            self.update_header(
+                tool_count=self._tool_total,
+                tool_ok=self._tool_ok,
+            )
+        except Exception:
+            pass
 
     def start_thinking(self) -> None:
         try:

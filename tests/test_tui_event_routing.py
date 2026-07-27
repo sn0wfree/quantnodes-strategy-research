@@ -35,21 +35,26 @@ class TestRouteAgentEvent:
             app.route_agent_event("text_delta", {"text": "hi"})
         m.assert_called_once_with("hi")
 
-    def test_tool_call_dispatches_to_write_rail(self):
+    def test_tool_call_dispatches_to_transcript(self):
+        """Stage C: tool_call goes inline to TranscriptView (not rail)."""
         app = self._app()
-        with mock.patch.object(app, "write_rail") as m:
+        mock_tv = mock.MagicMock()
+        with mock.patch.object(app, "query_one", return_value=mock_tv):
             app.route_agent_event(
                 "tool_call",
-                {"tool": "read_file", "arguments": {"p": "/x"}, "call_id": "c1"},
+                {"tool": "read_file", "args": {"path": "/x"}, "call_id": "c1"},
             )
-        m.assert_called_once()
-        event_type, payload = m.call_args.args[0], m.call_args.args[1]
-        assert event_type == "tool_call"
-        assert payload["tool"] == "read_file"
+        # TranscriptView.append_tool_call called
+        mock_tv.append_tool_call.assert_called_once()
+        call_id, tool, args = mock_tv.append_tool_call.call_args.args
+        assert call_id == "c1"
+        assert tool == "read_file"
+        assert args == {"path": "/x"}
 
-    def test_tool_result_dispatches_to_write_rail(self):
+    def test_tool_result_dispatches_to_transcript(self):
         app = self._app()
-        with mock.patch.object(app, "write_rail") as m:
+        mock_tv = mock.MagicMock()
+        with mock.patch.object(app, "query_one", return_value=mock_tv):
             app.route_agent_event(
                 "tool_result",
                 {
@@ -61,35 +66,35 @@ class TestRouteAgentEvent:
                     "preview": "data",
                 },
             )
-        m.assert_called_once()
-        event_type, payload = m.call_args.args[0], m.call_args.args[1]
-        assert event_type == "tool_result"
-        assert payload["tool"] == "read_file"
+        mock_tv.update_tool_result.assert_called_once_with("c1", True, 100)
 
-    def test_tool_progress_dispatches_to_write_rail(self):
+    def test_tool_progress_is_silent(self):
+        """Stage C: tool_progress is a no-op (reserved for future inline use)."""
         app = self._app()
-        with mock.patch.object(app, "write_rail") as m:
+        mock_tv = mock.MagicMock()
+        with mock.patch.object(app, "write_rail") as wr, \
+             mock.patch.object(app, "query_one", return_value=mock_tv):
             app.route_agent_event(
                 "tool_progress",
-                {
-                    "tool": "dl",
-                    "call_id": "c1",
-                    "stage": "fetch",
-                    "current": 5,
-                    "total": 10,
-                    "message": "downloading",
-                },
+                {"tool": "dl", "call_id": "c1", "message": "downloading"},
             )
-        m.assert_called_once()
+        wr.assert_not_called()
+        # No TranscriptView method called for progress
+        mock_tv.append_tool_call.assert_not_called()
+        mock_tv.update_tool_result.assert_not_called()
 
-    def test_tool_heartbeat_dispatches_to_write_rail(self):
+    def test_tool_heartbeat_is_silent(self):
         app = self._app()
-        with mock.patch.object(app, "write_rail") as m:
+        mock_tv = mock.MagicMock()
+        with mock.patch.object(app, "write_rail") as wr, \
+             mock.patch.object(app, "query_one", return_value=mock_tv):
             app.route_agent_event(
                 "tool_heartbeat",
                 {"tool": "t", "call_id": "c1", "elapsed_s": 5.2},
             )
-        m.assert_called_once()
+        wr.assert_not_called()
+        mock_tv.append_tool_call.assert_not_called()
+        mock_tv.update_tool_result.assert_not_called()
 
     def test_compact_dispatches_to_write_rail(self):
         app = self._app()
@@ -241,7 +246,7 @@ class TestSessionRunAgentLoop:
         # AgentLoop was constructed with on_event = app.route_agent_event
         ctor_kwargs = MockLoop.call_args.kwargs
         assert ctor_kwargs["on_event"] is app.route_agent_event
-        assert ctor_kwargs["stream_mode"] is False
+        assert ctor_kwargs["stream_mode"] is True  # Stage B: chat path streams
         assert ctor_kwargs["max_iterations"] == 1
         assert ctor_kwargs["session_id"] == "test-sid"
 

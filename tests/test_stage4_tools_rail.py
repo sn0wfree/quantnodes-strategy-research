@@ -1,4 +1,16 @@
-"""Tests for Stage 4 - ToolsRail unified timeline."""
+"""Tests for ToolsRail — Stage C updated.
+
+After Stage C, tool events flow inline to TranscriptView; the rail
+keeps only ``compact`` events and the iter counter.
+
+This file supersedes the Stage 4 tool-timeline tests with Stage C
+expectations:
+
+* handle_event("tool_call" / "tool_result" / "tool_progress" /
+  tool_heartbeat) are silent no-ops on the rail.
+* handle_event("compact") still appends a TimelineEntry.
+* set_iter and TimelineEntry defaults unchanged.
+"""
 from __future__ import annotations
 
 from strategy_research.cli.tui.widgets.tools_rail import (
@@ -16,47 +28,32 @@ class TestTimelineEntry:
 
 
 class TestToolsRailHandleEvent:
+    """Stage C: tool_* events are silent; only compact + iter_start remain."""
+
     def _rail(self) -> ToolsRail:
         return ToolsRail()
 
-    def test_tool_call_adds_running_entry(self):
+    def test_tool_call_is_no_op(self):
         rail = self._rail()
         rail.handle_event("tool_call", {"tool": "read_file", "iter": 1})
-        assert len(rail._timeline) == 1
-        assert rail._timeline[0].label == "read_file"
-        assert rail._timeline[0].status == "running"
-        assert rail._timeline[0].iter == 1
+        assert rail._timeline == []
 
-    def test_tool_result_updates_to_done(self):
+    def test_tool_result_is_no_op(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "read_file"})
-        rail.handle_event("tool_result", {"tool": "read_file", "status": "ok", "elapsed_ms": 500})
-        assert rail._timeline[0].status == "done"
-        assert rail._timeline[0].duration_ms == 500
+        rail.handle_event("tool_result", {
+            "tool": "read_file", "status": "ok", "elapsed_ms": 500,
+        })
+        assert rail._timeline == []
 
-    def test_tool_result_error_status(self):
+    def test_tool_progress_is_no_op(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "search"})
-        rail.handle_event("tool_result", {"tool": "search", "status": "error", "elapsed_ms": 100})
-        assert rail._timeline[0].status == "error"
+        rail.handle_event("tool_progress", {"tool": "x", "message": "50% done"})
+        assert rail._timeline == []
 
-    def test_tool_result_backward_compat_ok(self):
+    def test_tool_heartbeat_is_no_op(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "search"})
-        rail.handle_event("tool_result", {"tool": "search", "ok": True, "elapsed_ms": 200})
-        assert rail._timeline[0].status == "done"
-
-    def test_tool_progress_updates_detail(self):
-        rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "download"})
-        rail.handle_event("tool_progress", {"tool": "download", "message": "50% done"})
-        assert rail._timeline[0].detail == "50% done"
-
-    def test_tool_heartbeat_updates_detail(self):
-        rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "analyze"})
-        rail.handle_event("tool_heartbeat", {"tool": "analyze", "detail": "still working"})
-        assert rail._timeline[0].detail == "still working"
+        rail.handle_event("tool_heartbeat", {"tool": "x", "detail": "still working"})
+        assert rail._timeline == []
 
     def test_compact_adds_entry(self):
         rail = self._rail()
@@ -76,52 +73,29 @@ class TestToolsRailHandleEvent:
         assert rail._iter == 3
         assert rail._iter_max == 10
 
-    def test_timeline_trimmed_to_max(self):
-        rail = self._rail()
-        rail._max_timeline = 3
-        for i in range(5):
-            rail.handle_event("tool_call", {"tool": f"t{i}"})
-        assert len(rail._timeline) == 3
-        assert rail._timeline[0].label == "t2"
-        assert rail._timeline[-1].label == "t4"
-
     def test_clear_timeline(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "x"})
+        rail.handle_event("compact", {"before_tokens": 1, "after_tokens": 1})
         rail.clear_timeline()
         assert len(rail._timeline) == 0
 
 
 class TestToolsRailRender:
+    """Stage C: empty timeline shows the inline-tool hint, not '(idle)'."""
+
     def _rail(self) -> ToolsRail:
         return ToolsRail()
 
-    def test_render_running_entry_shows_ellipsis(self):
+    def test_render_empty_timeline_shows_inline_hint(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "backtest"})
         content = rail._render_timeline()
-        assert "backtest" in content
-        assert "..." in content
+        assert "(tool calls shown inline)" in content
 
-    def test_render_done_entry_shows_duration(self):
+    def test_render_compact_entry_appears(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "backtest"})
-        rail.handle_event("tool_result", {"tool": "backtest", "status": "ok", "elapsed_ms": 5200})
+        rail.handle_event("compact", {"before_tokens": 12, "after_tokens": 4})
         content = rail._render_timeline()
-        assert "5.2s" in content
-
-    def test_render_detail_shown_as_sub_line(self):
-        rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "download"})
-        rail.handle_event("tool_progress", {"tool": "download", "message": "fetching"})
-        content = rail._render_timeline()
-        assert "└" in content
-        assert "fetching" in content
-
-    def test_render_empty_timeline_shows_idle(self):
-        rail = self._rail()
-        content = rail._render_timeline()
-        assert "(idle)" in content
+        assert "compacted" in content
 
     def test_render_footer_shows_iter(self):
         rail = self._rail()

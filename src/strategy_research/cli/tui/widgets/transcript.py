@@ -22,9 +22,19 @@ Multi-folder cursor (Ctrl+E):
     last folder (expand).  Subsequent presses fold the current one and
     expand the previous (cyclic).  This lets the user inspect any past
     turn without losing context.
+
+Inline tool calls (Stage C):
+    Tool calls live as 1-2 lines parallel to streaming text:
+
+        ⏳ read_file · {"path": "..."}      ← append_tool_call
+        ✔ read_file · 0.3s                  ← update_tool_result
+
+    State is tracked in ``_tool_lines: {call_id: line_index}`` so the
+    result line can be replaced in-place via ``_truncate_to``.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from rich.console import RenderableType
@@ -32,6 +42,8 @@ from textual.widgets import RichLog
 
 from strategy_research.cli.tui.messages import WriteTranscript
 from strategy_research.cli.tui.widgets.streaming_text import StreamingText
+
+_ARGS_PREVIEW_MAX = 80
 
 
 class TranscriptView(RichLog):
@@ -62,6 +74,11 @@ class TranscriptView(RichLog):
         self._fold_baselines: list[int] = []
         self._fold_line_counts: list[int] = []
         self._active_folder_idx: int | None = None
+        # Inline tool-call state (Stage C):
+        # _tool_lines:  call_id → line index of the in-flight "⏳ tool · args" line
+        # _tool_names:  call_id → tool name (cached so update_tool_result can render it)
+        self._tool_lines: dict[str, int] = {}
+        self._tool_names: dict[str, str] = {}
 
     def append(self, content: RenderableType | str) -> None:
         """Append ``content`` on a new line (alias for ``write``)."""
@@ -81,10 +98,79 @@ class TranscriptView(RichLog):
         self._fold_baselines = []
         self._fold_line_counts = []
         self._active_folder_idx = None
+        self._tool_lines = {}
+        self._tool_names = {}
 
     def append_done(self) -> None:
         """Write a ``Done.`` marker line to close a turn."""
         self.write("[dim]\u2022 Done.[/dim]")
+
+    # ------------------------------------------------------------------ inline tools (Stage C)
+
+    def append_tool_call(self, call_id: str, tool: str, args: dict) -> None:
+        """Write an inline ``⏳ tool · {args preview}`` line for a new tool call.
+
+        Args:
+            call_id: Unique tool-call identifier (used by ``update_tool_result``
+                to locate the line and replace it in-place).
+            tool: Tool name (e.g. ``"read_file"``).
+            args: Tool arguments dict (JSON-serialised for display).
+
+        Side effects:
+            * Appends one styled line to the RichLog.
+            * Stores ``call_id → line_index`` in ``_tool_lines``.
+            * Caches ``call_id → tool`` in ``_tool_names`` for the result.
+        """
+        args_str = self._format_args_preview(args)
+        line = f"[muted]\u23f3 [bold]{tool}[/bold] \u00b7 {args_str}[/muted]"
+        self.write(line)
+        self._tool_lines[call_id] = len(self.lines) - 1
+        self._tool_names[call_id] = tool
+
+    def update_tool_result(self, call_id: str, ok: bool, elapsed_ms: int) -> None:
+        """Replace the ``⏳`` line for ``call_id`` with a ``✔/✘`` result line.
+
+        If ``call_id`` is unknown (e.g. event arrived after a ``clear_log``),
+        the call is silently ignored — no crash, no orphan write.
+
+        Args:
+            call_id: Same id passed to ``append_tool_call``.
+            ok: True for success (green check), False for error (red cross).
+            elapsed_ms: Execution duration; rendered as ``0.3s`` / ``320ms``.
+
+        Side effects:
+            * Truncates to the line index recorded by ``append_tool_call``.
+            * Writes the styled result line.
+            * Removes the call from ``_tool_lines`` / ``_tool_names``.
+        """
+        if call_id not in self._tool_lines:
+            return
+        line_idx = self._tool_lines.pop(call_id)
+        tool = self._tool_names.pop(call_id, "?")
+        elapsed_str = self._format_elapsed(elapsed_ms)
+        symbol = "\u2714" if ok else "\u2718"
+        style = "success" if ok else "error"
+        new_line = f"[{style}]{symbol} [bold]{tool}[/bold] \u00b7 {elapsed_str}[/{style}]"
+        self._truncate_to(line_idx)
+        self.write(new_line)
+
+    @staticmethod
+    def _format_args_preview(args: dict) -> str:
+        """JSON-encode args with truncation at ``_ARGS_PREVIEW_MAX`` chars."""
+        try:
+            args_str = json.dumps(args, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            args_str = repr(args)
+        if len(args_str) > _ARGS_PREVIEW_MAX:
+            args_str = args_str[:_ARGS_PREVIEW_MAX - 3] + "..."
+        return args_str
+
+    @staticmethod
+    def _format_elapsed(elapsed_ms: int) -> str:
+        """Format milliseconds as ``320ms`` (<1s) or ``1.2s`` (>=1s)."""
+        if elapsed_ms < 1000:
+            return f"{elapsed_ms}ms"
+        return f"{elapsed_ms / 1000:.1f}s"
 
     # ------------------------------------------------------------------ streaming
 

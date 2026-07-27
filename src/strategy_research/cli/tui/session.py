@@ -234,7 +234,7 @@ class ChatSession:
             registry=registry,
             workspace=None,
             on_event=self.app.route_agent_event,
-            stream_mode=False,  # plain-text chat: non-streaming for stability
+            stream_mode=True,   # plain-text chat: token-by-token stream
             max_iterations=1,   # plain chat: single pass, no ReAct loop
             session_id=getattr(self.ctx, "session_id", "cli"),
             system_prompt=system_prompt,
@@ -249,38 +249,34 @@ class ChatSession:
         if result.answer:
             self.ctx.history.append({"role": "assistant", "content": result.answer})
 
-        # End streaming lifecycle
+        # End streaming lifecycle (defensive close in case no
+        # ``assistant_message`` event arrived).
         try:
             self.app.stop_thinking()
             self.app.end_streaming()
         except Exception:
             pass
 
-        # Mark turn completion (plain-chat path skips iter_end events).
-        try:
-            from strategy_research.cli.tui.widgets.transcript import TranscriptView
-            tv = self.app.query_one(TranscriptView)
-            tv.append_done()
-        except Exception:
-            pass
+        # Done. marker is emitted by ``iter_end`` route handler — no
+        # redundant append_done() here (which previously caused the
+        # "• Done." ×2 bug).
 
     def _update_header_stats(self) -> None:
-        """Update the StatusHeader with current session stats."""
+        """Update the StatusHeader with current session stats.
+
+        Stage C: tool totals come from ``app._tool_total`` / ``_tool_ok``
+        (incremented in ``ResearchApp._route_tool_event``) rather than
+        from the ToolsRail timeline — tools are now rendered inline in
+        TranscriptView and the rail no longer tracks them.
+        """
         if self.app is None:
             return
         try:
             # Count messages in history
             msg_count = len(self.ctx.history)
-            # Count tool events from the tools rail
-            tool_count = 0
-            tool_ok = 0
-            try:
-                from strategy_research.cli.tui.widgets.tools_rail import ToolsRail
-                rail = self.app.query_one(ToolsRail)
-                tool_count = len(rail._timeline)
-                tool_ok = sum(1 for t in rail._timeline if t.status == "done")
-            except Exception:
-                pass
+            # Tool totals now live on App (Stage C)
+            tool_count = getattr(self.app, "_tool_total", 0)
+            tool_ok = getattr(self.app, "_tool_ok", 0)
             # Estimate tokens (rough: 1 token per 4 chars)
             token_used = sum(
                 len(str(turn.get("content", ""))) // 4
@@ -299,6 +295,7 @@ class ChatSession:
                 model=model,
                 message_count=msg_count,
                 tool_count=tool_count,
+                tool_ok=tool_ok,
                 token_used=token_used,
                 session_id=getattr(self.ctx, "session_id", "cli"),
             )

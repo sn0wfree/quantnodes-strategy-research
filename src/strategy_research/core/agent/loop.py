@@ -449,6 +449,21 @@ class AgentLoop:
         self._trace({"type": "error", "iteration": iteration, "error": str(exc)})
         self._emit("error", {"message": str(exc), "fatal": True})
 
+    @staticmethod
+    def _is_stream_required_error(exc: Exception) -> bool:
+        """Whether the error should NOT trigger a stream→achat fallback.
+
+        Auth/rate-limit/config errors are equally fatal for both modes
+        (return True → no fallback). Everything else (timeout, server,
+        malformed SSE, JSON parse errors) gets one ``achat()`` retry.
+        """
+        from ..llm.errors import (
+            LLMAuthError,
+            LLMConfigError,
+            LLMRateLimitError,
+        )
+        return isinstance(exc, (LLMAuthError, LLMRateLimitError, LLMConfigError))
+
     def _append_assistant_msg(
         self, response: LLMResponse, messages: list[dict[str, Any]],
         result: LoopResult, iteration: int,
@@ -526,6 +541,7 @@ class AgentLoop:
             f"No progress detected (last {self.no_progress_window} tool calls identical)"
         )
         self._trace({"type": "loop_end", "reason": "no_progress", "iteration": iteration})
+        self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
             "iteration": iteration,
             "finish_reason": "no_progress",
@@ -540,6 +556,7 @@ class AgentLoop:
             f"Reached max_iterations={self.max_iterations} without a final answer."
         )
         self._trace({"type": "loop_end", "reason": "max_iter", "iteration": result.iterations})
+        self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
             "iteration": result.iterations,
             "finish_reason": "max_iter",
@@ -553,6 +570,7 @@ class AgentLoop:
         result.answer = response.content
         result.finished_reason = "stop"
         self._trace({"type": "loop_end", "reason": "stop", "iteration": iteration})
+        self._emit("assistant_message", {"content": response.content or ""})
         self._emit("iter_end", {
             "iteration": iteration,
             "finish_reason": "stop",
@@ -607,9 +625,17 @@ class AgentLoop:
                 else:
                     response = self.client.chat(messages)
             except LLMError as exc:
-                self._handle_llm_error(exc, iteration, result)
-                self._fire_hooks("on_error", hook_ctx, exc)
-                break
+                if self._stream_mode and not self._is_stream_required_error(exc):
+                    try:
+                        response = self.client.chat(messages)
+                    except LLMError as exc2:
+                        self._handle_llm_error(exc2, iteration, result)
+                        self._fire_hooks("on_error", hook_ctx, exc2)
+                        break
+                else:
+                    self._handle_llm_error(exc, iteration, result)
+                    self._fire_hooks("on_error", hook_ctx, exc)
+                    break
 
             self._append_assistant_msg(response, messages, result, iteration)
 
@@ -678,9 +704,20 @@ class AgentLoop:
                 else:
                     response = await self.client.achat(messages)
             except LLMError as exc:
-                self._handle_llm_error(exc, iteration, result)
-                await self._afire_hooks("on_error", hook_ctx, exc)
-                break
+                if self._stream_mode and not self._is_stream_required_error(exc):
+                    # Streaming failed for non-streaming-required reasons
+                    # (e.g. provider doesn't support SSE, parsing error on
+                    # a partial chunk). Fall back to non-streaming achat().
+                    try:
+                        response = await self.client.achat(messages)
+                    except LLMError as exc2:
+                        self._handle_llm_error(exc2, iteration, result)
+                        await self._afire_hooks("on_error", hook_ctx, exc2)
+                        break
+                else:
+                    self._handle_llm_error(exc, iteration, result)
+                    await self._afire_hooks("on_error", hook_ctx, exc)
+                    break
 
             self._append_assistant_msg(response, messages, result, iteration)
 

@@ -55,33 +55,40 @@ class TestE2EConversationFlow:
             app.route_agent_event("iter_end", {"iteration": 1})
 
     def test_tool_call_result_flow(self):
-        """tool_call -> tool_progress -> tool_result."""
+        """tool_call -> tool_progress -> tool_result.
+
+        Stage C: tool events route inline to TranscriptView (append_tool_call /
+        update_tool_result). The side rail only sees ``compact`` events.
+        """
         app = self._app()
 
-        mock_rail = mock.MagicMock()
-        with mock.patch.object(app, "query_one", return_value=mock_rail):
-            # tool_call
+        mock_tv = mock.MagicMock()
+        with mock.patch.object(app, "query_one", return_value=mock_tv):
+            # tool_call → TranscriptView.append_tool_call
             app.route_agent_event("tool_call", {
                 "tool": "read_file",
-                "arguments": {"path": "/x"},
+                "args": {"path": "/x"},
+                "call_id": "c1",
                 "iter": 1,
             })
-            assert mock_rail.handle_event.call_count >= 1
+            mock_tv.append_tool_call.assert_called_once()
 
-            # tool_progress
+            # tool_progress → no-op on TV (reserved for future inline use)
             app.route_agent_event("tool_progress", {
                 "tool": "read_file",
+                "call_id": "c1",
                 "message": "reading...",
             })
-            assert mock_rail.handle_event.call_count >= 2
 
-            # tool_result
+            # tool_result → TranscriptView.update_tool_result
             app.route_agent_event("tool_result", {
                 "tool": "read_file",
+                "call_id": "c1",
                 "status": "ok",
+                "ok": True,
                 "elapsed_ms": 100,
             })
-            assert mock_rail.handle_event.call_count >= 3
+            mock_tv.update_tool_result.assert_called_once_with("c1", True, 100)
 
     def test_compact_flow(self):
         """compact event adds timeline entry."""
