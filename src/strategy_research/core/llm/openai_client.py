@@ -125,9 +125,13 @@ def _extract_error_code(body: Any) -> str:
     if not isinstance(body, dict):
         return ""
     error_section = body.get("error", {})
-    if isinstance(error_section, dict):
-        return str(error_section.get("code", "")).lower()
-    return str(body.get("code", "")).lower()
+    if isinstance(error_section, dict) and error_section.get("code"):
+        return str(error_section["code"]).lower()
+    if isinstance(error_section, str) and error_section:
+        return error_section.lower()
+    if body.get("code"):
+        return str(body["code"]).lower()
+    return ""
 
 
 def _raise_for_status(response: httpx.Response) -> None:
@@ -260,8 +264,8 @@ class OpenAICompatClient:
         try:
             with httpx.Client(**client_kwargs) as client:
                 with client.stream("POST", url, json=payload, headers=headers) as response:
-                    _raise_for_status(response)
                     try:
+                        _raise_for_status(response)
                         for line in response.iter_lines():
                             chunk = parse_stream_chunk(line)
                             if chunk is not None:
@@ -273,7 +277,7 @@ class OpenAICompatClient:
                             for _ in response.iter_lines():
                                 pass
                         except Exception:  # noqa: BLE001
-                            pass  # Cleanup failure must not mask original error
+                            pass
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError(
                 f"stream timed out after {self.config.timeout_s}s"
@@ -301,8 +305,8 @@ class OpenAICompatClient:
 
         async with httpx.AsyncClient(**client_kwargs) as client:
             async with client.stream("POST", url, json=payload, headers=headers) as response:
-                _raise_for_status(response)
                 try:
+                    _raise_for_status(response)
                     async for line in response.aiter_lines():
                         chunk = parse_stream_chunk(line)
                         if chunk is not None:
@@ -310,15 +314,14 @@ class OpenAICompatClient:
                             if chunk.finish_reason:
                                 return
                 finally:
-                    # Ensure the remaining response body is consumed to
-                    # prevent httpx's __aexit__ from raising "Attempted
-                    # to access streaming response content, without having
-                    # called 'read()'." when the context manager closes.
+                    # Consume remaining response body to prevent httpx
+                    # __aexit__ raising "Attempted to access streaming
+                    # response content, without having called 'read()'."
                     try:
                         async for _ in response.aiter_lines():
                             pass
                     except Exception:  # noqa: BLE001
-                        pass  # Cleanup failure must not mask original error
+                        pass
 
     def with_config(self, **kwargs: Any) -> "OpenAICompatClient":
         """Return a new client with overridden config fields."""
