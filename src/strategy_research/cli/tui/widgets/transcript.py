@@ -85,6 +85,8 @@ class TranscriptView(RichLog):
         # _tool_names:  call_id → tool name (cached so update_tool_result can render it)
         self._tool_lines: dict[str, int] = {}
         self._tool_names: dict[str, str] = {}
+        # Mouse selection support: plain-text mirror for get_selection()
+        self._plain_lines: list[str] = []
 
     def append(self, content: RenderableType | str) -> None:
         """Append ``content`` on a new line (alias for ``write``)."""
@@ -106,10 +108,78 @@ class TranscriptView(RichLog):
         self._active_folder_idx = None
         self._tool_lines = {}
         self._tool_names = {}
+        self._plain_lines = []
 
     def append_done(self) -> None:
         """Write a ``Done.`` marker line to close a turn."""
         self.write("[dim]\u2022 Done.[/dim]")
+
+    # ------------------------------------------------------------------ mouse selection
+
+    def write(self, content: RenderableType | str, **kwargs: Any) -> "TranscriptView":
+        """Override write to also store plain text for mouse selection."""
+        # Store plain text mirror for get_selection()
+        if isinstance(content, str):
+            self._plain_lines.append(content)
+        else:
+            try:
+                from rich.console import Console as RichConsole
+                import io
+                buf = io.StringIO()
+                console = RichConsole(file=buf, force_terminal=False, width=200)
+                console.print(content, end="")
+                self._plain_lines.append(buf.getvalue().rstrip("\n"))
+            except Exception:
+                self._plain_lines.append(str(content))
+        return super().write(content, **kwargs)
+
+    def render_line(self, y: int) -> "Strip":
+        """Render a line with offset metadata for mouse selection.
+
+        Calls ``Strip.apply_offsets()`` so the Textual compositor can
+        map screen coordinates to content positions. Also applies
+        selection highlighting when a drag-select is active.
+        """
+        from textual.strip import Strip as _Strip
+        scroll_x, scroll_y = self.scroll_offset
+        strip = self._render_line(scroll_y + y, scroll_x, self.size.width)
+
+        # Embed offset metadata — without this the compositor cannot
+        # determine which content position the user clicked on.
+        strip = strip.apply_offsets(scroll_x, y)
+
+        # Apply selection highlight if a selection is active.
+        selection = self.text_selection
+        if selection is not None:
+            span = selection.get_span(y)
+            if span is not None:
+                start, end = span
+                if end == -1:
+                    end = len(strip.text)
+                try:
+                    sel_style = self.screen.get_component_rich_style(
+                        "screen--selection"
+                    )
+                    strip.stylize_before(sel_style, start, end)
+                except Exception:
+                    pass
+
+        return strip
+
+    def get_selection(self, selection: Any) -> tuple[str, str] | None:
+        """Extract plain text under the selection range.
+
+        Uses the ``_plain_lines`` mirror maintained by ``write()`` to
+        return the selected text without needing to re-render Rich
+        renderables.
+        """
+        text = "\n".join(self._plain_lines)
+        return selection.extract(text), "\n"
+
+    def selection_updated(self, selection: Any) -> None:
+        """Called when the selection changes — invalidate render cache."""
+        self._line_cache.clear()
+        self.refresh()
 
     # ------------------------------------------------------------------ markdown body
 
