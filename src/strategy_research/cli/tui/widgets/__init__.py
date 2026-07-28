@@ -9,6 +9,7 @@ unchanged.
 from __future__ import annotations
 
 from strategy_research.cli.tui.widgets.banner import Banner
+from strategy_research.cli.tui.widgets.dag_view import DAGView
 from strategy_research.cli.tui.widgets.goal_panel import GoalPanel
 from strategy_research.cli.tui.widgets.hint_footer import HintFooter
 from strategy_research.cli.tui.widgets.input_bar import ChatInput
@@ -26,6 +27,7 @@ __all__ = [
     "Banner",
     "ChatInput",
     "CommandSidebar",
+    "DAGView",
     "GoalPanel",
     "HintFooter",
     "ModeBar",

@@ -247,7 +247,120 @@ def _validate_config(config: "GoalWorkflowConfig") -> None:
             )
 
 
+# ── Save (Phase 4 v0.5.5) ──────────────────────────────────
+
+
+def save_goal_workflow(
+    path: Path,
+    config: "GoalWorkflowConfig",
+    *,
+    backup: bool = True,
+    validate: bool = True,
+) -> None:
+    """Atomically write a GoalWorkflowConfig to YAML.
+
+    Steps:
+      1. Serialize config to YAML.
+      2. If ``backup=True`` and ``path`` exists, rename to ``<path>.bak``.
+      3. Write to ``<path>.tmp``.
+      4. If ``validate=True``, run ``validate_dag()`` — on failure, restore.
+      5. ``os.replace(tmp, path)``.
+
+    Args:
+        path: Destination YAML file path.
+        config: GoalWorkflowConfig to serialize.
+        backup: Whether to create a ``.bak`` file before overwriting.
+        validate: Whether to validate the DAG before writing.
+
+    Raises:
+        ValueError: If the DAG is invalid (cycle detected).
+        OSError: If the write fails.
+    """
+    import os
+    import tempfile
+
+    try:
+        import yaml
+    except ImportError:
+        raise ImportError(
+            "PyYAML is required for saving workflow configs. "
+            "Install with: pip install pyyaml"
+        )
+
+    # Validate DAG before writing
+    if validate:
+        from ..workflow.dag import validate_dag
+        validate_dag(config.dag)
+
+    # Serialize to dict
+    data = {
+        "name": config.name,
+        "description": config.description,
+        "version": config.version,
+        "goal": {
+            "default_criteria": config.goal.default_criteria,
+            "risk_tier": config.goal.risk_tier,
+        },
+        "agents": [
+            {
+                "id": a.id,
+                "prompt_file": a.prompt_file,
+                "tools": a.tools,
+                "input_from": a.input_from,
+                "evidence_criterion": a.evidence_criterion,
+                "timeout": a.timeout,
+                "max_retries": a.max_retries,
+                **({"condition": a.condition} if a.condition else {}),
+            }
+            for a in config.agents
+        ],
+        "dag": config.dag,
+        "completion": {
+            "mode": config.completion.mode,
+            "auto_audit": config.completion.auto_audit,
+            "require_all_evidence": config.completion.require_all_evidence,
+        },
+    }
+
+    if config.branches:
+        data["branches"] = [
+            {
+                "condition": b.condition,
+                "action": b.action,
+                "target": b.target,
+                "reason": b.reason,
+            }
+            for b in config.branches
+        ]
+
+    yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    # Atomic write
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Backup
+    if backup and path.exists():
+        bak_path = path.with_suffix(path.suffix + ".bak")
+        bak_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # Write to temp file then rename
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(yaml_str)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        # Restore from backup on failure
+        if backup and path.exists():
+            bak_path = path.with_suffix(path.suffix + ".bak")
+            if bak_path.exists():
+                os.replace(str(bak_path), str(path))
+        raise
+
+
 __all__ = [
     "load_goal_workflow",
     "list_goal_workflows",
+    "save_goal_workflow",
 ]
