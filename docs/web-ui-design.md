@@ -768,11 +768,38 @@ interface AgentState {
   current_task?: string;              // 当前正在做什么
   output_summary?: string;            // 输出摘要（前 100 字）
   tools?: string[];                   // 使用的工具列表
-  tokens_used?: number;               // 已消耗 token
+  tokens_used?: number;               // 已消耗 token（总）
   tokens_limit?: number;              // token 上限
   iteration?: number;                 // 当前迭代
   iteration_limit?: number;           // 迭代上限
   error?: string;
+
+  // ── ReAct Loop 扩展字段 ──
+  finished_reason?: 'stop' | 'max_iter' | 'no_progress' | 'error';  // 循环结束原因
+  tool_calls_count: number;           // 已执行工具调用总数
+  compaction_count: number;           // 上下文压缩次数（丢失早期信息的标志）
+  context_tokens: number;             // 当前上下文窗口使用量
+  context_tokens_limit: number;       // 上下文窗口上限（如 128k）
+  iterations_detail: IterationDetail[]; // 每次迭代的详细摘要
+}
+
+// ── 单次迭代详情（ReAct 循环的一轮 Think→Act→Observe）──
+
+interface IterationDetail {
+  iteration: number;                  // 迭代序号
+  thinking_summary?: string;          // 推理摘要（前 200 字）
+  tool_calls: IterationToolCall[];    // 本迭代的工具调用列表
+  tokens_used?: number;               // 本迭代消耗 token
+  duration_ms?: number;               // 本迭代耗时
+  compaction_applied?: boolean;       // 是否触发了上下文压缩
+}
+
+interface IterationToolCall {
+  call_id: string;
+  tool_name: string;
+  status: 'running' | 'completed' | 'error';
+  duration_ms?: number;
+  result_preview?: string;            // 结果摘要（前 100 字）
 }
 ```
 
@@ -786,41 +813,62 @@ interface AgentState {
 | 4 | risk_review | 橙 `#F59E0B` |
 | 5+ | 自动分配 | 青 `#06B6D4` / 红 `#EF4444` |
 
-#### 4.2.2 Agent Tab（右主区）— 列表式
+**finished_reason 语义**：
+
+| 值 | 含义 | 用户看到 | 颜色 |
+|---|---|---|---|
+| `stop` | LLM 不再调用工具，正常结束 | ✔ 正常完成 | 绿 |
+| `max_iter` | 达到最大迭代次数 | ⚠ 达到上限 | 黄 |
+| `no_progress` | 连续 3 次相同 tool_calls，陷入循环 | ✖ 无进展 | 红 |
+| `error` | 工具执行或 LLM 调用出错 | ✖ 出错 | 红 |
+
+#### 4.2.2 Agent Tab（右主区）— 列表式 + 迭代历史
 
 ```
-┌─ Agent Tab ────────────────────────────────────────┐
-│  🔍 搜索 Agent...                                   │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  ── running ────────────────────────────────────── │
-│                                                     │
-│  ┌─ 🤖 researcher ─────────────────────── 12.3s ─┐ │
-│  │  正在分析动量因子表现...                        │ │ ← 展开详情
-│  │  ┌──────────────────────────────────────────┐ │ │
-│  │  │ Tools:  read_file ✔ ✔  execute_python ⏳ │ │ │
-│  │  │ Tokens: 1,234 / 4,096 (30%)              │ │ │
-│  │  │ Iter:   3 / 10                           │ │ │
-│  │  └──────────────────────────────────────────┘ │ │
-│  └────────────────────────────────────────────────┘ │
-│                                                     │
-│  ── completed ──────────────────────────────────── │
-│                                                     │
-│  ✔ data_quality · 1.8s                             │ ← 紧凑（一行）
-│                                                     │
-│  ── pending ────────────────────────────────────── │
-│                                                     │
-│  ○ factor_analyst · 等待中                          │ ← 紧凑（一行）
-│  ○ risk_review · 等待中                             │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+┌─ Agent Tab ────────────────────────────────────────────────┐
+│  🔍 搜索 Agent...                                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ── running ────────────────────────────────────────────── │
+│                                                             │
+│  ┌─ 🤖 researcher ──── iter 3/10 ── 1,234 tok ── 12.3s ─┐ │
+│  │  正在分析动量因子表现...                                  │ │ ← 运行中：展开
+│  │  ┌──────────────────────────────────────────────────┐ │ │
+│  │  │ Iter 3:                                          │ │ │
+│  │  │  🧠 "让我检查因子收益分布..." (折叠)               │ │ │
+│  │  │  ✔ read_file · data.py · 0.3s                    │ │ │
+│  │  │  ⏳ execute_python · analysis.py                  │ │ │
+│  │  │                                                   │ │ │
+│  │  │ Iter 2:                                          │ │ │
+│  │  │  🧠 "需要先验证数据完整性..." (折叠)               │ │ │
+│  │  │  ✔ read_file · raw.csv · 0.1s                    │ │ │
+│  │  │  ✔ validate_data · 0.2s                          │ │ │
+│  │  │                                                   │ │ │
+│  │  │ Iter 1:                                          │ │ │
+│  │  │  🧠 "先看看数据结构..." (折叠)                     │ │ │
+│  │  │  ✔ list_files · 0.05s                            │ │ │
+│  │  └──────────────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                             │
+│  ── completed ──────────────────────────────────────────── │
+│                                                             │
+│  ✔ data_quality ── iter 2/10 ── 580 tok ── 1.8s ── stop  │ ← 紧凑（一行）
+│                                                             │
+│  ── pending ────────────────────────────────────────────── │
+│                                                             │
+│  ○ factor_analyst · 等待中                                  │
+│  ○ risk_review · 等待中                                     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**交互**：
-- running 的 Agent 自动展开详情（Tools/Token/Iteration），不需要手动点击
-- completed 和 pending 的 Agent 紧凑显示（只有一行）
+**关键交互**：
+- running 的 Agent 自动展开：显示迭代历史（最新迭代在上）
+- 每次迭代可折叠：点击展开 thinking 摘要 + tool_calls 列表
+- completed 的 Agent 紧凑一行：显示 ✔ + finished_reason
 - 点击任意 Agent → 聊天区滚动到该 Agent 的最近消息
-- 状态变化 → 右主区自动重排（running 的始终在顶部）
+- 状态变化 → 右主区自动重排（running 始终在顶部）
+- 红点提示：Agent 状态变化（completed/error）时 Tab 上显示红点
 
 **状态色 + 图标映射**：
 
@@ -1073,7 +1121,7 @@ CREATE TABLE web_messages (
     metadata_json TEXT                 -- model/tokens_used/iteration
 );
 
--- Agent 实时状态表（Workflow 运行时写入）
+-- Agent 实时状态表（Workflow 运行时写入，含 ReAct Loop 扩展）
 CREATE TABLE web_agent_states (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     goal_id TEXT NOT NULL,
@@ -1093,6 +1141,13 @@ CREATE TABLE web_agent_states (
     iteration INTEGER DEFAULT 0,
     iteration_limit INTEGER DEFAULT 0,
     error TEXT,
+    -- ReAct Loop 扩展字段
+    finished_reason TEXT,              -- stop/max_iter/no_progress/error
+    tool_calls_count INTEGER DEFAULT 0,-- 已执行工具调用总数
+    compaction_count INTEGER DEFAULT 0,-- 上下文压缩次数
+    context_tokens INTEGER DEFAULT 0,  -- 当前上下文窗口使用量
+    context_tokens_limit INTEGER DEFAULT 0, -- 上下文窗口上限
+    iterations_detail_json TEXT,       -- JSON IterationDetail[]
     updated_at REAL DEFAULT (unixepoch())
 );
 
@@ -1164,22 +1219,47 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 | `/api/chat/upload` | POST | multipart form | `{image_url, mime_type}` | 上传图片 |
 | `/api/chat/message` | DELETE | `?message_id=X` | 204 | 删除消息 |
 
-**SSE 事件类型**：
+**SSE 事件类型**（含 ReAct Loop 桥接事件）：
 
-| 事件 | data 字段 | 说明 |
-|---|---|---|
-| `text_delta` | `{delta, message_id}` | 流式文本增量 |
-| `thinking_start` | `{message_id, thinking_id}` | 思考开始 |
-| `thinking_delta` | `{delta, message_id, thinking_id}` | 思考增量 |
-| `thinking_done` | `{message_id, thinking_id}` | 思考结束 |
-| `tool_call` | `{call_id, tool_name, arguments, message_id}` | 工具调用开始 |
-| `tool_result` | `{call_id, status, result, duration_ms, message_id}` | 工具调用结果 |
-| `file_edit` | `{file_path, additions, deletions, diff, message_id}` | 文件编辑 |
-| `table` | `{headers, rows, caption, message_id}` | 数据表格 |
-| `assistant_message` | `{message_id, agent_id, content, parts}` | 完整消息 |
-| `image` | `{url, mime_type, message_id}` | 图片 |
-| `error` | `{error, message_id}` | 错误 |
-| `heartbeat` | `{timestamp}` | 心跳（30s 间隔） |
+| 事件 | data 字段 | 说明 | 来源 |
+|---|---|---|---|
+| `text_delta` | `{delta, message_id}` | 流式文本增量 | AgentLoop |
+| `thinking_start` | `{message_id, thinking_id}` | 思考开始 | AgentLoop |
+| `thinking_delta` | `{delta, message_id, thinking_id}` | 思考增量 | AgentLoop |
+| `thinking_done` | `{message_id, thinking_id}` | 思考结束 | AgentLoop |
+| `tool_call` | `{call_id, tool_name, arguments, message_id, agent_id}` | 工具调用开始 | AgentLoop |
+| `tool_result` | `{call_id, status, result, duration_ms, message_id, agent_id}` | 工具调用结果 | AgentLoop |
+| `file_edit` | `{file_path, additions, deletions, diff, message_id}` | 文件编辑 | Tool |
+| `table` | `{headers, rows, caption, message_id}` | 数据表格 | Tool |
+| `assistant_message` | `{message_id, agent_id, content, parts}` | 完整消息 | AgentLoop |
+| `image` | `{url, mime_type, message_id}` | 图片 | Tool |
+| `error` | `{error, message_id}` | 错误 | AgentLoop |
+| `heartbeat` | `{timestamp}` | 心跳（30s 间隔） | Server |
+| `agent_iteration` | `{agent_id, iteration, max_iterations}` | ReAct 迭代开始 | AgentLoop |
+| `agent_iteration_end` | `{agent_id, iteration, tool_calls_count, duration_ms, tokens_used}` | ReAct 迭代结束 | AgentLoop |
+| `agent_tool_progress` | `{agent_id, tool, call_id, stage, current, total, message}` | 工具执行进度 | AgentLoop |
+| `agent_compaction` | `{agent_id, level, kept_messages, removed_messages}` | 上下文压缩 | AgentLoop |
+| `agent_usage` | `{agent_id, prompt_tokens, completion_tokens, total_tokens}` | Token 用量 | AgentLoop |
+| `agent_finished` | `{agent_id, finished_reason, tool_calls_total, compaction_count}` | Agent 循环结束 | AgentLoop |
+
+**事件来源映射**（AgentLoop → SSE）：
+
+```
+AgentLoop._emit()           →  SSE Event              →  Web UI Store 更新
+─────────────────────────────────────────────────────────────────────────────
+thinking_start/done/end     →  thinking_start/done     →  chat.thinking
+text_delta                  →  text_delta              →  chat.streaming
+tool_call                   →  tool_call               →  chat.toolCalls
+tool_result                 →  tool_result             →  chat.toolCalls
+tool_progress               →  agent_tool_progress     →  agents.iterations
+tool_heartbeat              →  (忽略，仅内部保活)       →  —
+iter_start                  →  agent_iteration         →  agents.iterations
+iter_end                    →  agent_iteration_end     →  agents.iterations
+assistant_message           →  assistant_message       →  chat.messages
+compact                     →  agent_compaction        →  agents.compaction
+llm_usage                   →  agent_usage             →  agents.tokens
+error                       →  error                   →  chat.error
+```
 
 ### 6.3 会话 API
 
@@ -1205,22 +1285,52 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 | `/api/goal/workflow/{name}/dag` | GET | — | `{dag}` | DAG 结构（nodes + edges） |
 | `/api/goal/workflow/{name}/agents` | GET | — | `{agents[]}` | agent 详情（含 color 字段） |
 
-**Workflow SSE 事件类型**：
+**Workflow SSE 事件类型**（含 AgentLoop 桥接）：
 
-| 事件 | data 字段 | 说明 |
-|---|---|---|
-| `agent_status` | `{agent_id, status, duration_ms?, current_task?}` | Agent 状态变化 |
-| `agent_output` | `{agent_id, summary}` | Agent 输出摘要 |
-| `workflow_progress` | `{pct, completed, total, elapsed_ms}` | 全局进度更新 |
-| `workflow_complete` | `{goal_id, status}` | Workflow 完成 |
-| `workflow_error` | `{goal_id, error}` | Workflow 错误 |
+| 事件 | data 字段 | 说明 | 来源 |
+|---|---|---|---|
+| `agent_status` | `{agent_id, status, layer?, duration_ms?, current_task?}` | Agent 状态变化 | WorkflowEventBus |
+| `agent_output` | `{agent_id, summary}` | Agent 输出摘要 | GoalWorkflowHook |
+| `agent_loop` | `{agent_id, event, data}` | Agent 内部 ReAct 事件透传 | AgentLoop → SSE 适配器 |
+| `workflow_progress` | `{pct, completed, total, elapsed_ms}` | 全局进度更新 | GoalWorkflowRunner |
+| `workflow_complete` | `{goal_id, status}` | Workflow 完成 | GoalWorkflowRunner |
+| `workflow_error` | `{goal_id, error}` | Workflow 错误 | GoalWorkflowRunner |
+| `evidence_collected` | `{agent_id, criteria_id, evidence_id}` | Evidence 采集 | GoalWorkflowHook |
+
+**agent_loop 事件透传**（Workflow SSE 的子通道）：
+
+```json
+{
+  "event": "agent_loop",
+  "data": {
+    "agent_id": "researcher",
+    "event": "agent_iteration",
+    "data": {
+      "iteration": 3,
+      "max_iterations": 10,
+      "tool_calls_count": 5,
+      "tokens_used": 1234
+    }
+  }
+}
+```
+
+前端 Store 处理逻辑：
+```
+agent_loop.event == "agent_iteration"     → 更新 agents[agent_id].iteration
+agent_loop.event == "agent_iteration_end" → 追加 iterations_detail[]
+agent_loop.event == "agent_compaction"    → agents[agent_id].compaction_count++
+agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason = data.reason
+```
 
 ### 6.5 Agent API
 
 | 端点 | 方法 | 请求体 | 响应 | 说明 |
 |---|---|---|---|---|
 | `/api/agent/list` | GET | — | `{agents[]}` | 可用 agents（含 color） |
-| `/api/agent/status` | GET | `?goal_id=X` | `{agents_status[]}` | 运行状态 |
+| `/api/agent/status` | GET | `?goal_id=X` | `{agents_status[]}` | 运行状态（含 ReAct 扩展字段） |
+| `/api/agent/{goal_id}/{agent_id}/iterations` | GET | — | `{iterations: IterationDetail[]}` | 迭代历史详情 |
+| `/api/agent/{goal_id}/{agent_id}/events` | GET | — | SSE stream | 单个 Agent 的 ReAct 事件流 |
 
 ---
 
