@@ -8,8 +8,8 @@ type SSEEventType =
   | 'text_delta' | 'tool_call' | 'tool_result' | 'thinking_delta'
   | 'thinking_done' | 'thinking_start' | 'thinking_end'
   | 'file_edit' | 'table' | 'chart' | 'image'
-  | 'agent_status' | 'agent_loop'
-  | 'dag_update' | 'progress'
+  | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
+  | 'dag_update' | 'progress' | 'message_received' | 'error'
 
 interface SSEEvent {
   event: string
@@ -27,7 +27,6 @@ export function useSSE(sessionId: string | null) {
   const setStreamingMessage = useChatStore((s) => s.setStreamingMessage)
   const appendStreamingText = useChatStore((s) => s.appendStreamingText)
   const updateAgent = useAgentStore((s) => s.updateAgent)
-  const addAgent = useAgentStore((s) => s.addAgent)
   const updateNodeStatus = useWorkflowStore((s) => s.updateNodeStatus)
   const addToast = useToastStore((s) => s.addToast)
 
@@ -41,20 +40,46 @@ export function useSSE(sessionId: string | null) {
         return
       }
 
+      const messageId = data.message_id as string | undefined
+
       switch (event) {
         case 'text_delta': {
-          const delta = data.delta as string
-          appendStreamingText(delta)
+          // Backend sends {"text": "delta_content", "message_id": "..."}
+          const text = (data.text || data.delta) as string
+          if (text && messageId) {
+            // Append to the streaming message's text part
+            updateMessage(messageId, (msg) => {
+              const textPart = msg.parts.find((p) => p.type === 'text')
+              if (textPart && textPart.type === 'text') {
+                textPart.text += text
+              }
+            })
+          }
+          // Also update the global streaming text for the StreamingText component
+          appendStreamingText(text || '')
+          break
+        }
+        case 'assistant_message': {
+          // Backend sends {"content": "full text", "message_id": "..."}
+          const content = data.content as string
+          if (content && messageId) {
+            updateMessage(messageId, (msg) => {
+              const textPart = msg.parts.find((p) => p.type === 'text')
+              if (textPart && textPart.type === 'text') {
+                textPart.text = content
+              }
+            })
+          }
           break
         }
         case 'tool_call': {
-          const { message_id, id, name, arguments: args } = data as {
+          const { message_id: mid, id, name, arguments: args } = data as {
             message_id: string
             id: string
             name: string
             arguments: string
           }
-          updateMessage(message_id, (msg) => {
+          updateMessage(mid, (msg) => {
             const existing = msg.parts.find(
               (p) => p.type === 'tool_call' && p.id === id
             )
@@ -71,13 +96,13 @@ export function useSSE(sessionId: string | null) {
           break
         }
         case 'tool_result': {
-          const { message_id, id, result, status } = data as {
+          const { message_id: mid, id, result, status } = data as {
             message_id: string
             id: string
             result: string
             status: string
           }
-          updateMessage(message_id, (msg) => {
+          updateMessage(mid, (msg) => {
             const tc = msg.parts.find(
               (p) => p.type === 'tool_call' && p.id === id
             )
@@ -89,30 +114,40 @@ export function useSSE(sessionId: string | null) {
           break
         }
         case 'thinking_start': {
-          const { message_id, thinking_id } = data as {
-            message_id: string
-            thinking_id: string
+          if (messageId) {
+            updateMessage(messageId, (msg) => {
+              msg.parts.push({
+                type: 'thinking',
+                text: '',
+                collapsed: true,
+              } as any)
+            })
           }
-          updateMessage(message_id, (msg) => {
-            msg.parts.push({
-              type: 'thinking',
-              text: '',
-              collapsed: true,
-            } as any)
-          })
           break
         }
         case 'thinking_delta': {
-          const { message_id, delta } = data as {
-            message_id: string
-            delta: string
+          const delta = data.delta as string
+          if (delta && messageId) {
+            updateMessage(messageId, (msg) => {
+              const last = msg.parts[msg.parts.length - 1]
+              if (last && last.type === 'thinking') {
+                last.text += delta
+              }
+            })
           }
-          updateMessage(message_id, (msg) => {
-            const last = msg.parts[msg.parts.length - 1]
-            if (last && last.type === 'thinking') {
-              last.text += delta
-            }
-          })
+          break
+        }
+        case 'agent_done': {
+          // AgentLoop finished — clear streaming state
+          setStreamingMessage(null)
+          break
+        }
+        case 'error': {
+          const error = data.error as string
+          if (error) {
+            addToast('error', error)
+          }
+          setStreamingMessage(null)
           break
         }
         case 'agent_status': {
@@ -158,7 +193,6 @@ export function useSSE(sessionId: string | null) {
       setStreamingMessage,
       appendStreamingText,
       updateAgent,
-      addAgent,
       updateNodeStatus,
       addToast,
     ]
@@ -195,8 +229,8 @@ export function useSSE(sessionId: string | null) {
       'text_delta', 'tool_call', 'tool_result',
       'thinking_start', 'thinking_delta', 'thinking_done', 'thinking_end',
       'file_edit', 'table', 'chart', 'image',
-      'agent_status', 'agent_loop',
-      'dag_update', 'progress',
+      'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
+      'dag_update', 'progress', 'message_received', 'error',
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))
 

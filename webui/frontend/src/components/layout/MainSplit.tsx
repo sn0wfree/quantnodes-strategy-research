@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { useLayoutStore } from '../../stores/layout'
+import { MessageList } from '../chat/MessageList'
+import { Composer } from '../chat/Composer'
 
 export function MainSplit() {
   const leftRatio = useLayoutStore((s) => s.leftRatio)
@@ -38,18 +40,12 @@ export function MainSplit() {
         className="flex flex-col overflow-hidden bg-slate-900"
         style={{ flex: rightPanelVisible ? `0 0 ${leftRatio * 100}%` : '1 1 0' }}
       >
-        {/* 聊天内容区 - 占位 */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="flex h-full items-center justify-center text-slate-500">
-            选择或创建会话开始
-          </div>
+        {/* Messages */}
+        <div className="flex-1 overflow-hidden">
+          <MessageList />
         </div>
-        {/* 输入框 - 底部 */}
-        <div className="border-t border-slate-800 p-4">
-          <div className="glass rounded-xl px-4 py-3 text-sm text-slate-400">
-            输入消息...
-          </div>
-        </div>
+        {/* Composer */}
+        <Composer />
       </div>
 
       {/* 拖拽分隔条 */}
