@@ -216,7 +216,10 @@ class TestRunDispatcherV051:
         assert rc == 0
 
     def test_run_help_mentions_new_subcommands(self, console):
-        rc = run(None, "help")
+        """`/goal help` (called directly) lists new subcommands."""
+        from strategy_research.cli.commands.slash_goal import cmd_help
+        rc = cmd_help(console=console)
+        assert rc == 0
         out = console.export_text()
         assert "workflows" in out
         assert "checkpoint" in out

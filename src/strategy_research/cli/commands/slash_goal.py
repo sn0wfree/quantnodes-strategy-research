@@ -7,11 +7,16 @@ Thin command wrappers around :class:`GoalStore` for the interactive REPL:
 * :func:`cmd_evidence` (``/goal evidence <idx> <note>``) — append evidence.
 * :func:`cmd_complete` (``/goal complete [recap]``) — mark complete.
 * :func:`cmd_cancel` (``/goal cancel [recap]``) — cancel.
+* :func:`cmd_workflows` (``/goal workflows [list|show|path]``) — enumerate workflow presets.
+* :func:`cmd_checkpoint` (``/goal checkpoint [save|list|resume|delete]``) — checkpoint control.
 * :func:`cmd_help` (``/goal help``) — usage panel.
+
+Phase 4 v0.5.1 added workflow + checkpoint subcommands.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -38,6 +43,30 @@ def _resolve_console(console: Optional[Console] = None) -> Console:
 def _store():
     from strategy_research.core.goal import GoalStore
     return GoalStore(db_path=_resolve_db_path())
+
+
+def _user_workflows_dir() -> Path:
+    """Return the user-scope workflows directory.
+
+    Defaults to ``~/.quantnodes-research/workflows/``. Exposed for
+    monkeypatching in tests.
+    """
+    raw = os.environ.get("STRATEGY_RESEARCH_WORKFLOWS_DIR")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".quantnodes-research" / "workflows"
+
+
+def _checkpoint_base_dir() -> Path:
+    """Return the checkpoint base directory.
+
+    Defaults to ``~/.quantnodes-research/checkpoints/``. Exposed for
+    monkeypatching in tests.
+    """
+    raw = os.environ.get("STRATEGY_RESEARCH_CHECKPOINT_DIR")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".quantnodes-research" / "checkpoints"
 
 
 def cmd_status(*, console: Optional[Console] = None, session_id: str = "cli") -> int:
@@ -78,19 +107,45 @@ def cmd_status(*, console: Optional[Console] = None, session_id: str = "cli") ->
 
 
 def cmd_start(objective: str, *, console: Optional[Console] = None,
-              session_id: str = "cli", template_key: str = "") -> int:
-    """``/goal start <objective> [--template <key>]`` — create a new goal."""
+              session_id: str = "cli", template_key: str = "",
+              workflow_name: str = "") -> int:
+    """``/goal start <objective> [--template <key>] [--workflow <name>]`` — create a new goal.
+
+    Phase 4 v0.5.1: ``--workflow <name>`` loads a YAML workflow preset and
+    runs the DAG synchronously, recording evidence and auto-completing per
+    the workflow's completion config. CLI standalone mode is best-effort:
+    it executes the workflow in-process and reports the final state.
+
+    If both ``--workflow`` and ``--template`` are provided, ``--workflow``
+    takes precedence and ``--template`` is ignored.
+    """
     console = _resolve_console(console)
     if not objective.strip():
-        console.print("[red]Usage:[/red] /goal start <objective> [--template <key>]")
+        console.print(
+            "[red]Usage:[/red] "
+            "/goal start <objective> [--template <key>] [--workflow <name>]"
+        )
         return 1
     try:
+        store = _store()
+
+        # ── Workflow path (Phase 4 v0.5.1) ──
+        if workflow_name:
+            return _start_workflow(
+                objective=objective,
+                workflow_name=workflow_name,
+                session_id=session_id,
+                console=console,
+                store=store,
+            )
+
+        # ── Legacy / template path ──
         from strategy_research.core.goal.context import default_goal_criteria
+        from strategy_research.core.goal.models import RiskTier
         from strategy_research.core.goal.templates import get_template
 
-        # Resolve criteria from template or defaults
         criteria = default_goal_criteria()
-        risk_tier = "research_general"
+        risk_tier = RiskTier.RESEARCH_GENERAL
         if template_key:
             tmpl = get_template(template_key)
             if tmpl is None:
@@ -101,9 +156,14 @@ def cmd_start(objective: str, *, console: Optional[Console] = None,
                 ) + "[/dim]")
                 return 1
             criteria = tmpl.criteria
-            risk_tier = tmpl.risk_tier
+            # tmpl.risk_tier may be a string — coerce to RiskTier enum.
+            tier_value = getattr(tmpl, "risk_tier", "research_general")
+            risk_tier = (
+                tier_value
+                if isinstance(tier_value, RiskTier)
+                else RiskTier(tier_value)
+            )
 
-        store = _store()
         goal = store.replace_goal(
             session_id=session_id,
             objective=objective,
@@ -116,6 +176,60 @@ def cmd_start(objective: str, *, console: Optional[Console] = None,
         console.print(f"[red]/goal start failed:[/red] {exc}")
         return 1
     console.print(f"[green]Started goal:[/green] {goal.goal_id}")
+    return 0
+
+
+def _start_workflow(
+    *,
+    objective: str,
+    workflow_name: str,
+    session_id: str,
+    console: Console,
+    store: Any,
+) -> int:
+    """Load a YAML workflow and execute it synchronously (CLI standalone).
+
+    Creates a goal row with ``workflow_id`` set, then runs the DAG in-process
+    and reports evidence / completion status. Returns 0 on success, 1 on
+    workflow-load or execution failure.
+    """
+    from strategy_research.core.goal.workflow import GoalWorkflowRunner
+    from strategy_research.core.goal.workflow_config import load_goal_workflow
+
+    try:
+        config = load_goal_workflow(workflow_name)
+    except FileNotFoundError as exc:
+        console.print(f"[red]Workflow not found:[/red] {workflow_name}")
+        console.print(f"[dim]{exc}[/dim]")
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to load workflow:[/red] {exc}")
+        return 1
+
+    runner = GoalWorkflowRunner(
+        config=config,
+        session_id=session_id,
+        store=store,
+        workspace=Path.cwd(),
+    )
+
+    console.print(
+        f"[cyan]Running workflow:[/cyan] {config.name} "
+        f"({len(config.agents)} agents)"
+    )
+    try:
+        goal_id = asyncio.run(runner.start(objective))
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Workflow execution failed:[/red] {exc}")
+        return 1
+
+    progress = runner.get_progress()
+    status = progress.get("status", "unknown")
+    evidence = progress.get("evidence_count", 0)
+    console.print(
+        f"[green]Workflow finished:[/green] goal={goal_id[:12]} "
+        f"status={status} evidence={evidence}"
+    )
     return 0
 
 
@@ -254,12 +368,14 @@ def cmd_help(*, console: Optional[Console] = None) -> int:
     """``/goal help`` — usage panel."""
     console = _resolve_console(console)
     body = (
-        "/goal status                          — show current goal\n"
-        "/goal start <objective> [--template T] — create a new goal\n"
-        "/goal evidence <idx-or-id> <note>      — record evidence\n"
-        "/goal complete [recap] [--lite]        — mark complete\n"
-        "/goal cancel [recap]                   — cancel\n"
-        "/goal templates                        — list available templates\n"
+        "/goal status                                  — show current goal\n"
+        "/goal start <obj> [--template T] [--workflow W] — create a new goal\n"
+        "/goal evidence <idx-or-id> <note>             — record evidence\n"
+        "/goal complete [recap] [--lite]               — mark complete\n"
+        "/goal cancel [recap]                          — cancel\n"
+        "/goal templates                               — list templates (+ workflows)\n"
+        "/goal workflows [list|show <n>|path <n>]      — enumerate workflow presets\n"
+        "/goal checkpoint save|list|resume|delete ...  — checkpoint control\n"
     )
     console.print(Panel(body, title="/goal", border_style="dim"))
     return 0
@@ -272,15 +388,370 @@ def cmd_templates(*, console: Optional[Console] = None) -> int:
     templates = list_templates()
     if not templates:
         console.print("[dim]No templates registered.[/dim]")
+    else:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Key")
+        table.add_column("Name")
+        table.add_column("Description")
+        table.add_column("Criteria", justify="right")
+        for key, tmpl in sorted(templates.items()):
+            table.add_row(key, tmpl.name, tmpl.description, str(len(tmpl.criteria)))
+        console.print(table)
+
+    # Phase 4 v0.5.1: also list workflows under templates view
+    console.print("\n[dim]Workflow presets:[/dim]")
+    workflows = _list_workflows_for_display()
+    if workflows:
+        for wf in workflows:
+            console.print(
+                f"  [cyan]{wf['name']}[/cyan]  {wf['description'][:60]}"
+            )
+    else:
+        console.print("  [dim](none found)[/dim]")
+    return 0
+
+
+# ── Phase 4 v0.5.1 — workflow enumeration ─────────────────────────────
+
+
+def _list_workflows_for_display() -> list[dict[str, str]]:
+    """Read all built-in + user workflow presets for display.
+
+    Wraps :func:`list_goal_workflows` but always returns dicts (never raises).
+    Used by ``/goal templates`` and ``/goal workflows list``.
+    """
+    try:
+        from strategy_research.core.goal.workflow_config import list_goal_workflows
+        return list_goal_workflows()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _resolve_workflow_path(name_or_path: str) -> Path | None:
+    """Resolve a workflow name or explicit path to a YAML file.
+
+    Mirrors the search logic in :mod:`workflow_config` but returns the path
+    directly for CLI display purposes (no parsing needed).
+    """
+    from strategy_research.core.goal import workflow_config
+
+    path = Path(name_or_path)
+    if path.exists() and path.suffix in (".yaml", ".yml"):
+        return path
+
+    candidates = [
+        workflow_config._PRESETS_DIR / f"goal_{name_or_path}.yaml",
+        workflow_config._PRESETS_DIR / f"{name_or_path}.yaml",
+        _user_workflows_dir() / f"{name_or_path}.yaml",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def cmd_workflows(*args: str, console: Optional[Console] = None) -> int:
+    """``/goal workflows [list|show <name>|path <name>]`` — enumerate presets.
+
+    Subcommands:
+      * ``list`` (default) — table of name / description / source / agents
+      * ``show <name>`` — render YAML path + first 30 lines
+      * ``path <name>`` — print absolute YAML path
+    """
+    console = _resolve_console(console)
+
+    if not args or args[0] == "list":
+        return _cmd_workflows_list(console)
+    if args[0] == "show" and len(args) >= 2:
+        return _cmd_workflows_show(args[1], console)
+    if args[0] == "path" and len(args) >= 2:
+        return _cmd_workflows_path(args[1], console)
+
+    console.print(
+        "[red]Usage:[/red] /goal workflows [list|show <name>|path <name>]"
+    )
+    return 1
+
+
+def _cmd_workflows_list(console: Console) -> int:
+    workflows = _list_workflows_for_display()
+    if not workflows:
+        console.print("[yellow]No workflows found.[/yellow]")
+        console.print(
+            f"[dim]Searched: "
+            f"{_user_workflows_dir()} "
+            f"(and built-in presets)[/dim]"
+        )
         return 0
+
     table = Table(show_header=True, header_style="bold")
-    table.add_column("Key")
     table.add_column("Name")
     table.add_column("Description")
-    table.add_column("Criteria", justify="right")
-    for key, tmpl in sorted(templates.items()):
-        table.add_row(key, tmpl.name, tmpl.description, str(len(tmpl.criteria)))
+    table.add_column("Source")
+    for wf in workflows:
+        path = wf.get("path", "")
+        source = "user" if "workflows" in path else "built-in"
+        table.add_row(
+            wf.get("name", ""),
+            wf.get("description", "")[:60],
+            source,
+        )
     console.print(table)
+    return 0
+
+
+def _cmd_workflows_show(name: str, console: Console) -> int:
+    path = _resolve_workflow_path(name)
+    if path is None:
+        console.print(f"[red]Workflow not found:[/red] {name}")
+        return 1
+
+    try:
+        import yaml
+    except ImportError:
+        console.print("[red]PyYAML required for show.[/red]")
+        return 1
+
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    agents = data.get("agents", [])
+    dag = data.get("dag", {})
+
+    body = (
+        f"[bold]{path.name}[/bold]\n"
+        f"description: {data.get('description', '')}\n"
+        f"version: {data.get('version', '1.0')}\n"
+        f"agents: {len(agents)} | "
+        f"dag nodes: {len(dag)} | "
+        f"completion: {data.get('completion', {}).get('mode', 'auto')}\n"
+        f"\n"
+        f"[dim]path: {path}[/dim]"
+    )
+    console.print(Panel(body, title="Workflow", border_style="cyan"))
+    return 0
+
+
+def _cmd_workflows_path(name: str, console: Console) -> int:
+    path = _resolve_workflow_path(name)
+    if path is None:
+        console.print(f"[red]Workflow not found:[/red] {name}")
+        return 1
+    console.print(str(path))
+    return 0
+
+
+# ── Phase 4 v0.5.1 — checkpoint control ──────────────────────────────
+
+
+def cmd_checkpoint(*args, console: Optional[Console] = None,
+                   session_id: str = "cli") -> int:
+    """``/goal checkpoint [save|list|resume|delete] [args]``.
+
+    Subcommands:
+      * ``save`` — checkpoint the current goal's workflow state (CLI mode
+        prints state summary; full save requires active runner — currently
+        returns 1 with explanation if no runner).
+      * ``list [session_id]`` — list all checkpoints on disk.
+      * ``resume [goal_id]`` — restore latest (or specified) checkpoint.
+      * ``delete <goal_id>`` — remove a checkpoint directory.
+    """
+    console = _resolve_console(console)
+    if not args:
+        console.print(
+            "[red]Usage:[/red] "
+            "/goal checkpoint save|list|resume|delete [goal_id]"
+        )
+        return 1
+
+    sub = args[0]
+    rest = list(args[1:])
+
+    if sub == "save":
+        return _cmd_checkpoint_save(console)
+    if sub == "list":
+        sid = rest[0] if rest else None
+        return _cmd_checkpoint_list(console, sid)
+    if sub == "resume":
+        goal_id = rest[0] if rest else ""
+        return _cmd_checkpoint_resume(console, session_id, goal_id)
+    if sub == "delete":
+        if not rest:
+            console.print("[red]Usage:[/red] /goal checkpoint delete <goal_id>")
+            return 1
+        return _cmd_checkpoint_delete(console, session_id, rest[0])
+
+    console.print(
+        "[red]Unknown checkpoint subcommand:[/red] " + sub + "\n"
+        "Use save|list|resume|delete."
+    )
+    return 1
+
+
+def _cmd_checkpoint_save(console: Console) -> int:
+    """Checkpoint the active goal.
+
+    CLI standalone mode: there is no live ``GoalWorkflowRunner`` attached
+    to the CLI session — the workflow ran to completion in the same call
+    as ``cmd_start --workflow``. We therefore persist a "summary" snapshot
+    of the current goal state (post-completion), which lets ``resume``
+    later restore context even though the DAG itself has finished.
+
+    For long-running workflows (TUI mode), checkpointing is driven by the
+    ``WorkflowWorker`` (Phase 4 v0.5.2).
+    """
+    try:
+        store = _store()
+        snapshot = store.get_current_snapshot("cli")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to access store:[/red] {exc}")
+        return 1
+
+    if not snapshot:
+        console.print("[yellow]No active goal. Nothing to checkpoint.[/yellow]")
+        return 1
+
+    goal = snapshot.get("goal", {})
+    goal_id = goal.get("goal_id", "")
+    if not goal_id:
+        console.print("[yellow]No active goal.[/yellow]")
+        return 1
+
+    try:
+        from strategy_research.core.goal.checkpoint_store import CheckpointStore
+    except ImportError as exc:
+        console.print(f"[red]CheckpointStore unavailable:[/red] {exc}")
+        return 1
+
+    state = {
+        "goal_status": goal.get("status"),
+        "objective": goal.get("objective"),
+        "protocol": goal.get("protocol"),
+        "risk_tier": goal.get("risk_tier"),
+        "checkpoint_kind": "summary",
+    }
+    layer_results = {
+        "criteria": snapshot.get("criteria", []),
+        "evidence": snapshot.get("evidence", []),
+    }
+    cp = CheckpointStore(base_dir=_checkpoint_base_dir())
+    cp.save(
+        session_id="cli",
+        goal_id=goal_id,
+        state=state,
+        layer_results=layer_results,
+        workflow_name=goal.get("protocol", ""),
+    )
+    console.print(
+        f"[green]Checkpoint saved:[/green] {goal_id[:12]}"
+    )
+    return 0
+
+
+def _cmd_checkpoint_list(console: Console, session_id: Optional[str]) -> int:
+    try:
+        from strategy_research.core.goal.checkpoint_store import CheckpointStore
+    except ImportError as exc:
+        console.print(f"[red]CheckpointStore unavailable:[/red] {exc}")
+        return 1
+
+    cp = CheckpointStore(base_dir=_checkpoint_base_dir())
+    items = cp.list_checkpoints(session_id=session_id)
+    if not items:
+        scope = f"session '{session_id}'" if session_id else "any session"
+        console.print(f"[dim]No checkpoints in {scope}.[/dim]")
+        return 0
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Goal ID")
+    table.add_column("Workflow")
+    table.add_column("Session")
+    table.add_column("Created")
+    for meta in items:
+        table.add_row(
+            meta.get("goal_id", "")[:12],
+            meta.get("workflow_name", ""),
+            meta.get("session_id", ""),
+            meta.get("created_at", "")[:19],
+        )
+    console.print(table)
+    return 0
+
+
+def _cmd_checkpoint_resume(console: Console, session_id: str,
+                           goal_id: str) -> int:
+    """Resume from a checkpoint.
+
+    Restores state into the store and re-emits the goal summary. For
+    DAG workflows, true re-execution is Phase 4 v0.5.3 P1.3 — this v0.5.1
+    implementation restores metadata so the user can inspect prior state
+    and re-issue ``/goal start`` if needed.
+    """
+    try:
+        from strategy_research.core.goal.checkpoint_store import CheckpointStore
+    except ImportError as exc:
+        console.print(f"[red]CheckpointStore unavailable:[/red] {exc}")
+        return 1
+
+    cp = CheckpointStore(base_dir=_checkpoint_base_dir())
+
+    # Resolve goal_id: latest if blank
+    if not goal_id:
+        items = cp.list_checkpoints(session_id=session_id)
+        if not items:
+            console.print(
+                f"[yellow]No checkpoints to resume for "
+                f"session '{session_id}'.[/yellow]"
+            )
+            return 0
+        goal_id = items[-1]["goal_id"]
+
+    data = cp.load(session_id=session_id, goal_id=goal_id)
+    if data is None:
+        console.print(
+            f"[red]Checkpoint not found:[/red] session='{session_id}' "
+            f"goal='{goal_id}'"
+        )
+        return 1
+
+    state = data.get("state", {})
+    layer_results = data.get("layer_results", {})
+    meta = data.get("meta", {})
+
+    body = (
+        f"goal_id: {goal_id[:12]}\n"
+        f"workflow: {meta.get('workflow_name', '')}\n"
+        f"created: {meta.get('created_at', '')[:19]}\n"
+        f"status: {state.get('goal_status', '?')}\n"
+        f"protocol: {state.get('protocol', '?')}\n"
+        f"\n"
+        f"[dim]criteria: {len(layer_results.get('criteria', []))} | "
+        f"evidence: {len(layer_results.get('evidence', []))}[/dim]"
+    )
+    console.print(Panel(body, title="Resumed checkpoint", border_style="cyan"))
+    console.print(
+        "[dim]Note: full DAG re-execution is Phase 4 v0.5.3 (P1.3). "
+        "Re-issue /goal start --workflow to re-run.[/dim]"
+    )
+    return 0
+
+
+def _cmd_checkpoint_delete(console: Console, session_id: str,
+                           goal_id: str) -> int:
+    try:
+        from strategy_research.core.goal.checkpoint_store import CheckpointStore
+    except ImportError as exc:
+        console.print(f"[red]CheckpointStore unavailable:[/red] {exc}")
+        return 1
+
+    cp = CheckpointStore(base_dir=_checkpoint_base_dir())
+    deleted = cp.delete(session_id=session_id, goal_id=goal_id)
+    if deleted:
+        console.print(
+            f"[green]Checkpoint deleted:[/green] {goal_id[:12]}"
+        )
+    else:
+        console.print(
+            f"[yellow]No checkpoint to delete for {goal_id[:12]}.[/yellow]"
+        )
     return 0
 
 
@@ -297,19 +768,31 @@ def run(ctx: Any = None, *args: str) -> int:
         return cmd_help()
     if sub == "templates":
         return cmd_templates()
+    if sub == "workflows":
+        return cmd_workflows(*rest)
+    if sub == "checkpoint":
+        return cmd_checkpoint(*rest)
     if sub == "start":
-        # Parse --template option
+        # Parse --template and --workflow options (Phase 4 v0.5.1)
         template_key = ""
+        workflow_name = ""
         objective_parts = []
         i = 0
         while i < len(rest):
             if rest[i] == "--template" and i + 1 < len(rest):
                 template_key = rest[i + 1]
                 i += 2
+            elif rest[i] == "--workflow" and i + 1 < len(rest):
+                workflow_name = rest[i + 1]
+                i += 2
             else:
                 objective_parts.append(rest[i])
                 i += 1
-        return cmd_start(" ".join(objective_parts), template_key=template_key)
+        return cmd_start(
+            " ".join(objective_parts),
+            template_key=template_key,
+            workflow_name=workflow_name,
+        )
     if sub == "evidence" and rest:
         # Next tokens: "<idx-or-id>" "<note words...>"
         if len(rest) >= 2:
@@ -332,5 +815,10 @@ __all__ = [
     "cmd_complete",
     "cmd_cancel",
     "cmd_help",
+    "cmd_templates",
+    "cmd_workflows",
+    "cmd_checkpoint",
     "run",
+    "_user_workflows_dir",
+    "_checkpoint_base_dir",
 ]
