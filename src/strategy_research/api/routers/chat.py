@@ -86,7 +86,17 @@ async def _run_agent_loop_background(
 
     This mirrors TUI's ChatSession._run_agent_loop() but pushes events
     to sse_buffer instead of Textual widgets.
+
+    Test mode: when ``STRATEGY_RESEARCH_TEST_CHAT=1``, emits a scripted
+    sequence of SSE events instead of calling the real LLM. Used by
+    E2E tests to avoid network calls and ensure determinism.
     """
+    import os
+
+    if os.environ.get("STRATEGY_RESEARCH_TEST_CHAT") == "1":
+        await _run_test_script(session_id, message_id, task)
+        return
+
     cfg = _build_llm_config()
     if cfg is None or not cfg.api_key:
         sse_buffer.push(
@@ -162,6 +172,75 @@ async def _run_agent_loop_background(
             json.dumps({"message_id": message_id, "status": "error"}),
             session_id,
         )
+
+
+async def _run_test_script(session_id: str, message_id: str, task: str):
+    """Emit a scripted sequence of SSE events for E2E testing.
+
+    Mirrors what the real AgentLoop would emit:
+    - thinking_start → thinking_delta (×N) → (collapse)
+    - text_delta (×N, simulating streaming response)
+    - agent_done
+
+    Events are spaced 30ms apart to keep tests fast but realistic.
+    """
+    reply_parts = [
+        f"这是对「{task}」的脚本化回复。",
+        " 主要演示 SSE 流式事件分发链路。",
+        " 客户端 useSSE hook 会把每个 text_delta 累积到 streamingText。",
+        "\n\n**测试要点**：",
+        "\n- 事件 message_id 关联",
+        "\n- streamingText 累积",
+        "\n- agent_done 清空 streamingMessageId",
+    ]
+    try:
+        # Phase 1: thinking block (collapsed by default)
+        sse_buffer.push(
+            "thinking_start",
+            json.dumps({"message_id": message_id}, ensure_ascii=False),
+            session_id,
+        )
+        thinking_chunks = ["分析用户问题", " → 检索相关策略", " → 准备回复"]
+        for chunk in thinking_chunks:
+            await asyncio.sleep(0.03)
+            sse_buffer.push(
+                "thinking_delta",
+                json.dumps({"message_id": message_id, "delta": chunk}, ensure_ascii=False),
+                session_id,
+            )
+        sse_buffer.push(
+            "thinking_done",
+            json.dumps({"message_id": message_id}, ensure_ascii=False),
+            session_id,
+        )
+
+        # Phase 2: streaming text reply
+        for part in reply_parts:
+            await asyncio.sleep(0.03)
+            sse_buffer.push(
+                "text_delta",
+                json.dumps({"message_id": message_id, "text": part}, ensure_ascii=False),
+                session_id,
+            )
+
+        # Phase 3: completion signal
+        sse_buffer.push(
+            "agent_done",
+            json.dumps({
+                "message_id": message_id,
+                "status": "success",
+                "answer_length": sum(len(p) for p in reply_parts),
+            }, ensure_ascii=False),
+            session_id,
+        )
+    except asyncio.CancelledError:
+        # Test cancellation handling matches production
+        sse_buffer.push(
+            "agent_done",
+            json.dumps({"message_id": message_id, "status": "cancelled"}, ensure_ascii=False),
+            session_id,
+        )
+        raise
 
 
 @router.post("/send_async", response_model=SendMessageResponse)

@@ -47,20 +47,24 @@ export function Composer() {
     })
 
     // Create placeholder for assistant response
-    const assistantMsgId = crypto.randomUUID()
+    // Note: localAssistantId is a temporary local ID. Once we get the
+    // backend's message_id from /chat/send_async, we rename the local
+    // message so SSE text_delta events (which carry the backend's
+    // message_id) can find and update it.
+    const localAssistantId = crypto.randomUUID()
     addMessage({
-      id: assistantMsgId,
+      id: localAssistantId,
       session_id: currentSessionId,
       role: 'assistant',
       parts: [{ type: 'text', text: '' }],
       created_at: Date.now() / 1000,
     })
-    setStreamingMessage(assistantMsgId)
+    setStreamingMessage(localAssistantId)
     setStreamingText('')
 
     try {
       // Send to backend
-      await api.post<{ message_id: string; event_id: string; status: string }>(
+      const res = await api.post<{ message_id: string; event_id: string; status: string }>(
         '/chat/send_async',
         {
           session_id: currentSessionId,
@@ -69,13 +73,27 @@ export function Composer() {
         }
       )
 
+      // Rename local message → backend's message_id so SSE events
+      // (keyed by backend's id) can update the same message.
+      if (res.message_id && res.message_id !== localAssistantId) {
+        useChatStore.setState((state) => {
+          const local = state.messages.get(localAssistantId)
+          if (local) {
+            state.messages.delete(localAssistantId)
+            state.messages.set(res.message_id, { ...local, id: res.message_id })
+          }
+        })
+        setStreamingMessage(res.message_id)
+      }
+
       // SSE will handle the rest via useSSE hook
       // When agent_done arrives, streamingMessageId will be cleared
     } catch (err: any) {
       console.error('Send failed:', err)
       // Remove the optimistic assistant message on error
-      const msgs = useChatStore.getState().messages
-      msgs.delete(assistantMsgId)
+      useChatStore.setState((state) => {
+        state.messages.delete(localAssistantId)
+      })
       setStreamingMessage(null)
     } finally {
       setSending(false)

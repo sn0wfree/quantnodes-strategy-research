@@ -1,5 +1,9 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
+import { enableMapSet } from 'immer'
+
+// Required for immer to handle Map/Set types in chat state
+enableMapSet()
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
