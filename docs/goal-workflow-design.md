@@ -542,12 +542,15 @@ src/strategy_research/core/goal/templates.py
 
 ### 11.2 Phase 2 计划
 
-- [ ] 集成 AgentLoop 作为默认 agent_runner
-- [ ] GoalPanel 显示 workflow 进度（每个 agent 状态图标）
-- [ ] slash_goal.py 加 `--workflow` 参数
-- [ ] session.py Ctrl+G 暂停 workflow
-- [ ] 表达式求值（简单 DSL：`output.field < value`）
-- [ ] 4 个额外 preset（market_analysis / risk_assessment / strategy_review / portfolio_review）
+| 任务 | 优先级 |
+|---|---|
+| [ ] 集成 AgentLoop 作为默认 agent_runner | P0 |
+| [ ] GoalPanel 显示 workflow 进度（每个 agent 状态图标）| P1 |
+| [ ] slash_goal.py 加 `--workflow` 参数 | P2 |
+| [ ] session.py Ctrl+G 暂停 workflow | P2 |
+| [ ] 表达式求值（简单 DSL：`output.field < value`）| P3 |
+| [ ] 4 个额外 preset（market_analysis / risk_assessment / strategy_review / portfolio_review）| P2 |
+| [ ] **重构 R1-R12**（详见 §13 设计模式 + §14 复用清单）| **P0** |
 
 ### 11.3 Phase 3 计划
 
@@ -556,6 +559,166 @@ src/strategy_research/core/goal/templates.py
 - [ ] 可视化工作流编辑器
 - [ ] Workflow 性能监控（每个 agent 耗时）
 - [ ] 与 Hook 系统集成
+
+## 13. 设计模式应用
+
+Phase 2 重构采用 6 种设计模式提升代码质量与复用性。
+
+### 13.1 工厂模式 — AgentRunnerFactory
+
+**问题**：`agent_runner: Callable` 散落在 `__init__` 中，runner 类型选择逻辑无集中管理。
+
+**方案**：
+
+```python
+class AgentRunner(Protocol):
+    async def run(self, agent_id, prompt, tools, context) -> dict: ...
+
+class AgentRunnerFactory:
+    """工厂: 根据 runner_type 创建合适的 AgentRunner."""
+    @staticmethod
+    def create(runner_type: str = "stub", **kwargs) -> AgentRunner:
+        runners = {
+            "stub": lambda: StubAgentRunner(),
+            "swarm_worker": lambda: SwarmWorkerRunner(**kwargs),
+            "agent_loop": lambda: AgentLoopRunner(**kwargs),
+        }
+        if runner_type not in runners:
+            raise ValueError(f"Unknown runner type: {runner_type}")
+        return runners[runner_type]()
+```
+
+**3 个内置实现**：
+- `StubAgentRunner` — 返回 stub 结果（测试/CI 用）
+- `SwarmWorkerRunner` — 包装 `WorkflowController.execute_agent`
+- `AgentLoopRunner` — 包装 `build_agent_loop + AgentLoop.run()`
+
+**收益**：Runner 选择逻辑集中；易扩展新类型；自动 fallback。
+
+### 13.2 装饰器模式 — Agent 执行增强
+
+**问题**：`_execute_agent` 是 130 行的巨方法，混合 prompt 构建、retry、timeout、validation、evidence 收集 5 个关注点。
+
+**方案**：4 个装饰器自由组合
+
+```python
+@with_retry(max_retries)          # 重试
+@with_timeout(timeout_s)          # 超时
+@with_validation(validator)       # 验证
+@with_evidence_collection(collector, criterion_idx)  # evidence 收集
+async def run(agent_id, prompt, tools, context) -> dict: ...
+```
+
+**4 个装饰器位置**（仅 Agent 执行层）：
+- `core/workflow/decorators.py::with_timeout`
+- `core/workflow/decorators.py::with_retry`
+- `core/workflow/decorators.py::with_validation`
+- `core/workflow/decorators.py::with_evidence_collection`
+
+**收益**：`_execute_agent` 从 130 行 → 25 行；每个关注点独立可测。
+
+### 13.3 策略模式 — CompletionStrategy
+
+**问题**：`_auto_complete` 用 `if/elif` 分支处理 `auto` / `lite` / `manual` 三种模式，难扩展。
+
+**方案**：
+
+```python
+class CompletionStrategy(Protocol):
+    async def complete(self, store, session_id, goal_id, criteria, evidence, workflow_name): ...
+
+class AutoCompleteStrategy: ...   # 完整审计 + completion
+class LiteCompleteStrategy: ...   # 仅 evidence
+class ManualCompleteStrategy: ... # 不调 update_status
+
+class CompletionStrategyFactory:
+    @staticmethod
+    def get(mode: str) -> CompletionStrategy:
+        return _strategies.get(mode) or _strategies["auto"]
+```
+
+**收益**：消除 if/elif；易扩展新模式（hybrid）；单元测试无需 mock GoalStore。
+
+### 13.4 观察者模式 — WorkflowEventObserver
+
+**问题**：`GoalPanel` 不会自动响应状态变化，需手动调用 `update_goal_panel()`。
+
+**方案**：
+
+```python
+class WorkflowEventObserver(Protocol):
+    def on_event(self, event: str, data: dict) -> None: ...
+
+class GoalWorkflowRunner:
+    def _emit(self, event: str, **data) -> None:
+        for obs in self._observers:
+            try: obs.on_event(event, data)
+            except Exception: ...
+```
+
+**3 个内置 Observer**（未来）：
+- `GoalPanelObserver` — 推送到 GoalPanel widget
+- `LoggerObserver` — 记录所有事件
+- `MetricsObserver` — 收集性能指标
+
+**收益**：UI 响应自动化；易添加新观察者；与 SwarmRuntime hook 架构对齐。
+
+### 13.5 注册表模式 — ValidatorRegistry / AgentRunnerRegistry
+
+**问题**：9 个 `AgentValidator` 与 runner 实现散落，缺乏统一索引。
+
+**方案**：
+
+```python
+class ValidatorRegistry:
+    _validators: dict[str, AgentValidator] = {}
+    @classmethod
+    def register(cls, agent_name, validator): ...
+    @classmethod
+    def get(cls, agent_name) -> AgentValidator | None: ...
+
+class AgentRunnerRegistry:
+    _runners: dict[str, type[AgentRunner]] = {}
+    # 同上模式
+```
+
+**收益**：配置驱动行为（YAML 决定用哪个 runner/validator）；与现有 `AgentRegistry` / `TEMPLATES` 一致。
+
+### 13.6 Builder 模式（Phase 3 备选）
+
+`PromptBuilder` 已经是 builder 模式（`build_prompt`），Phase 2 仅复用。
+
+### 13.7 责任链模式（Phase 3 备选）
+
+Phase 3 SwarmRuntime hook 架构会采用。
+
+## 14. 复用清单（Phase 2 重构后）
+
+| vibe-trading 组件 | 重构前 | 重构后 |
+|---|---|---|
+| `PromptBuilder.load_prompt()` | ❌ 自实现 `_load_prompt_template` | ✅ R1 直接复用 |
+| `PromptBuilder.build_prompt()` | ❌ 自实现 `_build_prompt` | ✅ R2 直接复用 |
+| `PromptBuilder._format_upstream()` | ❌ 自实现 upstream 拼接 | ✅ R2 直接复用 |
+| `AgentValidator` | ❌ 未集成 | ✅ R9 注册 9 个 validator |
+| `SwarmWorker` | ❌ 未集成 | ✅ R3 `SwarmWorkerRunner` |
+| `AgentLoop` | ❌ 未集成 | ✅ R3 `AgentLoopRunner` |
+| `WorkflowController.execute_agent()` | ❌ 未集成 | ✅ R3 `SwarmWorkerRunner` 包装 |
+| `topological_layers()` | ✅ 已复用 | ✅ 已复用（+ R11 缓存）|
+| `validate_dag()` | ✅ 已复用 | ✅ 已复用 |
+| `core/swarm/run_store.py` | ❌ 决策：重新设计为文件系统 | — |
+| `SwarmRuntime` (DAG + 并行) | ❌ 自实现 | ❌ 保持（Phase 3 hook 化）|
+
+**Phase 2 重构前后对比**：
+
+| 指标 | 重构前 | 重构后 |
+|---|---|---|
+| `_execute_agent` 行数 | 130 | 25 |
+| `_build_prompt` 行数 | 53 | 5 |
+| `_auto_complete` 行数 | 60 | 25 |
+| `__init__` 中的实例化 | 散落 5+ 处 | 构造时注入 |
+| `_execute_dag` + `continue_after_pause` | 30 + 25（重复）| 30 + 5（复用 `_run_layers`）|
+| 代码总行数（workflow.py）| ~688 | ~520 |
+| 复用 vibe-trading 组件 | 2 | 8 |
 
 ## 12. 参考资料
 
