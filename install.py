@@ -6,6 +6,8 @@ Usage:
     python install.py --dev            # 开发模式（不构建前端）
     python install.py --frontend       # 仅构建前端
     python install.py --backend        # 仅安装后端依赖
+    python install.py --e2e            # 完整安装 + 跑 E2E 测试 (Playwright)
+    python install.py --e2e-only       # 仅跑 E2E 测试（需已安装）
     python install.py --uninstall      # 卸载
     python install.py --help           # 显示帮助
 
@@ -136,6 +138,87 @@ def build_frontend(frontend_dir: Path) -> None:
     log("前端构建完成 → webui/static/ ✓")
 
 
+def install_playwright(pip: str) -> None:
+    """安装 Playwright Python SDK + Chromium 浏览器。
+
+    - ``pytest-playwright`` 提供 Playwright Python 绑定
+    - ``playwright install --with-deps chromium`` 安装 Chromium 浏览器和系统依赖
+
+    系统依赖 (``--with-deps``) 需要 sudo / 管理员权限；如果失败，回退到
+    ``playwright install chromium`` （无系统依赖，CI / Docker 中常用）。
+    """
+    header("安装 Playwright")
+
+    # 检查 pytest-playwright 已安装
+    log("检查 playwright Python 包 ...")
+    rc = subprocess.run(
+        [sys.executable, "-c", "import playwright; print(playwright.__version__)"],
+        capture_output=True,
+    )
+    if rc.returncode == 0:
+        log(f"已安装 (version={rc.stdout.decode().strip()}) ✓")
+    else:
+        log("pip install pytest-playwright (含 playwright SDK)")
+        run([*pip.split(), "install", "pytest-playwright"], cwd=Path.cwd())
+
+    # 安装 Chromium 浏览器
+    log("安装 Chromium 浏览器二进制 ...")
+    rc = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+    )
+    if rc.returncode != 0:
+        warn("playwright install --with-deps 失败（可能需要 sudo）")
+        log("尝试 fallback（不带系统依赖）...")
+        rc = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+        )
+        if rc.returncode != 0:
+            err("Chromium 安装失败。请手动运行：")
+            err(f"  {sys.executable} -m playwright install chromium")
+            sys.exit(1)
+        log("Chromium 安装完成（无系统依赖）✓")
+    else:
+        log("Chromium 安装完成 ✓")
+
+
+def check_static_build(project_root: Path) -> None:
+    """确保 webui/static/ 已构建（E2E 测试必需）。"""
+    static_index = project_root / "webui" / "static" / "index.html"
+    if not static_index.exists():
+        err(f"前端构建产物不存在: {static_index}")
+        err("请先运行: python install.py  或  python install.py --frontend")
+        sys.exit(1)
+
+
+def run_e2e_tests(project_root: Path) -> int:
+    """跑 Playwright E2E 测试。
+
+    使用 ``STRATEGY_RESEARCH_TEST_CHAT=1`` 触发后端脚本化 SSE 模式
+    （不需要真实 LLM）。返回 pytest 退出码。
+    """
+    header("运行 E2E 测试")
+
+    check_static_build(project_root)
+
+    cmd = [
+        sys.executable, "-m", "pytest",
+        "tests/test_webui_e2e_playwright.py",
+        "-v", "--tb=short",
+    ]
+    env = {**__import__("os").environ, "STRATEGY_RESEARCH_TEST_CHAT": "1"}
+
+    log("$ " + " ".join(cmd))
+    log("(脚本化 SSE 模式 — 不需要真实 LLM)")
+    log(" ")
+    result = subprocess.run(cmd, cwd=project_root, env=env)
+    if result.returncode == 0:
+        log("E2E 测试通过 ✓")
+    else:
+        err("E2E 测试失败")
+        err("调试: STRATEGY_RESEARCH_TEST_CHAT=1 python -m pytest tests/test_webui_e2e_playwright.py -v --tb=long")
+    return result.returncode
+
+
 def uninstall_all(project_root: Path, frontend_dir: Path, pip: str) -> None:
     """卸载：删除包 + node_modules + 构建产物。"""
     header("卸载")
@@ -216,6 +299,7 @@ def show_usage() -> None:
    quantnodes-strategy-research api serve --port 8765
 
 🧪 运行测试：
+   python install.py --e2e                         # CI: 完整安装 + E2E
    pytest tests/test_webui_api.py tests/test_webui_e2e.py -v   # 后端 22 测试
    cd webui/frontend && npm test                                 # 前端 27 测试
 
@@ -246,6 +330,14 @@ def main() -> int:
         help="仅安装后端依赖",
     )
     parser.add_argument(
+        "--e2e", action="store_true",
+        help="完整安装 + 跑 E2E 测试（Playwright 浏览器 + 真实后端）",
+    )
+    parser.add_argument(
+        "--e2e-only", action="store_true",
+        help="仅跑 E2E 测试（需已通过 (无参数) / --dev 完成安装）",
+    )
+    parser.add_argument(
         "--uninstall", action="store_true",
         help="卸载",
     )
@@ -270,11 +362,26 @@ def main() -> int:
         build_frontend(frontend_dir)
         return 0
 
+    if args.e2e_only:
+        install_playwright(pip)
+        rc = run_e2e_tests(project_root)
+        return rc
+
     if args.dev:
         install_backend(project_root, pip)
         install_frontend_deps(frontend_dir)
         show_usage()
         return 0
+
+    if args.e2e:
+        install_backend(project_root, pip)
+        install_frontend_deps(frontend_dir)
+        build_frontend(frontend_dir)
+        install_playwright(pip)
+        rc = run_e2e_tests(project_root)
+        if rc == 0:
+            show_usage()
+        return rc
 
     # 默认：完整安装
     install_backend(project_root, pip)

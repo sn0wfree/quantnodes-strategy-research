@@ -6,6 +6,8 @@
 #   ./install.sh --dev                # 开发模式（不构建前端）
 #   ./install.sh --frontend           # 仅构建前端
 #   ./install.sh --backend            # 仅安装后端依赖
+#   ./install.sh --e2e                # 完整安装 + 跑 E2E 测试 (Playwright)
+#   ./install.sh --e2e-only           # 仅跑 E2E 测试（需已安装）
 #   ./install.sh --uninstall          # 卸载
 #   ./install.sh --help               # 显示帮助
 #
@@ -90,12 +92,16 @@ Options:
   --dev          开发模式：后端 + 前端依赖（不构建）
   --frontend     仅构建前端
   --backend      仅安装后端依赖
+  --e2e          完整安装 + 跑 E2E 测试（Playwright 浏览器 + 真实后端）
+  --e2e-only     仅跑 E2E 测试（需已通过 (无参数) / --dev 完成安装）
   --uninstall    卸载（删除包 + node_modules + 构建产物）
   --help         显示此帮助
 
 Examples:
   $0                              # 完整安装
   $0 --dev                        # 开发模式
+  $0 --e2e                        # CI 用：完整安装 + E2E 测试
+  $0 --e2e-only                   # 本地反复跑 E2E（不重装）
   quantnodes-strategy-research serve --host 0.0.0.0 --port 87183
 EOF
 }
@@ -150,6 +156,76 @@ build_frontend() {
     log "运行 npm run build ..."
     npm run build
     log "前端构建完成 → webui/static/ ✓"
+}
+
+# ============================================================
+# 安装 Playwright Python 包 + 浏览器
+# ============================================================
+install_playwright() {
+    header "安装 Playwright"
+
+    log "检查 playwright Python 包 ..."
+    if ! $PYTHON_BIN -c "import playwright" 2>/dev/null; then
+        log "pip install pytest-playwright (含 playwright SDK)"
+        $PIP_BIN install pytest-playwright
+    else
+        log "已安装 ✓"
+    fi
+
+    log "安装 Chromium 浏览器二进制 (--with-deps) ..."
+    log "(如果 --with-deps 需要 sudo，会自动提示)"
+    if $PYTHON_BIN -m playwright install --with-deps chromium; then
+        log "Chromium 安装完成 ✓"
+    else
+        warn "playwright install --with-deps 失败"
+        log "尝试 fallback（不带系统依赖）..."
+        if $PYTHON_BIN -m playwright install chromium; then
+            log "Chromium 安装完成（无系统依赖）✓"
+        else
+            err "Chromium 安装失败。请手动运行: $PYTHON_BIN -m playwright install chromium"
+            return 1
+        fi
+    fi
+}
+
+# ============================================================
+# 验证前端构建产物存在
+# ============================================================
+check_static_build() {
+    if [[ ! -f "$PROJECT_ROOT/webui/static/index.html" ]]; then
+        err "前端构建产物不存在: webui/static/index.html"
+        err "请先运行: $0  或  $0 --frontend"
+        return 1
+    fi
+}
+
+# ============================================================
+# 跑 E2E 测试
+# ============================================================
+run_e2e_tests() {
+    header "运行 E2E 测试"
+
+    check_command "$PYTHON_BIN"
+
+    # 确保前端已构建（E2E 需要 webui/static/）
+    check_static_build || return 1
+
+    cd "$PROJECT_ROOT"
+
+    log "pytest tests/test_webui_e2e_playwright.py -v"
+    log "(脚本化 SSE 模式 — 不需要真实 LLM)"
+    log " "
+
+    # 禁用 LLMBridge autouse fixture 干扰（conftest.py 有 _isolate_llm_bridge）
+    # E2E 用 TEST_MODE=1 替代
+    if STRATEGY_RESEARCH_TEST_CHAT=1 "$PYTHON_BIN" -m pytest tests/test_webui_e2e_playwright.py -v --tb=short; then
+        log "E2E 测试通过 ✓"
+        return 0
+    else
+        err "E2E 测试失败"
+        err "调试: STRATEGY_RESEARCH_TEST_CHAT=1 $PYTHON_BIN -m pytest tests/test_webui_e2e_playwright.py -v --tb=long"
+        return 1
+    fi
 }
 
 # ============================================================
@@ -220,6 +296,7 @@ EOF
    quantnodes-strategy-research api serve --port 8765
 
 🧪 运行测试：
+   ./install.sh --e2e                              # CI: 完整安装 + E2E (Playwright)
    pytest tests/test_webui_api.py tests/test_webui_e2e.py -v   # 后端 22 测试
    cd webui/frontend && npm test                                 # 前端 27 测试
 
@@ -248,6 +325,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --backend)
             MODE="backend"
+            shift
+            ;;
+        --e2e)
+            MODE="e2e"
+            shift
+            ;;
+        --e2e-only)
+            MODE="e2e-only"
             shift
             ;;
         --uninstall)
@@ -280,6 +365,20 @@ case "$MODE" in
         install_backend
         install_frontend_deps
         show_usage
+        ;;
+    e2e-only)
+        install_playwright
+        run_e2e_tests
+        ;;
+    e2e)
+        install_backend
+        install_frontend_deps
+        build_frontend
+        install_playwright
+        run_e2e_tests
+        if [[ $? -eq 0 ]]; then
+            show_usage
+        fi
         ;;
     full|"")
         install_backend
