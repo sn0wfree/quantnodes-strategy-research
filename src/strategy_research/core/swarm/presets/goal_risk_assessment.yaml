@@ -1,0 +1,55 @@
+name: goal_risk_assessment
+description: 投资组合风险审计 + 压力测试 + 风险报告
+version: "1.0"
+
+goal:
+  default_criteria:
+    - "已评估当前仓位风险敞口"
+    - "已执行压力测试场景分析"
+    - "已记录风险指标和阈值警报"
+    - "已生成风险审计报告"
+  risk_tier: research_general
+
+agents:
+  - id: position_auditor
+    prompt_file: .prompts/position_auditor.md
+    tools: [read_file, analysis]
+    input_from: []
+    evidence_criterion: 0
+    timeout: 120
+    max_retries: 2
+
+  - id: risk_controller
+    prompt_file: .prompts/risk_controller.md
+    tools: [analysis, run_backtest]
+    input_from: [position_auditor]
+    evidence_criterion: 1
+    timeout: 180
+    max_retries: 3
+
+  - id: stress_tester
+    prompt_file: .prompts/stress_tester.md
+    tools: [analysis, run_backtest]
+    input_from: [position_auditor, risk_controller]
+    evidence_criterion: 2
+    timeout: 300
+    max_retries: 3
+
+  - id: report_writer
+    prompt_file: .prompts/report_writer.md
+    tools: [markdown]
+    input_from: [risk_controller, stress_tester]
+    evidence_criterion: 3
+    timeout: 120
+    max_retries: 2
+
+dag:
+  position_auditor: []
+  risk_controller: [position_auditor]
+  stress_tester: [position_auditor, risk_controller]
+  report_writer: [risk_controller, stress_tester]
+
+completion:
+  mode: auto
+  auto_audit: true
+  require_all_evidence: true

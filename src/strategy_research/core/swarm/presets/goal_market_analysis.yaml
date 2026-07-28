@@ -1,0 +1,45 @@
+name: goal_market_analysis
+description: 市场状态扫描 + regime 分类 + 报告生成
+version: "1.0"
+
+goal:
+  default_criteria:
+    - "已识别当前市场 regime（牛/熊/震荡）"
+    - "已列出至少 5 个市场观察指标"
+    - "已生成结构化市场分析报告"
+  risk_tier: research_general
+
+agents:
+  - id: market_scanner
+    prompt_file: .prompts/market_scanner.md
+    tools: [read_file, search_web]
+    input_from: []
+    evidence_criterion: 0
+    timeout: 180
+    max_retries: 2
+
+  - id: regime_classifier
+    prompt_file: .prompts/regime_classifier.md
+    tools: [analysis]
+    input_from: [market_scanner]
+    evidence_criterion: 1
+    timeout: 120
+    max_retries: 2
+
+  - id: report_writer
+    prompt_file: .prompts/report_writer.md
+    tools: [markdown]
+    input_from: [market_scanner, regime_classifier]
+    evidence_criterion: 2
+    timeout: 120
+    max_retries: 2
+
+dag:
+  market_scanner: []
+  regime_classifier: [market_scanner]
+  report_writer: [market_scanner, regime_classifier]
+
+completion:
+  mode: auto
+  auto_audit: true
+  require_all_evidence: false

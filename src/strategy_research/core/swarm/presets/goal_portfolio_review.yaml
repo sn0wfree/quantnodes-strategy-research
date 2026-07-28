@@ -1,0 +1,55 @@
+name: goal_portfolio_review
+description: 投资组合构建 + 集中度检查 + 风险指标 + 报告
+version: "1.0"
+
+goal:
+  default_criteria:
+    - "已完成投资组合权重分配"
+    - "已检查集中度风险"
+    - "已计算组合风险指标"
+    - "已生成组合审查报告"
+  risk_tier: research_general
+
+agents:
+  - id: portfolio_construction
+    prompt_file: .prompts/portfolio_construction.md
+    tools: [analysis, run_backtest]
+    input_from: []
+    evidence_criterion: 0
+    timeout: 300
+    max_retries: 3
+
+  - id: concentration_check
+    prompt_file: .prompts/concentration_check.md
+    tools: [analysis]
+    input_from: [portfolio_construction]
+    evidence_criterion: 1
+    timeout: 120
+    max_retries: 2
+
+  - id: risk_metrics
+    prompt_file: .prompts/risk_controller.md
+    tools: [analysis, run_backtest]
+    input_from: [portfolio_construction, concentration_check]
+    evidence_criterion: 2
+    timeout: 180
+    max_retries: 2
+
+  - id: report_writer
+    prompt_file: .prompts/report_writer.md
+    tools: [markdown]
+    input_from: [concentration_check, risk_metrics]
+    evidence_criterion: 3
+    timeout: 120
+    max_retries: 2
+
+dag:
+  portfolio_construction: []
+  concentration_check: [portfolio_construction]
+  risk_metrics: [portfolio_construction, concentration_check]
+  report_writer: [concentration_check, risk_metrics]
+
+completion:
+  mode: auto
+  auto_audit: true
+  require_all_evidence: false
