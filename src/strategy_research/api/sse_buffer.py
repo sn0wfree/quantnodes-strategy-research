@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import threading
 from collections import deque
@@ -24,6 +25,7 @@ class SSEEventBuffer:
 
     Events are stored for 5 minutes or max 10000 events.
     Clients can request replay from a specific event ID.
+    Supports async notification via asyncio.Event per session.
     """
 
     def __init__(self, max_events: int = 10000, ttl_seconds: float = 300):
@@ -32,6 +34,8 @@ class SSEEventBuffer:
         self._buffer: deque[SSEEvent] = deque(maxlen=max_events)
         self._lock = threading.Lock()
         self._counter = 0
+        # Per-session async notification events
+        self._session_events: dict[str, asyncio.Event] = {}
 
     def push(self, event: str, data: str, session_id: str) -> str:
         """Push a new event. Returns the event ID."""
@@ -46,6 +50,12 @@ class SSEEventBuffer:
         with self._lock:
             self._buffer.append(sse_event)
         self._cleanup()
+        # Notify any waiting SSE consumers
+        if session_id in self._session_events:
+            try:
+                self._session_events[session_id].set()
+            except RuntimeError:
+                pass
         return event_id
 
     def replay_from(self, event_id: str, session_id: str) -> list[SSEEvent]:
@@ -61,6 +71,36 @@ class SSEEventBuffer:
                 elif e.id == event_id:
                     found = True
             return events
+
+    def get_events_since(self, session_id: str, last_id: str = "") -> list[SSEEvent]:
+        """Get all events for a session after (or from) the given ID.
+
+        If last_id is empty, returns all recent events for the session.
+        """
+        with self._lock:
+            if not last_id:
+                # Return all recent events for this session
+                return [e for e in self._buffer if e.session_id == session_id]
+            events = []
+            found = False
+            for e in self._buffer:
+                if e.session_id != session_id:
+                    continue
+                if found:
+                    events.append(e)
+                elif e.id == last_id:
+                    found = True
+            return events
+
+    def register_session(self, session_id: str) -> asyncio.Event:
+        """Register an async notification event for a session."""
+        evt = asyncio.Event()
+        self._session_events[session_id] = evt
+        return evt
+
+    def unregister_session(self, session_id: str):
+        """Unregister the async notification event for a session."""
+        self._session_events.pop(session_id, None)
 
     def _cleanup(self):
         """Remove expired events."""
