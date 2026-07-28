@@ -558,12 +558,12 @@ src/strategy_research/core/goal/templates.py
 - [x] P3.2: GoalWorkflowHook — goal-specific hook that plugs into SwarmRuntime
 - [x] P3.3: SwarmPreset 统一 — GoalWorkflowConfig.to_swarm_preset() + SwarmPreset 扩展
 - [x] P3.4: 立即取消模式 — pause(immediate=True) + asyncio.Task 取消
+- [x] P3.5: 子 workflow 支持 — start_sub_workflow(parent_goal_id) + parent_goal_id 链接
+- [x] P3.6: 工作流进度 checkpoint + 恢复 — CheckpointStore 持久化到磁盘
 - [x] P3.7: 完整表达式 DSL — ExpressionEvaluator (dot-path + 比较运算符)
+- [x] P3.8: 可视化编辑器 — GoalPanel.on_workflow_event() 事件处理
+- [x] P3.9: GoalWorkflowRunner 完全委托给 SwarmRuntime — start() 使用 SwarmRuntime.execute()
 - [x] P3.10: 性能监控 — MetricsObserver (event counts + agent/layer timings)
-- [ ] P3.5: 子 workflow 支持（parent_goal_id 已有字段）
-- [ ] P3.6: 工作流进度 checkpoint + 恢复（持久化 _layer_results）
-- [ ] P3.8: 可视化工作流编辑器（TUI widget）
-- [ ] P3.9: 完整 Hook 系统集成（GoalWorkflowRunner 完全委托给 SwarmRuntime）
 
 ## 13. 设计模式应用
 
