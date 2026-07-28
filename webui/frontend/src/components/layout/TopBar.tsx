@@ -1,6 +1,7 @@
 import { Search, Command } from 'lucide-react'
 import { useCommandPaletteStore } from '../../stores/commandPalette'
 import { useSessionStore } from '../../stores/session'
+import { SSEStatus } from '../common/SSEStatus'
 
 export function TopBar() {
   const togglePalette = useCommandPaletteStore((s) => s.toggle)
@@ -15,6 +16,9 @@ export function TopBar() {
         {currentSession && (
           <span className="text-xs text-slate-500">/ {currentSession.title}</span>
         )}
+        <div className="ml-2 border-l border-slate-700 pl-2">
+          <SSEStatus />
+        </div>
       </div>
       <button
         onClick={togglePalette}

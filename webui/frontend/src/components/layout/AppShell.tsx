@@ -7,6 +7,8 @@ import { TopBar } from './TopBar'
 import { MainSplit } from './MainSplit'
 import { RightPanel } from './RightPanel'
 import { ToastManager } from '../common/Toast'
+import { CommandPalette } from '../common/CommandPalette'
+import { ErrorBoundary } from '../common/ErrorBoundary'
 
 export function AppShell() {
   useKeyboardShortcuts()
@@ -19,11 +21,16 @@ export function AppShell() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar />
         <div className="flex flex-1 overflow-hidden">
-          <MainSplit />
-          <RightPanel />
+          <ErrorBoundary>
+            <MainSplit />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <RightPanel />
+          </ErrorBoundary>
         </div>
       </div>
       <ToastManager />
+      <CommandPalette />
     </div>
   )
 }
