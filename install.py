@@ -9,6 +9,10 @@ Usage:
     python install.py --uninstall      # 卸载
     python install.py --help           # 显示帮助
 
+自动检测 ~/.quantnodes/ 配置：
+    - 已有 llm.json + .env → 跳过 LLM 设置提示
+    - 未配置 → 提示运行 init
+
 启动 Web UI:
     quantnodes-strategy-research serve --host 0.0.0.0 --port 87183
     # 浏览器访问 http://localhost:87183
@@ -154,13 +158,54 @@ def uninstall_all(project_root: Path, frontend_dir: Path, pip: str) -> None:
     log("卸载完成 ✓")
 
 
+def check_llm_config_via_module() -> dict:
+    """调用项目内置的检测模块，返回 LLM 配置状态。
+
+    Returns:
+        dict with keys: configured, provider, model, api_key_source
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).parent / "src"))
+        from strategy_research.cli.llm_config_check import check_llm_config
+        return check_llm_config()
+    except Exception:
+        return {
+            "configured": False,
+            "provider": "",
+            "model": "",
+            "api_key_source": "none",
+        }
+
+
 def show_usage() -> None:
     """显示使用说明。"""
     header("使用说明")
 
-    print("""✅ 安装完成！
+    # 检测 LLM 配置
+    status = check_llm_config_via_module()
 
-📦 启动 Web UI（推荐）：
+    print("✅ 安装完成！\n")
+
+    if status["configured"]:
+        # 已配置：跳过 init 提示
+        print(f"{GREEN}✓ LLM 配置：已检测到{NC}")
+        print(f"   ~/.quantnodes/llm.json  →  provider={status['provider']}, model={status['model']}")
+        print(f"   api_key 来源             →  {status['api_key_source']}")
+        print(f"   → 跳过 LLM 设置，直接启动即可\n")
+    else:
+        # 未配置：提示用户
+        print(f"{YELLOW}⚠ LLM 配置：未检测到 ~/.quantnodes/llm.json 或缺少 API key{NC}\n")
+        print("   启动 Web UI 之前，请先配置 LLM（任选其一）：")
+        print("   1. 交互式向导：")
+        print("      quantnodes-research init")
+        print("   2. 手动创建配置文件：")
+        print("      mkdir -p ~/.quantnodes")
+        print('      echo \'LLM_API_KEY=sk-...\' > ~/.quantnodes/.env')
+        print("      chmod 600 ~/.quantnodes/.env")
+        print("   3. 设置环境变量：")
+        print('      export OPENAI_API_KEY="sk-..."\n')
+
+    print("""📦 启动 Web UI（推荐）：
    quantnodes-strategy-research serve --host 0.0.0.0 --port 87183
    # 浏览器访问 http://localhost:87183
 
@@ -169,13 +214,6 @@ def show_usage() -> None:
 
 📦 启动纯 API：
    quantnodes-strategy-research api serve --port 8765
-
-🌍 环境变量（必填 OPENAI_API_KEY）：
-   export OPENAI_API_KEY="sk-..."                  # LLM API key
-   export OPENAI_BASE_URL="https://api.openai.com/v1"  # 可选：自定义 endpoint
-   export OPENAI_MODEL="gpt-4o-mini"                   # 可选：默认模型
-   export CORS_ORIGINS="http://localhost:3000"         # 可选：CORS
-   export STATIC_DIR="/path/to/webui/static"           # 可选：自定义前端路径
 
 🧪 运行测试：
    pytest tests/test_webui_api.py tests/test_webui_e2e.py -v   # 后端 22 测试

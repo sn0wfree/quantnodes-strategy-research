@@ -17,6 +17,7 @@ def cmd_webui_serve(args) -> int:
     import uvicorn
 
     from strategy_research.api.app import create_app, configure_from_env
+    from strategy_research.cli.llm_config_check import check_llm_config
     from strategy_research.webui.routes import router as webui_router
 
     # Read env config (CORS_ORIGINS, JWT_SECRET, STATIC_DIR)
@@ -36,11 +37,28 @@ def cmd_webui_serve(args) -> int:
     # Mount webui routes
     app.include_router(webui_router, tags=["webui"])
 
+    # ── Startup banner ──────────────────────────────────────────────
     print(f"🌐 Strategy Research Web UI starting at http://{args.host}:{args.port}")
     print(f"   Workspace: {workspace}")
     if static_dir:
         print(f"   Static files: {static_dir}")
     print(f"   Docs:         http://{args.host}:{args.port}/docs")
+
+    # ── LLM 配置状态检测 ──────────────────────────────────────────
+    try:
+        llm_status = check_llm_config()
+        if llm_status["configured"]:
+            print(
+                f"✓ LLM 配置：{llm_status['provider']} / {llm_status['model']} "
+                f"(api_key={llm_status['api_key_source']})"
+            )
+        else:
+            print("⚠ LLM 配置未完成（聊天 API 会返回 503）：")
+            print("   - 缺少 ~/.quantnodes/llm.json 或 .env")
+            print("   - 运行：quantnodes-research init")
+            print("   - 或设置：export OPENAI_API_KEY='sk-...'")
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠ LLM 配置检测失败: {exc}")
 
     uvicorn.run(
         app,

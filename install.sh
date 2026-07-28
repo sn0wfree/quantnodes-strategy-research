@@ -9,6 +9,10 @@
 #   ./install.sh --uninstall          # 卸载
 #   ./install.sh --help               # 显示帮助
 #
+# 自动检测 ~/.quantnodes/ 配置：
+#   - 已有 llm.json + .env → 跳过 LLM 设置提示
+#   - 未配置 → 提示运行 init
+#
 # 启动 Web UI:
 #   quantnodes-strategy-research serve --host 0.0.0.0 --port 87183
 #
@@ -18,8 +22,6 @@ set -e
 
 # 默认参数
 MODE="full"
-SKIP_FRONTEND=false
-SKIP_BACKEND=false
 
 # 颜色输出
 RED='\033[0;31m'
@@ -38,6 +40,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PIP_BIN="${PIP_BIN:-pip3}"
+
+# ============================================================
+# LLM 配置检测
+# ============================================================
+QUANTNODES_DIR="$HOME/.quantnodes"
+LLM_JSON_PATH="$QUANTNODES_DIR/llm.json"
+DOTENV_PATH="$QUANTNODES_DIR/.env"
+
+check_llm_config() {
+    """检测 ~/.quantnodes/ LLM 配置状态。
+
+    输出（全局变量）：
+      llm_configured    - "true" / "false"
+      llm_provider      - provider 名称（如 minimax/openai）
+      llm_model         - model 名称
+      llm_api_key_source - env / dotenv / llm.json / none
+    """
+    # 调用 Python 模块做检测（单一可信源）
+    local _result
+    _result=$($PYTHON_BIN -c "
+import sys
+sys.path.insert(0, '$PROJECT_ROOT/src')
+from strategy_research.cli.llm_config_check import check_llm_config
+import json
+status = check_llm_config()
+print(json.dumps(status, ensure_ascii=False))
+" 2>/dev/null || echo '{"configured": false, "provider": "", "model": "", "api_key_source": "none"}')
+
+    # 解析 JSON 结果
+    llm_configured=$(echo "$_result" | $PYTHON_BIN -c "import json,sys; print('true' if json.load(sys.stdin).get('configured') else 'false')" 2>/dev/null || echo "false")
+    llm_provider=$(echo "$_result" | $PYTHON_BIN -c "import json,sys; print(json.load(sys.stdin).get('provider', ''))" 2>/dev/null || echo "")
+    llm_model=$(echo "$_result" | $PYTHON_BIN -c "import json,sys; print(json.load(sys.stdin).get('model', ''))" 2>/dev/null || echo "")
+    llm_api_key_source=$(echo "$_result" | $PYTHON_BIN -c "import json,sys; print(json.load(sys.stdin).get('api_key_source', 'none'))" 2>/dev/null || echo "none")
+}
 
 # ============================================================
 # 帮助
@@ -139,9 +175,40 @@ uninstall_all() {
 show_usage() {
     header "使用说明"
 
+    # 检测 LLM 配置
+    check_llm_config
+
     cat <<EOF
 ✅ 安装完成！
 
+EOF
+
+    if [[ "$llm_configured" == "true" ]]; then
+        cat <<EOF
+✓ LLM 配置：已检测到
+   ~/.quantnodes/llm.json  →  provider=$llm_provider, model=$llm_model
+   api_key 来源             →  $llm_api_key_source
+   → 跳过 LLM 设置，直接启动即可
+
+EOF
+    else
+        cat <<EOF
+⚠ LLM 配置：未检测到 ~/.quantnodes/llm.json 或缺少 API key
+
+   启动 Web UI 之前，请先配置 LLM（任选其一）：
+   1. 交互式向导：
+      quantnodes-research init
+   2. 手动创建配置文件：
+      mkdir -p ~/.quantnodes
+      echo 'LLM_API_KEY=sk-...' > ~/.quantnodes/.env
+      chmod 600 ~/.quantnodes/.env
+   3. 设置环境变量：
+      export OPENAI_API_KEY="sk-..."
+
+EOF
+    fi
+
+    cat <<'EOF'
 📦 启动 Web UI（推荐）：
    quantnodes-strategy-research serve --host 0.0.0.0 --port 87183
    # 浏览器访问 http://localhost:87183
@@ -151,13 +218,6 @@ show_usage() {
 
 📦 启动纯 API：
    quantnodes-strategy-research api serve --port 8765
-
-🌍 环境变量（必填 OPENAI_API_KEY）：
-   export OPENAI_API_KEY="sk-..."                  # LLM API key
-   export OPENAI_BASE_URL="https://api.openai.com/v1"  # 可选：自定义 endpoint
-   export OPENAI_MODEL="gpt-4o-mini"                   # 可选：默认模型
-   export CORS_ORIGINS="http://localhost:3000"         # 可选：CORS
-   export STATIC_DIR="/path/to/webui/static"           # 可选：自定义前端路径
 
 🧪 运行测试：
    pytest tests/test_webui_api.py tests/test_webui_e2e.py -v   # 后端 22 测试
