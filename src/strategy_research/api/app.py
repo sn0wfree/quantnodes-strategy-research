@@ -32,9 +32,11 @@ def create_app(
     app.add_middleware(AuthMiddleware)
 
     # Register routers
-    from .routers import auth, goal, hypothesis, memory, run, session, validation, workflow
+    from .routers import auth, chat, goal, hypothesis, memory, run, session, validation, web_session, workflow
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+    app.include_router(web_session.router, prefix="/api/chat/session", tags=["chat-session"])
 
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
     app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
