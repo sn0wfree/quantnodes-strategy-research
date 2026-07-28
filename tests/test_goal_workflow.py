@@ -225,20 +225,20 @@ class TestGoalWorkflowRunner:
         assert progress["paused"] is False
 
     def test_get_layers(self):
+        """After P3.9, GoalWorkflowRunner delegates DAG to SwarmRuntime.
+        Test that to_swarm_preset() produces correct dag."""
         config = self._make_config()
-        runner = GoalWorkflowRunner(config, session_id="test-session")
-        layers = runner._get_layers()
-        assert len(layers) == 2
-        assert "agent_a" in layers[0]
-        assert "agent_b" in layers[1]
+        preset = config.to_swarm_preset()
+        assert preset.dag == {"agent_a": [], "agent_b": ["agent_a"]}
 
     def test_get_agent_config(self):
+        """After P3.9, agent config lookup is via to_swarm_preset()."""
         config = self._make_config()
-        runner = GoalWorkflowRunner(config, session_id="test-session")
-        agent = runner._get_agent_config("agent_a")
-        assert agent is not None
-        assert agent.id == "agent_a"
-        assert runner._get_agent_config("nonexistent") is None
+        preset = config.to_swarm_preset()
+        assert len(preset.agents) == 2
+        names = {a.agent_name for a in preset.agents}
+        assert "agent_a" in names
+        assert "agent_b" in names
 
     def test_pause_resume(self):
         config = self._make_config()
@@ -250,11 +250,12 @@ class TestGoalWorkflowRunner:
         assert runner._state.paused is False
 
     def test_build_goal_context(self):
+        """After P3.9, goal context is built inside start().
+        Test that GoalWorkflowConfig.to_swarm_preset() includes goal data."""
         config = self._make_config()
-        runner = GoalWorkflowRunner(config, session_id="test-session")
-        # Should not crash even with no active goal
-        ctx = runner._build_goal_context()
-        assert isinstance(ctx, str)
+        preset = config.to_swarm_preset()
+        assert preset.goal is not None
+        assert preset.goal["default_criteria"] == ["criterion 1", "criterion 2"]
 
 
 # ── YAML Loading ─────────────────────────────────────────────

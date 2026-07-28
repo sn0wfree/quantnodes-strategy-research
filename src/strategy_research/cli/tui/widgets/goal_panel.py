@@ -206,5 +206,68 @@ class GoalPanel(Static):
         hint = "Ctrl+G 展开"
         self.update(f"{icon} {title}  {pct}  {ev}  [dim]│[/dim]  [dim]{hint}[/dim]")
 
+    # ── P3.8: Workflow event handler ──────────────────────────
+
+    def on_workflow_event(self, event: str, data: dict[str, Any]) -> None:
+        """Handle workflow events from WorkflowEventBus (P3.8).
+
+        Called by GoalPanelObserver when the runner emits events.
+        Updates the panel display based on the event type.
+
+        Supported events:
+          - layer_start: show current layer progress
+          - agent_start: flash agent as running
+          - agent_complete: update agent status
+          - agent_error: mark agent as error
+          - workflow_completed: show completion status
+          - workflow_failed: show error status
+          - workflow_paused: show paused status
+          - workflow_resumed: show resumed status
+        """
+        agent_id = data.get("agent_id", "")
+        layer = data.get("layer", -1)
+
+        if event == "agent_start":
+            # Mark agent as running in criteria (if we have criteria)
+            for c in self._criteria:
+                # Match by index or text containing agent_id
+                if c.get("agent_id") == agent_id or not c.get("agent_id"):
+                    c["_agent_status"] = "running"
+                    break
+            self._render()
+
+        elif event == "agent_complete":
+            for c in self._criteria:
+                if c.get("agent_id") == agent_id:
+                    c["_agent_status"] = "success"
+                    c["status"] = "covered"
+                    break
+            self._evidence_count = data.get("evidence_count", self._evidence_count)
+            self._render()
+
+        elif event == "agent_error":
+            for c in self._criteria:
+                if c.get("agent_id") == agent_id:
+                    c["_agent_status"] = "error"
+                    break
+            self._render()
+
+        elif event == "workflow_completed":
+            self._status = "complete"
+            self._progress = 100.0
+            self._render()
+
+        elif event == "workflow_failed":
+            self._status = "error"
+            self._render()
+
+        elif event in ("workflow_paused", "workflow_resumed"):
+            # The continuation_paused flag is set by the caller
+            self._render()
+
+        elif event == "layer_start":
+            # Could show layer progress in the footer
+            self._render()
+
 
 __all__ = ["GoalPanel"]
