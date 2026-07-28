@@ -122,32 +122,37 @@ webui/frontend/
     │   │   ├── RegisterPage.tsx          # 注册页
     │   │   └── AuthGuard.tsx             # 路由守卫
     │   ├── chat/                         # 聊天模块
-    │   │   ├── MessageList.tsx           # 消息列表 (虚拟滚动)
+    │   │   ├── MessageList.tsx           # 消息列表 (虚拟滚动: react-virtuoso)
     │   │   ├── MessageBubble.tsx         # 用户消息气泡
-    │   │   ├── AssistantMessage.tsx      # 助手消息 (Markdown)
+    │   │   ├── AssistantMessage.tsx      # 助手消息 (Markdown + parts)
     │   │   ├── StreamingText.tsx         # 流式文本 (打字机效果)
-    │   │   ├── ThinkingBlock.tsx         # 推理过程 (可折叠)
-    │   │   ├── ToolCallBlock.tsx         # 工具调用 (⏳→✔/✘)
-    │   │   ├── DiffBlock.tsx             # 文件 diff 展示
+    │   │   ├── ThinkingBlock.tsx         # 推理过程 (默认折叠, 每条独立展开)
+    │   │   ├── ToolCallGroup.tsx         # 工具调用组 (默认折叠, 合并 call+result)
+    │   │   ├── ToolCallItem.tsx          # 单个工具调用条目
+    │   │   ├── FileEditBlock.tsx         # 文件 diff 展示 (默认展开)
+    │   │   ├── TableBlock.tsx            # 数据表格 (默认展开)
+    │   │   ├── ChartBlock.tsx            # 图表 (默认展开)
     │   │   ├── ImageBlock.tsx            # 图片展示
-    │   │   ├── Composer.tsx              # 输入框 (@mention + 图片粘贴)
+    │   │   ├── Composer.tsx              # 输入框 (@agent/@file + 图片粘贴)
+    │   │   ├── MentionDropdown.tsx       # @mention 下拉菜单
     │   │   └── MarkdownRenderer.tsx      # Markdown 渲染器
     │   ├── agents/                       # Agent 展示模块
-    │   │   ├── AgentCard.tsx             # Agent 状态卡片 (右侧面板)
-    │   │   ├── AgentTimeline.tsx         # Agent 活动时间线 (主聊天区)
-    │   │   ├── ActivityCluster.tsx       # 折叠活动组
-    │   │   └── AgentPicker.tsx           # Agent 切换器 (顶部栏)
+    │   │   ├── AgentList.tsx             # Agent 列表 (右主区 Tab, 列表式)
+    │   │   ├── AgentItem.tsx             # 单个 Agent 条目 (运行中展开详情)
+    │   │   └── AgentDetailPanel.tsx      # Agent 详情侧栏 (点击展开)
     │   ├── workflow/                     # Workflow 模块
-    │   │   ├── WorkflowDAG.tsx           # React Flow DAG 可视化
-    │   │   ├── DAGNode.tsx               # 自定义 DAG 节点
-    │   │   ├── DAGEdge.tsx               # 自定义 DAG 边
+    │   │   ├── WorkflowDAG.tsx           # React Flow DAG 可视化 (滚轮缩放/拖拽平移)
+    │   │   ├── DAGNode.tsx               # 自定义 DAG 节点 (状态色+左边框)
+    │   │   ├── DAGEdge.tsx               # 自定义 DAG 边 (灰色→蓝高亮)
+    │   │   ├── DAGToolbar.tsx            # DAG 顶部工具栏 (名称+控制按钮)
+    │   │   ├── DAGProgressBar.tsx        # DAG 底部进度条
+    │   │   ├── DAGNodeDetail.tsx         # 节点详情侧栏 (右侧滑出)
     │   │   ├── WorkflowList.tsx          # Preset 列表 (卡片式)
-    │   │   ├── WorkflowStart.tsx         # 启动表单
-    │   │   └── WorkflowProgress.tsx      # 进度条 + 事件日志
+    │   │   └── WorkflowStart.tsx         # 启动表单
     │   ├── goal/                         # Goal 模块
-    │   │   ├── GoalPanel.tsx             # 目标进度面板
-    │   │   ├── CriteriaList.tsx          # 标准清单
-    │   │   └── EvidenceTimeline.tsx      # Evidence 时间线
+    │   │   ├── GoalTab.tsx               # Goal Tab 容器 (标准在上, 时间线在下)
+    │   │   ├── CriteriaList.tsx          # 标准清单 (带 Evidence 计数+Agent 来源)
+    │   │   └── GoalTimeline.tsx          # Evidence 时间线 (倒序, 最新在上)
     │   └── common/                       # 通用组件
     │       ├── Badge.tsx                 # 状态徽章
     │       ├── Spinner.tsx               # 加载动画
@@ -483,6 +488,42 @@ font-family: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
 
 ## 4. 核心模块设计
 
+### 4.0 跨模块联动
+
+四个核心模块的层级关系和数据流向：
+
+```
+        ┌─────────────┐
+        │   Goal      │  ← 最高层级：目标 + 标准 + Evidence
+        └──────┬──────┘
+               │
+        ┌──────▼──────┐
+        │  Workflow   │  ← DAG 图：Agent 依赖关系 + 全局进度
+        │    DAG      │
+        └──────┬──────┘
+               │
+      ┌────────▼────────┐
+      │                 │
+┌─────▼─────┐   ┌───────▼───────┐
+│  聊天模块  │   │   Agent 面板   │
+│ (左主区)   │   │  (右主区 Tab)  │
+│ 消息流     │   │  状态卡片列表  │
+│ + 输入框   │   │               │
+└───────────┘   └───────────────┘
+```
+
+**联动关系**（点击跳转）：
+
+| 触发点 | 跳转到 | 行为 |
+|---|---|---|
+| DAG 节点 click | Agent Tab | 切到对应 Agent，高亮该 Agent |
+| Agent 卡片 click | 聊天区 | 滚动到该 Agent 最近消息 |
+| Goal Evidence click | 聊天区 | 滚动到产出该 Evidence 的消息 |
+| TopBar 状态指示 | 全局 | 实时显示 running Agent 数量 |
+| TopBar 暂停按钮 | DAG + TopBar | 同步暂停/恢复状态 |
+
+---
+
 ### 4.1 聊天模块
 
 #### 4.1.1 消息数据模型
@@ -494,6 +535,7 @@ interface Message {
   id: string;
   session_id: string;
   role: 'user' | 'assistant' | 'system';
+  agent_id?: string;                  // 产出此消息的 Agent（辅助信息区显示）
   content: string;                    // 完整文本（最终态）
   parts: MessagePart[];               // 结构化内容块
   created_at: number;
@@ -502,9 +544,11 @@ interface Message {
 
 type MessagePart =
   | TextPart
-  | ToolCallPart
-  | ToolResultPart
+  | ToolCallPart            // 合并了 call + result，用 status 演进
   | ThinkingPart
+  | FileEditPart
+  | TablePart
+  | ChartPart
   | ImagePart;
 
 interface TextPart {
@@ -512,12 +556,13 @@ interface TextPart {
   content: string;
 }
 
+// 合并版：ToolCall + ToolResult 合为一体
 interface ToolCallPart {
   type: 'tool_call';
   call_id: string;
   tool_name: string;
   arguments: Record<string, unknown>;
-  status: 'running' | 'completed' | 'error';
+  status: 'pending' | 'running' | 'completed' | 'error';
   result?: string;
   duration_ms?: number;
   error?: string;
@@ -525,22 +570,43 @@ interface ToolCallPart {
 
 interface ThinkingPart {
   type: 'thinking';
-  content: string;                    // 推理过程文本
-  collapsed: boolean;                 // 是否折叠
+  id: string;                          // 唯一 ID，支持独立展开/折叠
+  content: string;                     // 推理过程文本
+}
+
+interface FileEditPart {
+  type: 'file_edit';
+  file_path: string;
+  additions: number;
+  deletions: number;
+  diff: string;                        // unified diff 格式
+}
+
+interface TablePart {
+  type: 'table';
+  headers: string[];
+  rows: (string | number)[][];
+  caption?: string;
+}
+
+interface ChartPart {
+  type: 'chart';
+  chart_type: 'bar' | 'line' | 'pie' | 'scatter';
+  data: Record<string, unknown>;
+  title?: string;
 }
 
 interface ImagePart {
   type: 'image';
-  url: string;                        // base64 data URL 或远程 URL
+  url: string;                         // base64 data URL 或远程 URL
   mime_type: string;
   alt?: string;
 }
 
 interface MessageMetadata {
-  agent?: string;                     // 产出此消息的 agent
-  model?: string;                     // 使用的模型
+  model?: string;                      // 使用的模型
   tokens_used?: number;
-  iteration?: number;                 // AgentLoop 迭代次数
+  iteration?: number;                  // AgentLoop 迭代次数
 }
 ```
 
@@ -554,13 +620,13 @@ event: text_delta
 data: {"delta": "根据分析", "message_id": "msg_123"}
 
 event: thinking_start
-data: {"message_id": "msg_123"}
+data: {"message_id": "msg_123", "thinking_id": "th_1"}
 
 event: thinking_delta
-data: {"delta": "让我先检查...", "message_id": "msg_123"}
+data: {"delta": "让我先检查...", "message_id": "msg_123", "thinking_id": "th_1"}
 
 event: thinking_done
-data: {"message_id": "msg_123"}
+data: {"message_id": "msg_123", "thinking_id": "th_1"}
 
 event: tool_call
 data: {"call_id": "tc_1", "tool_name": "read_file", "arguments": {"path": "src/core.py"}, "message_id": "msg_123"}
@@ -568,8 +634,14 @@ data: {"call_id": "tc_1", "tool_name": "read_file", "arguments": {"path": "src/c
 event: tool_result
 data: {"call_id": "tc_1", "status": "completed", "result": "file content...", "duration_ms": 300, "message_id": "msg_123"}
 
+event: file_edit
+data: {"file_path": "src/strategy.py", "additions": 23, "deletions": 5, "diff": "...", "message_id": "msg_123"}
+
+event: table
+data: {"headers": ["因子","年化收益","夏普比"], "rows": [...], "message_id": "msg_123"}
+
 event: assistant_message
-data: {"message_id": "msg_123", "content": "完整回复文本", "parts": [...]}
+data: {"message_id": "msg_123", "agent_id": "researcher", "content": "完整回复文本", "parts": [...]}
 
 event: image
 data: {"url": "data:image/png;base64,...", "mime_type": "image/png", "message_id": "msg_123"}
@@ -588,73 +660,179 @@ data: {"timestamp": 1234567890}
        ↓
 SSE 连接 → GET /api/chat/events?session_id=X
        ↓
-┌─────────────────────────────────────────────────┐
-│  text_delta → StreamingText.append(delta)       │
-│              → 原地更新 DOM (打字机效果)         │
-│                                                  │
-│  thinking_start → ThinkingBlock 展开             │
-│  thinking_delta → ThinkingBlock 追加文本          │
-│  thinking_done  → ThinkingBlock 折叠             │
-│                                                  │
-│  tool_call → ToolCallBlock 显示 ⏳ + 工具名      │
-│  tool_result → ToolCallBlock 更新 ✔/✘ + 耗时     │
-│                                                  │
-│  assistant_message → MarkdownRenderer 渲染       │
-│                      StreamingText → 隐藏        │
-│                      ThinkingBlock → 可折叠保留   │
-│                      ToolCallBlock → 保留状态     │
-└─────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│  text_delta → StreamingText.append(delta)             │
+│              → 原地更新 DOM (打字机效果)               │
+│                                                        │
+│  thinking_start → ThinkingBlock 渲染（默认折叠）       │
+│  thinking_delta → ThinkingBlock 追加文本               │
+│  thinking_done  → 保留，不自动折叠/展开                 │
+│                                                        │
+│  tool_call → ToolCallGroup 添加条目（默认折叠）         │
+│  tool_result → ToolCallGroup 更新状态 ✔/✘ + 耗时       │
+│                                                        │
+│  table → TablePart 渲染（默认展开）                    │
+│  file_edit → DiffBlock 渲染（默认展开）                 │
+│  chart → ChartPart 渲染（默认展开）                     │
+│                                                        │
+│  assistant_message → MarkdownRenderer 渲染             │
+│                      StreamingText → 隐藏              │
+│                      ThinkingBlock → 保留（可展开）     │
+│                      ToolCallGroup → 保留状态           │
+└───────────────────────────────────────────────────────┘
 ```
+
+#### 4.1.4 消息渲染布局
+
+单条 AssistantMessage 的视觉结构（按 Agent 分组，头部显示 Agent 标识）：
+
+```
+┌─ AssistantMessage ───────────────────────────────────────────────────┐
+│  🤖 researcher  · 14:32  · 2,340 tokens  · iteration 3/10           │ ← 头部
+│ ┌──────────────────────────────────────────────────────────────────┐ │
+│ │  ┌ ThinkingBlock (折叠) ─────────────────────────────────────┐  │ │
+│ │  │  ▶ 思考中... (850 字)                                      │  │ │
+│ │  └───────────────────────────────────────────────────────────┘  │ │
+│ │                                                                  │ │
+│ │  ┌ ToolCallGroup ────────────────────────────────────────────┐  │ │
+│ │  │  ✔ read_file · src/data.py · 0.3s                        │  │ │ ← 默认折叠
+│ │  │  ⏳ execute_python · momentum_analysis.py · running...    │  │ │
+│ │  └───────────────────────────────────────────────────────────┘  │ │
+│ │                                                                  │ │
+│ │  ┌ TablePart (默认展开) ─────────────────────────────────────┐  │ │
+│ │  │  ┌────────────┬──────────┬────────┬──────────┐            │  │ │
+│ │  │  │ 因子名称   │ 年化收益  │ 夏普比  │ 最大回撤  │            │  │ │
+│ │  │  ├────────────┼──────────┼────────┼──────────┤            │  │ │
+│ │  │  │ 动量因子   │ 15.2%    │ 1.83   │ -12.5%   │            │  │ │
+│ │  │  │ 反转因子   │ 8.7%     │ 1.24   │ -18.3%   │            │  │ │
+│ │  │  └────────────┴──────────┴────────┴──────────┘            │  │ │
+│ │  │  共 12 行 · 点击展开全部                                   │  │ │
+│ │  └───────────────────────────────────────────────────────────┘  │ │
+│ │                                                                  │ │
+│ │  根据分析结果，动量因子在近 3 个月表现优于反转因子...               │ │ ← 最终文本
+│ │                                                                  │ │
+│ │  ┌ FileEditPart ─────────────────────────────────────────────┐  │ │
+│ │  │  📝 src/strategy.py  (+23 / -5)                           │  │ │
+│ │  │  + def momentum_strategy(data):                           │  │ │
+│ │  │  +     ...                                                │  │ │
+│ │  └───────────────────────────────────────────────────────────┘  │ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**关键交互**：
+- ThinkingBlock：默认折叠，每条独立可展开/折叠，不自动展开
+- ToolCallGroup：默认折叠（只显示工具名 + 状态 + 耗时），点击展开详情
+- TablePart / ChartPart / DiffBlock：默认展开（量化研究核心输出，用户最关心）
+- 长输出（>5行表格或>20行 diff）截断显示前 5 行，底部"展开全部"
+- Agent 头部用小图标 + 名称 + 品牌色标识（researcher=蓝, data_quality=绿, factor_analyst=紫, risk_review=橙）
+- 虚拟滚动：消息列表使用 react-virtuoso 或 @tanstack/react-virtual，只渲染可视区域
+
+#### 4.1.5 输入框（Composer）
+
+```
+┌──────────────────────────────────────────────────────┐
+│  📎  📷  输入消息...                        ⌘↵ 发送 │ ← 玻璃拟态（仅左主区底部）
+└──────────────────────────────────────────────────────┘
+```
+
+**@mention 交互**：
+- 输入 `@` 弹出下拉菜单，分两组：
+  - `@agent`：显示可用 Agent 列表（名称 + 状态图标）
+  - `@file`：显示文件搜索结果（输入关键词实时搜索工作区文件）
+- 选中后插入标签，输入框显示为高亮标签样式
+
+**其他功能**：
+- 支持图片粘贴（Ctrl+V）和拖拽上传
+- 支持 Shift+Enter 换行
+- 发送后清空输入框，自动滚动到底部
+- 历史上箭头翻阅历史输入
+- 输入框高度自适应内容（最多 200px，超过后内部滚动）
+
+---
 
 ### 4.2 Agent 展示模块
 
-#### 4.2.1 Agent 状态卡片（右侧面板）
+#### 4.2.1 Agent 状态模型
 
 ```typescript
 interface AgentState {
-  id: string;
-  name: string;
+  id: string;                         // agent_id
+  name: string;                       // 显示名称
+  color: string;                      // 品牌色（蓝/绿/紫/橙/青）
   status: 'idle' | 'pending' | 'running' | 'completed' | 'error' | 'skipped';
+  layer: number;                      // DAG 层级
   started_at?: number;
   completed_at?: number;
   duration_ms?: number;
   current_task?: string;              // 当前正在做什么
   output_summary?: string;            // 输出摘要（前 100 字）
+  tools?: string[];                   // 使用的工具列表
+  tokens_used?: number;               // 已消耗 token
+  tokens_limit?: number;              // token 上限
+  iteration?: number;                 // 当前迭代
+  iteration_limit?: number;           // 迭代上限
   error?: string;
 }
 ```
 
-卡片布局：
+**Agent 颜色标识**（按 preset 顺序自动分配）：
+
+| 顺序 | Agent | 颜色 |
+|---|---|---|
+| 1 | researcher | 蓝 `#3B82F6` |
+| 2 | data_quality | 绿 `#22C55E` |
+| 3 | factor_analyst | 紫 `#A855F7` |
+| 4 | risk_review | 橙 `#F59E0B` |
+| 5+ | 自动分配 | 青 `#06B6D4` / 红 `#EF4444` |
+
+#### 4.2.2 Agent Tab（右主区）— 列表式
+
 ```
-┌─────────────────────────┐
-│ 🤖 researcher           │  ← 名称 + 图标
-│ ⏳ running · 12.3s      │  ← 状态 + 耗时
-│ ▓▓▓▓▓▓▓░░░ 70%         │  ← 进度条（可选）
-│ 正在分析动量因子表现...    │  ← 当前任务（截断）
-└─────────────────────────┘
+┌─ Agent Tab ────────────────────────────────────────┐
+│  🔍 搜索 Agent...                                   │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  ── running ────────────────────────────────────── │
+│                                                     │
+│  ┌─ 🤖 researcher ─────────────────────── 12.3s ─┐ │
+│  │  正在分析动量因子表现...                        │ │ ← 展开详情
+│  │  ┌──────────────────────────────────────────┐ │ │
+│  │  │ Tools:  read_file ✔ ✔  execute_python ⏳ │ │ │
+│  │  │ Tokens: 1,234 / 4,096 (30%)              │ │ │
+│  │  │ Iter:   3 / 10                           │ │ │
+│  │  └──────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────┘ │
+│                                                     │
+│  ── completed ──────────────────────────────────── │
+│                                                     │
+│  ✔ data_quality · 1.8s                             │ ← 紧凑（一行）
+│                                                     │
+│  ── pending ────────────────────────────────────── │
+│                                                     │
+│  ○ factor_analyst · 等待中                          │ ← 紧凑（一行）
+│  ○ risk_review · 等待中                             │
+│                                                     │
+└─────────────────────────────────────────────────────┘
 ```
 
-#### 4.2.2 Agent 活动时间线（主聊天区内）
+**交互**：
+- running 的 Agent 自动展开详情（Tools/Token/Iteration），不需要手动点击
+- completed 和 pending 的 Agent 紧凑显示（只有一行）
+- 点击任意 Agent → 聊天区滚动到该 Agent 的最近消息
+- 状态变化 → 右主区自动重排（running 的始终在顶部）
 
-```
-┌──────────────────────────────────────────────────┐
-│ 📊 Agent: researcher (Layer 1)                    │
-│ ┌──────────────────────────────────────────────┐ │
-│ │ 🧠 Thinking (折叠)                            │ │
-│ │ ├─ ⏳ read_file · src/data.py                 │ │
-│ │ ├─ ✔ read_file · 0.3s                        │ │
-│ │ ├─ ⏳ execute_python · momentum_analysis.py   │ │
-│ │ ├─ ✔ execute_python · 2.1s                    │ │
-│ │ └─ 🧠 Thinking done (折叠)                    │ │
-│ └──────────────────────────────────────────────┘ │
-│ "根据分析结果，动量因子在近 3 个月表现..."           │
-└──────────────────────────────────────────────────┘
-```
+**状态色 + 图标映射**：
 
-ActivityCluster 组件：
-- 标题行：Agent 名称 + Layer + 状态图标
-- 内容区：可折叠，包含推理行 + 工具调用行
-- 每行：状态图标 + 工具名 + 参数摘要 + 耗时
+| 状态 | 颜色 | 图标 | 动效 |
+|---|---|---|---|
+| running | 黄 `#EAB308` | ⏳ | 蓝光呼吸（克制） |
+| completed | 绿 `#22C55E` | ✔ | 无 |
+| error | 红 `#EF4444` | ✗ | 无 |
+| skipped | 灰 `#64748B` | ⊘ | 无 |
+| pending | 深灰 `#475569` | ○ | 无 |
+
+---
 
 ### 4.3 Workflow DAG 模块
 
@@ -669,98 +847,188 @@ interface WorkflowDAG {
 interface DAGNode {
   id: string;                         // agent_id
   label: string;                      // 显示名称
+  color: string;                      // Agent 品牌色
   status: 'pending' | 'running' | 'completed' | 'error' | 'skipped';
   prompt_file: string;
-  evidence_criterion: number;
+  evidence_criterion: string;         // Evidence 标准描述
   tools: string[];
-  position: { x: number; y: number }; // React Flow 坐标
+  position: { x: number; y: number }; // dagre 自动布局坐标
 }
 
 interface DAGEdge {
   id: string;
   source: string;                     // 上游 agent_id
   target: string;                     // 下游 agent_id
-  label?: string;
+  label?: string;                     // 边上的条件标签
 }
 ```
 
-#### 4.3.2 DAG 可视化（React Flow）
+#### 4.3.2 DAG Tab 布局（React Flow）
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Workflow: goal_factor_research                       │
-│  "因子研究工作流"                                      │
-│                                                       │
-│  ┌──────────┐     ┌──────────┐     ┌──────────┐     │
-│  │○ researcher│────▶│⏳ data   │────▶│○ factor  │     │
-│  └──────────┘     │  quality │     │  analyst │     │
-│                   └──────────┘     └────┬─────┘     │
-│                                         │            │
-│                                    ┌────▼─────┐     │
-│                                    │○ risk    │     │
-│                                    │  review  │     │
-│                                    └──────────┘     │
-│                                                       │
-│  ┌─────────────────────────────────────────────┐     │
-│  │  Objective: [研究动量因子在A股的表现...]       │     │
-│  │  [▶ 启动]  [⏸ 暂停]  [🔄 恢复]              │     │
-│  └─────────────────────────────────────────────┘     │
-└──────────────────────────────────────────────────────┘
+┌─ DAG Tab ────────────────────────────────────────────────────────┐
+│  📊 因子研究工作流                         [▶ 启动] [⏸] [🔄]   │ ← 顶部工具栏
+├───────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│          ┌────────────┐                                          │
+│          │  researcher  │  ← 完成：绿色左边框 + ✓                 │
+│          │  ✔ 3.2s     │                                          │
+│          └──────┬─────┘                                          │
+│                 ↓  （灰色连线 → 运行中变蓝高亮）                    │
+│          ┌──────────────┐                                        │
+│          │ data_quality  │  ← 运行中：蓝光呼吸 + 左边框高亮         │
+│          │ ⏳ 正在检查... │                                        │
+│          └──────┬───────┘                                        │
+│                 ↓                                                │
+│      ┌──────────┴──────────┐                                     │
+│      ↓                     ↓                                     │
+│    ┌────────────┐  ┌──────────────┐                               │
+│    │ factor_    │  │ risk_review  │  ← 待运行：灰色 + 虚线边框     │
+│    │ analyst    │  │              │                               │
+│    └────────────┘  └──────────────┘                               │
+│                                                                   │
+├───────────────────────────────────────────────────────────────────┤
+│  ▓▓▓▓▓▓░░░░  66%  ·  2/4 完成  ·  已运行 12m 35s                  │ ← 底部进度条
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-节点交互：
-- 点击节点 → 弹出详情弹窗（prompt/条件/tools/evidence_criterion）
-- 运行中节点 → 脉冲动画 + 边高亮
-- 完成节点 → 绿色 ✓
-- 错误节点 → 红色 ✗ + 点击查看错误
+**节点详情侧栏（点击节点，从右侧滑出，不遮挡 DAG 图）**：
 
-#### 4.3.3 坐标自动布局
+```
+┌─ 节点详情 ─────────────────────────────────────────┐
+│  ✕  data_quality                                    │
+├─────────────────────────────────────────────────────┤
+│  状态: 运行中 · 1分45秒                              │
+│  Agent 颜色: 绿色                                    │
+│                                                      │
+│  ┌ Prompt ────────────────────────────────────────┐ │
+│  │ 你是一个数据质量检查专家，负责验证...             │ │ ← 折叠/展开
+│  └────────────────────────────────────────────────┘ │
+│                                                      │
+│  ┌ 触发条件 ──────────────────────────────────────┐ │
+│  │ upstream: researcher                           │ │
+│  │ condition: has_data == true                     │ │
+│  └────────────────────────────────────────────────┘ │
+│                                                      │
+│  ┌ 工具 (3) ─────────────────────────────────────┐ │
+│  │  ✔ read_file     ✔ execute_python              │ │
+│  │  ○ search_arxiv                                │ │
+│  └────────────────────────────────────────────────┘ │
+│                                                      │
+│  ┌ Evidence 标准 ────────────────────────────────┐ │
+│  │ 至少 2 条高质量数据验证                          │ │
+│  └────────────────────────────────────────────────┘ │
+│                                                      │
+│  [跳转到聊天记录]  [复制 prompt]                      │
+└─────────────────────────────────────────────────────┘
+```
 
-使用 `dagre` 或 `@xyflow/react` 的内置布局算法，根据 DAG 拓扑自动计算节点坐标：
-- 同一层的节点水平排列
-- 层间垂直间距固定
+**DAG 图交互**：
+- 滚轮缩放，拖拽平移
+- 双击节点 = 跳转到该 Agent 的聊天记录
+- 悬停节点 = tooltip（状态 + 耗时 + 当前任务摘要，300ms 延迟显示）
+- 运行中节点：左边框高亮 + 微蓝光呼吸（`box-shadow: 0 0 0 2px rgba(59,130,246,0.3)`）
+- 已完成节点：绿色 ✓ 图标 + 左边框绿色
+- 待运行节点：灰色 + 虚线边框
+- 错误节点：红色 ✗ + 红色左边框
+
+**坐标自动布局**：
+- 使用 `dagre` 或 `@xyflow/react` 内置布局算法
+- 按 DAG 拓扑分层，同层水平排列，层间垂直间距固定
 - 节点宽度根据名称自适应
+- 初始加载自动计算坐标，用户不手动编辑位置（v1 不支持拖拽编辑）
+
+---
 
 ### 4.4 Goal 面板模块
 
-```
-┌─────────────────────────┐
-│ 🎯 目标进度              │
-│                         │
-│ 研究动量因子在A股的表现   │  ← 目标描述
-│                         │
-│ ████████░░░░ 66%        │  ← 进度条
-│                         │
-│ 标准清单:                │
-│ ✔ 收集市场数据           │  ← 已覆盖
-│ ○ 分析因子表现           │  ← 未覆盖
-│ ✔ 风控审查              │  ← 已覆盖
-│                         │
-│ 📎 4 条 Evidence        │
-│                         │
-│ [⏸ 暂停]  [🔄 恢复]     │
-└─────────────────────────┘
+#### 4.4.1 Goal 数据模型
+
+```typescript
+interface Goal {
+  id: string;
+  session_id: string;
+  objective: string;                  // 目标描述
+  status: 'active' | 'completed' | 'paused' | 'error';
+  criteria: GoalCriteria[];           // 标准清单
+  progress_pct: number;               // 进度百分比 (0-100)
+  progress_detail: string;            // "5/7 标准已覆盖"
+  evidence_count: number;             // Evidence 总数
+  started_at: number;
+  completed_at?: number;
+}
+
+interface GoalCriteria {
+  id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'covered';
+  evidence_count: number;             // 关联 Evidence 数量
+  agent_id?: string;                  // 负责的 Agent
+}
+
+interface GoalEvidence {
+  id: string;
+  criteria_id: string;
+  agent_id: string;
+  summary: string;                    // Evidence 摘要
+  created_at: number;
+}
 ```
 
-### 4.5 输入框（Composer）
+#### 4.4.2 Goal Tab 布局（右主区）
 
 ```
-┌──────────────────────────────────────────────────┐
-│ 👤 输入消息...                                     │
-│                                                  │
-│ @workspace    # @mention 工作区文件                │
-│ @agent_name   # @mention 特定 agent               │
-│                                                  │
-│ 📎 附件  📷 图片  [发送]                          │
-└──────────────────────────────────────────────────┘
+┌─ Goal Tab ──────────────────────────────────────────────────────┐
+│  🎯 目标: 研究动量因子在A股的表现                                  │
+│                                                                  │
+│  ▓▓▓▓▓▓▓░░░░  70%  ·  5/7 标准已覆盖                             │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ── 标准清单 ────────────────────────────────────────────────── │
+│                                                                  │
+│  ✅ 收集市场数据（价格、成交量、市值）                             │
+│     └─ 📎 3 条 Evidence · data_quality  · 点击跳转               │
+│                                                                  │
+│  ✅ 计算动量因子（1M/3M/6M/12M）                                  │
+│     └─ 📎 2 条 Evidence · factor_analyst · 点击跳转              │
+│                                                                  │
+│  ⏳ 分析因子表现（收益、风险、稳定性）← 进行中                    │
+│     └─ 📎 1 条 Evidence · factor_analyst · 点击跳转              │
+│                                                                  │
+│  ⚪ 与基准指数对比                                                │
+│                                                                  │
+│  ⚪ 风控审查                                                     │
+│                                                                  │
+│  ⚪ 形成研究结论                                                  │
+│                                                                  │
+│  ⚪ 生成回测报告                                                  │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ── 时间线 ──────────────────────────────────────────────────── │
+│                                                                  │
+│  14:40  factor_analyst  ⏳ 因子表现分析中...                       │
+│  14:37  factor_analyst  ✔ 反转因子计算完成                         │
+│  14:35  factor_analyst  ✔ 动量因子计算完成                         │
+│  14:32  data_quality    ✔ 数据分布合理性确认                       │
+│  14:30  data_quality    ✔ 数据完整性验证通过                       │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-功能：
-- 支持 @mention（文件搜索、agent 列表）
-- 支持图片粘贴（Ctrl+V）和拖拽上传
-- 支持 Shift+Enter 换行
-- 发送后清空输入框
-- 历史上箭头翻阅
+**关键设计决策**：
+1. **进度计算** = 已覆盖标准数 / 总标准数（简单透明）
+2. **标准带 Evidence 计数**：每条标准下方显示关联了几条 Evidence、来自哪个 Agent
+3. **时间线倒序**：最新的在上，自动滚动到底部（可暂停）
+4. **控制按钮不在这里**：暂停/恢复在 DAG 工具栏 + TopBar
+5. **点击 Evidence** → 跳转到聊天区对应消息（滚动 + 高亮 2s 淡出）
+
+**状态图标映射**：
+| 标准状态 | 图标 | 颜色 |
+|---|---|---|
+| covered | ✅ | 绿 `#22C55E` |
+| in_progress | ⏳ | 黄 `#EAB308` |
+| pending | ⚪ | 灰 `#475569` |
 
 ---
 
