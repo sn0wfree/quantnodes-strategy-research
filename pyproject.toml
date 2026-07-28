@@ -56,6 +56,13 @@ engine = [
 webui = [
     "jinja2>=3.1",
 ]
+webui-api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.5",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.0",
+]
 
 [project.scripts]
 quantnodes-research = "strategy_research.cli.__main__:main"

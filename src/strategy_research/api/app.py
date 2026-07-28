@@ -27,8 +27,14 @@ def create_app(
     app.state.goal_db_path = goal_db_path
     app.state.hypotheses_path = hypotheses_path
 
+    # Register auth middleware
+    from .middleware import AuthMiddleware
+    app.add_middleware(AuthMiddleware)
+
     # Register routers
-    from .routers import goal, hypothesis, memory, run, session, validation, workflow
+    from .routers import auth, goal, hypothesis, memory, run, session, validation, workflow
+
+    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
     app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
