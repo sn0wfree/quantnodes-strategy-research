@@ -876,6 +876,16 @@ def main() -> int:
     webui_serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")
     webui_serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
 
+    # serve (top-level alias) — 一键启动 Web UI + 后端
+    serve_parser = subparsers.add_parser("serve", help="一键启动 Web UI 服务器（最简命令）")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=87183, help="监听端口 (默认 87183)")
+    serve_parser.add_argument("--reload", action="store_true", help="热重载 (开发模式)")
+    serve_parser.add_argument("--workspace", "-w", default=".", help="工作区路径")
+    serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")
+    serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
+    serve_parser.add_argument("--static-dir", help="前端静态文件目录 (默认 webui/static)")
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1032,6 +1042,9 @@ def main() -> int:
         else:
             webui_parser.print_help()
             return 0
+    elif args.command == "serve":
+        # Top-level alias — same as `webui serve`
+        return cmd_webui_serve(args)
     else:
         parser.print_help()
         return 0

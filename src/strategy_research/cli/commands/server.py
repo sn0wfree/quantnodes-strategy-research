@@ -16,14 +16,21 @@ def cmd_webui_serve(args) -> int:
     """启动 Web UI 服务器。"""
     import uvicorn
 
-    from strategy_research.api.app import create_app
+    from strategy_research.api.app import create_app, configure_from_env
     from strategy_research.webui.routes import router as webui_router
 
+    # Read env config (CORS_ORIGINS, JWT_SECRET, STATIC_DIR)
+    env_config = configure_from_env()
+
     workspace = Path(args.workspace)
+    static_dir = getattr(args, "static_dir", None) or env_config.get("static_dir")
+
     app = create_app(
         workspace_path=workspace if workspace.exists() else None,
         goal_db_path=getattr(args, "goal_db", None),
         hypotheses_path=getattr(args, "hypotheses_path", None),
+        static_dir=static_dir,
+        cors_origins=env_config.get("cors_origins"),
     )
 
     # Mount webui routes
@@ -31,6 +38,9 @@ def cmd_webui_serve(args) -> int:
 
     print(f"🌐 Strategy Research Web UI starting at http://{args.host}:{args.port}")
     print(f"   Workspace: {workspace}")
+    if static_dir:
+        print(f"   Static files: {static_dir}")
+    print(f"   Docs:         http://{args.host}:{args.port}/docs")
 
     uvicorn.run(
         app,
