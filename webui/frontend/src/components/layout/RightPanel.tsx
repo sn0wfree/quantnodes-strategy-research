@@ -1,6 +1,9 @@
 import * as Tabs from '@radix-ui/react-tabs'
 import { useLayoutStore } from '../../stores/layout'
 import { Workflow, Target, Bot } from 'lucide-react'
+import { AgentList } from '../agent/AgentList'
+import { GoalTab } from '../goal/GoalTab'
+import { WorkflowDAGPlaceholder } from '../workflow/WorkflowDAGPlaceholder'
 
 const TABS = [
   { value: 'dag', label: 'DAG', icon: Workflow },
@@ -36,13 +39,13 @@ export function RightPanel() {
         </Tabs.List>
 
         <Tabs.Content value="dag" className="flex-1 overflow-y-auto p-4">
-          <div className="text-sm text-slate-500">DAG 视图（待实现）</div>
+          <WorkflowDAGPlaceholder />
         </Tabs.Content>
         <Tabs.Content value="goal" className="flex-1 overflow-y-auto p-4">
-          <div className="text-sm text-slate-500">Goal 视图（待实现）</div>
+          <GoalTab goal={null} />
         </Tabs.Content>
         <Tabs.Content value="agent" className="flex-1 overflow-y-auto p-4">
-          <div className="text-sm text-slate-500">Agent 列表（待实现）</div>
+          <AgentList />
         </Tabs.Content>
       </Tabs.Root>
     </div>

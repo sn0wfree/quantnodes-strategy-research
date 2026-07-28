@@ -1,0 +1,81 @@
+import { Target } from 'lucide-react'
+import { CriteriaList } from './CriteriaList'
+import { GoalTimeline } from './GoalTimeline'
+import { EmptyState } from '../common/EmptyState'
+
+interface Goal {
+  id: string
+  title: string
+  description: string
+  status: 'active' | 'completed' | 'failed'
+  criteria: Array<{
+    id: string
+    description: string
+    status: 'pending' | 'in_progress' | 'completed'
+    evidence_count: number
+    agent_id?: string
+  }>
+  timeline: Array<{
+    id: string
+    type: 'evidence' | 'iteration' | 'message' | 'system'
+    content: string
+    timestamp: number
+    agent_id?: string
+  }>
+}
+
+interface GoalTabProps {
+  goal: Goal | null
+}
+
+export function GoalTab({ goal }: GoalTabProps) {
+  if (!goal) {
+    return (
+      <EmptyState
+        icon={<Target className="h-10 w-10" />}
+        title="暂无活跃目标"
+        description="使用 /goal 命令创建研究目标"
+      />
+    )
+  }
+
+  const totalCriteria = goal.criteria.length
+
+  return (
+    <div className="space-y-6">
+      {/* Goal header */}
+      <div>
+        <h3 className="text-sm font-semibold text-slate-100 mb-1">{goal.title}</h3>
+        {goal.description && (
+          <p className="text-xs text-slate-400 leading-relaxed">{goal.description}</p>
+        )}
+        <div className="flex items-center gap-2 mt-2">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium
+              ${goal.status === 'active'
+                ? 'bg-emerald-900/50 text-emerald-300'
+                : goal.status === 'completed'
+                ? 'bg-blue-900/50 text-blue-300'
+                : 'bg-red-900/50 text-red-300'
+              }
+            `}
+          >
+            {goal.status === 'active' ? '进行中' : goal.status === 'completed' ? '已完成' : '失败'}
+          </span>
+        </div>
+      </div>
+
+      {/* Criteria */}
+      <div>
+        <h4 className="text-xs font-medium text-slate-400 mb-2">研究标准</h4>
+        <CriteriaList criteria={goal.criteria} totalCriteria={totalCriteria} />
+      </div>
+
+      {/* Timeline */}
+      <div>
+        <h4 className="text-xs font-medium text-slate-400 mb-2">活动时间线</h4>
+        <GoalTimeline events={goal.timeline} />
+      </div>
+    </div>
+  )
+}
