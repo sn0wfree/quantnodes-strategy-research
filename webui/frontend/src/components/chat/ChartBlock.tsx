@@ -1,0 +1,139 @@
+import { useState } from 'react'
+import { BarChart3, ChevronDown, ChevronRight, Download } from 'lucide-react'
+import {
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts'
+import type { ChartPart } from '../../stores/chat'
+
+interface ChartBlockProps {
+  chart: ChartPart
+}
+
+const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#f97316', '#14b8a6']
+
+function ChartRenderer({ chart }: { chart: ChartPart }) {
+  const { chart_type, data, title } = chart
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex h-48 items-center justify-center text-xs text-slate-500">
+        无数据
+      </div>
+    )
+  }
+
+  // Auto-detect x/y keys from first data item
+  const firstItem = data[0] as Record<string, unknown>
+  const keys = Object.keys(firstItem)
+  const xKey = keys.find((k) => typeof firstItem[k] === 'string') || keys[0]
+  const yKey = keys.find((k) => typeof firstItem[k] === 'number') || keys[1] || keys[0]
+
+  switch (chart_type) {
+    case 'bar':
+      return (
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+            <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+            />
+            <Bar dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      )
+    case 'line':
+      return (
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+            <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+            />
+            <Line type="monotone" dataKey={yKey} stroke="#3b82f6" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      )
+    case 'pie':
+      return (
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey={yKey}
+              nameKey={xKey}
+              cx="50%"
+              cy="50%"
+              outerRadius={80}
+              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+            >
+              {data.map((_, i) => (
+                <Cell key={i} fill={COLORS[i % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      )
+    case 'scatter':
+      return (
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+            <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+            />
+            <Bar dataKey={yKey} fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      )
+    default:
+      return (
+        <div className="flex h-48 items-center justify-center text-xs text-slate-500">
+          不支持的图表类型: {chart_type}
+        </div>
+      )
+  }
+}
+
+export function ChartBlock({ chart }: ChartBlockProps) {
+  const [expanded, setExpanded] = useState(true)
+
+  return (
+    <div className="my-2 rounded-lg border border-slate-700/50 overflow-hidden">
+      {/* Header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 bg-slate-800/50 px-3 py-2 text-left text-xs hover:bg-slate-800/80 transition-colors"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 text-slate-500" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-slate-500" />
+        )}
+        <BarChart3 className="h-3.5 w-3.5 text-primary-400" />
+        <span className="text-slate-300">
+          {chart.title || `${chart.chart_type} 图表`}
+        </span>
+        <span className="text-[10px] text-slate-600 ml-auto">
+          {chart.data.length} 数据点
+        </span>
+      </button>
+
+      {/* Chart */}
+      {expanded && (
+        <div className="p-3">
+          <ChartRenderer chart={chart} />
+        </div>
+      )}
+    </div>
+  )
+}
