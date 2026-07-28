@@ -1037,7 +1037,9 @@ interface GoalEvidence {
 ### 5.1 数据库
 
 ```sql
--- users.db
+-- users.db (新增)
+
+-- 用户表
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
@@ -1049,6 +1051,7 @@ CREATE TABLE users (
     is_active INTEGER DEFAULT 1
 );
 
+-- Web 会话表（独立于 CLI sessions.db）
 CREATE TABLE web_sessions (
     id TEXT PRIMARY KEY,               -- UUID
     user_id INTEGER REFERENCES users(id),
@@ -1058,17 +1061,43 @@ CREATE TABLE web_sessions (
     is_active INTEGER DEFAULT 1
 );
 
+-- Web 消息表（支持新的 MessagePart 结构）
 CREATE TABLE web_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT REFERENCES web_sessions(id),
     role TEXT NOT NULL,                -- user/assistant/system
-    content TEXT,
-    parts_json TEXT,                   -- JSON MessagePart[]
+    agent_id TEXT,                     -- 产出此消息的 Agent（assistant 消息才有）
+    content TEXT,                      -- 完整文本（最终态）
+    parts_json TEXT,                   -- JSON MessagePart[]（新结构）
     created_at REAL DEFAULT (unixepoch()),
-    metadata_json TEXT
+    metadata_json TEXT                 -- model/tokens_used/iteration
+);
+
+-- Agent 实时状态表（Workflow 运行时写入）
+CREATE TABLE web_agent_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT,                        -- 品牌色 hex
+    status TEXT DEFAULT 'pending',     -- idle/pending/running/completed/error/skipped
+    layer INTEGER,
+    started_at REAL,
+    completed_at REAL,
+    duration_ms REAL,
+    current_task TEXT,
+    output_summary TEXT,
+    tools_json TEXT,                   -- JSON string[]
+    tokens_used INTEGER DEFAULT 0,
+    tokens_limit INTEGER DEFAULT 0,
+    iteration INTEGER DEFAULT 0,
+    iteration_limit INTEGER DEFAULT 0,
+    error TEXT,
+    updated_at REAL DEFAULT (unixepoch())
 );
 
 CREATE INDEX idx_messages_session ON web_messages(session_id, created_at);
+CREATE INDEX idx_agent_states_goal ON web_agent_states(goal_id, agent_id);
 ```
 
 ### 5.2 认证流程
@@ -1084,7 +1113,7 @@ CREATE INDEX idx_messages_session ON web_messages(session_id, created_at);
 │ token    │     │          │     │          │
 │          │     │          │     │          │
 │ GET      │────▶│ 验证 JWT │     │          │
-│ /api/*   │     │          │     │          │
+│ /api/*   │     │ 注入 user│     │          │
 │          │◀────│ 响应数据  │     │          │
 └──────────┘     └──────────┘     └──────────┘
 ```
@@ -1098,6 +1127,18 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 ```
+
+### 5.4 密码安全
+
+- 使用 `bcrypt` 哈希（cost factor = 12）
+- 密码最少 8 位
+- 登录失败 5 次后锁定 15 分钟（可选，v1 不实现）
+
+### 5.5 Session 隔离
+
+- CLI 会话存 `sessions.db`，Web 会话存 `users.db`
+- 两个数据库完全隔离，互不影响
+- Web 会话通过 `user_id` 关联用户，CLI 会话不需要用户认证
 
 ---
 
@@ -1116,12 +1157,29 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 | 端点 | 方法 | 请求体 | 响应 | 说明 |
 |---|---|---|---|---|
-| `/api/chat/send` | POST | `{session_id, content, images?}` | `{message_id, reply}` | 同步发送 |
-| `/api/chat/send_async` | POST | `{session_id, content, images?}` | 204 | 异步发送 |
+| `/api/chat/send` | POST | `{session_id, content, images?, agent_id?}` | `{message_id, reply}` | 同步发送 |
+| `/api/chat/send_async` | POST | `{session_id, content, images?, agent_id?}` | 204 | 异步发送 |
 | `/api/chat/events` | GET | `?session_id=X` | SSE stream | 实时事件流 |
-| `/api/chat/history` | GET | `?session_id=X&limit=50&before=msg_id` | `{messages[]}` | 历史消息 |
+| `/api/chat/history` | GET | `?session_id=X&limit=50&before=msg_id` | `{messages[]}` | 历史消息（游标分页） |
 | `/api/chat/upload` | POST | multipart form | `{image_url, mime_type}` | 上传图片 |
 | `/api/chat/message` | DELETE | `?message_id=X` | 204 | 删除消息 |
+
+**SSE 事件类型**：
+
+| 事件 | data 字段 | 说明 |
+|---|---|---|
+| `text_delta` | `{delta, message_id}` | 流式文本增量 |
+| `thinking_start` | `{message_id, thinking_id}` | 思考开始 |
+| `thinking_delta` | `{delta, message_id, thinking_id}` | 思考增量 |
+| `thinking_done` | `{message_id, thinking_id}` | 思考结束 |
+| `tool_call` | `{call_id, tool_name, arguments, message_id}` | 工具调用开始 |
+| `tool_result` | `{call_id, status, result, duration_ms, message_id}` | 工具调用结果 |
+| `file_edit` | `{file_path, additions, deletions, diff, message_id}` | 文件编辑 |
+| `table` | `{headers, rows, caption, message_id}` | 数据表格 |
+| `assistant_message` | `{message_id, agent_id, content, parts}` | 完整消息 |
+| `image` | `{url, mime_type, message_id}` | 图片 |
+| `error` | `{error, message_id}` | 错误 |
+| `heartbeat` | `{timestamp}` | 心跳（30s 间隔） |
 
 ### 6.3 会话 API
 
@@ -1137,90 +1195,262 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 | 端点 | 方法 | 请求体 | 响应 | 说明 |
 |---|---|---|---|---|
 | `/api/goal/start` | POST | `{session_id, objective, risk_tier?}` | `{goal_id}` | 创建 goal |
-| `/api/goal/status` | GET | `?session_id=X` | `{goal}` | goal 状态 |
+| `/api/goal/status` | GET | `?session_id=X` | `{goal}` | goal 状态（含 criteria + evidence） |
 | `/api/goal/workflow/start` | POST | `{session_id, workflow_name, objective}` | `{goal_id}` | 启动 workflow |
-| `/api/goal/workflow/status` | GET | `?goal_id=X` | `{progress}` | workflow 进度 |
-| `/api/goal/workflow/events` | GET | `?goal_id=X` | SSE stream | workflow 事件 |
+| `/api/goal/workflow/status` | GET | `?goal_id=X` | `{progress, agents[]}` | workflow 进度 + agent 状态 |
+| `/api/goal/workflow/events` | GET | `?goal_id=X` | SSE stream | workflow 事件（agent 状态变化 + workflow 事件） |
 | `/api/goal/workflow/pause` | POST | `{goal_id, immediate?}` | `{ok}` | 暂停 |
 | `/api/goal/workflow/resume` | POST | `{goal_id}` | `{ok}` | 恢复 |
 | `/api/goal/workflow/list` | GET | — | `{workflows[]}` | 列出 presets |
-| `/api/goal/workflow/{name}/dag` | GET | — | `{dag}` | DAG 结构 |
-| `/api/goal/workflow/{name}/agents` | GET | — | `{agents[]}` | agent 详情 |
+| `/api/goal/workflow/{name}/dag` | GET | — | `{dag}` | DAG 结构（nodes + edges） |
+| `/api/goal/workflow/{name}/agents` | GET | — | `{agents[]}` | agent 详情（含 color 字段） |
+
+**Workflow SSE 事件类型**：
+
+| 事件 | data 字段 | 说明 |
+|---|---|---|
+| `agent_status` | `{agent_id, status, duration_ms?, current_task?}` | Agent 状态变化 |
+| `agent_output` | `{agent_id, summary}` | Agent 输出摘要 |
+| `workflow_progress` | `{pct, completed, total, elapsed_ms}` | 全局进度更新 |
+| `workflow_complete` | `{goal_id, status}` | Workflow 完成 |
+| `workflow_error` | `{goal_id, error}` | Workflow 错误 |
 
 ### 6.5 Agent API
 
 | 端点 | 方法 | 请求体 | 响应 | 说明 |
 |---|---|---|---|---|
-| `/api/agent/list` | GET | — | `{agents[]}` | 可用 agents |
+| `/api/agent/list` | GET | — | `{agents[]}` | 可用 agents（含 color） |
 | `/api/agent/status` | GET | `?goal_id=X` | `{agents_status[]}` | 运行状态 |
 
 ---
 
 ## 7. 开发计划
 
-### 阶段划分
+### 7.1 阶段划分
 
-| 阶段 | 内容 | 天数 | 依赖 |
-|---|---|---|---|
-| **P1: 脚手架** | React 项目初始化 + Vite + Tailwind + 路由 + 布局骨架 + 认证 | 3 | 无 |
-| **P2: 聊天核心** | 消息列表 + 流式渲染 + Markdown + 输入框 + SSE | 4 | P1 |
-| **P3: 工具调用** | ToolCallBlock + DiffBlock + ThinkingBlock + 图片 | 3 | P2 |
-| **P4: Agent 面板** | AgentCard + AgentTimeline + ActivityCluster | 2 | P2 |
-| **P5: Workflow DAG** | React Flow + DAGNode + 启动 + 实时状态 | 3 | P2 |
-| **P6: Goal + 后端** | GoalPanel + 后端 chat API + session 管理 | 2 | P1 |
-| **P7: 集成测试** | 全链路测试 + 优化 + 打包 | 2 | P1-P6 |
-| **总计** | | **~19 天** | |
+| 阶段 | 内容 | 天数 | 依赖 | 产出 |
+|---|---|---|---|---|
+| **P1: 脚手架** | React 项目 + Vite + Tailwind + 路由 + 布局骨架 + 认证 | 3 | 无 | 可登录的空壳应用 |
+| **P2: 聊天核心** | 消息列表 + 流式渲染 + Markdown + 输入框 + SSE + 后端 chat API | 4 | P1 | 可对话的聊天应用 |
+| **P3: 工具调用** | ToolCallGroup + ThinkingBlock + TableBlock + FileEditBlock + 图片 | 3 | P2 | 完整的消息渲染 |
+| **P4: Agent + Goal** | AgentList + GoalTab + 跨模块联动 | 2 | P2 | Agent 状态 + Goal 进度 |
+| **P5: Workflow DAG** | React Flow DAG + 节点详情侧栏 + 启动/暂停 + 实时状态 | 3 | P2, P4 | 可视化工作流 |
+| **P6: Command Palette + 优化** | Cmd+K + 虚拟滚动 + 响应式 + 性能优化 | 2 | P1-P5 | 完整交互体验 |
+| **P7: 集成测试 + 部署** | 全链路测试 + 打包 + 静态文件部署 | 2 | P1-P6 | 可部署版本 |
+| **总计** | | **~19 天** | | |
 
-### P1 详细任务
+### 7.2 P1 详细任务（脚手架 + 认证）— 3 天
 
-1. 初始化 React 项目 (`npm create vite@latest`)
-2. 安装依赖 (tailwindcss, zustand, react-router-dom, lucide-react, radix-ui)
-3. 配置 Tailwind 深色主题
-4. 实现 AppShell 三栏布局
-5. 实现 TopBar + Sidebar + RightPanel
-6. 实现 LoginPage + RegisterPage
-7. 实现 AuthGuard 路由守卫
-8. 实现 API Client (fetch wrapper + JWT 注入)
-9. 实现 Zustand auth store
-10. 后端 auth.py (register/login/me/refresh)
-11. 后端 JWT 中间件
+**Day 1：React 项目初始化**
+1. `npm create vite@latest webui/frontend -- --template react-ts`
+2. 安装依赖：tailwindcss, @tailwindcss/vite, zustand, react-router-dom, lucide-react, @radix-ui/react-dialog, @radix-ui/react-popover, @radix-ui/react-tabs, @radix-ui/react-tooltip
+3. 配置 Tailwind 深色主题 + CSS 变量（色板）
+4. 配置 Vite proxy → FastAPI 后端
 
-### P2 详细任务
+**Day 2：布局骨架**
+5. 实现 AppShell（三栏布局 + TopBar + IconNav）
+6. 实现 TopBar（搜索框 + 会话标题 + 状态 + 用户头像）
+7. 实现 IconNav（64px 图标栏 + hover 浮层）
+8. 实现 MainSplit（可拖拽分隔条 + localStorage 记忆）
+9. 实现 RightPanel（三 Tab 容器）
+10. 实现 ResizablePanel 通用组件
 
-1. 实现 SSE 连接管理器
-2. 实现 chat store (messages, streaming state)
-3. 实现 MessageList (虚拟滚动)
-4. 实现 MessageBubble (用户消息)
-5. 实现 AssistantMessage (助手消息)
-6. 实现 StreamingText (打字机效果)
-7. 实现 MarkdownRenderer
-8. 实现 Composer (@mention + 图片)
-9. 后端 chat.py (send/send_async/events/history)
-10. 后端 session.py (create/list/update/delete)
+**Day 3：认证**
+11. 后端 `api/routers/auth.py`（register/login/me/refresh）
+12. 后端 `api/middleware/auth.py`（JWT 验证中间件）
+13. 后端 `users.db` 初始化（表创建）
+14. 前端 LoginPage + RegisterPage
+15. 前端 AuthGuard 路由守卫
+16. 前端 API Client（fetch wrapper + JWT 自动注入 + token 刷新）
+17. 前端 Zustand auth store
+18. 后端 `api/routers/session.py`（create/list/update/delete）
+19. 前端 Zustand session store + sidebar 会话列表
+
+### 7.3 P2 详细任务（聊天核心）— 4 天
+
+**Day 4-5：消息渲染**
+1. 实现 SSE 连接管理器（EventSource + 重连 + 心跳检测）
+2. 实现 chat store（messages, streaming, thinking 状态）
+3. 实现 MessageList（react-virtuoso 虚拟滚动）
+4. 实现 MessageBubble（用户消息）
+5. 实现 AssistantMessage（Agent 头部 + parts 容器）
+6. 实现 StreamingText（打字机效果，`requestAnimationFrame` + 30ms/字符）
+7. 实现 MarkdownRenderer（react-markdown + remark-gfm + react-syntax-highlighter）
+
+**Day 6：输入框**
+8. 实现 Composer（textarea + 高度自适应 + Shift+Enter 换行）
+9. 实现 MentionDropdown（@agent / @file 两组下拉 + 键盘导航）
+10. 实现图片粘贴/拖拽上传 + 本地预览
+
+**Day 7：后端 chat API**
+11. 后端 `api/routers/chat.py`（send/send_async/events/history/upload/message）
+12. 实现 SSE 事件流（StreamingResponse + async generator）
+13. 实现游标分页（based on created_at + id）
+14. 实现图片上传（/tmp/uploads/，限制 10MB）
+15. 前端 Zustand layout store（右主区可见性 + Tab 状态 + 面板比例）
+
+### 7.4 P3 详细任务（工具调用 + 思考）— 3 天
+
+**Day 8：工具调用**
+1. 实现 ToolCallGroup（折叠容器，默认折叠，点击展开）
+2. 实现 ToolCallItem（状态图标 + 工具名 + 参数摘要 + 耗时）
+3. 实现 tool_call / tool_result SSE 事件处理
+
+**Day 9：思考 + 文件编辑**
+4. 实现 ThinkingBlock（默认折叠，每条独立展开/折叠）
+5. 实现 FileEditBlock（unified diff 渲染，默认展开）
+6. 实现 file_edit SSE 事件处理
+
+**Day 10：表格 + 图表**
+7. 实现 TableBlock（表格渲染，默认展开，>5行截断）
+8. 实现 ChartBlock（简单图表：bar/line，基于 SVG 或 recharts）
+9. 实现 table SSE 事件处理
+10. 实现 ImageBlock（图片展示 + 点击放大）
+
+### 7.5 P4 详细任务（Agent + Goal）— 2 天
+
+**Day 11：Agent 列表**
+1. 实现 AgentList（右主区 Tab，列表式布局）
+2. 实现 AgentItem（running 展开详情，其余紧凑一行）
+3. 实现 Agent 颜色标识（按顺序分配蓝/绿/紫/橙/青）
+4. 实现 agent_status SSE 事件处理
+
+**Day 12：Goal 面板**
+5. 实现 GoalTab（目标描述 + 进度条 + 标准清单 + 时间线）
+6. 实现 CriteriaList（标准带 Evidence 计数 + Agent 来源）
+7. 实现 GoalTimeline（倒序时间线，最新在上）
+8. 实现点击 Evidence → 聊天区滚动跳转（scrollIntoView + 高亮 2s 淡出）
+
+### 7.6 P5 详细任务（Workflow DAG）— 3 天
+
+**Day 13：DAG 可视化**
+1. 安装 @xyflow/react + dagre
+2. 实现 WorkflowDAG（React Flow 容器 + dagre 自动布局）
+3. 实现 DAGNode（自定义节点：状态色左边框 + Agent 颜色 + 状态图标）
+4. 实现 DAGEdge（自定义边：灰色 → 运行中蓝高亮）
+
+**Day 14：DAG 交互**
+5. 实现 DAGToolbar（名称 + 启动/暂停/恢复按钮）
+6. 实现 DAGProgressBar（底部进度条 + 百分比 + 耗时）
+7. 实现 DAGNodeDetail（右侧滑出面板：prompt/条件/tools/evidence）
+8. 实现节点交互：滚轮缩放、拖拽平移、双击跳转、悬停 tooltip
+
+**Day 15：Workflow 启动 + 实时**
+9. 实现 WorkflowList（preset 卡片列表，hover 展开详情）
+10. 实现 WorkflowStart（启动表单：选择 preset + 输入 objective）
+11. 接入 workflow SSE 事件（agent_status/workflow_progress/workflow_complete）
+12. 实现 TopBar 暂停/恢复按钮（与 DAG 工具栏同步）
+
+### 7.7 P6 详细任务（Command Palette + 优化）— 2 天
+
+**Day 16：Command Palette**
+1. 实现 CommandPalette（Cmd+K 触发 + 模糊搜索 + 键盘导航）
+2. 实现命令注册机制（可扩展的命令列表）
+3. 实现命令分类（会话/工作流/设置/视图）
+
+**Day 17：性能 + 响应式**
+4. 优化虚拟滚动（消息列表 + Agent 列表）
+5. 实现响应式断点（≥1440px 三栏 / 1024-1439px 两栏 / <1024px 单栏）
+6. 实现 `prefers-reduced-motion` 支持
+7. 骨架屏加载状态（消息列表 + Agent 列表 + DAG）
+8. 错误边界 + 全局错误处理
+
+### 7.8 P7 详细任务（测试 + 部署）— 2 天
+
+**Day 18：测试**
+1. 组件单元测试（关键组件：MessageList, ToolCallGroup, DAGNode）
+2. API 集成测试（认证 + 聊天 + session）
+3. E2E 测试（登录 → 发消息 → 看到回复 → 启动 workflow → 看到 DAG）
+
+**Day 19：部署**
+4. Vite build 配置（output → `webui/static/`）
+5. FastAPI 静态文件 mount（`/` → `webui/static/index.html`）
+6. 生产环境配置（JWT_SECRET, CORS, 日志）
+7. 文档更新（README + API 文档）
 
 ---
 
 ## 8. 文件变更清单
 
-### 新增文件
+### 8.1 新增文件
 
 | 文件 | 说明 |
 |---|---|
-| `webui/frontend/` | React 项目目录 (~30 个组件文件) |
+| `webui/frontend/` | React 项目目录 |
+| `webui/frontend/package.json` | 前端依赖配置 |
+| `webui/frontend/vite.config.ts` | Vite 配置（proxy + build output） |
+| `webui/frontend/tailwind.config.ts` | Tailwind 深色主题配置 |
+| `webui/frontend/src/main.tsx` | 入口 |
+| `webui/frontend/src/App.tsx` | 根组件 + 路由 |
+| `webui/frontend/src/styles/globals.css` | CSS 变量 + Tailwind 入口 |
+| `webui/frontend/src/api/client.ts` | fetch wrapper + JWT 注入 |
+| `webui/frontend/src/api/sse.ts` | SSE 连接管理器 |
+| `webui/frontend/src/api/types.ts` | TypeScript 类型定义 |
+| `webui/frontend/src/stores/auth.ts` | 认证状态 |
+| `webui/frontend/src/stores/session.ts` | 会话状态 |
+| `webui/frontend/src/stores/chat.ts` | 聊天状态 |
+| `webui/frontend/src/stores/agents.ts` | Agent 状态 |
+| `webui/frontend/src/stores/workflow.ts` | Workflow 状态 |
+| `webui/frontend/src/stores/layout.ts` | 布局状态 |
+| `webui/frontend/src/stores/commandPalette.ts` | 命令面板状态 |
+| `webui/frontend/src/components/layout/AppShell.tsx` | 整体布局容器 |
+| `webui/frontend/src/components/layout/TopBar.tsx` | 顶部导航栏 |
+| `webui/frontend/src/components/layout/IconNav.tsx` | 左侧图标导航栏 |
+| `webui/frontend/src/components/layout/NavPopover.tsx` | 导航栏 hover 浮层 |
+| `webui/frontend/src/components/layout/MainSplit.tsx` | 左右主区分隔 |
+| `webui/frontend/src/components/layout/RightPanel.tsx` | 右主区 Tab 容器 |
+| `webui/frontend/src/components/layout/CommandPalette.tsx` | Cmd+K 命令面板 |
+| `webui/frontend/src/components/layout/ResizablePanel.tsx` | 可拖拽面板通用组件 |
+| `webui/frontend/src/components/auth/LoginPage.tsx` | 登录页 |
+| `webui/frontend/src/components/auth/RegisterPage.tsx` | 注册页 |
+| `webui/frontend/src/components/auth/AuthGuard.tsx` | 路由守卫 |
+| `webui/frontend/src/components/chat/MessageList.tsx` | 消息列表（虚拟滚动） |
+| `webui/frontend/src/components/chat/MessageBubble.tsx` | 用户消息气泡 |
+| `webui/frontend/src/components/chat/AssistantMessage.tsx` | 助手消息 |
+| `webui/frontend/src/components/chat/StreamingText.tsx` | 流式文本 |
+| `webui/frontend/src/components/chat/ThinkingBlock.tsx` | 推理过程 |
+| `webui/frontend/src/components/chat/ToolCallGroup.tsx` | 工具调用组 |
+| `webui/frontend/src/components/chat/ToolCallItem.tsx` | 单个工具调用 |
+| `webui/frontend/src/components/chat/FileEditBlock.tsx` | 文件 diff |
+| `webui/frontend/src/components/chat/TableBlock.tsx` | 数据表格 |
+| `webui/frontend/src/components/chat/ChartBlock.tsx` | 图表 |
+| `webui/frontend/src/components/chat/ImageBlock.tsx` | 图片展示 |
+| `webui/frontend/src/components/chat/Composer.tsx` | 输入框 |
+| `webui/frontend/src/components/chat/MentionDropdown.tsx` | @mention 下拉 |
+| `webui/frontend/src/components/chat/MarkdownRenderer.tsx` | Markdown 渲染器 |
+| `webui/frontend/src/components/agents/AgentList.tsx` | Agent 列表 |
+| `webui/frontend/src/components/agents/AgentItem.tsx` | Agent 条目 |
+| `webui/frontend/src/components/agents/AgentDetailPanel.tsx` | Agent 详情侧栏 |
+| `webui/frontend/src/components/workflow/WorkflowDAG.tsx` | DAG 可视化 |
+| `webui/frontend/src/components/workflow/DAGNode.tsx` | 自定义 DAG 节点 |
+| `webui/frontend/src/components/workflow/DAGEdge.tsx` | 自定义 DAG 边 |
+| `webui/frontend/src/components/workflow/DAGToolbar.tsx` | DAG 工具栏 |
+| `webui/frontend/src/components/workflow/DAGProgressBar.tsx` | DAG 进度条 |
+| `webui/frontend/src/components/workflow/DAGNodeDetail.tsx` | 节点详情侧栏 |
+| `webui/frontend/src/components/workflow/WorkflowList.tsx` | Preset 列表 |
+| `webui/frontend/src/components/workflow/WorkflowStart.tsx` | 启动表单 |
+| `webui/frontend/src/components/goal/GoalTab.tsx` | Goal Tab 容器 |
+| `webui/frontend/src/components/goal/CriteriaList.tsx` | 标准清单 |
+| `webui/frontend/src/components/goal/GoalTimeline.tsx` | Evidence 时间线 |
+| `webui/frontend/src/components/common/Badge.tsx` | 状态徽章 |
+| `webui/frontend/src/components/common/Spinner.tsx` | 加载动画 |
+| `webui/frontend/src/components/common/EmptyState.tsx` | 空状态 |
+| `webui/frontend/src/components/common/ConfirmDialog.tsx` | 确认弹窗 |
 | `api/routers/auth.py` | 认证 API |
 | `api/routers/chat.py` | 聊天 API |
+| `api/routers/session.py` | 会话 API |
 | `api/middleware/auth.py` | JWT 中间件 |
 | `docs/web-ui-design.md` | 本文档 |
 
-### 修改文件
+### 8.2 修改文件
 
 | 文件 | 改动 |
 |---|---|
-| `api/app.py` | 注册 auth/chat router + 静态文件 mount |
-| `api/routers/workflow.py` | 增加 DAG/agent 端点 |
+| `api/app.py` | 注册 auth/chat/session router + 静态文件 mount |
+| `api/routers/workflow.py` | 增加 DAG/agent 端点 + SSE 事件 |
 | `pyproject.toml` | 新增 python-jose, bcrypt 依赖 |
 
-### 保留文件（后续可移除）
+### 8.3 保留文件（后续可移除）
 
 | 文件 | 说明 |
 |---|---|
@@ -1231,9 +1461,13 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 ## 9. 待讨论项
 
-1. **图片存储**：base64 inline 还是存文件系统？（建议：小图 base64，大图存 `/tmp/uploads/`）
-2. **消息分页**：游标分页还是 offset 分页？（建议：游标，基于 created_at + id）
-3. **SSE 重连策略**：指数退避 + 最大重试次数？
-4. **WebSocket**：是否需要双向实时通信？（目前 SSE 单向够用）
-5. **国际化**：i18n 框架选型？（建议：先硬编码中文，后续用 react-i18next）
-6. **构建部署**：Vite build 输出到 `webui/static/`，FastAPI serve 静态文件？
+| # | 问题 | 推荐方案 | 状态 |
+|---|---|---|---|
+| 1 | 图片存储 | base64 inline（≤5MB）+ 文件系统（>5MB，/tmp/uploads/） | 待确认 |
+| 2 | 消息分页 | 游标分页（based on created_at + id） | ✅ 已确认 |
+| 3 | SSE 重连策略 | 指数退避（1s→2s→4s→8s→16s→30s max）+ 最大 10 次重试 | 待确认 |
+| 4 | WebSocket | 不需要（SSE 单向够用，Agent 状态通过 SSE 推送） | ✅ 已确认 |
+| 5 | 国际化 | 先硬编码中文，后续用 react-i18next | ✅ 已确认 |
+| 6 | 构建部署 | Vite build → `webui/static/`，FastAPI mount 静态文件 | 待确认 |
+| 7 | 虚拟滚动库 | react-virtuoso（推荐）或 @tanstack/react-virtual | 待确认 |
+| 8 | 图表库 | recharts（推荐）或 直接 SVG（v1 简单图表） | 待确认 |
