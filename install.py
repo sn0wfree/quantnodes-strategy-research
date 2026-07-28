@@ -191,7 +191,7 @@ def check_static_build(project_root: Path) -> None:
 
 
 def run_e2e_tests(project_root: Path) -> int:
-    """跑 Playwright E2E 测试。
+    """跑 Playwright E2E 测试 + 视觉回归测试。
 
     使用 ``STRATEGY_RESEARCH_TEST_CHAT=1`` 触发后端脚本化 SSE 模式
     （不需要真实 LLM）。返回 pytest 退出码。
@@ -203,19 +203,50 @@ def run_e2e_tests(project_root: Path) -> int:
     cmd = [
         sys.executable, "-m", "pytest",
         "tests/test_webui_e2e_playwright.py",
+        "tests/test_webui_visual.py",
         "-v", "--tb=short",
     ]
     env = {**__import__("os").environ, "STRATEGY_RESEARCH_TEST_CHAT": "1"}
 
     log("$ " + " ".join(cmd))
     log("(脚本化 SSE 模式 — 不需要真实 LLM)")
+    log("视觉回归测试：tests/baselines/ 必须存在 (首次运行 UPDATE_SNAPSHOTS=1 录制)")
     log(" ")
     result = subprocess.run(cmd, cwd=project_root, env=env)
     if result.returncode == 0:
         log("E2E 测试通过 ✓")
     else:
         err("E2E 测试失败")
-        err("调试: STRATEGY_RESEARCH_TEST_CHAT=1 python -m pytest tests/test_webui_e2e_playwright.py -v --tb=long")
+        err("调试: STRATEGY_RESEARCH_TEST_CHAT=1 python -m pytest tests/test_webui_e2e_playwright.py tests/test_webui_visual.py -v --tb=long")
+        err("视觉回归失败时，diff 图保存到 tests/diffs/")
+    return result.returncode
+
+
+def record_visual_baselines(project_root: Path) -> int:
+    """录制视觉回归基线（首次或大改后）。"""
+    header("录制视觉回归基线")
+
+    check_static_build(project_root)
+
+    cmd = [
+        sys.executable, "-m", "pytest",
+        "tests/test_webui_visual.py",
+        "-v",
+    ]
+    env = {
+        **__import__("os").environ,
+        "STRATEGY_RESEARCH_TEST_CHAT": "1",
+        "UPDATE_SNAPSHOTS": "1",
+    }
+    log("$ " + " ".join(cmd))
+    log("(UPDATE_SNAPSHOTS=1 → 截图保存为基线，跳过断言)")
+    log(" ")
+    result = subprocess.run(cmd, cwd=project_root, env=env)
+    if result.returncode == 0:
+        log("基线录制完成 ✓")
+        log(f"位置: tests/baselines/")
+    else:
+        err("基线录制失败")
     return result.returncode
 
 
@@ -338,6 +369,10 @@ def main() -> int:
         help="仅跑 E2E 测试（需已通过 (无参数) / --dev 完成安装）",
     )
     parser.add_argument(
+        "--record-baselines", action="store_true",
+        help="录制视觉回归基线（首次或大改 UI 后）",
+    )
+    parser.add_argument(
         "--uninstall", action="store_true",
         help="卸载",
     )
@@ -365,6 +400,11 @@ def main() -> int:
     if args.e2e_only:
         install_playwright(pip)
         rc = run_e2e_tests(project_root)
+        return rc
+
+    if args.record_baselines:
+        install_playwright(pip)
+        rc = record_visual_baselines(project_root)
         return rc
 
     if args.dev:

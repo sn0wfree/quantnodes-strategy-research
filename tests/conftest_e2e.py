@@ -134,6 +134,22 @@ def api_client(backend_server: dict) -> requests.Session:
     return session
 
 
+@pytest.fixture(scope="session")
+def browser():
+    """共享 Playwright Chromium browser fixture (供 E2E + 视觉回归测试使用)。
+
+    注意：scope="session" 让所有测试复用同一浏览器实例，加速测试。
+    每个测试函数仍应该用 ``context`` fixture 创建独立 BrowserContext
+    以避免 cookies / localStorage / viewport 互相污染。
+    """
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True)
+        yield b
+        b.close()
+
+
 @pytest.fixture
 def app_url(backend_server: dict) -> str:
     """Backend URL — named `app_url` to avoid pytest-base-url collision."""

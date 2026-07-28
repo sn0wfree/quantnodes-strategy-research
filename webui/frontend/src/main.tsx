@@ -15,6 +15,12 @@ if (typeof window !== 'undefined') {
   import('./stores/chat').then(({ useChatStore }) => {
     ;(window as any).__chatStore = useChatStore
   })
+  import('./stores/workflow').then(({ useWorkflowStore }) => {
+    ;(window as any).__workflowStore = useWorkflowStore
+  })
+  import('./stores/commandPalette').then(({ useCommandPaletteStore }) => {
+    ;(window as any).__commandPalette = useCommandPaletteStore
+  })
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

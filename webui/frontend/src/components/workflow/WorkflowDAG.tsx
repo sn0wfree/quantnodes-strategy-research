@@ -143,7 +143,7 @@ export function WorkflowDAG({
         onResume={onResume}
         onReset={onReset}
       />
-      <div className="relative flex-1">
+      <div className="relative flex-1 min-h-0">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -158,6 +158,7 @@ export function WorkflowDAG({
           minZoom={0.3}
           maxZoom={2}
           defaultEdgeOptions={{ type: 'dagEdge' }}
+          style={{ width: '100%', height: '100%' }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1e293b" />
           <Controls className="!bg-slate-800 !border-slate-700 !rounded-lg" />

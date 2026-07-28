@@ -28,20 +28,13 @@ from playwright.sync_api import (
     BrowserContext,
     Page,
     expect,
-    sync_playwright,
 )
 
 
 # ────────────────────────── Helpers ──────────────────────────
 
 
-@pytest.fixture(scope="session")
-def browser() -> Iterator[Browser]:
-    """Chromium 浏览器 fixture (复用单例加速测试)。"""
-    with sync_playwright() as p:
-        b = p.chromium.launch(headless=True)
-        yield b
-        b.close()
+# browser fixture 由 conftest_e2e.py 提供 (session scope, 复用单例)
 
 
 @pytest.fixture

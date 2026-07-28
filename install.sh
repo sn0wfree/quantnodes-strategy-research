@@ -6,8 +6,9 @@
 #   ./install.sh --dev                # 开发模式（不构建前端）
 #   ./install.sh --frontend           # 仅构建前端
 #   ./install.sh --backend            # 仅安装后端依赖
-#   ./install.sh --e2e                # 完整安装 + 跑 E2E 测试 (Playwright)
-#   ./install.sh --e2e-only           # 仅跑 E2E 测试（需已安装）
+#   ./install.sh --e2e                # 完整安装 + 跑 E2E + 视觉回归测试 (Playwright)
+#   ./install.sh --e2e-only           # 仅跑 E2E + 视觉回归测试（需已安装）
+#   ./install.sh --record-baselines   # 录制视觉回归基线（首次/大改 UI 后）
 #   ./install.sh --uninstall          # 卸载
 #   ./install.sh --help               # 显示帮助
 #
@@ -92,16 +93,17 @@ Options:
   --dev          开发模式：后端 + 前端依赖（不构建）
   --frontend     仅构建前端
   --backend      仅安装后端依赖
-  --e2e          完整安装 + 跑 E2E 测试（Playwright 浏览器 + 真实后端）
-  --e2e-only     仅跑 E2E 测试（需已通过 (无参数) / --dev 完成安装）
+  --e2e          完整安装 + 跑 E2E + 视觉回归测试
+  --e2e-only     仅跑 E2E + 视觉回归测试（需已安装）
+  --record-baselines  录制视觉回归基线（tests/baselines/）
   --uninstall    卸载（删除包 + node_modules + 构建产物）
   --help         显示此帮助
 
 Examples:
   $0                              # 完整安装
   $0 --dev                        # 开发模式
-  $0 --e2e                        # CI 用：完整安装 + E2E 测试
-  $0 --e2e-only                   # 本地反复跑 E2E（不重装）
+  $0 --e2e                        # CI 用：完整安装 + E2E + 视觉回归
+  $0 --record-baselines           # 首次/大改后：重新录制视觉基线
   quantnodes-strategy-research serve --host 0.0.0.0 --port 87183
 EOF
 }
@@ -199,11 +201,11 @@ check_static_build() {
     fi
 }
 
-# ============================================================
-# 跑 E2E 测试
+# =========================================================─────────
+# 跑 E2E + 视觉回归测试
 # ============================================================
 run_e2e_tests() {
-    header "运行 E2E 测试"
+    header "运行 E2E + 视觉回归测试"
 
     check_command "$PYTHON_BIN"
 
@@ -212,18 +214,48 @@ run_e2e_tests() {
 
     cd "$PROJECT_ROOT"
 
-    log "pytest tests/test_webui_e2e_playwright.py -v"
+    log "pytest tests/test_webui_e2e_playwright.py tests/test_webui_visual.py -v"
     log "(脚本化 SSE 模式 — 不需要真实 LLM)"
+    log "视觉回归需要 tests/baselines/ 存在 (首次: ./install.sh --record-baselines)"
     log " "
 
     # 禁用 LLMBridge autouse fixture 干扰（conftest.py 有 _isolate_llm_bridge）
     # E2E 用 TEST_MODE=1 替代
-    if STRATEGY_RESEARCH_TEST_CHAT=1 "$PYTHON_BIN" -m pytest tests/test_webui_e2e_playwright.py -v --tb=short; then
-        log "E2E 测试通过 ✓"
+    if STRATEGY_RESEARCH_TEST_CHAT=1 "$PYTHON_BIN" -m pytest \
+        tests/test_webui_e2e_playwright.py \
+        tests/test_webui_visual.py \
+        -v --tb=short; then
+        log "E2E + 视觉回归测试通过 ✓"
         return 0
     else
-        err "E2E 测试失败"
-        err "调试: STRATEGY_RESEARCH_TEST_CHAT=1 $PYTHON_BIN -m pytest tests/test_webui_e2e_playwright.py -v --tb=long"
+        err "测试失败"
+        err "调试: STRATEGY_RESEARCH_TEST_CHAT=1 $PYTHON_BIN -m pytest tests/test_webui_e2e_playwright.py tests/test_webui_visual.py -v --tb=long"
+        err "视觉回归失败时，diff 图保存到 tests/diffs/"
+        return 1
+    fi
+}
+
+# =========================================================─────────
+# 录制视觉回归基线
+# =========================================================─────────
+record_visual_baselines() {
+    header "录制视觉回归基线"
+
+    check_command "$PYTHON_BIN"
+    check_static_build || return 1
+
+    cd "$PROJECT_ROOT"
+
+    log "UPDATE_SNAPSHOTS=1 pytest tests/test_webui_visual.py -v"
+    log "(截图保存为基线，跳过断言)"
+    log " "
+
+    if UPDATE_SNAPSHOTS=1 STRATEGY_RESEARCH_TEST_CHAT=1 "$PYTHON_BIN" -m pytest \
+        tests/test_webui_visual.py -v --tb=short; then
+        log "基线录制完成 ✓ → tests/baselines/"
+        return 0
+    else
+        err "基线录制失败"
         return 1
     fi
 }
@@ -335,6 +367,10 @@ while [[ $# -gt 0 ]]; do
             MODE="e2e-only"
             shift
             ;;
+        --record-baselines)
+            MODE="record-baselines"
+            shift
+            ;;
         --uninstall)
             MODE="uninstall"
             shift
@@ -369,6 +405,10 @@ case "$MODE" in
     e2e-only)
         install_playwright
         run_e2e_tests
+        ;;
+    record-baselines)
+        install_playwright
+        record_visual_baselines
         ;;
     e2e)
         install_backend
