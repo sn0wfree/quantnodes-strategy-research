@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -204,6 +205,34 @@ class GoalEvidenceCollector:
             return 0
 
 
+class _AgentConfigExecutor:
+    """Minimal AgentExecutor adapter for workflow config agents.
+
+    Phase 4 P1.1: Wraps a GoalAgentConfig into the AgentExecutor protocol
+    so agents from the YAML can be registered in AgentRegistry.
+    """
+
+    def __init__(self, agent_id: str, tools: list[str] | None = None) -> None:
+        self._agent_id = agent_id
+        self._tools = tools or []
+
+    @property
+    def name(self) -> str:
+        return self._agent_id
+
+    def run(self, prompt: str, context: dict | None = None) -> dict:
+        """Execute the agent. In CLI standalone mode, returns a stub.
+
+        The real execution path goes through SwarmRuntime → SwarmWorker
+        → AgentLoop, which bypasses this adapter. This adapter is only
+        used by WorkflowController for fallback/legacy paths.
+        """
+        logger.info(
+            "_AgentConfigExecutor.run(%s): stub execution", self._agent_id
+        )
+        return {"answer": f"[stub] {self._agent_id}: completed", "agent_id": self._agent_id}
+
+
 # ── Workflow Runner (P3.9: delegates to SwarmRuntime) ────────
 
 
@@ -236,13 +265,33 @@ class GoalWorkflowRunner:
         Args:
             config: Workflow configuration loaded from YAML.
             session_id: Current session id.
-            agent_runner: Pre-built AgentRunner (unused in P3.9, kept for compat).
-            agent_runner_type: Type for SwarmRuntime controller selection.
+            agent_runner: [deprecated] Pre-built AgentRunner. Use AgentRunnerRegistry instead.
+            agent_runner_type: [deprecated] Type for SwarmRuntime controller selection.
             store: GoalStore instance.
-            runner_kwargs: Pass-through kwargs for controller.
-            use_validators: Whether to register validators (unused in P3.9).
+            runner_kwargs: [deprecated] Pass-through kwargs for controller.
+            use_validators: Whether to register validators.
             workspace: Workspace path for prompt file resolution.
         """
+        # P1.6: Deprecation warnings for dead parameters (v0.5.3)
+        if agent_runner is not None:
+            warnings.warn(
+                "agent_runner is deprecated in v0.5.3 and will be removed in v0.6.0. "
+                "Use AgentRunnerRegistry.register() instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if agent_runner_type != "stub":
+            warnings.warn(
+                "agent_runner_type is deprecated in v0.5.3 and will be removed in v0.6.0. "
+                "The runner now delegates to SwarmRuntime + GoalWorkflowHook.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if runner_kwargs:
+            warnings.warn(
+                "runner_kwargs is deprecated in v0.5.3 and will be removed in v0.6.0. "
+                "Configure agents via YAML or AgentRunnerRegistry.",
+                DeprecationWarning, stacklevel=2,
+            )
+
         self._config = config
         self._session_id = session_id
         self._store = store
@@ -326,6 +375,7 @@ class GoalWorkflowRunner:
             source="workflow",
             protocol=self._config.name,
             risk_tier=risk_tier,
+            workflow_id=self._config.name,  # P1.7: persist workflow_id
         )
         self._goal_id = goal.goal_id
 
@@ -335,7 +385,7 @@ class GoalWorkflowRunner:
             for agent in self._config.agents
         }
 
-        # 3. Create GoalWorkflowHook
+        # 3. Create GoalWorkflowHook (P1.2: pass runner for cancelled check)
         from .workflow_hook import GoalWorkflowHook
         from .completion_strategy import CompletionStrategyFactory
 
@@ -344,6 +394,7 @@ class GoalWorkflowRunner:
             goal_id=self._goal_id,
             evidence_map=evidence_map,
             store=self._store,
+            runner=self,  # P1.2: hook checks runner._state.cancelled
             completion_strategy=CompletionStrategyFactory.get(
                 self._config.completion.mode,
             ),
@@ -494,13 +545,28 @@ class GoalWorkflowRunner:
         return self._goal_id
 
     def _build_controller(self) -> Any:
-        """Build a WorkflowController for SwarmRuntime."""
+        """Build a WorkflowController for SwarmRuntime.
+
+        Phase 4 P1.1: Populates the AgentRegistry with agents from the
+        workflow config. Each agent is registered as a simple executor
+        that can run through the controller pipeline.
+        """
         try:
             from ..workflow.controller import ControllerConfig, WorkflowController
             from ..workflow.agents import AgentRegistry
+
+            registry = AgentRegistry()
+            # Register each agent from the YAML config as a simple executor
+            for agent_cfg in self._config.agents:
+                executor = _AgentConfigExecutor(
+                    agent_id=agent_cfg.id,
+                    tools=agent_cfg.tools,
+                )
+                registry.register(executor)
+
             cfg = ControllerConfig(timeout_seconds=120.0)
             return WorkflowController(
-                registry=AgentRegistry(), adj={}, config=cfg,
+                registry=registry, adj={}, config=cfg,
             )
         except Exception as exc:
             logger.warning("Cannot build WorkflowController: %s", exc)
@@ -539,14 +605,34 @@ class GoalWorkflowRunner:
         """Save current workflow state to disk for crash recovery.
 
         Returns the checkpoint directory path, or None if no store.
+
+        Phase 4 P1.3: Now saves real layer_results from the hook,
+        not an empty dict. This enables ``resume_from_checkpoint``
+        to restore agent outputs for skip logic.
         """
         from .checkpoint_store import CheckpointStore as _CPS
+
+        hook = self._hook
+        layer_results: dict[str, Any] = {}
+        if hook is not None:
+            raw = getattr(hook, "_layer_results", None)
+            if isinstance(raw, dict):
+                layer_results = raw
+            elif raw is not None:
+                # Fallback: try evidence_count + completed info
+                layer_results = {
+                    "_summary": {
+                        "evidence_count": getattr(hook, "evidence_count", 0),
+                        "completed": getattr(hook, "completed", False),
+                    }
+                }
+
         cp = _CPS()
         return cp.save(
             session_id=self._session_id,
             goal_id=self._goal_id,
             state=self._state.get_summary(),
-            layer_results={},  # layer_results are in the hook now
+            layer_results=layer_results,
             workflow_name=self._config.name,
         )
 
@@ -591,6 +677,28 @@ class GoalWorkflowRunner:
         runner._state.evidence_count = state_data.get("evidence_count", 0)
         runner._state.agent_statuses = state_data.get("agent_statuses", {})
         runner._goal_id = goal_id
+
+        # P1.3: Restore layer_results into hook (create hook if needed)
+        layer_results = data.get("layer_results", {})
+        if layer_results:
+            if runner._hook is None:
+                from .workflow_hook import GoalWorkflowHook
+                runner._hook = GoalWorkflowHook.__new__(GoalWorkflowHook)
+                runner._hook._layer_results = {}
+                runner._hook._completed = False
+                runner._hook._evidence_count = 0
+                runner._hook._session_id = session_id
+                runner._hook._goal_id = goal_id
+                runner._hook._evidence_map = {}
+                runner._hook._store = None
+                runner._hook._runner = runner
+                runner._hook._run_store = None
+                runner._hook._run_id = ""
+                runner._hook._completion_strategy = None
+                runner._hook._completion_mode = ""
+                runner._hook._workflow_name = config.name
+                runner._hook._event_bus = runner._event_bus
+            runner._hook._layer_results = layer_results
 
         logger.info(
             "Resumed workflow from checkpoint: goal_id=%s layer=%d evidence=%d",

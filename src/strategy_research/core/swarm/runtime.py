@@ -275,13 +275,15 @@ class SwarmRuntime:
         t0 = time.perf_counter()
 
         try:
-            full_task = task
-            if upstream:
-                upstream_ctx = "\n".join(
-                    f"=== {aid} ===\n{out[:500]}"
-                    for aid, out in upstream.items()
-                )
-                full_task = f"上游输出:\n{upstream_ctx}\n\n当前任务: {task}"
+            # P1.5: Use PromptBuilder for structured prompt construction
+            from ..workflow.prompt import PromptBuilder
+            builder = PromptBuilder()
+            full_task = builder.build_prompt(
+                agent_name=agent_call.agent_name,
+                base_prompt=task,
+                context=agent_call.context if hasattr(agent_call, "context") else None,
+                upstream_outputs=upstream if upstream else None,
+            )
 
             if self._controller is None and self._owns_default_controller:
                 self._controller = _build_default_controller()

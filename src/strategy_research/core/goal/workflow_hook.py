@@ -51,6 +51,7 @@ class GoalWorkflowHook:
         evidence_map: dict[str, int],
         store: Any,
         *,
+        runner: Any = None,
         run_store: Any = None,
         run_id: str = "",
         completion_strategy: Any = None,
@@ -62,6 +63,7 @@ class GoalWorkflowHook:
         self._goal_id = goal_id
         self._evidence_map = evidence_map
         self._store = store
+        self._runner = runner  # P1.2: reference for should_stop() cancelled check
         self._run_store = run_store
         self._run_id = run_id
         self._completion_strategy = completion_strategy
@@ -70,6 +72,7 @@ class GoalWorkflowHook:
         self._event_bus = event_bus
         self._completed = False
         self._evidence_count = 0
+        self._layer_results: dict[str, Any] = {}  # P1.3: saved/restored on checkpoint
 
     @property
     def name(self) -> str:
@@ -150,7 +153,16 @@ class GoalWorkflowHook:
             self._auto_complete()
 
     def should_stop(self) -> bool:
-        """Return True if the goal has been completed."""
+        """Return True if the goal has been completed or the runner is cancelled.
+
+        Phase 4 P1.2: Checks ``runner._state.cancelled`` so that
+        ``pause(immediate=True)`` actually interrupts DAG execution
+        via SwarmRuntime's ``should_stop`` hook.
+        """
+        # Check runner's cancelled flag (P1.2)
+        runner_state = getattr(self._runner, "_state", None)
+        if runner_state and getattr(runner_state, "cancelled", False):
+            return True
         return self._completed
 
     # ── Internal helpers ───────────────────────────────────────
