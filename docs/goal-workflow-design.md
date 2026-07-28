@@ -554,11 +554,16 @@ src/strategy_research/core/goal/templates.py
 
 ### 11.3 Phase 3 计划
 
-- [ ] 子 workflow 支持（parent_goal_id 已有字段）
-- [ ] 工作流进度 checkpoint + 恢复
-- [ ] 可视化工作流编辑器
-- [ ] Workflow 性能监控（每个 agent 耗时）
-- [ ] 与 Hook 系统集成
+- [x] P3.1: SwarmRuntime hooks 架构 — SwarmHook Protocol + hooks 参数（breaking change）
+- [x] P3.2: GoalWorkflowHook — goal-specific hook that plugs into SwarmRuntime
+- [x] P3.3: SwarmPreset 统一 — GoalWorkflowConfig.to_swarm_preset() + SwarmPreset 扩展
+- [x] P3.4: 立即取消模式 — pause(immediate=True) + asyncio.Task 取消
+- [x] P3.7: 完整表达式 DSL — ExpressionEvaluator (dot-path + 比较运算符)
+- [x] P3.10: 性能监控 — MetricsObserver (event counts + agent/layer timings)
+- [ ] P3.5: 子 workflow 支持（parent_goal_id 已有字段）
+- [ ] P3.6: 工作流进度 checkpoint + 恢复（持久化 _layer_results）
+- [ ] P3.8: 可视化工作流编辑器（TUI widget）
+- [ ] P3.9: 完整 Hook 系统集成（GoalWorkflowRunner 完全委托给 SwarmRuntime）
 
 ## 13. 设计模式应用
 
