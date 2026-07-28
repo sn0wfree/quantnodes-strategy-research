@@ -10,10 +10,12 @@ class TestValidateDag:
         validate_dag({"a": []})
 
     def test_linear_chain(self):
-        validate_dag({"a": ["b"], "b": ["c"]})
+        # deps: b depends on a, c depends on b
+        validate_dag({"a": [], "b": ["a"], "c": ["b"]})
 
     def test_diamond(self):
-        validate_dag({"a": ["b", "c"], "b": ["d"], "c": ["d"]})
+        # deps: b depends on a, c depends on a, d depends on b and c
+        validate_dag({"a": [], "b": ["a"], "c": ["a"], "d": ["b", "c"]})
 
     def test_cycle_raises(self):
         with pytest.raises(ValueError, match="cycle"):
@@ -28,7 +30,7 @@ class TestValidateDag:
             validate_dag({"a": ["b"], "b": ["c"], "c": ["a"]})
 
     def test_disconnected_components(self):
-        validate_dag({"a": ["b"], "c": ["d"]})
+        validate_dag({"a": [], "b": ["a"], "c": [], "d": ["c"]})
 
 
 class TestTopologicalLayers:
@@ -40,28 +42,33 @@ class TestTopologicalLayers:
         assert result == [["a"]]
 
     def test_linear_chain(self):
-        result = topological_layers({"a": ["b"], "b": ["c"]})
+        # deps: b depends on a, c depends on b
+        result = topological_layers({"a": [], "b": ["a"], "c": ["b"]})
         assert result == [["a"], ["b"], ["c"]]
 
     def test_diamond(self):
-        result = topological_layers({"a": ["b", "c"], "b": ["d"], "c": ["d"]})
+        # deps: b depends on a, c depends on a, d depends on b and c
+        result = topological_layers({"a": [], "b": ["a"], "c": ["a"], "d": ["b", "c"]})
         assert len(result) == 3
         assert result[0] == ["a"]
         assert sorted(result[1]) == ["b", "c"]
         assert result[2] == ["d"]
 
     def test_parallel_agents_same_layer(self):
-        result = topological_layers({"a": ["c"], "b": ["c"]})
+        # deps: c depends on both a and b
+        result = topological_layers({"a": [], "b": [], "c": ["a", "b"]})
         assert len(result) == 2
         assert sorted(result[0]) == ["a", "b"]
         assert result[1] == ["c"]
 
     def test_complex_dag(self):
+        # deps convention
         adj = {
-            "researcher": ["data_quality", "factor_analyst"],
-            "data_quality": ["strategist"],
-            "factor_analyst": ["strategist"],
-            "strategist": ["portfolio_construction"],
+            "researcher": [],
+            "data_quality": ["researcher"],
+            "factor_analyst": ["researcher"],
+            "strategist": ["data_quality", "factor_analyst"],
+            "portfolio_construction": ["strategist"],
         }
         result = topological_layers(adj)
         assert len(result) == 4
@@ -71,6 +78,7 @@ class TestTopologicalLayers:
         assert result[3] == ["portfolio_construction"]
 
     def test_result_is_sorted(self):
-        result = topological_layers({"z": ["a"], "a": ["m"], "m": ["b"]})
+        # deps: a depends on z, m depends on a, b depends on m
+        result = topological_layers({"z": [], "a": ["z"], "m": ["a"], "b": ["m"]})
         for layer in result:
             assert layer == sorted(layer)

@@ -38,15 +38,17 @@ class TestWorkflowE2E:
         reg.register(StubExecutor("anti_overfit_analyst", {"methods_passed": 4, "methods_total": 6}))
         reg.register(StubExecutor("backtest_diagnostics", {"metrics": {"sharpe": 0.8, "calmar": 0.6, "max_dd": -0.15}}))
 
+        # deps convention: {node: [upstream_deps]}
         adj = {
-            "researcher": ["data_quality", "factor_analyst"],
-            "data_quality": ["strategist"],
-            "factor_analyst": ["strategist"],
-            "strategist": ["portfolio_construction"],
-            "portfolio_construction": ["risk_controller"],
-            "risk_controller": ["attribution_analyst"],
-            "attribution_analyst": ["anti_overfit_analyst"],
-            "anti_overfit_analyst": ["backtest_diagnostics"],
+            "researcher": [],
+            "data_quality": ["researcher"],
+            "factor_analyst": ["researcher"],
+            "strategist": ["data_quality", "factor_analyst"],
+            "portfolio_construction": ["strategist"],
+            "risk_controller": ["portfolio_construction"],
+            "attribution_analyst": ["risk_controller"],
+            "anti_overfit_analyst": ["attribution_analyst"],
+            "backtest_diagnostics": ["anti_overfit_analyst"],
         }
 
         validate_dag(adj)
@@ -66,7 +68,8 @@ class TestWorkflowE2E:
         reg = AgentRegistry()
         reg.register(StubExecutor("a"))
         reg.register(FailingExecutor("b"))
-        adj = {"a": ["b"]}
+        # deps convention: b depends on a
+        adj = {"a": [], "b": ["a"]}
         config = ControllerConfig(max_retries=1, retry_delay=0.0)
         ctrl = WorkflowController(reg, adj, config)
 
@@ -95,15 +98,17 @@ class TestWorkflowE2E:
         assert result.valid is False
 
     def test_dag_layers_computation(self):
+        # deps convention: {node: [upstream_deps]}
         adj = {
-            "researcher": ["data_quality", "factor_analyst"],
-            "data_quality": ["strategist"],
-            "factor_analyst": ["strategist"],
-            "strategist": ["portfolio_construction"],
-            "portfolio_construction": ["risk_controller"],
-            "risk_controller": ["attribution_analyst"],
-            "attribution_analyst": ["anti_overfit_analyst"],
-            "anti_overfit_analyst": ["backtest_diagnostics"],
+            "researcher": [],
+            "data_quality": ["researcher"],
+            "factor_analyst": ["researcher"],
+            "strategist": ["data_quality", "factor_analyst"],
+            "portfolio_construction": ["strategist"],
+            "risk_controller": ["portfolio_construction"],
+            "attribution_analyst": ["risk_controller"],
+            "anti_overfit_analyst": ["attribution_analyst"],
+            "backtest_diagnostics": ["anti_overfit_analyst"],
         }
         layers = topological_layers(adj)
         assert layers[0] == ["researcher"]

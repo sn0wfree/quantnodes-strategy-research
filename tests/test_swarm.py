@@ -14,6 +14,7 @@ from strategy_research.core.swarm.runtime import (
     SwarmResult,
     SwarmRuntime,
 )
+from strategy_research.core.workflow.dag import topological_layers
 from strategy_research.core.workflow.types import AgentCall, AgentStatus
 
 
@@ -145,25 +146,22 @@ class TestSwarmRuntime:
         assert not ok
 
     def test_topological_layers(self):
-        runtime = SwarmRuntime()
         dag = {
             "a": [],
             "b": ["a"],
             "c": ["a"],
             "d": ["b", "c"],
         }
-        layers = runtime._topological_layers(dag)
+        layers = topological_layers(dag)
         assert len(layers) == 3
         assert layers[0] == ["a"]
         assert set(layers[1]) == {"b", "c"}
         assert layers[2] == ["d"]
 
     def test_topological_layers_cycle(self):
-        runtime = SwarmRuntime()
         dag = {"a": ["b"], "b": ["a"]}
-        layers = runtime._topological_layers(dag)
-        # Cycle detection: remaining nodes added as single layer
-        assert len(layers) == 1
+        with pytest.raises(ValueError, match="cycle"):
+            topological_layers(dag)
 
     def test_gather_upstream(self):
         runtime = SwarmRuntime()

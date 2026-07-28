@@ -60,20 +60,23 @@ class TestRoundExecution:
 class TestWorkflowController:
     def test_build_agent_chain(self):
         reg = AgentRegistry()
-        adj = {"a": ["b"], "b": ["c"]}
+        # deps convention: b depends on a, c depends on b
+        adj = {"a": [], "b": ["a"], "c": ["b"]}
         ctrl = WorkflowController(reg, adj)
         chain = ctrl.build_agent_chain()
         assert chain == ["a", "b", "c"]
 
     def test_layers(self):
         reg = AgentRegistry()
-        adj = {"a": ["c"], "b": ["c"]}
+        # deps convention: c depends on both a and b
+        adj = {"a": [], "b": [], "c": ["a", "b"]}
         ctrl = WorkflowController(reg, adj)
         assert ctrl.layers == [["a", "b"], ["c"]]
 
     def test_execute_round_skip_unregistered(self):
         reg = AgentRegistry()
-        adj = {"a": ["b"]}
+        # deps convention: b depends on a
+        adj = {"a": [], "b": ["a"]}
         ctrl = WorkflowController(reg, adj)
         result = ctrl.execute_round(1, "test prompt")
         assert len(result.executions) == 2
@@ -83,7 +86,8 @@ class TestWorkflowController:
         reg = AgentRegistry()
         reg.register(DummyAgent("a"))
         reg.register(DummyAgent("b"))
-        adj = {"a": ["b"]}
+        # deps convention: b depends on a
+        adj = {"a": [], "b": ["a"]}
         ctrl = WorkflowController(reg, adj)
         result = ctrl.execute_round(1, "test prompt")
         assert len(result.executions) == 2
@@ -94,7 +98,8 @@ class TestWorkflowController:
         reg = AgentRegistry()
         reg.register(DummyAgent("a"))
         reg.register(DummyAgent("b", raise_error=True))
-        adj = {"a": ["b"]}
+        # deps convention: b depends on a
+        adj = {"a": [], "b": ["a"]}
         config = ControllerConfig(max_retries=2, retry_delay=0.01)
         ctrl = WorkflowController(reg, adj, config)
         result = ctrl.execute_round(1, "test prompt")
@@ -113,7 +118,8 @@ class TestWorkflowController:
         reg = AgentRegistry()
         reg.register(DummyAgent("a"))
         reg.register(DummyAgent("b"))
-        adj = {"a": ["b"]}
+        # deps convention: b depends on a
+        adj = {"a": [], "b": ["a"]}
         ctrl = WorkflowController(reg, adj)
         result = ctrl.execute_round(1, "prompt")
         b_ctx = result.executions[1].call.context

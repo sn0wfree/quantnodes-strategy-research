@@ -143,8 +143,9 @@ def render_dag(
             next_layer = layers[layer_idx + 1]
             edge_parts = []
             for node in layer:
-                targets = [t for t in dag.get(node, []) if t in next_layer]
-                if targets:
+                # Find nodes in the next layer that depend on this node
+                dependents = [n for n in next_layer if node in dag.get(n, [])]
+                if dependents:
                     edge_parts.append(f"{_EDGE_HORIZ * 3}{_EDGE_ARROW}")
             if edge_parts:
                 lines.append("  " + " ".join(edge_parts))

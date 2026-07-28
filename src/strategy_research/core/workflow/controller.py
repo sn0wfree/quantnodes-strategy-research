@@ -134,11 +134,8 @@ class WorkflowController:
         return ctx
 
     def _get_upstream_agents(self, agent_name: str) -> list[str]:
-        upstream: list[str] = []
-        for src, targets in self._adj.items():
-            if agent_name in targets:
-                upstream.append(src)
-        return upstream
+        """Return upstream dependencies of agent_name from the DAG."""
+        return list(self._adj.get(agent_name, []))
 
     def _execute_agent(
         self,

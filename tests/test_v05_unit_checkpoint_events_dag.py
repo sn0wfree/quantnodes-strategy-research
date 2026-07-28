@@ -23,7 +23,7 @@ from strategy_research.core.goal.event_bus import (
     GoalPanelObserver,
     MetricsObserver,
 )
-from strategy_research.core.workflow.dag import validate_dag, topological_layers
+from strategy_research.core.workflow.dag import validate_dag, topological_layers, find_downstream, find_upstream
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -365,8 +365,8 @@ class TestValidateDag:
 
 
 class TestTopologicalLayers:
-    """topological_layers treats adj as {src: [targets]} (edges src->target).
-    Nodes with no incoming edges (in_degree=0) come first."""
+    """topological_layers uses deps convention: {node: [upstream_deps]}.
+    Nodes with no deps (in_degree=0) execute first."""
 
     def test_empty(self):
         assert topological_layers({}) == []
@@ -376,29 +376,25 @@ class TestTopologicalLayers:
         assert layers == [["A"]]
 
     def test_chain(self):
-        # A->B->C: A has in_degree 0, B has 1, C has 1
-        # Wait: adj = {A: [], B: [A], C: [B]}
-        # Edges: B->A, C->B. So in_degree: A=1, B=1, C=0
-        # Layers: [C], [B], [A]
+        # deps: B depends on A, C depends on B
+        # in_degree: A=0, B=1, C=1 → layers: [A], [B], [C]
         layers = topological_layers({"A": [], "B": ["A"], "C": ["B"]})
-        assert layers == [["C"], ["B"], ["A"]]
+        assert layers == [["A"], ["B"], ["C"]]
 
     def test_diamond(self):
-        # adj = {A: [], B: [A], C: [A], D: [B, C]}
-        # Edges: B->A, C->A, D->B, D->C. in_degree: A=2, B=1, C=1, D=0
-        # Layers: [D], [B, C], [A]
+        # deps: B depends on A, C depends on A, D depends on B and C
+        # in_degree: A=0, B=1, C=1, D=2 → layers: [A], [B,C], [D]
         layers = topological_layers({"A": [], "B": ["A"], "C": ["A"], "D": ["B", "C"]})
-        assert layers[0] == ["D"]
+        assert layers[0] == ["A"]
         assert set(layers[1]) == {"B", "C"}
-        assert layers[2] == ["A"]
+        assert layers[2] == ["D"]
 
     def test_multiple_roots(self):
-        # adj = {A: [], B: [], C: [A, B]}
-        # Edges: C->A, C->B. in_degree: A=1, B=1, C=0
-        # Layers: [C], [A, B]
+        # deps: C depends on A and B, A and B have no deps
+        # in_degree: A=0, B=0, C=2 → layers: [A,B], [C]
         layers = topological_layers({"A": [], "B": [], "C": ["A", "B"]})
-        assert layers[0] == ["C"]
-        assert set(layers[1]) == {"A", "B"}
+        assert set(layers[0]) == {"A", "B"}
+        assert layers[1] == ["C"]
 
     def test_layers_are_sorted(self):
         layers = topological_layers({"Z": [], "A": [], "M": []})
@@ -409,12 +405,107 @@ class TestTopologicalLayers:
         assert layers[0] == ["A", "B", "C"]
 
     def test_wide_dag(self):
-        # adj = {root: [], child_0: [root], ...}
-        # Edges: child_i -> root. in_degree: root=10, child_i=0
-        # Layers: [child_0..9], [root]
+        # deps: all children depend on root
+        # in_degree: root=0, child_i=1 → layers: [root], [child_0..9]
         dag = {"root": []}
         for i in range(10):
             dag[f"child_{i}"] = ["root"]
         layers = topological_layers(dag)
-        assert len(layers[0]) == 10
-        assert layers[1] == ["root"]
+        assert layers[0] == ["root"]
+        assert len(layers[1]) == 10
+
+    def test_cycle_raises(self):
+        with pytest.raises(ValueError, match="cycle"):
+            topological_layers({"A": ["B"], "B": ["A"]})
+
+    def test_self_cycle_raises(self):
+        with pytest.raises(ValueError, match="cycle"):
+            topological_layers({"A": ["A"]})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# find_downstream
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFindDownstream:
+    """find_downstream finds all nodes that depend on a given node."""
+
+    def test_single_child(self):
+        dag = {"A": [], "B": ["A"]}
+        assert find_downstream(dag, "A") == ["B"]
+
+    def test_diamond(self):
+        dag = {"A": [], "B": ["A"], "C": ["A"], "D": ["B", "C"]}
+        assert find_downstream(dag, "A") == ["B", "C", "D"]
+
+    def test_chain(self):
+        dag = {"A": [], "B": ["A"], "C": ["B"]}
+        assert find_downstream(dag, "A") == ["B", "C"]
+
+    def test_leaf_node(self):
+        dag = {"A": [], "B": ["A"]}
+        assert find_downstream(dag, "B") == []
+
+    def test_no_deps(self):
+        dag = {"A": [], "B": []}
+        assert find_downstream(dag, "A") == []
+
+    def test_partial_subtree(self):
+        dag = {"A": [], "B": ["A"], "C": ["B"], "D": []}
+        assert find_downstream(dag, "A") == ["B", "C"]
+
+    def test_wide_dag(self):
+        dag = {"root": []}
+        for i in range(5):
+            dag[f"child_{i}"] = ["root"]
+        result = find_downstream(dag, "root")
+        assert result == [f"child_{i}" for i in range(5)]
+
+    def test_result_sorted(self):
+        dag = {"A": [], "Z": ["A"], "M": ["A"], "B": ["A"]}
+        assert find_downstream(dag, "A") == ["B", "M", "Z"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# find_upstream
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFindUpstream:
+    """find_upstream finds all nodes that a given node depends on."""
+
+    def test_single_parent(self):
+        dag = {"A": [], "B": ["A"]}
+        assert find_upstream(dag, "B") == ["A"]
+
+    def test_diamond(self):
+        dag = {"A": [], "B": ["A"], "C": ["A"], "D": ["B", "C"]}
+        assert find_upstream(dag, "D") == ["A", "B", "C"]
+
+    def test_chain(self):
+        dag = {"A": [], "B": ["A"], "C": ["B"]}
+        assert find_upstream(dag, "C") == ["A", "B"]
+
+    def test_root_node(self):
+        dag = {"A": [], "B": ["A"]}
+        assert find_upstream(dag, "A") == []
+
+    def test_no_deps(self):
+        dag = {"A": [], "B": []}
+        assert find_upstream(dag, "A") == []
+
+    def test_partial_chain(self):
+        dag = {"A": [], "B": ["A"], "C": ["B"], "D": []}
+        assert find_upstream(dag, "C") == ["A", "B"]
+
+    def test_wide_dag(self):
+        dag = {"root": []}
+        for i in range(5):
+            dag[f"child_{i}"] = ["root"]
+        result = find_upstream(dag, "child_3")
+        assert result == ["root"]
+
+    def test_result_sorted(self):
+        dag = {"A": [], "Z": [], "M": [], "target": ["Z", "M", "A"]}
+        assert find_upstream(dag, "target") == ["A", "M", "Z"]

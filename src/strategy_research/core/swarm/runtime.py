@@ -22,6 +22,7 @@ from typing import Any
 
 from ..workflow.agents import AgentRegistry
 from ..workflow.controller import WorkflowController
+from ..workflow.dag import topological_layers
 from ..workflow.grounding import GroundingProvider
 from ..workflow.types import AgentCall, AgentStatus, SwarmHook
 
@@ -144,7 +145,7 @@ class SwarmRuntime:
         t0 = time.perf_counter()
 
         try:
-            layers = self._topological_layers(preset.dag)
+            layers = topological_layers(preset.dag)
 
             for layer_idx, layer in enumerate(layers):
                 if run_id not in self._active_runs:
@@ -345,29 +346,5 @@ class SwarmRuntime:
                 upstream[uid] = r.output
         return upstream
 
-    def _topological_layers(self, dag: dict[str, list[str]]) -> list[list[str]]:
-        """Split DAG into execution layers via topological sort."""
-        in_degree: dict[str, int] = {node: 0 for node in dag}
-        for node, deps in dag.items():
-            for dep in deps:
-                if dep not in in_degree:
-                    in_degree[dep] = 0
-                in_degree[node] = len(deps)
+    
 
-        layers: list[list[str]] = []
-        remaining = set(dag.keys())
-
-        while remaining:
-            layer = [n for n in remaining if in_degree.get(n, 0) == 0]
-            if not layer:
-                layers.append(list(remaining))
-                break
-
-            layers.append(sorted(layer))
-            for n in layer:
-                remaining.discard(n)
-                for node, deps in dag.items():
-                    if n in deps:
-                        in_degree[node] = max(0, in_degree[node] - 1)
-
-        return layers

@@ -159,21 +159,21 @@ class TestSwarmRuntimeGatherUpstream:
 
 class TestSwarmRuntimeTopologicalLayers:
     def test_empty(self):
-        rt = SwarmRuntime()
-        assert rt._topological_layers({}) == []
+        from strategy_research.core.workflow.dag import topological_layers
+        assert topological_layers({}) == []
 
     def test_single(self):
-        rt = SwarmRuntime()
-        assert rt._topological_layers({"a": []}) == [["a"]]
+        from strategy_research.core.workflow.dag import topological_layers
+        assert topological_layers({"a": []}) == [["a"]]
 
     def test_chain(self):
-        rt = SwarmRuntime()
-        layers = rt._topological_layers({"a": [], "b": ["a"], "c": ["b"]})
+        from strategy_research.core.workflow.dag import topological_layers
+        layers = topological_layers({"a": [], "b": ["a"], "c": ["b"]})
         assert layers == [["a"], ["b"], ["c"]]
 
     def test_diamond(self):
-        rt = SwarmRuntime()
-        layers = rt._topological_layers(
+        from strategy_research.core.workflow.dag import topological_layers
+        layers = topological_layers(
             {"a": [], "b": ["a"], "c": ["a"], "d": ["b", "c"]}
         )
         assert layers[0] == ["a"]
