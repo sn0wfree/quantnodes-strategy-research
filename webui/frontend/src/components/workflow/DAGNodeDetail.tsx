@@ -1,0 +1,116 @@
+import { X, Bot, Clock, Wrench, FileText, Zap } from 'lucide-react'
+import type { DAGNodeData } from './DAGNode'
+
+interface DAGNodeDetailProps {
+  node: DAGNodeData & { id: string }
+  onClose: () => void
+}
+
+export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
+  return (
+    <div className="absolute right-0 top-0 bottom-0 w-[360px] bg-slate-900 border-l border-slate-800 z-20 flex flex-col shadow-2xl">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-2">
+          {node.agentColor && (
+            <div
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: node.agentColor }}
+            />
+          )}
+          <h3 className="text-sm font-medium text-slate-100">{node.label}</h3>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Status */}
+        <DetailSection title="状态" icon={<Zap className="h-3.5 w-3.5" />}>
+          <StatusBadge status={node.status} />
+        </DetailSection>
+
+        {/* Agent */}
+        {node.agentName && (
+          <DetailSection title="Agent" icon={<Bot className="h-3.5 w-3.5" />}>
+            <span className="text-xs text-slate-300">{node.agentName}</span>
+          </DetailSection>
+        )}
+
+        {/* Type */}
+        {node.type && (
+          <DetailSection title="类型" icon={<Wrench className="h-3.5 w-3.5" />}>
+            <span className="text-xs text-slate-300 font-mono">{node.type}</span>
+          </DetailSection>
+        )}
+
+        {/* Prompt / Description (from extra data) */}
+        {(node as any).prompt && (
+          <DetailSection title="Prompt" icon={<FileText className="h-3.5 w-3.5" />}>
+            <pre className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-800/50 rounded p-2 max-h-40 overflow-y-auto">
+              {(node as any).prompt}
+            </pre>
+          </DetailSection>
+        )}
+
+        {/* Conditions */}
+        {(node as any).conditions && (
+          <DetailSection title="条件" icon={<Clock className="h-3.5 w-3.5" />}>
+            <span className="text-xs text-slate-300">
+              {JSON.stringify((node as any).conditions)}
+            </span>
+          </DetailSection>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DetailSection({
+  title,
+  icon,
+  children,
+}: {
+  title: string
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-slate-500">{icon}</span>
+        <span className="text-[10px] uppercase tracking-wider text-slate-500">{title}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const config = {
+    pending: 'bg-slate-500/20 text-slate-400',
+    running: 'bg-blue-500/20 text-blue-400',
+    completed: 'bg-emerald-500/20 text-emerald-400',
+    failed: 'bg-red-500/20 text-red-400',
+    skipped: 'bg-slate-600/20 text-slate-500',
+  }[status] || 'bg-slate-500/20 text-slate-400'
+
+  const label = {
+    pending: '等待中',
+    running: '运行中',
+    completed: '已完成',
+    failed: '失败',
+    skipped: '已跳过',
+  }[status] || status
+
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${config}`}>
+      {label}
+    </span>
+  )
+}

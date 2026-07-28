@@ -1,9 +1,10 @@
 import * as Tabs from '@radix-ui/react-tabs'
 import { useLayoutStore } from '../../stores/layout'
+import { useWorkflowStore } from '../../stores/workflow'
 import { Workflow, Target, Bot } from 'lucide-react'
 import { AgentList } from '../agent/AgentList'
 import { GoalTab } from '../goal/GoalTab'
-import { WorkflowDAGPlaceholder } from '../workflow/WorkflowDAGPlaceholder'
+import { WorkflowDAG } from '../workflow/WorkflowDAG'
 
 const TABS = [
   { value: 'dag', label: 'DAG', icon: Workflow },
@@ -15,6 +16,14 @@ export function RightPanel() {
   const visible = useLayoutStore((s) => s.rightPanelVisible)
   const tab = useLayoutStore((s) => s.rightPanelTab)
   const setTab = useLayoutStore((s) => s.setRightPanelTab)
+
+  // Workflow state
+  const dagNodes = useWorkflowStore((s) => s.dagNodes)
+  const dagEdges = useWorkflowStore((s) => s.dagEdges)
+  const executionProgress = useWorkflowStore((s) => s.executionProgress)
+  const presets = useWorkflowStore((s) => s.presets)
+  const currentPresetId = useWorkflowStore((s) => s.currentPresetId)
+  const currentPreset = presets.find((p) => p.id === currentPresetId)
 
   if (!visible) return null
 
@@ -38,8 +47,18 @@ export function RightPanel() {
           })}
         </Tabs.List>
 
-        <Tabs.Content value="dag" className="flex-1 overflow-y-auto p-4">
-          <WorkflowDAGPlaceholder />
+        <Tabs.Content value="dag" className="flex-1 overflow-hidden">
+          <WorkflowDAG
+            workflowName={currentPreset?.name || '未命名工作流'}
+            nodes={dagNodes.map((n) => ({
+              ...n,
+              agentColor: n.status === 'running' ? '#3b82f6' : undefined,
+            }))}
+            edges={dagEdges}
+            progress={executionProgress}
+            completed={dagNodes.filter((n) => n.status === 'completed').length}
+            total={dagNodes.length}
+          />
         </Tabs.Content>
         <Tabs.Content value="goal" className="flex-1 overflow-y-auto p-4">
           <GoalTab goal={null} />
