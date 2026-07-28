@@ -49,12 +49,7 @@ def render_hint_strip(width: int = 80) -> str:
     """
     tokens = brand_tokens()
     return render_hint_bar(
-        left=(
-            f"[{tokens.primary}]f1[/] help · "
-            f"[{tokens.primary}]ctrl+c[/] halt · "
-            f"[{tokens.primary}]ctrl+d[/] quit · "
-            f"[{tokens.primary}]ctrl+shift+c[/] copy"
-        ),
+        left=f"[{tokens.primary}]f1[/] help · [{tokens.primary}]ctrl+c[/] halt · [{tokens.primary}]ctrl+d[/] quit",
         right=f"[muted]vibe-trading parity · QuantNodes-Research v0.4.2[/muted]",
         width=width,
     )

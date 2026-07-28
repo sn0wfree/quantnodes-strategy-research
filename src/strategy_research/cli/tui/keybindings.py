@@ -25,7 +25,6 @@ TUI_BINDINGS: Tuple[Binding, ...] = (
     Binding("ctrl+2", "toggle_tools_rail", "Tools", show=True),
     Binding("ctrl+e", "toggle_fold", "Fold", show=True),
     Binding("ctrl+m", "toggle_mode", "Mode", show=True),
-    Binding("ctrl+shift+c", "screen.copy_text", "Copy", show=True),
 )
 
 

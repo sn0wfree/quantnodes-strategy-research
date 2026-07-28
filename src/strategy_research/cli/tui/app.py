@@ -500,7 +500,24 @@ class ResearchApp(App):
     # ------------------------------------------------------------------ keybindings
 
     def action_halt(self) -> None:
-        """Ctrl+C — trip the kill switch."""
+        """Ctrl+C — copy selected text, or trip the kill switch.
+
+        Smart behaviour: if the user has text selected in the
+        TranscriptView, Ctrl+C copies it to the clipboard (via OSC 52)
+        and clears the selection.  Only when *nothing* is selected does
+        it trigger the kill switch — matching standard terminal / editor
+        muscle memory.
+        """
+        try:
+            selected = self.screen.get_selected_text()
+        except Exception:
+            selected = None
+        if selected:
+            self.copy_to_clipboard(selected)
+            self.screen.clear_selection()
+            n = len(selected)
+            self.write_transcript(f"[dim]已复制 {n} 字符[/dim]")
+            return
         if self.session is None:
             return
         self.session.trip_halt(reason="ctrl+c")
