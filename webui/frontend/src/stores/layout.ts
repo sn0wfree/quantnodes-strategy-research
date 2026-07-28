@@ -30,5 +30,5 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
       workMode: mode,
       rightPanelVisible: mode === 'monitor',
     }),
-  setLeftRatio: (r) => set({ leftRatio: r }),
+  setLeftRatio: (r) => set({ leftRatio: Math.max(0.2, Math.min(0.8, r)) }),
 }))

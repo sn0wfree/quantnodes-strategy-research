@@ -663,6 +663,66 @@ $ quantnodes-research session list
 
 ---
 
+## 🖥️ Web UI（v0.6.0 新增）
+
+基于 React 19 + TypeScript + Vite 5 的 Web 界面，提供与 TUI 等价的 LLM 流式对话能力，外加 DAG 可视化、Agent 监控、Goal 跟踪等。
+
+### 启动
+
+```bash
+# 终端 1：构建前端 + 启动后端（一体化）
+cd webui/frontend
+npm install --legacy-peer-deps
+npm run build                    # 输出到 webui/static/
+cd ../..
+pip install -e ".[api]"
+uvicorn strategy_research.api.app:create_app --factory --host 0.0.0.0 --port 8000
+
+# 浏览器访问 http://localhost:8000
+```
+
+### 开发模式
+
+```bash
+# 终端 1：后端
+uvicorn strategy_research.api.app:create_app --factory --port 8000
+
+# 终端 2：前端（带热更新 + API 代理）
+cd webui/frontend
+npm run dev                      # http://localhost:5173，自动代理 /api → :8000
+```
+
+### 测试
+
+```bash
+# 后端 API 测试（22 个）
+pytest tests/test_webui_api.py tests/test_webui_e2e.py -v
+
+# 前端组件测试（27 个）
+cd webui/frontend
+npm test
+```
+
+### 环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `OPENAI_API_KEY` | 必填 | LLM API key（与 TUI 共享） |
+| `OPENAI_BASE_URL` | - | LLM API base URL |
+| `OPENAI_MODEL` | - | 默认模型名称 |
+| `CORS_ORIGINS` | `*` | 允许的 CORS 来源（逗号分隔） |
+| `STATIC_DIR` | `webui/static/` | 静态文件目录 |
+| `JWT_SECRET` | - | JWT 签名密钥（生产环境必填） |
+
+### 架构
+
+- **前端**：React 19 + Vite 5 + Tailwind CSS 3 + Radix UI + Zustand + React Flow + Recharts
+- **后端**：FastAPI + uvicorn + WebSocket（已接入真实 `AgentLoop`）
+- **协议**：REST API + SSE（Server-Sent Events）
+- **认证**：JWT + bcrypt（内存用户存储，可扩展到 SQLite）
+
+---
+
 ## 开发
 
 ### 安装开发依赖
@@ -682,6 +742,7 @@ pytest tests/test_preflight.py -v         # preflight 测试
 pytest tests/test_cli_init.py -v           # init 测试
 pytest tests/test_workflow_e2e.py -v       # Workflow e2e 测试
 pytest tests/test_session.py -v            # Session 测试
+pytest tests/test_webui_api.py tests/test_webui_e2e.py -v  # Web UI API 测试
 
 # 性能测试
 pytest tests/test_session_triggers.py -v   # 触发器同步性能
@@ -695,6 +756,16 @@ ruff check .
 
 # 类型检查（可选）
 mypy src/strategy_research/
+```
+
+### 前端开发
+
+```bash
+cd webui/frontend
+npm run dev         # 开发模式（端口 5173）
+npm run build       # 生产构建（输出 webui/static/）
+npm test            # 运行 Vitest 测试
+npm run test:coverage  # 覆盖率报告
 ```
 
 ### 测试覆盖（5,536+ 个测试）

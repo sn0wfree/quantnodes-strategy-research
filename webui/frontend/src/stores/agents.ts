@@ -56,11 +56,13 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
     set((state) => {
       const agent = state.agents.get(id)
       if (agent) updater(agent)
+      return state
     }),
   addAgent: (agent) =>
     set((state) => {
       const idx = state.agents.size
       agent.color = AGENT_COLORS[idx % AGENT_COLORS.length]
       state.agents.set(agent.id, agent)
+      return state
     }),
 }))

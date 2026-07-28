@@ -18,13 +18,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     SKIP_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
-    PUBLIC_PREFIXES = ["/api/auth/", "/api/chat/"]
+    PUBLIC_PREFIXES = ["/api/auth/", "/api/chat/", "/assets/"]
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
         # Skip auth for health/docs
         if path in self.SKIP_PATHS or path.startswith("/docs"):
+            return await call_next(request)
+
+        # Skip auth for static files (frontend assets)
+        # Static files have extensions like .js, .css, .png, .svg, .ico, .json, .html, .woff, .woff2, .ttf
+        if any(path.endswith(ext) for ext in [
+            ".js", ".css", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".json",
+            ".html", ".woff", ".woff2", ".ttf", ".eot", ".map",
+        ]):
             return await call_next(request)
 
         # Skip auth for public endpoints
@@ -34,6 +42,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 user_id = self._extract_user_id(request)
                 request.state.user_id = user_id or "anonymous"
                 return await call_next(request)
+
+        # Root path "/" serves the SPA index.html — skip auth
+        if path == "/" or (not path.startswith("/api/") and not path.startswith("/docs")):
+            return await call_next(request)
 
         # Extract token from header or query
         token = self._extract_token(request)
