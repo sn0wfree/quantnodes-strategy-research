@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Workflows - Strategy Research{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 20px;">Workflow Presets</h1>
+
+<div class="card">
+    <h2>Available Workflows</h2>
+    {% if workflows %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for wf in workflows %}
+            <tr>
+                <td><strong>{{ wf.name }}</strong></td>
+                <td>{{ wf.description[:80] }}{% if wf.description|length > 80 %}...{% endif %}</td>
+                <td>
+                    <a href="/webui/workflows/{{ wf.name }}" class="btn btn-primary">View & Run</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No workflows found.</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-28
+
+### Added
+- **8 prompt templates** for workflow agents:
+  `market_scanner`, `regime_classifier`, `report_writer`,
+  `position_auditor`, `stress_tester`, `icarus_review`,
+  `benchmark_compare`, `concentration_check`.
+- `tests/test_goal_workflow_prompts.py` — 27 tests for prompt template
+  loading, content validation, and PromptBuilder integration.
+
+## [0.5.5] - 2026-07-28
+
+### Added
+- **ASCII DAG visual editor** (`dag_renderer.py`): renders workflow DAGs
+  with status icons (✓ ⏳ ✗ ○), selection markers, and progress display.
+- **`DAGView` TUI widget** (`dag_view.py`): Textual widget with j/k/h/l
+  keyboard navigation, status updates, and close action.
+- **`save_goal_workflow()`**: atomic YAML write with optional `.bak`
+  backup and DAG validation.
+- `tests/test_dag_renderer.py` — 22 tests for render_dag + save_goal_workflow.
+- `tests/test_dag_view_widget.py` — 8 tests for DAGView rendering + navigation.
+
+## [0.5.4] - 2026-07-28
+
+### Added
+- **4 new workflow presets**: `goal_market_analysis`, `goal_risk_assessment`,
+  `goal_strategy_review`, `goal_portfolio_review`.
+- **Cookbook** (`docs/goal-workflow-cookbook.md`): 5-minute tutorial for
+  custom workflow creation.
+- **Demo script** (`examples/goal_workflow_demo.py`): Python API usage example.
+- `tests/test_goal_workflow_v054.py` — 43 tests for presets + cookbook + demo.
+
+## [0.5.3] - 2026-07-28
+
+### Fixed (P1 — 让自定义真正生效)
+- **P1.1**: `_build_controller` now populates `AgentRegistry` from YAML agents.
+- **P1.2**: `should_stop()` checks `runner._state.cancelled` so
+  `pause(immediate=True)` actually interrupts DAG execution.
+- **P1.3**: Checkpoint saves/restores real `layer_results` (not empty dict).
+- **P1.4**: Expression DSL supports `and`/`or`/`not` boolean logic
+  with correct precedence.
+- **P1.5**: SwarmRuntime uses `PromptBuilder` for structured prompts.
+- **P1.6**: Dead params (`agent_runner`, `runner_kwargs`) emit
+  `DeprecationWarning` (to be removed in v0.6.0).
+- **P1.7**: `workflow_id` persisted in goal row on `start()`.
+- `tests/test_goal_workflow_v053.py` — 17 tests for all P1 fixes.
+
+## [0.5.2] - 2026-07-28
+
+### Added
+- **`WorkflowWorker`**: async wrapper for `GoalWorkflowRunner.start()`
+  with state transitions (idle → running → completed/failed).
+- **Ctrl+G pause**: pressing Ctrl+G pauses active workflow before
+  falling back to continuation toggle.
+- **GoalPanel subscription**: `GoalPanelObserver` receives workflow events
+  and updates the TUI goal panel in real-time.
+- `tests/test_goal_workflow_v052.py` — 16 tests for worker + TUI integration.
+
+## [0.5.1] - 2026-07-28
+
+### Added
+- **`/goal start <objective> --workflow <name>`**: loads YAML workflow preset.
+- **`/goal workflows [list|show|path]`**: enumerate/display workflow presets.
+- **`/goal checkpoint [save|list|resume|delete]`**: crash recovery for workflows.
+- `tests/test_goal_workflow_v051.py` — 22 tests for CLI subcommands.
+
+### Fixed (DAG framework)
+- **Unified DAG convention** to `{node: [upstream_deps]}` across all modules.
+- **`dag.py`**: `topological_layers` + `validate_dag` now use deps convention.
+- **`dag_renderer.py`**: edge-drawing logic corrected for deps convention.
+- **`SwarmRuntime._topological_layers` removed**: unified with `dag.py` version.
+- **`find_downstream(adj, node)`**: BFS to find all nodes depending on a node.
+- **`find_upstream(adj, node)`**: BFS to find all nodes a node depends on.
+- **`ExpressionEvaluator`**: `not` operator now has correct precedence
+  (higher than `and`/`or`).
+- **`AgentLoop` tests**: fixed hang caused by `stream_mode=True` default
+  without mocking `client.stream`.
+
 ## [0.5.0] - 2026-07-24
 
 ### Changed

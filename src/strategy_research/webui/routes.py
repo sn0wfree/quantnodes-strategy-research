@@ -209,4 +209,95 @@ async def memory_search_htmx(request: Request, q: str = ""):
     return HTMLResponse(content=html)
 
 
+# ── Workflow pages ──────────────────────────────────────────────
+
+
+@router.get("/workflows", response_class=HTMLResponse)
+async def workflows_list(request: Request):
+    """Workflows list page — lists available workflow presets."""
+    from ..core.goal.workflow_config import list_goal_workflows
+    workflows = list_goal_workflows()
+    return templates.TemplateResponse("goals/workflows.html", {
+        "request": request,
+        "workflows": workflows,
+    })
+
+
+@router.get("/workflows/{workflow_name}", response_class=HTMLResponse)
+async def workflow_detail(request: Request, workflow_name: str):
+    """Workflow detail page — shows DAG + start form."""
+    from ..core.goal.workflow_config import load_goal_workflow
+    try:
+        config = load_goal_workflow(workflow_name)
+    except FileNotFoundError:
+        return HTMLResponse(content=f"<h1>Workflow '{workflow_name}' not found</h1>", status_code=404)
+
+    dag_data = json.dumps(config.dag)
+    agents = [{"id": a.id, "prompt_file": a.prompt_file} for a in config.agents]
+
+    return templates.TemplateResponse("goals/workflow_detail.html", {
+        "request": request,
+        "workflow_name": workflow_name,
+        "description": config.description,
+        "dag_data": dag_data,
+        "agents": agents,
+    })
+
+
+@router.get("/workflows/{workflow_name}/events")
+async def workflow_events_sse(request: Request, workflow_name: str, goal_id: str):
+    """SSE endpoint for workflow progress (proxies to API)."""
+    from ..api.routers.workflow import _active_runners
+    import asyncio
+    import json
+
+    entry = _active_runners.get(goal_id)
+    if entry is None:
+        return HTMLResponse(content="Workflow not found", status_code=404)
+
+    runner = entry["runner"]
+
+    async def event_generator():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        class SSEObserver:
+            def on_event(self, event: str, data: dict):
+                try:
+                    queue.put_nowait((event, data))
+                except asyncio.QueueFull:
+                    pass
+
+        observer = SSEObserver()
+        runner.subscribe(observer)
+
+        try:
+            progress = runner.get_progress()
+            yield f"data: {json.dumps({'event': 'progress', 'data': progress})}\n\n"
+
+            while True:
+                try:
+                    event, data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    payload = json.dumps({
+                        "event": event,
+                        "data": {k: str(v) for k, v in data.items()} if isinstance(data, dict) else str(data),
+                    })
+                    yield f"data: {payload}\n\n"
+                    if event in ("workflow_completed", "workflow_failed"):
+                        break
+                except asyncio.TimeoutError:
+                    progress = runner.get_progress()
+                    yield f"data: {json.dumps({'event': 'heartbeat', 'data': progress})}\n\n"
+                    if progress.get("hook_completed") or progress.get("status") in ("completed", "error"):
+                        break
+        finally:
+            runner.unsubscribe(observer)
+
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 __all__ = ["router"]

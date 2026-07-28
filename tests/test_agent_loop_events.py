@@ -39,6 +39,7 @@ def _make_loop(sink: EventSink, *, max_iterations: int = 1) -> AgentLoop:
     memory = mock.MagicMock()
     memory.history = []
     return AgentLoop(
+        stream_mode=False,
         config=cfg,
         registry=registry,
         memory=memory,

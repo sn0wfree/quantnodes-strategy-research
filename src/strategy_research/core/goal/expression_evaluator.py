@@ -110,8 +110,7 @@ class ExpressionEvaluator:
     def evaluate(self, expression: str) -> bool:
         """Evaluate an expression string. Returns bool result.
 
-        Handles ``and``/``or``/``not`` by splitting on keywords at the
-        top level (outside quotes), then recursing.
+        Operator precedence (highest to lowest): ``not`` > ``and`` > ``or``.
 
         Raises:
             ValueError: If the expression cannot be parsed.
@@ -124,22 +123,20 @@ class ExpressionEvaluator:
         if expr.lower() in ("false", "0", ""):
             return False
 
-        # ── Try ``not <expr>`` first ──
-        if expr.lower().startswith("not "):
-            inner = expr[4:].strip()
-            return not self.evaluate(inner)
-
-        # ── Try splitting on ``or`` / ``and`` ──
-        # Split on ``or`` first (lower precedence), then ``and``.
-        # We split from the left so ``A or B and C`` becomes
-        # ``[A, B and C]`` which is correct (and binds tighter).
+        # ── Split on ``or`` first (lowest precedence) ──
         or_parts = self._split_top_level(expr, "or")
         if len(or_parts) > 1:
             return any(self.evaluate(part) for part in or_parts)
 
+        # ── Split on ``and`` (middle precedence) ──
         and_parts = self._split_top_level(expr, "and")
         if len(and_parts) > 1:
             return all(self.evaluate(part) for part in and_parts)
+
+        # ── Handle ``not`` prefix (highest precedence) ──
+        if expr.lower().startswith("not "):
+            inner = expr[4:].strip()
+            return not self.evaluate(inner)
 
         # ── Single atomic comparison ──
         return self._evaluate_atom(expr)

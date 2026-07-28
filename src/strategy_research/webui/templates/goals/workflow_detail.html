@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}{{ workflow_name }} - Strategy Research{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 8px;">{{ workflow_name }}</h1>
+<p style="color: #666; margin-bottom: 20px;">{{ description }}</p>
+
+<!-- Start Form -->
+<div class="card">
+    <h2>Start Workflow</h2>
+    <form id="workflow-form" onsubmit="startWorkflow(event)">
+        <div style="display: flex; gap: 12px; align-items: end;">
+            <div>
+                <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">Session ID</label>
+                <input type="text" id="session-id" value="web-session" class="search-box" style="width: 200px;">
+            </div>
+            <div style="flex: 1;">
+                <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">Objective</label>
+                <input type="text" id="objective" placeholder="Research objective..." class="search-box" style="width: 100%;">
+            </div>
+            <button type="submit" class="btn btn-primary" id="start-btn">Start</button>
+        </div>
+    </form>
+</div>
+
+<!-- Progress -->
+<div class="card" id="progress-card" style="display: none;">
+    <h2>Progress</h2>
+    <div id="progress-status" style="margin-bottom: 12px; font-size: 14px;"></div>
+    <div id="progress-bar-container" style="background: #eee; border-radius: 4px; height: 8px; margin-bottom: 12px;">
+        <div id="progress-bar" style="background: #1a73e8; height: 100%; border-radius: 4px; width: 0%; transition: width 0.3s;"></div>
+    </div>
+    <div id="progress-agents" style="font-size: 13px; color: #666;"></div>
+    <div id="progress-events" style="margin-top: 12px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; background: #f8f9fa; padding: 12px; border-radius: 4px;"></div>
+</div>
+
+<!-- Agents -->
+<div class="card">
+    <h2>Agents ({{ agents|length }})</h2>
+    <table>
+        <thead>
+            <tr><th>Agent ID</th><th>Prompt File</th></tr>
+        </thead>
+        <tbody>
+            {% for agent in agents %}
+            <tr>
+                <td><code>{{ agent.id }}</code></td>
+                <td>{{ agent.prompt_file }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- DAG -->
+<div class="card">
+    <h2>DAG Structure</h2>
+    <pre id="dag-display" style="background: #f8f9fa; padding: 16px; border-radius: 4px; overflow-x: auto; font-size: 13px;">{{ dag_data }}</pre>
+</div>
+
+<script>
+let eventSource = null;
+let goalId = null;
+
+async function startWorkflow(e) {
+    e.preventDefault();
+    const sessionId = document.getElementById('session-id').value;
+    const objective = document.getElementById('objective').value;
+    if (!objective) { alert('Please enter an objective'); return; }
+
+    const btn = document.getElementById('start-btn');
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+
+    try {
+        const resp = await fetch('/api/goal/workflow/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                session_id: sessionId,
+                workflow_name: '{{ workflow_name }}',
+                objective: objective,
+            }),
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            goalId = data.goal_id;
+            document.getElementById('progress-card').style.display = 'block';
+            document.getElementById('progress-status').textContent = 'Goal ID: ' + goalId;
+            startSSE();
+        } else {
+            alert('Error: ' + (data.detail || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Start';
+        }
+    } catch (err) {
+        alert('Failed to start: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Start';
+    }
+}
+
+function startSSE() {
+    if (!goalId) return;
+    eventSource = new EventSource('/api/goal/workflow/events?goal_id=' + goalId);
+    const eventsDiv = document.getElementById('progress-events');
+    const progressBar = document.getElementById('progress-bar');
+    const progressStatus = document.getElementById('progress-status');
+    const progressAgents = document.getElementById('progress-agents');
+
+    eventSource.onmessage = function(e) {
+        const msg = JSON.parse(e.data);
+        const ts = new Date().toLocaleTimeString();
+        eventsDiv.innerHTML += '<div>[' + ts + '] ' + msg.event + ': ' + JSON.stringify(msg.data).substring(0, 200) + '</div>';
+        eventsDiv.scrollTop = eventsDiv.scrollHeight;
+
+        if (msg.event === 'progress' || msg.event === 'heartbeat') {
+            const d = msg.data;
+            if (d.agents_total > 0) {
+                const pct = Math.round((d.agents_completed / d.agents_total) * 100);
+                progressBar.style.width = pct + '%';
+                progressStatus.textContent = d.status + ' (' + d.agents_completed + '/' + d.agents_total + ' agents, ' + d.evidence_count + ' evidence)';
+            }
+        }
+
+        if (msg.event === 'workflow_completed' || msg.event === 'workflow_failed') {
+            eventSource.close();
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('start-btn').textContent = 'Start';
+            progressStatus.textContent += ' — ' + msg.event;
+        }
+    };
+
+    eventSource.onerror = function() {
+        eventsDiv.innerHTML += '<div style="color: red;">[error] Connection lost</div>';
+    };
+}
+</script>
+{% endblock %}

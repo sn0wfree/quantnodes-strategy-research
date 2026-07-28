@@ -28,9 +28,10 @@ def create_app(
     app.state.hypotheses_path = hypotheses_path
 
     # Register routers
-    from .routers import goal, hypothesis, memory, run, session, validation
+    from .routers import goal, hypothesis, memory, run, session, validation, workflow
 
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
+    app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
     app.include_router(hypothesis.router, prefix="/api/hypothesis", tags=["hypothesis"])
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
     app.include_router(session.router, prefix="/api/session", tags=["session"])

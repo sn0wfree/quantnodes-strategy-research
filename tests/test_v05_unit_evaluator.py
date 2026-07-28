@@ -168,18 +168,14 @@ class TestComplexExpressions:
         assert ev.evaluate("not a.x > 0.1 and a.x > 0") is True
 
     def test_not_with_or(self):
-        # NOTE: `not` negates the entire rest of the expression (not just
-        # the next atom). This is the current v0.5 implementation.
-        # `not a.x > 10 or a.x > 3` = `not (a.x > 10 or a.x > 3)` = `not True` = False
+        # With correct precedence: (not a.x > 10) or (a.x > 3) = True or True = True
         ev = ExpressionEvaluator({"a": {"x": 5}})
-        assert ev.evaluate("not a.x > 10 or a.x > 3") is False
+        assert ev.evaluate("not a.x > 10 or a.x > 3") is True
 
-    def test_not_only_negates_following_atom_when_parenthesized(self):
+    def test_not_with_and(self):
+        # With correct precedence: (not a.x > 10) and (a.x > 3) = True and True = True
         ev = ExpressionEvaluator({"a": {"x": 5}})
-        # Workaround: use separate evaluate calls for correct precedence
-        left = ev.evaluate("not a.x > 10")  # not False = True
-        right = ev.evaluate("a.x > 3")  # True
-        assert left or right is True
+        assert ev.evaluate("not a.x > 10 and a.x > 3") is True
 
     def test_double_not(self):
         ev = ExpressionEvaluator({"a": {"x": 5}})

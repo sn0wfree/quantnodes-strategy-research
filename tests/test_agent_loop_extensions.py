@@ -70,6 +70,7 @@ class TestMicrocompact:
             # Pre-create file with long content
             (ws / "x").write_text("A" * 2000)
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -91,6 +92,7 @@ class TestMicrocompact:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -124,6 +126,7 @@ class TestContextCollapse:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -146,6 +149,7 @@ class TestContextCollapse:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -168,6 +172,7 @@ class TestContextCollapse:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -196,6 +201,7 @@ class TestHardTruncate:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -225,6 +231,7 @@ class TestHeartbeat:
             # Create trace dir
             trace_dir = ws / "trace"
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -257,6 +264,7 @@ class TestTrace:
             (ws / "strategies").mkdir()
             trace_dir = ws / "trace"
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -279,6 +287,7 @@ class TestTrace:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -300,6 +309,7 @@ class TestTrace:
             (ws / "strategies").mkdir()
             trace_dir = ws / "trace"
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -328,6 +338,7 @@ class TestTrace:
             (ws / "strategies").mkdir()
             trace_dir = ws / "trace"
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -354,6 +365,7 @@ class TestGitCommit:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -375,6 +387,7 @@ class TestGitCommit:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+                stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -411,6 +424,7 @@ class TestThresholdEdgeCases:
             ws = Path(td)
             (ws / "strategies").mkdir()
             loop = AgentLoop(
+            stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
@@ -450,6 +464,7 @@ class TestIntegration:
         trace_dir = ws / "trace"
 
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=ws,
@@ -497,6 +512,7 @@ class TestIntegration:
         (ws / "strategies").mkdir()
 
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             memory=mem,

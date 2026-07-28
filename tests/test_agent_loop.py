@@ -57,6 +57,7 @@ class TestBasicLoop:
     def test_single_iteration_stop(self, workspace):
         mock = MockLLM([text_resp("the answer")])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -76,6 +77,7 @@ class TestBasicLoop:
             text_resp("done"),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -96,6 +98,7 @@ class TestBasicLoop:
             text_resp("got both"),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -118,6 +121,7 @@ class TestMaxIterations:
             for i in range(5)
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -143,6 +147,7 @@ class TestNoProgress:
             for i in range(5)
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -162,6 +167,7 @@ class TestNoProgress:
             for i in range(5)
         ] + [text_resp("done")])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -180,6 +186,7 @@ class TestNoProgress:
             tool_resp([ToolCall(id="c2", name="list_history", arguments={})]),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -202,6 +209,7 @@ class TestErrorHandling:
             # Second call raises
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -227,6 +235,7 @@ class TestErrorHandling:
             text_resp("ok"),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -244,6 +253,7 @@ class TestErrorHandling:
             text_resp("ok"),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -279,6 +289,7 @@ class TestWorkspaceInjection:
             text_resp("done"),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=reg,
             workspace=workspace,
@@ -297,6 +308,7 @@ class TestMessagesHistory:
     def test_messages_populated(self, workspace):
         mock = MockLLM([text_resp("final")])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -315,6 +327,7 @@ class TestMessagesHistory:
             text_resp("final"),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -398,6 +411,7 @@ class TestIntegration:
             text_resp("Strategy updated with momentum_20_60 factor."),
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -418,6 +432,7 @@ class TestIntegration:
             for _ in range(20)
         ])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -437,6 +452,7 @@ class TestAllowedTools:
     def test_allowed_tools_filtering(self, workspace):
         """allowed_tools 白名单只保留指定工具"""
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -450,6 +466,7 @@ class TestAllowedTools:
     def test_allowed_tools_none_means_all(self, workspace):
         """allowed_tools=None 时全部工具保留"""
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -467,6 +484,7 @@ class TestReadonly:
     def test_readonly_filters_write_file(self, workspace):
         """readonly=True 时 write_file 被过滤"""
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -477,6 +495,7 @@ class TestReadonly:
     def test_readonly_preserves_read_tools(self, workspace):
         """readonly=True 时所有只读工具保留"""
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -491,6 +510,7 @@ class TestReadonly:
     def test_readonly_false_keeps_all(self, workspace):
         """readonly=False 时全部工具保留"""
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -507,6 +527,7 @@ class TestRunWithContext:
         """run(context=...) 把 context 拼在 task 前面"""
         mock = MockLLM([text_resp("done")])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -521,6 +542,7 @@ class TestRunWithContext:
         """不传 context 时行为不变"""
         mock = MockLLM([text_resp("done")])
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
@@ -540,6 +562,7 @@ class TestCustomSystemPrompt:
         mock = MockLLM([text_resp("done")])
         custom = "你是风险控制员。{tool_list}"
         loop = AgentLoop(
+            stream_mode=False,
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
