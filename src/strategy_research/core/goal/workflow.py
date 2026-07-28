@@ -80,6 +80,53 @@ class GoalWorkflowConfig:
     completion: CompletionConfig = field(default_factory=CompletionConfig)
     branches: list[BranchConfig] = field(default_factory=list)
 
+    def to_swarm_preset(self) -> Any:
+        """Convert to a SwarmPreset for use with SwarmRuntime (P3.3).
+
+        GoalAgentConfig → AgentCall conversion maps:
+          id → agent_name
+          prompt_file → prompt
+          tools/input_from/evidence_criterion/timeout/max_retries → context
+        """
+        from ..workflow.types import AgentCall
+        from ..swarm.runtime import SwarmPreset
+
+        agent_calls = []
+        for agent in self.agents:
+            agent_calls.append(AgentCall(
+                agent_name=agent.id,
+                prompt=agent.prompt_file,
+                context={
+                    "tools": agent.tools,
+                    "input_from": agent.input_from,
+                    "evidence_criterion": agent.evidence_criterion,
+                    "timeout": agent.timeout,
+                    "max_retries": agent.max_retries,
+                },
+            ))
+
+        return SwarmPreset(
+            name=self.name,
+            description=self.description,
+            agents=agent_calls,
+            dag=self.dag,
+            goal={
+                "default_criteria": self.goal.default_criteria,
+                "risk_tier": self.goal.risk_tier,
+            },
+            completion={
+                "mode": self.completion.mode,
+                "auto_audit": self.completion.auto_audit,
+                "require_all_evidence": self.completion.require_all_evidence,
+            },
+            branches=[
+                {"condition": b.condition, "action": b.action,
+                 "target": b.target, "reason": b.reason}
+                for b in self.branches
+            ],
+            version=self.version,
+        )
+
 
 # ── Workflow State ───────────────────────────────────────────
 
@@ -91,6 +138,7 @@ class GoalWorkflowState:
     status: str = "idle"  # idle | running | paused | completed | error | cancelled
     current_layer: int = 0
     paused: bool = False
+    cancelled: bool = False  # P3.4: immediate cancel flag
     pause_layer: int = -1
     agent_statuses: dict[str, str] = field(default_factory=dict)
     agent_errors: dict[str, str] = field(default_factory=dict)
@@ -248,6 +296,8 @@ class GoalWorkflowRunner:
         self._goal_id: str = ""
         self._evidence_collector: GoalEvidenceCollector | None = None
         self._layer_results: dict[str, dict[str, Any]] = {}
+        # P3.4: Track active asyncio.Task objects for immediate cancel
+        self._active_tasks: dict[str, asyncio.Task] = {}
 
     # ── Public API ────────────────────────────────────────────
 
@@ -363,7 +413,7 @@ class GoalWorkflowRunner:
         layers = self._get_layers()
 
         for layer_idx in range(start_idx, len(layers)):
-            if self._state.paused:
+            if self._state.paused or self._state.cancelled:
                 self._state.pause_layer = layer_idx
                 self._state.status = "paused"
                 self._event_bus.emit("workflow_paused", layer=layer_idx)
@@ -390,11 +440,25 @@ class GoalWorkflowRunner:
             self._event_bus.emit("workflow_completed")
 
     async def _execute_layer(self, layer: list[str], layer_idx: int) -> None:
-        """Execute all agents in a layer in parallel."""
+        """Execute all agents in a layer in parallel with task tracking (P3.4)."""
         if not layer:
             return
-        tasks = [self._execute_agent(agent_id, layer_idx) for agent_id in layer]
-        await asyncio.gather(*tasks)
+        tasks: list[asyncio.Task] = []
+        for agent_id in layer:
+            task = asyncio.create_task(self._execute_agent(agent_id, layer_idx))
+            self._active_tasks[agent_id] = task
+            tasks.append(task)
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            # Immediate cancel: tasks were cancelled, gather remaining
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            raise
+        finally:
+            for agent_id in layer:
+                self._active_tasks.pop(agent_id, None)
 
     async def _execute_agent(self, agent_id: str, layer_idx: int) -> None:
         """Execute one agent using decorators (R7).
@@ -448,6 +512,11 @@ class GoalWorkflowRunner:
             self._state.set_agent_status(agent_id, "success")
             self._event_bus.emit(
                 "agent_complete", agent_id=agent_id, layer=layer_idx,
+            )
+        except asyncio.CancelledError:
+            self._state.set_agent_status(agent_id, "cancelled", "immediate cancel")
+            self._event_bus.emit(
+                "agent_cancelled", agent_id=agent_id,
             )
         except asyncio.TimeoutError:
             self._state.set_agent_status(
@@ -532,8 +601,19 @@ class GoalWorkflowRunner:
         return result
 
     def _evaluate_condition(self, condition: str, agent_id: str) -> bool:
-        # Stub — Phase 3 will add DSL evaluation.
-        return False
+        """Evaluate a branch condition against agent outputs (P3.7).
+
+        Uses the ExpressionEvaluator DSL.  Supports dot-path access
+        and comparison operators like ``factor_analyst.output.sharpe < 0.3``.
+        """
+        if not condition:
+            return False
+        try:
+            from .expression_evaluator import evaluate_condition
+            return evaluate_condition(condition, self._layer_results)
+        except Exception as exc:
+            logger.warning("Condition evaluation failed for %r: %s", condition, exc)
+            return False
 
     # ── Completion (R6: Strategy pattern) ────────────────────
 
@@ -584,15 +664,44 @@ class GoalWorkflowRunner:
             self._event_bus.emit("workflow_failed", error=str(exc))
             logger.error("Auto-completion failed: %s", exc)
 
-    # ── Pause / Resume ───────────────────────────────────────
+    # ── Pause / Resume (P3.4: immediate cancel) ──────────────
 
-    def pause(self) -> None:
+    def pause(self, *, immediate: bool = False) -> None:
+        """Pause workflow execution.
+
+        Args:
+            immediate: If True, cancel all running asyncio tasks immediately.
+                       If False (default), wait for current agent to finish
+                       before stopping (graceful).
+        """
         self._state.paused = True
-        self._event_bus.emit("workflow_paused", layer=self._state.current_layer)
-        logger.info("Goal workflow paused at layer %d", self._state.current_layer)
+        if immediate:
+            self._state.cancelled = True
+            for agent_id, task in list(self._active_tasks.items()):
+                if not task.done():
+                    task.cancel()
+                    logger.info("Cancelled task for agent %s", agent_id)
+            self._active_tasks.clear()
+            self._event_bus.emit(
+                "workflow_cancelled", layer=self._state.current_layer,
+            )
+            logger.info(
+                "Goal workflow cancelled immediately at layer %d",
+                self._state.current_layer,
+            )
+        else:
+            self._event_bus.emit(
+                "workflow_paused", layer=self._state.current_layer,
+            )
+            logger.info(
+                "Goal workflow paused gracefully at layer %d",
+                self._state.current_layer,
+            )
 
     def resume(self) -> None:
+        """Resume workflow execution after pause."""
         self._state.paused = False
+        self._state.cancelled = False
         self._event_bus.emit("workflow_resumed")
         logger.info("Goal workflow resumed from layer %d", self._state.pause_layer)
 

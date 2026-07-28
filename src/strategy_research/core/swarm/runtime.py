@@ -1,5 +1,15 @@
-"""SwarmRuntime — DAG-based multi-agent orchestration with worker grounding."""
+"""SwarmRuntime — DAG-based multi-agent orchestration with hook support (P3.1).
 
+Breaking change in Phase 3:
+  ``execute()`` now accepts an optional ``hooks`` parameter that enables
+  external code to observe and control the execution lifecycle.
+
+Hook callbacks:
+  - ``on_layer_start(layer_idx, agents, context)``
+  - ``on_agent_complete(agent_id, result, context)``
+  - ``on_layer_complete(layer_idx, agents, results)``
+  - ``should_stop() -> bool``
+"""
 from __future__ import annotations
 
 import logging
@@ -8,25 +18,21 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ..workflow.agents import AgentRegistry
 from ..workflow.controller import WorkflowController
 from ..workflow.grounding import GroundingProvider
-from ..workflow.types import AgentCall, AgentStatus
+from ..workflow.types import AgentCall, AgentStatus, SwarmHook
 
 logger = logging.getLogger(__name__)
 
 
-# ── Default controller factory (P6 Phase 1-A3) ────────────────────────
+# ── Default controller factory ────────────────────────────────
 
 
 def _build_default_controller() -> WorkflowController | None:
-    """Build a default WorkflowController backed by SwarmWorker + LLM.
-
-    Returns None if the LLM client cannot be initialised (e.g. missing
-    API key in the test environment). Caller should handle the None
-    gracefully (fall back to stub).
-    """
+    """Build a default WorkflowController backed by SwarmWorker + LLM."""
     try:
         from ..workflow.controller import ControllerConfig
         cfg = ControllerConfig(timeout_seconds=60.0)
@@ -36,14 +42,32 @@ def _build_default_controller() -> WorkflowController | None:
         return None
 
 
+# ── Data classes ───────────────────────────────────────────────
+
+
 @dataclass
 class SwarmPreset:
-    """A swarm preset loaded from YAML."""
+    """A swarm preset loaded from YAML.
+
+    Unified preset type (P3.3): covers both generic swarm presets
+    and goal-specific workflow presets.  The goal/completion/branches
+    fields are optional — generic swarm presets leave them as None.
+
+    This replaces the separate ``GoalWorkflowConfig`` type for the
+    execution layer.  The goal workflow loader still produces the
+    richer ``GoalWorkflowConfig`` for YAML parsing, but converts
+    it to ``SwarmPreset`` before passing to SwarmRuntime.
+    """
 
     name: str
     description: str = ""
     agents: list[AgentCall] = field(default_factory=list)
     dag: dict[str, list[str]] = field(default_factory=dict)
+    # Goal-specific fields (None for generic swarm presets)
+    goal: dict[str, Any] | None = None
+    completion: dict[str, Any] | None = None
+    branches: list[dict[str, Any]] = field(default_factory=list)
+    version: str = "1.0"
 
 
 @dataclass
@@ -69,16 +93,16 @@ class SwarmResult:
     success: bool = False
 
 
-class SwarmRuntime:
-    """DAG-based multi-agent swarm runtime.
+# ── SwarmRuntime ──────────────────────────────────────────────
 
-    Executes agents according to a dependency DAG, with worker grounding
-    (pre-fetched market data) and streaming progress.
+
+class SwarmRuntime:
+    """DAG-based multi-agent swarm runtime with hook support.
 
     Usage:
         runtime = SwarmRuntime(controller=ctrl)
         preset = load_preset(preset_path)
-        result = runtime.execute(preset, workspace, task)
+        result = runtime.execute(preset, workspace, task, hooks=[my_hook])
     """
 
     def __init__(
@@ -91,7 +115,6 @@ class SwarmRuntime:
         self._grounding = grounding
         self._max_workers = max_workers
         self._active_runs: dict[str, bool] = {}
-        # Lazily-instantiated default controller (created on first use)
         self._owns_default_controller = controller is None
 
     def execute(
@@ -99,39 +122,44 @@ class SwarmRuntime:
         preset: SwarmPreset,
         workspace: Path,
         task: str,
+        hooks: list[SwarmHook] | None = None,
     ) -> SwarmResult:
-        """Execute a swarm preset.
+        """Execute a swarm preset with optional lifecycle hooks.
 
-        Agents are executed in topological order (DAG layers).
-        Within each layer, agents run in parallel via ThreadPoolExecutor.
+        Args:
+            preset: Swarm preset defining agents + DAG.
+            workspace: Filesystem root for prompt files.
+            task: The task prompt string.
+            hooks: Optional list of SwarmHook instances to call
+                   at each lifecycle point.
+
+        Returns:
+            SwarmResult with per-agent outputs and success flag.
         """
         run_id = f"swarm_{uuid.uuid4().hex[:8]}"
         self._active_runs[run_id] = True
+        hooks = hooks or []
 
-        result = SwarmResult(
-            run_id=run_id,
-            preset_name=preset.name,
-        )
-
+        result = SwarmResult(run_id=run_id, preset_name=preset.name)
         t0 = time.perf_counter()
 
         try:
-            # Topological sort
             layers = self._topological_layers(preset.dag)
 
-            for layer in layers:
+            for layer_idx, layer in enumerate(layers):
                 if run_id not in self._active_runs:
-                    break  # cancelled
+                    break  # cancelled via cancel(run_id)
 
-                # Execute layer in parallel
-                layer_futures = {}
+                # ── Hook: on_layer_start
+                self._emit(hooks, "on_layer_start", layer_idx, layer, {})
+
+                layer_futures: dict[Any, str] = {}
                 with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
                     for agent_id in layer:
                         agent_call = self._find_agent(preset.agents, agent_id)
                         if agent_call is None:
                             continue
 
-                        # Gather upstream outputs
                         upstream = self._gather_upstream(
                             agent_id, preset.dag, result.agent_results,
                         )
@@ -147,20 +175,42 @@ class SwarmRuntime:
                         try:
                             agent_result = future.result()
                             result.agent_results[agent_id] = agent_result
+
+                            # ── Hook: on_agent_complete
+                            self._emit(
+                                hooks, "on_agent_complete",
+                                agent_id, agent_result, {},
+                            )
+
                         except Exception as exc:  # noqa: BLE001
                             result.agent_results[agent_id] = AgentResult(
                                 agent_id=agent_id,
                                 status=AgentStatus.FAILED,
                                 error=str(exc),
                             )
+                            self._emit(
+                                hooks, "on_agent_complete",
+                                agent_id,
+                                result.agent_results[agent_id],
+                                {},
+                            )
 
-            # Check if all agents succeeded
+                # ── Hook: on_layer_complete
+                self._emit(
+                    hooks, "on_layer_complete",
+                    layer_idx, layer,
+                    {aid: r for aid, r in result.agent_results.items()},
+                )
+
+                # ── Hook: should_stop
+                if self._any_hook_should_stop(hooks):
+                    logger.info("SwarmRuntime stopped by hook at layer %d", layer_idx)
+                    break
+
             result.success = all(
                 r.status == AgentStatus.SUCCESS
                 for r in result.agent_results.values()
             )
-
-            # Collect final output from last completed agent
             completed = [
                 r for r in result.agent_results.values()
                 if r.status == AgentStatus.SUCCESS
@@ -181,6 +231,39 @@ class SwarmRuntime:
             return True
         return False
 
+    # ── Hook helpers ───────────────────────────────────────────
+
+    def _emit(
+        self,
+        hooks: list[SwarmHook],
+        method_name: str,
+        *args: Any,
+    ) -> None:
+        """Call a hook method on all hooks, swallowing errors."""
+        for hook in hooks:
+            try:
+                method = getattr(hook, method_name, None)
+                if method is not None:
+                    method(*args)
+            except Exception as exc:                    # noqa: BLE001
+                logger.warning(
+                    "Hook %s.%s failed: %s",
+                    getattr(hook, "name", type(hook).__name__),
+                    method_name, exc,
+                )
+
+    def _any_hook_should_stop(self, hooks: list[SwarmHook]) -> bool:
+        """Return True if any hook's should_stop() returns True."""
+        for hook in hooks:
+            try:
+                if hook.should_stop():
+                    return True
+            except Exception as exc:                    # noqa: BLE001
+                logger.warning("Hook %s.should_stop failed: %s", hook.name, exc)
+        return False
+
+    # ── Agent execution ────────────────────────────────────────
+
     def _execute_agent(
         self,
         agent_call: AgentCall,
@@ -192,7 +275,6 @@ class SwarmRuntime:
         t0 = time.perf_counter()
 
         try:
-            # Build agent task with upstream context
             full_task = task
             if upstream:
                 upstream_ctx = "\n".join(
@@ -201,16 +283,11 @@ class SwarmRuntime:
                 )
                 full_task = f"上游输出:\n{upstream_ctx}\n\n当前任务: {task}"
 
-            # Use controller if available; lazily create a default one
-            # backed by SwarmWorker + LLMConfig.
             if self._controller is None and self._owns_default_controller:
                 self._controller = _build_default_controller()
 
             if self._controller is not None:
                 if self._owns_default_controller:
-                    # Default controller: convert failures into "[error]"
-                    # so DAG layers stay alive (otherwise a transient
-                    # LLM hiccup would poison downstream agents).
                     try:
                         output = self._controller.execute_agent(
                             agent_call, full_task, workspace,
@@ -223,13 +300,10 @@ class SwarmRuntime:
                         )
                         output = f"[error] {agent_call.agent_name}: {exc}"
                 else:
-                    # User-supplied controller: propagate failures so
-                    # callers can observe them via agent_results[*].error.
                     output = self._controller.execute_agent(
                         agent_call, full_task, workspace,
                     )
             else:
-                # No controller → stub fallback (tests, dry-runs)
                 output = f"[stub] {agent_call.agent_name}: completed"
 
             return AgentResult(
@@ -247,8 +321,9 @@ class SwarmRuntime:
                 elapsed_s=round(time.perf_counter() - t0, 2),
             )
 
+    # ── DAG helpers ────────────────────────────────────────────
+
     def _find_agent(self, agents: list[AgentCall], agent_id: str) -> AgentCall | None:
-        """Find agent by ID."""
         for a in agents:
             if a.agent_name == agent_id:
                 return a
@@ -260,7 +335,6 @@ class SwarmRuntime:
         dag: dict[str, list[str]],
         results: dict[str, AgentResult],
     ) -> dict[str, str]:
-        """Gather outputs from upstream agents."""
         upstream_ids = dag.get(agent_id, [])
         upstream = {}
         for uid in upstream_ids:
@@ -271,7 +345,6 @@ class SwarmRuntime:
 
     def _topological_layers(self, dag: dict[str, list[str]]) -> list[list[str]]:
         """Split DAG into execution layers via topological sort."""
-        # Compute in-degree
         in_degree: dict[str, int] = {node: 0 for node in dag}
         for node, deps in dag.items():
             for dep in deps:
@@ -283,17 +356,14 @@ class SwarmRuntime:
         remaining = set(dag.keys())
 
         while remaining:
-            # Find nodes with zero in-degree
             layer = [n for n in remaining if in_degree.get(n, 0) == 0]
             if not layer:
-                # Cycle detected — add remaining as single layer
                 layers.append(list(remaining))
                 break
 
             layers.append(sorted(layer))
             for n in layer:
                 remaining.discard(n)
-                # Reduce in-degree for dependents
                 for node, deps in dag.items():
                     if n in deps:
                         in_degree[node] = max(0, in_degree[node] - 1)

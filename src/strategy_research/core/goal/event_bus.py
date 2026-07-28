@@ -121,10 +121,59 @@ class GoalPanelObserver:
             logger.warning("GoalPanel update failed: %s", exc)
 
 
+class MetricsObserver:
+    """Collects timing and count metrics for each agent and layer (P3.10).
+
+    Useful for performance profiling of workflow execution.
+    """
+
+    def __init__(self) -> None:
+        self.agent_timings: dict[str, list[float]] = {}  # agent_id → [elapsed_s, ...]
+        self.layer_timings: list[float] = []
+        self.event_counts: dict[str, int] = {}
+
+    def on_event(self, event: str, data: dict[str, Any]) -> None:
+        import time as _time
+
+        self.event_counts[event] = self.event_counts.get(event, 0) + 1
+
+        # Track agent completion timings
+        if event == "agent_complete":
+            agent_id = data.get("agent_id", "unknown")
+            elapsed = data.get("elapsed_s", 0.0)
+            self.agent_timings.setdefault(agent_id, []).append(elapsed)
+
+        # Track layer timings (from on_layer_start/complete)
+        if event == "layer_start":
+            self._layer_start = _time.perf_counter()
+        elif event == "layer_complete" and hasattr(self, "_layer_start"):
+            elapsed = _time.perf_counter() - self._layer_start
+            self.layer_timings.append(elapsed)
+
+    def summary(self) -> dict[str, Any]:
+        """Return a summary of collected metrics."""
+        agent_avg = {
+            aid: sum(ts) / len(ts) if ts else 0.0
+            for aid, ts in self.agent_timings.items()
+        }
+        return {
+            "event_counts": dict(self.event_counts),
+            "agent_avg_timings": agent_avg,
+            "layer_timings": list(self.layer_timings),
+            "total_layers": len(self.layer_timings),
+        }
+
+    def clear(self) -> None:
+        self.agent_timings.clear()
+        self.layer_timings.clear()
+        self.event_counts.clear()
+
+
 __all__ = [
     "WorkflowEventObserver",
     "WorkflowEventBus",
     "LoggerObserver",
     "CollectingObserver",
     "GoalPanelObserver",
+    "MetricsObserver",
 ]
