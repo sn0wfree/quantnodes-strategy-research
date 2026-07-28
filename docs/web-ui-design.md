@@ -102,11 +102,12 @@ webui/frontend/
     ├── stores/                           # Zustand 状态管理
     │   ├── auth.ts                       # 认证状态 (user, token, login/logout)
     │   ├── session.ts                    # 会话状态 (current_session, sessions_list)
-    │   ├── chat.ts                       # 聊天状态 (messages, streaming, thinking)
-    │   ├── agents.ts                     # Agent 状态 (agent_list, agent_status)
+    │   ├── chat.ts                       # 聊天状态 (messages: Map, streaming, thinking)
+    │   ├── agents.ts                     # Agent 状态 (agents: Map, iterations_detail)
     │   ├── workflow.ts                   # Workflow 状态 (dag, execution, progress)
     │   ├── layout.ts                     # 布局状态 (左导航宽度、右主区可见性、Tab、比例)
-    │   └── commandPalette.ts             # 命令面板状态
+    │   ├── commandPalette.ts             # 命令面板状态
+    │   └── toast.ts                      # Toast 通知状态 (队列, 最多 3 条)
     ├── components/
     │   ├── layout/                       # 布局骨架
     │   │   ├── AppShell.tsx              # 整体布局容器 (三栏 + TopBar)
@@ -153,11 +154,20 @@ webui/frontend/
     │   │   ├── GoalTab.tsx               # Goal Tab 容器 (标准在上, 时间线在下)
     │   │   ├── CriteriaList.tsx          # 标准清单 (带 Evidence 计数+Agent 来源)
     │   │   └── GoalTimeline.tsx          # Evidence 时间线 (倒序, 最新在上)
-    │   └── common/                       # 通用组件
-    │       ├── Badge.tsx                 # 状态徽章
-    │       ├── Spinner.tsx               # 加载动画
-    │       ├── EmptyState.tsx            # 空状态
-    │       └── ConfirmDialog.tsx         # 确认弹窗
+    │   ├── common/                       # 通用组件
+    │   │   ├── Badge.tsx                 # 状态徽章（颜色映射 + 尺寸变体）
+    │   │   ├── Spinner.tsx               # 加载动画（旋转/脉冲 + 尺寸）
+    │   │   ├── EmptyState.tsx            # 空状态（图标 + 文案 + 操作按钮）
+    │   │   ├── ConfirmDialog.tsx         # 确认弹窗（标题 + 描述 + 双按钮）
+    │   │   ├── Toast.tsx                 # Toast 通知（自动消失/手动关闭/最多 3 条）
+    │   │   ├── ToastManager.tsx          # Toast 队列管理
+    │   │   ├── Skeleton.tsx              # 通用骨架屏（矩形/圆形/文字行）
+    │   │   ├── ImageLightbox.tsx         # 图片全屏查看（基于 Radix Dialog）
+    │   │   └── ErrorBoundary.tsx         # 全局错误边界（fallback UI）
+    │   └── hooks/                        # 自定义 Hooks
+    │       ├── useKeyboardShortcuts.ts   # 键盘快捷键统一管理（Cmd+K/G/W/B/1/2/3）
+    │       ├── useSSE.ts                 # SSE 连接管理（重连/心跳/Last-Event-ID）
+    │       └── useMention.ts             # @mention 搜索逻辑（agent/file）
     └── styles/
         └── globals.css                   # Tailwind 入口 + 全局样式
 ```
@@ -1080,6 +1090,245 @@ interface GoalEvidence {
 
 ---
 
+### 4.5 SSE 事件可靠性
+
+本节定义 SSE 事件流的可靠性机制，解决异步状态下的核心问题：消息确认、断连补偿、崩溃恢复、并发控制、连接管理、双流合并、事件节流。
+
+#### 4.5.1 事件 ID + 重放机制
+
+**解决**：SSE 断连后错过的事件无法追赶（P3-1），页面刷新后状态丢失（P2-3）。
+
+```
+后端:
+  - 每个 SSE 事件分配递增 event_id（格式: {timestamp_ms}-{seq}）
+  - 保留最近 5 分钟的事件缓冲区（环形缓冲，最大 10000 条）
+  - 重连请求携带 Last-Event-ID header
+  - 后端从该 id 起重放缓冲区内的事件
+
+前端:
+  - SSE 连接建立后记录最后收到的 event_id
+  - 断连重连时发送 Last-Event-ID header
+  - 重连后先收重放事件（replayed=true），再收新事件
+  - 重放事件与本地 store 做去重（基于 event_id）
+```
+
+**事件格式扩展**：
+
+```json
+{
+  "event_id": "1722153600000-042",
+  "event": "text_delta",
+  "replayed": false,
+  "data": {"delta": "根据分析", "message_id": "msg_123"}
+}
+```
+
+#### 4.5.2 端到端确认链
+
+**解决**：`send_async` 返回 204 无 `message_id`，用户消息发送后无确认（P1-1, P2-1, P3-4）。
+
+```
+用户输入 → POST /api/chat/send_async
+       ↓
+后端:
+  1. 创建 user message（status=pending）
+  2. 返回 {message_id, event_id, status: "accepted"}
+  3. 启动 AgentLoop（异步）
+       ↓
+前端:
+  1. 收到响应 → 立即插入 user message（确认态）
+  2. 清空输入框
+  3. SSE 流开始 → assistant 消息出现
+       ↓
+失败场景:
+  1. 网络错误 → catch → 保留输入内容 + 显示 toast
+  2. 后端 4xx/5xx → 保留输入内容 + 显示 toast + 消息列表插入"发送失败"系统消息
+  3. 后端返回 status: "rejected" → 保留输入内容 + 显示原因
+```
+
+**send_async 响应格式变更**：
+
+```typescript
+interface SendAsyncResponse {
+  message_id: string;      // user message ID
+  event_id: string;        // 首个事件的 event_id
+  status: 'accepted' | 'rejected';
+  error?: string;          // rejected 时的原因
+}
+```
+
+#### 4.5.3 Agent 崩溃恢复
+
+**解决**：Agent 在流式输出中途崩溃，前端已累积部分内容但永远等不到 `assistant_message`（P3-2）。
+
+```
+AgentLoop 崩溃时后端发送:
+  1. error 事件（包含 error + partial_content）
+  2. assistant_message 事件（如果有的话，包含已累积的完整内容）
+
+前端 error 事件处理:
+  1. 将当前 streaming 状态标记为 "aborted"
+  2. 在 UI 中显示 "⚠ 生成中断" 提示（红色提示条）
+  3. 保留已收到的部分内容（不丢弃）
+  4. pending 状态的 tool_call 标记为 error
+  5. Agent 状态设为 error + finished_reason = "error"
+```
+
+**error 事件扩展**：
+
+```json
+{
+  "event": "error",
+  "data": {
+    "error": "LLM API rate limit exceeded",
+    "message_id": "msg_123",
+    "partial_content": "根据分析，动量因子...",
+    "agent_id": "researcher",
+    "fatal": true
+  }
+}
+```
+
+#### 4.5.4 前端 Store 原子更新
+
+**解决**：多 Agent 事件交错时 Store 更新无并发控制（P4-1），流式→最终态切换可能闪烁（P2-2）。
+
+```
+数据结构:
+  - chat.messages: Map<message_id, Message>（O(1) 查找，不数组 splice）
+  - chat.streamingMessageId: string | null（标记当前流式消息）
+  - agents.map: Map<agent_id, AgentState>
+
+更新策略:
+  - 所有事件处理基于 message_id + call_id 做精确 patch
+  - 不全量替换 messages 数组，只更新单条消息的 parts
+  - 使用 Zustand immer 中间件确保不可变更新
+  - text_delta 使用 requestAnimationFrame 批量合并到下一帧
+
+流式→最终态切换:
+  1. 收到 assistant_message（event_id=X）
+  2. 查找 streamingMessageId 对应的消息
+  3. 原子替换: content = final_content, parts = final_parts
+  4. 清除 streamingMessageId = null
+  5. StreamingText 组件检测到 streamingMessageId 变化后卸载
+```
+
+**Store 更新伪代码**：
+
+```typescript
+// text_delta: 增量追加（合并到下一帧）
+case 'text_delta':
+  requestAnimationFrame(() => {
+    const msg = messages.get(data.message_id);
+    if (msg) {
+      msg.content += data.delta;
+      messages.set(data.message_id, msg);
+    }
+  });
+
+// tool_call: 精确插入 tool_call part
+case 'tool_call':
+  const msg = messages.get(data.message_id);
+  msg.parts.push({ type: 'tool_call', call_id: data.call_id, ... });
+  messages.set(data.message_id, msg);
+
+// assistant_message: 原子替换
+case 'assistant_message':
+  const msg = messages.get(data.message_id);
+  msg.content = data.content;
+  msg.parts = data.parts;
+  streamingMessageId = null;
+  messages.set(data.message_id, msg);
+```
+
+#### 4.5.5 连接生命周期管理
+
+**解决**：两条独立 SSE 流的并行管理未定义（P1-2），JWT 过期对 SSE 长连接的影响（P3-3），多标签页状态不同步（P4-3）。
+
+```
+SSEManager（单例）:
+  - 管理所有 SSE 连接的生命周期
+  - 按需建立: 只有 workflow 运行时才开 workflow SSE
+  - session 切换时: 断开旧 chat SSE → 建立新 chat SSE
+  - workflow 完成时: 关闭 workflow SSE
+
+连接状态机:
+  disconnected → connecting → connected → reconnecting → disconnected
+                                      ↘ disconnected (主动关闭)
+
+JWT 过期处理:
+  - SSE 连接建立时携带当前 token
+  - 后端心跳事件中附带 token_expiry 字段
+  - 前端检测到 token 即将过期（<5min）→ 刷新 token → 重建 SSE 连接
+  - 后端收到过期 token 的 SSE 请求 → 返回 401 → 前端刷新 token 后重连
+
+双流合并:
+  - chat SSE 和 workflow SSE 的事件统一加 source 字段
+  - source: "chat" | "workflow"
+  - 前端 Store 按 event_id 全局排序（跨流）
+  - 两条流的事件时间戳差异 <100ms 时视为同一时刻
+
+多标签页（v1 不处理）:
+  - 后续用 BroadcastChannel API 同步关键状态变更
+  - 或监听 storage event
+```
+
+**SSEManager 接口**：
+
+```typescript
+interface SSEManager {
+  connectChat(sessionId: string): void;
+  connectWorkflow(goalId: string): void;
+  disconnectAll(): void;
+  onEvent(callback: (event: SSEEvent) => void): void;
+  getLastEventId(): string | null;
+  refreshToken(newToken: string): void;
+}
+```
+
+#### 4.5.6 SSE 事件节流与批处理
+
+**解决**：多 Agent 并行时事件频率过高（20-30/s），导致 Store 更新和 React 重渲染性能瓶颈（P5-2）。
+
+```
+后端节流:
+  - text_delta: 合并为 50ms 间隔发送（攒多个 delta 一次性发）
+  - tool_heartbeat: 合并为 5s 间隔（不每个 heartbeat 都发）
+  - agent_iteration / agent_iteration_end: 不节流（低频事件）
+
+前端批处理:
+  - text_delta: 使用 requestAnimationFrame 合并到下一帧
+  - 多个 tool_call/tool_result 在同一帧内到达 → 批量更新 Store
+  - React 渲染优化: MessageList 使用 React.memo + areEqual
+  - AgentList 使用 useMemo 缓存排序结果
+
+性能目标:
+  - 正常场景: <5 事件/s → 无需优化
+  - 高峰场景: 20-30 事件/s → 后端节流后 <10/s + 前端批处理
+```
+
+#### 4.5.7 图片上传→消息关联流程
+
+**解决**：图片上传到消息关联的完整流程未闭环（P1-6）。
+
+```
+1. 用户在 Composer 粘贴/拖拽图片
+2. 前端预览（本地 blob URL）+ 上传到 /api/chat/upload
+3. 后端保存到 /tmp/uploads/，返回 {image_url, mime_type}
+4. 用户点击发送 → send_async({content, images: [image_url]})
+5. 后端创建 user message，parts_json 中包含 ImagePart
+6. Agent 收到图片 → 可能通过 tool 产出图片
+7. Agent 通过 image SSE 事件发回图片 → 前端渲染 ImageBlock
+8. 图片消息持久化到 web_messages.parts_json
+```
+
+**图片存储策略**：
+- ≤5MB：base64 inline（存在 parts_json 的 ImagePart.url 中）
+- >5MB：存 `/tmp/uploads/{uuid}.{ext}`，url 为相对路径
+- 过期清理：7 天未访问的图片自动删除
+
+---
+
 ## 5. 认证设计
 
 ### 5.1 数据库
@@ -1113,6 +1362,7 @@ CREATE TABLE web_sessions (
 CREATE TABLE web_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT REFERENCES web_sessions(id),
+    goal_id TEXT,                       -- 关联的 Goal（可选，用于 Evidence→消息反查）
     role TEXT NOT NULL,                -- user/assistant/system
     agent_id TEXT,                     -- 产出此消息的 Agent（assistant 消息才有）
     content TEXT,                      -- 完整文本（最终态）
@@ -1212,8 +1462,8 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 | 端点 | 方法 | 请求体 | 响应 | 说明 |
 |---|---|---|---|---|
-| `/api/chat/send` | POST | `{session_id, content, images?, agent_id?}` | `{message_id, reply}` | 同步发送 |
-| `/api/chat/send_async` | POST | `{session_id, content, images?, agent_id?}` | 204 | 异步发送 |
+| `/api/chat/send` | POST | `{session_id, content, images?, agent_id?}` | `{message_id, reply}` | 同步发送（保留给非流式场景，如 webhook/批处理） |
+| `/api/chat/send_async` | POST | `{session_id, content, images?, agent_id?}` | `{message_id, event_id, status}` | 异步发送（返回确认，不返回 204） |
 | `/api/chat/events` | GET | `?session_id=X` | SSE stream | 实时事件流 |
 | `/api/chat/history` | GET | `?session_id=X&limit=50&before=msg_id` | `{messages[]}` | 历史消息（游标分页） |
 | `/api/chat/upload` | POST | multipart form | `{image_url, mime_type}` | 上传图片 |
@@ -1226,11 +1476,13 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 | `text_delta` | `{delta, message_id}` | 流式文本增量 | AgentLoop |
 | `thinking_start` | `{message_id, thinking_id}` | 思考开始 | AgentLoop |
 | `thinking_delta` | `{delta, message_id, thinking_id}` | 思考增量 | AgentLoop |
-| `thinking_done` | `{message_id, thinking_id}` | 思考结束 | AgentLoop |
+| `thinking_done` | `{message_id, thinking_id}` | 推理文本结束 | AgentLoop |
+| `thinking_end` | `{message_id, thinking_id}` | thinking block 可关闭（loading 状态结束） | AgentLoop |
 | `tool_call` | `{call_id, tool_name, arguments, message_id, agent_id}` | 工具调用开始 | AgentLoop |
 | `tool_result` | `{call_id, status, result, duration_ms, message_id, agent_id}` | 工具调用结果 | AgentLoop |
 | `file_edit` | `{file_path, additions, deletions, diff, message_id}` | 文件编辑 | Tool |
 | `table` | `{headers, rows, caption, message_id}` | 数据表格 | Tool |
+| `chart` | `{chart_type, data, title?, message_id}` | 图表数据 | Tool |
 | `assistant_message` | `{message_id, agent_id, content, parts}` | 完整消息 | AgentLoop |
 | `image` | `{url, mime_type, message_id}` | 图片 | Tool |
 | `error` | `{error, message_id}` | 错误 | AgentLoop |
@@ -1247,7 +1499,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 ```
 AgentLoop._emit()           →  SSE Event              →  Web UI Store 更新
 ─────────────────────────────────────────────────────────────────────────────
-thinking_start/done/end     →  thinking_start/done     →  chat.thinking
+thinking_start/done/end     →  thinking_start/done/end  →  chat.thinking
 text_delta                  →  text_delta              →  chat.streaming
 tool_call                   →  tool_call               →  chat.toolCalls
 tool_result                 →  tool_result             →  chat.toolCalls
@@ -1365,7 +1617,7 @@ agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason =
 9. 实现 RightPanel（三 Tab 容器）
 10. 实现 ResizablePanel 通用组件
 
-**Day 3：认证**
+**Day 3：认证 + SSE 可靠性基础**
 11. 后端 `api/routers/auth.py`（register/login/me/refresh）
 12. 后端 `api/middleware/auth.py`（JWT 验证中间件）
 13. 后端 `users.db` 初始化（表创建）
@@ -1375,22 +1627,31 @@ agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason =
 17. 前端 Zustand auth store
 18. 后端 `api/routers/session.py`（create/list/update/delete）
 19. 前端 Zustand session store + sidebar 会话列表
+20. 后端 SSE 事件缓冲区（环形缓冲，5 分钟 / 10000 条）
+21. 后端 `send_async` 返回 `{message_id, event_id, status}`（不再是 204）
+22. 前端 SSEManager 单例（连接状态机 + Last-Event-ID 重连）
+23. 前端 `hooks/useSSE.ts`（SSE 连接管理 + 心跳检测）
+24. 前端 Toast 组件（Toast.tsx + ToastManager.tsx + toast store）
+25. 前端 ErrorBoundary（全局错误边界 + fallback UI）
 
 ### 7.3 P2 详细任务（聊天核心）— 4 天
 
-**Day 4-5：消息渲染**
-1. 实现 SSE 连接管理器（EventSource + 重连 + 心跳检测）
-2. 实现 chat store（messages, streaming, thinking 状态）
-3. 实现 MessageList（react-virtuoso 虚拟滚动）
-4. 实现 MessageBubble（用户消息）
-5. 实现 AssistantMessage（Agent 头部 + parts 容器）
-6. 实现 StreamingText（打字机效果，`requestAnimationFrame` + 30ms/字符）
-7. 实现 MarkdownRenderer（react-markdown + remark-gfm + react-syntax-highlighter）
+**Day 4-5：消息渲染 + 原子更新**
+1. 实现 chat store（messages: Map + streamingMessageId + immer 中间件）
+2. 实现 MessageList（react-virtuoso 虚拟滚动）
+3. 实现 MessageBubble（用户消息）
+4. 实现 AssistantMessage（Agent 头部 + parts 容器 + aborted 状态）
+5. 实现 StreamingText（打字机效果 + requestAnimationFrame 批处理）
+6. 实现 MarkdownRenderer（react-markdown + remark-gfm + react-syntax-highlighter）
+7. 实现 SSE 事件处理：text_delta/tool_call/tool_result → Store 原子更新
 
-**Day 6：输入框**
+**Day 6：输入框 + 确认链**
 8. 实现 Composer（textarea + 高度自适应 + Shift+Enter 换行）
 9. 实现 MentionDropdown（@agent / @file 两组下拉 + 键盘导航）
 10. 实现图片粘贴/拖拽上传 + 本地预览
+11. 实现 send_async 确认链（发送→确认→插入→清空→失败回滚）
+12. 实现 keyboard shortcuts hook（Cmd+K/G/W/B/1/2/3）
+13. 实现 Skeleton 加载组件（MessageSkeleton + AgentSkeleton）
 
 **Day 7：后端 chat API**
 11. 后端 `api/routers/chat.py`（send/send_async/events/history/upload/message）
@@ -1411,19 +1672,21 @@ agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason =
 5. 实现 FileEditBlock（unified diff 渲染，默认展开）
 6. 实现 file_edit SSE 事件处理
 
-**Day 10：表格 + 图表**
+**Day 10：表格 + 图表 + 图片**
 7. 实现 TableBlock（表格渲染，默认展开，>5行截断）
 8. 实现 ChartBlock（简单图表：bar/line，基于 SVG 或 recharts）
-9. 实现 table SSE 事件处理
+9. 实现 table/chart SSE 事件处理
 10. 实现 ImageBlock（图片展示 + 点击放大）
+11. 实现 ImageLightbox（全屏图片查看，基于 Radix Dialog）
 
 ### 7.5 P4 详细任务（Agent + Goal）— 2 天
 
-**Day 11：Agent 列表**
+**Day 11：Agent 列表 + 详情**
 1. 实现 AgentList（右主区 Tab，列表式布局）
-2. 实现 AgentItem（running 展开详情，其余紧凑一行）
+2. 实现 AgentItem（running 展示迭代历史，其余紧凑一行）
 3. 实现 Agent 颜色标识（按顺序分配蓝/绿/紫/橙/青）
-4. 实现 agent_status SSE 事件处理
+4. 实现 agent_status / agent_loop SSE 事件处理
+5. 实现 AgentDetailPanel（点击 Agent 展开详情侧栏）
 
 **Day 12：Goal 面板**
 5. 实现 GoalTab（目标描述 + 进度条 + 标准清单 + 时间线）
@@ -1458,12 +1721,14 @@ agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason =
 2. 实现命令注册机制（可扩展的命令列表）
 3. 实现命令分类（会话/工作流/设置/视图）
 
-**Day 17：性能 + 响应式**
-4. 优化虚拟滚动（消息列表 + Agent 列表）
-5. 实现响应式断点（≥1440px 三栏 / 1024-1439px 两栏 / <1024px 单栏）
-6. 实现 `prefers-reduced-motion` 支持
-7. 骨架屏加载状态（消息列表 + Agent 列表 + DAG）
-8. 错误边界 + 全局错误处理
+**Day 17：性能 + 响应式 + SSE 节流**
+4. 实现后端 text_delta 合并（50ms 间隔发送）
+5. 实现前端 text_delta 批处理（requestAnimationFrame 合并）
+6. 优化虚拟滚动（消息列表 + Agent 列表 + GoalTimeline）
+7. 实现响应式断点（≥1440px 三栏 / 1024-1439px 两栏 / <1024px 单栏）
+8. 实现 `prefers-reduced-motion` 支持
+9. 实现 NavPopover（导航栏 hover 浮层：会话列表/工作流列表）
+10. 错误边界 + 全局错误处理 + SSE 连接状态 toast
 
 ### 7.8 P7 详细任务（测试 + 部署）— 2 天
 
@@ -1546,6 +1811,14 @@ agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason =
 | `webui/frontend/src/components/common/Spinner.tsx` | 加载动画 |
 | `webui/frontend/src/components/common/EmptyState.tsx` | 空状态 |
 | `webui/frontend/src/components/common/ConfirmDialog.tsx` | 确认弹窗 |
+| `webui/frontend/src/components/common/Toast.tsx` | Toast 通知 |
+| `webui/frontend/src/components/common/ToastManager.tsx` | Toast 队列管理 |
+| `webui/frontend/src/components/common/Skeleton.tsx` | 通用骨架屏 |
+| `webui/frontend/src/components/common/ImageLightbox.tsx` | 图片全屏查看 |
+| `webui/frontend/src/components/common/ErrorBoundary.tsx` | 全局错误边界 |
+| `webui/frontend/src/hooks/useKeyboardShortcuts.ts` | 键盘快捷键管理 |
+| `webui/frontend/src/hooks/useSSE.ts` | SSE 连接管理 |
+| `webui/frontend/src/hooks/useMention.ts` | @mention 搜索 |
 | `api/routers/auth.py` | 认证 API |
 | `api/routers/chat.py` | 聊天 API |
 | `api/routers/session.py` | 会话 API |
@@ -1573,11 +1846,13 @@ agent_loop.event == "agent_finished"      → agents[agent_id].finished_reason =
 
 | # | 问题 | 推荐方案 | 状态 |
 |---|---|---|---|
-| 1 | 图片存储 | base64 inline（≤5MB）+ 文件系统（>5MB，/tmp/uploads/） | 待确认 |
+| 1 | 图片存储 | ≤5MB base64 inline + >5MB 文件系统（/tmp/uploads/）+ 7 天过期 | ✅ 已确认 |
 | 2 | 消息分页 | 游标分页（based on created_at + id） | ✅ 已确认 |
-| 3 | SSE 重连策略 | 指数退避（1s→2s→4s→8s→16s→30s max）+ 最大 10 次重试 | 待确认 |
-| 4 | WebSocket | 不需要（SSE 单向够用，Agent 状态通过 SSE 推送） | ✅ 已确认 |
+| 3 | SSE 重连策略 | 指数退避 1s→30s + 最大 10 次 + Last-Event-ID 重放 | ✅ 已确认 |
+| 4 | WebSocket | 不需要（SSE 单向够用，Agent 状态通过 agent_loop 透传） | ✅ 已确认 |
 | 5 | 国际化 | 先硬编码中文，后续用 react-i18next | ✅ 已确认 |
-| 6 | 构建部署 | Vite build → `webui/static/`，FastAPI mount 静态文件 | 待确认 |
-| 7 | 虚拟滚动库 | react-virtuoso（推荐）或 @tanstack/react-virtual | 待确认 |
-| 8 | 图表库 | recharts（推荐）或 直接 SVG（v1 简单图表） | 待确认 |
+| 6 | 构建部署 | Vite build → `webui/static/`，FastAPI mount 静态文件 | ✅ 已确认 |
+| 7 | 虚拟滚动库 | react-virtuoso（MessageList + AgentList + GoalTimeline） | ✅ 已确认 |
+| 8 | 图表库 | recharts（bar/line/pie/scatter） | ✅ 已确认 |
+| 9 | 多标签页同步 | v1 不处理，后续用 BroadcastChannel | ✅ 已确认 |
+| 10 | JWT + SSE 过期 | 宽限期 5 分钟 + 心跳检测 401 → 刷新 token → 重连 | ✅ 已确认 |
