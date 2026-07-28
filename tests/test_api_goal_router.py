@@ -1,0 +1,305 @@
+"""Tests for api/routers/goal.py — Goal API routes.
+
+覆盖：
+- POST /start — 创建 goal
+- GET /status — 查询当前 goal
+- GET /list — 列出 goals（带过滤）
+- POST /evidence — 添加 evidence（无 active goal → 404）
+- POST /complete — 完成 goal（无 active → 404，invalid outcome → 400）
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from strategy_research.api.routers.goal import router as goal_router
+from strategy_research.api.middleware import AuthMiddleware
+
+
+@pytest.fixture
+def app(tmp_path):
+    """构造测试 app，goal DB 指向临时目录。"""
+    db_path = str(tmp_path / "goals.db")
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+    app.state.goal_db_path = db_path
+    app.include_router(goal_router, prefix="/api/goal")
+    return app
+
+
+@pytest.fixture
+def client(app):
+    return TestClient(app)
+
+
+def auth_header(user_id: str = "tester"):
+    """生成有效 JWT 头。"""
+    import base64
+    import json
+    import time
+
+    payload = {"sub": user_id, "exp": int(time.time()) + 3600}
+    token = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    return {"Authorization": f"Bearer {token}"}
+
+
+# ────────────────────────── /start ──────────────────────────
+
+
+class TestStart:
+    def test_start_goal_success(self, client):
+        res = client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={
+                "session_id": "sess-1",
+                "objective": "Find alpha factor with Sharpe > 1.5",
+            },
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert "goal_id" in data
+
+    def test_start_with_custom_criteria(self, client):
+        res = client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={
+                "session_id": "sess-2",
+                "objective": "Build a momentum strategy",
+                "criteria": ["IC > 0.05", "Sharpe > 1.0", "Max DD < 20%"],
+            },
+        )
+        assert res.status_code == 200
+
+    def test_start_with_risk_tier(self, client):
+        """risk_tier 必须能转换为 RiskTier enum。"""
+        res = client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={
+                "session_id": "sess-3",
+                "objective": "Test",
+                "risk_tier": "research_general",
+            },
+        )
+        assert res.status_code == 200
+
+    def test_start_invalid_risk_tier_returns_500(self, client):
+        """无效 risk_tier → RiskTier() 抛 ValueError → 500。"""
+        res = client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={
+                "session_id": "sess-bad",
+                "objective": "Test",
+                "risk_tier": "invalid_tier",
+            },
+        )
+        # 500 because unhandled ValueError in route
+        assert res.status_code == 500
+
+
+# ────────────────────────── /status ──────────────────────────
+
+
+class TestStatus:
+    def test_no_active_goal(self, client):
+        res = client.get(
+            "/api/goal/status?session_id=sess-empty",
+            headers=auth_header(),
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "no_goal"
+
+    def test_status_after_start(self, client):
+        """创建 goal 后查询 status。"""
+        # Start a goal first
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-status", "objective": "Test"},
+        )
+
+        res = client.get(
+            "/api/goal/status?session_id=sess-status",
+            headers=auth_header(),
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert data["session_id"] == "sess-status"
+        assert "goal_status" in data
+        assert "objective" in data
+
+
+# ────────────────────────── /list ──────────────────────────
+
+
+class TestList:
+    def test_list_empty(self, client):
+        res = client.get(
+            "/api/goal/list",
+            headers=auth_header(),
+        )
+        assert res.status_code == 200
+        assert res.json()["goals"] == []
+
+    def test_list_after_create(self, client):
+        # Create multiple goals
+        for i in range(3):
+            client.post(
+                "/api/goal/start",
+                headers=auth_header(),
+                json={"session_id": f"sess-{i}", "objective": f"Goal {i}"},
+            )
+
+        res = client.get("/api/goal/list", headers=auth_header())
+        data = res.json()
+        assert len(data["goals"]) == 3
+
+    def test_list_filter_by_session(self, client):
+        """session_id 过滤。"""
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-A", "objective": "A"},
+        )
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-B", "objective": "B"},
+        )
+
+        res = client.get(
+            "/api/goal/list?session_id=sess-A",
+            headers=auth_header(),
+        )
+        data = res.json()
+        assert len(data["goals"]) == 1
+        assert data["goals"][0]["session_id"] == "sess-A"
+
+    def test_list_limit(self, client):
+        """limit 参数限制返回数量。"""
+        for i in range(5):
+            client.post(
+                "/api/goal/start",
+                headers=auth_header(),
+                json={"session_id": f"sess-{i}", "objective": f"G{i}"},
+            )
+
+        res = client.get(
+            "/api/goal/list?limit=2",
+            headers=auth_header(),
+        )
+        assert len(res.json()["goals"]) == 2
+
+
+# ────────────────────────── /evidence ──────────────────────────
+
+
+class TestEvidence:
+    def test_evidence_without_active_goal_returns_404(self, client):
+        res = client.post(
+            "/api/goal/evidence",
+            headers=auth_header(),
+            json={"session_id": "no-active", "evidence": "Some finding"},
+        )
+        assert res.status_code == 404
+        assert "No active goal" in res.json()["detail"]
+
+    def test_evidence_success(self, client):
+        """创建 goal → 添加 evidence。"""
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-ev", "objective": "Test"},
+        )
+
+        res = client.post(
+            "/api/goal/evidence",
+            headers=auth_header(),
+            json={
+                "session_id": "sess-ev",
+                "evidence": "Collected 5 years of AAPL data with 1d granularity",
+                "source": "api",
+            },
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert "evidence_id" in data
+
+
+# ────────────────────────── /complete ──────────────────────────
+
+
+class TestComplete:
+    def test_complete_without_active_goal_returns_404(self, client):
+        res = client.post(
+            "/api/goal/complete",
+            headers=auth_header(),
+            json={"session_id": "no-active", "outcome": "complete"},
+        )
+        assert res.status_code == 404
+
+    def test_complete_invalid_outcome_returns_400(self, client):
+        """无效 outcome 枚举 → 400。"""
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-bad", "objective": "Test"},
+        )
+
+        res = client.post(
+            "/api/goal/complete",
+            headers=auth_header(),
+            json={"session_id": "sess-bad", "outcome": "invalid_outcome_xyz"},
+        )
+        assert res.status_code == 400
+        assert "Invalid outcome" in res.json()["detail"]
+
+    def test_complete_success(self, client):
+        """正常完成（cancelled — 不需要所有 criterion 满足）。"""
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-done", "objective": "Test"},
+        )
+
+        res = client.post(
+            "/api/goal/complete",
+            headers=auth_header(),
+            json={"session_id": "sess-done", "outcome": "cancelled", "summary": "User aborted"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert data["new_status"] == "cancelled"
+
+
+# ────────────────────────── Auth required ──────────────────────────
+
+
+class TestAuthRequired:
+    def test_goal_endpoints_require_auth(self, app):
+        """所有 goal 端点都需要 JWT（/api/goal/* 不在 PUBLIC_PREFIXES 中）。"""
+        client = TestClient(app)
+
+        res = client.post("/api/goal/start", json={"session_id": "x", "objective": "y"})
+        assert res.status_code == 401
+
+        res = client.get("/api/goal/status?session_id=x")
+        assert res.status_code == 401
+
+        res = client.get("/api/goal/list")
+        assert res.status_code == 401
+
+        res = client.post("/api/goal/evidence", json={"session_id": "x", "evidence": "y"})
+        assert res.status_code == 401
+
+        res = client.post("/api/goal/complete", json={"session_id": "x"})
+        assert res.status_code == 401
