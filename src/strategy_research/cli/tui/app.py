@@ -34,6 +34,10 @@ from strategy_research.cli.tui.messages import (
     WriteTranscript,
 )
 from strategy_research.cli.tui.session import ChatSession
+from strategy_research.cli.tui.workers.workflow_worker import (
+    WorkflowWorker,
+    WorkflowWorkerState,
+)
 from strategy_research.cli.tui.widgets import (
     ActivityRail,
     Banner,
@@ -92,6 +96,9 @@ class ResearchApp(App):
         # arrive via ``route_agent_event``.
         self._tool_total: int = 0
         self._tool_ok: int = 0
+        # Active workflow worker (Phase 4 v0.5.2). Created by
+        # ``start_workflow()`` when the user runs ``/goal start --workflow``.
+        self._workflow_worker: Optional[WorkflowWorker] = None
 
     def compose(self):
         yield StatusHeader(id="status-header")
@@ -606,10 +613,50 @@ class ResearchApp(App):
         self.write_transcript(f"[dim]已切换到 {label} 模式[/dim]")
 
     def action_toggle_goal_continuation(self) -> None:
-        """Ctrl+G — pause/resume goal auto-continuation."""
+        """Ctrl+G — pause/resume goal auto-continuation.
+
+        Phase 4 v0.5.2: If a workflow worker is active, Ctrl+G pauses it
+        first (immediate=True). Falls back to the legacy continuation
+        toggle when no workflow is running.
+        """
+        # 1) Pause active workflow (highest priority)
+        worker = self._workflow_worker
+        if worker is not None and worker.is_running:
+            worker.cancel(immediate=True)
+            return
+
+        # 2) Legacy continuation toggle
         if self.session is None:
             return
         self.session.toggle_goal_continuation()
+
+    # ── Phase 4 v0.5.2 — workflow integration ──────────────────
+
+    def start_workflow(self, runner: Any) -> WorkflowWorker:
+        """Attach a GoalWorkflowRunner to a fresh WorkflowWorker.
+
+        Subscribes the GoalPanel widget as an event observer so the
+        panel updates in real time as the workflow executes. Replaces
+        any previously attached worker.
+
+        Args:
+            runner: A GoalWorkflowRunner with a populated config and
+                event_bus.
+
+        Returns:
+            The newly created WorkflowWorker.
+        """
+        # Unsubscribe from previous worker's runner to avoid leaks.
+        prev_worker = self._workflow_worker
+        if prev_worker is not None:
+            prev_worker._unsubscribe_panel_observer()
+
+        worker = WorkflowWorker(runner, self)
+        self._workflow_worker = worker
+        # Subscribe the panel observer immediately so events emitted
+        # during the very first layer are captured.
+        worker._subscribe_panel_observer()
+        return worker
 
     def update_goal_panel(self) -> None:
         """Refresh GoalPanel from the current goal snapshot.
