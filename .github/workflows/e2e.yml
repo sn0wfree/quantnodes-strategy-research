@@ -1,0 +1,160 @@
+name: E2E Tests (Playwright)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:    # 允许手动触发
+    inputs:
+      update_baselines:
+        description: "更新视觉回归基线（tests/baselines/）"
+        required: false
+        type: boolean
+        default: false
+
+# 取消同 workflow 旧 run，节省 CI 时间
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      # 后端脚本化 SSE 模式 — 不需要真实 LLM
+      STRATEGY_RESEARCH_TEST_CHAT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      # 缓存 webui/frontend/node_modules (加速 npm ci)
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: webui/frontend/node_modules
+          key: ${{ runner.os }}-npm-${{ hashFiles('webui/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      # 缓存 Playwright 浏览器 (~250MB, 不缓存很慢)
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('webui/frontend/package-lock.json', 'tests/test_webui_visual.py') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # 缓存前端构建产物 (vite build 是最耗时的步骤)
+      - name: Cache frontend build
+        uses: actions/cache@v4
+        with:
+          path: |
+            webui/static
+            webui/frontend/node_modules/.vite
+          key: ${{ runner.os }}-vite-${{ hashFiles('webui/frontend/src/**', 'webui/frontend/package.json', 'webui/frontend/vite.config.ts', 'webui/frontend/tsconfig.app.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vite-
+
+      # 安装后端 + 前端依赖
+      - name: Install backend + frontend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,api,webui-api]"
+          cd webui/frontend
+          npm install --legacy-peer-deps
+
+      # 构建前端（可能从 cache 命中）
+      - name: Build frontend
+        run: |
+          cd webui/frontend
+          npm run build
+
+      # 安装 Playwright 浏览器（如果 cache 命中则跳过）
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install chromium
+
+      # 跑 E2E + 视觉回归测试
+      - name: Run E2E + visual regression tests
+        run: |
+          python -m pytest tests/test_webui_e2e_playwright.py tests/test_webui_visual.py \
+            -v --tb=short \
+            --color=yes
+
+      # 失败时上传视觉 diff 图 (供 PR review)
+      - name: Upload visual diff artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs-${{ github.run_id }}
+          path: tests/diffs/
+          retention-days: 7
+
+      # 失败时上传实际截图 (debug 用)
+      - name: Upload actual screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-screenshots-${{ github.run_id }}
+          path: tests/_actual/
+          retention-days: 7
+
+      # 所有 run 都上传 baselines（防止有人忘了提交新基线）
+      - name: Upload baselines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baselines-${{ github.run_id }}
+          path: tests/baselines/
+          retention-days: 30
+
+  # 单独的 baseline 更新 job — 通过手动触发
+  update-baselines:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.update_baselines == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: Install deps
+        run: |
+          python -m pip install -e ".[dev,api,webui-api]"
+          cd webui/frontend && npm install --legacy-peer-deps && npm run build && cd ../..
+          python -m playwright install chromium
+
+      - name: Update baselines
+        run: |
+          UPDATE_SNAPSHOTS=1 STRATEGY_RESEARCH_TEST_CHAT=1 \
+            python -m pytest tests/test_webui_visual.py -v --tb=short
+
+      - name: Commit updated baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tests/baselines/
+          if git diff --cached --quiet; then
+            echo "No baseline changes"
+          else
+            git commit -m "ci: update visual regression baselines"
+            git push
+          fi

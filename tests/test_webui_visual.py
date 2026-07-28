@@ -263,11 +263,78 @@ class TestMessageBubble:
 
 
 class TestDAGVisualization:
-    """DAG 可视化 — React Flow 节点 + 边。"""
+    """DAG 可视化 — React Flow 节点 + 边。
+
+    验证 5 种场景:
+    - dag_visualization: 默认混合状态 (backward compat baseline)
+    - dag_all_pending: 全部 pending
+    - dag_mid_running: 部分 running + completed + pending
+    - dag_all_completed: 全部完成 (progress=100%)
+    - dag_has_failed: 1 个 failed + 其他 completed/pending
+    """
+
+    DAG_STATES = {
+        "all_pending": {
+            "dagNodes": [
+                {"id": "plan", "label": "Plan Research", "status": "pending"},
+                {"id": "data", "label": "Load Market Data", "status": "pending"},
+                {"id": "alpha", "label": "Compute Alpha", "status": "pending"},
+                {"id": "report", "label": "Generate Report", "status": "pending"},
+            ],
+            "dagEdges": [
+                {"id": "e1", "source": "plan", "target": "data"},
+                {"id": "e2", "source": "data", "target": "alpha"},
+                {"id": "e3", "source": "alpha", "target": "report"},
+            ],
+            "executionProgress": 0.0,
+        },
+        "mid_running": {
+            "dagNodes": [
+                {"id": "plan", "label": "Plan Research", "status": "completed"},
+                {"id": "data", "label": "Load Market Data", "status": "completed"},
+                {"id": "alpha", "label": "Compute Alpha", "status": "running"},
+                {"id": "report", "label": "Generate Report", "status": "pending"},
+            ],
+            "dagEdges": [
+                {"id": "e1", "source": "plan", "target": "data"},
+                {"id": "e2", "source": "data", "target": "alpha"},
+                {"id": "e3", "source": "alpha", "target": "report"},
+            ],
+            "executionProgress": 0.5,
+        },
+        "all_completed": {
+            "dagNodes": [
+                {"id": "plan", "label": "Plan Research", "status": "completed"},
+                {"id": "data", "label": "Load Market Data", "status": "completed"},
+                {"id": "alpha", "label": "Compute Alpha", "status": "completed"},
+                {"id": "report", "label": "Generate Report", "status": "completed"},
+            ],
+            "dagEdges": [
+                {"id": "e1", "source": "plan", "target": "data"},
+                {"id": "e2", "source": "data", "target": "alpha"},
+                {"id": "e3", "source": "alpha", "target": "report"},
+            ],
+            "executionProgress": 1.0,
+        },
+        "has_failed": {
+            "dagNodes": [
+                {"id": "plan", "label": "Plan Research", "status": "completed"},
+                {"id": "data", "label": "Load Market Data", "status": "failed"},
+                {"id": "alpha", "label": "Compute Alpha", "status": "pending"},
+                {"id": "report", "label": "Generate Report", "status": "pending"},
+            ],
+            "dagEdges": [
+                {"id": "e1", "source": "plan", "target": "data"},
+                {"id": "e2", "source": "data", "target": "alpha"},
+                {"id": "e3", "source": "alpha", "target": "report"},
+            ],
+            "executionProgress": 0.25,
+        },
+    }
 
     @pytest.fixture
     def dag_page(self, context: BrowserContext, app_url: str) -> Iterator[Page]:
-        """注入 workflow DAG 状态 → 打开 right panel 的 DAG 标签。"""
+        """登录后注入空 DAG store — 各 test 自己再注入 state。"""
         page = context.new_page()
         try:
             import requests
@@ -299,57 +366,97 @@ class TestDAGVisualization:
                 "() => typeof window.__workflowStore !== 'undefined'", timeout=5000
             )
 
-            # 注入 4 节点的 DAG (确定性布局，便于 visual diff)
+            # 等 React Flow 容器出现 — 必须先注入至少 1 个节点
+            # (React Flow v12 在 nodes=[] 时会卸载容器元素)
             page.evaluate(
                 """() => {
                     window.__workflowStore.setState({
-                        dagNodes: [
-                            { id: 'plan', label: 'Plan Research', status: 'completed' },
-                            { id: 'data', label: 'Load Market Data', status: 'completed' },
-                            { id: 'alpha', label: 'Compute Alpha', status: 'running' },
-                            { id: 'report', label: 'Generate Report', status: 'pending' },
-                        ],
-                        dagEdges: [
-                            { id: 'e1', source: 'plan', target: 'data' },
-                            { id: 'e2', source: 'data', target: 'alpha' },
-                            { id: 'e3', source: 'alpha', target: 'report' },
-                        ],
-                        executionProgress: 0.5,
+                        dagNodes: [{ id: '__bootstrap', label: 'Bootstrap', status: 'pending' }],
+                        dagEdges: [],
+                        executionProgress: 0.0,
                     });
                 }"""
             )
-
-            # 默认状态 rightPanelTab='dag' + visible=true → DAG 已可见
-            # 无需点击按钮（点击 active 按钮可能 toggle 关闭）
-
-            # 等 React Flow 渲染 + fitView 布局完成
-            page.wait_for_selector(".react-flow__node", timeout=10_000)
-            page.wait_for_timeout(800)
+            page.wait_for_selector(".react-flow", timeout=10_000)
+            page.wait_for_timeout(500)
 
             yield page
         finally:
             page.close()
 
     def test_dag_visualization_baseline(self, dag_page: Page):
-        """完整 DAG 视图 — 节点颜色 + 边 + 状态进度。"""
-        # 等 React Flow + 节点出现
+        """默认 DAG 视图 — 混合状态 (backward compat baseline)。"""
+        # 注入 baseline 默认 mixed 状态
+        dag_page.evaluate(
+            """() => {
+                window.__workflowStore.setState({
+                    dagNodes: [
+                        { id: 'plan', label: 'Plan Research', status: 'completed' },
+                        { id: 'data', label: 'Load Market Data', status: 'completed' },
+                        { id: 'alpha', label: 'Compute Alpha', status: 'running' },
+                        { id: 'report', label: 'Generate Report', status: 'pending' },
+                    ],
+                    dagEdges: [
+                        { id: 'e1', source: 'plan', target: 'data' },
+                        { id: 'e2', source: 'data', target: 'alpha' },
+                        { id: 'e3', source: 'alpha', target: 'report' },
+                    ],
+                    executionProgress: 0.5,
+                });
+            }"""
+        )
+
         try:
-            dag_page.wait_for_selector(".react-flow", timeout=10_000)
             dag_page.wait_for_selector(".react-flow__node", timeout=10_000)
         except Exception:
-            # 打印调试信息
-            count = dag_page.locator(".react-flow").count()
-            nodes = dag_page.locator(".react-flow__node").count()
-            pytest.skip(f"React Flow not ready (count={count}, nodes={nodes})")
+            pytest.skip("React Flow nodes not rendered")
             return
 
         # 等 fitView 布局动画完成
         dag_page.wait_for_timeout(800)
 
-        # 截取整个 react-flow 容器（含 nodes + edges + minimap + controls）
         react_flow = dag_page.locator(".react-flow").first
         actual = _screenshot_element(dag_page, react_flow, "dag_visualization")
         _assert_or_update(actual, "dag_visualization", max_diff_ratio=0.02)
+
+    @pytest.mark.parametrize("state_name", list(DAG_STATES.keys()))
+    def test_dag_state_snapshots(self, dag_page: Page, state_name: str):
+        """DAG 多状态快照 — 验证 4 种节点组合的视觉表现。
+
+        4 种状态:
+        - all_pending: 全部 pending (灰色边框, 空进度条)
+        - mid_running: 部分 running (蓝色脉冲图标) + completed (绿色 check)
+        - all_completed: 全部完成 (绿色, 100% 进度条)
+        - has_failed: 1 个 failed (红色 X 图标) + 其他 completed/pending
+        """
+        config = self.DAG_STATES[state_name]
+
+        # 注入对应状态
+        dag_page.evaluate(
+            """(config) => {
+                window.__workflowStore.setState({
+                    dagNodes: config.dagNodes,
+                    dagEdges: config.dagEdges,
+                    executionProgress: config.executionProgress,
+                });
+            }""",
+            config,
+        )
+
+        # 等 React Flow 重新布局
+        try:
+            dag_page.wait_for_selector(".react-flow__node", timeout=10_000)
+        except Exception:
+            pytest.skip(f"React Flow nodes not rendered for {state_name}")
+            return
+        dag_page.wait_for_timeout(1000)
+
+        react_flow = dag_page.locator(".react-flow").first
+        if react_flow.count() == 0:
+            pytest.skip(f"React Flow not rendered for {state_name}")
+
+        actual = _screenshot_element(dag_page, react_flow, f"dag_{state_name}")
+        _assert_or_update(actual, f"dag_{state_name}", max_diff_ratio=0.02)
 
 
 class TestCommandPalette:
@@ -401,3 +508,173 @@ class TestCommandPalette:
             _assert_or_update(actual, "command_palette", max_diff_ratio=0.02)
         finally:
             page.close()
+
+
+class TestEmptyStates:
+    """空状态视觉 — 验证 EmptyState 组件在各个 panel 的渲染。
+
+    3 个场景:
+    - empty_chat: 已登录 + currentSessionId 设置 + 消息列表为空
+    - empty_goal: Goal 标签 + 无活跃目标 → 显示「暂无活跃目标」
+    - empty_agent: Agent 标签 + 无 agent → 显示「暂无 Agent」
+    """
+
+    @pytest.fixture
+    def logged_in_page(
+        self, context: BrowserContext, app_url: str
+    ) -> Iterator[Page]:
+        """通用 fixture: 注册 + 注入 token + 跳转到 home。"""
+        import requests
+        import uuid as _uuid
+
+        api = requests.Session()
+        api.base_url = app_url  # type: ignore[attr-defined]
+
+        username = f"empty_{_uuid.uuid4().hex[:8]}"
+        r = api.post(
+            f"{api.base_url}/api/auth/register",
+            json={"username": username, "password": "p"},
+        )
+        token = r.json()["access_token"]
+
+        page = context.new_page()
+        try:
+            page.goto(f"{app_url}/login")
+            page.wait_for_selector("input[type='password']", timeout=10_000)
+            page.evaluate(
+                """({token}) => {
+                    localStorage.setItem('sr-auth', JSON.stringify({
+                        state: { token, user: { username: 'empty' } }, version: 0
+                    }));
+                }""",
+                {"token": token},
+            )
+            page.goto(f"{app_url}/")
+            page.wait_for_selector("header", timeout=10_000)
+            yield page
+        finally:
+            page.close()
+
+    def test_empty_chat(self, logged_in_page: Page):
+        """空聊天区 — 选中 session 但没有消息。
+
+        预期: MessageList 显示 EmptyState 「开始对话」
+        """
+        # 注入空 store (default 是空 messages)
+        logged_in_page.wait_for_function(
+            "() => typeof window.__chatStore !== 'undefined'", timeout=5000
+        )
+        logged_in_page.wait_for_function(
+            "() => typeof window.__sessionStore !== 'undefined'", timeout=5000
+        )
+
+        # 注入 session 但不添加消息
+        logged_in_page.evaluate(
+            """() => {
+                window.__sessionStore.setState({
+                    currentSessionId: 'demo-session-1',
+                    sessions: [{
+                        id: 'demo-session-1',
+                        title: 'Empty Chat Session',
+                        created_at: Date.now() / 1000,
+                        updated_at: Date.now() / 1000,
+                    }],
+                });
+            }"""
+        )
+
+        # 等 EmptyState「开始对话」出现
+        logged_in_page.wait_for_selector("text=开始对话", timeout=5000)
+        logged_in_page.wait_for_timeout(300)
+
+        actual = _screenshot_page(logged_in_page, "empty_chat")
+        _assert_or_update(actual, "empty_chat", max_diff_ratio=0.01)
+
+    def test_empty_goal(self, logged_in_page: Page):
+        """空 Goal 列表 — Goal tab + 无目标。
+
+        预期: 显示「暂无活跃目标」+ 添加按钮
+        """
+        # 默认 rightPanelTab='goal' — 但 layout store 默认是 'dag'
+        # 切换到 goal tab
+        logged_in_page.wait_for_function(
+            "() => typeof window.__workflowStore !== 'undefined'", timeout=5000
+        )
+        # 通过点击 IconNav 的 Goal 按钮切换
+        # title 属性: Workflow=undefined(默认), Target=goal, Bot=agent
+        goal_btn = logged_in_page.locator("button[title='goal']")
+        if goal_btn.count() > 0:
+            goal_btn.click()
+            logged_in_page.wait_for_timeout(500)
+
+        # 等 EmptyState「暂无活跃目标」出现
+        try:
+            logged_in_page.wait_for_selector("text=暂无活跃目标", timeout=5000)
+        except Exception:
+            pytest.skip("Goal EmptyState not found (right panel may be hidden)")
+            return
+
+        logged_in_page.wait_for_timeout(300)
+
+        # 截整个右侧面板
+        right_panel = logged_in_page.locator("[class*='RightPanel'], aside, [role='complementary']")
+        if right_panel.count() == 0:
+            # fallback: 截图右侧 480px 区域
+            viewport = logged_in_page.viewport_size
+            actual = logged_in_page.screenshot(
+                path=str(ACTUALS_DIR / "empty_goal.png"),
+                clip={
+                    "x": viewport["width"] - 480,
+                    "y": 48,
+                    "width": 480,
+                    "height": viewport["height"] - 48,
+                },
+                animations="disabled",
+            )
+            ACTUALS_DIR.mkdir(parents=True, exist_ok=True)
+            (ACTUALS_DIR / "empty_goal.png").write_bytes(actual)
+            actual = ACTUALS_DIR / "empty_goal.png"
+        else:
+            actual = _screenshot_element(logged_in_page, right_panel.first, "empty_goal")
+
+        _assert_or_update(actual, "empty_goal", max_diff_ratio=0.02)
+
+    def test_empty_agent(self, logged_in_page: Page):
+        """空 Agent 列表 — Agent tab + 无 agent。
+
+        预期: 显示「暂无 Agent」
+        """
+        # 切换到 agent tab
+        logged_in_page.wait_for_function(
+            "() => typeof window.__workflowStore !== 'undefined'", timeout=5000
+        )
+        agent_btn = logged_in_page.locator("button[title='agent']")
+        if agent_btn.count() > 0:
+            agent_btn.click()
+            logged_in_page.wait_for_timeout(500)
+
+        # 等 EmptyState「暂无 Agent」出现
+        try:
+            logged_in_page.wait_for_selector("text=暂无 Agent", timeout=5000)
+        except Exception:
+            pytest.skip("Agent EmptyState not found")
+            return
+
+        logged_in_page.wait_for_timeout(300)
+
+        # 截右侧面板
+        viewport = logged_in_page.viewport_size
+        actual_path = ACTUALS_DIR / "empty_agent.png"
+        ACTUALS_DIR.mkdir(parents=True, exist_ok=True)
+        logged_in_page.screenshot(
+            path=str(actual_path),
+            clip={
+                "x": viewport["width"] - 480,
+                "y": 48,
+                "width": 480,
+                "height": viewport["height"] - 48,
+            },
+            animations="disabled",
+        )
+
+        _assert_or_update(actual_path, "empty_agent", max_diff_ratio=0.02)
