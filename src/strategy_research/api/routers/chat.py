@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .sse_buffer import sse_buffer
+from ..sse_buffer import sse_buffer
 
 router = APIRouter()
 

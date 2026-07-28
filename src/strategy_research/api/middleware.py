@@ -18,7 +18,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     SKIP_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
-    PUBLIC_PREFIXES = ["/api/auth/", "/api/goal/", "/api/session/"]
+    PUBLIC_PREFIXES = ["/api/auth/", "/api/chat/"]
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
