@@ -78,23 +78,39 @@ def cmd_status(*, console: Optional[Console] = None, session_id: str = "cli") ->
 
 
 def cmd_start(objective: str, *, console: Optional[Console] = None,
-              session_id: str = "cli") -> int:
-    """``/goal start <objective>`` — create a new goal."""
+              session_id: str = "cli", template_key: str = "") -> int:
+    """``/goal start <objective> [--template <key>]`` — create a new goal."""
     console = _resolve_console(console)
     if not objective.strip():
-        console.print("[red]Usage:[/red] /goal start <objective>")
+        console.print("[red]Usage:[/red] /goal start <objective> [--template <key>]")
         return 1
     try:
         from strategy_research.core.goal.context import default_goal_criteria
+        from strategy_research.core.goal.templates import get_template
+
+        # Resolve criteria from template or defaults
+        criteria = default_goal_criteria()
+        risk_tier = "research_general"
+        if template_key:
+            tmpl = get_template(template_key)
+            if tmpl is None:
+                console.print(f"[red]Unknown template:[/red] {template_key}")
+                console.print("[dim]Available: " + ", ".join(
+                    sorted(getattr(__import__('strategy_research.core.goal.templates',
+                                              fromlist=['TEMPLATES']), 'TEMPLATES').keys())
+                ) + "[/dim]")
+                return 1
+            criteria = tmpl.criteria
+            risk_tier = tmpl.risk_tier
 
         store = _store()
-        criteria = default_goal_criteria()
         goal = store.replace_goal(
             session_id=session_id,
             objective=objective,
             criteria=criteria,
             source="cli",
             protocol="thesis_review",
+            risk_tier=risk_tier,
         )
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]/goal start failed:[/red] {exc}")
@@ -159,10 +175,15 @@ def cmd_evidence(criterion_ref: str, note: str, *,
 
 
 def cmd_complete(recap: str = "", *, console: Optional[Console] = None,
-                 session_id: str = "cli") -> int:
-    """``/goal complete [recap]`` — mark the goal complete."""
+                 session_id: str = "cli", lite: bool = False) -> int:
+    """``/goal complete [recap] [--lite]`` — mark the goal complete.
+
+    With ``--lite``, only verifies evidence coverage (no audit required).
+    Without ``--lite``, requires audit rows for all required criteria.
+    """
     console = _resolve_console(console)
     try:
+        from strategy_research.core.goal.context import criterion_is_covered
         from strategy_research.core.goal.models import AuditRow, GoalStatus
 
         store = _store()
@@ -171,25 +192,34 @@ def cmd_complete(recap: str = "", *, console: Optional[Console] = None,
             console.print("[yellow]No active goal.[/yellow]")
             return 0
         goal_id = snapshot["goal"]["goal_id"]
-        # Verify all criteria have evidence before allowing completion
         criteria = snapshot.get("criteria", [])
-        all_covered = snapshot.get("all_covered", False)
-        if criteria and not all_covered:
-            console.print("[red]Cannot complete:[/red] not all criteria have evidence.")
-            return 1
 
-        evidence_ids = [e.get("evidence_id", "") for e in snapshot.get("evidence", [])]
-        store.update_status(
-            session_id=session_id,
-            goal_id=goal_id,
-            expected_goal_id=goal_id,
-            status=GoalStatus.COMPLETE,
-            audit=AuditRow(result="satisfied", evidence_ids=evidence_ids, notes=recap or ""),
-        )
+        if lite:
+            # Lite mode: just verify all required criteria have evidence
+            store.complete_lite(
+                session_id=session_id,
+                goal_id=goal_id,
+                expected_goal_id=goal_id,
+                recap=recap or "(lite completion)",
+            )
+        else:
+            all_covered = snapshot.get("all_covered", False)
+            if criteria and not all_covered:
+                console.print("[red]Cannot complete:[/red] not all criteria have evidence.")
+                return 1
+            evidence_ids = [e.get("evidence_id", "") for e in snapshot.get("evidence", [])]
+            store.update_status(
+                session_id=session_id,
+                goal_id=goal_id,
+                expected_goal_id=goal_id,
+                status=GoalStatus.COMPLETE,
+                audit=AuditRow(result="satisfied", evidence_ids=evidence_ids, notes=recap or ""),
+            )
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]/goal complete failed:[/red] {exc}")
         return 1
-    console.print("[green]Goal completed.[/green]")
+    mode = " (lite)" if lite else ""
+    console.print(f"[green]Goal completed{mode}.[/green]")
     return 0
 
 
@@ -224,13 +254,33 @@ def cmd_help(*, console: Optional[Console] = None) -> int:
     """``/goal help`` — usage panel."""
     console = _resolve_console(console)
     body = (
-        "/goal status                       — show current goal\n"
-        "/goal start <objective>            — create a new goal\n"
-        "/goal evidence <idx-or-id> <note>  — record evidence\n"
-        "/goal complete [recap]             — mark complete\n"
-        "/goal cancel [recap]               — cancel\n"
+        "/goal status                          — show current goal\n"
+        "/goal start <objective> [--template T] — create a new goal\n"
+        "/goal evidence <idx-or-id> <note>      — record evidence\n"
+        "/goal complete [recap] [--lite]        — mark complete\n"
+        "/goal cancel [recap]                   — cancel\n"
+        "/goal templates                        — list available templates\n"
     )
     console.print(Panel(body, title="/goal", border_style="dim"))
+    return 0
+
+
+def cmd_templates(*, console: Optional[Console] = None) -> int:
+    """``/goal templates`` — list available goal templates."""
+    from strategy_research.core.goal.templates import list_templates
+    console = _resolve_console(console)
+    templates = list_templates()
+    if not templates:
+        console.print("[dim]No templates registered.[/dim]")
+        return 0
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Key")
+    table.add_column("Name")
+    table.add_column("Description")
+    table.add_column("Criteria", justify="right")
+    for key, tmpl in sorted(templates.items()):
+        table.add_row(key, tmpl.name, tmpl.description, str(len(tmpl.criteria)))
+    console.print(table)
     return 0
 
 
@@ -245,15 +295,31 @@ def run(ctx: Any = None, *args: str) -> int:
         return cmd_status()
     if sub == "help":
         return cmd_help()
+    if sub == "templates":
+        return cmd_templates()
     if sub == "start":
-        return cmd_start(" ".join(rest))
+        # Parse --template option
+        template_key = ""
+        objective_parts = []
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--template" and i + 1 < len(rest):
+                template_key = rest[i + 1]
+                i += 2
+            else:
+                objective_parts.append(rest[i])
+                i += 1
+        return cmd_start(" ".join(objective_parts), template_key=template_key)
     if sub == "evidence" and rest:
         # Next tokens: "<idx-or-id>" "<note words...>"
         if len(rest) >= 2:
             return cmd_evidence(rest[0], " ".join(rest[1:]))
         return cmd_evidence(rest[0], "")
     if sub == "complete":
-        return cmd_complete(" ".join(rest))
+        # Parse --lite option
+        lite = "--lite" in rest
+        rest = [r for r in rest if r != "--lite"]
+        return cmd_complete(" ".join(rest), lite=lite)
     if sub == "cancel":
         return cmd_cancel(" ".join(rest))
     return cmd_help()

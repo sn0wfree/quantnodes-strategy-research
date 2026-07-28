@@ -876,6 +876,103 @@ class GoalStore:
             raise RuntimeError("updated goal could not be reloaded")
         return updated
 
+    def complete_lite(
+        self,
+        *,
+        session_id: str,
+        goal_id: str,
+        expected_goal_id: str,
+        recap: str | None = None,
+    ) -> GoalRecord:
+        """Complete a goal in lite mode — evidence coverage only, no audit.
+
+        Lite mode verifies that every required criterion has at least one
+        linked evidence record, but does NOT require audit rows or verified
+        status.  Suitable for quick research and exploratory analysis.
+
+        Args:
+            session_id: Owning session id.
+            goal_id: Goal to complete.
+            expected_goal_id: Stale-write guard (must match goal_id).
+            recap: Optional completion summary.
+
+        Returns:
+            Updated GoalRecord.
+
+        Raises:
+            StaleGoalError: If goal is not current or id mismatch.
+            ValueError: If required criteria lack evidence.
+        """
+        with self._write_transaction():
+            goal = self._require_mutable_goal(session_id, goal_id, expected_goal_id)
+            session_id = goal.session_id
+            goal_id = goal.goal_id
+
+            # Lite validation: every required criterion must have evidence
+            criteria = self.list_criteria(goal_id)
+            evidence = self.list_evidence(goal_id)
+            evidence_by_criterion: dict[str, list] = {}
+            for ev in evidence:
+                cid = ev.criterion_id
+                if cid:
+                    evidence_by_criterion.setdefault(cid, []).append(ev)
+
+            for criterion in criteria:
+                if not criterion.required:
+                    continue
+                if not evidence_by_criterion.get(criterion.criterion_id):
+                    raise ValueError(
+                        f"Criterion {criterion.criterion_id} ({criterion.text}) "
+                        "lacks evidence — cannot complete in lite mode"
+                    )
+
+            now = _now_iso()
+            self._conn.execute(
+                """
+                UPDATE goals
+                SET status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at),
+                    recap = COALESCE(?, recap)
+                WHERE goal_id = ? AND session_id = ?
+                """,
+                (GoalStatus.COMPLETE.value, now, now, recap, goal_id, session_id),
+            )
+
+            # Write a synthetic audit row for record-keeping
+            all_evidence_ids = [ev.evidence_id for ev in evidence]
+            self._conn.execute(
+                """
+                INSERT INTO goal_audits (
+                    audit_id, goal_id, session_id, audit_type, result,
+                    rows_json, created_at
+                )
+                VALUES (?, ?, ?, 'completion_lite', ?, ?, ?)
+                """,
+                (
+                    _id("audit"),
+                    goal_id,
+                    session_id,
+                    GoalStatus.COMPLETE.value,
+                    _json_dumps([{
+                        "criterion_id": c.criterion_id,
+                        "result": "satisfied",
+                        "evidence_ids": [
+                            ev.evidence_id for ev in evidence
+                            if ev.criterion_id == c.criterion_id
+                        ],
+                        "notes": "(lite completion)",
+                    } for c in criteria if c.required]),
+                    now,
+                ),
+            )
+
+            self._update_progress(goal_id)
+            self._on_goal_complete(session_id, goal_id)
+
+        updated = self.get_goal(goal_id)
+        if updated is None:
+            raise RuntimeError("updated goal could not be reloaded")
+        return updated
+
     def _on_goal_complete(self, session_id: str, goal_id: str) -> None:
         """Hook fired when a goal reaches COMPLETE status.
 

@@ -85,6 +85,9 @@ class ChatSession:
         self.session_logger = session_logger
         # Pending raw input buffer used by :meth:`ResumeOrNewModal`.
         self._pending_input: Optional[str] = None
+        # Goal continuation control: when True, _check_goal_continuation
+        # is suppressed so the agent stops after each LLM response.
+        self._goal_continuation_paused: bool = False
 
     # ------------------------------------------------------------------ API
 
@@ -117,6 +120,13 @@ class ChatSession:
         # Must run AFTER process_turn (which may create/complete a goal)
         # and BEFORE _run_agent_loop (which needs the mode to select prompt).
         self._sync_interactive_mode()
+
+        # Refresh the GoalPanel widget with current goal data.
+        if self.app is not None:
+            try:
+                self.app.update_goal_panel()
+            except Exception:
+                pass
 
         # If plain text and an LLM client is bound, route the user
         # turn through AgentLoop (full event-driven flow).
@@ -375,6 +385,71 @@ class ChatSession:
             self._write_transcript(
                 "[success]halt cleared — long-running loops may now proceed.[/]"
             )
+
+    def toggle_goal_continuation(self) -> None:
+        """Ctrl+G — pause/resume goal auto-continuation.
+
+        When paused, the agent stops after each LLM response without
+        automatically injecting a <goal-continuation> prompt.  The user
+        can still chat freely; resuming re-enables the auto-continue
+        behaviour on the next turn.
+        """
+        self._goal_continuation_paused = not self._goal_continuation_paused
+        if self._goal_continuation_paused:
+            self._write_transcript(
+                "[dim]Goal 自动续跑已暂停 — 按 Ctrl+G 恢复[/dim]"
+            )
+        else:
+            self._write_transcript(
+                "[dim]Goal 自动续跑已恢复[/dim]"
+            )
+        # Update GoalPanel hint
+        if self.app is not None:
+            try:
+                self.app.update_goal_panel()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------ evidence detection
+
+    @staticmethod
+    def detect_evidence_in_response(content: str) -> dict | None:
+        """Heuristic: detect research evidence in agent response text.
+
+        Returns a dict with ``text``, ``confidence`` ("high"/"medium"/"low"),
+        and ``matched_pattern`` if evidence is detected, or None.
+
+        This is a passive detection — the caller decides whether to prompt
+        the user for confirmation.
+        """
+        import re
+
+        if not content or len(content.strip()) < 20:
+            return None
+
+        # Patterns indicating quantitative research evidence
+        patterns = [
+            (r"(年化收益[率]?|annualized\s+return)", "high"),
+            (r"(夏普比率?|sharpe\s+ratio)", "high"),
+            (r"(最大回撤|max(?:imum)?\s+drawdown)", "high"),
+            (r"(收益率|return\s+rate)", "medium"),
+            (r"(波动率|volatility)", "medium"),
+            (r"(回测|backtest|back-test)", "medium"),
+            (r"(数据来源|data\s+source|来源[：:])", "medium"),
+            (r"(统计[显著性]|statistical\s+significance|p[\s-]*value)", "high"),
+            (r"(置信区间|confidence\s+interval)", "high"),
+            (r"(因子[收益表现]|factor\s+(?:return|performance))", "medium"),
+        ]
+
+        for pattern, confidence in patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                return {
+                    "text": content[:500],
+                    "confidence": confidence,
+                    "matched_pattern": pattern,
+                }
+
+        return None
 
 
 __all__ = [

@@ -39,6 +39,7 @@ from strategy_research.cli.tui.widgets import (
     Banner,
     ChatInput,
     CommandSidebar,
+    GoalPanel,
     HintFooter,
     Milestone,
     ModeBar,
@@ -95,6 +96,7 @@ class ResearchApp(App):
     def compose(self):
         yield StatusHeader(id="status-header")
         yield ModeBar(id="mode-bar")
+        yield GoalPanel(id="goal-panel")
         with Horizontal(id="main-row"):
             yield CommandSidebar(id="sidebar", classes="hidden")
             yield TranscriptView(id="transcript")
@@ -602,6 +604,44 @@ class ResearchApp(App):
         # Show brief notification in transcript
         label = "策略研究（JSON 输出）" if new_mode == "goal" else "普通聊天（自然语言）"
         self.write_transcript(f"[dim]已切换到 {label} 模式[/dim]")
+
+    def action_toggle_goal_continuation(self) -> None:
+        """Ctrl+G — pause/resume goal auto-continuation."""
+        if self.session is None:
+            return
+        self.session.toggle_goal_continuation()
+
+    def update_goal_panel(self) -> None:
+        """Refresh GoalPanel from the current goal snapshot.
+
+        Called by _sync_interactive_mode in ChatSession after each turn.
+        """
+        try:
+            panel = self.query_one("#goal-panel", GoalPanel)
+        except Exception:
+            return
+        if self.session is None:
+            panel.clear_goal()
+            return
+        try:
+            from strategy_research.core.goal import GoalStore
+            store = GoalStore()
+            snapshot = store.get_current_snapshot(self.session.ctx.session_id)
+            if snapshot is None:
+                panel.clear_goal()
+                return
+            goal = snapshot["goal"]
+            panel.update_goal(
+                objective=goal.get("objective", ""),
+                status=goal.get("status", ""),
+                progress=goal.get("progress_percent", 0.0),
+                criteria=snapshot.get("criteria", []),
+                evidence_count=snapshot.get("evidence_count", 0),
+                goal_id=goal.get("goal_id", ""),
+                continuation_paused=getattr(self.session, "_goal_continuation_paused", False),
+            )
+        except Exception:
+            panel.clear_goal()
 
 
 __all__ = ["ResearchApp"]
