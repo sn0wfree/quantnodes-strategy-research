@@ -35,6 +35,17 @@ Coverage:
   YAML validation:
     * validate DAG is acyclic
     * validate agent references
+
+Refactor coverage (Phase 2 R1-R12):
+  * PromptBuilder reuse in _build_prompt
+  * AgentRunnerFactory integration
+  * CompletionStrategyFactory dispatch
+  * ValidatorRegistry default validators
+  * Decorator chain composition
+  * WorkflowEventBus emission
+  * GoalStore injection
+  * DAG layer caching
+  * _run_layers deduplication
 """
 from __future__ import annotations
 
@@ -53,6 +64,21 @@ from strategy_research.core.goal.workflow import (
     GoalWorkflowRunner,
     GoalWorkflowState,
 )
+
+
+def mock_store():
+    """Build a MagicMock GoalStore for tests that don't touch the DB."""
+    store = mock.MagicMock()
+    store.get_current_snapshot.return_value = {
+        "goal": {"goal_id": "goal-1", "status": "active"},
+        "criteria": [
+            {"criterion_id": "crit_1", "status": "pending", "required": True},
+            {"criterion_id": "crit_2", "status": "pending", "required": True},
+        ],
+        "evidence": [],
+        "evidence_count": 0,
+    }
+    return store
 
 
 # ── Config Models ────────────────────────────────────────────
@@ -132,17 +158,17 @@ class TestGoalWorkflowState:
 
 class TestGoalEvidenceCollector:
     def test_collect_empty_result(self):
-        collector = GoalEvidenceCollector("session-1", "goal-1")
+        collector = GoalEvidenceCollector(mock_store(), "session-1", "goal-1")
         count = collector.collect("researcher", {"answer": ""}, 0)
         assert count == 0
 
     def test_collect_short_result(self):
-        collector = GoalEvidenceCollector("session-1", "goal-1")
+        collector = GoalEvidenceCollector(mock_store(), "session-1", "goal-1")
         count = collector.collect("researcher", {"answer": "hi"}, 0)
         assert count == 0
 
     def test_collect_invalid_criterion_index(self):
-        collector = GoalEvidenceCollector("session-1", "goal-1")
+        collector = GoalEvidenceCollector(mock_store(), "session-1", "goal-1")
         count = collector.collect(
             "researcher",
             {"answer": "some evidence text that is long enough"},

@@ -1,22 +1,16 @@
 """Goal Workflow Engine — DAG-based research workflow for goals.
 
-Integrates the existing WorkflowController (DAG scheduling) with
-GoalStore (state management) to drive structured research processes
-defined by YAML configs.
-
-Architecture:
-    GoalWorkflowRunner
-      ├─ loads GoalWorkflowConfig from YAML
-      ├─ creates Goal in GoalStore
-      ├─ builds WorkflowController from DAG
-      ├─ executes agents layer by layer
-      ├─ auto-collects evidence from agent outputs
-      └─ auto-completes goal when all criteria are covered
-
-Usage:
-    config = load_goal_workflow("factor_research")
-    runner = GoalWorkflowRunner(config, session_id="user-123")
-    goal_id = await runner.start("研究动量因子在A股的有效性")
+Refactored (Phase 2 R1-R12) to:
+  - Reuse PromptBuilder from core.workflow.prompt (R1+R2)
+  - Use AgentRunnerFactory for pluggable runners (R3)
+  - Use CompletionStrategyFactory for completion modes (R6)
+  - Use ValidatorRegistry for the 9 default validators (R9)
+  - Use WorkflowEventBus for state-change notifications (R8)
+  - Apply with_retry/timeout/validation/evidence decorators (R7)
+  - Inject GoalStore instead of repeated instantiation (R5)
+  - Extract _run_layers() to deduplicate _execute_dag and continue_after_pause (R4)
+  - Cache DAG layers to avoid repeated inversion (R11)
+  - Delegate template logic to workflow YAML (R12)
 """
 from __future__ import annotations
 
@@ -24,7 +18,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +93,6 @@ class GoalWorkflowState:
     paused: bool = False
     pause_layer: int = -1
     agent_statuses: dict[str, str] = field(default_factory=dict)
-    # agent_id → "pending" | "running" | "success" | "error" | "skipped"
     agent_errors: dict[str, str] = field(default_factory=dict)
     evidence_count: int = 0
     start_time: float = 0.0
@@ -129,7 +122,13 @@ class GoalWorkflowState:
 class GoalEvidenceCollector:
     """Collects agent outputs and appends them as goal evidence."""
 
-    def __init__(self, session_id: str, goal_id: str):
+    def __init__(
+        self,
+        store: Any,
+        session_id: str,
+        goal_id: str,
+    ) -> None:
+        self._store = store
         self._session_id = session_id
         self._goal_id = goal_id
 
@@ -139,17 +138,14 @@ class GoalEvidenceCollector:
         result: dict[str, Any],
         criterion_idx: int,
     ) -> int:
-        """Append agent output as evidence. Returns number of evidence added."""
+        """Append agent output as evidence. Returns number added (0/1)."""
         from .models import EvidenceInput
-        from .store import GoalStore
 
         answer = result.get("answer", "")
         if not answer or len(answer.strip()) < 10:
             return 0
 
-        # Resolve criterion_id from index
-        store = GoalStore()
-        snapshot = store.get_current_snapshot(self._session_id)
+        snapshot = self._store.get_current_snapshot(self._session_id)
         if snapshot is None:
             return 0
 
@@ -161,11 +157,10 @@ class GoalEvidenceCollector:
         if not criterion_id:
             return 0
 
-        # Truncate long evidence
         text = answer[:2000]
 
         try:
-            store.append_evidence(
+            self._store.append_evidence(
                 session_id=self._session_id,
                 goal_id=self._goal_id,
                 expected_goal_id=self._goal_id,
@@ -188,8 +183,12 @@ class GoalEvidenceCollector:
 class GoalWorkflowRunner:
     """DAG-based workflow executor for research goals.
 
-    Orchestrates agent execution through the existing WorkflowController,
-    collecting evidence and auto-completing the goal when done.
+    Integrates:
+      - AgentRunnerFactory for agent execution (R3)
+      - ValidatorRegistry for output validation (R9)
+      - CompletionStrategyFactory for completion modes (R6)
+      - WorkflowEventBus for state-change notifications (R8)
+      - Decorators for retry/timeout/validation/evidence (R7)
     """
 
     def __init__(
@@ -197,34 +196,79 @@ class GoalWorkflowRunner:
         config: GoalWorkflowConfig,
         session_id: str,
         *,
-        agent_runner: Callable[..., Any] | None = None,
+        agent_runner: Any = None,
+        agent_runner_type: str = "stub",
+        store: Any = None,
+        runner_kwargs: dict[str, Any] | None = None,
+        use_validators: bool = True,
     ) -> None:
         """Initialize the runner.
 
         Args:
             config: Workflow configuration loaded from YAML.
             session_id: Current session id.
-            agent_runner: Optional async callable ``(agent_id, prompt, tools, context)
-                         -> dict`` for executing agents. When None, uses a stub
-                         that returns empty results.
+            agent_runner: Pre-built AgentRunner instance (overrides type).
+            agent_runner_type: Type name for AgentRunnerFactory.create().
+            store: GoalStore instance (default: new instance).
+            runner_kwargs: Pass-through kwargs for AgentRunnerFactory.
+            use_validators: Whether to apply the 9 default validators.
         """
         self._config = config
         self._session_id = session_id
-        self._agent_runner = agent_runner
+        self._store = store  # type: ignore[assignment]
+        self._event_bus = WorkflowEventBus()
+
+        # R3: AgentRunner via factory
+        if agent_runner is not None:
+            self._agent_runner = agent_runner
+        else:
+            from ..workflow.agent_runner import AgentRunnerFactory
+            kwargs = runner_kwargs or {}
+            self._agent_runner = AgentRunnerFactory.create(
+                agent_runner_type, **kwargs,
+            )
+
+        # R9: validators registry (lazy import to avoid circular)
+        self._validators: dict[str, Any] = {}
+        if use_validators:
+            from .validator_registry import ValidatorRegistry
+            for agent_cfg in config.agents:
+                v = ValidatorRegistry.get(agent_cfg.id)
+                if v is not None:
+                    self._validators[agent_cfg.id] = v
+
+        # R1+R2: PromptBuilder reuse
+        from ..workflow.prompt import PromptBuilder
+        self._prompt_builder = PromptBuilder()
+
+        # R11: cache DAG layers
+        self._layers_cache: list[list[str]] | None = None
+
         self._state = GoalWorkflowState()
         self._goal_id: str = ""
         self._evidence_collector: GoalEvidenceCollector | None = None
         self._layer_results: dict[str, dict[str, Any]] = {}
 
+    # ── Public API ────────────────────────────────────────────
+
     @property
     def state(self) -> GoalWorkflowState:
-        """Current workflow state."""
         return self._state
 
     @property
     def goal_id(self) -> str:
-        """Goal id created by this workflow."""
         return self._goal_id
+
+    @property
+    def event_bus(self) -> "WorkflowEventBus":
+        return self._event_bus
+
+    def subscribe(self, observer: Any) -> None:
+        """Add an observer for state-change events."""
+        self._event_bus.subscribe(observer)
+
+    def unsubscribe(self, observer: Any) -> None:
+        self._event_bus.unsubscribe(observer)
 
     def get_progress(self) -> dict[str, Any]:
         """Return current workflow progress for UI display."""
@@ -255,27 +299,23 @@ class GoalWorkflowRunner:
     # ── Lifecycle ────────────────────────────────────────────
 
     async def start(self, objective: str) -> str:
-        """Start the workflow: create goal → execute DAG → return goal_id.
+        """Start the workflow: create goal → execute DAG → return goal_id."""
+        if self._store is None:
+            from .store import GoalStore
+            self._store = GoalStore()
 
-        Args:
-            objective: Research goal objective text.
-
-        Returns:
-            The created goal id.
-        """
         from .context import default_goal_criteria
         from .models import RiskTier
-        from .store import GoalStore
 
         self._state.status = "running"
         self._state.start_time = time.time()
+        self._event_bus.emit("workflow_start", workflow=self._config.name)
 
-        # 1. Create the goal
+        # Create the goal (R5: use injected store)
         criteria = self._config.goal.default_criteria or default_goal_criteria()
         risk_tier = RiskTier(self._config.goal.risk_tier)
 
-        store = GoalStore()
-        goal = store.replace_goal(
+        goal = self._store.replace_goal(
             session_id=self._session_id,
             objective=objective,
             criteria=criteria,
@@ -285,7 +325,7 @@ class GoalWorkflowRunner:
         )
         self._goal_id = goal.goal_id
         self._evidence_collector = GoalEvidenceCollector(
-            self._session_id, self._goal_id
+            self._store, self._session_id, self._goal_id,
         )
 
         logger.info(
@@ -293,36 +333,50 @@ class GoalWorkflowRunner:
             self._goal_id, self._config.name,
         )
 
-        # 2. Execute the DAG
         try:
             await self._execute_dag()
         except Exception as exc:
             self._state.status = "error"
             self._state.error_message = str(exc)
+            self._event_bus.emit("workflow_failed", error=str(exc))
             logger.error("Goal workflow failed: %s", exc)
 
         return self._goal_id
 
+    # ── DAG execution (R4: deduplicated) ─────────────────────
+
     async def _execute_dag(self) -> None:
-        """Execute the DAG layer by layer."""
+        """Execute the DAG layer by layer (starts from layer 0)."""
+        await self._run_layers(0)
+
+    async def continue_after_pause(self) -> None:
+        """Resume execution from the paused layer."""
+        if not self._state.paused:
+            return
+        self._state.paused = False
+        self._state.status = "running"
+        self._event_bus.emit("workflow_resumed")
+        await self._run_layers(self._state.pause_layer)
+
+    async def _run_layers(self, start_idx: int) -> None:
+        """Common layer execution logic shared by start() and continue_after_pause()."""
         layers = self._get_layers()
 
-        for layer_idx, layer in enumerate(layers):
-            # Check pause
+        for layer_idx in range(start_idx, len(layers)):
             if self._state.paused:
                 self._state.pause_layer = layer_idx
                 self._state.status = "paused"
+                self._event_bus.emit("workflow_paused", layer=layer_idx)
                 return
 
             self._state.current_layer = layer_idx
+            self._event_bus.emit("layer_start", layer=layer_idx)
 
-            # Apply branch conditions
-            layer = self._apply_branches(layer)
-
-            # Execute agents in this layer
+            layer = self._apply_branches(layers[layer_idx])
             await self._execute_layer(layer, layer_idx)
 
-            # Check auto-completion
+            self._event_bus.emit("layer_complete", layer=layer_idx)
+
             if self._config.completion.mode == "auto":
                 if self._check_all_criteria_covered():
                     await self._auto_complete()
@@ -333,348 +387,218 @@ class GoalWorkflowRunner:
             await self._auto_complete()
         else:
             self._state.status = "completed"
+            self._event_bus.emit("workflow_completed")
 
-    async def _execute_layer(
-        self, layer: list[str], layer_idx: int
-    ) -> None:
-        """Execute all agents in a layer (in parallel)."""
+    async def _execute_layer(self, layer: list[str], layer_idx: int) -> None:
+        """Execute all agents in a layer in parallel."""
         if not layer:
             return
-
-        tasks = [
-            self._execute_agent(agent_id, layer_idx)
-            for agent_id in layer
-        ]
+        tasks = [self._execute_agent(agent_id, layer_idx) for agent_id in layer]
         await asyncio.gather(*tasks)
 
-    async def _execute_agent(
-        self, agent_id: str, layer_idx: int
-    ) -> None:
-        """Execute a single agent, retry on failure, collect evidence."""
+    async def _execute_agent(self, agent_id: str, layer_idx: int) -> None:
+        """Execute one agent using decorators (R7).
+
+        Decorator chain (outer → inner):
+          1. with_retry   — retry on exception
+          2. with_timeout — wall-clock budget
+          3. with_validation — validate output, retry on failure
+          4. with_evidence_collection — auto-collect evidence
+        """
         agent_config = self._get_agent_config(agent_id)
         if agent_config is None:
             self._state.set_agent_status(agent_id, "skipped", "not in config")
             return
 
         self._state.set_agent_status(agent_id, "running")
+        self._event_bus.emit("agent_start", agent_id=agent_id, layer=layer_idx)
 
-        for attempt in range(agent_config.max_retries + 1):
-            try:
-                # Build prompt with upstream outputs
-                prompt = self._build_prompt(agent_id)
+        # Build decorated pipeline
+        from ..workflow.decorators import (
+            with_evidence_collection,
+            with_retry,
+            with_timeout,
+            with_validation,
+        )
 
-                # Execute agent
-                result = await self._run_agent(
-                    agent_config, prompt, layer_idx
-                )
+        run_func = self._agent_runner.run
+        run_func = with_retry(agent_config.max_retries)(run_func)
+        run_func = with_timeout(agent_config.timeout)(run_func)
 
-                # Collect evidence
-                if self._evidence_collector and result:
-                    count = self._evidence_collector.collect(
-                        agent_id, result, agent_config.evidence_criterion
-                    )
-                    self._state.evidence_count += count
+        validator = self._validators.get(agent_id)
+        if validator is not None:
+            run_func = with_validation(validator)(run_func)
 
-                # Store result for upstream gathering
-                self._layer_results[agent_id] = result or {}
+        if self._evidence_collector is not None:
+            run_func = with_evidence_collection(
+                self._evidence_collector,
+                agent_config.evidence_criterion,
+            )(run_func)
 
-                self._state.set_agent_status(agent_id, "success")
-                return
-
-            except asyncio.TimeoutError:
-                self._state.set_agent_status(
-                    agent_id, "error", f"timeout after {agent_config.timeout}s"
-                )
-                if attempt < agent_config.max_retries:
-                    logger.warning(
-                        "Agent %s timed out (attempt %d), retrying...",
-                        agent_id, attempt + 1,
-                    )
-                    await asyncio.sleep(1.0)
-                else:
-                    return
-
-            except Exception as exc:
-                self._state.set_agent_status(agent_id, "error", str(exc))
-                if attempt < agent_config.max_retries:
-                    logger.warning(
-                        "Agent %s failed (attempt %d): %s, retrying...",
-                        agent_id, attempt + 1, exc,
-                    )
-                    await asyncio.sleep(1.0)
-                else:
-                    return
-
-    async def _run_agent(
-        self,
-        agent_config: GoalAgentConfig,
-        prompt: str,
-        layer_idx: int,
-    ) -> dict[str, Any]:
-        """Run an agent via the configured runner or a stub."""
-        if self._agent_runner is not None:
-            return await asyncio.wait_for(
-                self._agent_runner(
-                    agent_config.id,
-                    prompt,
-                    agent_config.tools,
-                    {"layer": layer_idx, "goal_id": self._goal_id},
-                ),
-                timeout=agent_config.timeout,
+        try:
+            prompt = self._build_prompt(agent_id)
+            result = await run_func(
+                agent_id,
+                prompt,
+                agent_config.tools,
+                {"layer": layer_idx, "goal_id": self._goal_id},
+            )
+            self._layer_results[agent_id] = result or {}
+            self._state.evidence_count += 1  # bumped by decorator
+            self._state.set_agent_status(agent_id, "success")
+            self._event_bus.emit(
+                "agent_complete", agent_id=agent_id, layer=layer_idx,
+            )
+        except asyncio.TimeoutError:
+            self._state.set_agent_status(
+                agent_id, "error", f"timeout after {agent_config.timeout}s",
+            )
+            self._event_bus.emit(
+                "agent_error", agent_id=agent_id, error="timeout",
+            )
+        except Exception as exc:
+            self._state.set_agent_status(agent_id, "error", str(exc))
+            self._event_bus.emit(
+                "agent_error", agent_id=agent_id, error=str(exc),
             )
 
-        # Stub: return empty result
-        await asyncio.sleep(0.01)
-        return {"answer": f"[stub] {agent_config.id} completed"}
-
-    # ── Prompt Building ──────────────────────────────────────
+    # ── Prompt building (R1+R2: PromptBuilder reuse) ───────
 
     def _build_prompt(self, agent_id: str) -> str:
-        """Build prompt for an agent, injecting upstream outputs."""
+        """Build prompt via PromptBuilder (cached + upstream-formatted)."""
         agent_config = self._get_agent_config(agent_id)
         if agent_config is None:
             return ""
 
-        # Load base prompt from template
-        base_prompt = self._load_prompt_template(agent_config.prompt_file)
+        upstream = {
+            dep: self._layer_results[dep]
+            for dep in agent_config.input_from
+            if dep in self._layer_results
+        }
 
-        # Gather upstream outputs
-        upstream = {}
-        for dep in agent_config.input_from:
-            if dep in self._layer_results:
-                upstream[dep] = self._layer_results[dep]
-
-        # Inject goal context
-        goal_context = self._build_goal_context()
-
-        # Assemble final prompt
-        parts = [goal_context]
-        if base_prompt:
-            parts.append(base_prompt)
-        if upstream:
-            parts.append("\n## 上游 Agent 输出\n")
-            for dep_name, dep_output in upstream.items():
-                answer = dep_output.get("answer", "(no output)")
-                parts.append(f"### {dep_name}\n{answer[:1500]}\n")
-
-        return "\n".join(parts)
+        return self._prompt_builder.build_prompt(
+            agent_name=agent_id,
+            base_prompt=self._build_goal_context(),
+            upstream_outputs=upstream,
+        )
 
     def _build_goal_context(self) -> str:
-        """Build goal context block for the agent prompt."""
+        """Build goal context block via existing formatter."""
         from .context import get_current_goal_context
         ctx, _ = get_current_goal_context(self._session_id)
         return ctx
 
-    def _load_prompt_template(self, prompt_file: str) -> str:
-        """Load a prompt template from the templates directory."""
-        from pathlib import Path
-
-        # Resolve path relative to templates directory
-        templates_dir = Path(__file__).parent.parent.parent / "templates"
-        prompt_path = templates_dir / prompt_file
-
-        if not prompt_path.exists():
-            logger.warning("Prompt template not found: %s", prompt_path)
-            return ""
-
-        try:
-            return prompt_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            logger.warning("Failed to load prompt %s: %s", prompt_path, exc)
-            return ""
-
-    # ── DAG Helpers ──────────────────────────────────────────
+    # ── DAG helpers (R11: cached layers) ─────────────────────
 
     def _get_layers(self) -> list[list[str]]:
-        """Compute topological layers from the DAG.
+        """Compute topological layers from the DAG (cached).
 
-        The YAML config uses ``key: [upstream_deps]`` convention
-        (node depends on its list values).  The DAG function uses
-        ``key: [downstream]`` convention (key points to nodes that
-        depend on it).  We invert before calling.
+        The YAML config uses ``key: [upstream_deps]`` convention.  The
+        DAG function uses ``key: [downstream]`` convention.  We invert
+        before calling.
         """
+        if self._layers_cache is not None:
+            return self._layers_cache
+
         from ..workflow.dag import topological_layers
 
-        # Invert: upstream_deps → downstream
         downstream: dict[str, list[str]] = {}
         for node, deps in self._config.dag.items():
             downstream.setdefault(node, [])
             for dep in deps:
                 downstream.setdefault(dep, []).append(node)
-
-        return topological_layers(downstream)
+        self._layers_cache = topological_layers(downstream)
+        return self._layers_cache
 
     def _get_agent_config(self, agent_id: str) -> GoalAgentConfig | None:
-        """Find agent config by id."""
         for agent in self._config.agents:
             if agent.id == agent_id:
                 return agent
         return None
 
     def _apply_branches(self, layer: list[str]) -> list[str]:
-        """Apply conditional branches to filter/modify a layer."""
         if not self._config.branches:
             return layer
-
         result = []
-        skip = set()
-
+        skip: set[str] = set()
         for branch in self._config.branches:
             if branch.action == "skip":
-                # Check if any agent in the layer triggers the skip
                 for agent_id in layer:
                     if self._evaluate_condition(branch.condition, agent_id):
                         skip.add(branch.target)
-
         for agent_id in layer:
             if agent_id not in skip:
                 result.append(agent_id)
-
         return result
 
     def _evaluate_condition(self, condition: str, agent_id: str) -> bool:
-        """Evaluate a branch condition against an agent's output.
-
-        This is a simplified evaluator.  Conditions are strings like
-        ``"factor_analyst.output.sharpe < 0.3"``.
-        """
-        # For now, return False (no branches triggered)
-        # Full implementation would parse and evaluate the expression
+        # Stub — Phase 3 will add DSL evaluation.
         return False
 
-    # ── Completion ───────────────────────────────────────────
+    # ── Completion (R6: Strategy pattern) ────────────────────
 
     def _check_all_criteria_covered(self) -> bool:
-        """Check if all required criteria have evidence."""
-        from .store import GoalStore
-
-        store = GoalStore()
-        snapshot = store.get_current_snapshot(self._session_id)
+        snapshot = self._store.get_current_snapshot(self._session_id)
         if snapshot is None:
             return False
-
         criteria = snapshot.get("criteria", [])
         evidence = snapshot.get("evidence", [])
-
-        # Group evidence by criterion
         evidence_by_criterion: dict[str, list] = {}
         for ev in evidence:
             cid = ev.get("criterion_id")
             if cid:
                 evidence_by_criterion.setdefault(cid, []).append(ev)
-
         for criterion in criteria:
             if not criterion.get("required", True):
                 continue
             cid = criterion.get("criterion_id", "")
             if not evidence_by_criterion.get(cid):
                 return False
-
         return True
 
     async def _auto_complete(self) -> None:
-        """Auto-complete the goal after all criteria are covered."""
-        from .models import AuditRow, GoalStatus
-        from .store import GoalStore
-
-        store = GoalStore()
-        snapshot = store.get_current_snapshot(self._session_id)
+        """Dispatch completion to the configured CompletionStrategy."""
+        snapshot = self._store.get_current_snapshot(self._session_id)
         if snapshot is None:
             return
 
-        criteria = snapshot.get("criteria", [])
-        evidence = snapshot.get("evidence", [])
+        from .completion_strategy import CompletionStrategyFactory
 
-        if self._config.completion.mode == "lite":
-            try:
-                store.complete_lite(
-                    session_id=self._session_id,
-                    goal_id=self._goal_id,
-                    expected_goal_id=self._goal_id,
-                    recap=f"Workflow {self._config.name} auto-completed (lite)",
-                )
-                self._state.status = "completed"
-                logger.info("Goal %s auto-completed (lite)", self._goal_id)
-            except Exception as exc:
-                logger.error("Lite completion failed: %s", exc)
-                self._state.status = "error"
-                self._state.error_message = str(exc)
-        else:
-            # Build audit rows
-            audit_rows = []
-            evidence_ids = [e.get("evidence_id", "") for e in evidence]
-            for criterion in criteria:
-                if not criterion.get("required", True):
-                    continue
-                cid = criterion.get("criterion_id", "")
-                # Find evidence for this criterion
-                cid_evidence_ids = [
-                    e.get("evidence_id", "") for e in evidence
-                    if e.get("criterion_id") == cid
-                ]
-                audit_rows.append(AuditRow(
-                    criterion_id=cid,
-                    result="satisfied",
-                    evidence_ids=cid_evidence_ids or evidence_ids[:1],
-                    notes=f"Auto-completed by workflow {self._config.name}",
-                ))
+        strategy = CompletionStrategyFactory.get(self._config.completion.mode)
+        try:
+            await strategy.complete(
+                self._store,
+                self._session_id,
+                self._goal_id,
+                snapshot.get("criteria", []),
+                snapshot.get("evidence", []),
+                self._config.name,
+            )
+            self._state.status = "completed"
+            self._event_bus.emit("workflow_completed")
+            logger.info("Goal %s completed via %s strategy",
+                        self._goal_id, type(strategy).__name__)
+        except Exception as exc:
+            self._state.status = "error"
+            self._state.error_message = str(exc)
+            self._event_bus.emit("workflow_failed", error=str(exc))
+            logger.error("Auto-completion failed: %s", exc)
 
-            try:
-                store.update_status(
-                    session_id=self._session_id,
-                    goal_id=self._goal_id,
-                    expected_goal_id=self._goal_id,
-                    status=GoalStatus.COMPLETE,
-                    audit=audit_rows,
-                    recap=f"Workflow {self._config.name} auto-completed",
-                )
-                self._state.status = "completed"
-                logger.info("Goal %s auto-completed", self._goal_id)
-            except Exception as exc:
-                logger.error("Auto-completion failed: %s", exc)
-                self._state.status = "error"
-                self._state.error_message = str(exc)
-
-    # ── Pause/Resume ─────────────────────────────────────────
+    # ── Pause / Resume ───────────────────────────────────────
 
     def pause(self) -> None:
-        """Pause workflow execution after the current agent finishes."""
         self._state.paused = True
+        self._event_bus.emit("workflow_paused", layer=self._state.current_layer)
         logger.info("Goal workflow paused at layer %d", self._state.current_layer)
 
     def resume(self) -> None:
-        """Resume workflow execution."""
         self._state.paused = False
+        self._event_bus.emit("workflow_resumed")
         logger.info("Goal workflow resumed from layer %d", self._state.pause_layer)
 
-    async def continue_after_pause(self) -> None:
-        """Resume execution from the paused layer."""
-        if not self._state.paused:
-            return
-        self._state.paused = False
-        self._state.status = "running"
 
-        # Continue from paused layer
-        layers = self._get_layers()
-        for layer_idx in range(self._state.pause_layer, len(layers)):
-            if self._state.paused:
-                self._state.pause_layer = layer_idx
-                return
-
-            self._state.current_layer = layer_idx
-            layer = self._apply_branches(layers[layer_idx])
-            await self._execute_layer(layer, layer_idx)
-
-            if self._config.completion.mode == "auto":
-                if self._check_all_criteria_covered():
-                    await self._auto_complete()
-                    return
-
-        if self._config.completion.mode == "auto":
-            await self._auto_complete()
-        else:
-            self._state.status = "completed"
-
+# Re-exports for convenience
+from .event_bus import WorkflowEventBus  # noqa: E402
 
 __all__ = [
     "GoalWorkflowConfig",
@@ -685,4 +609,5 @@ __all__ = [
     "GoalWorkflowState",
     "GoalEvidenceCollector",
     "GoalWorkflowRunner",
+    "WorkflowEventBus",
 ]

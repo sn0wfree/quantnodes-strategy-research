@@ -37,23 +37,55 @@ from .workflow import (
     GoalWorkflowState,
 )
 from .workflow_config import load_goal_workflow, list_goal_workflows
+from .completion_strategy import (
+    AutoCompleteStrategy,
+    CompletionStrategy,
+    CompletionStrategyFactory,
+    LiteCompleteStrategy,
+    ManualCompleteStrategy,
+)
+from .validator_registry import (
+    ValidatorRegistry,
+    register_default_validators,
+)
+from .event_bus import (
+    CollectingObserver,
+    GoalPanelObserver,
+    LoggerObserver,
+    WorkflowEventBus,
+    WorkflowEventObserver,
+)
 
 __all__ = [
     "AuditRow",
+    "AutoCompleteStrategy",
+    "CollectingObserver",
+    "CompletionConfig",
+    "CompletionStrategy",
+    "CompletionStrategyFactory",
     "CONTINUABLE_GOAL_STATUSES",
     "EvidenceInput",
     "EvidenceRecord",
+    "GoalAgentConfig",
     "GoalClaim",
     "GoalCriterion",
+    "GoalPanelObserver",
     "GoalRecord",
     "GoalStatus",
     "GoalStore",
     "GoalWorkflowConfig",
+    "GoalWorkflowGoalConfig",
     "GoalWorkflowRunner",
     "GoalWorkflowState",
+    "LiteCompleteStrategy",
+    "LoggerObserver",
+    "ManualCompleteStrategy",
     "OPEN_CRITERION_STATUSES",
     "RiskTier",
     "StaleGoalError",
+    "ValidatorRegistry",
+    "WorkflowEventBus",
+    "WorkflowEventObserver",
     "criterion_is_covered",
     "default_goal_criteria",
     "format_goal_context",
@@ -64,5 +96,6 @@ __all__ = [
     "load_goal_workflow",
     "list_goal_workflows",
     "normalize_required_text",
+    "register_default_validators",
     "reject_live_execution_objective",
 ]
