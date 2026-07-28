@@ -176,7 +176,8 @@ class GoalStore:
                     completed_at TEXT,
                     recap TEXT,
                     progress_percent REAL NOT NULL DEFAULT 0.0,
-                    parent_goal_id TEXT
+                    parent_goal_id TEXT,
+                    workflow_id TEXT
                 );
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_goals_one_current_per_session
@@ -291,6 +292,10 @@ class GoalStore:
             self._conn.execute(
                 "ALTER TABLE goals ADD COLUMN parent_goal_id TEXT"
             )
+        if "workflow_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE goals ADD COLUMN workflow_id TEXT"
+            )
 
         # P3-C: hypothesis_id on goal_evidence
         ev_cols = [
@@ -334,6 +339,7 @@ class GoalStore:
         turn_budget: int | None = None,
         time_budget_seconds: int | None = None,
         parent_goal_id: str | None = None,
+        workflow_id: str | None = None,
     ) -> GoalRecord:
         """Supersede the current goal and create a new active goal.
 
@@ -349,6 +355,7 @@ class GoalStore:
             turn_budget: Optional turn budget.
             time_budget_seconds: Optional wall-clock budget.
             parent_goal_id: Optional parent goal for sub-goal decomposition.
+            workflow_id: Optional workflow config name绑定到 goal.
 
         Returns:
             The newly active goal.
@@ -396,9 +403,9 @@ class GoalStore:
                     goal_id, session_id, status, objective, ui_summary, source,
                     protocol, risk_tier, token_budget, turn_budget,
                     time_budget_seconds, created_at, updated_at, progress_percent,
-                    parent_goal_id
+                    parent_goal_id, workflow_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     goal_id,
@@ -416,6 +423,7 @@ class GoalStore:
                     now,
                     0.0,
                     parent_goal_id,
+                    workflow_id,
                 ),
             )
             self._conn.execute(
@@ -1362,6 +1370,7 @@ class GoalStore:
             recap=row["recap"],
             progress_percent=float(row["progress_percent"]) if row["progress_percent"] is not None else 0.0,
             parent_goal_id=row["parent_goal_id"] if "parent_goal_id" in row.keys() else None,
+            workflow_id=row["workflow_id"] if "workflow_id" in row.keys() else None,
         )
 
     @staticmethod

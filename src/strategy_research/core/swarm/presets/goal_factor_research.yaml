@@ -1,0 +1,55 @@
+name: goal_factor_research
+description: 因子研究工作流 — 从因子定义到风险评审的完整流程
+version: "1.0"
+
+goal:
+  default_criteria:
+    - "定义因子逻辑和标的池"
+    - "收集历史数据并回测因子表现"
+    - "分析因子衰减和稳健性"
+    - "记录风险提示和非建议边界"
+  risk_tier: research_general
+
+agents:
+  - id: researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, search_web]
+    input_from: []
+    evidence_criterion: 0
+    timeout: 120
+    max_retries: 2
+
+  - id: data_quality
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file]
+    input_from: [researcher]
+    evidence_criterion: 1
+    timeout: 120
+    max_retries: 2
+
+  - id: factor_analyst
+    prompt_file: .prompts/factor_analyst.md
+    tools: [compute_factor, run_backtest]
+    input_from: [researcher, data_quality]
+    evidence_criterion: 2
+    timeout: 300
+    max_retries: 3
+
+  - id: risk_reviewer
+    prompt_file: .prompts/risk_controller.md
+    tools: [run_backtest]
+    input_from: [factor_analyst]
+    evidence_criterion: 3
+    timeout: 180
+    max_retries: 2
+
+dag:
+  researcher: []
+  data_quality: [researcher]
+  factor_analyst: [researcher, data_quality]
+  risk_reviewer: [factor_analyst]
+
+completion:
+  mode: auto
+  auto_audit: true
+  require_all_evidence: true

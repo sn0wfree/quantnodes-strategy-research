@@ -31,6 +31,12 @@ from .models import (
 )
 from .policy import normalize_required_text, reject_live_execution_objective
 from .store import GoalStore
+from .workflow import (
+    GoalWorkflowConfig,
+    GoalWorkflowRunner,
+    GoalWorkflowState,
+)
+from .workflow_config import load_goal_workflow, list_goal_workflows
 
 __all__ = [
     "AuditRow",
@@ -42,6 +48,9 @@ __all__ = [
     "GoalRecord",
     "GoalStatus",
     "GoalStore",
+    "GoalWorkflowConfig",
+    "GoalWorkflowRunner",
+    "GoalWorkflowState",
     "OPEN_CRITERION_STATUSES",
     "RiskTier",
     "StaleGoalError",
@@ -52,6 +61,8 @@ __all__ = [
     "get_current_goal_context",
     "goal_needs_continuation",
     "goal_progress_tuple",
+    "load_goal_workflow",
+    "list_goal_workflows",
     "normalize_required_text",
     "reject_live_execution_objective",
 ]
