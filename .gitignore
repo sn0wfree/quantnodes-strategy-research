@@ -61,3 +61,8 @@ tui-captures/
 
 # Local config-audit snapshots (host-specific, may contain sensitive info)
 docs/config-audit-*.md
+
+# Frontend
+webui/frontend/node_modules/
+webui/frontend/dist/
+webui/static/
