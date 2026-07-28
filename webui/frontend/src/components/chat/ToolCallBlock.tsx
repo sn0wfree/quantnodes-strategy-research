@@ -22,21 +22,6 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-function formatResultPreview(result: string): string {
-  if (!result) return ''
-  try {
-    const parsed = JSON.parse(result)
-    if (typeof parsed === 'object') {
-      const keys = Object.keys(parsed)
-      if (keys.length <= 3) return keys.join(', ')
-      return `${keys.slice(0, 3).join(', ')} +${keys.length - 3}`
-    }
-    return String(parsed).slice(0, 80)
-  } catch {
-    return result.slice(0, 80)
-  }
-}
-
 export function ToolCallBlock({ toolCall, startTime }: ToolCallBlockProps) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState<'args' | 'result' | null>(null)

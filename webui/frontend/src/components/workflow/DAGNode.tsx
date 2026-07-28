@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Clock, CheckCircle, XCircle, AlertCircle, Zap, Loader2 } from 'lucide-react'
+import { Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react'
 
 export interface DAGNodeData {
   label: string

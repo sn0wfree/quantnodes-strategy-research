@@ -52,6 +52,7 @@ export function RightPanel() {
             workflowName={currentPreset?.name || '未命名工作流'}
             nodes={dagNodes.map((n) => ({
               ...n,
+              status: n.status ?? 'pending',
               agentColor: n.status === 'running' ? '#3b82f6' : undefined,
             }))}
             edges={dagEdges}

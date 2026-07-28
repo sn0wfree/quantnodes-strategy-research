@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { BarChart3, ChevronDown, ChevronRight, Download } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import type { ChartPart } from '../../stores/chat'
 
@@ -13,7 +13,7 @@ interface ChartBlockProps {
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#f97316', '#14b8a6']
 
 function ChartRenderer({ chart }: { chart: ChartPart }) {
-  const { chart_type, data, title } = chart
+  const { chart_type, data } = chart
 
   if (!data || data.length === 0) {
     return (
@@ -69,7 +69,7 @@ function ChartRenderer({ chart }: { chart: ChartPart }) {
               cx="50%"
               cy="50%"
               outerRadius={80}
-              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+              label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
             >
               {data.map((_, i) => (
                 <Cell key={i} fill={COLORS[i % COLORS.length]} />

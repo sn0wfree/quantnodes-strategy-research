@@ -41,7 +41,7 @@ interface AgentState {
 
 const AGENT_COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#06b6d4']
 
-export const useAgentStore = create<AgentState>()((set, get) => ({
+export const useAgentStore = create<AgentState>()((set) => ({
   agents: new Map(),
   setAgents: (agents) =>
     set(() => {

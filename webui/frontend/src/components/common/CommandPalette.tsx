@@ -73,7 +73,7 @@ export function CommandPalette() {
       label: '切换右主区可见性',
       description: '显示/隐藏右主区',
       category: 'view',
-      icon: toggleRightPanel ? undefined as any : Eye,
+      icon: Eye,
       action: () => { toggleRightPanel(); setOpen(false) },
       keywords: ['panel', '区'],
     },

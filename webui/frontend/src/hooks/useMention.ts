@@ -46,7 +46,7 @@ export function useMention(items: MentionItem[]) {
   )
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent, text: string, onSelect: (item: MentionItem) => void) => {
+    (e: React.KeyboardEvent, _text: string, onSelect: (item: MentionItem) => void) => {
       if (!active) return false
       if (e.key === 'ArrowDown') {
         e.preventDefault()

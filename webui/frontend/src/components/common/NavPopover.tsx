@@ -18,7 +18,7 @@ export function NavPopover({
   const [open, setOpen] = useState(false)
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen} delay={100}>
+    <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         {trigger}
       </Popover.Trigger>

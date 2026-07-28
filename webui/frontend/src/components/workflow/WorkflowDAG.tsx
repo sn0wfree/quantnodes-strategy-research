@@ -32,7 +32,7 @@ function layoutWithDagre(
   g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 120 })
 
   rawNodes.forEach((n) => {
-    g.setNode(n.id, { width: 180, height: 70 })
+    g.setNode(n.id as string, { width: 180, height: 70 })
   })
   rawEdges.forEach((e) => {
     g.setEdge(e.source, e.target)
@@ -41,11 +41,11 @@ function layoutWithDagre(
   dagre.layout(g)
 
   const nodes: Node[] = rawNodes.map((n) => {
-    const pos = g.node(n.id)
+    const pos = g.node(n.id as string)
     return {
-      id: n.id,
+      id: n.id as string,
       position: { x: pos.x - 90, y: pos.y - 35 },
-      data: n,
+      data: n as unknown as Record<string, unknown>,
       type: 'dagNode',
     }
   })

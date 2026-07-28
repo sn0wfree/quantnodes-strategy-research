@@ -16,6 +16,12 @@ function renderWithReactFlow(nodeData: DAGNodeData, selected = false) {
     <ReactFlowProvider>
       <DAGNode
         id="node-1"
+        type="dagNode"
+        draggable={false}
+        selectable
+        deletable={false}
+        dragging={false}
+        zIndex={0}
         data={nodeData as any}
         selected={selected}
       />

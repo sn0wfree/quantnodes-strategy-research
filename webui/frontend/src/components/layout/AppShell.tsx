@@ -1,4 +1,3 @@
-import { useLayoutStore } from '../../stores/layout'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useSSE } from '../../hooks/useSSE'
 import { useSessionStore } from '../../stores/session'

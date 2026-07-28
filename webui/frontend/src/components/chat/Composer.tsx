@@ -60,7 +60,7 @@ export function Composer() {
 
     try {
       // Send to backend
-      const res = await api.post<{ message_id: string; event_id: string; status: string }>(
+      await api.post<{ message_id: string; event_id: string; status: string }>(
         '/chat/send_async',
         {
           session_id: currentSessionId,

@@ -10,7 +10,8 @@ if (!global.crypto) {
 }
 if (!global.crypto.randomUUID) {
   let counter = 0
-  global.crypto.randomUUID = () => `test-uuid-${++counter}`
+  global.crypto.randomUUID = () =>
+    `test-uuid-0000-0000-0000-${String(++counter).padStart(12, '0')}` as `${string}-${string}-${string}-${string}-${string}`
 }
 
 // Mock matchMedia

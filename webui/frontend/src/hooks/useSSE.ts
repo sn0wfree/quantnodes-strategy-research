@@ -11,15 +11,9 @@ type SSEEventType =
   | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
   | 'dag_update' | 'progress' | 'message_received' | 'error'
 
-interface SSEEvent {
-  event: string
-  data: string
-  id?: string
-}
-
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectCount = useRef(0)
 
   const addMessage = useChatStore((s) => s.addMessage)

@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react'
-import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso } from 'react-virtuoso'
+import type { VirtuosoHandle } from 'react-virtuoso'
 import { useChatStore } from '../../stores/chat'
 import { MessageBubble } from './MessageBubble'
 import { AssistantMessage } from './AssistantMessage'
@@ -43,7 +44,7 @@ export function MessageList() {
       ref={virtuosoRef}
       data={messageList}
       totalCount={messageList.length}
-      itemContent={(index, message) => {
+      itemContent={(_index, message) => {
         const isStreaming = message.id === streamingMessageId
         if (message.role === 'user') {
           return <MessageBubble message={message} />
