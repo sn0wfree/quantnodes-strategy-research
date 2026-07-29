@@ -97,7 +97,7 @@ class CreateGoalTool(BaseTool):
             )
             return _ok({
                 "goal_id": goal.goal_id,
-                "status": goal.status.value,
+                "goal_status": goal.status.value,
                 "objective": goal.objective,
                 "progress_percent": goal.progress_percent,
             })
@@ -212,7 +212,7 @@ class CompleteGoalTool(BaseTool):
             )
             return _ok({
                 "goal_id": updated.goal_id,
-                "status": updated.status.value,
+                "goal_status": updated.status.value,
                 "recap": updated.recap,
             })
         except Exception as exc:
@@ -259,7 +259,7 @@ class GetGoalStatusTool(BaseTool):
             return _ok({
                 "has_goal": True,
                 "goal_id": goal.get("goal_id"),
-                "status": goal.get("status"),
+                "goal_status": goal.get("status"),
                 "objective": goal.get("objective"),
                 "progress_percent": goal.get("progress_percent", 0),
                 "criteria_count": len(criteria),
@@ -320,7 +320,7 @@ class ListGoalsTool(BaseTool):
                     {
                         "goal_id": g.goal_id,
                         "session_id": g.session_id,
-                        "status": g.status.value,
+                        "goal_status": g.status.value,
                         "objective": g.objective,
                         "progress_percent": g.progress_percent,
                         "created_at": g.created_at,
