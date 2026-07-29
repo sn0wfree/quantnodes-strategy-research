@@ -268,7 +268,7 @@ class ChatSession:
             max_iterations=1,   # plain chat: single pass, no ReAct loop
             session_id=getattr(self.ctx, "session_id", "cli"),
             system_prompt=system_prompt,
-            allowed_tools=[],  # chat-only path; tools disabled by default
+            allowed_tools=None,  # all tools enabled
         )
 
         # Inject user message into loop's internal state via _build_messages

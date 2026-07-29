@@ -86,7 +86,7 @@ class SessionService:
         content: str,
         *,
         model: str | None = None,
-        max_iterations: int = 1,
+        max_iterations: int = 5,
         system_prompt: Optional[str] = None,
         allow_shell_tools: bool = False,
     ) -> dict[str, str]:
@@ -376,13 +376,13 @@ class SessionService:
         agent = AgentLoop(
             config=cfg,
             registry=registry,
-            workspace=None,
+            workspace=Path.cwd(),
             on_event=event_callback,
             stream_mode=True,
             max_iterations=max_iterations,
             session_id=attempt.session_id,
             system_prompt=system_prompt,
-            allowed_tools=[],
+            allowed_tools=None,
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).
@@ -457,16 +457,16 @@ def _accumulate_part(
         parts.append(
             {
                 "type": "tool_call",
-                "id": data.get("id"),
-                "name": data.get("name"),
+                "id": data.get("id") or data.get("call_id"),
+                "name": data.get("name") or data.get("tool"),
                 "arguments": data.get("arguments"),
             }
         )
     elif event_type == "tool_result":
-        tool_call_id = data.get("id")
+        tool_call_id = data.get("id") or data.get("call_id")
         for p in reversed(parts):
             if p.get("type") == "tool_call" and p.get("id") == tool_call_id:
-                p["result"] = data.get("result")
+                p["result"] = data.get("result") or data.get("preview")
                 p["status"] = data.get("status", "done")
                 break
     elif event_type == "thinking_delta":

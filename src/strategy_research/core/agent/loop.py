@@ -241,8 +241,9 @@ class AgentLoop:
         accumulated_tool_calls: list[dict[str, Any]] = []
         usage: dict[str, int] | None = None
 
+        tools = self.registry.get_definitions() or None
         try:
-            for chunk in self.client.stream(messages):
+            for chunk in self.client.stream(messages, tools=tools):
                 if chunk.delta_content:
                     if full_content == "" and chunk.delta_content:
                         # Transition: thinking_done before first text token
@@ -327,8 +328,9 @@ class AgentLoop:
         accumulated_tool_calls: list[dict[str, Any]] = []
         usage: dict[str, int] | None = None
 
+        tools = self.registry.get_definitions() or None
         try:
-            async for chunk in self.client.astream(messages):
+            async for chunk in self.client.astream(messages, tools=tools):
                 if chunk.delta_content:
                     if full_content == "":
                         self._emit("thinking_done", {})
@@ -635,11 +637,13 @@ class AgentLoop:
                 if self._stream_mode:
                     response = self._stream_chat(messages, iteration)
                 else:
-                    response = self.client.chat(messages)
+                    tools = self.registry.get_definitions() or None
+                    response = self.client.chat(messages, tools=tools)
             except LLMError as exc:
                 if self._stream_mode and not self._is_stream_required_error(exc):
                     try:
-                        response = self.client.chat(messages)
+                        tools = self.registry.get_definitions() or None
+                        response = self.client.chat(messages, tools=tools)
                     except LLMError as exc2:
                         self._handle_llm_error(exc2, iteration, result)
                         self._fire_hooks("on_error", hook_ctx, exc2)
@@ -728,14 +732,16 @@ class AgentLoop:
                 if self._stream_mode:
                     response = await self._astream_chat(messages, iteration)
                 else:
-                    response = await self.client.achat(messages)
+                    tools = self.registry.get_definitions() or None
+                    response = await self.client.achat(messages, tools=tools)
             except LLMError as exc:
                 if self._stream_mode and not self._is_stream_required_error(exc):
                     # Streaming failed for non-streaming-required reasons
                     # (e.g. provider doesn't support SSE, parsing error on
                     # a partial chunk). Fall back to non-streaming achat().
                     try:
-                        response = await self.client.achat(messages)
+                        tools = self.registry.get_definitions() or None
+                        response = await self.client.achat(messages, tools=tools)
                     except LLMError as exc2:
                         self._handle_llm_error(exc2, iteration, result)
                         await self._afire_hooks("on_error", hook_ctx, exc2)
@@ -831,8 +837,10 @@ class AgentLoop:
         # Emit tool_call event
         self._emit("tool_call", {
             "tool": tc.name,
+            "name": tc.name,            # frontend reads data.name
+            "id": tc.id,                # frontend reads data.id
             "arguments": tc.arguments,
-            "call_id": tc.id,
+            "call_id": tc.id,           # backward compat
             "iter": getattr(self, "_current_iter", 0),
         })
 
@@ -854,15 +862,17 @@ class AgentLoop:
 
         # Emit tool_result event
         is_error = isinstance(output, str) and output.startswith('{"status": "error"')
-        status_str = "error" if is_error else "ok"
+        status_str = "error" if is_error else "done"
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
         self._emit("tool_result", {
             "tool": tc.name,
-            "call_id": tc.id,
+            "id": tc.id,                # frontend reads data.id
+            "call_id": tc.id,           # backward compat
             "status": status_str,
-            "ok": not is_error,  # backward compat
+            "ok": not is_error,          # backward compat
+            "result": output_preview,    # frontend reads data.result
+            "preview": output_preview,   # backward compat
             "elapsed_ms": elapsed_ms,
-            "preview": output_preview,
         })
 
         # Trace tool result
@@ -977,11 +987,13 @@ class AgentLoop:
             self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
             self._emit("tool_result", {
                 "tool": tc.name,
+                "id": tc.id,
                 "call_id": tc.id,
                 "status": "error",
                 "ok": False,
-                "elapsed_ms": 0,
+                "result": "tool not in registry",
                 "preview": "tool not in registry",
+                "elapsed_ms": 0,
             })
             return {
                 "role": "tool",
@@ -994,6 +1006,8 @@ class AgentLoop:
 
         self._emit("tool_call", {
             "tool": tc.name,
+            "name": tc.name,
+            "id": tc.id,
             "arguments": tc.arguments,
             "call_id": tc.id,
             "iter": getattr(self, "_current_iter", 0),
@@ -1015,15 +1029,17 @@ class AgentLoop:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
         is_error = isinstance(output, str) and output.startswith('{"status": "error"')
-        status_str = "error" if is_error else "ok"
+        status_str = "error" if is_error else "done"
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
         self._emit("tool_result", {
             "tool": tc.name,
+            "id": tc.id,
             "call_id": tc.id,
             "status": status_str,
             "ok": not is_error,
-            "elapsed_ms": elapsed_ms,
+            "result": output_preview,
             "preview": output_preview,
+            "elapsed_ms": elapsed_ms,
         })
 
         self._trace({
