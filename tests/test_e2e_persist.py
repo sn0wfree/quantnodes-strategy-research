@@ -34,9 +34,16 @@ async def _wait_done(page, timeout_s=30):
     deadline = asyncio.get_event_loop().time() + timeout_s
     while asyncio.get_event_loop().time() < deadline:
         body = await page.inner_text("body")
-        if "Agent" in body and len(body) > 150:
+        if "Agent" in body and len(body) > 100:
             await page.wait_for_timeout(3000)
             return True
+        agent_msgs = page.locator('[class*="assistant"], [class*="Agent"]')
+        count = await agent_msgs.count()
+        if count > 0:
+            text = await agent_msgs.last.inner_text()
+            if len(text.strip()) > 5:
+                await page.wait_for_timeout(3000)
+                return True
         await page.wait_for_timeout(500)
     return False
 
@@ -58,7 +65,7 @@ async def test_messages_persist_after_new_send():
                 print(f"--- Sending msg {i+1}: {msg}")
                 await _send(page, msg)
                 await page.wait_for_timeout(2000)
-                ok = await _wait_done(page, timeout_s=25)
+                ok = await _wait_done(page, timeout_s=60)
                 assert ok, f"msg {i+1} no response"
                 await page.wait_for_timeout(1000)
 

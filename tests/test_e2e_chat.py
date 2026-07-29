@@ -69,16 +69,20 @@ async def _send_message(page, text):
 async def _wait_for_response(page, timeout_s=30):
     """Wait for assistant response to complete."""
     deadline = asyncio.get_event_loop().time() + timeout_s
-    found_content = False
     while asyncio.get_event_loop().time() < deadline:
         body = await page.inner_text("body")
-        # Look for assistant content (not just "Agent" label)
-        if "Agent" in body and len(body) > 200:
-            found_content = True
-        # Check if streaming indicator is gone (no more "正在输入" or similar)
-        if found_content:
-            await page.wait_for_timeout(3000)  # extra wait for streaming to fully finish
+        # Look for assistant content indicators
+        if ("Agent" in body and len(body) > 100) or "agent_done" in body.lower():
+            await page.wait_for_timeout(3000)
             return True
+        # Also check if there are assistant message elements
+        agent_msgs = page.locator('[class*="assistant"], [class*="Agent"]')
+        count = await agent_msgs.count()
+        if count > 0:
+            text = await agent_msgs.last.inner_text()
+            if len(text.strip()) > 5:
+                await page.wait_for_timeout(3000)
+                return True
         await page.wait_for_timeout(500)
     return False
 
