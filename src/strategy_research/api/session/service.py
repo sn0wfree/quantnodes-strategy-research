@@ -31,6 +31,26 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_CHARS = 12000
 
 
+def _bootstrap_workspace(workspace: Path) -> None:
+    """Ensure workspace has the required directory structure.
+
+    Only creates directories — no root-level template files to avoid
+    confusing the LLM about where actual strategies live.
+    """
+    # Create strategies directory
+    strategies_dir = workspace / "strategies"
+    strategies_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure data.duckdb exists (init_db handles table creation)
+    db_path = workspace / "data.duckdb"
+    if not db_path.exists():
+        try:
+            from ...core.db import init_db
+            init_db(workspace)
+        except Exception as exc:
+            logger.warning("Failed to init DuckDB: %s", exc)
+
+
 class SessionService:
     """Unified chat service used by both API and TUI paths.
 
@@ -374,10 +394,15 @@ class SessionService:
             self.event_bus.emit(attempt.session_id, event_type, data)
 
         # Build AgentLoop
+        workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
+
+        # Bootstrap workspace if incomplete
+        _bootstrap_workspace(workspace_path)
+
         agent = AgentLoop(
             config=cfg,
             registry=registry,
-            workspace=Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd()))),
+            workspace=workspace_path,
             on_event=event_callback,
             stream_mode=True,
             max_iterations=max_iterations,
