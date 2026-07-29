@@ -371,7 +371,7 @@ async def chat_events(
                     last_id = evt.id
 
         finally:
-            sse_buffer.unregister_session(session_id)
+            sse_buffer.unregister_session(session_id, notification_event)
 
     return StreamingResponse(
         event_generator(),

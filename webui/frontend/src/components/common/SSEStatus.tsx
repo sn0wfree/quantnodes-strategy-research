@@ -1,55 +1,8 @@
-import { useEffect, useState } from 'react'
 import { Wifi, WifiOff, Loader2 } from 'lucide-react'
-import { useSessionStore } from '../../stores/session'
+import { useSSEStore } from '../../stores/sse'
 
 export function SSEStatus() {
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
-  const [status, setStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting')
-
-  useEffect(() => {
-    if (!currentSessionId) {
-      setStatus('disconnected')
-      return
-    }
-
-    setStatus('connecting')
-
-    let retryCount = 0
-    let es: EventSource | null = null
-    let timeout: ReturnType<typeof setTimeout> | null = null
-
-    const connect = () => {
-      const token = localStorage.getItem('sr-auth')
-      let parsedToken = ''
-      try {
-        parsedToken = token ? JSON.parse(token).state.token : ''
-      } catch {}
-
-      const params = new URLSearchParams({ session_id: currentSessionId })
-      if (parsedToken) params.set('token', parsedToken)
-      es = new EventSource(`/api/chat/events?${params}`)
-
-      es.onopen = () => {
-        setStatus('connected')
-        retryCount = 0
-      }
-
-      es.onerror = () => {
-        setStatus('disconnected')
-        es?.close()
-        retryCount++
-        const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000)
-        timeout = setTimeout(connect, delay)
-      }
-    }
-
-    connect()
-
-    return () => {
-      es?.close()
-      if (timeout) clearTimeout(timeout)
-    }
-  }, [currentSessionId])
+  const status = useSSEStore((s) => s.status)
 
   const config = {
     connected: {

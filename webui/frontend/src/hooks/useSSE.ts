@@ -3,6 +3,7 @@ import { useChatStore } from '../stores/chat'
 import { useAgentStore } from '../stores/agents'
 import { useWorkflowStore } from '../stores/workflow'
 import { useToastStore } from '../stores/toast'
+import { useSSEStore } from '../stores/sse'
 
 type SSEEventType =
   | 'text_delta' | 'tool_call' | 'tool_result' | 'thinking_delta'
@@ -198,6 +199,8 @@ export function useSSE(sessionId: string | null) {
       sourceRef.current.close()
     }
 
+    useSSEStore.getState().setStatus('connecting')
+
     const token = localStorage.getItem('sr-auth')
     let parsedToken = ''
     try {
@@ -210,10 +213,12 @@ export function useSSE(sessionId: string | null) {
 
     es.onopen = () => {
       reconnectCount.current = 0
+      useSSEStore.getState().setStatus('connected')
     }
 
     es.onerror = () => {
       es.close()
+      useSSEStore.getState().setStatus('disconnected')
       const delay = Math.min(1000 * Math.pow(2, reconnectCount.current), 30000)
       reconnectCount.current++
       reconnectTimer.current = setTimeout(connect, delay)

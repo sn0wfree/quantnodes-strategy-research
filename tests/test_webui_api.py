@@ -113,7 +113,7 @@ class TestSSEBuffer:
         buf.push("text_delta", '{"delta":"hello"}', "sess1")
         assert evt.is_set()
 
-        buf.unregister_session("sess1")
+        buf.unregister_session("sess1", evt)
 
 
 class TestWebSession:
