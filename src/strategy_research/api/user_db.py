@@ -114,7 +114,7 @@ def get_user_db(workspace_path: Optional[Path] = None) -> UserDB:
     if key not in _dbs:
         db_dir = workspace_path
         db_dir.mkdir(parents=True, exist_ok=True)
-        _dbs[key] = UserDB(db_dir / "users.db")
+        _dbs[key] = UserDB(db_dir / "quantnodes_strategy_research_user.db")
 
     return _dbs[key]
 
