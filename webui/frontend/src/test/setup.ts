@@ -1,8 +1,20 @@
 import '@testing-library/jest-dom'
 import { enableMapSet } from 'immer'
+import { vi } from 'vitest'
+import { createElement } from 'react'
 
 // Enable Map/Set support for Immer
 enableMapSet()
+
+// Mock the heavy syntax highlighter globally (refractor is ESM-only, can't load in CJS test env)
+// Used by MarkdownRenderer via react-syntax-highlighter.
+vi.mock('react-syntax-highlighter', () => ({
+  Prism: ({ children }: any) =>
+    createElement('pre', { 'data-testid': 'syntax-highlighter' }, children),
+}))
+vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
+  oneDark: {},
+}))
 
 // Mock crypto.randomUUID if not available
 if (!global.crypto) {

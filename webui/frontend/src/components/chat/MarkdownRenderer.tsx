@@ -7,9 +7,19 @@ import { useState, useCallback } from 'react'
 
 interface MarkdownRendererProps {
   content: string
+  /** When true, skip Prism syntax highlighting (avoids per-char re-render cost). */
+  streaming?: boolean
 }
 
-function CodeBlock({ language, children }: { language: string; children: string }) {
+function CodeBlock({
+  language,
+  children,
+  streaming,
+}: {
+  language: string
+  children: string
+  streaming?: boolean
+}) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
@@ -30,18 +40,24 @@ function CodeBlock({ language, children }: { language: string; children: string 
           {copied ? '已复制' : '复制'}
         </button>
       </div>
-      <SyntaxHighlighter
-        language={language || 'text'}
-        style={oneDark}
-        customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.8125rem' }}
-      >
-        {children}
-      </SyntaxHighlighter>
+      {streaming ? (
+        <pre className="m-0 overflow-x-auto bg-[#282c34] p-4 text-[0.8125rem] font-mono text-slate-200">
+          {children}
+        </pre>
+      ) : (
+        <SyntaxHighlighter
+          language={language || 'text'}
+          style={oneDark}
+          customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.8125rem' }}
+        >
+          {children}
+        </SyntaxHighlighter>
+      )}
     </div>
   )
 }
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -50,7 +66,11 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           const match = /language-(\w+)/.exec(className || '')
           const codeStr = String(children).replace(/\n$/, '')
           if (match) {
-            return <CodeBlock language={match[1]} children={codeStr} />
+            return (
+              <CodeBlock language={match[1]} streaming={streaming}>
+                {codeStr}
+              </CodeBlock>
+            )
           }
           return (
             <code

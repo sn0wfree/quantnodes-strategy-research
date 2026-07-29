@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { X, Cpu, User, FolderOpen, Palette, Eye, EyeOff, Save, Check, AlertCircle } from 'lucide-react'
+import { X, Cpu, User, FolderOpen, Palette, Eye, EyeOff, Save, Check, AlertCircle, MessageSquare } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useAuthStore } from '../../stores/auth'
 import { api } from '../../api/client'
@@ -31,6 +31,8 @@ const PROVIDERS = [
 export function SettingsModal() {
   const open = useLayoutStore((s) => s.settingsOpen)
   const setOpen = useLayoutStore((s) => s.setSettingsOpen)
+  const chatLayout = useLayoutStore((s) => s.chatLayout)
+  const setChatLayout = useLayoutStore((s) => s.setChatLayout)
   const user = useAuthStore((s) => s.user)
 
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
@@ -291,6 +293,24 @@ export function SettingsModal() {
               )}
             </Section>
 
+            {/* ── 聊天布局 ── */}
+            <Section icon={MessageSquare} title="聊天布局">
+              <div className="grid grid-cols-2 gap-3">
+                <LayoutOption
+                  label="气泡式"
+                  desc="用户消息右对齐气泡，Agent 带头像"
+                  active={chatLayout === 'bubble'}
+                  onClick={() => setChatLayout('bubble')}
+                />
+                <LayoutOption
+                  label="扁平式"
+                  desc="所有消息左对齐（Codex 风格）"
+                  active={chatLayout === 'flat'}
+                  onClick={() => setChatLayout('flat')}
+                />
+              </div>
+            </Section>
+
             {/* ── 外观设置 ── */}
             <Section icon={Palette} title="外观设置">
               <div className="space-y-3 text-sm">
@@ -363,6 +383,35 @@ function SizeBtn({ label, active }: { label: string; active?: boolean }) {
   return (
     <button className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${active ? 'bg-primary-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
       {label}
+    </button>
+  )
+}
+
+function LayoutOption({
+  label,
+  desc,
+  active,
+  onClick,
+}: {
+  label: string
+  desc: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg border p-3 text-left transition-colors ${
+        active
+          ? 'border-primary-500 bg-primary-600/10'
+          : 'border-slate-700 bg-slate-900/50 hover:bg-slate-800/50'
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-slate-200">{label}</span>
+        {active && <Check className="h-3.5 w-3.5 text-primary-400" />}
+      </div>
+      <div className="mt-1 text-xs text-slate-500">{desc}</div>
     </button>
   )
 }

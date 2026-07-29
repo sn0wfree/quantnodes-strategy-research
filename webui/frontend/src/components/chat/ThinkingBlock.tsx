@@ -1,12 +1,18 @@
 import { useState } from 'react'
-import { Brain, ChevronDown, ChevronRight } from 'lucide-react'
+import { Sparkles, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface ThinkingBlockProps {
   text: string
   collapsed?: boolean
+  /** Whether the thinking is still streaming (shows shimmer dot). */
+  streaming?: boolean
 }
 
-export function ThinkingBlock({ text, collapsed = true }: ThinkingBlockProps) {
+export function ThinkingBlock({
+  text,
+  collapsed = true,
+  streaming = false,
+}: ThinkingBlockProps) {
   const [isExpanded, setIsExpanded] = useState(!collapsed)
 
   if (!text) return null
@@ -22,10 +28,13 @@ export function ThinkingBlock({ text, collapsed = true }: ThinkingBlockProps) {
         ) : (
           <ChevronRight className="h-3 w-3 text-violet-400" />
         )}
-        <Brain className="h-3.5 w-3.5 text-violet-400" />
+        <Sparkles className="h-3.5 w-3.5 text-violet-400" />
         <span className="text-violet-300">推理过程</span>
+        {streaming && (
+          <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+        )}
         <span className="text-violet-500 text-[10px]">
-          {text.length > 100 ? `${Math.ceil(text.length / 4)} tokens` : ''}
+          {text.length > 100 ? `约 ${Math.ceil(text.length / 4)} 字` : ''}
         </span>
       </button>
       {isExpanded && (

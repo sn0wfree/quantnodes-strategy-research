@@ -248,7 +248,7 @@ export const stories: Story[] = [
     icon: MessageSquare,
     render: () => (
       <div className="w-96 bg-slate-950 p-4">
-        <MessageBubble message={userMessage} />
+        <MessageBubble message={userMessage} layout="bubble" />
       </div>
     ),
   },
@@ -260,7 +260,7 @@ export const stories: Story[] = [
     icon: Bot,
     render: () => (
       <div className="w-[600px] bg-slate-950 p-4">
-        <AssistantMessage message={assistantMessage} isStreaming={false} />
+        <AssistantMessage message={assistantMessage} isStreaming={false} layout="bubble" />
       </div>
     ),
   },

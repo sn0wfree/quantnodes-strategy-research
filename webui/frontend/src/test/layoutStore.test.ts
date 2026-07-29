@@ -3,12 +3,15 @@ import { useLayoutStore } from '../stores/layout'
 
 describe('useLayoutStore', () => {
   beforeEach(() => {
+    localStorage.clear()
     useLayoutStore.setState({
       navWidth: 64,
       rightPanelVisible: true,
       rightPanelTab: 'dag',
       workMode: 'monitor',
       leftRatio: 0.5,
+      settingsOpen: false,
+      chatLayout: 'bubble',
     })
   })
 
@@ -39,5 +42,22 @@ describe('useLayoutStore', () => {
 
     useLayoutStore.getState().setLeftRatio(0.5)
     expect(useLayoutStore.getState().leftRatio).toBe(0.5)
+  })
+
+  it('defaults chatLayout to bubble', () => {
+    expect(useLayoutStore.getState().chatLayout).toBe('bubble')
+  })
+
+  it('switches chatLayout to flat and persists to localStorage', () => {
+    useLayoutStore.getState().setChatLayout('flat')
+    expect(useLayoutStore.getState().chatLayout).toBe('flat')
+    expect(localStorage.getItem('sr-chat-layout')).toBe('flat')
+  })
+
+  it('switches chatLayout back to bubble and updates localStorage', () => {
+    useLayoutStore.getState().setChatLayout('flat')
+    useLayoutStore.getState().setChatLayout('bubble')
+    expect(useLayoutStore.getState().chatLayout).toBe('bubble')
+    expect(localStorage.getItem('sr-chat-layout')).toBe('bubble')
   })
 })

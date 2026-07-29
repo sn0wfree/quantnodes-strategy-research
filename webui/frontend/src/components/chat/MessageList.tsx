@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import type { VirtuosoHandle } from 'react-virtuoso'
 import { useChatStore } from '../../stores/chat'
+import { useLayoutStore } from '../../stores/layout'
 import { MessageBubble } from './MessageBubble'
 import { AssistantMessage } from './AssistantMessage'
 import { EmptyState } from '../common/EmptyState'
@@ -11,11 +12,11 @@ export function MessageList() {
   const messages = useChatStore((s) => s.messages)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const streamingText = useChatStore((s) => s.streamingText)
+  const chatLayout = useLayoutStore((s) => s.chatLayout)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   const messageList = Array.from(messages.values()).sort((a, b) => a.created_at - b.created_at)
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (messageList.length > 0) {
       setTimeout(() => {
@@ -26,6 +27,18 @@ export function MessageList() {
       }, 50)
     }
   }, [messageList.length, streamingText])
+
+  // Listen for global "focus chat" event (from sidebar chat icon)
+  useEffect(() => {
+    const handler = () => {
+      virtuosoRef.current?.scrollToIndex({
+        index: messageList.length - 1,
+        align: 'end',
+      })
+    }
+    window.addEventListener('sr:focus-chat', handler)
+    return () => window.removeEventListener('sr:focus-chat', handler)
+  }, [messageList.length])
 
   if (messageList.length === 0) {
     return (
@@ -47,13 +60,14 @@ export function MessageList() {
       itemContent={(_index, message) => {
         const isStreaming = message.id === streamingMessageId
         if (message.role === 'user') {
-          return <MessageBubble message={message} />
+          return <MessageBubble message={message} layout={chatLayout} />
         }
         return (
           <AssistantMessage
             message={message}
             isStreaming={isStreaming}
             streamingText={isStreaming ? streamingText : undefined}
+            layout={chatLayout}
           />
         )
       }}

@@ -1,13 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-
-// Mock the heavy syntax highlighter (refractor is ESM-only, can't load in CJS test env)
-vi.mock('react-syntax-highlighter', () => ({
-  Prism: ({ children }: any) => <pre data-testid="syntax-highlighter">{children}</pre>,
-}))
-vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
-  oneDark: {},
-}))
-
+import { describe, it, expect } from 'vitest'
+// Note: react-syntax-highlighter is mocked globally in test/setup.ts
 import { render } from '@testing-library/react'
 import { MarkdownRenderer } from '../components/chat/MarkdownRenderer'
 

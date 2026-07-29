@@ -1,5 +1,6 @@
 import { Bot } from 'lucide-react'
 import type { Message, MessagePart } from '../../stores/chat'
+import type { ChatLayout } from '../../stores/layout'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallGroup } from './ToolCallGroup'
@@ -14,16 +15,24 @@ interface AssistantMessageProps {
   message: Message
   isStreaming?: boolean
   streamingText?: string
+  layout: ChatLayout
 }
 
-function PartRenderer({ part }: { part: MessagePart }) {
+function formatTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function PartRenderer({ part, isStreaming }: { part: MessagePart; isStreaming: boolean }) {
   switch (part.type) {
     case 'text':
       return <MarkdownRenderer content={part.text} />
     case 'tool_call':
       return <ToolCallBlock toolCall={part} />
     case 'thinking':
-      return <ThinkingBlock text={part.text} collapsed={part.collapsed} />
+      return <ThinkingBlock text={part.text} collapsed={part.collapsed} streaming={isStreaming} />
     case 'file_edit':
       return <FileEditBlock fileEdit={part} />
     case 'table':
@@ -37,8 +46,12 @@ function PartRenderer({ part }: { part: MessagePart }) {
   }
 }
 
-export function AssistantMessage({ message, isStreaming, streamingText }: AssistantMessageProps) {
-  // Group consecutive tool_calls into a single ToolCallGroup
+export function AssistantMessage({
+  message,
+  isStreaming,
+  streamingText,
+  layout,
+}: AssistantMessageProps) {
   const groupedParts: Array<{ type: 'single'; part: MessagePart } | { type: 'tool_group'; calls: any[] }> = []
   let i = 0
   while (i < message.parts.length) {
@@ -56,35 +69,60 @@ export function AssistantMessage({ message, isStreaming, streamingText }: Assist
     }
   }
 
+  const modelLabel = message.metadata?.model
+    ? `Agent · ${message.metadata.model}`
+    : 'Agent'
+
+  const headerLine = (
+    <div className="mb-1 flex items-center gap-2">
+      {layout === 'bubble' && (
+        <span className="text-xs font-medium text-slate-400">{modelLabel}</span>
+      )}
+      {layout === 'flat' && (
+        <>
+          <span className="text-xs font-medium text-emerald-400">{modelLabel}</span>
+          <span className="text-xs text-slate-600">{formatTime(message.created_at)}</span>
+        </>
+      )}
+      {message.agent_id && (
+        <span className="text-xs text-slate-600">{message.agent_id}</span>
+      )}
+    </div>
+  )
+
+  const body = (
+    <div className="text-sm text-slate-200 leading-relaxed">
+      {isStreaming && streamingText !== undefined ? (
+        <StreamingText text={streamingText} isDone={false} />
+      ) : (
+        groupedParts.map((item, idx) => {
+          if (item.type === 'tool_group') {
+            return <ToolCallGroup key={idx} toolCalls={item.calls} />
+          }
+          return <PartRenderer key={idx} part={item.part} isStreaming={!!isStreaming} />
+        })
+      )}
+    </div>
+  )
+
+  if (layout === 'flat') {
+    return (
+      <div className="px-4 py-3">
+        {headerLine}
+        {body}
+      </div>
+    )
+  }
+
+  // bubble mode (default)
   return (
     <div className="flex gap-3 px-4 py-2">
-      {/* Agent avatar */}
-      <div
-        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-600 text-white text-xs font-medium"
-      >
+      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-600 text-white text-xs font-medium">
         <Bot className="h-4 w-4" />
       </div>
-
-      {/* Content */}
       <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-400">Agent</span>
-          {message.agent_id && (
-            <span className="text-xs text-slate-600">{message.agent_id}</span>
-          )}
-        </div>
-        <div className="text-sm text-slate-200 leading-relaxed">
-          {isStreaming && streamingText !== undefined ? (
-            <StreamingText text={streamingText} isDone={false} />
-          ) : (
-            groupedParts.map((item, idx) => {
-              if (item.type === 'tool_group') {
-                return <ToolCallGroup key={idx} toolCalls={item.calls} />
-              }
-              return <PartRenderer key={idx} part={item.part} />
-            })
-          )}
-        </div>
+        {headerLine}
+        {body}
       </div>
     </div>
   )
