@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS price_data (
 );
 
 -- ohlcv 视图: 映射 price_data 到因子分析工具期望的格式
-CREATE OR REPLACE VIEW ohlcv AS
+CREATE VIEW IF NOT EXISTS ohlcv AS
 SELECT
     date,
     asset_code AS asset,
@@ -180,12 +180,23 @@ def init_db(workspace_path: Path) -> bool:
         return False
 
     try:
+        # Execute table creation first
         conn.execute(DUCKDB_INIT_SQL)
         conn.close()
         return True
     except Exception as e:
+        # Handle view creation conflicts gracefully
+        if "write-write conflict" in str(e) or "already exists" in str(e):
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return True  # View already exists, that's fine
         print(f"❌ DuckDB 初始化失败: {e}")
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
         return False
 
 
