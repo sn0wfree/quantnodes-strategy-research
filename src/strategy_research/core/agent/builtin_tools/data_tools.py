@@ -53,13 +53,13 @@ class GetMarketDataTool(BaseTool):
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
-        from ...core.data_source.base import validate_date_range
-        from ...core.data_source.registry import (
+        from ...data_source.base import validate_date_range
+        from ...data_source.registry import (
             LOADER_REGISTRY,
             NoAvailableSourceError,
             resolve_loader,
         )
-        from ...core.data_source.utils import detect_market
+        from ...data_source.utils import detect_market
 
         codes = kwargs.get("codes", [])
         start_date = kwargs.get("start_date", "")
@@ -158,7 +158,7 @@ class ListDataSourcesTool(BaseTool):
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
-        from ...core.data_source.registry import LOADER_REGISTRY, _ensure_registered
+        from ...data_source.registry import LOADER_REGISTRY, _ensure_registered
 
         _ensure_registered()
         sources = []

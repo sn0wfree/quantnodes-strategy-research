@@ -839,7 +839,9 @@ class AgentLoop:
             "tool": tc.name,
             "name": tc.name,            # frontend reads data.name
             "id": tc.id,                # frontend reads data.id
-            "arguments": tc.arguments,
+            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+            if not isinstance(tc.arguments, str)
+            else tc.arguments,
             "call_id": tc.id,           # backward compat
             "iter": getattr(self, "_current_iter", 0),
         })
@@ -1008,7 +1010,9 @@ class AgentLoop:
             "tool": tc.name,
             "name": tc.name,
             "id": tc.id,
-            "arguments": tc.arguments,
+            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+            if not isinstance(tc.arguments, str)
+            else tc.arguments,
             "call_id": tc.id,
             "iter": getattr(self, "_current_iter", 0),
         })

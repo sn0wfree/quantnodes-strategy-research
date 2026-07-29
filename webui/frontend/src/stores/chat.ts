@@ -17,8 +17,8 @@ export interface ToolCallPart {
   type: 'tool_call'
   id: string
   name: string
-  arguments: string
-  result?: string
+  arguments: string | unknown
+  result?: string | unknown
   status: 'pending' | 'running' | 'done' | 'error'
 }
 

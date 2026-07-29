@@ -454,12 +454,18 @@ def _accumulate_part(
         else:
             parts.append({"type": "text", "text": text})
     elif event_type == "tool_call":
+        raw_args = data.get("arguments")
+        args_str = (
+            raw_args
+            if isinstance(raw_args, str)
+            else json.dumps(raw_args, ensure_ascii=False) if raw_args is not None else None
+        )
         parts.append(
             {
                 "type": "tool_call",
                 "id": data.get("id") or data.get("call_id"),
                 "name": data.get("name") or data.get("tool"),
-                "arguments": data.get("arguments"),
+                "arguments": args_str,
             }
         )
     elif event_type == "tool_result":

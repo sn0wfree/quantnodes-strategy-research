@@ -71,12 +71,17 @@ export function useSSE(sessionId: string | null) {
           break
         }
         case 'tool_call': {
-          const { message_id: mid, id, name, arguments: args } = data as {
+          const { message_id: mid, id, name, arguments: rawArgs } = data as {
             message_id: string
             id: string
             name: string
-            arguments: string
+            arguments: string | unknown
           }
+          // Always store as JSON string for consistency with DB-loaded messages
+          const args =
+            typeof rawArgs === 'string'
+              ? rawArgs
+              : JSON.stringify(rawArgs ?? {})
           updateMessage(mid, (msg) => {
             const existing = msg.parts.find(
               (p) => p.type === 'tool_call' && p.id === id
@@ -94,12 +99,17 @@ export function useSSE(sessionId: string | null) {
           break
         }
         case 'tool_result': {
-          const { message_id: mid, id, result, status } = data as {
+          const { message_id: mid, id, result: rawResult, status } = data as {
             message_id: string
             id: string
-            result: string
+            result: string | unknown
             status: string
           }
+          // Always store as JSON string for consistency with DB-loaded messages
+          const result =
+            typeof rawResult === 'string'
+              ? rawResult
+              : JSON.stringify(rawResult ?? {})
           updateMessage(mid, (msg) => {
             const tc = msg.parts.find(
               (p) => p.type === 'tool_call' && p.id === id

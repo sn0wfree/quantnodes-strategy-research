@@ -24,30 +24,44 @@ function formatDuration(ms: number): string {
 }
 
 /** Try to extract a brief, single-line preview from JSON args. */
-function summarizeArgs(args: string): string {
-  try {
-    const parsed = JSON.parse(args)
-    const keys = Object.keys(parsed)
-    if (keys.length === 0) return ''
-    // First 2 keys with truncated values
-    return keys
-      .slice(0, 2)
-      .map((k) => {
-        const v = parsed[k]
-        const s = typeof v === 'string' ? v : JSON.stringify(v)
-        return `${k}: ${s.length > 24 ? s.slice(0, 24) + '…' : s}`
-      })
-      .join(', ')
-  } catch {
-    return args.length > 30 ? args.slice(0, 30) + '…' : args
+function summarizeArgs(args: string | unknown): string {
+  // args may already be an object (loaded from DB) or a JSON string (from SSE)
+  const parsed: Record<string, unknown> =
+    typeof args === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(args) as Record<string, unknown>
+          } catch {
+            return {}
+          }
+        })()
+      : ((args ?? {}) as Record<string, unknown>)
+  const keys = Object.keys(parsed)
+  if (keys.length === 0) {
+    // Fall back to raw string representation
+    if (typeof args === 'string') {
+      return args.length > 30 ? args.slice(0, 30) + '…' : args
+    }
+    return ''
   }
+  // First 2 keys with truncated values
+  return keys
+    .slice(0, 2)
+    .map((k) => {
+      const v = parsed[k]
+      const s = typeof v === 'string' ? v : JSON.stringify(v)
+      return `${k}: ${s.length > 24 ? s.slice(0, 24) + '…' : s}`
+    })
+    .join(', ')
 }
 
 /** Render args and result as readable markdown. */
-function buildMarkdown(args: string, result: string | undefined): string {
-  let md = '**Arguments**\n\n```json\n' + args + '\n```\n'
+function buildMarkdown(args: string | unknown, result: string | unknown | undefined): string {
+  const argsStr = typeof args === 'string' ? args : JSON.stringify(args ?? {}, null, 2)
+  let md = '**Arguments**\n\n```json\n' + argsStr + '\n```\n'
   if (result !== undefined) {
-    md += '\n**Result**\n\n```json\n' + result + '\n```\n'
+    const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+    md += '\n**Result**\n\n```json\n' + resultStr + '\n```\n'
   }
   return md
 }

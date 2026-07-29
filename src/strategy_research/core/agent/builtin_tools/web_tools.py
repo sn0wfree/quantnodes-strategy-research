@@ -53,7 +53,7 @@ class WebSearchTool(BaseTool):
             return False
 
     def execute(self, **kwargs: Any) -> str:
-        from ...core.web.search import web_search
+        from ...web.search import web_search
         query = kwargs.get("query", "")
         max_results = int(kwargs.get("max_results", 10))
         return web_search(query=query, max_results=max_results)
@@ -81,7 +81,7 @@ class ReadUrlTool(BaseTool):
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
-        from ...core.web.fetch import read_url
+        from ...web.fetch import read_url
         url = kwargs.get("url", "")
         max_chars = int(kwargs.get("max_chars", 10_000))
         return read_url(url=url, max_chars=max_chars)
@@ -117,7 +117,7 @@ class ReadDocumentTool(BaseTool):
             return False
 
     def execute(self, **kwargs: Any) -> str:
-        from ...core.web.pdf import read_document
+        from ...web.pdf import read_document
         path = kwargs.get("path", "")
         max_pages = int(kwargs.get("max_pages", 50))
         return read_document(path=path, max_pages=max_pages)
