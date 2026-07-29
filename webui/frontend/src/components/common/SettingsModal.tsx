@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { X, Cpu, User, FolderOpen, Palette, Eye, EyeOff } from 'lucide-react'
+import { X, Cpu, User, FolderOpen, Palette, Eye, EyeOff, Save, Check, AlertCircle } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useAuthStore } from '../../stores/auth'
 import { api } from '../../api/client'
@@ -11,12 +11,32 @@ interface SystemInfo {
   llm: { configured: boolean; provider: string; model: string; api_key_source: string }
 }
 
+interface LLMConfig {
+  provider: string
+  model: string
+  api_key: string
+  base_url: string
+}
+
+const PROVIDERS = [
+  { value: 'minimax', label: 'MiniMax', models: ['minimax-M3'] },
+  { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini'] },
+  { value: 'anthropic', label: 'Anthropic', models: ['claude-sonnet-4-20250514', 'claude-3-haiku-20240307'] },
+  { value: 'deepseek', label: 'DeepSeek', models: ['deepseek-chat'] },
+]
+
 export function SettingsModal() {
   const open = useLayoutStore((s) => s.settingsOpen)
   const setOpen = useLayoutStore((s) => s.setSettingsOpen)
   const user = useAuthStore((s) => s.user)
 
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({ provider: '', model: '', api_key: '', base_url: '' })
+  const [llmLoading, setLlmLoading] = useState(false)
+  const [llmMsg, setLlmMsg] = useState('')
+  const [llmError, setLlmError] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -28,14 +48,41 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (open) {
+      // Load system info
       api.get<SystemInfo>('/system/info').then(setSystemInfo).catch(() => {})
+      // Load LLM config
+      api.get<LLMConfig>('/system/llm').then(setLlmConfig).catch(() => {})
+      // Reset password fields
       setOldPassword('')
       setNewPassword('')
       setConfirmPassword('')
       setPwMsg('')
       setPwError('')
+      setLlmMsg('')
+      setLlmError('')
     }
   }, [open])
+
+  const handleSaveLLM = async () => {
+    setLlmMsg('')
+    setLlmError('')
+    if (!llmConfig.provider || !llmConfig.model) {
+      setLlmError('Provider 和 Model 不能为空')
+      return
+    }
+    setLlmLoading(true)
+    try {
+      await api.put('/system/llm', llmConfig)
+      setLlmMsg('配置已保存')
+      // Reload system info
+      const info = await api.get<SystemInfo>('/system/info')
+      setSystemInfo(info)
+    } catch (err: any) {
+      setLlmError(err.message || '保存失败')
+    } finally {
+      setLlmLoading(false)
+    }
+  }
 
   const handleChangePassword = async () => {
     setPwMsg('')
@@ -66,6 +113,8 @@ export function SettingsModal() {
     }
   }
 
+  const currentModels = PROVIDERS.find((p) => p.value === llmConfig.provider)?.models || []
+
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
@@ -86,51 +135,115 @@ export function SettingsModal() {
 
             {/* ── LLM 配置 ── */}
             <Section icon={Cpu} title="LLM 配置">
-              {systemInfo?.llm ? (
-                <div className="space-y-2 text-sm">
-                  <Row label="Provider" value={systemInfo.llm.provider} />
-                  <Row label="Model" value={systemInfo.llm.model} />
-                  <Row label="API Key" value={systemInfo.llm.api_key_source} />
-                  <Row label="状态" value={systemInfo.llm.configured ? '✓ 已配置' : '✗ 未配置'} accent={systemInfo.llm.configured} />
+              <div className="space-y-3">
+                {/* Provider */}
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">Provider</label>
+                  <select
+                    value={llmConfig.provider}
+                    onChange={(e) => {
+                      const provider = e.target.value
+                      const models = PROVIDERS.find((p) => p.value === provider)?.models || []
+                      setLlmConfig({ ...llmConfig, provider, model: models[0] || '' })
+                    }}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
+                  >
+                    <option value="">选择 Provider</option>
+                    {PROVIDERS.map((p) => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
+                  </select>
                 </div>
-              ) : (
-                <p className="text-sm text-slate-500">加载中...</p>
-              )}
+
+                {/* Model */}
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">Model</label>
+                  <select
+                    value={llmConfig.model}
+                    onChange={(e) => setLlmConfig({ ...llmConfig, model: e.target.value })}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
+                  >
+                    <option value="">选择 Model</option>
+                    {currentModels.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* API Key */}
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">API Key</label>
+                  <div className="relative">
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      placeholder="输入 API Key"
+                      value={llmConfig.api_key}
+                      onChange={(e) => setLlmConfig({ ...llmConfig, api_key: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 pr-10 text-sm text-slate-100 outline-none focus:border-primary-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Base URL */}
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">Base URL (可选)</label>
+                  <input
+                    type="text"
+                    placeholder="留空使用默认"
+                    value={llmConfig.base_url}
+                    onChange={(e) => setLlmConfig({ ...llmConfig, base_url: e.target.value })}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
+                  />
+                </div>
+
+                {/* Status */}
+                {systemInfo?.llm && (
+                  <div className="flex items-center gap-2 text-xs">
+                    {systemInfo.llm.configured ? (
+                      <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">当前: {systemInfo.llm.provider} / {systemInfo.llm.model}</span></>
+                    ) : (
+                      <><AlertCircle className="h-3 w-3 text-amber-400" /><span className="text-amber-400">未配置</span></>
+                    )}
+                  </div>
+                )}
+
+                {llmError && <p className="text-xs text-red-400">{llmError}</p>}
+                {llmMsg && <p className="text-xs text-green-400">{llmMsg}</p>}
+
+                <button
+                  onClick={handleSaveLLM}
+                  disabled={llmLoading}
+                  className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {llmLoading ? '保存中...' : '保存配置'}
+                </button>
+              </div>
             </Section>
 
             {/* ── 用户管理 ── */}
             <Section icon={User} title="用户管理">
               <div className="space-y-3">
-                <Row label="当前用户" value={user?.username || '—'} />
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-400">当前用户</span>
+                  <span className="text-slate-200">{user?.username || '—'}</span>
+                </div>
                 <div className="space-y-2">
-                  <PasswordInput
-                    placeholder="当前密码"
-                    value={oldPassword}
-                    onChange={setOldPassword}
-                    show={showOldPw}
-                    onToggle={() => setShowOldPw(!showOldPw)}
-                  />
-                  <PasswordInput
-                    placeholder="新密码"
-                    value={newPassword}
-                    onChange={setNewPassword}
-                    show={showNewPw}
-                    onToggle={() => setShowNewPw(!showNewPw)}
-                  />
-                  <input
-                    type="password"
-                    placeholder="确认新密码"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
-                  />
+                  <PasswordInput placeholder="当前密码" value={oldPassword} onChange={setOldPassword} show={showOldPw} onToggle={() => setShowOldPw(!showOldPw)} />
+                  <PasswordInput placeholder="新密码" value={newPassword} onChange={setNewPassword} show={showNewPw} onToggle={() => setShowNewPw(!showNewPw)} />
+                  <input type="password" placeholder="确认新密码" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500" />
                   {pwError && <p className="text-xs text-red-400">{pwError}</p>}
                   {pwMsg && <p className="text-xs text-green-400">{pwMsg}</p>}
-                  <button
-                    onClick={handleChangePassword}
-                    disabled={pwLoading}
-                    className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
-                  >
+                  <button onClick={handleChangePassword} disabled={pwLoading}
+                    className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50">
                     {pwLoading ? '修改中...' : '修改密码'}
                   </button>
                 </div>
@@ -141,8 +254,14 @@ export function SettingsModal() {
             <Section icon={FolderOpen} title="工作区设置">
               {systemInfo ? (
                 <div className="space-y-2 text-sm">
-                  <Row label="路径" value={systemInfo.workspace_path} />
-                  <Row label="用户数" value={String(systemInfo.user_count)} />
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">路径</span>
+                    <span className="text-slate-200 text-xs">{systemInfo.workspace_path}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">用户数</span>
+                    <span className="text-slate-200">{systemInfo.user_count}</span>
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">加载中...</p>
@@ -190,15 +309,6 @@ function Section({ icon: Icon, title, children }: { icon: any; title: string; ch
   )
 }
 
-function Row({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-slate-400">{label}</span>
-      <span className={accent ? 'text-green-400' : 'text-slate-200'}>{value}</span>
-    </div>
-  )
-}
-
 function PasswordInput({ placeholder, value, onChange, show, onToggle }: {
   placeholder: string; value: string; onChange: (v: string) => void; show: boolean; onToggle: () => void
 }) {
@@ -220,11 +330,7 @@ function PasswordInput({ placeholder, value, onChange, show, onToggle }: {
 
 function ThemeBtn({ label, active }: { label: string; active?: boolean }) {
   return (
-    <button
-      className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${
-        active ? 'bg-primary-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-      }`}
-    >
+    <button className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${active ? 'bg-primary-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
       {label}
     </button>
   )
@@ -232,11 +338,7 @@ function ThemeBtn({ label, active }: { label: string; active?: boolean }) {
 
 function SizeBtn({ label, active }: { label: string; active?: boolean }) {
   return (
-    <button
-      className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${
-        active ? 'bg-primary-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-      }`}
-    >
+    <button className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${active ? 'bg-primary-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
       {label}
     </button>
   )
