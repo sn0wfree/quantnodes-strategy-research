@@ -219,6 +219,13 @@ async def _run_agent_loop_background(
                     p["result"] = event_data.get("result")
                     p["status"] = event_data.get("status", "done")
                     break
+        elif event_type == "tool_progress":
+            # Attach progress steps to matching tool_call
+            steps = event_data.get("steps", [])
+            for p in reversed(accumulated_parts):
+                if p.get("type") == "tool_call" and p.get("id") == event_data.get("id"):
+                    p["progress"] = steps
+                    break
         elif event_type == "thinking_delta":
             delta = event_data.get("delta", "")
             if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":

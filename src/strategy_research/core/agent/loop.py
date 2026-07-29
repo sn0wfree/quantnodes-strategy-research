@@ -852,6 +852,14 @@ class AgentLoop:
         if "workspace" not in kwargs and self.workspace is not None:
             kwargs["workspace"] = self.workspace
 
+        # Inject progress callback so tools can report progress steps
+        def _progress_callback(steps: list[str]) -> None:
+            self._emit("tool_progress", {
+                "id": tc.id,
+                "steps": steps,
+            })
+        kwargs["_progress_callback"] = _progress_callback
+
         t0 = time.perf_counter()
         try:
             output = tool.execute(**kwargs)
