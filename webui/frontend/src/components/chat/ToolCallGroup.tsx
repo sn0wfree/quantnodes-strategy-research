@@ -1,18 +1,26 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
+import { ChevronRight, Wrench } from 'lucide-react'
 import type { ToolCallPart } from '../../stores/chat'
 import { ToolCallBlock } from './ToolCallBlock'
 
 interface ToolCallGroupProps {
   toolCalls: ToolCallPart[]
+  /** Per-call start times keyed by tool call id. */
+  startTimes?: Record<string, number>
 }
 
-export function ToolCallGroup({ toolCalls }: ToolCallGroupProps) {
+export function ToolCallGroup({ toolCalls, startTimes }: ToolCallGroupProps) {
   const [expanded, setExpanded] = useState(false)
 
+  // Single tool → render directly (no group chrome).
   if (toolCalls.length === 0) return null
   if (toolCalls.length === 1) {
-    return <ToolCallBlock toolCall={toolCalls[0]} />
+    return (
+      <ToolCallBlock
+        toolCall={toolCalls[0]}
+        startTime={startTimes?.[toolCalls[0].id]}
+      />
+    )
   }
 
   const running = toolCalls.filter((tc) => tc.status === 'running').length
@@ -20,42 +28,50 @@ export function ToolCallGroup({ toolCalls }: ToolCallGroupProps) {
   const error = toolCalls.filter((tc) => tc.status === 'error').length
 
   return (
-    <div className="my-1.5 rounded-lg border border-slate-700/50 overflow-hidden">
-      {/* Group header */}
-      <button
+    <div className="my-1 border-l-2 border-slate-700 bg-slate-800/20 rounded-r-md overflow-hidden">
+      {/* Single-line summary chip */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 bg-slate-800/30 px-3 py-2 text-left text-xs hover:bg-slate-800/50 transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setExpanded((v) => !v)
+          }
+        }}
+        className="flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left text-[12px] hover:bg-slate-800/40 transition-colors"
       >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 text-slate-500" />
-        ) : (
-          <ChevronRight className="h-3 w-3 text-slate-500" />
-        )}
+        <ChevronRight
+          className={`h-3 w-3 text-slate-500 transition-transform ${
+            expanded ? 'rotate-90' : ''
+          }`}
+        />
         <Wrench className="h-3.5 w-3.5 text-slate-400" />
-        <span className="text-slate-300">
-          {toolCalls.length} 个工具调用
+        <span className="font-medium text-slate-300">
+          {toolCalls.length} tool calls
         </span>
-        <div className="ml-auto flex items-center gap-2 text-[10px]">
+        <span className="ml-auto flex items-center gap-2 text-[10px]">
           {running > 0 && (
             <span className="flex items-center gap-1 text-amber-400">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-              {running} 运行中
+              {running} running
             </span>
           )}
-          {done > 0 && (
-            <span className="text-emerald-400">{done} 完成</span>
-          )}
-          {error > 0 && (
-            <span className="text-red-400">{error} 失败</span>
-          )}
-        </div>
-      </button>
+          {done > 0 && <span className="text-emerald-400">{done} done</span>}
+          {error > 0 && <span className="text-red-400">{error} failed</span>}
+        </span>
+      </div>
 
-      {/* Expanded: individual tool calls */}
+      {/* Expanded: list of individual tool calls */}
       {expanded && (
-        <div className="border-t border-slate-700/50 p-1 space-y-1">
+        <div className="border-t border-slate-700/40 px-2 py-1.5 space-y-1">
           {toolCalls.map((tc) => (
-            <ToolCallBlock key={tc.id} toolCall={tc} />
+            <ToolCallBlock
+              key={tc.id}
+              toolCall={tc}
+              startTime={startTimes?.[tc.id]}
+            />
           ))}
         </div>
       )}

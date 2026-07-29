@@ -14,8 +14,8 @@ const mockToolCall = (id: string, status: ToolCallPart['status']): ToolCallPart 
 describe('ToolCallGroup', () => {
   it('renders single tool call directly without group header', () => {
     render(<ToolCallGroup toolCalls={[mockToolCall('1', 'done')]} />)
-    // Single tool call should not show the group header
-    expect(screen.queryByText(/个工具调用/)).not.toBeInTheDocument()
+    // Single tool call should not show the "N tool calls" group header
+    expect(screen.queryByText(/tool calls/)).not.toBeInTheDocument()
   })
 
   it('renders group header for multiple tool calls', () => {
@@ -29,7 +29,7 @@ describe('ToolCallGroup', () => {
       />
     )
     // Group header should show count
-    expect(screen.getByText(/3 个工具调用/)).toBeInTheDocument()
+    expect(screen.getByText(/3 tool calls/)).toBeInTheDocument()
   })
 
   it('returns null for empty tool calls', () => {
@@ -48,9 +48,8 @@ describe('ToolCallGroup', () => {
         ]}
       />
     )
-    // Should show counts in header
-    expect(screen.getByText('2 完成')).toBeInTheDocument()
-    expect(screen.getByText(/运行中/)).toBeInTheDocument()
-    expect(screen.getByText('1 失败')).toBeInTheDocument()
+    expect(screen.getByText('2 done')).toBeInTheDocument()
+    expect(screen.getByText(/running/)).toBeInTheDocument()
+    expect(screen.getByText('1 failed')).toBeInTheDocument()
   })
 })

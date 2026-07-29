@@ -2,13 +2,20 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, Hash } from 'lucide-react'
 import { useState, useCallback } from 'react'
 
 interface MarkdownRendererProps {
   content: string
   /** When true, skip Prism syntax highlighting (avoids per-char re-render cost). */
   streaming?: boolean
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
 }
 
 function CodeBlock({
@@ -29,26 +36,32 @@ function CodeBlock({
   }, [children])
 
   return (
-    <div className="group relative my-2 rounded-lg overflow-hidden border border-slate-700/50">
-      <div className="flex items-center justify-between bg-slate-800 px-4 py-1.5 text-xs text-slate-400">
-        <span>{language || 'code'}</span>
+    <div className="group relative my-3 rounded-lg overflow-hidden border border-slate-700/50">
+      <div className="flex items-center justify-between bg-slate-800/70 px-3 py-1 text-[11px] text-slate-400 font-mono">
+        <span>{language || 'text'}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 text-slate-500 hover:text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="flex items-center gap-1 text-slate-500 hover:text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity"
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-          {copied ? '已复制' : '复制'}
+          <span>{copied ? '已复制' : '复制'}</span>
         </button>
       </div>
       {streaming ? (
-        <pre className="m-0 overflow-x-auto bg-[#282c34] p-4 text-[0.8125rem] font-mono text-slate-200">
+        <pre className="m-0 overflow-x-auto bg-[#282c34] p-4 text-[0.8125rem] leading-relaxed font-mono text-slate-200">
           {children}
         </pre>
       ) : (
         <SyntaxHighlighter
           language={language || 'text'}
           style={oneDark}
-          customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.8125rem' }}
+          customStyle={{
+            margin: 0,
+            borderRadius: 0,
+            fontSize: '0.8125rem',
+            lineHeight: '1.55',
+            padding: '1rem',
+          }}
         >
           {children}
         </SyntaxHighlighter>
@@ -74,7 +87,7 @@ export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) 
           }
           return (
             <code
-              className="rounded bg-slate-800 px-1.5 py-0.5 text-sm font-mono text-primary-300"
+              className="rounded-md bg-slate-800/80 px-1.5 py-0.5 text-[0.85em] font-mono text-emerald-300 border border-slate-700/40"
               {...props}
             >
               {children}
@@ -83,55 +96,100 @@ export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) 
         },
         table({ children }) {
           return (
-            <div className="my-2 overflow-x-auto rounded-lg border border-slate-700/50">
+            <div className="my-3 overflow-x-auto rounded-lg border border-slate-700/50">
               <table className="w-full text-sm">{children}</table>
             </div>
           )
         },
         thead({ children }) {
-          return <thead className="bg-slate-800/50">{children}</thead>
+          return <thead className="bg-slate-800/70 sticky top-0">{children}</thead>
         },
         th({ children }) {
           return (
-            <th className="px-3 py-2 text-left font-medium text-slate-300 border-b border-slate-700/50">
+            <th className="px-3 py-2 text-left font-semibold text-slate-200 border-b border-slate-700/60">
               {children}
             </th>
           )
         },
         td({ children }) {
           return (
-            <td className="px-3 py-2 border-b border-slate-800/50 text-slate-300">
+            <td className="px-3 py-2 border-b border-slate-800/40 text-slate-300">
               {children}
             </td>
           )
         },
+        tr({ children }) {
+          return <tr className="hover:bg-slate-800/30 transition-colors">{children}</tr>
+        },
         p({ children }) {
-          return <p className="my-1.5 leading-relaxed">{children}</p>
+          return <p className="my-2 leading-7 text-slate-200">{children}</p>
         },
         ul({ children }) {
-          return <ul className="my-1.5 list-disc pl-5 space-y-1">{children}</ul>
+          return <ul className="my-2 list-disc pl-6 space-y-1.5 text-slate-200 marker:text-slate-500">{children}</ul>
         },
         ol({ children }) {
-          return <ol className="my-1.5 list-decimal pl-5 space-y-1">{children}</ol>
+          return <ol className="my-2 list-decimal pl-6 space-y-1.5 text-slate-200 marker:text-slate-500">{children}</ol>
         },
         li({ children }) {
-          return <li className="leading-relaxed">{children}</li>
+          return <li className="leading-7">{children}</li>
         },
         blockquote({ children }) {
           return (
-            <blockquote className="my-2 border-l-4 border-primary-500/50 pl-4 text-slate-400 italic">
+            <blockquote className="my-3 border-l-4 border-primary-500/50 bg-slate-800/30 pl-4 pr-3 py-2 text-slate-300 not-italic rounded-r">
               {children}
             </blockquote>
           )
         },
         h1({ children }) {
-          return <h1 className="my-3 text-xl font-bold text-slate-100">{children}</h1>
+          const id = slugify(String(children))
+          return (
+            <h1
+              id={id}
+              className="group my-4 mt-6 text-2xl font-bold text-slate-100 scroll-mt-16 border-b border-slate-800 pb-2"
+            >
+              {children}
+              <a href={`#${id}`} className="ml-2 opacity-0 group-hover:opacity-50 text-slate-500">
+                <Hash className="inline h-4 w-4" />
+              </a>
+            </h1>
+          )
         },
         h2({ children }) {
-          return <h2 className="my-2.5 text-lg font-semibold text-slate-100">{children}</h2>
+          const id = slugify(String(children))
+          return (
+            <h2
+              id={id}
+              className="group my-3 mt-5 text-xl font-semibold text-slate-100 scroll-mt-16"
+            >
+              {children}
+              <a href={`#${id}`} className="ml-2 opacity-0 group-hover:opacity-50 text-slate-500">
+                <Hash className="inline h-3.5 w-3.5" />
+              </a>
+            </h2>
+          )
         },
         h3({ children }) {
-          return <h3 className="my-2 text-base font-semibold text-slate-200">{children}</h3>
+          const id = slugify(String(children))
+          return (
+            <h3
+              id={id}
+              className="group my-2.5 mt-4 text-base font-semibold text-slate-200 scroll-mt-16"
+            >
+              {children}
+              <a href={`#${id}`} className="ml-2 opacity-0 group-hover:opacity-50 text-slate-500">
+                <Hash className="inline h-3 w-3" />
+              </a>
+            </h3>
+          )
+        },
+        h4({ children }) {
+          return <h4 className="my-2 mt-4 text-sm font-semibold text-slate-300">{children}</h4>
+        },
+        strong({ children }) {
+          return <strong className="font-semibold text-slate-100">{children}</strong>
+        },
+        em({ children }) {
+          return <em className="italic text-slate-200">{children}</em>
         },
         a({ href, children }) {
           return (
@@ -139,14 +197,14 @@ export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) 
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-primary-400 hover:underline"
+              className="text-primary-400 underline decoration-primary-500/30 underline-offset-2 hover:decoration-primary-400"
             >
               {children}
             </a>
           )
         },
         hr() {
-          return <hr className="my-4 border-slate-700/50" />
+          return <hr className="my-5 border-slate-700/50" />
         },
       }}
     >

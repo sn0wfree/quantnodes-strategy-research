@@ -74,7 +74,7 @@ export function AssistantMessage({
     : 'Agent'
 
   const headerLine = (
-    <div className="mb-1 flex items-center gap-2">
+    <div className="mb-1.5 flex items-center gap-2">
       {layout === 'bubble' && (
         <span className="text-xs font-medium text-slate-400">{modelLabel}</span>
       )}
@@ -91,7 +91,7 @@ export function AssistantMessage({
   )
 
   const body = (
-    <div className="text-sm text-slate-200 leading-relaxed">
+    <div className="text-sm text-slate-200 space-y-1.5">
       {isStreaming && streamingText !== undefined ? (
         <StreamingText text={streamingText} isDone={false} />
       ) : (
@@ -107,7 +107,7 @@ export function AssistantMessage({
 
   if (layout === 'flat') {
     return (
-      <div className="px-4 py-3">
+      <div className="px-4 py-3 border-b border-slate-800/40 last:border-b-0">
         {headerLine}
         {body}
       </div>
@@ -116,9 +116,9 @@ export function AssistantMessage({
 
   // bubble mode (default)
   return (
-    <div className="flex gap-3 px-4 py-2">
-      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-600 text-white text-xs font-medium">
-        <Bot className="h-4 w-4" />
+    <div className="flex gap-3 px-4 py-2.5">
+      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary-600 text-white text-xs font-medium">
+        <Bot className="h-3.5 w-3.5" />
       </div>
       <div className="min-w-0 flex-1">
         {headerLine}
