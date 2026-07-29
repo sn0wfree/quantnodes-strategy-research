@@ -32,8 +32,13 @@
 │   │   └── runs/                # 回测结果（自动生成）
 │   └── ...
 ├── data/                        # 数据文件（可选，CSV/Parquet）
-└── analysis_notes.md            # 分析笔记（可选）
+└── templates/                   # 模板和文档
+    ├── strategy.py              # 策略模板
+    ├── config.yaml              # 配置模板
+    └── .skills/                 # 方法论文档
 ```
+
+**探索 workspace**: 先用 `list_files` 确认实际结构，不要假设。
 
 ## 探索 Workspace 的方法
 
@@ -62,7 +67,7 @@ PARAMS = {
 FACTOR_EXPRS = [
     {
         "factor_name": "momentum_20d",
-        "factor_code": "ts_return(close, 20)",  # 因子算子表达式
+        "factor_code": "ts_return(close, 20)",
         "weight": 1.0,
     },
 ]
@@ -70,6 +75,8 @@ FACTOR_EXPRS = [
 # 因子权重方式
 FACTOR_WEIGHT_METHOD = "equal"  # "equal" | "inv_vol"
 ```
+
+> 📖 完整模板见: `read_file("{workspace}/templates/strategy.py")`
 
 ### config.yaml 格式
 
@@ -95,6 +102,8 @@ factors:
     weight: 1.0
 ```
 
+> 📖 完整模板见: `read_file("{workspace}/templates/config.yaml")`
+
 **data.source 选项：**
 - `auto+duckdb`（推荐）：DuckDB缓存 + 在线自动刷新
 - `duckdb`：仅本地DB（需先导入数据）
@@ -109,19 +118,20 @@ factors:
 read_file(workspace="{workspace}", path="templates/.skills/factor-research.md")
 ```
 
-该文件的"算子参考"章节包含完整的算子列表（17个核心算子）：
-- **截面算子**: rank, zscore, scale
-- **时序算子**: ts_rank, ts_corr, ts_cov, ts_mean, ts_std, ts_max, ts_min, ts_argmax, ts_argmin
-- **工具算子**: decay_linear, signed_power, safe_div, vwap
-
-**完整算子列表以 `templates/.skills/factor-research.md` 为准。**
+该文件的"算子参考"章节包含完整的算子列表。**完整算子列表以文档为准。**
 
 ## 工作流程
 
-### 标准流程（先探索再操作）
-1. `list_files(workspace, path="strategies")` → 确认目录结构
-2. `list_files(workspace, path=".")` → 查看 workspace 根目录
-3. `read_file(workspace, path="strategies/{name}/strategy.py")` → 读取策略
+### 基础流程（快速启动）
+
+1. **读取状态** → `list_files` + `read_file` 了解当前策略、历史实验
+2. **决策** → 选择下一步行动（搜索/挖掘/优化/移除）
+3. **执行** → `write_file` 修改 strategy.py + `run_backtest` 运行回测
+4. **判断** → 改善则保留，退化则回滚
+5. **重复** → 回到第 1 步
+
+> 📖 完整迭代流程（含决策表、风控阈值、抗过拟合检验）见:
+> `read_file("{workspace}/templates/program.md")`
 
 ### 因子分析流程
 1. `get_market_data` → 获取行情数据
@@ -135,12 +145,6 @@ read_file(workspace="{workspace}", path="templates/.skills/factor-research.md")
 2. `write_file("strategies/{name}/strategy.py", content)` → 创建策略
 3. `write_file("strategies/{name}/config.yaml", content)` → 创建配置
 4. `run_backtest(strategy_name="{name}")` → 执行回测
-
-### 策略回测流程
-1. `list_files(workspace, path="strategies/{name}")` → 确认文件存在
-2. `read_file(workspace, path="strategies/{name}/strategy.py")` → 验证内容
-3. `run_backtest(strategy_name="{name}")` → 执行回测
-4. `list_history` → 查看历史回测结果
 
 ## 工具使用原则
 
