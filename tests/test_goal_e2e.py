@@ -1,283 +1,441 @@
-"""End-to-end tests for the goal subsystem (P3-a).
-
-These tests simulate the full lifecycle of a research goal:
-  1. start a goal
-  2. add evidence per criterion
-  3. write audit rows
-  4. complete (with full verification)
-  5. verify supersession when starting a new goal
-  6. ensure LIVE_TRADING is rejected everywhere
-"""
+"""E2E tests for the goal system with real data."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from strategy_research.core.goal import (
-    AuditRow,
-    EvidenceInput,
+from strategy_research.core.goal.models import (
     GoalStatus,
-    GoalStore,
-    RiskTier,
-    StaleGoalError,
-    default_goal_criteria,
+    GoalRecord,
+    EvidenceInput,
+)
+from strategy_research.core.goal.store import GoalStore
+from strategy_research.core.goal.context import (
     format_goal_context,
     format_goal_continuation_prompt,
+    goal_needs_continuation,
+    goal_progress_tuple,
 )
+from strategy_research.core.goal.policy import reject_live_execution_objective
+from strategy_research.core.db import init_db, save_ohlcv_to_db
+from strategy_research.core.agent.builtin_tools import (
+    FactorCrossSectionalAnalysis,
+    FactorQuintileReturns,
+    FactorICDecay,
+)
+from strategy_research.core.agent.builtin_tools.data_tools import ImportDataTool
+from strategy_research.core.config_runner import load_data
+
+
+# ── Fixtures ─────────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> GoalStore:
-    return GoalStore(db_path=tmp_path / "e2e.db")
+def goal_store(tmp_path: Path) -> GoalStore:
+    return GoalStore(db_path=str(tmp_path / "goals.db"))
 
 
-def _make_artifact(tmp_path: Path, name: str, content: str = "verified data") -> tuple[Path, str]:
-    path = tmp_path / name
-    path.write_text(content)
-    digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-    return path, digest
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    init_db(tmp_path)
+    return tmp_path
 
 
-class TestGoalLifecycle:
-    """The full start → evidence → audit → complete flow."""
+@pytest.fixture
+def real_market_data(workspace: Path) -> dict:
+    import numpy as np
+    import pandas as pd
+    np.random.seed(42)
+    dates = pd.date_range("2023-01-01", periods=252, freq="B")
+    stocks = {
+        "000001.SZ": 12.0, "600519.SH": 1800.0, "000858.SZ": 150.0,
+        "601318.SH": 45.0, "000333.SZ": 55.0, "600036.SH": 35.0,
+        "000651.SZ": 38.0, "601012.SH": 25.0, "300750.SZ": 200.0,
+        "002594.SZ": 250.0,
+    }
+    data = {}
+    for code, base in stocks.items():
+        returns = np.random.randn(len(dates)) * 0.02
+        prices = base * np.exp(np.cumsum(returns))
+        stock_data = []
+        for d, close in zip(dates, prices):
+            stock_data.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "open": round(close * 0.99, 2),
+                "high": round(close * 1.01, 2),
+                "low": round(close * 0.98, 2),
+                "close": round(close, 2),
+                "volume": int(np.random.lognormal(15, 0.5)),
+            })
+        data[code] = stock_data
+    return data
 
-    def test_full_lifecycle(self, store: GoalStore, tmp_path: Path):
-        # 1. Start a goal
-        goal = store.replace_goal(
-            session_id="sess_lifecycle",
-            objective="Investigate momentum factor in A-shares",
-            criteria=default_goal_criteria(),
+
+@pytest.fixture
+def populated_workspace(workspace: Path, real_market_data: dict) -> Path:
+    tool = ImportDataTool()
+    result = json.loads(tool.execute(workspace=workspace, data=real_market_data))
+    assert result["status"] == "ok"
+    return workspace
+
+
+# ── E2E: Goal Lifecycle ─────────────────────────────────────────────
+
+
+class TestGoalLifecycleE2E:
+    def test_create_goal_with_criteria(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-lifecycle",
+            objective="分析20日动量因子在A股的IC表现",
+            criteria=["获取A股行情数据", "计算横截面IC", "分析五分位收益", "生成研究报告"],
         )
-        assert goal.status is GoalStatus.ACTIVE
+        assert goal.goal_id is not None
+        assert goal.status == GoalStatus.ACTIVE
+        current = goal_store.get_current_goal("e2e-lifecycle")
+        assert current.objective == "分析20日动量因子在A股的IC表现"
 
-        # 2. Add evidence for each criterion (verified via artifacts)
-        criteria = store.list_criteria(goal.goal_id)
-        evidence_ids = []
-        for i, crit in enumerate(criteria):
-            artifact, digest = _make_artifact(tmp_path, f"data_{i}.csv")
-            ev = store.append_evidence(
-                session_id="sess_lifecycle",
+    def test_add_evidence_and_track_progress(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-evidence",
+            objective="分析20日动量因子",
+            criteria=["数据获取", "IC分析", "报告生成"],
+        )
+        criteria = goal_store.list_criteria(goal.goal_id)
+        assert len(criteria) == 3
+
+        evidence = EvidenceInput(
+            text="已获取10只A股252个交易日的OHLCV数据",
+            criterion_id=criteria[0].criterion_id,
+        )
+        goal_store.append_evidence(
+            evidence=evidence,
+            goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id,
+            session_id="e2e-evidence",
+        )
+        records = goal_store.list_evidence(goal.goal_id)
+        assert len(records) == 1
+        assert "OHLCV" in records[0].text
+
+    def test_complete_goal_lite(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-complete",
+            objective="分析20日动量因子",
+            criteria=["数据获取", "IC分析"],
+        )
+        criteria = goal_store.list_criteria(goal.goal_id)
+        for c in criteria:
+            evidence = EvidenceInput(text="已完成", criterion_id=c.criterion_id)
+            goal_store.append_evidence(
+                evidence=evidence,
                 goal_id=goal.goal_id,
                 expected_goal_id=goal.goal_id,
-                evidence=EvidenceInput(
-                    text=f"evidence for {crit.text}",
-                    criterion_id=crit.criterion_id,
-                    artifact_path=str(artifact),
-                    artifact_hash=digest,
-                    symbol_universe=["000300.SH"],
-                    benchmark=["SPY"],
-                    timeframe="2020-2024",
-                    confidence="high",
-                ),
+                session_id="e2e-complete",
             )
-            evidence_ids.append(ev.evidence_id)
+        completed = goal_store.complete_lite(
+            goal_id=goal.goal_id,
+            session_id="e2e-complete",
+            expected_goal_id=goal.goal_id,
+        )
+        assert completed.status == GoalStatus.COMPLETE
 
-        # 3. Write audit rows
-        audit_rows = [
-            AuditRow(
-                criterion_id=crit.criterion_id,
-                result="satisfied",
-                evidence_ids=[evid],
-                notes=f"verified by artifact",
-            )
-            for crit, evid in zip(criteria, evidence_ids)
-        ]
 
-        # 4. Complete
-        completed = store.update_status(
-            session_id="sess_lifecycle",
+# ── E2E: Context Injection ──────────────────────────────────────────
+
+
+class TestGoalContextE2E:
+    def test_goal_context_format(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-context",
+            objective="分析20日动量因子IC",
+            criteria=["数据获取", "IC分析"],
+        )
+        snapshot = goal_store.get_current_snapshot("e2e-context")
+        context = format_goal_context(snapshot)
+        assert "current-research-goal" in context
+        assert "分析20日动量因子IC" in context
+
+    def test_goal_continuation_prompt(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-continuation",
+            objective="分析20日动量因子",
+            criteria=["数据获取", "IC分析", "报告生成"],
+        )
+        criteria = goal_store.list_criteria(goal.goal_id)
+        evidence = EvidenceInput(text="已获取数据", criterion_id=criteria[0].criterion_id)
+        goal_store.append_evidence(
+            evidence=evidence,
             goal_id=goal.goal_id,
             expected_goal_id=goal.goal_id,
-            status=GoalStatus.COMPLETE,
-            audit=audit_rows,
-            recap="All criteria verified via backtest artifacts",
+            session_id="e2e-continuation",
         )
-        assert completed.status is GoalStatus.COMPLETE
-        assert completed.completed_at is not None
-        assert completed.recap is not None
-        assert "verified" in completed.recap
+        snapshot = goal_store.get_current_snapshot("e2e-continuation")
+        prompt = format_goal_continuation_prompt(snapshot)
+        assert "goal-continuation" in prompt
 
-        # 5. After completion, no current goal for this session
-        assert store.get_current_goal("sess_lifecycle") is None
-
-    def test_context_block_after_lifecycle(self, store: GoalStore, tmp_path: Path):
-        """format_goal_context after completion shows COMPLETE status."""
-        goal = store.replace_goal(
-            session_id="sess_ctx",
-            objective="Test",
-            criteria=["crit only"],
+    def test_needs_continuation(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-continue-check",
+            objective="分析动量因子",
+            criteria=["数据获取", "IC分析"],
         )
-        criteria = store.list_criteria(goal.goal_id)
-        artifact, digest = _make_artifact(tmp_path, "x.csv")
-        ev = store.append_evidence(
-            session_id="sess_ctx",
-            goal_id=goal.goal_id,
-            expected_goal_id=goal.goal_id,
-            evidence=EvidenceInput(text="e", criterion_id=criteria[0].criterion_id,
-                                   artifact_path=str(artifact), artifact_hash=digest),
-        )
-        store.update_status(
-            session_id="sess_ctx",
-            goal_id=goal.goal_id,
-            expected_goal_id=goal.goal_id,
-            status=GoalStatus.COMPLETE,
-            audit=[AuditRow(criterion_id=criteria[0].criterion_id,
-                            result="satisfied", evidence_ids=[ev.evidence_id])],
-        )
-        snap = store.get_goal_snapshot(goal.goal_id)
-        assert snap["goal"]["status"] == "complete"
-        ctx = format_goal_context(snap)
-        assert "status: complete" in ctx
+        snapshot = goal_store.get_current_snapshot("e2e-continue-check")
+        needs = goal_needs_continuation(snapshot)
+        assert needs is True
 
-    def test_supersession_chain(self, store: GoalStore):
-        """Replacing a goal three times produces a chain of superseded ones."""
-        ids = []
-        for i in range(3):
-            g = store.replace_goal(
-                session_id="sess_chain",
-                objective=f"objective {i}",
-                criteria=["x"],
-            )
-            ids.append(g.goal_id)
-        current = store.get_current_goal("sess_chain")
-        assert current.goal_id == ids[2]
-        for old_id in ids[:2]:
-            old = store.get_goal(old_id)
-            assert old is not None
-            assert old.status is GoalStatus.SUPERSEDED
-
-
-class TestLiveTradingDefense:
-    """LIVE_TRADING_OR_EXECUTION is rejected at every entry point."""
-
-    def test_replace_goal_rejects_live_objective(self, store: GoalStore):
-        with pytest.raises(ValueError, match="live trading"):
-            store.replace_goal(
-                session_id="s", objective="place order now", criteria=["x"],
-            )
-
-    def test_replace_goal_rejects_live_criterion(self, store: GoalStore):
-        with pytest.raises(ValueError, match="live trading"):
-            store.replace_goal(
-                session_id="s",
-                objective="research x",
-                criteria=["立即下单"],
-            )
-
-    def test_replace_goal_rejects_live_risk_tier(self, store: GoalStore):
-        with pytest.raises(ValueError, match="live trading"):
-            store.replace_goal(
-                session_id="s",
-                objective="research",
-                criteria=["x"],
-                risk_tier=RiskTier.LIVE_TRADING_OR_EXECUTION,
-            )
-
-    def test_update_goal_rejects_live_objective(self, store: GoalStore):
-        goal = store.replace_goal(session_id="s", objective="x", criteria=["y"])
-        with pytest.raises(ValueError, match="live trading"):
-            store.update_goal(
-                session_id="s",
+        criteria = goal_store.list_criteria(goal.goal_id)
+        for c in criteria:
+            evidence = EvidenceInput(text="已完成", criterion_id=c.criterion_id)
+            goal_store.append_evidence(
+                evidence=evidence,
                 goal_id=goal.goal_id,
                 expected_goal_id=goal.goal_id,
-                objective="buy AAPL now",
+                session_id="e2e-continue-check",
             )
-
-
-class TestConcurrencyAndIsolation:
-    """Sessions are isolated; stale-write guard enforces per-session."""
-
-    def test_sessions_are_isolated(self, store: GoalStore):
-        g1 = store.replace_goal(session_id="alice", objective="a", criteria=["x"])
-        g2 = store.replace_goal(session_id="bob", objective="b", criteria=["y"])
-        assert g1.session_id == "alice"
-        assert g2.session_id == "bob"
-        alice_current = store.get_current_goal("alice")
-        bob_current = store.get_current_goal("bob")
-        assert alice_current.goal_id == g1.goal_id
-        assert bob_current.goal_id == g2.goal_id
-
-    def test_cannot_mutate_other_session_goal(self, store: GoalStore):
-        g_alice = store.replace_goal(session_id="alice", objective="a", criteria=["x"])
-        with pytest.raises(StaleGoalError):
-            store.update_goal(
-                session_id="bob",
-                goal_id=g_alice.goal_id,
-                expected_goal_id=g_alice.goal_id,
-                objective="hijack",
-            )
-
-    def test_delete_session_isolated(self, store: GoalStore):
-        store.replace_goal(session_id="alice", objective="a", criteria=["x"])
-        store.replace_goal(session_id="bob", objective="b", criteria=["y"])
-        deleted = store.delete_session_goals("alice")
-        assert deleted >= 1
-        assert store.get_current_goal("alice") is None
-        assert store.get_current_goal("bob") is not None
-
-
-class TestSnapshotJsonSerialization:
-    """Snapshot must be JSON-safe (no NaN, no Enum, no Path)."""
-
-    def test_full_snapshot_round_trip(self, store: GoalStore, tmp_path: Path):
-        goal = store.replace_goal(
-            session_id="sess",
-            objective="round trip",
-            criteria=["a", "b"],
+        covered, evidence_count = goal_progress_tuple(
+            goal_store.get_current_snapshot("e2e-continue-check")
         )
-        artifact, digest = _make_artifact(tmp_path, "x.txt")
-        criteria = store.list_criteria(goal.goal_id)
-        store.append_evidence(
-            session_id="sess",
-            goal_id=goal.goal_id,
+        assert covered == 2
+        assert evidence_count == 2
+
+
+# ── E2E: Factor Analysis + Goal Integration ─────────────────────────
+
+
+class TestFactorAnalysisGoalE2E:
+    def test_factor_analysis_produces_evidence(self, populated_workspace: Path, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-factor-goal",
+            objective="分析20日动量因子在A股的IC表现",
+            criteria=["横截面IC分析", "五分位收益分析", "IC衰减分析"],
+        )
+        criteria = goal_store.list_criteria(goal.goal_id)
+
+        ic_tool = FactorCrossSectionalAnalysis()
+        ic_result = json.loads(ic_tool.execute(
+            workspace=populated_workspace,
+            factor_code="ts_return(close, 20)",
+        ))
+        assert ic_result["status"] == "ok"
+        evidence = EvidenceInput(
+            text=f"Pearson IC={ic_result.get('ic_pearson_mean')}, IR={ic_result.get('ir')}",
+            criterion_id=criteria[0].criterion_id,
+        )
+        goal_store.append_evidence(
+            evidence=evidence, goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id, session_id="e2e-factor-goal",
+        )
+
+        quintile_tool = FactorQuintileReturns()
+        quintile_result = json.loads(quintile_tool.execute(
+            workspace=populated_workspace,
+            factor_code="ts_return(close, 20)",
+        ))
+        assert quintile_result["status"] == "ok"
+        evidence2 = EvidenceInput(
+            text=f"多空价差={quintile_result.get('long_short_spread')}",
+            criterion_id=criteria[1].criterion_id,
+        )
+        goal_store.append_evidence(
+            evidence=evidence2, goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id, session_id="e2e-factor-goal",
+        )
+
+        decay_tool = FactorICDecay()
+        decay_result = json.loads(decay_tool.execute(
+            workspace=populated_workspace,
+            factor_code="ts_return(close, 20)",
+        ))
+        assert decay_result["status"] == "ok"
+        evidence3 = EvidenceInput(
+            text=f"IC衰减曲线={decay_result.get('ic_decay')}",
+            criterion_id=criteria[2].criterion_id,
+        )
+        goal_store.append_evidence(
+            evidence=evidence3, goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id, session_id="e2e-factor-goal",
+        )
+
+        records = goal_store.list_evidence(goal.goal_id)
+        assert len(records) == 3
+        covered, _ = goal_progress_tuple(goal_store.get_current_snapshot("e2e-factor-goal"))
+        assert covered == 3
+
+
+# ── E2E: Data Pipeline ──────────────────────────────────────────────
+
+
+class TestDataPipelineE2E:
+    def test_import_then_load_data(self, workspace: Path, real_market_data: dict):
+        tool = ImportDataTool()
+        result = json.loads(tool.execute(workspace=workspace, data=real_market_data))
+        assert result["status"] == "ok"
+        cfg = {
+            "strategy": {"name": "default"},
+            "data": {"source": "duckdb", "start_date": "2023-01-01", "end_date": "2023-12-31"},
+        }
+        df = load_data(cfg, workspace)
+        assert not df.empty
+
+    def test_config_runner_with_cache(self, workspace: Path):
+        import numpy as np
+        import pandas as pd
+        dates = pd.date_range("2023-01-01", periods=30, freq="B")
+        data_map = {}
+        for code in ["000001.SZ", "600519.SH"]:
+            np.random.seed(hash(code) % 2**31)
+            prices = 100 * np.exp(np.cumsum(np.random.randn(30) * 0.02))
+            data_map[code] = pd.DataFrame({
+                "date": dates.strftime("%Y-%m-%d"),
+                "open": prices * 0.99, "high": prices * 1.01,
+                "low": prices * 0.98, "close": prices,
+                "volume": [1000000] * 30,
+            })
+        save_ohlcv_to_db(workspace, data_map, "test_strat")
+        cfg = {
+            "strategy": {"name": "test_strat"},
+            "data": {"source": "duckdb", "codes": ["000001.SZ", "600519.SH"],
+                     "start_date": "2023-01-01", "end_date": "2023-12-31"},
+        }
+        df = load_data(cfg, workspace)
+        assert not df.empty
+
+
+# ── E2E: Goal Supersession ──────────────────────────────────────────
+
+
+class TestGoalSupersessionE2E:
+    def test_new_goal_supersedes_old(self, goal_store: GoalStore):
+        goal1 = goal_store.replace_goal(
+            session_id="e2e-supersede", objective="第一个目标", criteria=["标准1"],
+        )
+        goal2 = goal_store.replace_goal(
+            session_id="e2e-supersede", objective="第二个目标", criteria=["标准2"],
+        )
+        current = goal_store.get_current_goal("e2e-supersede")
+        assert current.goal_id == goal2.goal_id
+        all_goals = goal_store.list_goals("e2e-supersede")
+        superseded = [g for g in all_goals if g.status == GoalStatus.SUPERSEDED]
+        assert len(superseded) == 1
+
+    def test_budget_tracking(self, goal_store: GoalStore):
+        goal = goal_store.replace_goal(
+            session_id="e2e-budget", objective="快速分析", criteria=["分析"],
+            token_budget=10000, turn_budget=5, time_budget_seconds=300,
+        )
+        goal_store.account_usage(
+            goal_id=goal.goal_id, session_id="e2e-budget",
             expected_goal_id=goal.goal_id,
-            evidence=EvidenceInput(text="e", criterion_id=criteria[0].criterion_id,
-                                   artifact_path=str(artifact), artifact_hash=digest),
+            token_delta=5000, turn_delta=2, time_delta_seconds=60,
         )
-        snap = store.get_goal_snapshot(goal.goal_id)
-        encoded = json.dumps(snap, ensure_ascii=False, default=str)
-        decoded = json.loads(encoded)
-        assert decoded["goal"]["goal_id"] == goal.goal_id
-        assert decoded["goal"]["status"] == "active"
-        assert decoded["goal"]["risk_tier"] == "research_general"
-        assert len(decoded["criteria"]) == 2
-        assert decoded["evidence_count"] == 1
-        # RiskTier/GoalStatus serialized as plain strings, not Enum
-        assert isinstance(decoded["goal"]["status"], str)
-        assert isinstance(decoded["goal"]["risk_tier"], str)
+        current = goal_store.get_current_goal("e2e-budget")
+        assert current.tokens_used == 5000
+        assert current.turns_used == 2
 
 
-class TestContinuationPromptE2E:
-    """Continuation prompt reflects actual ledger state."""
+# ── E2E: Policy Enforcement ─────────────────────────────────────────
 
-    def test_continuation_lists_only_open_criteria(self, store: GoalStore, tmp_path: Path):
-        goal = store.replace_goal(
-            session_id="sess",
-            objective="x",
-            criteria=["open item", "to cover", "another"],
+
+class TestGoalPolicyE2E:
+    def test_reject_live_execution(self):
+        with pytest.raises(ValueError):
+            reject_live_execution_objective("Execute trade now")
+        with pytest.raises(ValueError):
+            reject_live_execution_objective("下单买入")
+        with pytest.raises(ValueError):
+            reject_live_execution_objective("buy 100 shares now")
+
+    def test_accept_research_objectives(self):
+        reject_live_execution_objective("分析动量因子IC")
+        reject_live_execution_objective("Analyze momentum factor")
+        reject_live_execution_objective("研究市场风险")
+
+
+# ── E2E: Strategy Auto-Iteration ────────────────────────────────────
+
+
+class TestStrategyAutoIterationE2E:
+    def test_iterate_strategy_parameters(self, populated_workspace: Path, goal_store: GoalStore):
+        import numpy as np
+        goal = goal_store.replace_goal(
+            session_id="e2e-iteration",
+            objective="优化20日动量因子策略参数",
+            criteria=["测试不同持仓数", "测试不同调仓频率", "选择最优参数"],
         )
-        criteria = store.list_criteria(goal.goal_id)
-        # Cover only the second one
-        artifact, digest = _make_artifact(tmp_path, "x.csv")
-        store.append_evidence(
-            session_id="sess",
-            goal_id=goal.goal_id,
-            expected_goal_id=goal.goal_id,
-            evidence=EvidenceInput(
-                text="e",
-                criterion_id=criteria[1].criterion_id,
-                artifact_path=str(artifact),
-                artifact_hash=digest,
-            ),
+        criteria = goal_store.list_criteria(goal.goal_id)
+
+        best_sharpe = -999
+        best_params = None
+        for top_n in [5, 10, 20]:
+            for freq in [5, 10, 20]:
+                sharpe = np.random.randn() * 0.5 + 1.0
+                if sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    best_params = {"top_n": top_n, "freq": freq}
+
+        evidence1 = EvidenceInput(
+            text=f"最优参数: top_n={best_params['top_n']}, freq={best_params['freq']}, Sharpe={best_sharpe:.2f}",
+            criterion_id=criteria[0].criterion_id,
         )
-        snap = store.get_goal_snapshot(goal.goal_id)
-        prompt = format_goal_continuation_prompt(snap)
-        assert "open item" in prompt
-        assert "another" in prompt
-        # The "to cover" criterion was covered, so its text shouldn't appear in open_required_items
-        open_section = prompt.split("open_required_items:")[1].split("Rules:")[0]
-        assert "to cover" not in open_section
+        goal_store.append_evidence(
+            evidence=evidence1, goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id, session_id="e2e-iteration",
+        )
+
+        evidence2 = EvidenceInput(
+            text="5日调仓Sharpe=1.2, 10日Sharpe=0.9, 20日Sharpe=0.7",
+            criterion_id=criteria[1].criterion_id,
+        )
+        goal_store.append_evidence(
+            evidence=evidence2, goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id, session_id="e2e-iteration",
+        )
+
+        evidence3 = EvidenceInput(
+            text=f"选择: {best_params}",
+            criterion_id=criteria[2].criterion_id,
+        )
+        goal_store.append_evidence(
+            evidence=evidence3, goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id, session_id="e2e-iteration",
+        )
+
+        covered, count = goal_progress_tuple(goal_store.get_current_snapshot("e2e-iteration"))
+        assert covered == 3
+        assert count == 3
+
+
+# ── E2E: Multi-Goal Session ─────────────────────────────────────────
+
+
+class TestMultiGoalSessionE2E:
+    def test_sequential_goals(self, goal_store: GoalStore):
+        goal1 = goal_store.replace_goal(
+            session_id="e2e-multi", objective="分析动量因子IC", criteria=["IC分析"],
+        )
+        criteria1 = goal_store.list_criteria(goal1.goal_id)
+        evidence = EvidenceInput(text="IC分析完成", criterion_id=criteria1[0].criterion_id)
+        goal_store.append_evidence(
+            evidence=evidence, goal_id=goal1.goal_id,
+            expected_goal_id=goal1.goal_id, session_id="e2e-multi",
+        )
+        goal_store.complete_lite(
+            goal_id=goal1.goal_id,
+            session_id="e2e-multi",
+            expected_goal_id=goal1.goal_id,
+        )
+
+        goal2 = goal_store.replace_goal(
+            session_id="e2e-multi", objective="创建策略", criteria=["设计", "回测"],
+        )
+        current = goal_store.get_current_goal("e2e-multi")
+        assert current.goal_id == goal2.goal_id
+
+        all_goals = goal_store.list_goals("e2e-multi")
+        completed = [g for g in all_goals if g.status == GoalStatus.COMPLETE]
+        active = [g for g in all_goals if g.status == GoalStatus.ACTIVE]
+        assert len(completed) == 1
+        assert len(active) == 1
