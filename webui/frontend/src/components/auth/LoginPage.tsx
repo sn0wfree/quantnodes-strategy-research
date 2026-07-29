@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../stores/auth'
 import { api } from '../../api/client'
 
@@ -67,12 +67,6 @@ export function LoginPage() {
             {loading ? '登录中...' : '登录'}
           </button>
         </form>
-        <p className="mt-4 text-center text-sm text-slate-500">
-          没有账号？{' '}
-          <Link to="/register" className="text-primary-400 hover:underline">
-            注册
-          </Link>
-        </p>
       </div>
     </div>
   )

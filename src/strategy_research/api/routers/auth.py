@@ -1,27 +1,18 @@
-"""Authentication API — register / login / me / refresh。"""
+"""Authentication API — login / me。
+
+Registration is disabled (backend code kept but not exposed).
+Default admin account: admin / admin (seeded on first startup).
+"""
 
 from __future__ import annotations
 
 import time
-import uuid
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 router = APIRouter()
-
-# ---------------------------------------------------------------------------
-# In-memory user store (will be replaced by SQLite users.db later)
-# ---------------------------------------------------------------------------
-_users: dict[str, dict] = {}
-
-
-class UserCreate(BaseModel):
-    username: str
-    display_name: Optional[str] = None
-    password: str
 
 
 class UserLogin(BaseModel):
@@ -33,6 +24,9 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: dict
+
+
+# ── Token helpers (placeholder — real JWT later) ─────────────
 
 
 def _hash_password(password: str) -> str:
@@ -66,36 +60,45 @@ async def get_current_user_id(token: str = "") -> str:
     return "anonymous"
 
 
+# ── User DB (lazy init with workspace path) ──────────────────
+
+_user_db = None
+
+
+def _get_user_db():
+    """Lazy-init: get the user DB instance.
+
+    On first call, initializes SQLite + seeds admin/admin if empty.
+    Uses a default path since workspace_path isn't directly available here.
+    """
+    global _user_db
+    if _user_db is None:
+        from strategy_research.api.user_db import get_user_db, seed_admin_if_empty
+        _user_db = get_user_db()
+        seed_admin_if_empty(_user_db)
+    return _user_db
+
+
+# ── Endpoints ────────────────────────────────────────────────
+
+# Registration endpoint — disabled (code kept for manual DB writes)
+# To register a user manually:
+#   python3 -c "
+#   from strategy_research.api.user_db import get_user_db, hash_password
+#   db = get_user_db()
+#   db.create_user('myuser', 'My User', hash_password('mypassword'))
+#   "
 @router.post("/register", response_model=TokenResponse)
-async def register(body: UserCreate):
-    """Register a new user."""
-    if body.username in _users:
-        raise HTTPException(status_code=409, detail="Username already exists")
-
-    user_id = str(uuid.uuid4())
-    _users[body.username] = {
-        "id": user_id,
-        "username": body.username,
-        "display_name": body.display_name or body.username,
-        "password_hash": _hash_password(body.password),
-        "created_at": time.time(),
-    }
-
-    token = _create_token(user_id)
-    return TokenResponse(
-        access_token=token,
-        user={
-            "id": user_id,
-            "username": body.username,
-            "display_name": body.display_name or body.username,
-        },
-    )
+async def register():
+    """Registration is disabled. Use manual DB insertion."""
+    raise HTTPException(status_code=403, detail="Registration is disabled")
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: UserLogin):
     """Login with username + password."""
-    user = _users.get(body.username)
+    db = _get_user_db()
+    user = db.get_user_by_username(body.username)
     if not user or user["password_hash"] != _hash_password(body.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -113,11 +116,12 @@ async def login(body: UserLogin):
 @router.get("/me")
 async def me(user_id: str = Depends(get_current_user_id)):
     """Get current user info."""
-    for user in _users.values():
-        if user["id"] == user_id:
-            return {
-                "id": user["id"],
-                "username": user["username"],
-                "display_name": user["display_name"],
-            }
+    db = _get_user_db()
+    user = db.get_user_by_id(user_id)
+    if user:
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "display_name": user["display_name"],
+        }
     raise HTTPException(status_code=404, detail="User not found")

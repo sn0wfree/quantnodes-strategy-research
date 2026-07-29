@@ -1,7 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/auth'
 import { LoginPage } from './components/auth/LoginPage'
-import { RegisterPage } from './components/auth/RegisterPage'
 import { AppShell } from './components/layout/AppShell'
 import { CatalogPage } from './catalog/CatalogPage'
 import { CatalogItem } from './catalog/CatalogItem'
@@ -16,10 +15,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      {/* Catalog — Storybook-style component index (no auth required).
-          Available in dev builds, plus production builds when
-          VITE_ENABLE_CATALOG=1 is set at build time. */}
+      {/* Catalog — Storybook-style component index (no auth required). */}
       <Route path="/catalog" element={<CatalogPage />} />
       <Route path="/catalog/:name" element={<CatalogItem />} />
       <Route

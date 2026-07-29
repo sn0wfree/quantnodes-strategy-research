@@ -12,48 +12,36 @@ def client():
 
 
 class TestAuth:
-    def test_register(self, client):
+    def test_register_disabled(self, client):
+        """Registration is disabled — returns 403."""
         res = client.post("/api/auth/register", json={
             "username": "testuser",
             "display_name": "Test User",
             "password": "pass123",
         })
-        assert res.status_code == 200
-        data = res.json()
-        assert "access_token" in data
-        assert data["user"]["username"] == "testuser"
-        assert data["user"]["display_name"] == "Test User"
+        assert res.status_code == 403
 
-    def test_register_duplicate(self, client):
-        client.post("/api/auth/register", json={
-            "username": "dup_user",
-            "password": "pass",
-        })
+    def test_register_disabled_always(self, client):
+        """Even duplicate usernames return 403 (register disabled)."""
         res = client.post("/api/auth/register", json={
             "username": "dup_user",
             "password": "pass",
         })
-        assert res.status_code == 409
+        assert res.status_code == 403
 
     def test_login_success(self, client):
-        client.post("/api/auth/register", json={
-            "username": "login_user",
-            "password": "pass123",
-        })
+        """Default admin/admin is seeded on first startup."""
         res = client.post("/api/auth/login", json={
-            "username": "login_user",
-            "password": "pass123",
+            "username": "admin",
+            "password": "admin",
         })
         assert res.status_code == 200
         assert "access_token" in res.json()
+        assert res.json()["user"]["username"] == "admin"
 
     def test_login_wrong_password(self, client):
-        client.post("/api/auth/register", json={
-            "username": "wrong_pw_user",
-            "password": "pass123",
-        })
         res = client.post("/api/auth/login", json={
-            "username": "wrong_pw_user",
+            "username": "admin",
             "password": "wrong",
         })
         assert res.status_code == 401
