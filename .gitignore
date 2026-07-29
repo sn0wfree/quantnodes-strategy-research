@@ -66,3 +66,4 @@ docs/config-audit-*.md
 webui/frontend/node_modules/
 webui/frontend/dist/
 webui/static/
+*.db
