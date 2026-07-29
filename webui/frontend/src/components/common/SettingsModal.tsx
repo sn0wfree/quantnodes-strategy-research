@@ -19,10 +19,13 @@ interface LLMConfig {
 }
 
 const PROVIDERS = [
-  { value: 'minimax', label: 'MiniMax', models: ['minimax-M3'] },
-  { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini'] },
-  { value: 'anthropic', label: 'Anthropic', models: ['claude-sonnet-4-20250514', 'claude-3-haiku-20240307'] },
-  { value: 'deepseek', label: 'DeepSeek', models: ['deepseek-chat'] },
+  { value: 'minimax',  label: 'MiniMax',              models: ['minimax-M3'] },
+  { value: 'openai',   label: 'OpenAI',               models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-nano'] },
+  { value: 'anthropic', label: 'Anthropic',           models: ['claude-sonnet-4-20250514', 'claude-3-haiku-20240307'] },
+  { value: 'deepseek', label: 'DeepSeek',             models: ['deepseek-chat', 'deepseek-reasoner'] },
+  { value: 'kimi',     label: 'Kimi (Moonshot)',      models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+  { value: 'qwen',     label: '通义千问',              models: ['qwen-plus', 'qwen-turbo', 'qwen-max'] },
+  { value: 'custom',   label: '自定义 (OpenAI 兼容)',  models: [] },
 ]
 
 export function SettingsModal() {
@@ -66,8 +69,16 @@ export function SettingsModal() {
   const handleSaveLLM = async () => {
     setLlmMsg('')
     setLlmError('')
-    if (!llmConfig.provider || !llmConfig.model) {
-      setLlmError('Provider 和 Model 不能为空')
+    if (!llmConfig.provider) {
+      setLlmError('请选择 Provider')
+      return
+    }
+    if (!llmConfig.model) {
+      setLlmError('请输入 Model')
+      return
+    }
+    if (llmConfig.provider === 'custom' && !llmConfig.base_url) {
+      setLlmError('自定义模式下 Base URL 不能为空')
       return
     }
     setLlmLoading(true)
@@ -158,16 +169,26 @@ export function SettingsModal() {
                 {/* Model */}
                 <div>
                   <label className="mb-1 block text-xs text-slate-400">Model</label>
-                  <select
-                    value={llmConfig.model}
-                    onChange={(e) => setLlmConfig({ ...llmConfig, model: e.target.value })}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
-                  >
-                    <option value="">选择 Model</option>
-                    {currentModels.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                  {currentModels.length > 0 ? (
+                    <select
+                      value={llmConfig.model}
+                      onChange={(e) => setLlmConfig({ ...llmConfig, model: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
+                    >
+                      <option value="">选择 Model</option>
+                      {currentModels.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="输入模型名称，如 qwen2.5、llama3、mistral"
+                      value={llmConfig.model}
+                      onChange={(e) => setLlmConfig({ ...llmConfig, model: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
+                    />
+                  )}
                 </div>
 
                 {/* API Key */}
@@ -193,10 +214,12 @@ export function SettingsModal() {
 
                 {/* Base URL */}
                 <div>
-                  <label className="mb-1 block text-xs text-slate-400">Base URL (可选)</label>
+                  <label className="mb-1 block text-xs text-slate-400">
+                    Base URL {llmConfig.provider === 'custom' ? '(必填)' : '(可选，留空使用默认)'}
+                  </label>
                   <input
                     type="text"
-                    placeholder="留空使用默认"
+                    placeholder={llmConfig.provider === 'custom' ? '如 http://localhost:11434/v1' : '留空使用默认'}
                     value={llmConfig.base_url}
                     onChange={(e) => setLlmConfig({ ...llmConfig, base_url: e.target.value })}
                     className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
