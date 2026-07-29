@@ -38,7 +38,8 @@ def _build_llm_config():
     """Build LLMConfig from env/settings. Same logic as TUI's __main__.py."""
     try:
         from dotenv import load_dotenv
-        load_dotenv(override=True)
+        from pathlib import Path
+        load_dotenv(Path.home() / ".quantnodes" / ".env", override=True)
     except Exception:
         pass
     try:
@@ -343,6 +344,12 @@ async def chat_events(
                 for evt in missed:
                     yield _format_sse(evt)
                     last_id = evt.id
+
+            # Flush any events that arrived before we started listening
+            existing = sse_buffer.get_events_since(session_id, last_id)
+            for evt in existing:
+                yield _format_sse(evt)
+                last_id = evt.id
 
             # Stream new events
             event_count = 0
