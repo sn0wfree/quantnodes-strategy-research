@@ -70,7 +70,7 @@ class TestWebUIServe:
         assert kwargs["reload"] is True
 
     def test_mounts_webui_router(self, mock_uvicorn, mock_app_factory):
-        """应该 include_router(webui_router)。"""
+        """webui router is now mounted inside create_app() (survives --reload)."""
         from strategy_research.cli.commands.server import cmd_webui_serve
 
         create, config, fake_app, router = mock_app_factory
@@ -82,7 +82,8 @@ class TestWebUIServe:
 
         cmd_webui_serve(args)
 
-        fake_app.include_router.assert_called_once_with(router, tags=["webui"])
+        # webui router is mounted inside create_app, so just verify it was called
+        create.assert_called_once()
 
     def test_static_dir_from_env(self, mock_uvicorn, mock_app_factory):
         """无 args.static_dir 时从 env_config 取。"""

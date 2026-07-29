@@ -33,6 +33,20 @@ def create_app(
         static_dir: Static files directory (e.g. `webui/static/`). If exists, will be served at `/`.
         cors_origins: CORS allowed origins (default: `["*"]` for dev).
     """
+    # Resolve from environment if not explicitly provided (supports uvicorn --reload factory mode)
+    if workspace_path is None:
+        env = os.environ.get("SR_WORKSPACE_PATH")
+        workspace_path = Path(env) if env else None
+    if goal_db_path is None:
+        goal_db_path = os.environ.get("SR_GOAL_DB_PATH")
+    if hypotheses_path is None:
+        hypotheses_path = os.environ.get("SR_HYPOTHESES_PATH")
+    if static_dir is None:
+        static_dir = os.environ.get("STATIC_DIR")
+    if cors_origins is None:
+        cors_str = os.environ.get("CORS_ORIGINS")
+        cors_origins = cors_str.split(",") if cors_str else None
+
     app = FastAPI(
         title="Strategy Research API",
         version=__version__,
@@ -72,6 +86,10 @@ def create_app(
     app.include_router(session.router, prefix="/api/session", tags=["session"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
+
+    # WebUI routes (mounted inside factory so they survive --reload)
+    from ..webui.routes import router as webui_router
+    app.include_router(webui_router, tags=["webui"])
 
     # Serve static files if available
     static_path = Path(static_dir) if static_dir else Path(__file__).parent.parent.parent.parent / "webui" / "static"
