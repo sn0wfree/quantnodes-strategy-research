@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useSSE } from '../../hooks/useSSE'
 import { useSessionStore } from '../../stores/session'
-import { api } from '../../api/client'
+import { useChatStore } from '../../stores/chat'
 import { IconNav } from './IconNav'
 import { TopBar } from './TopBar'
 import { MainSplit } from './MainSplit'
@@ -10,36 +10,65 @@ import { RightPanel } from './RightPanel'
 import { ToastManager } from '../common/Toast'
 import { CommandPalette } from '../common/CommandPalette'
 import { ErrorBoundary } from '../common/ErrorBoundary'
+import { SearchModal } from '../common/SearchModal'
 
 export function AppShell() {
   useKeyboardShortcuts()
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
-  const setSessions = useSessionStore((s) => s.setSessions)
-  const setCurrentSession = useSessionStore((s) => s.setCurrentSession)
-  const addSession = useSessionStore((s) => s.addSession)
+  const loadSessions = useSessionStore((s) => s.loadSessions)
 
-  // Auto-load or create session on mount
+  // Init: restore from persisted state or create fresh
   useEffect(() => {
-    if (currentSessionId) return // already have a session
-
+    let cancelled = false
     const init = async () => {
       try {
-        const res = await api.get<{ sessions: any[] }>('/chat/session')
-        if (res.sessions && res.sessions.length > 0) {
-          setSessions(res.sessions)
-          setCurrentSession(res.sessions[0].id)
+        // 1. Load all sessions metadata (await so filter below works)
+        await loadSessions()
+        if (cancelled) return
+
+        // 2. Read latest persisted state AFTER loadSessions
+        const state = useSessionStore.getState()
+        const validOpenIds = (state.openSessionIds ?? []).filter((id) =>
+          state.sessions.some((s) => s.id === id)
+        )
+
+        if (validOpenIds.length > 0) {
+          // Re-open tabs that exist
+          for (const id of validOpenIds) {
+            try {
+              await state.openSession(id)
+            } catch {
+              // 404 — session deleted server-side, skip
+            }
+            if (cancelled) return
+          }
+          // Switch to current (or first valid)
+          const target =
+            state.currentSessionId && validOpenIds.includes(state.currentSessionId)
+              ? state.currentSessionId
+              : validOpenIds[0]
+          if (target && target !== state.currentSessionId) {
+            await state.switchSession(target)
+          } else if (target) {
+            // Same session — just reload messages
+            await useChatStore.getState().loadMessages(target)
+          }
         } else {
-          // Create first session
-          const newSession = await api.post<any>('/chat/session', { title: '新会话' })
-          addSession(newSession)
-          setCurrentSession(newSession.id)
+          // No valid sessions — create one
+          await state.createNewSession('新会话')
         }
-      } catch {
-        // API not ready yet, retry after a short delay
-        setTimeout(init, 1000)
+      } catch (err) {
+        console.error('AppShell init failed:', err)
+        // Retry after a short delay
+        if (!cancelled) setTimeout(init, 1000)
       }
     }
-    init()
+    void init()
+    return () => {
+      cancelled = true
+    }
+    // Run only on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useSSE(currentSessionId)
@@ -60,6 +89,7 @@ export function AppShell() {
       </div>
       <ToastManager />
       <CommandPalette />
+      <SearchModal />
     </div>
   )
 }

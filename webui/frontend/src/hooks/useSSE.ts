@@ -4,6 +4,7 @@ import { useAgentStore } from '../stores/agents'
 import { useWorkflowStore } from '../stores/workflow'
 import { useToastStore } from '../stores/toast'
 import { useSSEStore } from '../stores/sse'
+import { useSessionStore } from '../stores/session'
 
 type SSEEventType =
   | 'text_delta' | 'tool_call' | 'tool_result' | 'thinking_delta'
@@ -11,6 +12,7 @@ type SSEEventType =
   | 'file_edit' | 'table' | 'chart' | 'image'
   | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
   | 'dag_update' | 'progress' | 'message_received' | 'error'
+  | 'session_meta_updated'
 
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
@@ -180,6 +182,34 @@ export function useSSE(sessionId: string | null) {
           useWorkflowStore.getState().setExecutionProgress(progress)
           break
         }
+        case 'session_meta_updated': {
+          // Server-side update (e.g. auto-title after first message)
+          const { session_id, title, message_count, starred, tags, archived } = data as {
+            session_id: string
+            title?: string
+            message_count?: number
+            starred?: boolean
+            tags?: string[]
+            archived?: boolean
+          }
+          if (session_id) {
+            useSessionStore.setState((state) => ({
+              sessions: state.sessions.map((sess) =>
+                sess.id === session_id
+                  ? {
+                      ...sess,
+                      ...(title !== undefined ? { title } : {}),
+                      ...(message_count !== undefined ? { message_count } : {}),
+                      ...(starred !== undefined ? { starred } : {}),
+                      ...(tags !== undefined ? { tags } : {}),
+                      ...(archived !== undefined ? { archived } : {}),
+                    }
+                  : sess
+              ),
+            }))
+          }
+          break
+        }
       }
     },
     [
@@ -230,6 +260,7 @@ export function useSSE(sessionId: string | null) {
       'file_edit', 'table', 'chart', 'image',
       'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
       'dag_update', 'progress', 'message_received', 'error',
+      'session_meta_updated',
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))
 

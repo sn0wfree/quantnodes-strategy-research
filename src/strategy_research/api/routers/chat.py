@@ -91,32 +91,117 @@ async def _run_agent_loop_background(
     Test mode: when ``STRATEGY_RESEARCH_TEST_CHAT=1``, emits a scripted
     sequence of SSE events instead of calling the real LLM. Used by
     E2E tests to avoid network calls and ensure determinism.
+
+    Persistence: user message is inserted before the loop runs, assistant
+    message (with accumulated parts) is inserted after agent_done.
     """
     import os
 
+    # ── Persist user message + auto-title ────────────────────────────────
+    from .web_session import persist_message, auto_title_session, _get_db
+    persist_message(
+        session_id=session_id,
+        role="user",
+        content=task,
+        message_id=message_id,
+    )
+    new_title = auto_title_session(session_id, task)
+    if new_title:
+        # Notify frontend of the auto-title update via SSE
+        try:
+            conn = _get_db()
+            row = conn.execute(
+                "SELECT message_count, starred, tags_json, archived "
+                "FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            meta_update = {
+                "session_id": session_id,
+                "title": new_title,
+                "message_count": row["message_count"] if row else 0,
+                "starred": bool(row["starred"]) if row else False,
+                "tags": json.loads(row["tags_json"]) if row and row["tags_json"] else [],
+                "archived": bool(row["archived"]) if row else False,
+            }
+            sse_buffer.push(
+                "session_meta_updated",
+                json.dumps(meta_update, ensure_ascii=False),
+                session_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to emit session_meta_updated: %s", exc)
+
+    # Accumulator for assistant parts (text + tool calls + thinking)
+    accumulated_parts: list[dict[str, Any]] = []
+
     if os.environ.get("STRATEGY_RESEARCH_TEST_CHAT") == "1":
-        await _run_test_script(session_id, message_id, task)
+        await _run_test_script(session_id, message_id, task, accumulated_parts)
+        # Persist assistant message after scripted run
+        assistant_content = "".join(
+            p.get("text", "") for p in accumulated_parts if p.get("type") == "text"
+        )
+        persist_message(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_content,
+            parts=accumulated_parts or None,
+            metadata={"model": "test-script"},
+        )
         return
 
     cfg = _build_llm_config()
     if cfg is None or not cfg.api_key:
-        sse_buffer.push(
-            "error",
-            json.dumps({"message_id": message_id, "error": "LLM 未配置。请设置 OPENAI_API_KEY 环境变量。"}),
-            session_id,
-        )
+        err_data = {"message_id": message_id, "error": "LLM 未配置。请设置 OPENAI_API_KEY 环境变量。"}
+        sse_buffer.push("error", json.dumps(err_data), session_id)
         sse_buffer.push(
             "agent_done",
             json.dumps({"message_id": message_id, "status": "error"}),
             session_id,
         )
+        # Persist error message
+        persist_message(
+            session_id=session_id,
+            role="assistant",
+            content=err_data["error"],
+            parts=[{"type": "error", "message": err_data["error"]}],
+        )
         return
 
-    # Build on_event callback that pushes to sse_buffer
+    # Build on_event callback that pushes to sse_buffer AND accumulates parts
     def on_event(event_type: str, data: dict):
         # Add message_id to every event for frontend correlation
         event_data = {**data, "message_id": message_id}
         sse_buffer.push(event_type, json.dumps(event_data, ensure_ascii=False), session_id)
+
+        # Accumulate for persistence
+        if event_type == "text_delta":
+            text = event_data.get("text", "")
+            if accumulated_parts and accumulated_parts[-1].get("type") == "text":
+                accumulated_parts[-1]["text"] += text
+            else:
+                accumulated_parts.append({"type": "text", "text": text})
+        elif event_type == "tool_call":
+            accumulated_parts.append({
+                "type": "tool_call",
+                "id": event_data.get("id"),
+                "name": event_data.get("name"),
+                "arguments": event_data.get("arguments"),
+            })
+        elif event_type == "tool_result":
+            # Attach result to last tool_call
+            for p in reversed(accumulated_parts):
+                if p.get("type") == "tool_call" and p.get("id") == event_data.get("id"):
+                    p["result"] = event_data.get("result")
+                    p["status"] = event_data.get("status", "done")
+                    break
+        elif event_type == "thinking_delta":
+            delta = event_data.get("delta", "")
+            if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":
+                accumulated_parts[-1]["text"] += delta
+            else:
+                accumulated_parts.append({"type": "thinking", "text": delta})
+        elif event_type == "thinking_done":
+            if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":
+                accumulated_parts[-1]["status"] = "done"
 
     try:
         from strategy_research.core.agent.loop import AgentLoop
@@ -161,6 +246,18 @@ async def _run_agent_loop_background(
             session_id,
         )
 
+        # Persist assistant message (with all accumulated parts)
+        assistant_content = result.answer or "".join(
+            p.get("text", "") for p in accumulated_parts if p.get("type") == "text"
+        )
+        persist_message(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_content,
+            parts=accumulated_parts or None,
+            metadata={"model": getattr(cfg, "model", None)} if cfg else None,
+        )
+
     except Exception as exc:
         logger.error("AgentLoop failed for session %s: %s", session_id, exc, exc_info=True)
         sse_buffer.push(
@@ -173,17 +270,32 @@ async def _run_agent_loop_background(
             json.dumps({"message_id": message_id, "status": "error"}),
             session_id,
         )
+        # Persist error as assistant message
+        persist_message(
+            session_id=session_id,
+            role="assistant",
+            content=f"[error] {exc}",
+            parts=[{"type": "error", "message": str(exc)}],
+        )
 
 
-async def _run_test_script(session_id: str, message_id: str, task: str):
+async def _run_test_script(
+    session_id: str,
+    message_id: str,
+    task: str,
+    accumulated_parts: Optional[list[dict[str, Any]]] = None,
+):
     """Emit a scripted sequence of SSE events for E2E testing.
 
     Mirrors what the real AgentLoop would emit:
-    - thinking_start → thinking_delta (×N) → (collapse)
+    - thinking_start → thinking_delta (×N) → thinking_done
     - text_delta (×N, simulating streaming response)
     - agent_done
 
     Events are spaced 30ms apart to keep tests fast but realistic.
+
+    If ``accumulated_parts`` is provided, fills it with the same text/thinking
+    parts so persistence can save the assistant message.
     """
     reply_parts = [
         f"这是对「{task}」的脚本化回复。",
@@ -194,6 +306,8 @@ async def _run_test_script(session_id: str, message_id: str, task: str):
         "\n- streamingText 累积",
         "\n- agent_done 清空 streamingMessageId",
     ]
+    if accumulated_parts is None:
+        accumulated_parts = []
     try:
         # Phase 1: thinking block (collapsed by default)
         sse_buffer.push(
@@ -202,6 +316,8 @@ async def _run_test_script(session_id: str, message_id: str, task: str):
             session_id,
         )
         thinking_chunks = ["分析用户问题", " → 检索相关策略", " → 准备回复"]
+        thinking_text = "".join(thinking_chunks)
+        accumulated_parts.append({"type": "thinking", "text": thinking_text, "status": "streaming"})
         for chunk in thinking_chunks:
             await asyncio.sleep(0.03)
             sse_buffer.push(
@@ -209,13 +325,18 @@ async def _run_test_script(session_id: str, message_id: str, task: str):
                 json.dumps({"message_id": message_id, "delta": chunk}, ensure_ascii=False),
                 session_id,
             )
+        # Mark thinking done
+        if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":
+            accumulated_parts[-1]["status"] = "done"
         sse_buffer.push(
             "thinking_done",
             json.dumps({"message_id": message_id}, ensure_ascii=False),
             session_id,
         )
 
-        # Phase 2: streaming text reply
+        # Phase 2: streaming text reply — accumulate as single text part
+        full_text = "".join(reply_parts)
+        accumulated_parts.append({"type": "text", "text": full_text})
         for part in reply_parts:
             await asyncio.sleep(0.03)
             sse_buffer.push(

@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { useLayoutStore } from '../../stores/layout'
 import { MessageList } from '../chat/MessageList'
 import { Composer } from '../chat/Composer'
+import { SessionTabs } from '../chat/SessionTabs'
 
 export function MainSplit() {
   const leftRatio = useLayoutStore((s) => s.leftRatio)
@@ -40,6 +41,7 @@ export function MainSplit() {
         className="flex flex-col overflow-hidden bg-slate-900"
         style={{ flex: rightPanelVisible ? `0 0 ${leftRatio * 100}%` : '1 1 0' }}
       >
+        <SessionTabs />
         {/* Messages */}
         <div className="flex-1 overflow-hidden">
           <MessageList />

@@ -6,6 +6,8 @@ import {
   Settings, Eye, EyeOff, RefreshCw, ArrowRight, Layers,
 } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
+import { useSessionStore } from '../../stores/session'
+import { useChatStore } from '../../stores/chat'
 
 interface Command {
   id: string
@@ -33,6 +35,10 @@ export function CommandPalette() {
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const setWorkMode = useLayoutStore((s) => s.setWorkMode)
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
+  const createNewSession = useSessionStore((s) => s.createNewSession)
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const setSearchOpen = useSessionStore((s) => s.setSearchOpen)
+  const loadMessages = useChatStore((s) => s.loadMessages)
 
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -113,8 +119,11 @@ export function CommandPalette() {
       description: '创建新会话并开始聊天',
       category: 'action',
       icon: Plus,
-      shortcut: '⌘N',
-      action: () => { setOpen(false); /* TODO: dispatch new session */ },
+      shortcut: '⌘T',
+      action: () => {
+        setOpen(false)
+        void createNewSession('新会话')
+      },
       keywords: ['new', 'session', '新建'],
     },
     {
@@ -123,8 +132,24 @@ export function CommandPalette() {
       description: '重新加载当前会话的消息',
       category: 'action',
       icon: RefreshCw,
-      action: () => { setOpen(false); /* TODO: dispatch refresh */ },
+      action: () => {
+        setOpen(false)
+        if (currentSessionId) void loadMessages(currentSessionId)
+      },
       keywords: ['refresh', 'reload'],
+    },
+    {
+      id: 'action-search-messages',
+      label: '搜索消息',
+      description: 'FTS5 全文搜索所有会话',
+      category: 'action',
+      icon: Search,
+      shortcut: '⌘K',
+      action: () => {
+        setOpen(false)
+        setSearchOpen(true)
+      },
+      keywords: ['search', 'find', '搜索', '查找'],
     },
 
     // Navigation
@@ -137,7 +162,7 @@ export function CommandPalette() {
       action: () => { setOpen(false); setSettingsOpen(true) },
       keywords: ['settings', '配置'],
     },
-  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setSettingsOpen, setOpen])
+  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setSettingsOpen, setOpen, createNewSession, currentSessionId, setSearchOpen, loadMessages])
 
   // Filter by query
   const filtered = useMemo(() => {

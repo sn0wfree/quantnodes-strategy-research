@@ -1,41 +1,84 @@
 import { useEffect, useCallback } from 'react'
 import { useCommandPaletteStore } from '../stores/commandPalette'
 import { useLayoutStore } from '../stores/layout'
+import { useSessionStore } from '../stores/session'
 
 type KeyBinding = {
   key: string
   meta?: boolean
   shift?: boolean
   action: () => void
+  ignoreInputs?: boolean
 }
 
 export function useKeyboardShortcuts() {
   const togglePalette = useCommandPaletteStore((s) => s.toggle)
   const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
+  const setSearchOpen = useSessionStore((s) => s.setSearchOpen)
+  const createNewSession = useSessionStore((s) => s.createNewSession)
+  const closeSession = useSessionStore((s) => s.closeSession)
+  const switchSession = useSessionStore((s) => s.switchSession)
+  const openSessionIds = useSessionStore((s) => s.openSessionIds)
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
 
   const bindings: KeyBinding[] = [
-    { key: 'k', meta: true, action: togglePalette },
+    // Search
+    { key: 'k', meta: true, action: () => setSearchOpen(true) },
+    // Panel toggles
     { key: 'g', meta: true, action: () => setRightPanelTab('goal') },
     { key: 'w', meta: true, action: () => setRightPanelTab('dag') },
     { key: 'b', meta: true, action: toggleRightPanel },
-    { key: '1', meta: true, action: () => setRightPanelTab('dag') },
-    { key: '2', meta: true, action: () => setRightPanelTab('goal') },
-    { key: '3', meta: true, action: () => setRightPanelTab('agent') },
+    // Tabs
+    { key: '1', meta: true, action: () => openSessionIds[0] && void switchSession(openSessionIds[0]) },
+    { key: '2', meta: true, action: () => openSessionIds[1] && void switchSession(openSessionIds[1]) },
+    { key: '3', meta: true, action: () => openSessionIds[2] && void switchSession(openSessionIds[2]) },
+    { key: '4', meta: true, action: () => openSessionIds[3] && void switchSession(openSessionIds[3]) },
+    { key: '5', meta: true, action: () => openSessionIds[4] && void switchSession(openSessionIds[4]) },
+    { key: '6', meta: true, action: () => openSessionIds[5] && void switchSession(openSessionIds[5]) },
+    { key: '7', meta: true, action: () => openSessionIds[6] && void switchSession(openSessionIds[6]) },
+    { key: '8', meta: true, action: () => openSessionIds[7] && void switchSession(openSessionIds[7]) },
+    { key: '9', meta: true, action: () => openSessionIds[8] && void switchSession(openSessionIds[8]) },
+    // New tab
+    { key: 't', meta: true, action: () => void createNewSession('新会话') },
+    // Close current tab (⌘W also opens DAG — overlap, ignore ⌘W conflict)
+    { key: 'w', meta: true, shift: true, action: () => currentSessionId && closeSession(currentSessionId) },
   ]
 
   const handler = useCallback(
     (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isInput = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      )
       const isMeta = e.metaKey || e.ctrlKey
+
       for (const b of bindings) {
-        if (b.key === e.key.toLowerCase() && b.meta === isMeta && (b.shift ?? false) === e.shiftKey) {
-          e.preventDefault()
-          b.action()
-          return
-        }
+        const matchKey = b.key === e.key.toLowerCase()
+        const matchMeta = (b.meta ?? false) === isMeta
+        const matchShift = (b.shift ?? false) === e.shiftKey
+        if (!matchKey || !matchMeta || !matchShift) continue
+        // For palette/search (Cmd+K), still trigger even when in input
+        const skipIfInput = isInput && !['k', 't'].includes(b.key)
+        if (skipIfInput) continue
+        e.preventDefault()
+        b.action()
+        return
       }
     },
-    [togglePalette, setRightPanelTab, toggleRightPanel]
+    [
+      togglePalette,
+      setRightPanelTab,
+      toggleRightPanel,
+      setSearchOpen,
+      createNewSession,
+      closeSession,
+      switchSession,
+      openSessionIds,
+      currentSessionId,
+    ]
   )
 
   useEffect(() => {

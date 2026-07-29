@@ -30,15 +30,17 @@ function PartContent({ part }: { part: MessagePart }) {
 }
 
 export function MessageBubble({ message, layout }: MessageBubbleProps) {
+  const msgAny = message as unknown as { content?: string }
+  const parts = message.parts ?? (msgAny.content ? [{ type: 'text', text: msgAny.content }] : [])
   if (layout === 'flat') {
     return (
-      <div className="px-4 py-3">
+      <div id={`msg-${message.id}`} className="px-4 py-3 transition-all">
         <div className="mb-1 flex items-center gap-2 text-xs">
           <span className="font-medium text-primary-400">You</span>
           <span className="text-slate-600">{formatTime(message.created_at)}</span>
         </div>
         <div className="text-sm text-slate-200 leading-relaxed">
-          {message.parts.map((part, i) => (
+          {parts.map((part, i) => (
             <PartContent key={i} part={part} />
           ))}
         </div>
@@ -48,9 +50,9 @@ export function MessageBubble({ message, layout }: MessageBubbleProps) {
 
   // bubble mode
   return (
-    <div className="flex justify-end px-4 py-2">
+    <div id={`msg-${message.id}`} className="flex justify-end px-4 py-2 transition-all">
       <div className="max-w-[70%] rounded-2xl rounded-br-md bg-primary-600 px-4 py-2.5 text-sm text-white">
-        {message.parts.map((part, i) => (
+        {parts.map((part, i) => (
           <PartContent key={i} part={part} />
         ))}
       </div>

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { enableMapSet } from 'immer'
+import { api } from '../api/client'
 
 // Required for immer to handle Map/Set types in chat state
 enableMapSet()
@@ -80,6 +81,8 @@ interface ChatState {
   setStreamingMessage: (id: string | null) => void
   setStreamingText: (text: string) => void
   appendStreamingText: (delta: string) => void
+  loadMessages: (sessionId: string) => Promise<void>
+  clearMessages: () => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -107,5 +110,24 @@ export const useChatStore = create<ChatState>()(
       set((state) => {
         state.streamingText += delta
       }),
+    clearMessages: () =>
+      set((state) => {
+        state.messages.clear()
+        state.streamingMessageId = null
+        state.streamingText = ''
+      }),
+    loadMessages: async (sessionId: string) => {
+      try {
+        const data = await api.get<{ messages: Message[] }>(
+          `/chat/session/${sessionId}/messages?limit=200`
+        )
+        set((state) => {
+          state.messages.clear()
+          data.messages.forEach((m) => state.messages.set(m.id, m))
+        })
+      } catch (err) {
+        console.error('loadMessages error:', err)
+      }
+    },
   }))
 )
