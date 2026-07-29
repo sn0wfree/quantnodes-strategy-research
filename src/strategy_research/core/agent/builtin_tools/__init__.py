@@ -1958,6 +1958,12 @@ def build_default_registry() -> ToolRegistry:
         register_data_tools(r)
     except Exception:
         pass
+    # Goal management tools
+    try:
+        from .goal_tools import register_goal_tools
+        register_goal_tools(r)
+    except Exception:
+        pass
     return r
 
 
@@ -1980,5 +1986,10 @@ __all__ = [
     "StrategyCompare",
     "DrawdownAnalysis",
     "BenchmarkComparison",
+    "CreateGoalTool",
+    "AddEvidenceTool",
+    "CompleteGoalTool",
+    "GetGoalStatusTool",
+    "ListGoalsTool",
     "build_default_registry",
 ]

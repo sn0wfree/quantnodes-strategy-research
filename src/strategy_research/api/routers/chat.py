@@ -412,6 +412,10 @@ async def send_async(body: ChatMessage, request: Request):
     gets its own auto-generated UUID (see chat.py history for the
     loadMessages-key-collision bug this prevents).
     """
+    # ── /goal command intercept ────────────────────────────────────────
+    if body.content.strip().startswith("/goal"):
+        return await _handle_goal_command(body)
+
     # Cancel any existing loop for this session (new message replaces old)
     if body.session_id in _loop_tasks:
         _loop_tasks[body.session_id].cancel()
@@ -436,6 +440,190 @@ async def send_async(body: ChatMessage, request: Request):
         event_id="",
         status="processing",
         attempt_id=result.get("attempt_id"),
+    )
+
+
+# ── /goal command handler ────────────────────────────────────────────
+
+
+async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
+    """Handle /goal slash commands without going through AgentLoop."""
+    from ..session.web_session import persist_message
+    from ...core.goal import GoalStore, GoalStatus, EvidenceInput, RiskTier
+    from ...core.goal.context import default_goal_criteria
+
+    session_id = body.session_id
+    content = body.content.strip()
+
+    # Parse command
+    parts = content.split(None, 2)  # /goal <subcommand> [args]
+    subcmd = parts[1].lower() if len(parts) > 1 else "status"
+    args = parts[2] if len(parts) > 2 else ""
+
+    # IDs for SSE correlation
+    user_msg_id = str(uuid.uuid4())
+    assistant_msg_id = str(uuid.uuid4())
+
+    # Persist user message
+    persist_message(
+        session_id=session_id,
+        role="user",
+        content=content,
+        message_id=user_msg_id,
+    )
+
+    # Emit message_received so frontend creates both message placeholders
+    sse_buffer.push(
+        "message_received",
+        json.dumps({
+            "message_id": user_msg_id,
+            "user_message_id": user_msg_id,
+            "assistant_message_id": assistant_msg_id,
+            "content": content,
+        }, ensure_ascii=False),
+        session_id,
+    )
+
+    # Execute goal command
+    response_text = ""
+    try:
+        store = GoalStore()
+
+        if subcmd == "start" or subcmd == "create":
+            objective = args or "Research goal"
+            goal = store.replace_goal(
+                session_id=session_id,
+                objective=objective,
+                criteria=default_goal_criteria(),
+            )
+            response_text = (
+                f"Goal created: {goal.goal_id[:12]}...\n"
+                f"Objective: {goal.objective}\n"
+                f"Status: {goal.status.value}"
+            )
+
+        elif subcmd == "status" or subcmd == "":
+            current = store.get_current_goal(session_id)
+            if current is None:
+                response_text = "No active goal. Use /goal start <objective> to create one."
+            else:
+                snapshot = store.get_current_snapshot(session_id)
+                criteria = snapshot.get("criteria", []) if snapshot else []
+                evidence_count = snapshot.get("evidence_count", 0) if snapshot else 0
+                response_text = (
+                    f"Goal: {current.goal_id[:12]}...\n"
+                    f"Objective: {current.objective}\n"
+                    f"Status: {current.status.value}\n"
+                    f"Progress: {current.progress_percent:.0f}%\n"
+                    f"Criteria: {len(criteria)} | Evidence: {evidence_count}"
+                )
+
+        elif subcmd == "evidence" or subcmd == "ev":
+            current = store.get_current_goal(session_id)
+            if current is None:
+                response_text = "No active goal. Create one first with /goal start <objective>."
+            else:
+                text = args or "No evidence text provided"
+                evidence = EvidenceInput(text=text, source_type="chat")
+                record = store.append_evidence(
+                    session_id=session_id,
+                    goal_id=current.goal_id,
+                    expected_goal_id=current.goal_id,
+                    evidence=evidence,
+                )
+                updated = store.get_current_goal(session_id)
+                response_text = (
+                    f"Evidence added: {record.evidence_id[:12]}...\n"
+                    f"Progress: {updated.progress_percent:.0f}%"
+                )
+
+        elif subcmd == "complete" or subcmd == "done":
+            current = store.get_current_goal(session_id)
+            if current is None:
+                response_text = "No active goal to complete."
+            else:
+                recap = args or None
+                updated = store.complete_lite(
+                    session_id=session_id,
+                    goal_id=current.goal_id,
+                    expected_goal_id=current.goal_id,
+                    recap=recap,
+                )
+                response_text = (
+                    f"Goal completed: {updated.goal_id[:12]}...\n"
+                    f"Status: {updated.status.value}"
+                )
+
+        elif subcmd == "cancel":
+            current = store.get_current_goal(session_id)
+            if current is None:
+                response_text = "No active goal to cancel."
+            else:
+                updated = store.update_status(
+                    session_id=session_id,
+                    goal_id=current.goal_id,
+                    expected_goal_id=current.goal_id,
+                    status=GoalStatus.CANCELLED,
+                    recap=args or None,
+                )
+                response_text = (
+                    f"Goal cancelled: {updated.goal_id[:12]}...\n"
+                    f"Status: {updated.status.value}"
+                )
+
+        elif subcmd == "help":
+            response_text = (
+                "/goal start <objective>  — create a new goal\n"
+                "/goal status             — show current goal\n"
+                "/goal evidence <text>    — add evidence\n"
+                "/goal complete [recap]   — mark complete\n"
+                "/goal cancel [recap]     — cancel goal\n"
+                "/goal help               — this message"
+            )
+
+        else:
+            response_text = f"Unknown subcommand: {subcmd}. Use /goal help for usage."
+
+    except Exception as exc:
+        logger.exception("goal command failed: %s", subcmd)
+        response_text = f"Goal command failed: {exc}"
+
+    # Emit text_delta with the response
+    sse_buffer.push(
+        "text_delta",
+        json.dumps({
+            "message_id": assistant_msg_id,
+            "text": response_text,
+        }, ensure_ascii=False),
+        session_id,
+    )
+
+    # Persist assistant message
+    persist_message(
+        session_id=session_id,
+        role="assistant",
+        content=response_text,
+        parts=[{"type": "text", "text": response_text}],
+        message_id=assistant_msg_id,
+        metadata={"model": "goal-handler"},
+    )
+
+    # Emit agent_done
+    sse_buffer.push(
+        "agent_done",
+        json.dumps({
+            "message_id": assistant_msg_id,
+            "status": "success",
+        }, ensure_ascii=False),
+        session_id,
+    )
+
+    return SendMessageResponse(
+        message_id=user_msg_id,
+        user_message_id=user_msg_id,
+        assistant_message_id=assistant_msg_id,
+        event_id="",
+        status="done",
     )
 
 
