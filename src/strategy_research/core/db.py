@@ -200,6 +200,68 @@ def init_db(workspace_path: Path) -> bool:
         return False
 
 
+def save_ohlcv_to_db(
+    workspace_path: Path,
+    data_map: dict[str, pd.DataFrame],
+    strategy_name: str = "default",
+) -> int:
+    """Save OHLCV data from online sources into DuckDB.
+
+    Reusable by config_runner, import_data tool, and CLI.
+
+    Args:
+        workspace_path: Workspace root path.
+        data_map: Dict of {code: DataFrame} with OHLCV columns.
+        strategy_name: Strategy name for data partitioning.
+
+    Returns:
+        Total rows saved.
+    """
+    init_db(workspace_path)
+    conn = get_connection(workspace_path)
+    if conn is None:
+        raise RuntimeError("failed to open DuckDB")
+
+    total_rows = 0
+    for code, df in data_map.items():
+        if df is None or df.empty:
+            continue
+
+        # Normalize column names
+        col_map = {}
+        for col in df.columns:
+            cl = col.lower()
+            if cl in ("trade_date", "tradedate", "datetime"):
+                col_map[col] = "date"
+            elif cl in ("code", "symbol", "ticker"):
+                col_map[col] = "asset_code"
+        if col_map:
+            df = df.rename(columns=col_map)
+
+        if "asset_code" not in df.columns:
+            df["asset_code"] = code
+        if "date" not in df.columns:
+            continue
+
+        for c in ("open", "high", "low", "close", "volume"):
+            if c not in df.columns:
+                df[c] = df["close"] if c != "volume" else 0.0
+
+        df["strategy_name"] = strategy_name
+        df = df[["strategy_name", "asset_code", "date", "open", "high", "low", "close", "volume"]]
+
+        conn.execute("""
+            INSERT OR REPLACE INTO price_data
+            (strategy_name, asset_code, date, open, high, low, close, volume)
+            SELECT strategy_name, asset_code, date, open, high, low, close, volume
+            FROM df
+        """)
+        total_rows += len(df)
+
+    conn.close()
+    return total_rows
+
+
 # ============================================================
 # 价格数据操作
 # ============================================================

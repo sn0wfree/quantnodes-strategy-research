@@ -102,21 +102,52 @@ def create_backtest_config(cfg: dict) -> BacktestConfig:
 # ============================================================
 
 def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
-    """从 DuckDB 加载数据."""
+    """Load price data — DuckDB first, fallback to online source + save.
+
+    Supports:
+    - source="duckdb": load from local DuckDB
+    - source="auto"|"tencent"|"akshare"|etc: fetch online, save to DuckDB, return
+    """
     strategy_name = cfg.get("strategy", {}).get("name", "default")
     data_cfg = cfg.get("data", {})
-
     source = data_cfg.get("source", "duckdb")
+    codes = data_cfg.get("codes", [])
+    start_date = data_cfg.get("start_date", "2020-01-01")
+    end_date = data_cfg.get("end_date", "2025-12-31")
 
+    # 1. DuckDB path — load from local DB
     if source == "duckdb":
-        return load_price_data(
-            workspace_path,
-            strategy_name,
-            start_date=data_cfg.get("start_date"),
-            end_date=data_cfg.get("end_date"),
-        )
-    else:
-        raise ValueError(f"不支持的数据源: {source}")
+        df = load_price_data(workspace_path, strategy_name, start_date, end_date)
+        if not df.empty:
+            return df
+        # If empty but codes specified, fall through to online fetch
+        if not codes:
+            return df
+
+    # 2. Online fetch path — get data, save to DuckDB, return
+    if codes:
+        try:
+            from .data_source.registry import resolve_loader, detect_market
+            from .db import save_ohlcv_to_db
+
+            market = detect_market(codes[0]) if codes else "a_share"
+            preferred = source if source not in ("auto", "duckdb") else None
+            loader = resolve_loader(market, preferred=preferred)
+
+            logger.info("Fetching data from %s for %d codes", loader.name, len(codes))
+            data_map = loader.fetch(codes, start_date, end_date)
+
+            # Save to DuckDB
+            n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
+            logger.info("Saved %d rows to DuckDB", n_rows)
+
+            # Reload from DuckDB
+            return load_price_data(workspace_path, strategy_name, start_date, end_date)
+        except Exception as exc:
+            logger.warning("Online fetch failed: %s", exc)
+            # Fall through to return empty
+
+    return pd.DataFrame()
 
 
 # ============================================================

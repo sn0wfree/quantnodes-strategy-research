@@ -70,10 +70,12 @@ strategy:
   name: momentum_20d
   type: rotation
 data:
-  source: auto
-  codes:
+  source: duckdb        # duckdb=本地DB | auto=自动选择在线源 | tencent/akshare=指定源
+  codes:                # 股票代码列表（在线获取时必填）
     - 000001.SZ
     - 600519.SH
+  start_date: 2020-01-01
+  end_date: 2025-12-31
 rebalance:
   freq: W
   min_history: 252
@@ -84,6 +86,12 @@ factors:
     code: ts_return(close, 20)
     weight: 1.0
 ```
+
+**data.source 说明：**
+- `duckdb`（默认）：从本地 DuckDB 加载，需要先用 `import_data` 导入数据
+- `auto`：自动选择最佳在线数据源（A股用 tencent，美股用 yfinance）
+- `tencent` / `akshare` / `eastmoney`：指定在线数据源
+- 在线获取的数据会自动保存到 DuckDB，后续运行可直接用 `duckdb`
 
 ### 因子表达式算子
 
