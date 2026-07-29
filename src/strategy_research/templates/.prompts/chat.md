@@ -88,10 +88,12 @@ factors:
 ```
 
 **data.source 说明：**
-- `duckdb`（默认）：从本地 DuckDB 加载，需要先用 `import_data` 导入数据
-- `auto`：自动选择最佳在线数据源（A股用 tencent，美股用 yfinance）
-- `tencent` / `akshare` / `eastmoney`：指定在线数据源
-- 在线获取的数据会自动保存到 DuckDB，后续运行可直接用 `duckdb`
+- `auto+duckdb`（推荐）：DuckDB 缓存 + 在线自动刷新
+  - DuckDB 有新鲜数据 → 直接用缓存
+  - DuckDB 为空或过期 → 自动在线获取 → 保存到 DuckDB → 返回
+- `duckdb`：仅从本地 DuckDB 加载（需先 `import_data`）
+- `auto`：每次在线获取（不缓存）
+- `tencent` / `akshare` / `eastmoney`：指定在线数据源（不缓存）
 
 ### 因子表达式算子
 

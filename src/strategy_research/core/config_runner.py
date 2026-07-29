@@ -101,12 +101,39 @@ def create_backtest_config(cfg: dict) -> BacktestConfig:
 # 3. 数据加载
 # ============================================================
 
-def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
-    """Load price data — DuckDB first, fallback to online source + save.
+def _is_data_fresh(workspace_path: Path, strategy_name: str, end_date: str) -> bool:
+    """Check if DuckDB data is fresh enough (ends within 7 days of end_date)."""
+    from datetime import datetime, timedelta
+    try:
+        from .db import get_connection
+        conn = get_connection(workspace_path, read_only=True)
+        if conn is None:
+            return False
+        result = conn.execute(
+            "SELECT MAX(date) FROM price_data WHERE strategy_name = ?",
+            [strategy_name],
+        ).fetchone()
+        conn.close()
+        if result and result[0]:
+            max_date = result[0]
+            if isinstance(max_date, str):
+                max_date = datetime.strptime(max_date, "%Y-%m-%d").date()
+            target = datetime.strptime(end_date, "%Y-%m-%d").date()
+            return (target - max_date).days <= 7
+    except Exception:
+        pass
+    return False
 
-    Supports:
-    - source="duckdb": load from local DuckDB
-    - source="auto"|"tencent"|"akshare"|etc: fetch online, save to DuckDB, return
+
+def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
+    """Load price data with DuckDB caching and online fallback.
+
+    Source modes:
+    - "duckdb": load from local DB only
+    - "auto"|"tencent"|"akshare"|etc: fetch online, save to DuckDB, return
+    - "auto+duckdb": DuckDB cache + online refresh (recommended)
+      1. DuckDB has fresh data → use cache
+      2. DuckDB empty or stale → fetch online → save to DuckDB → return
     """
     strategy_name = cfg.get("strategy", {}).get("name", "default")
     data_cfg = cfg.get("data", {})
@@ -115,16 +142,40 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
     start_date = data_cfg.get("start_date", "2020-01-01")
     end_date = data_cfg.get("end_date", "2025-12-31")
 
-    # 1. DuckDB path — load from local DB
+    # --- Cache mode: auto+duckdb ---
+    if source == "auto+duckdb":
+        # 1. Check if DuckDB cache is fresh
+        if codes and _is_data_fresh(workspace_path, strategy_name, end_date):
+            df = load_price_data(workspace_path, strategy_name, start_date, end_date)
+            if not df.empty:
+                logger.info("Using DuckDB cache for %s", strategy_name)
+                return df
+        # 2. Cache miss — fetch online
+        if codes:
+            try:
+                from .data_source.registry import resolve_loader, detect_market
+                from .db import save_ohlcv_to_db
+
+                market = detect_market(codes[0]) if codes else "a_share"
+                loader = resolve_loader(market)  # auto-select best source
+                logger.info("Cache miss: fetching from %s for %d codes", loader.name, len(codes))
+                data_map = loader.fetch(codes, start_date, end_date)
+                n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
+                logger.info("Saved %d rows to DuckDB cache", n_rows)
+                return load_price_data(workspace_path, strategy_name, start_date, end_date)
+            except Exception as exc:
+                logger.warning("Online fetch failed: %s", exc)
+        return pd.DataFrame()
+
+    # --- DuckDB only ---
     if source == "duckdb":
         df = load_price_data(workspace_path, strategy_name, start_date, end_date)
         if not df.empty:
             return df
-        # If empty but codes specified, fall through to online fetch
         if not codes:
             return df
 
-    # 2. Online fetch path — get data, save to DuckDB, return
+    # --- Online fetch (auto/tencent/akshare/etc) ---
     if codes:
         try:
             from .data_source.registry import resolve_loader, detect_market
@@ -137,15 +188,12 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
             logger.info("Fetching data from %s for %d codes", loader.name, len(codes))
             data_map = loader.fetch(codes, start_date, end_date)
 
-            # Save to DuckDB
             n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
             logger.info("Saved %d rows to DuckDB", n_rows)
 
-            # Reload from DuckDB
             return load_price_data(workspace_path, strategy_name, start_date, end_date)
         except Exception as exc:
             logger.warning("Online fetch failed: %s", exc)
-            # Fall through to return empty
 
     return pd.DataFrame()
 
