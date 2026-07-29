@@ -103,22 +103,18 @@ factors:
 
 ### 因子表达式算子
 
-**时序算子：**
-- `ts_return(close, N)` — N日收益率
-- `ts_mean(close, N)` — N日移动平均
-- `ts_std(close, N)` — N日标准差
-- `ts_rank(close, N)` — N日排名百分比
-- `delay(close, N)` — 滞后N期
-- `delta(close, N)` — N日变化量
+**不要猜测算子语法！** 先用 `read_file` 读取算子文档确认支持的算子：
 
-**组合算子：**
-- `ts_corr(close, volume, N)` — N日相关系数
-- `ts_max(close, N)` / `ts_min(close, N)` — N日最高/最低
-- `ts_sum(close, N)` — N日累计
+```
+read_file(workspace="{workspace}", path="templates/.skills/factor-research.md")
+```
 
-**复合表达式：**
-- `close / ts_mean(close, 20) - 1` — 价格偏离均线
-- `ts_std(ts_return(close, 1), 20)` — 20日波动率
+该文件的"算子参考"章节包含完整的算子列表（17个核心算子）：
+- **截面算子**: rank, zscore, scale
+- **时序算子**: ts_rank, ts_corr, ts_cov, ts_mean, ts_std, ts_max, ts_min, ts_argmax, ts_argmin
+- **工具算子**: decay_linear, signed_power, safe_div, vwap
+
+**完整算子列表以 `templates/.skills/factor-research.md` 为准。**
 
 ## 工作流程
 
