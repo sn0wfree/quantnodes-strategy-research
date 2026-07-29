@@ -10,12 +10,12 @@ import { useLayoutStore, type RightPanelTab } from '../../stores/layout'
 import { useAuthStore } from '../../stores/auth'
 import { useNavigate } from 'react-router-dom'
 
-const NAV_ITEMS: { icon: typeof MessageSquare; tab?: RightPanelTab; action?: 'logout' }[] = [
+const NAV_ITEMS: { icon: typeof MessageSquare; tab?: RightPanelTab; action?: 'logout' | 'settings' }[] = [
   { icon: MessageSquare },
   { icon: Workflow, tab: 'dag' },
   { icon: Target, tab: 'goal' },
   { icon: Bot, tab: 'agent' },
-  { icon: Settings },
+  { icon: Settings, action: 'settings' },
   { icon: LogOut, action: 'logout' },
 ]
 
@@ -23,6 +23,7 @@ export function IconNav() {
   const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const rightPanelTab = useLayoutStore((s) => s.rightPanelTab)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
+  const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
 
@@ -30,6 +31,10 @@ export function IconNav() {
     if (item.action === 'logout') {
       logout()
       navigate('/login')
+      return
+    }
+    if (item.action === 'settings') {
+      setSettingsOpen(true)
       return
     }
     if (item.tab) {

@@ -32,6 +32,7 @@ export function CommandPalette() {
   const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const setWorkMode = useLayoutStore((s) => s.setWorkMode)
+  const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
 
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -133,10 +134,10 @@ export function CommandPalette() {
       description: '打开设置页面',
       category: 'navigation',
       icon: Settings,
-      action: () => { setOpen(false); /* TODO: navigate to settings */ },
+      action: () => { setOpen(false); setSettingsOpen(true) },
       keywords: ['settings', '配置'],
     },
-  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setOpen])
+  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setSettingsOpen, setOpen])
 
   // Filter by query
   const filtered = useMemo(() => {

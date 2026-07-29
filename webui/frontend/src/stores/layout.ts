@@ -9,11 +9,13 @@ interface LayoutState {
   rightPanelTab: RightPanelTab
   workMode: WorkMode
   leftRatio: number
+  settingsOpen: boolean
   setNavWidth: (w: number) => void
   toggleRightPanel: () => void
   setRightPanelTab: (tab: RightPanelTab) => void
   setWorkMode: (mode: WorkMode) => void
   setLeftRatio: (r: number) => void
+  setSettingsOpen: (open: boolean) => void
 }
 
 export const useLayoutStore = create<LayoutState>()((set) => ({
@@ -22,6 +24,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   rightPanelTab: 'dag',
   workMode: 'monitor',
   leftRatio: 0.5,
+  settingsOpen: false,
   setNavWidth: (w) => set({ navWidth: w }),
   toggleRightPanel: () => set((s) => ({ rightPanelVisible: !s.rightPanelVisible })),
   setRightPanelTab: (tab) => set({ rightPanelTab: tab, rightPanelVisible: true }),
@@ -31,4 +34,5 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
       rightPanelVisible: mode === 'monitor',
     }),
   setLeftRatio: (r) => set({ leftRatio: Math.max(0.2, Math.min(0.8, r)) }),
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
 }))

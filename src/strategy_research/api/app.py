@@ -87,6 +87,10 @@ def create_app(
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
 
+    # System info (settings modal)
+    from .routers import system
+    app.include_router(system.router, prefix="/api/system", tags=["system"])
+
     # WebUI routes (mounted inside factory so they survive --reload)
     from ..webui.routes import router as webui_router
     app.include_router(webui_router, tags=["webui"])

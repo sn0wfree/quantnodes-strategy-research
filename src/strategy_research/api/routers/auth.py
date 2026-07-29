@@ -20,6 +20,11 @@ class UserLogin(BaseModel):
     password: str
 
 
+class ChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -125,3 +130,27 @@ async def me(user_id: str = Depends(get_current_user_id)):
             "display_name": user["display_name"],
         }
     raise HTTPException(status_code=404, detail="User not found")
+
+
+@router.post("/change-password")
+async def change_password(body: ChangePassword):
+    """Change password (requires old password)."""
+    db = _get_user_db()
+    old_hash = _hash_password(body.old_password)
+
+    # Find user by old password hash (works for small user base)
+    conn = db._get_conn()
+    row = conn.execute(
+        "SELECT id FROM users WHERE password_hash = ?", (old_hash,)
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="Old password incorrect")
+
+    from ..user_db import hash_password
+    conn.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (hash_password(body.new_password), row["id"]),
+    )
+    conn.commit()
+    return {"message": "Password updated"}
