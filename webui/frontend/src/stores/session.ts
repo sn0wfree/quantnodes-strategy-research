@@ -33,6 +33,7 @@ interface SessionState {
   searchResults: SearchHit[]
   searchOpen: boolean
   searchQuery: string
+  isSearching: boolean
 
   // Existing
   setSessions: (sessions: Session[]) => void
@@ -62,6 +63,7 @@ export const useSessionStore = create<SessionState>()(
       searchResults: [],
       searchOpen: false,
       searchQuery: '',
+      isSearching: false,
 
       setSessions: (sessions) => set({ sessions }),
       setCurrentSession: (id) => set({ currentSessionId: id }),
@@ -212,9 +214,10 @@ export const useSessionStore = create<SessionState>()(
       runSearch: async (query: string) => {
         set({ searchQuery: query })
         if (!query.trim()) {
-          set({ searchResults: [] })
+          set({ searchResults: [], isSearching: false })
           return
         }
+        set({ isSearching: true })
         try {
           const res = await api.post<{ hits: SearchHit[] }>('/chat/session/search', {
             query,
@@ -224,6 +227,8 @@ export const useSessionStore = create<SessionState>()(
         } catch (err) {
           console.error('runSearch failed:', err)
           set({ searchResults: [] })
+        } finally {
+          set({ isSearching: false })
         }
       },
 

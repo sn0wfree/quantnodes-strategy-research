@@ -140,11 +140,19 @@ class ContextBuilder:
         self._system_prompt_cache = prompt
         return prompt
 
-    def build_initial_messages(self, task: str) -> list[dict[str, Any]]:
-        """Build initial message list: system + user (with recalled memories).
+    def build_initial_messages(
+        self,
+        task: str,
+        history: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build initial message list: system + history + user (with recalled memories).
 
         Args:
             task: The user's task description.
+            history: Optional list of prior conversation turns in OpenAI
+                ``{"role": ..., "content": ...}`` format. Inserted between
+                the system prompt and the current user message so the LLM
+                has full conversation context.
 
         Returns:
             List of message dicts ready for OpenAI Chat Completions.
@@ -152,6 +160,8 @@ class ContextBuilder:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.build_system_prompt()},
         ]
+        if history:
+            messages.extend(history)
         full_task = task
         if self._user_message_prefix:
             full_task = self._user_message_prefix + "\n\n" + task

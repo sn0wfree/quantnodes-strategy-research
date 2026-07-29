@@ -253,9 +253,11 @@ class ChatSession:
                 system_prompt = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
             except Exception:
                 system_prompt = ""
-
-        # Snapshot ctx.history so we can restore on failure / extract answer
-        history_snapshot = list(self.ctx.history)
+ 
+        # Pass prior conversation turns as history context.
+        # ctx.history ends with the current user message (appended by
+        # process_turn); exclude it so the loop treats `task` as current.
+        history = list(self.ctx.history[:-1]) if len(self.ctx.history) > 1 else None
 
         loop = AgentLoop(
             config=cfg or self.llm_client.config,
@@ -271,7 +273,7 @@ class ChatSession:
 
         # Inject user message into loop's internal state via _build_messages
         # mirror - we just call loop.arun(task) and let it build messages.
-        result = await loop.arun(task)
+        result = await loop.arun(task, history=history)
 
         # Append assistant answer to ctx.history (preserve interactive ctx)
         if result.answer:

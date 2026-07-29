@@ -223,7 +223,8 @@ export function SessionTabs() {
                 />
               ) : (
                 <>
-                  <span className="max-w-[140px] truncate">{sess.title}</span>
+                  <span className="max-w-[100px] truncate" title={sess.id}>{sess.title}</span>
+                  <span className="text-[10px] text-slate-500 ml-1 font-mono">{sess.id.slice(0, 12)}</span>
                   {sess.message_count > 0 && (
                     <span className="rounded-full bg-slate-700/60 px-1.5 py-px text-[9px] text-slate-400">
                       {sess.message_count}

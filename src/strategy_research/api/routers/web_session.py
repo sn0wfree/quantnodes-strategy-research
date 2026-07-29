@@ -96,10 +96,68 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "ON messages(session_id, created_at)"
     )
 
+    # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS attempts (
+            attempt_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            parent_attempt_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            prompt TEXT,
+            run_dir TEXT,
+            summary TEXT,
+            react_trace_json TEXT,
+            metrics_json TEXT,
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            error TEXT,
+            message_id TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_attempts_session "
+        "ON attempts(session_id, created_at)"
+    )
+
     # FTS5 virtual table (graceful fallback if FTS5 not compiled in).
     # Use trigram tokenizer for substring matching across Chinese/English boundaries
     # (unicode61 default doesn't split Latin/Chinese tokens).
+    #
+    # Auto-heal: if messages_fts already exists with the wrong tokenizer
+    # (e.g. unicode61 from an older schema version), drop it and recreate
+    # with trigram so search behaves consistently. Otherwise SQLite happily
+    # skips the CREATE VIRTUAL TABLE IF NOT EXISTS and the wrong tokenizer
+    # sticks forever.
+    needs_fts_rebuild = False
     try:
+        existing_fts = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+        ).fetchone()
+        if existing_fts and existing_fts[0]:
+            sql_text = existing_fts[0].lower()
+            if "tokenize='trigram'" not in sql_text and 'tokenize="trigram"' not in sql_text:
+                needs_fts_rebuild = True
+                logger.warning(
+                    "messages_fts exists with wrong tokenizer; "
+                    "auto-rebuilding with trigram tokenizer..."
+                )
+
+        if needs_fts_rebuild:
+            # Drop the triggers first so we can rebuild cleanly
+            for trig in ("messages_ai", "messages_ad", "messages_au"):
+                try:
+                    conn.execute(f"DROP TRIGGER IF EXISTS {trig}")
+                except sqlite3.OperationalError as exc:
+                    logger.warning("drop trigger %s: %s", trig, exc)
+            try:
+                conn.execute("DROP TABLE IF EXISTS messages_fts")
+            except sqlite3.OperationalError as exc:
+                logger.error(
+                    "drop messages_fts failed (%s); skipping FTS rebuild", exc
+                )
+                needs_fts_rebuild = False
+
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
                 content,
@@ -130,6 +188,20 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
                 VALUES (new.rowid, new.content, new.role);
             END
         """)
+
+        # If we rebuilt the FTS table, repopulate it from messages
+        if needs_fts_rebuild:
+            try:
+                conn.execute(
+                    "INSERT INTO messages_fts(rowid, content, role) "
+                    "SELECT rowid, content, role FROM messages"
+                )
+                logger.info(
+                    "messages_fts rebuilt with trigram tokenizer; "
+                    "backfilled from messages table"
+                )
+            except sqlite3.OperationalError as exc:
+                logger.error("FTS backfill failed (continuing): %s", exc)
     except sqlite3.OperationalError as exc:
         logger.warning("FTS5 unavailable, search endpoint will be disabled: %s", exc)
 

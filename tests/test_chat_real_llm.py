@@ -293,7 +293,8 @@ class TestRealLLMChat:
         })
         assert r.status_code == 200
         data = r.json()
-        assert "message_id" in data
+        assert "user_message_id" in data
+        assert "assistant_message_id" in data
         assert data["status"] == "processing"
 
     def test_session_persists(self, auth_info):

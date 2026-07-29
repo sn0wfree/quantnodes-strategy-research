@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, X, User, Bot, FileText } from 'lucide-react'
+import { Search, X, User, Bot, FileText, Loader2 } from 'lucide-react'
 import { useSessionStore, type SearchHit } from '../../stores/session'
 
 export function SearchModal() {
@@ -7,6 +7,7 @@ export function SearchModal() {
   const setOpen = useSessionStore((s) => s.setSearchOpen)
   const query = useSessionStore((s) => s.searchQuery)
   const results = useSessionStore((s) => s.searchResults)
+  const isSearching = useSessionStore((s) => s.isSearching)
   const runSearch = useSessionStore((s) => s.runSearch)
   const clearSearch = useSessionStore((s) => s.clearSearch)
   const openSession = useSessionStore((s) => s.openSession)
@@ -98,6 +99,12 @@ export function SearchModal() {
             placeholder="搜索消息内容（支持中文/英文）..."
             className="flex-1 bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
           />
+          {query.trim() && isSearching && (
+            <Loader2
+              data-testid="search-spinner"
+              className="h-3.5 w-3.5 animate-spin text-slate-400"
+            />
+          )}
           <button
             onClick={() => setOpen(false)}
             className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200"
@@ -111,6 +118,14 @@ export function SearchModal() {
           {!query.trim() ? (
             <div className="py-12 text-center text-sm text-slate-500">
               输入关键词搜索所有会话的消息
+            </div>
+          ) : isSearching && results.length === 0 ? (
+            <div
+              data-testid="search-loading"
+              className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>搜索中…</span>
             </div>
           ) : results.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-500">

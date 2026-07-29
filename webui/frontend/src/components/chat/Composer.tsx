@@ -12,8 +12,6 @@ export function Composer() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const addMessage = useChatStore((s) => s.addMessage)
-  const setStreamingMessage = useChatStore((s) => s.setStreamingMessage)
-  const setStreamingText = useChatStore((s) => s.setStreamingText)
 
   // Auto-resize textarea
   useEffect(() => {
@@ -34,10 +32,18 @@ export function Composer() {
     setImages([])
     setSending(true)
 
-    // Optimistic: add user message to store immediately
-    const userMsgId = uuid('msg')
+    // Optimistic: add user message to store immediately with a local temp id.
+    // The SSE message_received event (or /send_async response) will rename it
+    // to the backend's user_message_id once it arrives.
+    //
+    // Do NOT create an assistant placeholder here — it will be created by
+    // useSSE on the message_received event, using the backend's
+    // assistant_message_id. This avoids the old role-swap bug where the
+    // local placeholder was renamed to a wrong id and SSE text_delta events
+    // ended up writing into the user message.
+    const tempUserId = uuid('msg')
     addMessage({
-      id: userMsgId,
+      id: tempUserId,
       session_id: currentSessionId,
       role: 'user',
       parts: [
@@ -47,59 +53,47 @@ export function Composer() {
       created_at: Date.now() / 1000,
     })
 
-    // Create placeholder for assistant response
-    // Note: localAssistantId is a temporary local ID. Once we get the
-    // backend's message_id from /chat/send_async, we rename the local
-    // message so SSE text_delta events (which carry the backend's
-    // message_id) can find and update it.
-    const localAssistantId = uuid('msg')
-    addMessage({
-      id: localAssistantId,
-      session_id: currentSessionId,
-      role: 'assistant',
-      parts: [{ type: 'text', text: '' }],
-      created_at: Date.now() / 1000,
-    })
-    setStreamingMessage(localAssistantId)
-    setStreamingText('')
-
     try {
       // Send to backend
-      const res = await api.post<{ message_id: string; event_id: string; status: string }>(
-        '/chat/send_async',
-        {
-          session_id: currentSessionId,
-          content,
-          images: messageImages.length > 0 ? messageImages : undefined,
-        }
-      )
+      const res = await api.post<{
+        message_id: string
+        user_message_id?: string
+        assistant_message_id?: string
+        attempt_id: string
+        status: string
+      }>('/chat/send_async', {
+        session_id: currentSessionId,
+        content,
+        images: messageImages.length > 0 ? messageImages : undefined,
+      })
 
-      // Rename local message → backend's message_id so SSE events
-      // (keyed by backend's id) can update the same message.
-      if (res.message_id && res.message_id !== localAssistantId) {
+      // Rename optimistic user message → backend's user_message_id.
+      // SSE text_delta / assistant_message events carry assistant_message_id
+      // (different from user_message_id), so we keep those events for the
+      // useSSE hook to dispatch via the new message_received handler.
+      const userMsgId = res.user_message_id || res.message_id
+      if (userMsgId && userMsgId !== tempUserId) {
         useChatStore.setState((state) => {
-          const local = state.messages.get(localAssistantId)
+          const local = state.messages.get(tempUserId)
           if (local) {
-            state.messages.delete(localAssistantId)
-            state.messages.set(res.message_id, { ...local, id: res.message_id })
+            state.messages.delete(tempUserId)
+            state.messages.set(userMsgId, { ...local, id: userMsgId })
           }
         })
-        setStreamingMessage(res.message_id)
       }
 
-      // SSE will handle the rest via useSSE hook
-      // When agent_done arrives, streamingMessageId will be cleared
+      // SSE will create the assistant placeholder via the message_received
+      // handler in useSSE — see comments at the top.
     } catch (err: any) {
       console.error('Send failed:', err)
-      // Remove the optimistic assistant message on error
+      // Remove the optimistic user message on error
       useChatStore.setState((state) => {
-        state.messages.delete(localAssistantId)
+        state.messages.delete(tempUserId)
       })
-      setStreamingMessage(null)
     } finally {
       setSending(false)
     }
-  }, [text, images, currentSessionId, addMessage, setStreamingMessage, setStreamingText])
+  }, [text, images, currentSessionId, addMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

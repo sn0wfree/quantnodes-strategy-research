@@ -15,15 +15,37 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..sse_buffer import sse_buffer
+from ..session.bridge import attach_eventbus_to_sse
+from ..session.events import EventBus
+from ..session.service import SessionService
+from ..session.store import SessionStore
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ── Shared SessionService (singleton) ─────────────────────────────────────
+# Borrowed from vibe_trading: one service for the whole process, with an
+# EventBus that mirrors events to the legacy SSEEventBuffer for the existing
+# FastAPI SSE endpoint.
+
+_event_bus = EventBus()
+attach_eventbus_to_sse(_event_bus)
+
+
+def _get_session_service() -> SessionService:
+    """Return the singleton SessionService bound to the active DB."""
+    from .web_session import _get_db_path
+
+    db_path = _get_db_path()
+    store = SessionStore(db_path=db_path)
+    return SessionService(store=store, event_bus=_event_bus)
+
+
 # Per-session LLM loop tasks (so we can cancel on new message)
 _loop_tasks: dict[str, asyncio.Task] = {}
 
-# Per-session conversation history
+# Per-session conversation history (legacy in-memory cache; replaced by DB)
 _session_histories: dict[str, list[dict[str, Any]]] = {}
 
 
@@ -74,6 +96,8 @@ class ChatMessage(BaseModel):
 
 class SendMessageResponse(BaseModel):
     message_id: str
+    user_message_id: str
+    assistant_message_id: str
     event_id: str
     status: str = "queued"
 
@@ -103,7 +127,6 @@ async def _run_agent_loop_background(
         session_id=session_id,
         role="user",
         content=task,
-        message_id=message_id,
     )
     new_title = auto_title_session(session_id, task)
     if new_title:
@@ -145,6 +168,7 @@ async def _run_agent_loop_background(
             content=assistant_content,
             parts=accumulated_parts or None,
             metadata={"model": "test-script"},
+            message_id=message_id,
         )
         return
 
@@ -163,6 +187,7 @@ async def _run_agent_loop_background(
             role="assistant",
             content=err_data["error"],
             parts=[{"type": "error", "message": err_data["error"]}],
+            message_id=message_id,
         )
         return
 
@@ -256,6 +281,7 @@ async def _run_agent_loop_background(
             content=assistant_content,
             parts=accumulated_parts or None,
             metadata={"model": getattr(cfg, "model", None)} if cfg else None,
+            message_id=message_id,
         )
 
     except Exception as exc:
@@ -276,6 +302,7 @@ async def _run_agent_loop_background(
             role="assistant",
             content=f"[error] {exc}",
             parts=[{"type": "error", "message": str(exc)}],
+            message_id=message_id,
         )
 
 
@@ -371,33 +398,34 @@ async def send_async(body: ChatMessage, request: Request):
 
     Returns message_id + event_id for confirmation.
     Frontend should listen to /events SSE stream for real-time response.
-    """
-    message_id = str(uuid.uuid4())
 
+    Uses the unified SessionService (also shared with TUI). The Attempt's
+    message_id is what SSE events carry for correlation; the user message
+    gets its own auto-generated UUID (see chat.py history for the
+    loadMessages-key-collision bug this prevents).
+    """
     # Cancel any existing loop for this session (new message replaces old)
     if body.session_id in _loop_tasks:
         _loop_tasks[body.session_id].cancel()
 
-    # Push confirmation event
-    event_id = sse_buffer.push(
-        "message_received",
-        json.dumps({
-            "message_id": message_id,
-            "session_id": body.session_id,
-            "status": "processing",
-        }),
-        body.session_id,
+    # Delegate to SessionService — it handles DB persistence, AgentLoop
+    # execution, history context, and event emission.
+    service = _get_session_service()
+    result = await service.send_message(
+        session_id=body.session_id,
+        content=body.content,
     )
 
-    # Spawn AgentLoop in background
-    task = asyncio.create_task(
-        _run_agent_loop_background(body.session_id, message_id, body.content)
-    )
-    _loop_tasks[body.session_id] = task
+    # Track the spawned attempt task so we can cancel future messages
+    for task in service._active_loops.values():
+        _loop_tasks[body.session_id] = task
+        break
 
     return SendMessageResponse(
-        message_id=message_id,
-        event_id=event_id,
+        message_id=result["user_message_id"],
+        user_message_id=result["user_message_id"],
+        assistant_message_id=result["assistant_message_id"],
+        event_id="",
         status="processing",
     )
 

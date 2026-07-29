@@ -48,6 +48,7 @@ describe('SearchModal', () => {
       searchResults: [],
       searchOpen: false,
       searchQuery: '',
+      isSearching: false,
     })
     vi.clearAllMocks()
   })
@@ -171,5 +172,42 @@ describe('SearchModal', () => {
     await waitFor(() => {
       expect(openSpy).toHaveBeenCalledWith('s1')
     })
+  })
+
+  it('shows spinner while search is in-flight', async () => {
+    useSessionStore.setState({ searchOpen: true })
+    // Pending promise → keeps isSearching=true while we assert
+    let resolvePost: (v: { hits: SearchHit[] }) => void = () => {}
+    mockedApi.post.mockReturnValue(
+      new Promise((res) => {
+        resolvePost = res
+      })
+    )
+
+    render(<SearchModal />)
+
+    const input = screen.getByPlaceholderText(/搜索消息内容/)
+    fireEvent.change(input, { target: { value: 'alpha' } })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search-spinner')).toBeInTheDocument()
+      expect(screen.getByTestId('search-loading')).toBeInTheDocument()
+    })
+
+    // Resolve and confirm spinner disappears
+    resolvePost({ hits: sampleHits })
+    await waitFor(() => {
+      expect(screen.queryByTestId('search-spinner')).toBeNull()
+      expect(screen.queryByTestId('search-loading')).toBeNull()
+      expect(screen.getByText('alpha 探索')).toBeInTheDocument()
+    })
+  })
+
+  it('hides spinner for empty query', () => {
+    useSessionStore.setState({ searchOpen: true, searchQuery: '' })
+    render(<SearchModal />)
+
+    expect(screen.queryByTestId('search-spinner')).toBeNull()
+    expect(screen.queryByTestId('search-loading')).toBeNull()
   })
 })

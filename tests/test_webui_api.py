@@ -1,6 +1,7 @@
 """Tests for auth router and SSE event buffer."""
 
 import pytest
+import sqlite3
 import time
 import uuid
 from fastapi.testclient import TestClient
@@ -404,3 +405,146 @@ class TestFTSSearch:
         res = client.post("/api/chat/session/search", json={"query": "uniquearchword123"})
         assert res.status_code == 200
         assert res.json()["hits"] == []
+
+
+class TestFTSMigration:
+    """Auto-heal logic in _ensure_schema: detect wrong tokenizer and rebuild."""
+
+    def _create_db_with_unicode61(self, tmp_db_path) -> None:
+        """Build a fresh DB with messages_fts using the unicode61 tokenizer
+        (the legacy/wrong one)."""
+        conn = sqlite3.connect(str(tmp_db_path))
+        conn.execute("""
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                parts_json TEXT,
+                created_at REAL NOT NULL,
+                metadata_json TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE messages_fts USING fts5(
+                content,
+                role,
+                content='messages',
+                content_rowid='rowid',
+                tokenize='unicode61'
+            )
+        """)
+        conn.execute("""
+            INSERT INTO messages(id, session_id, role, content, created_at)
+            VALUES ('m1', 's1', 'user', '帮我设计一个 alpha 量化策略', 1700000000.0)
+        """)
+        conn.commit()
+        conn.close()
+
+    def _get_fts_sql(self, tmp_db_path) -> str:
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+        ).fetchone()
+        conn.close()
+        return (row[0] or "") if row else ""
+
+    def _query_fts(self, tmp_db_path, query: str) -> int:
+        conn = sqlite3.connect(str(tmp_db_path))
+        try:
+            rows = conn.execute(
+                "SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?",
+                (query,),
+            ).fetchall()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def test_rebuilds_when_wrong_tokenizer(self, tmp_path, monkeypatch):
+        """DB with unicode61 tokenizer → _ensure_schema rebuilds as trigram."""
+        from strategy_research.api.routers import web_session
+
+        db_path = tmp_path / "test_malformed.db"
+        self._create_db_with_unicode61(db_path)
+
+        # Redirect the module to use this DB
+        monkeypatch.setattr(web_session, "_get_db_path", lambda: db_path)
+
+        # Run ensure_schema — should detect unicode61 and rebuild
+        conn = sqlite3.connect(str(db_path))
+        try:
+            web_session._ensure_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # After rebuild, tokenizer must be trigram
+        sql = self._get_fts_sql(db_path)
+        assert "tokenize='trigram'" in sql.lower(), \
+            f"Expected trigram tokenizer after rebuild, got: {sql}"
+        # The legacy unicode61 tokenize option must be gone
+        assert "tokenize='unicode61'" not in sql.lower(), \
+            f"unicode61 tokenizer still present after rebuild: {sql}"
+
+    def test_backfills_messages_after_rebuild(self, tmp_path, monkeypatch):
+        """Existing messages must be searchable after the rebuild."""
+        from strategy_research.api.routers import web_session
+
+        db_path = tmp_path / "test_backfill.db"
+        self._create_db_with_unicode61(db_path)
+
+        monkeypatch.setattr(web_session, "_get_db_path", lambda: db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            web_session._ensure_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Trigram tokenizer breaks "帮我设计一个 alpha 量化策略" into
+        # overlapping 3-byte windows. "alpha" is the most reliable query
+        # because its trigrams ("alp", "lph", "pha") stay contiguous in
+        # UTF-8, unlike pure Chinese where each char spans 3 bytes and
+        # trigrams bleed across character boundaries.
+        n = self._query_fts(db_path, "alpha")
+        assert n >= 1, "Expected 'alpha' to match the backfilled message"
+
+    def test_idempotent_when_already_trigram(self, tmp_path, monkeypatch, caplog):
+        """Calling _ensure_schema twice must not rebuild a healthy FTS table."""
+        from strategy_research.api.routers import web_session
+
+        db_path = tmp_path / "test_idempotent.db"
+        self._create_db_with_unicode61(db_path)
+
+        monkeypatch.setattr(web_session, "_get_db_path", lambda: db_path)
+
+        # First call → rebuild
+        conn = sqlite3.connect(str(db_path))
+        try:
+            web_session._ensure_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Capture sql right after first run
+        first_sql = self._get_fts_sql(db_path)
+
+        # Second call → must not drop/recreate
+        caplog.clear()
+        import logging
+        caplog.set_level(logging.WARNING, logger="strategy_research.api.routers.web_session")
+        conn = sqlite3.connect(str(db_path))
+        try:
+            web_session._ensure_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # SQL unchanged
+        second_sql = self._get_fts_sql(db_path)
+        assert first_sql == second_sql, \
+            "FTS schema changed between idempotent calls"
+        # No "auto-rebuilding" warning logged on the second call
+        assert "auto-rebuilding" not in caplog.text, \
+            f"Unexpected rebuild warning on idempotent call: {caplog.text}"

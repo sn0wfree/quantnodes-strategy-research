@@ -400,6 +400,7 @@ class AgentLoop:
 
     def _prepare_run(
         self, task: str, context: str | None,
+        history: list[dict[str, Any]] | None = None,
     ) -> tuple[str, LoopResult, list[dict[str, Any]], float]:
         """Assemble full_task, init result/messages, emit loop_start trace."""
         self._maybe_auto_create_hypothesis(task)
@@ -410,7 +411,7 @@ class AgentLoop:
         if goal_context:
             full_task = goal_context + "\n\n" + full_task
         result = LoopResult()
-        messages = self.context_builder.build_initial_messages(full_task)
+        messages = self.context_builder.build_initial_messages(full_task, history=history)
         result.messages = list(messages)
         t0 = time.perf_counter()
         self._trace({
@@ -596,17 +597,27 @@ class AgentLoop:
 
     # ── Public API ───────────────────────────────
 
-    def run(self, task: str, *, context: str | None = None) -> LoopResult:
+    def run(
+        self,
+        task: str,
+        *,
+        context: str | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> LoopResult:
         """Run the loop until done.
 
         Args:
             task: User task description.
             context: Optional context to prepend to task (e.g., current_state).
+            history: Optional prior conversation turns in OpenAI
+                ``{"role": ..., "content": ...}`` format. Inserted between
+                the system prompt and the current user message so the LLM
+                has full conversation context.
 
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
-        full_task, result, messages, t0 = self._prepare_run(task, context)
+        full_task, result, messages, t0 = self._prepare_run(task, context, history)
         hook_ctx = self._build_hook_context(0, messages)
         self._fire_hooks("before_run", hook_ctx)
 
@@ -675,17 +686,31 @@ class AgentLoop:
 
     # ── Async public API ──────────────────────────
 
-    async def arun(self, task: str, *, context: str | None = None) -> LoopResult:
+    async def arun(
+        self,
+        task: str,
+        *,
+        context: str | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> LoopResult:
         """Async version of run() - all I/O points use await.
 
         Uses ``client.astream()`` / ``client.achat()`` for LLM calls,
         ``asyncio.to_thread()`` for tool execution, and ``asyncio.gather()``
         for parallel readonly tools.
 
+        Args:
+            task: The user's task description.
+            context: Optional goal-context prefix prepended to the task.
+            history: Optional prior conversation turns in OpenAI
+                ``{"role": ..., "content": ...}`` format. Inserted between
+                the system prompt and the current user message so the LLM
+                has full conversation context.
+
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
-        full_task, result, messages, t0 = self._prepare_run(task, context)
+        full_task, result, messages, t0 = self._prepare_run(task, context, history)
         hook_ctx = self._build_hook_context(0, messages)
         await self._afire_hooks("before_run", hook_ctx)
 
