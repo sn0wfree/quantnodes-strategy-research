@@ -132,6 +132,69 @@ class ReadFileTool(BaseTool):
         })
 
 
+# ── 1b. ListFilesTool ─────────────────────────────────────────────
+
+
+class ListFilesTool(BaseTool):
+    """List files and directories in the workspace."""
+
+    name = "list_files"
+    description = (
+        "List files and subdirectories in a workspace directory. "
+        "Use this to explore the workspace structure before reading files. "
+        "Path is relative to workspace root."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "path": {"type": "string", "description": "Directory path relative to workspace (default: root).", "default": "."},
+            "pattern": {"type": "string", "description": "Glob pattern filter (e.g. '*.py', 'strategies/*')."},
+        },
+        "required": ["workspace"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        rel_path = kwargs.get("path", ".") or "."
+        pattern = kwargs.get("pattern")
+
+        target = (workspace / rel_path).resolve()
+        if not target.exists():
+            return _err(f"path not found: {rel_path}")
+        if not target.is_dir():
+            return _err(f"not a directory: {rel_path}")
+
+        try:
+            entries = []
+            if pattern:
+                for p in sorted(target.glob(pattern)):
+                    entries.append({
+                        "name": p.name,
+                        "type": "dir" if p.is_dir() else "file",
+                        "size": p.stat().st_size if p.is_file() else None,
+                    })
+            else:
+                for p in sorted(target.iterdir()):
+                    entries.append({
+                        "name": p.name,
+                        "type": "dir" if p.is_dir() else "file",
+                        "size": p.stat().st_size if p.is_file() else None,
+                    })
+            return _ok({
+                "path": str(target),
+                "entries": entries,
+                "count": len(entries),
+            })
+        except Exception as exc:
+            return _err(f"list failed: {exc}")
+
+
 # ── 2. WriteFileTool ────────────────────────────────────────────────
 
 
@@ -1863,6 +1926,7 @@ def build_default_registry() -> ToolRegistry:
     """
     r = ToolRegistry()
     r.register(ReadFileTool())
+    r.register(ListFilesTool())
     r.register(WriteFileTool())
     r.register(RunBacktestTool())
     r.register(ComputeFactorTool())

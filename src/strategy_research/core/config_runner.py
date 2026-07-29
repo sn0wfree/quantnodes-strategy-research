@@ -4,10 +4,13 @@
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from .db import load_price_data
 from .utils.backtest_config import (

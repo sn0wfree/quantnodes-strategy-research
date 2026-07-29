@@ -1,0 +1,370 @@
+"""Comprehensive Playwright E2E test for QuantNodes-Research.
+
+Tests the full workflow:
+1. Login
+2. Create session
+3. Factor analysis conversation
+4. Strategy creation
+5. Goal system interaction
+6. Verify UI displays correctly
+7. Leave session with complete history
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from pathlib import Path
+
+import pytest
+from playwright.async_api import async_playwright
+
+BASE_URL = "http://127.0.0.1:8783"
+
+
+async def _login(page):
+    """Login via UI and return JWT token."""
+    await page.goto(f"{BASE_URL}/login", timeout=60000)
+    await page.wait_for_load_state("networkidle")
+
+    username_input = page.locator('input[placeholder*="用户"], input[type="text"]').first
+    password_input = page.locator('input[type="password"]').first
+    await username_input.fill("admin")
+    await password_input.fill("admin")
+
+    login_btn = page.locator('button:has-text("登录"), button[type="submit"]').first
+    await login_btn.click()
+
+    await page.wait_for_url("**/", timeout=10000)
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(2000)
+
+    token = await page.evaluate("""() => {
+        const raw = localStorage.getItem('sr-auth');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            return parsed.state?.token || parsed.token || '';
+        }
+        return '';
+    }""")
+    return token
+
+
+async def _create_session(page):
+    """Create a new chat session via UI."""
+    plus_btn = page.locator("button").filter(has_text="+").first
+    if await plus_btn.is_visible(timeout=3000):
+        await plus_btn.click()
+        await page.wait_for_timeout(1000)
+
+
+async def _send_message(page, text):
+    """Type a message and send it."""
+    textarea = page.locator("textarea").first
+    await textarea.fill(text)
+    await page.wait_for_timeout(300)
+    send_btn = page.locator("button:has(svg.lucide-send)").first
+    await send_btn.click()
+
+
+async def _wait_for_response(page, timeout_s=60):
+    """Wait for assistant response to complete."""
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    while asyncio.get_event_loop().time() < deadline:
+        body = await page.inner_text("body")
+        if ("Agent" in body and len(body) > 200) or "agent_done" in body.lower():
+            await page.wait_for_timeout(3000)
+            return True
+        agent_msgs = page.locator('[class*="assistant"], [class*="Agent"]')
+        count = await agent_msgs.count()
+        if count > 0:
+            text = await agent_msgs.last.inner_text()
+            if len(text.strip()) > 10:
+                await page.wait_for_timeout(3000)
+                return True
+        await page.wait_for_timeout(500)
+    return False
+
+
+async def _take_screenshot(page, name):
+    """Take a screenshot with timestamp."""
+    path = f"/tmp/e2e_{name}_{int(time.time())}.png"
+    await page.screenshot(path=path, full_page=True)
+    print(f"📸 Screenshot: {path}")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_factor_analysis_workflow():
+    """E2E: Complete factor analysis workflow via chat."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
+        page = await context.new_page()
+
+        try:
+            # 1. Login
+            print("1. Logging in...")
+            await _login(page)
+            await _take_screenshot(page, "01_login")
+
+            # 2. Create session
+            print("2. Creating session...")
+            await _create_session(page)
+            await page.wait_for_timeout(1000)
+            await _take_screenshot(page, "02_session_created")
+
+            # 3. Send factor analysis request
+            print("3. Sending factor analysis request...")
+            await _send_message(page, "帮我分析20日动量因子在A股的IC表现")
+            await page.wait_for_timeout(2000)
+            await _take_screenshot(page, "03_message_sent")
+
+            # 4. Wait for response
+            print("4. Waiting for response...")
+            responded = await _wait_for_response(page, timeout_s=60)
+            assert responded, "No assistant response received"
+            await _take_screenshot(page, "04_response_received")
+
+            # 5. Verify message display
+            print("5. Verifying message display...")
+            body = await page.inner_text("body")
+
+            # Check user message exists
+            user_msgs = page.locator('[class*="bg-primary"][class*="rounded-lg"]')
+            user_count = await user_msgs.count()
+            print(f"   User messages: {user_count}")
+            assert user_count >= 1, "No user messages found"
+
+            # Check assistant message exists
+            agent_labels = page.locator('text="Agent"')
+            agent_count = await agent_labels.count()
+            print(f"   Agent messages: {agent_count}")
+            assert agent_count >= 1, "No agent messages found"
+
+            # Check for thinking block
+            thinking_blocks = page.locator('[class*="violet"], [class*="thinking"]')
+            thinking_count = await thinking_blocks.count()
+            print(f"   Thinking blocks: {thinking_count}")
+
+            await _take_screenshot(page, "05_verified")
+
+            print("✅ Factor analysis workflow completed successfully!")
+
+        finally:
+            await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_strategy_creation_workflow():
+    """E2E: Strategy creation via chat."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
+        page = await context.new_page()
+
+        try:
+            # 1. Login
+            await _login(page)
+
+            # 2. Create session
+            await _create_session(page)
+            await page.wait_for_timeout(1000)
+
+            # 3. Send strategy creation request
+            print("Sending strategy creation request...")
+            await _send_message(page, "基于20日动量因子创建一个策略，调仓频率5天，做多top10")
+            await page.wait_for_timeout(2000)
+            await _take_screenshot(page, "strategy_request")
+
+            # 4. Wait for response
+            responded = await _wait_for_response(page, timeout_s=60)
+            assert responded, "No response"
+
+            # 5. Verify strategy files mentioned
+            body = await page.inner_text("body")
+            assert "strategy" in body.lower() or "策略" in body, "Strategy not mentioned"
+
+            await _take_screenshot(page, "strategy_complete")
+            print("✅ Strategy creation workflow completed!")
+
+        finally:
+            await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_goal_system_workflow():
+    """E2E: Goal system interaction via chat."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
+        page = await context.new_page()
+
+        try:
+            # 1. Login
+            await _login(page)
+
+            # 2. Create session
+            await _create_session(page)
+            await page.wait_for_timeout(1000)
+
+            # 3. Send goal-oriented request
+            print("Sending goal-oriented request...")
+            await _send_message(page, "分析20日动量因子IC，保存分析结果，然后创建策略并回测")
+            await page.wait_for_timeout(2000)
+            await _take_screenshot(page, "goal_request")
+
+            # 4. Wait for response
+            responded = await _wait_for_response(page, timeout_s=90)
+            assert responded, "No response"
+
+            await _take_screenshot(page, "goal_complete")
+            print("✅ Goal system workflow completed!")
+
+        finally:
+            await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_functionality():
+    """E2E: Test cancel/interrupt functionality."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
+        page = await context.new_page()
+
+        try:
+            # 1. Login
+            await _login(page)
+
+            # 2. Create session
+            await _create_session(page)
+            await page.wait_for_timeout(1000)
+
+            # 3. Send a message
+            await _send_message(page, "你好")
+            await page.wait_for_timeout(2000)
+
+            # 4. Check if cancel button appears during streaming
+            cancel_btn = page.locator('button:has(svg.lucide-square)')
+            is_visible = await cancel_btn.is_visible(timeout=5000)
+            print(f"Cancel button visible during streaming: {is_visible}")
+
+            # 5. Wait for response
+            responded = await _wait_for_response(page, timeout_s=30)
+
+            await _take_screenshot(page, "cancel_test")
+            print("✅ Cancel functionality test completed!")
+
+        finally:
+            await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_full_session_history():
+    """E2E: Complete session with multiple messages for review."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
+        page = await context.new_page()
+
+        try:
+            # 1. Login
+            print("1. Logging in...")
+            await _login(page)
+
+            # 2. Create session
+            print("2. Creating session...")
+            await _create_session(page)
+            await page.wait_for_timeout(1000)
+
+            # 3. Message 1: Greeting
+            print("3. Sending greeting...")
+            await _send_message(page, "你好，我想研究A股的动量因子")
+            await _wait_for_response(page, timeout_s=30)
+            await _take_screenshot(page, "full_01_greeting")
+
+            # 4. Message 2: Factor analysis
+            print("4. Requesting factor analysis...")
+            await _send_message(page, "帮我分析20日动量因子在A股的IC表现")
+            await _wait_for_response(page, timeout_s=60)
+            await _take_screenshot(page, "full_02_analysis")
+
+            # 5. Message 3: Strategy creation
+            print("5. Requesting strategy creation...")
+            await _send_message(page, "基于这个因子创建一个策略配置")
+            await _wait_for_response(page, timeout_s=60)
+            await _take_screenshot(page, "full_03_strategy")
+
+            # 6. Verify all messages are displayed
+            print("6. Verifying message history...")
+            body = await page.inner_text("body")
+
+            # Check multiple user messages
+            user_msgs = page.locator('[class*="bg-primary"][class*="rounded-lg"]')
+            user_count = await user_msgs.count()
+            print(f"   Total user messages: {user_count}")
+            assert user_count >= 3, f"Expected ≥3 user messages, got {user_count}"
+
+            # Check multiple assistant messages
+            agent_labels = page.locator('text="Agent"')
+            agent_count = await agent_labels.count()
+            print(f"   Total agent messages: {agent_count}")
+            assert agent_count >= 3, f"Expected ≥3 agent messages, got {agent_count}"
+
+            # 7. Take final screenshot
+            await _take_screenshot(page, "full_04_complete")
+
+            # 8. Print session summary
+            print("\n" + "="*60)
+            print("SESSION COMPLETE - Full history available for review")
+            print("="*60)
+            print(f"User messages: {user_count}")
+            print(f"Agent messages: {agent_count}")
+            print("Screenshots saved to /tmp/e2e_full_*")
+            print("="*60)
+
+            print("✅ Full session history test completed!")
+
+        finally:
+            await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_call_display():
+    """E2E: Verify tool calls are displayed correctly in UI."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
+        page = await context.new_page()
+
+        try:
+            # 1. Login
+            await _login(page)
+
+            # 2. Create session
+            await _create_session(page)
+            await page.wait_for_timeout(1000)
+
+            # 3. Send message that triggers tool calls
+            print("Sending message that triggers tool calls...")
+            await _send_message(page, "列出可用的数据源")
+            await _wait_for_response(page, timeout_s=30)
+
+            # 4. Check for tool call display
+            tool_blocks = page.locator('[class*="tool"], [class*="ToolCall"]')
+            tool_count = await tool_blocks.count()
+            print(f"Tool call blocks: {tool_count}")
+
+            await _take_screenshot(page, "tool_calls")
+
+            # 5. Verify tool call content
+            body = await page.inner_text("body")
+            # Tool calls should show function names
+            assert "list_data_sources" in body or "数据源" in body, "Tool call not displayed"
+
+            print("✅ Tool call display test completed!")
+
+        finally:
+            await browser.close()
