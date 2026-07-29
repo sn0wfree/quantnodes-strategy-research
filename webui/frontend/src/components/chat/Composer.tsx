@@ -3,6 +3,7 @@ import { Send, Image as ImageIcon, X } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
 import { useSessionStore } from '../../stores/session'
 import { api } from '../../api/client'
+import { uuid } from '../../utils/uuid'
 
 export function Composer() {
   const [text, setText] = useState('')
@@ -34,7 +35,7 @@ export function Composer() {
     setSending(true)
 
     // Optimistic: add user message to store immediately
-    const userMsgId = crypto.randomUUID()
+    const userMsgId = uuid('msg')
     addMessage({
       id: userMsgId,
       session_id: currentSessionId,
@@ -51,7 +52,7 @@ export function Composer() {
     // backend's message_id from /chat/send_async, we rename the local
     // message so SSE text_delta events (which carry the backend's
     // message_id) can find and update it.
-    const localAssistantId = crypto.randomUUID()
+    const localAssistantId = uuid('msg')
     addMessage({
       id: localAssistantId,
       session_id: currentSessionId,
