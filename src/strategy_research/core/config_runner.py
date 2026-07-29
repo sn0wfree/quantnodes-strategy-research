@@ -156,7 +156,8 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
         # 2. Cache miss — fetch online
         if codes:
             try:
-                from .data_source.registry import resolve_loader, detect_market
+                from .data_source.registry import resolve_loader
+                from .data_source.utils import detect_market
                 from .db import save_ohlcv_to_db
 
                 market = detect_market(codes[0]) if codes else "a_share"
@@ -181,12 +182,12 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
     # --- Online fetch (auto/tencent/akshare/etc) ---
     if codes:
         try:
-            from .data_source.registry import resolve_loader, detect_market
+            from .data_source.registry import resolve_loader
+            from .data_source.utils import detect_market
             from .db import save_ohlcv_to_db
 
             market = detect_market(codes[0]) if codes else "a_share"
-            preferred = source if source not in ("auto", "duckdb") else None
-            loader = resolve_loader(market, preferred=preferred)
+            loader = resolve_loader(market)
 
             logger.info("Fetching data from %s for %d codes", loader.name, len(codes))
             data_map = loader.fetch(codes, start_date, end_date)
