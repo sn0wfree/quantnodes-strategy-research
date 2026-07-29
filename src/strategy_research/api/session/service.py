@@ -86,7 +86,7 @@ class SessionService:
         content: str,
         *,
         model: str | None = None,
-        max_iterations: int = 5,
+        max_iterations: int = 9999999999,
         system_prompt: Optional[str] = None,
         allow_shell_tools: bool = False,
     ) -> dict[str, str]:

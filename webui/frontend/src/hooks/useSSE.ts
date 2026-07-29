@@ -64,7 +64,11 @@ export function useSSE(sessionId: string | null) {
             updateMessage(messageId, (msg) => {
               const textPart = msg.parts.find((p) => p.type === 'text')
               if (textPart && textPart.type === 'text') {
-                textPart.text = content
+                // Only replace if new content is longer (prevents max_iter
+                // from wiping accumulated text_delta content)
+                if (content.length > textPart.text.length || textPart.text === '') {
+                  textPart.text = content
+                }
               }
             })
           }

@@ -556,9 +556,10 @@ class AgentLoop:
     def _handle_max_iter(self, result: LoopResult) -> None:
         """Populate max_iter result fields, emit trace + event."""
         result.finished_reason = "max_iter"
-        result.answer = (
-            f"Reached max_iterations={self.max_iterations} without a final answer."
-        )
+        if not result.answer:
+            result.answer = (
+                f"Reached max_iterations={self.max_iterations} without a final answer."
+            )
         self._trace({"type": "loop_end", "reason": "max_iter", "iteration": result.iterations})
         self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
