@@ -130,13 +130,12 @@ export function useSSE(sessionId: string | null) {
           // so subsequent text_delta / thinking_* / assistant_message events
           // (which carry that same id) can update it correctly.
           //
-          // Also handles the case where Composer.tsx's optimistic user
-          // message is still using its temp id (SSE may arrive before the
-          // /send_async response does).
+          // Uses incremental addMessage (immer set) instead of Map
+          // replacement to avoid race conditions with Composer's optimistic
+          // addMessage.
           const {
             user_message_id: userMsgId,
             assistant_message_id: assistantMsgId,
-            attempt_id: attemptId,
             content: userContent,
           } = data as {
             user_message_id?: string
@@ -145,49 +144,27 @@ export function useSSE(sessionId: string | null) {
             content?: string
             message_id?: string
           }
-          // Resolve user message id (may be in user_message_id or legacy message_id)
           const userId = userMsgId || (data.message_id as string | undefined)
 
-          // Find and rename any temp user message (Composer optimistic add).
-          // We use getState (not setState callback) so we sidestep immer's
-          // type inference for nested Maps.
-          if (userId) {
-            const state = useChatStore.getState()
-            const next = new Map(state.messages)
-            let renamed = false
-            next.forEach((m, id) => {
-              if (
-                m.role === 'user' &&
-                userContent !== undefined &&
-                m.parts[0]?.type === 'text' &&
-                (m.parts[0] as { text: string }).text === userContent &&
-                id !== userId
-              ) {
-                next.delete(id)
-                if (!next.has(userId)) {
-                  next.set(userId, { ...m, id: userId })
-                }
-                renamed = true
-              }
-            })
-            // If user message doesn't exist yet (SSE arrived before
-            // Composer optimistic), create it now.
-            if (!next.has(userId) && userContent !== undefined) {
-              next.set(userId, {
+          // Ensure user message exists with correct backend ID.
+          // If Composer's optimistic temp message already renamed it,
+          // this is a no-op (same id). If SSE arrived before rename,
+          // this creates it.
+          if (userId && userContent !== undefined) {
+            const existing = useChatStore.getState().messages.get(userId)
+            if (!existing) {
+              addMessage({
                 id: userId,
                 session_id: sessionId!,
                 role: 'user',
                 parts: [{ type: 'text', text: userContent }],
                 created_at: Date.now() / 1000,
               })
-              renamed = true
-            }
-            if (renamed) {
-              useChatStore.setState({ messages: next })
             }
           }
 
-          // Create assistant placeholder with backend's assistant_message_id
+          // Create assistant placeholder with backend's assistant_message_id.
+          // addMessage uses immer's set (incremental), not Map replacement.
           if (assistantMsgId) {
             addMessage({
               id: assistantMsgId,
@@ -198,8 +175,6 @@ export function useSSE(sessionId: string | null) {
             })
             setStreamingMessage(assistantMsgId)
             setStreamingText('')
-            // Touch attemptId to avoid unused-var warning (referenced for logging later)
-            void attemptId
           }
           break
         }
