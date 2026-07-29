@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -376,7 +377,7 @@ class SessionService:
         agent = AgentLoop(
             config=cfg,
             registry=registry,
-            workspace=Path.cwd(),
+            workspace=Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd()))),
             on_event=event_callback,
             stream_mode=True,
             max_iterations=max_iterations,

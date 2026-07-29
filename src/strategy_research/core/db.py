@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS price_data (
     PRIMARY KEY (strategy_name, asset_code, date)
 );
 
+-- ohlcv 视图: 映射 price_data 到因子分析工具期望的格式
+CREATE OR REPLACE VIEW ohlcv AS
+SELECT
+    date,
+    asset_code AS asset,
+    open,
+    high,
+    low,
+    close,
+    volume
+FROM price_data;
+
 -- 因子数据 (计算结果缓存)
 CREATE TABLE IF NOT EXISTS factor_data (
     strategy_name VARCHAR NOT NULL,

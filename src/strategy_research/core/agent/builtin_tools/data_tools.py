@@ -254,7 +254,113 @@ class SearchSymbolTool(BaseTool):
             return _err(f"search failed: {exc}")
 
 
+# ── 4. ImportDataTool ────────────────────────────────────────
+
+
+class ImportDataTool(BaseTool):
+    """Import OHLCV data into the workspace DuckDB for factor analysis."""
+
+    name = "import_data"
+    description = (
+        "Import OHLCV market data into the workspace DuckDB. "
+        "After calling get_market_data, use this tool to persist the data "
+        "so factor analysis tools can access it via the ohlcv table."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "data": {
+                "type": "object",
+                "description": "OHLCV data dict from get_market_data (code -> list of records).",
+            },
+            "strategy_name": {
+                "type": "string",
+                "description": "Strategy name for data partitioning (default: 'default').",
+                "default": "default",
+            },
+        },
+        "required": ["workspace", "data"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        workspace = kwargs.get("workspace")
+        if not workspace:
+            return _err("missing required kwarg 'workspace'")
+
+        data = kwargs.get("data")
+        if not data or not isinstance(data, dict):
+            return _err("missing or invalid 'data' (expect dict from get_market_data)")
+
+        strategy_name = kwargs.get("strategy_name", "default")
+
+        try:
+            from pathlib import Path
+            import pandas as pd
+            from ...db import get_connection, init_db
+
+            ws = Path(workspace)
+            init_db(ws)
+
+            conn = get_connection(ws)
+            if conn is None:
+                return _err("failed to open DuckDB")
+
+            total_rows = 0
+            for code, records in data.items():
+                if not records:
+                    continue
+                df = pd.DataFrame(records)
+                if df.empty:
+                    continue
+
+                # Normalize column names
+                col_map = {}
+                for col in df.columns:
+                    cl = col.lower()
+                    if cl in ("trade_date", "tradedate", "datetime"):
+                        col_map[col] = "date"
+                    elif cl in ("code", "symbol", "ticker"):
+                        col_map[col] = "asset_code"
+                if col_map:
+                    df = df.rename(columns=col_map)
+
+                # Ensure required columns
+                if "asset_code" not in df.columns:
+                    df["asset_code"] = code
+                if "date" not in df.columns:
+                    return _err(f"no date column in data for {code}")
+
+                # Fill missing OHLCV columns
+                for c in ("open", "high", "low", "close", "volume"):
+                    if c not in df.columns:
+                        df[c] = df["close"] if c != "volume" else 0.0
+
+                df["strategy_name"] = strategy_name
+                df = df[["strategy_name", "asset_code", "date", "open", "high", "low", "close", "volume"]]
+
+                conn.execute("""
+                    INSERT OR REPLACE INTO price_data
+                    (strategy_name, asset_code, date, open, high, low, close, volume)
+                    SELECT strategy_name, asset_code, date, open, high, low, close, volume
+                    FROM df
+                """)
+                total_rows += len(df)
+
+            conn.close()
+            return _ok({
+                "imported": total_rows,
+                "n_codes": len(data),
+                "strategy_name": strategy_name,
+                "message": f"Imported {total_rows} rows from {len(data)} codes into ohlcv table",
+            })
+
+        except Exception as exc:
+            return _err(f"import failed: {exc}")
+
+
 def register_data_tools(registry: ToolRegistry) -> None:
     """Register all data tools into a ToolRegistry."""
-    for tool_cls in (GetMarketDataTool, ListDataSourcesTool, SearchSymbolTool):
+    for tool_cls in (GetMarketDataTool, ListDataSourcesTool, SearchSymbolTool, ImportDataTool):
         registry.register(tool_cls())
