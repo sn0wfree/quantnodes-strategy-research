@@ -10,7 +10,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { Bot, Workflow, Target, MessageSquare, Layers, Inbox } from 'lucide-react'
+import { Bot, Workflow, MessageSquare, Layers, Inbox } from 'lucide-react'
 
 import { Badge } from '../components/common/Badge'
 import { Spinner } from '../components/common/Spinner'
@@ -34,7 +34,6 @@ import { ImageBlock } from '../components/chat/ImageBlock'
 import { AgentItem } from '../components/agent/AgentItem'
 import type { Agent } from '../stores/agents'
 
-import { DAGNode, type DAGNodeData } from '../components/workflow/DAGNode'
 import { DAGProgressBar } from '../components/workflow/DAGProgressBar'
 import { DAGToolbar } from '../components/workflow/DAGToolbar'
 
@@ -90,7 +89,6 @@ const makeAgent = (
   name: string,
   status: Agent['status'],
   description: string,
-  iteration = 0
 ): Agent => ({
   id,
   session_id: 'demo',
@@ -395,7 +393,7 @@ export const stories: Story[] = [
         <TableBlock
           table={{
             type: 'table',
-            title: 'Top 10 Alpha Factors',
+            caption: 'Top 10 Alpha Factors',
             headers: ['Symbol', 'IC', 'Sharpe', 'Max DD'],
             rows: [
               ['AAPL', '0.082', '1.42', '0.18'],
@@ -418,7 +416,7 @@ export const stories: Story[] = [
         <ChartBlock
           chart={{
             type: 'chart',
-            chartType: 'bar',
+            chart_type: 'bar',
             title: 'Monthly Returns',
             data: [
               { label: 'Jan', value: 0.05 },
@@ -443,7 +441,7 @@ export const stories: Story[] = [
         <ChartBlock
           chart={{
             type: 'chart',
-            chartType: 'line',
+            chart_type: 'line',
             title: 'Cumulative Returns',
             data: [
               { label: 'W1', value: 0.0 },
@@ -512,7 +510,7 @@ export const stories: Story[] = [
     icon: Bot,
     render: () => (
       <div className="w-96 bg-slate-900 p-4">
-        <AgentItem agent={makeAgent('a-2', 'Alpha Researcher', 'running', 'Computes alpha factors and evaluates IC', 3)} />
+        <AgentItem agent={makeAgent('a-2', 'Alpha Researcher', 'running', 'Computes alpha factors and evaluates IC')} />
       </div>
     ),
   },
@@ -524,7 +522,7 @@ export const stories: Story[] = [
     icon: Bot,
     render: () => (
       <div className="w-96 bg-slate-900 p-4">
-        <AgentItem agent={makeAgent('a-3', 'Backtest Engine', 'completed', 'Runs vectorized backtest over historical data', 5)} />
+        <AgentItem agent={makeAgent('a-3', 'Backtest Engine', 'completed', 'Runs vectorized backtest over historical data')} />
       </div>
     ),
   },

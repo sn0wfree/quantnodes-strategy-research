@@ -50,7 +50,7 @@ describe('APIClient', () => {
     it('attaches Bearer token when present', async () => {
       useAuthStore.setState({
         token: 'jwt-123',
-        user: { id: 'u1', username: 'u', display_name: 'U', created_at: 0 },
+        user: { id: 'u1', username: 'u', display_name: 'U' },
       })
 
       mockFetch.mockResolvedValueOnce({
@@ -140,7 +140,7 @@ describe('APIClient', () => {
       const logoutSpy = vi.fn()
       useAuthStore.setState({
         token: 'jwt',
-        user: { id: 'u1', username: 'u', display_name: 'U', created_at: 0 },
+        user: { id: 'u1', username: 'u', display_name: 'U' },
         logout: logoutSpy,
       } as any)
 
@@ -199,16 +199,16 @@ describe('APIClient', () => {
     it('passes token as query param when set', () => {
       useAuthStore.setState({
         token: 'jwt-abc',
-        user: { id: 'u1', username: 'u', display_name: 'U', created_at: 0 },
+        user: { id: 'u1', username: 'u', display_name: 'U' },
       } as any)
 
-      const es = api.sse('/chat/events') as MockEventSource
+      const es = api.sse('/chat/events') as unknown as MockEventSource
 
       expect(es.url).toBe('/api/chat/events?token=jwt-abc')
     })
 
     it('passes Last-Event-ID when provided', () => {
-      const es = api.sse('/chat/events', 'evt-42') as MockEventSource
+      const es = api.sse('/chat/events', 'evt-42') as unknown as MockEventSource
 
       expect(es.url).toContain('Last-Event-ID=evt-42')
     })
@@ -216,17 +216,17 @@ describe('APIClient', () => {
     it('combines token + Last-Event-ID', () => {
       useAuthStore.setState({
         token: 'jwt',
-        user: { id: 'u1', username: 'u', display_name: 'U', created_at: 0 },
+        user: { id: 'u1', username: 'u', display_name: 'U' },
       } as any)
 
-      const es = api.sse('/chat/events', 'evt-1') as MockEventSource
+      const es = api.sse('/chat/events', 'evt-1') as unknown as MockEventSource
 
       expect(es.url).toContain('token=jwt')
       expect(es.url).toContain('Last-Event-ID=evt-1')
     })
 
     it('no params when no token and no lastEventId', () => {
-      const es = api.sse('/chat/events') as MockEventSource
+      const es = api.sse('/chat/events') as unknown as MockEventSource
 
       expect(es.url).toBe('/api/chat/events')
     })

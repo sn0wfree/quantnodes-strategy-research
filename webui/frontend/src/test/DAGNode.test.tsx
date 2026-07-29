@@ -24,6 +24,9 @@ function renderWithReactFlow(nodeData: DAGNodeData, selected = false) {
         zIndex={0}
         data={nodeData as any}
         selected={selected}
+        isConnectable={false}
+        positionAbsoluteX={0}
+        positionAbsoluteY={0}
       />
     </ReactFlowProvider>
   )
