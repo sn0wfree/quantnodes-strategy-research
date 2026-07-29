@@ -100,6 +100,7 @@ class SendMessageResponse(BaseModel):
     assistant_message_id: str
     event_id: str
     status: str = "queued"
+    attempt_id: Optional[str] = None
 
 
 async def _run_agent_loop_background(
@@ -427,7 +428,36 @@ async def send_async(body: ChatMessage, request: Request):
         assistant_message_id=result["assistant_message_id"],
         event_id="",
         status="processing",
+        attempt_id=result.get("attempt_id"),
     )
+
+
+class CancelRequest(BaseModel):
+    session_id: str
+    attempt_id: Optional[str] = None
+
+
+@router.post("/cancel")
+async def cancel_attempt(body: CancelRequest):
+    """Cancel an in-flight agent attempt for a session.
+
+    If attempt_id is provided, cancels that specific attempt.
+    Otherwise, cancels any active attempt for the session.
+    """
+    # Cancel via loop task tracking (works without attempt_id)
+    task = _loop_tasks.pop(body.session_id, None)
+    if task is not None:
+        task.cancel()
+        return {"status": "cancelled", "session_id": body.session_id}
+
+    # Fallback: try SessionService.cancel with attempt_id
+    if body.attempt_id:
+        service = _get_session_service()
+        ok = service.cancel(body.attempt_id)
+        if ok:
+            return {"status": "cancelled", "attempt_id": body.attempt_id}
+
+    return {"status": "no_active_attempt", "session_id": body.session_id}
 
 
 @router.post("/send")

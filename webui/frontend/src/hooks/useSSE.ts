@@ -204,9 +204,34 @@ export function useSSE(sessionId: string | null) {
           }
           break
         }
+        case 'thinking_done': {
+          // Thinking phase finished, first text token arrived
+          if (messageId) {
+            updateMessage(messageId, (msg) => {
+              const last = msg.parts[msg.parts.length - 1]
+              if (last && last.type === 'thinking') {
+                last.collapsed = true
+              }
+            })
+          }
+          break
+        }
+        case 'thinking_end': {
+          // Streaming phase completely finished
+          if (messageId) {
+            updateMessage(messageId, (msg) => {
+              const last = msg.parts[msg.parts.length - 1]
+              if (last && last.type === 'thinking') {
+                last.collapsed = true
+              }
+            })
+          }
+          break
+        }
         case 'agent_done': {
           // AgentLoop finished — clear streaming state
           setStreamingMessage(null)
+          useChatStore.getState().setActiveAttempt(null)
           break
         }
         case 'error': {
@@ -215,6 +240,7 @@ export function useSSE(sessionId: string | null) {
             addToast('error', error)
           }
           setStreamingMessage(null)
+          useChatStore.getState().setActiveAttempt(null)
           break
         }
         case 'agent_status': {

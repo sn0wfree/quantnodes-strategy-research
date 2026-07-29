@@ -122,7 +122,7 @@ export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) 
           return <tr className="hover:bg-slate-800/30 transition-colors">{children}</tr>
         },
         p({ children }) {
-          return <p className="my-2 leading-7 text-slate-200">{children}</p>
+          return <p className="my-3 leading-7 text-slate-200">{children}</p>
         },
         ul({ children }) {
           return <ul className="my-2 list-disc pl-6 space-y-1.5 text-slate-200 marker:text-slate-500">{children}</ul>

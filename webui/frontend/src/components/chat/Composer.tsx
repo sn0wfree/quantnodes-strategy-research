@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Image as ImageIcon, X } from 'lucide-react'
+import { Send, Image as ImageIcon, X, Square } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
 import { useSessionStore } from '../../stores/session'
 import { api } from '../../api/client'
@@ -12,6 +12,11 @@ export function Composer() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const addMessage = useChatStore((s) => s.addMessage)
+  const streamingMessageId = useChatStore((s) => s.streamingMessageId)
+  const setActiveAttempt = useChatStore((s) => s.setActiveAttempt)
+  const cancelAttempt = useChatStore((s) => s.cancelAttempt)
+
+  const isStreaming = streamingMessageId !== null
 
   // Auto-resize textarea
   useEffect(() => {
@@ -33,14 +38,6 @@ export function Composer() {
     setSending(true)
 
     // Optimistic: add user message to store immediately with a local temp id.
-    // The SSE message_received event (or /send_async response) will rename it
-    // to the backend's user_message_id once it arrives.
-    //
-    // Do NOT create an assistant placeholder here — it will be created by
-    // useSSE on the message_received event, using the backend's
-    // assistant_message_id. This avoids the old role-swap bug where the
-    // local placeholder was renamed to a wrong id and SSE text_delta events
-    // ended up writing into the user message.
     const tempUserId = uuid('msg')
     addMessage({
       id: tempUserId,
@@ -54,12 +51,11 @@ export function Composer() {
     })
 
     try {
-      // Send to backend
       const res = await api.post<{
         message_id: string
         user_message_id?: string
         assistant_message_id?: string
-        attempt_id: string
+        attempt_id?: string
         status: string
       }>('/chat/send_async', {
         session_id: currentSessionId,
@@ -67,10 +63,12 @@ export function Composer() {
         images: messageImages.length > 0 ? messageImages : undefined,
       })
 
-      // Rename optimistic user message → backend's user_message_id.
-      // SSE text_delta / assistant_message events carry assistant_message_id
-      // (different from user_message_id), so we keep those events for the
-      // useSSE hook to dispatch via the new message_received handler.
+      // Store attempt_id for cancel support
+      if (res.attempt_id) {
+        setActiveAttempt(res.attempt_id)
+      }
+
+      // Rename optimistic user message → backend's user_message_id
       const userMsgId = res.user_message_id || res.message_id
       if (userMsgId && userMsgId !== tempUserId) {
         useChatStore.setState((state) => {
@@ -81,24 +79,28 @@ export function Composer() {
           }
         })
       }
-
-      // SSE will create the assistant placeholder via the message_received
-      // handler in useSSE — see comments at the top.
     } catch (err: any) {
       console.error('Send failed:', err)
-      // Remove the optimistic user message on error
       useChatStore.setState((state) => {
         state.messages.delete(tempUserId)
       })
     } finally {
       setSending(false)
     }
-  }, [text, images, currentSessionId, addMessage])
+  }, [text, images, currentSessionId, addMessage, setActiveAttempt])
+
+  const handleCancel = useCallback(() => {
+    cancelAttempt()
+  }, [cancelAttempt])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      if (isStreaming) {
+        handleCancel()
+      } else {
+        handleSend()
+      }
     }
   }
 
@@ -163,7 +165,13 @@ export function Composer() {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={currentSessionId ? '输入消息... (Shift+Enter 换行)' : '选择或创建会话'}
+          placeholder={
+            isStreaming
+              ? '正在生成中... (Enter 停止)'
+              : currentSessionId
+                ? '输入消息... (Shift+Enter 换行)'
+                : '选择或创建会话'
+          }
           disabled={!currentSessionId}
           rows={1}
           className="flex-1 resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none disabled:opacity-50"
@@ -171,18 +179,29 @@ export function Composer() {
         <div className="flex items-center gap-1">
           <button
             onClick={handleFileSelect}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200 transition-colors"
+            disabled={isStreaming}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200 transition-colors disabled:opacity-30"
             title="上传图片"
           >
             <ImageIcon className="h-4 w-4" />
           </button>
-          <button
-            onClick={handleSend}
-            disabled={sending || (!text.trim() && images.length === 0) || !currentSessionId}
-            className="rounded-lg bg-primary-600 p-1.5 text-white hover:bg-primary-700 disabled:opacity-30 disabled:hover:bg-primary-600 transition-colors"
-          >
-            <Send className="h-4 w-4" />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={handleCancel}
+              className="rounded-lg bg-red-600 p-1.5 text-white hover:bg-red-700 transition-colors"
+              title="停止生成"
+            >
+              <Square className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={sending || (!text.trim() && images.length === 0) || !currentSessionId}
+              className="rounded-lg bg-primary-600 p-1.5 text-white hover:bg-primary-700 disabled:opacity-30 disabled:hover:bg-primary-600 transition-colors"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

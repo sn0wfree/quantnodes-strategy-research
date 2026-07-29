@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { enableMapSet } from 'immer'
 import { api } from '../api/client'
+import { useSessionStore } from './session'
 
 // Required for immer to handle Map/Set types in chat state
 enableMapSet()
@@ -75,21 +76,25 @@ interface ChatState {
   messages: Map<string, Message>
   streamingMessageId: string | null
   streamingText: string
+  activeAttemptId: string | null
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
   updateMessage: (id: string, updater: (msg: Message) => void) => void
   setStreamingMessage: (id: string | null) => void
   setStreamingText: (text: string) => void
   appendStreamingText: (delta: string) => void
+  setActiveAttempt: (attemptId: string | null) => void
+  cancelAttempt: () => Promise<void>
   loadMessages: (sessionId: string) => Promise<void>
   clearMessages: () => void
 }
 
 export const useChatStore = create<ChatState>()(
-  immer((set) => ({
+  immer((set, get) => ({
     messages: new Map(),
     streamingMessageId: null,
     streamingText: '',
+    activeAttemptId: null,
     setMessages: (messages) =>
       set((state) => {
         state.messages.clear()
@@ -110,11 +115,34 @@ export const useChatStore = create<ChatState>()(
       set((state) => {
         state.streamingText += delta
       }),
+    setActiveAttempt: (attemptId) => set({ activeAttemptId: attemptId }),
+    cancelAttempt: async () => {
+      const { activeAttemptId } = get()
+      const sessionId = useSessionStore.getState().currentSessionId
+      if (!sessionId) return
+
+      try {
+        await api.post('/chat/cancel', {
+          session_id: sessionId,
+          attempt_id: activeAttemptId,
+        })
+      } catch (err) {
+        console.error('Cancel failed:', err)
+      }
+
+      // Clear streaming state
+      set((state) => {
+        state.streamingMessageId = null
+        state.streamingText = ''
+        state.activeAttemptId = null
+      })
+    },
     clearMessages: () =>
       set((state) => {
         state.messages.clear()
         state.streamingMessageId = null
         state.streamingText = ''
+        state.activeAttemptId = null
       }),
     loadMessages: async (sessionId: string) => {
       try {

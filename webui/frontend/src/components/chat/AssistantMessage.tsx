@@ -91,7 +91,7 @@ export function AssistantMessage({
   )
 
   const body = (
-    <div className="text-sm text-slate-200 space-y-1.5">
+    <div className="text-sm text-slate-200 space-y-3">
       {isStreaming && streamingText !== undefined ? (
         <StreamingText text={streamingText} isDone={false} />
       ) : (

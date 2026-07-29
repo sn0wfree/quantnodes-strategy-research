@@ -64,7 +64,7 @@ export function ThinkingBlock({
   }
 
   return (
-    <div className="my-1 border-l-2 border-violet-500/40 bg-violet-950/10 rounded-r-md overflow-hidden">
+    <div className="my-2 border-l-2 border-violet-500/40 bg-violet-950/10 rounded-r-md overflow-hidden">
       {/* Single-line header (always visible). role="button" instead of <button>
           so we can legally nest the copy icon-button inside. */}
       <div
