@@ -931,6 +931,927 @@ class OptionsPricingTool(BaseTool):
         })
 
 
+# ── 12. FactorCrossSectionalAnalysis ──────────────────────────────────
+
+
+class FactorCrossSectionalAnalysis(BaseTool):
+    """Cross-sectional IC analysis across a universe of assets."""
+
+    name = "factor_cross_sectional_analysis"
+    description = (
+        "Compute cross-sectional IC (Pearson and Spearman) of a factor expression "
+        "across a universe of assets. Returns IC mean, IC std, IR, IC>0 ratio, "
+        "and a time series of daily IC values."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "factor_code": {"type": "string", "description": "Factor expression (e.g. 'ts_mean(close, 20) / ts_mean(close, 60) - 1')."},
+            "universe": {
+                "type": "string",
+                "description": "Asset universe. Comma-separated codes, or 'all' for all assets (default: 'all').",
+            },
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
+            "forward_days": {"type": "integer", "description": "Forward return horizon in days (default 5)."},
+        },
+        "required": ["workspace", "factor_code"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import numpy as np
+
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        factor_code = kwargs.get("factor_code")
+        if not isinstance(factor_code, str) or not factor_code:
+            return _err("missing or invalid 'factor_code'")
+        universe_str = kwargs.get("universe", "all")
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+        forward_days = int(kwargs.get("forward_days", 5))
+
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:
+            return _err(f"db open failed: {exc}")
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
+            clauses = []
+            if start_date:
+                clauses.append(f"date >= '{start_date}'")
+            if end_date:
+                clauses.append(f"date <= '{end_date}'")
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY date, asset"
+            prices_df = conn.execute(query).fetch_df()
+        except Exception as exc:
+            return _err(f"ohlcv query failed: {exc}")
+
+        if prices_df.empty:
+            return _err("ohlcv table is empty")
+
+        # Filter universe
+        all_assets = sorted(prices_df["asset"].unique())
+        if universe_str != "all":
+            assets = [a.strip() for a in universe_str.split(",")]
+            missing = [a for a in assets if a not in all_assets]
+            if missing:
+                return _err(f"assets not found: {missing[:5]}")
+        else:
+            assets = all_assets
+
+        if len(assets) < 3:
+            return _err(f"need >= 3 assets for cross-sectional IC, got {len(assets)}")
+
+        df = prices_df[prices_df["asset"].isin(assets)].copy()
+
+        # Compute factor per asset and build date×asset panel
+        import pandas as pd
+        factor_panel = {}
+        for asset_code in assets:
+            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            if len(adf) < 20:
+                continue
+            try:
+                fv = compute_factor(factor_code, adf)
+                factor_panel[asset_code] = fv
+            except Exception:
+                continue
+
+        if len(factor_panel) < 3:
+            return _err(f"factor computation succeeded on < 3 assets ({len(factor_panel)})")
+
+        # Build forward return panel
+        ret_panel = {}
+        for asset_code in factor_panel:
+            adf = df[df["asset"] == asset_code].set_index("date")[["close"]].sort_index()
+            ret_panel[asset_code] = adf["close"].pct_change(forward_days).shift(-forward_days)
+
+        # Compute daily cross-sectional IC
+        factor_df = pd.DataFrame(factor_panel)
+        ret_df = pd.DataFrame(ret_panel)
+        common_dates = factor_df.index.intersection(ret_df.index)
+        factor_df = factor_df.loc[common_dates]
+        ret_df = ret_df.loc[common_dates]
+
+        ic_pearson_list = []
+        ic_spearman_list = []
+        valid_dates = []
+        for dt in common_dates:
+            fv = factor_df.loc[dt].dropna()
+            rv = ret_df.loc[dt].dropna()
+            common = fv.index.intersection(rv.index)
+            if len(common) < 3:
+                continue
+            f_vals = fv[common]
+            r_vals = rv[common]
+            pearson_ic = f_vals.corr(r_vals)
+            spearman_ic = f_vals.corr(r_vals, method="spearman")
+            if pd.notna(pearson_ic):
+                ic_pearson_list.append(pearson_ic)
+                ic_spearman_list.append(spearman_ic)
+                valid_dates.append(dt)
+
+        if len(ic_pearson_list) < 5:
+            return _err(f"too few valid IC observations ({len(ic_pearson_list)})")
+
+        ic_arr = np.array(ic_pearson_list)
+        spear_arr = np.array(ic_spearman_list)
+
+        return _ok({
+            "factor_code": factor_code,
+            "n_assets": len(factor_panel),
+            "n_dates": len(ic_pearson_list),
+            "forward_days": forward_days,
+            "ic_pearson_mean": round(float(np.mean(ic_arr)), 4),
+            "ic_pearson_std": round(float(np.std(ic_arr)), 4),
+            "ir": round(float(np.mean(ic_arr) / np.std(ic_arr)), 4) if np.std(ic_arr) > 0 else None,
+            "ic_pearson_gt0_ratio": round(float(np.mean(ic_arr > 0)), 4),
+            "ic_spearman_mean": round(float(np.mean(spear_arr)), 4),
+            "ic_spearman_std": round(float(np.std(spear_arr)), 4),
+            "sample_dates": [str(d) for d in valid_dates[:5]],
+        })
+
+
+# ── 13. FactorQuintileReturns ──────────────────────────────────────────
+
+
+class FactorQuintileReturns(BaseTool):
+    """Quintile portfolio return analysis."""
+
+    name = "factor_quintile_returns"
+    description = (
+        "Split a universe of assets into N groups by factor value, compute "
+        "average forward return per group. Returns quintile returns and "
+        "long-short spread."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "factor_code": {"type": "string", "description": "Factor expression."},
+            "universe": {"type": "string", "description": "Comma-separated asset codes or 'all' (default 'all')."},
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
+            "n_groups": {"type": "integer", "description": "Number of quintile groups (default 5)."},
+            "holding_period": {"type": "integer", "description": "Holding period in days (default 5)."},
+        },
+        "required": ["workspace", "factor_code"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import numpy as np
+
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        factor_code = kwargs.get("factor_code")
+        if not isinstance(factor_code, str) or not factor_code:
+            return _err("missing or invalid 'factor_code'")
+        universe_str = kwargs.get("universe", "all")
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+        n_groups = int(kwargs.get("n_groups", 5))
+        holding_period = int(kwargs.get("holding_period", 5))
+
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:
+            return _err(f"db open failed: {exc}")
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
+            clauses = []
+            if start_date:
+                clauses.append(f"date >= '{start_date}'")
+            if end_date:
+                clauses.append(f"date <= '{end_date}'")
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY date, asset"
+            prices_df = conn.execute(query).fetch_df()
+        except Exception as exc:
+            return _err(f"ohlcv query failed: {exc}")
+
+        if prices_df.empty:
+            return _err("ohlcv table is empty")
+
+        all_assets = sorted(prices_df["asset"].unique())
+        if universe_str != "all":
+            assets = [a.strip() for a in universe_str.split(",")]
+        else:
+            assets = all_assets
+
+        if len(assets) < n_groups * 2:
+            return _err(f"need >= {n_groups * 2} assets for {n_groups}-group analysis, got {len(assets)}")
+
+        import pandas as pd
+        df = prices_df[prices_df["asset"].isin(assets)].copy()
+
+        # Compute factor per asset
+        factor_panel = {}
+        for asset_code in assets:
+            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            if len(adf) < 20:
+                continue
+            try:
+                fv = compute_factor(factor_code, adf)
+                factor_panel[asset_code] = fv
+            except Exception:
+                continue
+
+        # Forward return panel
+        ret_panel = {}
+        for asset_code in factor_panel:
+            adf = df[df["asset"] == asset_code].set_index("date")[["close"]].sort_index()
+            ret_panel[asset_code] = adf["close"].pct_change(holding_period).shift(-holding_period)
+
+        factor_df = pd.DataFrame(factor_panel)
+        ret_df = pd.DataFrame(ret_panel)
+        common_dates = factor_df.index.intersection(ret_df.index)
+        factor_df = factor_df.loc[common_dates]
+        ret_df = ret_df.loc[common_dates]
+
+        # Assign quintile groups per date and compute group returns
+        group_returns = {g: [] for g in range(n_groups)}
+        for dt in common_dates:
+            fv = factor_df.loc[dt].dropna()
+            rv = ret_df.loc[dt].dropna()
+            common = fv.index.intersection(rv.index)
+            if len(common) < n_groups * 2:
+                continue
+            fv_sorted = fv[common].sort_values()
+            n_per = len(fv_sorted) // n_groups
+            for g in range(n_groups):
+                start_idx = g * n_per
+                end_idx = start_idx + n_per if g < n_groups - 1 else len(fv_sorted)
+                group_assets = fv_sorted.index[start_idx:end_idx]
+                g_ret = rv[group_assets].mean()
+                if pd.notna(g_ret):
+                    group_returns[g].append(float(g_ret))
+
+        result = {}
+        for g in range(n_groups):
+            rets = group_returns[g]
+            if rets:
+                result[f"Q{g+1}_mean_return"] = round(float(np.mean(rets)), 6)
+                result[f"Q{g+1}_n_periods"] = len(rets)
+            else:
+                result[f"Q{g+1}_mean_return"] = None
+                result[f"Q{g+1}_n_periods"] = 0
+
+        q1 = result.get("Q1_mean_return")
+        qn = result.get(f"Q{n_groups}_mean_return")
+        if q1 is not None and qn is not None:
+            result["long_short_spread"] = round(qn - q1, 6)
+
+        return _ok({
+            "factor_code": factor_code,
+            "n_groups": n_groups,
+            "holding_period": holding_period,
+            "n_assets_used": len(factor_panel),
+            **result,
+        })
+
+
+# ── 14. FactorICDecay ──────────────────────────────────────────────────
+
+
+class FactorICDecay(BaseTool):
+    """IC decay curve across multiple forward horizons."""
+
+    name = "factor_ic_decay"
+    description = (
+        "Compute cross-sectional IC at multiple forward return horizons "
+        "(e.g. 1, 5, 10, 20, 60 days) to measure how quickly factor "
+        "predictive power decays."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "factor_code": {"type": "string", "description": "Factor expression."},
+            "universe": {"type": "string", "description": "Comma-separated asset codes or 'all' (default 'all')."},
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
+            "horizons": {
+                "type": "string",
+                "description": "Comma-separated forward return horizons in days (default '1,5,10,20,60').",
+            },
+        },
+        "required": ["workspace", "factor_code"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import numpy as np
+
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        factor_code = kwargs.get("factor_code")
+        if not isinstance(factor_code, str) or not factor_code:
+            return _err("missing or invalid 'factor_code'")
+        universe_str = kwargs.get("universe", "all")
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+        horizons_str = kwargs.get("horizons", "1,5,10,20,60")
+        horizons = [int(h.strip()) for h in horizons_str.split(",")]
+
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:
+            return _err(f"db open failed: {exc}")
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
+            clauses = []
+            if start_date:
+                clauses.append(f"date >= '{start_date}'")
+            if end_date:
+                clauses.append(f"date <= '{end_date}'")
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY date, asset"
+            prices_df = conn.execute(query).fetch_df()
+        except Exception as exc:
+            return _err(f"ohlcv query failed: {exc}")
+
+        if prices_df.empty:
+            return _err("ohlcv table is empty")
+
+        all_assets = sorted(prices_df["asset"].unique())
+        if universe_str != "all":
+            assets = [a.strip() for a in universe_str.split(",")]
+        else:
+            assets = all_assets
+
+        import pandas as pd
+        df = prices_df[prices_df["asset"].isin(assets)].copy()
+
+        # Compute factor per asset
+        factor_panel = {}
+        for asset_code in assets:
+            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            if len(adf) < 20:
+                continue
+            try:
+                fv = compute_factor(factor_code, adf)
+                factor_panel[asset_code] = fv
+            except Exception:
+                continue
+
+        if len(factor_panel) < 3:
+            return _err(f"factor computation succeeded on < 3 assets ({len(factor_panel)})")
+
+        factor_df = pd.DataFrame(factor_panel)
+
+        # Compute IC at each horizon
+        results = []
+        for h in horizons:
+            ret_panel = {}
+            for asset_code in factor_panel:
+                adf = df[df["asset"] == asset_code].set_index("date")[["close"]].sort_index()
+                ret_panel[asset_code] = adf["close"].pct_change(h).shift(-h)
+
+            ret_df = pd.DataFrame(ret_panel)
+            common_dates = factor_df.index.intersection(ret_df.index)
+            f_df = factor_df.loc[common_dates]
+            r_df = ret_df.loc[common_dates]
+
+            ic_list = []
+            for dt in common_dates:
+                fv = f_df.loc[dt].dropna()
+                rv = r_df.loc[dt].dropna()
+                common = fv.index.intersection(rv.index)
+                if len(common) < 3:
+                    continue
+                ic = fv[common].corr(rv[common], method="spearman")
+                if pd.notna(ic):
+                    ic_list.append(ic)
+
+            if ic_list:
+                arr = np.array(ic_list)
+                results.append({
+                    "horizon": h,
+                    "ic_mean": round(float(np.mean(arr)), 4),
+                    "ic_std": round(float(np.std(arr)), 4),
+                    "ir": round(float(np.mean(arr) / np.std(arr)), 4) if np.std(arr) > 0 else None,
+                    "n_periods": len(ic_list),
+                })
+            else:
+                results.append({"horizon": h, "ic_mean": None, "ic_std": None, "ir": None, "n_periods": 0})
+
+        return _ok({
+            "factor_code": factor_code,
+            "n_assets": len(factor_panel),
+            "ic_decay": results,
+        })
+
+
+# ── 15. FactorTurnover ─────────────────────────────────────────────────
+
+
+class FactorTurnover(BaseTool):
+    """Factor ranking turnover analysis."""
+
+    name = "factor_turnover"
+    description = (
+        "Measure how quickly factor rankings change over time. Computes "
+        "average rank correlation between consecutive rebalancing periods. "
+        "Low turnover = stable factor, high turnover = noisy factor."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "factor_code": {"type": "string", "description": "Factor expression."},
+            "universe": {"type": "string", "description": "Comma-separated asset codes or 'all' (default 'all')."},
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
+            "rebalance_freq": {"type": "integer", "description": "Rebalancing frequency in days (default 5)."},
+        },
+        "required": ["workspace", "factor_code"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import numpy as np
+
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        factor_code = kwargs.get("factor_code")
+        if not isinstance(factor_code, str) or not factor_code:
+            return _err("missing or invalid 'factor_code'")
+        universe_str = kwargs.get("universe", "all")
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+        rebalance_freq = int(kwargs.get("rebalance_freq", 5))
+
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:
+            return _err(f"db open failed: {exc}")
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
+            clauses = []
+            if start_date:
+                clauses.append(f"date >= '{start_date}'")
+            if end_date:
+                clauses.append(f"date <= '{end_date}'")
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY date, asset"
+            prices_df = conn.execute(query).fetch_df()
+        except Exception as exc:
+            return _err(f"ohlcv query failed: {exc}")
+
+        if prices_df.empty:
+            return _err("ohlcv table is empty")
+
+        all_assets = sorted(prices_df["asset"].unique())
+        if universe_str != "all":
+            assets = [a.strip() for a in universe_str.split(",")]
+        else:
+            assets = all_assets
+
+        import pandas as pd
+        df = prices_df[prices_df["asset"].isin(assets)].copy()
+
+        # Compute factor per asset
+        factor_panel = {}
+        for asset_code in assets:
+            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            if len(adf) < 20:
+                continue
+            try:
+                fv = compute_factor(factor_code, adf)
+                factor_panel[asset_code] = fv
+            except Exception:
+                continue
+
+        if len(factor_panel) < 3:
+            return _err(f"factor computation succeeded on < 3 assets ({len(factor_panel)})")
+
+        factor_df = pd.DataFrame(factor_panel)
+
+        # Sample dates at rebalance frequency
+        dates = sorted(factor_df.index)
+        sampled_dates = dates[::rebalance_freq]
+        if len(sampled_dates) < 2:
+            return _err("not enough rebalancing periods")
+
+        # Compute rank correlation between consecutive periods
+        turnover_list = []
+        for i in range(1, len(sampled_dates)):
+            prev_ranks = factor_df.loc[sampled_dates[i - 1]].dropna().rank()
+            curr_ranks = factor_df.loc[sampled_dates[i]].dropna().rank()
+            common = prev_ranks.index.intersection(curr_ranks.index)
+            if len(common) < 3:
+                continue
+            rank_corr = prev_ranks[common].corr(curr_ranks[common], method="spearman")
+            if pd.notna(rank_corr):
+                turnover_list.append(1.0 - float(rank_corr))
+
+        if not turnover_list:
+            return _err("no valid turnover observations")
+
+        arr = np.array(turnover_list)
+        return _ok({
+            "factor_code": factor_code,
+            "n_assets": len(factor_panel),
+            "n_periods": len(turnover_list),
+            "rebalance_freq_days": rebalance_freq,
+            "avg_turnover": round(float(np.mean(arr)), 4),
+            "median_turnover": round(float(np.median(arr)), 4),
+            "std_turnover": round(float(np.std(arr)), 4),
+            "avg_rank_stability": round(1.0 - float(np.mean(arr)), 4),
+        })
+
+
+# ── 16. StrategyCompare ────────────────────────────────────────────────
+
+
+class StrategyCompare(BaseTool):
+    """Compare metrics across multiple strategies."""
+
+    name = "strategy_compare"
+    description = (
+        "Compare backtest metrics across multiple strategies side by side. "
+        "Reads results.tsv from each strategy's runs/ directory."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "strategy_names": {
+                "type": "string",
+                "description": "Comma-separated strategy names to compare.",
+            },
+            "metrics": {
+                "type": "string",
+                "description": "Comma-separated metric keys (default: 'sharpe,ann_return,max_dd,calmar,turnover,win_rate').",
+            },
+        },
+        "required": ["workspace", "strategy_names"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        strategy_names_str = kwargs.get("strategy_names", "")
+        if not strategy_names_str:
+            return _err("missing 'strategy_names'")
+        strategy_names = [s.strip() for s in strategy_names_str.split(",")]
+        metrics_str = kwargs.get("metrics", "sharpe,ann_return,max_dd,calmar,turnover,win_rate")
+        metrics_keys = [m.strip() for m in metrics_str.split(",")]
+
+        results = []
+        for name in strategy_names:
+            results_path = workspace / "strategies" / name / "runs" / "results.tsv"
+            if not results_path.exists():
+                results.append({"strategy": name, "error": f"results.tsv not found at {results_path}"})
+                continue
+
+            try:
+                import csv
+                with open(results_path, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f, delimiter="\t")
+                    rows = list(reader)
+            except Exception as exc:
+                results.append({"strategy": name, "error": f"read failed: {exc}"})
+                continue
+
+            if not rows:
+                results.append({"strategy": name, "error": "no runs found"})
+                continue
+
+            latest = rows[-1]
+            row = {"strategy": name}
+            for key in metrics_keys:
+                val = latest.get(key)
+                if val is not None:
+                    try:
+                        row[key] = round(float(val), 4)
+                    except (ValueError, TypeError):
+                        row[key] = val
+                else:
+                    row[key] = None
+            row["run_name"] = latest.get("run_name", "")
+            results.append(row)
+
+        return _ok({
+            "strategies": strategy_names,
+            "metrics": metrics_keys,
+            "comparison": results,
+        })
+
+
+# ── 17. DrawdownAnalysis ──────────────────────────────────────────────
+
+
+class DrawdownAnalysis(BaseTool):
+    """Detailed drawdown analysis for a strategy."""
+
+    name = "drawdown_analysis"
+    description = (
+        "Analyze drawdown periods for a strategy. Reads the equity curve "
+        "from the latest backtest run and returns top N drawdown periods "
+        "with start date, end date, recovery date, and depth."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "strategy_name": {"type": "string", "description": "Strategy name."},
+            "top_n": {"type": "integer", "description": "Number of top drawdown periods to return (default 5)."},
+        },
+        "required": ["workspace", "strategy_name"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import numpy as np
+
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        strategy_name = kwargs.get("strategy_name", "")
+        if not strategy_name:
+            return _err("missing 'strategy_name'")
+        top_n = int(kwargs.get("top_n", 5))
+
+        # Find latest run
+        runs_dir = workspace / "strategies" / strategy_name / "runs"
+        if not runs_dir.exists():
+            return _err(f"runs directory not found: {runs_dir}")
+
+        run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
+        if not run_dirs:
+            return _err("no runs found")
+
+        latest_run = run_dirs[-1]
+
+        # Try to find equity curve in common formats
+        import pandas as pd
+        equity = None
+        for fname in ["equity.csv", "equity_curve.csv", "portfolio.csv", "nav.csv"]:
+            fpath = latest_run / fname
+            if fpath.exists():
+                try:
+                    eq_df = pd.read_csv(fpath)
+                    # Try common column names
+                    for col in ["equity", "nav", "portfolio_value", "value", "close"]:
+                        if col in eq_df.columns:
+                            equity = eq_df[col].values
+                            dates = eq_df.iloc[:, 0].values if len(eq_df.columns) > 1 else None
+                            break
+                    if equity is not None:
+                        break
+                except Exception:
+                    continue
+
+        if equity is None:
+            # Try run.log for equity data
+            log_path = latest_run / "run.log"
+            if log_path.exists():
+                try:
+                    log_text = log_path.read_text(encoding="utf-8")
+                    # Look for equity values in log
+                    import re
+                    eq_matches = re.findall(r"equity[=:]\s*([\d.]+)", log_text)
+                    if eq_matches:
+                        equity = np.array([float(v) for v in eq_matches])
+                except Exception:
+                    pass
+
+        if equity is None or len(equity) < 10:
+            return _err("could not find equity curve data in the latest run")
+
+        equity = np.array(equity, dtype=float)
+
+        # Compute drawdown series
+        peak = np.maximum.accumulate(equity)
+        drawdown = (equity - peak) / peak
+
+        # Find drawdown periods
+        in_dd = drawdown < 0
+        periods = []
+        start = None
+        for i in range(len(in_dd)):
+            if in_dd[i] and start is None:
+                start = i
+            elif not in_dd[i] and start is not None:
+                # Drawdown ended at i-1, recovered at i
+                depth = float(np.min(drawdown[start:i]))
+                trough_idx = start + int(np.argmin(drawdown[start:i]))
+                periods.append({
+                    "start_idx": int(start),
+                    "trough_idx": int(trough_idx),
+                    "recovery_idx": int(i),
+                    "depth": round(depth, 4),
+                    "duration": int(i - start),
+                    "recovery_duration": int(i - trough_idx),
+                })
+                start = None
+
+        # If still in drawdown at end
+        if start is not None:
+            depth = float(np.min(drawdown[start:]))
+            trough_idx = start + int(np.argmin(drawdown[start:]))
+            periods.append({
+                "start_idx": int(start),
+                "trough_idx": int(trough_idx),
+                "recovery_idx": None,
+                "depth": round(depth, 4),
+                "duration": int(len(equity) - start),
+                "recovery_duration": None,
+                "note": "still in drawdown",
+            })
+
+        # Sort by depth and take top N
+        periods.sort(key=lambda p: p["depth"])
+        top_periods = periods[:top_n]
+
+        max_dd = round(float(np.min(drawdown)), 4)
+        current_dd = round(float(drawdown[-1]), 4)
+
+        return _ok({
+            "strategy": strategy_name,
+            "run": latest_run.name,
+            "equity_length": len(equity),
+            "max_drawdown": max_dd,
+            "current_drawdown": current_dd,
+            "n_drawdown_periods": len(periods),
+            "top_drawdowns": top_periods,
+        })
+
+
+# ── 18. BenchmarkComparison ────────────────────────────────────────────
+
+
+class BenchmarkComparison(BaseTool):
+    """Strategy vs benchmark performance comparison."""
+
+    name = "benchmark_comparison"
+    description = (
+        "Compare a strategy's performance against a benchmark. Computes "
+        "alpha, beta, tracking error, information ratio, and relative drawdown."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "Workspace root path."},
+            "strategy_name": {"type": "string", "description": "Strategy name."},
+            "benchmark_code": {"type": "string", "description": "Benchmark asset code (e.g. '000300.SH')."},
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
+        },
+        "required": ["workspace", "strategy_name", "benchmark_code"],
+    }
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        import numpy as np
+
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _err(str(exc))
+
+        strategy_name = kwargs.get("strategy_name", "")
+        benchmark_code = kwargs.get("benchmark_code", "")
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+
+        if not strategy_name:
+            return _err("missing 'strategy_name'")
+        if not benchmark_code:
+            return _err("missing 'benchmark_code'")
+
+        # Get strategy equity from latest run
+        runs_dir = workspace / "strategies" / strategy_name / "runs"
+        if not runs_dir.exists():
+            return _err(f"runs directory not found: {runs_dir}")
+
+        run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
+        if not run_dirs:
+            return _err("no runs found")
+
+        latest_run = run_dirs[-1]
+
+        import pandas as pd
+        strategy_equity = None
+        for fname in ["equity.csv", "equity_curve.csv", "portfolio.csv", "nav.csv"]:
+            fpath = latest_run / fname
+            if fpath.exists():
+                try:
+                    eq_df = pd.read_csv(fpath)
+                    for col in ["equity", "nav", "portfolio_value", "value", "close"]:
+                        if col in eq_df.columns:
+                            strategy_equity = eq_df[col].values.astype(float)
+                            break
+                    if strategy_equity is not None:
+                        break
+                except Exception:
+                    continue
+
+        if strategy_equity is None or len(strategy_equity) < 10:
+            return _err("could not find strategy equity curve")
+
+        # Get benchmark prices from DuckDB
+        try:
+            from ...db import get_connection
+            conn = get_connection(workspace)
+        except Exception as exc:
+            return _err(f"db open failed: {exc}")
+        if conn is None:
+            return _err("workspace has no DuckDB")
+
+        try:
+            query = f"SELECT date, close FROM ohlcv WHERE asset = '{benchmark_code}'"
+            if start_date:
+                query += f" AND date >= '{start_date}'"
+            if end_date:
+                query += f" AND date <= '{end_date}'"
+            query += " ORDER BY date"
+            bench_df = conn.execute(query).fetch_df()
+        except Exception as exc:
+            return _err(f"benchmark query failed: {exc}")
+
+        if bench_df.empty:
+            return _err(f"no data found for benchmark '{benchmark_code}'")
+
+        bench_equity = bench_df["close"].values.astype(float)
+
+        # Align lengths
+        min_len = min(len(strategy_equity), len(bench_equity))
+        strat_ret = np.diff(strategy_equity[-min_len:]) / strategy_equity[-min_len:-1]
+        bench_ret = np.diff(bench_equity[-min_len:]) / bench_equity[-min_len:-1]
+
+        # Compute metrics
+        excess_ret = strat_ret - bench_ret
+        beta = float(np.cov(strat_ret, bench_ret)[0, 1] / np.var(bench_ret)) if np.var(bench_ret) > 0 else None
+        alpha_ann = float((np.mean(strat_ret) - beta * np.mean(bench_ret)) * 252) if beta is not None else None
+        tracking_error = float(np.std(excess_ret) * np.sqrt(252))
+        info_ratio = float(np.mean(excess_ret) * 252 / tracking_error) if tracking_error > 0 else None
+
+        # Relative drawdown
+        cum_excess = np.cumprod(1 + excess_ret)
+        rel_peak = np.maximum.accumulate(cum_excess)
+        rel_dd = (cum_excess - rel_peak) / rel_peak
+        max_rel_dd = float(np.min(rel_dd))
+
+        return _ok({
+            "strategy": strategy_name,
+            "benchmark": benchmark_code,
+            "n_periods": min_len,
+            "alpha_annualized": round(alpha_ann, 4) if alpha_ann is not None else None,
+            "beta": round(beta, 4) if beta is not None else None,
+            "tracking_error": round(tracking_error, 4),
+            "information_ratio": round(info_ratio, 4) if info_ratio is not None else None,
+            "max_relative_drawdown": round(max_rel_dd, 4),
+            "strategy_annual_return": round(float(np.mean(strat_ret) * 252), 4),
+            "benchmark_annual_return": round(float(np.mean(bench_ret) * 252), 4),
+            "run": latest_run.name,
+        })
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
@@ -952,6 +1873,15 @@ def build_default_registry() -> ToolRegistry:
     r.register(ListSkillsTool())
     r.register(LoadSkillTool())
     r.register(OptionsPricingTool())
+    # Phase 4: Factor research tools
+    r.register(FactorCrossSectionalAnalysis())
+    r.register(FactorQuintileReturns())
+    r.register(FactorICDecay())
+    r.register(FactorTurnover())
+    # Phase 4: Strategy analysis tools
+    r.register(StrategyCompare())
+    r.register(DrawdownAnalysis())
+    r.register(BenchmarkComparison())
     # Phase 2: Web I/O tools (conditional on dependencies)
     try:
         from .web_tools import register_web_tools
@@ -979,5 +1909,12 @@ __all__ = [
     "ListSkillsTool",
     "LoadSkillTool",
     "OptionsPricingTool",
+    "FactorCrossSectionalAnalysis",
+    "FactorQuintileReturns",
+    "FactorICDecay",
+    "FactorTurnover",
+    "StrategyCompare",
+    "DrawdownAnalysis",
+    "BenchmarkComparison",
     "build_default_registry",
 ]
