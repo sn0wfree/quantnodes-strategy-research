@@ -2,6 +2,42 @@ import { useAuthStore } from '../stores/auth'
 
 const API_BASE = '/api'
 
+export interface GoalStatusResponse {
+  status: string
+  goal_id?: string
+  goal_status?: string
+  objective?: string
+  session_id?: string
+  progress_percent?: number
+  criteria?: Criterion[]
+  evidence_count?: number
+}
+
+export interface GoalStartResponse {
+  status: string
+  goal_id?: string
+}
+
+export interface GoalEvidenceResponse {
+  status: string
+  goal_id?: string
+  evidence_id?: string
+}
+
+export interface GoalCompleteResponse {
+  status: string
+  goal_id?: string
+  new_status?: string
+}
+
+export interface Criterion {
+  criterion_id: string
+  text: string
+  status: string
+  required: boolean
+  evidence_count?: number
+}
+
 class APIClient {
   private getToken(): string | null {
     return useAuthStore.getState().token
@@ -75,6 +111,41 @@ class APIClient {
     if (lastEventId) params.set('Last-Event-ID', lastEventId)
     const qs = params.toString() ? `?${params}` : ''
     return new EventSource(`${API_BASE}${path}${qs}`)
+  }
+
+  // ── Goal API ──────────────────────────────────────────────────────
+
+  goal = {
+    getStatus: (sessionId: string) =>
+      this.get<GoalStatusResponse>(`/goal/status?session_id=${sessionId}`),
+
+    start: (sessionId: string, objective: string, criteria?: string[]) =>
+      this.post<GoalStartResponse>('/goal/start', {
+        session_id: sessionId,
+        objective,
+        criteria,
+      }),
+
+    evidence: (sessionId: string, text: string, criterionId?: string) =>
+      this.post<GoalEvidenceResponse>('/goal/evidence', {
+        session_id: sessionId,
+        evidence: text,
+        criterion_id: criterionId,
+      }),
+
+    complete: (sessionId: string, recap?: string) =>
+      this.post<GoalCompleteResponse>('/goal/complete', {
+        session_id: sessionId,
+        outcome: 'complete',
+        summary: recap,
+      }),
+
+    cancel: (sessionId: string, recap?: string) =>
+      this.post<GoalCompleteResponse>('/goal/complete', {
+        session_id: sessionId,
+        outcome: 'cancelled',
+        summary: recap,
+      }),
   }
 }
 

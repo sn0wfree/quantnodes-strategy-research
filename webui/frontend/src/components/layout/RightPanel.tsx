@@ -1,6 +1,7 @@
 import * as Tabs from '@radix-ui/react-tabs'
 import { useLayoutStore } from '../../stores/layout'
 import { useWorkflowStore } from '../../stores/workflow'
+import { useGoalStore } from '../../stores/goal'
 import { Workflow, Target, Bot } from 'lucide-react'
 import { AgentList } from '../agent/AgentList'
 import { GoalTab } from '../goal/GoalTab'
@@ -25,7 +26,29 @@ export function RightPanel() {
   const currentPresetId = useWorkflowStore((s) => s.currentPresetId)
   const currentPreset = presets.find((p) => p.id === currentPresetId)
 
+  // Goal state
+  const currentGoal = useGoalStore((s) => s.currentGoal)
+
   if (!visible) return null
+
+  // Map GoalStore goal to GoalTab's expected format
+  const goalTabGoal = currentGoal ? {
+    id: currentGoal.goal_id,
+    title: currentGoal.objective,
+    description: '',
+    status: currentGoal.status === 'complete' ? 'completed' as const
+      : currentGoal.status === 'cancelled' ? 'failed' as const
+      : 'active' as const,
+    criteria: currentGoal.criteria.map((c) => ({
+      id: c.criterion_id,
+      description: c.text,
+      status: c.status === 'covered' ? 'completed' as const
+        : c.status === 'pending' ? 'pending' as const
+        : 'in_progress' as const,
+      evidence_count: c.evidence_count ?? 0,
+    })),
+    timeline: [],
+  } : null
 
   return (
     <div className="flex h-full w-[480px] flex-col border-l border-slate-800 bg-slate-900/80">
@@ -62,7 +85,7 @@ export function RightPanel() {
           />
         </Tabs.Content>
         <Tabs.Content value="goal" className="flex-1 overflow-y-auto p-4">
-          <GoalTab goal={null} />
+          <GoalTab goal={goalTabGoal} />
         </Tabs.Content>
         <Tabs.Content value="agent" className="flex-1 overflow-y-auto p-4">
           <AgentList />

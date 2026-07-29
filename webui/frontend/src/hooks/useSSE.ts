@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useChatStore } from '../stores/chat'
 import { useAgentStore } from '../stores/agents'
 import { useWorkflowStore } from '../stores/workflow'
+import { useGoalStore } from '../stores/goal'
 import { useToastStore } from '../stores/toast'
 import { useSSEStore } from '../stores/sse'
 import { useSessionStore } from '../stores/session'
@@ -13,6 +14,7 @@ type SSEEventType =
   | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
   | 'dag_update' | 'progress' | 'message_received' | 'error'
   | 'session_meta_updated'
+  | 'goal_updated' | 'goal_evidence_added' | 'goal_completed'
 
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
@@ -296,6 +298,39 @@ export function useSSE(sessionId: string | null) {
           useWorkflowStore.getState().setExecutionProgress(progress)
           break
         }
+        case 'goal_updated': {
+          const goalData = data as any
+          if (goalData.goal_id) {
+            useGoalStore.getState().setGoal({
+              goal_id: goalData.goal_id,
+              session_id: goalData.session_id || '',
+              status: goalData.status || 'active',
+              objective: goalData.objective || '',
+              progress_percent: goalData.progress_percent || 0,
+              criteria: goalData.criteria || [],
+              evidence_count: goalData.evidence_count || 0,
+            })
+          }
+          break
+        }
+        case 'goal_evidence_added': {
+          const evData = data as any
+          useGoalStore.getState().updateGoal((g) => {
+            g.evidence_count = (g.evidence_count || 0) + 1
+            if (evData.progress_percent !== undefined) {
+              g.progress_percent = evData.progress_percent
+            }
+          })
+          break
+        }
+        case 'goal_completed': {
+          const compData = data as any
+          useGoalStore.getState().updateGoal((g) => {
+            g.status = compData.status || 'complete'
+            if (compData.recap) g.recap = compData.recap
+          })
+          break
+        }
         case 'session_meta_updated': {
           // Server-side update (e.g. auto-title after first message)
           const { session_id, title, message_count, starred, tags, archived } = data as {
@@ -376,6 +411,7 @@ export function useSSE(sessionId: string | null) {
       'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
       'dag_update', 'progress', 'message_received', 'error',
       'session_meta_updated',
+      'goal_updated', 'goal_evidence_added', 'goal_completed',
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))
 
