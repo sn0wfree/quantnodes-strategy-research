@@ -16,21 +16,16 @@ function nextRevealLen(text: string, lastLen: number): number {
   if (target <= lastLen) return lastLen
 
   const diff = target - lastLen
-  // Short chunks: reveal immediately (single tick)
   if (diff <= 4) return target
-  // Medium chunks: 30% per tick, snapped to word boundary
   const want = Math.max(1, Math.ceil(diff * 0.3))
   let newLen = lastLen + want
   if (newLen >= target) return target
 
-  // Snap to next whitespace if we're inside a word
   while (newLen < target && !/[\s\n\u3002\uff0c\uff01\uff1f]/.test(text[newLen])) {
     newLen++
   }
-  // Include the separator itself
   if (newLen < target && /[\s\n]/.test(text[newLen])) newLen++
 
-  // Safety: don't exceed target
   return Math.min(newLen, target)
 }
 
@@ -53,7 +48,6 @@ export function StreamingText({ text, isDone }: StreamingTextProps) {
         setDisplayed(text.slice(0, newLen))
         lastLenRef.current = newLen
       }
-      // Keep ticking until we catch up
       if (lastLenRef.current < currentLen) {
         rafRef.current = requestAnimationFrame(tick)
       }
@@ -63,9 +57,15 @@ export function StreamingText({ text, isDone }: StreamingTextProps) {
     return () => cancelAnimationFrame(rafRef.current)
   }, [text, isDone])
 
-  if (!isDone && displayed.length < text.length) {
+  const isStreaming = !isDone && displayed.length < text.length
+
+  if (isStreaming) {
     return (
-      <div className="relative">
+      <div className="relative rounded-lg transition-shadow duration-500"
+        style={{
+          boxShadow: '0 0 24px -4px rgba(99, 102, 241, 0.12), 0 0 8px -2px rgba(99, 102, 241, 0.06)',
+        }}
+      >
         <MarkdownRenderer content={displayed} streaming />
         <span className="inline-block w-2 h-4 bg-primary-400 animate-pulse ml-0.5 align-middle" />
       </div>

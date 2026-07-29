@@ -7,8 +7,8 @@ import { useSSEStore } from '../stores/sse'
 import { useSessionStore } from '../stores/session'
 
 type SSEEventType =
-  | 'text_delta' | 'tool_call' | 'tool_result' | 'thinking_delta'
-  | 'thinking_done' | 'thinking_start' | 'thinking_end'
+  | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_progress'
+  | 'thinking_delta' | 'thinking_done' | 'thinking_start' | 'thinking_end'
   | 'file_edit' | 'table' | 'chart' | 'image'
   | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
   | 'dag_update' | 'progress' | 'message_received' | 'error'
@@ -123,6 +123,24 @@ export function useSSE(sessionId: string | null) {
               tc.status = status as 'done' | 'error'
             }
           })
+          break
+        }
+        case 'tool_progress': {
+          const { message_id: mid, id, steps } = data as {
+            message_id: string
+            id: string
+            steps: string[]
+          }
+          if (mid && id && steps) {
+            updateMessage(mid, (msg) => {
+              const tc = msg.parts.find(
+                (p) => p.type === 'tool_call' && p.id === id
+              )
+              if (tc && tc.type === 'tool_call') {
+                tc.progress = steps
+              }
+            })
+          }
           break
         }
         case 'thinking_start': {
@@ -352,7 +370,7 @@ export function useSSE(sessionId: string | null) {
     }
 
     const eventTypes = [
-      'text_delta', 'tool_call', 'tool_result',
+      'text_delta', 'tool_call', 'tool_result', 'tool_progress',
       'thinking_start', 'thinking_delta', 'thinking_done', 'thinking_end',
       'file_edit', 'table', 'chart', 'image',
       'agent_status', 'agent_loop', 'agent_done', 'assistant_message',

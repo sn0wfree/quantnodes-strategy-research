@@ -1,5 +1,5 @@
 import { Bot } from 'lucide-react'
-import type { Message, MessagePart } from '../../stores/chat'
+import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './ToolCallBlock'
@@ -25,12 +25,12 @@ function formatTime(ts: number): string {
   })
 }
 
-function PartRenderer({ part, isStreaming }: { part: MessagePart; isStreaming: boolean }) {
+function PartRenderer({ part, isStreaming, onRetry }: { part: MessagePart; isStreaming: boolean; onRetry?: (tc: ToolCallPart) => void }) {
   switch (part.type) {
     case 'text':
       return <MarkdownRenderer content={part.text} />
     case 'tool_call':
-      return <ToolCallBlock toolCall={part} />
+      return <ToolCallBlock toolCall={part} onRetry={onRetry} />
     case 'thinking':
       return <ThinkingBlock text={part.text} collapsed={part.collapsed} streaming={isStreaming} />
     case 'file_edit':

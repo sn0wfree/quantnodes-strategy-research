@@ -1,18 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Sparkles, ChevronRight, Copy, Check } from 'lucide-react'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface ThinkingBlockProps {
   text: string
   collapsed?: boolean
-  /** Whether the thinking is still streaming (shows shimmer dot). */
   streaming?: boolean
-  /** Wall-clock ms when thinking started; used to compute "Thought for Xs". */
   startTime?: number
-  /** Wall-clock ms when thinking ended; if omitted, computed from streaming. */
   endTime?: number
 }
 
-/** Format a millisecond duration as a short human-readable string. */
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   const s = ms / 1000
@@ -31,8 +28,6 @@ export function ThinkingBlock({
   const [copied, setCopied] = useState(false)
   const [tickMs, setTickMs] = useState(0)
 
-  // While streaming, periodically refresh the elapsed counter so the label
-  // grows live (e.g. "Thinking for 2.3s" → "Thinking for 2.4s").
   useEffect(() => {
     if (!streaming || !startTime) return
     const id = setInterval(() => setTickMs(Date.now() - startTime), 100)
@@ -41,7 +36,6 @@ export function ThinkingBlock({
 
   if (!text) return null
 
-  // Label: "Thinking for Xs" while streaming, "Thought for Xs" once done.
   let label: string
   if (streaming) {
     const elapsed =
@@ -64,9 +58,8 @@ export function ThinkingBlock({
   }
 
   return (
-    <div className="my-2 border-l-2 border-violet-500/40 bg-violet-950/10 rounded-r-md overflow-hidden">
-      {/* Single-line header (always visible). role="button" instead of <button>
-          so we can legally nest the copy icon-button inside. */}
+    <div className="my-2 border-l-2 border-violet-500/40 bg-violet-950/10 rounded-r-md overflow-hidden transition-colors duration-300">
+      {/* Single-line header */}
       <div
         role="button"
         tabIndex={0}
@@ -80,7 +73,7 @@ export function ThinkingBlock({
         className="flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left text-[11px] text-violet-300/80 hover:bg-violet-950/20 transition-colors"
       >
         <ChevronRight
-          className={`h-3 w-3 text-violet-400 transition-transform ${
+          className={`h-3 w-3 text-violet-400 transition-transform duration-200 ${
             isExpanded ? 'rotate-90' : ''
           }`}
         />
@@ -102,10 +95,12 @@ export function ThinkingBlock({
         </span>
       </div>
 
-      {/* Expanded content */}
+      {/* Expanded content - now uses MarkdownRenderer */}
       {isExpanded && (
-        <div className="border-t border-violet-500/20 px-3 py-2 text-[11px] text-violet-200/80 whitespace-pre-wrap max-h-72 overflow-y-auto font-mono leading-relaxed">
-          {text}
+        <div className="border-t border-violet-500/20 px-3 py-2 max-h-72 overflow-y-auto">
+          <div className="text-[12px] leading-relaxed text-violet-200/80">
+            <MarkdownRenderer content={text} />
+          </div>
         </div>
       )}
     </div>

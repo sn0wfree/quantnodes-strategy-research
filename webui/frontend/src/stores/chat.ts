@@ -21,6 +21,7 @@ export interface ToolCallPart {
   arguments: string | unknown
   result?: string | unknown
   status: 'pending' | 'running' | 'done' | 'error'
+  progress?: string[]
 }
 
 export interface ThinkingPart {

@@ -5,20 +5,20 @@ import { ToolCallBlock } from './ToolCallBlock'
 
 interface ToolCallGroupProps {
   toolCalls: ToolCallPart[]
-  /** Per-call start times keyed by tool call id. */
   startTimes?: Record<string, number>
+  onRetry?: (toolCall: ToolCallPart) => void
 }
 
-export function ToolCallGroup({ toolCalls, startTimes }: ToolCallGroupProps) {
+export function ToolCallGroup({ toolCalls, startTimes, onRetry }: ToolCallGroupProps) {
   const [expanded, setExpanded] = useState(false)
 
-  // Single tool → render directly (no group chrome).
   if (toolCalls.length === 0) return null
   if (toolCalls.length === 1) {
     return (
       <ToolCallBlock
         toolCall={toolCalls[0]}
         startTime={startTimes?.[toolCalls[0].id]}
+        onRetry={onRetry}
       />
     )
   }
@@ -28,7 +28,7 @@ export function ToolCallGroup({ toolCalls, startTimes }: ToolCallGroupProps) {
   const error = toolCalls.filter((tc) => tc.status === 'error').length
 
   return (
-    <div className="my-1 border-l-2 border-slate-700 bg-slate-800/20 rounded-r-md overflow-hidden">
+    <div className="my-1 border-l-2 border-slate-700 bg-slate-800/20 rounded-r-md overflow-hidden transition-colors duration-300">
       {/* Single-line summary chip */}
       <div
         role="button"
@@ -43,7 +43,7 @@ export function ToolCallGroup({ toolCalls, startTimes }: ToolCallGroupProps) {
         className="flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left text-[12px] hover:bg-slate-800/40 transition-colors"
       >
         <ChevronRight
-          className={`h-3 w-3 text-slate-500 transition-transform ${
+          className={`h-3 w-3 text-slate-500 transition-transform duration-200 ${
             expanded ? 'rotate-90' : ''
           }`}
         />
@@ -71,6 +71,7 @@ export function ToolCallGroup({ toolCalls, startTimes }: ToolCallGroupProps) {
               key={tc.id}
               toolCall={tc}
               startTime={startTimes?.[tc.id]}
+              onRetry={onRetry}
             />
           ))}
         </div>
