@@ -100,6 +100,14 @@ class ResearchApp(App):
         # ``start_workflow()`` when the user runs ``/goal start --workflow``.
         self._workflow_worker: Optional[WorkflowWorker] = None
 
+        # PR2 (tui-text-routing): tracks the active text segment so we
+        # can avoid double-writing when an ``assistant_message`` falls
+        # back event arrives after ``text.ended`` already finalized.
+        # ``_active_text_id`` is set by text.started, cleared by
+        # text.ended (or when a new segment starts).
+        self._active_text_id: Optional[str] = None
+        self._finalized_text_ids: set[str] = set()
+
     def compose(self):
         yield StatusHeader(id="status-header")
         yield ModeBar(id="mode-bar")
@@ -322,22 +330,46 @@ class ResearchApp(App):
         rail.update_goal(**kwargs)
 
     def route_agent_event(self, event_type: str, data: dict) -> None:
-        """Route AgentLoop events to the appropriate widget."""
-        if event_type == "text_delta":
-            # Strip <think> / <reasoning> / <thinking> / <|reasoning|>
+        """Route AgentLoop events to the appropriate widget.
+
+        PR2 (tui-text-routing): subscribes to the opencode-style 3-step
+        text protocol (text.started -> text_delta -> text.ended). The
+        legacy text_delta-only path is kept as a fallback for old
+        backends (no text.started ever arrives).
+        """
+        if event_type == "text.started":
+            # Begin a new streaming segment. Each LLM iteration (or
+            # one-shot final answer) gets its own streamer so multi-
+            # iteration flows don't merge text into one big block.
+            text_id = data.get("text_id") if isinstance(data, dict) else None
+            self.begin_streaming_session(text_id=text_id)
+        elif event_type == "text_delta":
+            # Strip  THINK / <reasoning> / <thinking> / <|reasoning|>
             # etc. before forwarding to the streamer so the user never
             # sees the model's internal monologue during typing.
             from strategy_research.cli.tui.text_filters import strip_thinking_tags
             self.update_streaming_delta(strip_thinking_tags(data.get("text", "")))
+        elif event_type == "text.ended":
+            # Finalize the current streaming segment (keep visible as a
+            # folder). On the next text.started a fresh segment begins.
+            self.end_streaming_session()
         elif event_type == "thinking_done":
             # Transition marker: thinking → text. Streaming already started.
             pass
         elif event_type == "assistant_message":
-            # Final assistant content (non-streaming path or stream close).
-            # Extract think tags (preserved as a foldable section) and
-            # render the remaining body as Markdown (no fold). Streaming
-            # preview (text_delta) still strips think tags so the user
-            # never sees internal reasoning during typing.
+            # Final assistant content (one-shot fallback). Used by:
+            #   (a) old backend that doesn't emit the 3-step protocol
+            #   (b) /goal /compact command handlers that wrap text in
+            #       3-step while still emitting assistant_message for
+            #       backwards compatibility
+            #
+            # Dedup: if the 3-step path already finalized a segment for
+            # this turn, the streaming preview is on-screen and we
+            # should NOT overwrite it with the formatted Markdown. This
+            # is the common case for /goal /compact.
+            #
+            # Otherwise, finalize any active streamer and render the
+            # formatted Markdown.
             #
             # Body content often contains inline JSON which Rich
             # Markdown renders as garbled paragraph text.  We detect and
@@ -349,14 +381,27 @@ class ResearchApp(App):
             think_content, body_content = extract_thinking_tags(raw_content)
             try:
                 tv = self.query_one(TranscriptView)
+                # Dedup: if we've already finalized a segment for this
+                # turn, the assistant_message is a duplicate from a
+                # non-streaming fallback path. Skip the write.
+                if self._finalized_text_ids and not tv._streamer:
+                    # Recent finalized segment exists, no active
+                    # streamer — this is the duplicate we want to skip.
+                    return
                 # Step 1: render think content as a foldable section
                 # (collapsed by default; Ctrl+E to expand).
                 if think_content:
                     tv.append_thinking(think_content)
-                # Step 2: reformat JSON in body → fenced code block,
-                # then render as Markdown, replacing the streaming
-                # preview in-place.
+                # Step 2: end any active streamer (so its preview is
+                # cleared) and render the formatted Markdown.
+                if tv._streamer is not None:
+                    tv._truncate_to(tv._stream_baseline)
+                    tv._streamer = None
+                    tv._stream_baseline = None
                 tv.write_assistant_message(reformat_body_content(body_content))
+                # Clear finalized set — this new write supersedes.
+                self._finalized_text_ids.clear()
+                self._active_text_id = None
             except Exception:
                 pass
         elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat"):
@@ -499,6 +544,53 @@ class ResearchApp(App):
             return tv.end_streaming(suffix=suffix)
         except Exception:
             return ""
+
+    # ------------------------------------------------------------------ PR2 (tui-text-routing)
+
+    def begin_streaming_session(self, text_id: str | None = None) -> None:
+        """Start a new streaming segment (PR2: text.started).
+
+        Args:
+            text_id: Identifier for this segment. Used by dedup logic
+                to skip ``assistant_message`` events that arrive after
+                we already finalized via ``text.ended``.
+
+        Idempotent: if a streamer is already active, finalize it first
+        so the new segment starts fresh. This handles back-to-back
+        text.started events (e.g. when the LLM resumes streaming
+        after a tool call).
+        """
+        try:
+            tv = self.query_one(TranscriptView)
+            if tv._streamer is not None:
+                # Auto-finalize any previous segment that hasn't ended
+                # (e.g. duplicate text.started, or backend skipped
+                # text.ended). Otherwise deltas would bleed over.
+                tv.end_streaming()
+            tv.begin_streaming()
+            self._active_text_id = text_id
+        except Exception:
+            pass
+
+    def end_streaming_session(self) -> None:
+        """Finalize the current streaming segment (PR2: text.ended).
+
+        Safe to call when no segment is active (no-op). The final
+        content is kept as a folder (Ctrl+E to expand) so users can
+        revisit past turns.
+        """
+        try:
+            tv = self.query_one(TranscriptView)
+            if tv._streamer is None:
+                return
+            tv.end_streaming()
+            # Track the active id as finalized so a subsequent
+            # assistant_message fallback knows to skip.
+            if self._active_text_id is not None:
+                self._finalized_text_ids.add(self._active_text_id)
+            self._active_text_id = None
+        except Exception:
+            pass
 
     async def on_synthesize_input(self, message: SynthesizeInput) -> None:
         """Route ``ChatInput.Submitted`` / sidebar clicks to the session."""
