@@ -9,6 +9,8 @@ Each provider has its own adapter that encapsulates:
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from strategy_research.core.llm.provider import (
@@ -429,3 +431,132 @@ class TestChatResponseWithProvider:
         response = parse_chat_response(raw, provider_name="deepseek")
         assert response.content == "response"
         assert response.reasoning_content == "thinking"
+
+
+# ── Fallback Warning Tests ─────────────────────────────────────
+
+
+class TestFallbackWarning:
+    """Test FallbackAdapter warning behavior when thinking tokens detected.
+
+    The FallbackAdapter is used when a provider name is not registered.
+    It should:
+    - Return None for thinking extraction (graceful degradation)
+    - Log a warning when thinking-like content is detected
+    - Not raise an error
+
+    When no thinking data is present, no warning should be logged.
+    """
+
+    def test_no_thinking_no_warning(self, caplog):
+        adapter = FallbackAdapter()
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            result = adapter.extract_thinking_from_delta({"content": "normal response"})
+        assert result is None
+        assert len(caplog.records) == 0
+
+    def test_think_tag_triggers_warning(self, caplog):
+        adapter = FallbackAdapter()
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            result = adapter.extract_thinking_from_delta({"content": "<think>plan</think>response"})
+        assert result is None  # graceful, no error
+        assert len(caplog.records) >= 1
+        assert "FallbackAdapter" in caplog.records[0].message
+        assert "tag:<think>" in caplog.records[0].message
+
+    def test_reasoning_content_triggers_warning(self, caplog):
+        adapter = FallbackAdapter()
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            result = adapter.extract_thinking_from_delta({"reasoning_content": "thinking"})
+        assert result is None
+        assert len(caplog.records) >= 1
+        assert "field:reasoning_content" in caplog.records[0].message
+
+    def test_reasoning_field_triggers_warning(self, caplog):
+        adapter = FallbackAdapter()
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            result = adapter.extract_thinking_from_delta({"reasoning": "thinking"})
+        assert result is None
+        assert len(caplog.records) >= 1
+        assert "field:reasoning" in caplog.records[0].message
+
+    def test_message_with_think_triggers_warning(self, caplog):
+        adapter = FallbackAdapter()
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            result = adapter.extract_thinking_from_message({"content": "<think>plan</think>response"})
+        assert result is None
+        assert len(caplog.records) >= 1
+        assert "source=message" in caplog.records[0].message
+
+    def test_no_thinking_no_error(self):
+        """Verify no thinking data doesn't raise an error."""
+        adapter = FallbackAdapter()
+        # Empty delta
+        assert adapter.extract_thinking_from_delta({}) is None
+        # Content without thinking tags
+        assert adapter.extract_thinking_from_delta({"content": "hello"}) is None
+        # Empty message
+        assert adapter.extract_thinking_from_message({}) is None
+        # Message with empty content
+        assert adapter.extract_thinking_from_message({"content": ""}) is None
+
+    def test_warning_lists_all_indicators(self, caplog):
+        """Warning should list all detected indicators when multiple present."""
+        adapter = FallbackAdapter()
+        delta = {
+            "content": "<think>plan",
+            "reasoning_content": "more",
+        }
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            adapter.extract_thinking_from_delta(delta)
+        warning_msg = caplog.records[0].message
+        assert "tag:<think>" in warning_msg
+        assert "field:reasoning_content" in warning_msg
+
+    def test_registered_provider_no_warning(self, caplog):
+        """Registered providers should not trigger FallbackAdapter warning."""
+        with caplog.at_level(logging.WARNING, logger="strategy_research.core.llm.provider.fallback"):
+            adapter = MiniMaxAdapter()
+            result = adapter.extract_thinking_from_delta({"content": "<think>plan</think>response"})
+        # MiniMax adapter handles thinking properly, no fallback warning
+        assert result is not None
+        assert result == "plan"
+        assert len(caplog.records) == 0
+
+
+# ── Provider Name Pass-Through Tests ────────────────────────────
+
+
+class TestProviderNamePassThrough:
+    """Test that provider_name flows from openai_client → parser → adapter."""
+
+    def test_parse_stream_chunk_with_minimax(self):
+        from strategy_research.core.llm.parser import parse_stream_chunk
+
+        # MiniMax sends <think> tags in content
+        line = 'data: {"choices": [{"delta": {"content": "<think>plan</think>response"}}]}'
+        chunk = parse_stream_chunk(line, provider_name="minimax")
+        assert chunk is not None
+        assert chunk.delta_thinking == "plan"
+        assert chunk.delta_content == "response"
+
+    def test_parse_stream_chunk_without_provider(self):
+        from strategy_research.core.llm.parser import parse_stream_chunk
+
+        # Without provider → fallback → no thinking extraction
+        line = 'data: {"choices": [{"delta": {"content": "<think>plan</think>response"}}]}'
+        chunk = parse_stream_chunk(line)
+        assert chunk is not None
+        assert chunk.delta_thinking == ""
+        # Fallback also doesn't strip, so raw tags remain
+        assert "<think>" in chunk.delta_content
+
+    def test_parse_stream_chunk_with_deepseek(self):
+        from strategy_research.core.llm.parser import parse_stream_chunk
+
+        # DeepSeek uses reasoning_content field
+        line = 'data: {"choices": [{"delta": {"reasoning_content": "thinking", "content": "response"}}]}'
+        chunk = parse_stream_chunk(line, provider_name="deepseek")
+        assert chunk is not None
+        assert chunk.delta_thinking == "thinking"
+        assert chunk.delta_content == "response"

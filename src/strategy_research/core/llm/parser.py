@@ -240,12 +240,18 @@ def parse_tool_arguments(raw_args: str | Any) -> dict[str, Any]:
 # ── SSE stream parsing ──────────────────────────────────────────────
 
 
-def parse_stream_chunk(raw_line: str) -> StreamChunk | None:
+def parse_stream_chunk(raw_line: str, provider_name: str | None = None) -> StreamChunk | None:
     """Parse one SSE line into a StreamChunk.
 
     Format (OpenAI):
         data: {json}
         data: [DONE]
+
+    Args:
+        raw_line: SSE line string.
+        provider_name: Provider identifier (e.g. 'minimax', 'openai') used
+            to select the correct ProviderAdapter for thinking-token
+            extraction. When None, FallbackAdapter is used.
 
     Returns None for empty lines or the [DONE] sentinel.
     """
@@ -266,7 +272,7 @@ def parse_stream_chunk(raw_line: str) -> StreamChunk | None:
         logger.warning("malformed SSE payload: %r", payload_str[:80])
         return None
 
-    return _chunk_from_dict(payload)
+    return _chunk_from_dict(payload, provider_name)
 
 
 def _chunk_from_dict(

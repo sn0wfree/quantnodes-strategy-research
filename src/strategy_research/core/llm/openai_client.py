@@ -289,7 +289,7 @@ class OpenAICompatClient:
                     try:
                         _raise_for_status(response, self.config.provider)
                         for line in response.iter_lines():
-                            chunk = parse_stream_chunk(line)
+                            chunk = parse_stream_chunk(line, self.config.provider)
                             if chunk is not None:
                                 yield chunk
                                 if chunk.finish_reason:
@@ -336,7 +336,7 @@ class OpenAICompatClient:
                 try:
                     _raise_for_status(response, self.config.provider)
                     async for line in response.aiter_lines():
-                        chunk = parse_stream_chunk(line)
+                        chunk = parse_stream_chunk(line, self.config.provider)
                         if chunk is not None:
                             yield chunk
                             if chunk.finish_reason:
