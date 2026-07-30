@@ -48,6 +48,15 @@ class ProviderAdapter(ABC):
         """Default max output tokens."""
         return 8192
 
+    @property
+    def default_context_tokens(self) -> int:
+        """Default context window size (input + output).
+
+        Used as the static fallback when models.dev is unreachable.
+        Override per-provider for a more accurate value.
+        """
+        return 8192
+
     # ── Thinking Tokens ──────────────────────────────────────────
 
     @abstractmethod

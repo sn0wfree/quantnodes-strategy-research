@@ -1,0 +1,26 @@
+{
+  "_comment": "Bundled provider index. Lists each provider_id with its canonical model file. See docs/model-catalog-design.md.",
+  "_schema_version": 1,
+  "providers": {
+    "minimax": {
+      "models_dev_id": "minimax-cn-coding-plan",
+      "bundled_models": ["minimax-M3"]
+    },
+    "openai": {
+      "models_dev_id": "openai",
+      "bundled_models": ["gpt-4o-mini"]
+    },
+    "deepseek": {
+      "models_dev_id": "deepseek",
+      "bundled_models": ["deepseek-chat"]
+    },
+    "qwen": {
+      "models_dev_id": "alibaba",
+      "bundled_models": ["qwen-plus"]
+    },
+    "kimi": {
+      "models_dev_id": "moonshotai",
+      "bundled_models": ["kimi-k2.5"]
+    }
+  }
+}

@@ -33,6 +33,7 @@ dependencies = [
     "textual>=0.50",        # Full-screen Textual TUI (Phase B v0.4.0)
     "markdownify>=0.13",    # HTML → Markdown (Phase 2: Web I/O)
     "duckduckgo-search>=7.0",  # Free web search, no API key (Phase 2: Web I/O)
+    "tomli>=2.0; python_version<'3.11'",  # TOML parser for Python <3.11 (model_catalog)
 ]
 
 [project.optional-dependencies]

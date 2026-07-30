@@ -35,6 +35,28 @@ _REGISTRY: dict[str, type[ProviderAdapter]] = {
 }
 
 
+# Map internal provider names to models.dev provider_ids used in URL paths.
+# See docs/model-catalog-design.md.
+MODELS_DEV_ID: dict[str, str] = {
+    "minimax": "minimax-cn-coding-plan",
+    "minimax-cn": "minimax-cn",
+    "minimax-cn-coding-plan": "minimax-cn-coding-plan",
+    "minimax-coding-plan": "minimax-coding-plan",
+    "openai": "openai",
+    "deepseek": "deepseek",
+    "qwen": "alibaba",
+    "kimi": "moonshotai",
+}
+
+
+def models_dev_id(provider: str) -> str:
+    """Map internal provider name to models.dev provider_id.
+
+    Unknown providers return the lowercase input unchanged.
+    """
+    return MODELS_DEV_ID.get(provider, provider.lower())
+
+
 def get_provider(name: str | None) -> ProviderAdapter:
     """Get provider adapter by name. Unknown providers get fallback.
 
