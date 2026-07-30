@@ -110,6 +110,64 @@ class TestProviderDefaults:
         assert "moonshot" in defaults["base_url"]
 
 
+# ── default_context_tokens Tests ─────────────────────────────────
+
+
+class TestDefaultContextTokens:
+    """Each provider must expose a class-level default context window.
+
+    Used as the static fallback when models.dev is unreachable.
+    """
+
+    def test_minimax_default_context_tokens(self):
+        from strategy_research.core.llm.provider.minimax import MiniMaxAdapter
+
+        assert MiniMaxAdapter().default_context_tokens == 200000
+
+    def test_openai_default_context_tokens(self):
+        from strategy_research.core.llm.provider.openai import OpenAIAdapter
+
+        assert OpenAIAdapter().default_context_tokens == 128000
+
+    def test_deepseek_default_context_tokens(self):
+        from strategy_research.core.llm.provider.deepseek import DeepSeekAdapter
+
+        assert DeepSeekAdapter().default_context_tokens == 64000
+
+    def test_qwen_default_context_tokens(self):
+        from strategy_research.core.llm.provider.qwen import QwenAdapter
+
+        assert QwenAdapter().default_context_tokens == 131072
+
+    def test_kimi_default_context_tokens(self):
+        from strategy_research.core.llm.provider.kimi import KimiAdapter
+
+        assert KimiAdapter().default_context_tokens == 128000
+
+    def test_base_default_context_tokens_inherits_8192(self):
+        """Base class default is 8192 (conservative)."""
+        from strategy_research.core.llm.provider.base import ProviderAdapter
+
+        # Direct check via a stand-in adapter (avoids needing abc subclass)
+        class Stub(ProviderAdapter):
+            @property
+            def name(self): return "stub"
+
+            @property
+            def default_base_url(self): return ""
+
+            @property
+            def default_model(self): return ""
+
+            def extract_thinking_from_delta(self, delta):
+                return None
+
+            def extract_thinking_from_message(self, message):
+                return None
+
+        assert Stub().default_context_tokens == 8192
+
+
 # ── Thinking Token Extraction Tests ─────────────────────────────
 
 
