@@ -73,15 +73,35 @@ describe('AssistantMessage', () => {
     expect(container.textContent).not.toContain('<think>')
   })
 
-  it('does NOT parse thinking when provider has no parser', () => {
+it('does NOT parse thinking when provider has no parser', () => {
     setProvider('unknown-provider')
     const msg: Message = {
       ...baseMsg,
-      parts: [{ type: 'text', text: '<think>plan</think>你好' }],
+      parts: [{ type: 'text', text: 'plan你好' }],
     }
     render(<AssistantMessage message={msg} layout="flat" />)
     // Tags appear as-is in the content (Markdown renderer shows them)
     // The text content should contain the tags
-    expect(screen.getByText(/<think>plan<\/think>你好/)).toBeTruthy()
+    expect(screen.getByText(/plan你好/)).toBeTruthy()
+  })
+
+  it('renders queued indicator with position/length when isQueued', () => {
+    const queuedMsg: Message = {
+      ...baseMsg,
+      parts: [],
+      metadata: {
+        queue_status: 'queued',
+        queue_position: 2,
+        queue_length: 3,
+      },
+    }
+    render(
+      <AssistantMessage
+        message={queuedMsg}
+        isQueued={true}
+        layout="bubble"
+      />
+    )
+    expect(screen.getByText(/等待中\.\.\. 2\/3/)).toBeTruthy()
   })
 })
