@@ -16,6 +16,21 @@ def client():
     return TestClient(app)
 
 
+def _make_llm_config(provider="minimax", model="minimax-M3", **overrides):
+    """Build a mock LLMConfig for patching."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    # Build directly to avoid the bridge layer
+    defaults = dict(
+        provider=provider,
+        model=model,
+        base_url="https://example.com",
+        api_key="",
+    )
+    defaults.update(overrides)
+    return LLMConfig(**defaults)
+
+
 def test_info_includes_model_info_when_llm_configured(client):
     """When LLM is configured, system/info includes model_info."""
     fake_llm = {
@@ -24,9 +39,13 @@ def test_info_includes_model_info_when_llm_configured(client):
         "model": "minimax-M3",
         "api_key_source": "env",
     }
+    cfg = _make_llm_config(provider="minimax", model="minimax-M3")
     with patch(
         "strategy_research.cli.llm_config_check.check_llm_config",
         return_value=fake_llm,
+    ), patch(
+        "strategy_research.core.llm.config.LLMConfig.load",
+        return_value=cfg,
     ):
         resp = client.get("/api/system/info")
     assert resp.status_code == 200
@@ -47,13 +66,47 @@ def test_info_model_info_none_when_unconfigured(client):
         "model": "unknown",
         "api_key_source": "unknown",
     }
+    cfg = _make_llm_config(provider="auto", model="unknown")
     with patch(
         "strategy_research.cli.llm_config_check.check_llm_config",
         return_value=fake_llm,
+    ), patch(
+        "strategy_research.core.llm.config.LLMConfig.load",
+        return_value=cfg,
     ):
         resp = client.get("/api/system/info")
     assert resp.status_code == 200
     assert resp.json()["model_info"] is None
+
+
+def test_info_respects_user_config_override(client):
+    """User-configured model_context_tokens appears in model_info."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    fake_llm = {
+        "configured": True,
+        "provider": "minimax",
+        "model": "minimax-M3",
+        "api_key_source": "env",
+    }
+    cfg = LLMConfig(
+        provider="minimax",
+        model="minimax-M3",
+        model_context_tokens=2_500_000,
+    )
+    with patch(
+        "strategy_research.cli.llm_config_check.check_llm_config",
+        return_value=fake_llm,
+    ), patch(
+        "strategy_research.core.llm.config.LLMConfig.load",
+        return_value=cfg,
+    ):
+        resp = client.get("/api/system/info")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["model_info"]["context_tokens"] == 2_500_000
+    # The legacy dict also reflects the override
+    assert body["llm"]["model_context_tokens"] == 2_500_000
 
 
 def test_refresh_endpoint_returns_model_info(client):
@@ -64,9 +117,13 @@ def test_refresh_endpoint_returns_model_info(client):
         "model": "gpt-4o-mini",
         "api_key_source": "env",
     }
+    cfg = _make_llm_config(provider="openai", model="gpt-4o-mini")
     with patch(
         "strategy_research.cli.llm_config_check.check_llm_config",
         return_value=fake_llm,
+    ), patch(
+        "strategy_research.core.llm.config.LLMConfig.load",
+        return_value=cfg,
     ):
         resp = client.post(
             "/api/system/model-info/refresh",
@@ -87,9 +144,13 @@ def test_refresh_endpoint_uses_current_config_when_no_body(client):
         "model": "minimax-M3",
         "api_key_source": "env",
     }
+    cfg = _make_llm_config(provider="minimax", model="minimax-M3")
     with patch(
         "strategy_research.cli.llm_config_check.check_llm_config",
         return_value=fake_llm,
+    ), patch(
+        "strategy_research.core.llm.config.LLMConfig.load",
+        return_value=cfg,
     ):
         resp = client.post("/api/system/model-info/refresh", json={})
     assert resp.status_code == 200
@@ -105,9 +166,13 @@ def test_refresh_endpoint_400_when_no_llm(client):
         "model": "unknown",
         "api_key_source": "unknown",
     }
+    cfg = _make_llm_config(provider="auto", model="unknown")
     with patch(
         "strategy_research.cli.llm_config_check.check_llm_config",
         return_value=fake_llm,
+    ), patch(
+        "strategy_research.core.llm.config.LLMConfig.load",
+        return_value=cfg,
     ):
         resp = client.post("/api/system/model-info/refresh", json={})
     assert resp.status_code == 400

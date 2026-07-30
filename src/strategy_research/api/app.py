@@ -183,19 +183,24 @@ async def _refresh_model_catalog_async() -> None:
 
     Runs 5s after startup so the first user request doesn't pay the
     network cost. Failure is silent (log warning; bundled data is used).
+
+    User-config overrides on ``model_context_tokens`` etc. are passed
+    through so the refreshed entry reflects user expectations.
     """
     await asyncio.sleep(5)
     try:
-        from ..cli.llm_config_check import check_llm_config
+        from ..core.llm.config import LLMConfig
         from ..core.llm.model_catalog import refresh_model_info
 
-        llm = check_llm_config()
-        provider = llm.get("provider")
-        model = llm.get("model")
-        if not provider or not model or provider == "unknown":
+        llm_config = LLMConfig.load()
+        provider = llm_config.provider
+        model = llm_config.model
+        if not provider or not model or provider == "auto":
             logger.debug("Model catalog refresh skipped: LLM not configured")
             return
-        info = await refresh_model_info(provider, model)
+        info = await refresh_model_info(
+            provider, model, user_config=llm_config
+        )
         logger.info(
             "Model catalog refreshed: %s/%s context=%d source=%s",
             info.provider,

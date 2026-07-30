@@ -24,11 +24,6 @@ class QwenAdapter(ProviderAdapter):
     def default_model(self) -> str:
         return "qwen-plus"
 
-    @property
-    def default_context_tokens(self) -> int:
-        # qwen-plus is 1M as of 2026; earlier versions are 128K.
-        return 131072
-
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         content = delta.get("reasoning_content")
         if content:

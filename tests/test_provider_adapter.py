@@ -114,35 +114,12 @@ class TestProviderDefaults:
 
 
 class TestDefaultContextTokens:
-    """Each provider must expose a class-level default context window.
+    """The base class default is 8192.
 
-    Used as the static fallback when models.dev is unreachable.
+    Concrete providers do NOT override this — the bundled TOML in
+    core/llm/data/providers/<id>/<model>.toml is the authoritative
+    "bundled" fallback, and user LLMConfig overrides win over it.
     """
-
-    def test_minimax_default_context_tokens(self):
-        from strategy_research.core.llm.provider.minimax import MiniMaxAdapter
-
-        assert MiniMaxAdapter().default_context_tokens == 200000
-
-    def test_openai_default_context_tokens(self):
-        from strategy_research.core.llm.provider.openai import OpenAIAdapter
-
-        assert OpenAIAdapter().default_context_tokens == 128000
-
-    def test_deepseek_default_context_tokens(self):
-        from strategy_research.core.llm.provider.deepseek import DeepSeekAdapter
-
-        assert DeepSeekAdapter().default_context_tokens == 64000
-
-    def test_qwen_default_context_tokens(self):
-        from strategy_research.core.llm.provider.qwen import QwenAdapter
-
-        assert QwenAdapter().default_context_tokens == 131072
-
-    def test_kimi_default_context_tokens(self):
-        from strategy_research.core.llm.provider.kimi import KimiAdapter
-
-        assert KimiAdapter().default_context_tokens == 128000
 
     def test_base_default_context_tokens_inherits_8192(self):
         """Base class default is 8192 (conservative)."""
@@ -166,6 +143,35 @@ class TestDefaultContextTokens:
                 return None
 
         assert Stub().default_context_tokens == 8192
+
+    def test_concrete_providers_do_not_override_default_context_tokens(self):
+        """Concrete providers must rely on bundled TOML, not class defaults.
+
+        Having a hardcoded ``default_context_tokens`` on the provider
+        would silently take effect when the bundled TOML is missing,
+        effectively hiding the default fallback. The catalog's 3-layer
+        fallback chain handles this correctly without an override.
+        """
+        from strategy_research.core.llm.provider.deepseek import DeepSeekAdapter
+        from strategy_research.core.llm.provider.kimi import KimiAdapter
+        from strategy_research.core.llm.provider.minimax import MiniMaxAdapter
+        from strategy_research.core.llm.provider.openai import OpenAIAdapter
+        from strategy_research.core.llm.provider.qwen import QwenAdapter
+
+        for adapter_cls in (
+            MiniMaxAdapter,
+            OpenAIAdapter,
+            DeepSeekAdapter,
+            QwenAdapter,
+            KimiAdapter,
+        ):
+            # Should NOT have an override
+            assert (
+                adapter_cls.default_context_tokens
+                is adapter_cls.__base__.default_context_tokens
+            )
+            # And that default is 8192
+            assert adapter_cls().default_context_tokens == 8192
 
 
 # ── Thinking Token Extraction Tests ─────────────────────────────

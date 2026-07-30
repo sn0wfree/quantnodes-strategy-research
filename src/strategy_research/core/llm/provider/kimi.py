@@ -23,12 +23,6 @@ class KimiAdapter(ProviderAdapter):
     def default_model(self) -> str:
         return "moonshot-v1-8k"
 
-    @property
-    def default_context_tokens(self) -> int:
-        # moonshot-v1-8k is 8K; kimi-k2 is 128K. Default to 128K
-        # since users typically use kimi-k2.5 (bundled default).
-        return 128000
-
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         return None
 

@@ -23,11 +23,6 @@ class DeepSeekAdapter(ProviderAdapter):
     def default_model(self) -> str:
         return "deepseek-chat"
 
-    @property
-    def default_context_tokens(self) -> int:
-        # deepseek-chat is 1M as of 2026; most users still use 64K.
-        return 64000
-
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         content = delta.get("reasoning_content")
         if content:

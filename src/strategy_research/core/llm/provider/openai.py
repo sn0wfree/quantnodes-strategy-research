@@ -28,11 +28,6 @@ class OpenAIAdapter(ProviderAdapter):
     def default_max_tokens(self) -> int:
         return 16384
 
-    @property
-    def default_context_tokens(self) -> int:
-        # gpt-4o-mini is 128K. Older models (gpt-3.5-turbo) are 16K; use 128K.
-        return 128000
-
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         content = delta.get("reasoning")
         if content and isinstance(content, str):

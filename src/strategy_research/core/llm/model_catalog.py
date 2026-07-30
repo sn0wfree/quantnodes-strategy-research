@@ -244,6 +244,98 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
+def _from_user_config(
+    user_config: Any,
+    provider: str,
+    model: str,
+) -> ModelInfo:
+    """Build a ModelInfo from user-supplied LLMConfig overrides.
+
+    Only the fields that the user explicitly set are used. Other fields
+    are left at the LLMConfig defaults (which may be None) — the
+    frontend treats them as "unknown".
+    """
+    dev_id = models_dev_id(provider)
+    return ModelInfo(
+        context_tokens=int(user_config.model_context_tokens),
+        max_output_tokens=(
+            int(user_config.model_max_output_tokens)
+            if user_config.model_max_output_tokens is not None
+            else 4096
+        ),
+        supports_vision=bool(user_config.model_supports_vision) or False,
+        supports_audio=False,
+        supports_pdf=False,
+        supports_tools=True,
+        supports_reasoning=bool(user_config.model_supports_reasoning) or False,
+        supports_structured_output=False,
+        cost_input=None,
+        cost_output=None,
+        cost_cache_read=None,
+        cost_cache_write=None,
+        description="User-configured override",
+        release_date=None,
+        provider=provider,
+        model=model,
+        models_dev_id=dev_id,
+        source="fetched",  # treat as authoritative
+        fetched_at=_now_iso(),
+    )
+
+
+def _merge_user_on_fetched(
+    user_config: Any,
+    fetched: ModelInfo,
+    provider: str,
+    model: str,
+) -> ModelInfo:
+    """Apply user_config overrides on top of a fetched ModelInfo.
+
+    Returns a new ModelInfo using:
+      - context_tokens / max_output_tokens: user_config if set, else fetched
+      - all other fields: from fetched
+
+    Used by refresh_async so that even after fetching, the user's
+    declared context window is what the UI sees.
+    """
+    dev_id = models_dev_id(provider)
+    return ModelInfo(
+        context_tokens=int(
+            getattr(user_config, "model_context_tokens", None)
+            or fetched.context_tokens
+        ),
+        max_output_tokens=int(
+            getattr(user_config, "model_max_output_tokens", None)
+            or fetched.max_output_tokens
+        ),
+        supports_vision=(
+            bool(user_config.model_supports_vision)
+            if user_config.model_supports_vision is not None
+            else fetched.supports_vision
+        ),
+        supports_audio=fetched.supports_audio,
+        supports_pdf=fetched.supports_pdf,
+        supports_tools=fetched.supports_tools,
+        supports_reasoning=(
+            bool(user_config.model_supports_reasoning)
+            if user_config.model_supports_reasoning is not None
+            else fetched.supports_reasoning
+        ),
+        supports_structured_output=fetched.supports_structured_output,
+        cost_input=fetched.cost_input,
+        cost_output=fetched.cost_output,
+        cost_cache_read=fetched.cost_cache_read,
+        cost_cache_write=fetched.cost_cache_write,
+        description=fetched.description,
+        release_date=fetched.release_date,
+        provider=provider,
+        model=model,
+        models_dev_id=dev_id,
+        source="fetched",
+        fetched_at=fetched.fetched_at,
+    )
+
+
 # ── Disk cache ───────────────────────────────────────────────────────
 
 
@@ -321,34 +413,55 @@ class ModelCatalog:
 
     # ── Public: synchronous lookup ─────────────────────────────────
 
-    def get_info(self, provider: str, model: str) -> ModelInfo:
-        """Return ModelInfo using cache → bundled → fallback.
+    def get_info(
+        self,
+        provider: str,
+        model: str,
+        *,
+        user_config: Any | None = None,
+    ) -> ModelInfo:
+        """Return ModelInfo using user_config → cache → bundled → fallback.
+
+        Resolution order:
+          1. user_config (LLMConfig with model_context_tokens set)
+          2. In-memory cache
+          3. Disk cache (fresh or stale — both serve as "have cached data")
+          4. Bundled TOML in core/llm/data/providers/<id>/<model>.toml
+          5. Default fallback (_default_fallback.json)
 
         Always returns successfully. Latency is bounded by the disk
         read at <1ms.
         """
+        # 1. User config — highest priority (note: NOT cached in memory,
+        # because a different user_config value should still take effect
+        # on the same call site).
+        if user_config is not None and getattr(
+            user_config, "model_context_tokens", None
+        ) is not None:
+            return _from_user_config(user_config, provider, model)
+
         dev_id = models_dev_id(provider)
         cache_key = f"{dev_id}/{model}"
 
-        # 1. In-memory cache
+        # 2. In-memory cache
         if cache_key in self._memory_cache:
             return self._memory_cache[cache_key]
 
-        # 2. Fresh disk cache
+        # 3. Disk cache (any entry, fresh or stale)
         cache = _read_cache()
         entry = cache.get(cache_key)
-        if entry and _is_cache_fresh(entry):
+        if entry:
             info = self._entry_to_model_info(entry, source_override="cached")
             self._memory_cache[cache_key] = info
             return info
 
-        # 3. Bundled data
+        # 4. Bundled data
         bundled_info = self._lookup_bundled(provider, model, dev_id)
         if bundled_info is not None:
             self._memory_cache[cache_key] = bundled_info
             return bundled_info
 
-        # 4. Generic fallback
+        # 5. Generic fallback
         info = _fallback_to_model_info(
             self._bundled_fallback,
             provider=provider,
@@ -362,12 +475,25 @@ class ModelCatalog:
 
     # ── Public: async refresh ──────────────────────────────────────
 
-    async def refresh_async(self, provider: str, model: str) -> ModelInfo:
+    async def refresh_async(
+        self,
+        provider: str,
+        model: str,
+        *,
+        user_config: Any | None = None,
+    ) -> ModelInfo:
         """Fetch from models.dev, update cache, return latest.
 
-        Tries each base URL in order; updates the disk cache on success
-        and returns the fetched entry. On total failure, falls back to
-        bundled / generic fallback and returns that instead.
+        Tries each base URL in order; updates the disk cache on success.
+
+        If user_config supplies ``model_context_tokens``, the fetched
+        values for capability fields (vision/reasoning/cost) are still
+        applied, but user_config wins for context_tokens /
+        max_output_tokens. The result is then written to disk cache so
+        subsequent get_info() calls return immediately.
+
+        On total failure, returns whatever get_info() resolves to
+        (cached, bundled, or fallback).
         """
         dev_id = models_dev_id(provider)
         cache_key = f"{dev_id}/{model}"
@@ -379,7 +505,7 @@ class ModelCatalog:
             except (tomllib.TOMLDecodeError, ValueError):
                 parsed = None
             if parsed is not None:
-                info = _toml_to_model_info(
+                fetched_info = _toml_to_model_info(
                     parsed,
                     provider=provider,
                     model=model,
@@ -387,22 +513,24 @@ class ModelCatalog:
                     source="fetched",
                     fetched_at=_now_iso(),
                 )
+                # Merge user_config overrides on top of fetched
+                if user_config is not None and getattr(
+                    user_config, "model_context_tokens", None
+                ) is not None:
+                    final = _merge_user_on_fetched(
+                        user_config, fetched_info, provider, model
+                    )
+                else:
+                    final = fetched_info
                 # Persist + cache
                 cache = _read_cache()
-                cache[cache_key] = info.to_dict()
+                cache[cache_key] = final.to_dict()
                 _write_cache(cache)
-                self._memory_cache[cache_key] = info
-                return info
+                self._memory_cache[cache_key] = final
+                return final
 
         # Refresh failed: serve cached (even if stale) or fall back
-        cache = _read_cache()
-        entry = cache.get(cache_key)
-        if entry:
-            info = self._entry_to_model_info(entry, source_override="cached")
-            self._memory_cache[cache_key] = info
-            return info
-
-        return self.get_info(provider, model)
+        return self.get_info(provider, model, user_config=user_config)
 
     async def refresh_all_async(self, providers: list[str]) -> int:
         """Refresh a list of (provider, model) pairs concurrently.
@@ -572,14 +700,26 @@ def reset_cache_for_tests() -> None:
     _default_catalog = None
 
 
-def get_model_info(provider: str, model: str) -> ModelInfo:
+def get_model_info(
+    provider: str,
+    model: str,
+    *,
+    user_config: Any | None = None,
+) -> ModelInfo:
     """Convenience: get info from the default catalog."""
-    return get_default_catalog().get_info(provider, model)
+    return get_default_catalog().get_info(provider, model, user_config=user_config)
 
 
-async def refresh_model_info(provider: str, model: str) -> ModelInfo:
+async def refresh_model_info(
+    provider: str,
+    model: str,
+    *,
+    user_config: Any | None = None,
+) -> ModelInfo:
     """Convenience: refresh info from the default catalog."""
-    return await get_default_catalog().refresh_async(provider, model)
+    return await get_default_catalog().refresh_async(
+        provider, model, user_config=user_config
+    )
 
 
 __all__ = [

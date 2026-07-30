@@ -37,6 +37,8 @@ from typing import Any, Mapping
 
 from .quantnodes_bridge import (
     CONFIG_PATH as QUANTNODES_LLM_JSON,
+)
+from .quantnodes_bridge import (
     load_quantnodes_llm_config,
 )
 
@@ -130,6 +132,15 @@ class LLMConfig:
 
     # ── Thinking ─────────────────────────────────
     enable_thinking: bool = True                   # emit thinking tokens (when provider supports them)
+
+    # ── Model metadata overrides ─────────────────
+    # When set, these values override whatever the ModelCatalog would
+    # otherwise derive (from models.dev fetch or bundled fallback). When
+    # None, the catalog resolution path is used as-is.
+    model_context_tokens: int | None = None        # e.g. 2000000
+    model_max_output_tokens: int | None = None     # e.g. 32000
+    model_supports_vision: bool | None = None
+    model_supports_reasoning: bool | None = None
 
     # ── Methods ──────────────────────────────────
 
@@ -275,18 +286,12 @@ def _try_load_dotenv() -> None:
 
 
 def _load_bridge_dict(path: Path) -> dict[str, Any]:
-    """Read the bridge config and translate into A dataclass field names.
+    """Read the bridge config and translate into LLMConfig field names.
 
-    Translator rules:
-        provider   → provider
-        model      → model
-        base_url   → base_url
-        api_key    → api_key   (env:VAR already resolved by the bridge)
-        timeout    → timeout_s (float)
-        max_retries→ max_retries (int)
-        max_tokens → max_tokens (int)
-        enabled=False → empty dict (caller treats as disabled)
     Plus: provider→base_url fallback when the JSON omitted base_url.
+
+    Unknown keys are passed through verbatim so user-config overrides
+    (model_context_tokens, etc.) survive the bridge translation.
 
     Returns {} silently when the file is missing or the section is empty —
     callers (the load() cascade) then fall through to env vars and code
@@ -300,39 +305,28 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
 
     out: dict[str, Any] = {}
 
-    provider = raw.get("provider")
-    if provider:
-        out["provider"] = str(provider)
+    # Pass through all non-empty fields. _merge_flat in LLMConfig silently
+    # ignores unknown keys; this preserves user-config extension fields.
+    for key, value in raw.items():
+        if value is None or value == "":
+            continue
+        out[key] = value
 
-    model = raw.get("model")
-    if model:
-        out["model"] = str(model)
+    # Typed conversions
+    _coerce_int(out, "timeout_s", raw.get("timeout"))
+    _coerce_int(out, "max_retries", raw.get("max_retries"))
+    _coerce_int(out, "max_tokens", raw.get("max_tokens"))
+    if "timeout_s" in out:
+        out.pop("timeout", None)
 
-    base_url = raw.get("base_url")
-    if base_url:
-        out["base_url"] = str(base_url)
+    for int_field in (
+        "model_context_tokens",
+        "model_max_output_tokens",
+    ):
+        _coerce_int(out, int_field, raw.get(int_field))
 
-    api_key = raw.get("api_key")
-    if api_key:
-        out["api_key"] = str(api_key)
-
-    if (v := raw.get("timeout")) is not None and v != "":
-        try:
-            out["timeout_s"] = float(v)
-        except (TypeError, ValueError):
-            logger.debug("bridge: cannot parse timeout %r as float", v)
-
-    if (v := raw.get("max_retries")) is not None and v != "":
-        try:
-            out["max_retries"] = int(v)
-        except (TypeError, ValueError):
-            logger.debug("bridge: cannot parse max_retries %r as int", v)
-
-    if (v := raw.get("max_tokens")) is not None and v != "":
-        try:
-            out["max_tokens"] = int(v)
-        except (TypeError, ValueError):
-            logger.debug("bridge: cannot parse max_tokens %r as int", v)
+    for bool_field in ("model_supports_vision", "model_supports_reasoning"):
+        _coerce_bool(out, bool_field, raw.get(bool_field))
 
     # Provider→base_url/model/max_tokens fallback when the JSON omitted them.
     if (p := out.get("provider")):
@@ -346,6 +340,28 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
                 out["max_tokens"] = defaults["max_tokens"]
 
     return out
+
+
+def _coerce_int(out: dict[str, Any], dst: str, src: Any) -> None:
+    """Convert ``src`` to int and write to ``out[dst]``. No-op on failure."""
+    if src is None or src == "":
+        return
+    try:
+        out[dst] = int(src)
+    except (TypeError, ValueError):
+        logger.debug("bridge: cannot parse %s %r as int", dst, src)
+
+
+def _coerce_bool(out: dict[str, Any], dst: str, src: Any) -> None:
+    """Convert ``src`` to bool and write to ``out[dst]``. No-op on failure."""
+    if src is None or src == "":
+        return
+    if isinstance(src, bool):
+        out[dst] = src
+    elif isinstance(src, str):
+        out[dst] = src.lower() in ("1", "true", "yes", "on")
+    else:
+        out[dst] = bool(src)
 
 
 def _env_to_overrides(env: Mapping[str, str]) -> dict[str, Any]:

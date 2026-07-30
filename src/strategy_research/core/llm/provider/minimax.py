@@ -36,13 +36,6 @@ class MiniMaxAdapter(ProviderAdapter):
     def default_max_tokens(self) -> int:
         return 32000
 
-    @property
-    def default_context_tokens(self) -> int:
-        # Conservative fallback: minimax-M3 (minimax-cn-coding-plan) is 1M,
-        # but older generations are 200K. Use 200K so callers see "we're
-        # approaching the limit" before the actual limit.
-        return 200000
-
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         content = delta.get("content", "")
         match = self.THINK_PATTERN.search(content)

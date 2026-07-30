@@ -59,21 +59,29 @@ async def system_info():
     # Workspace path
     workspace = os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd()))
 
-    # LLM status
+    # LLM status (legacy dict for frontend compat)
     try:
         llm = check_llm_config()
     except Exception:
         llm = {"configured": False, "provider": "unknown", "model": "unknown", "api_key_source": "unknown"}
 
-    # Model info from catalog (context window, capabilities, cost)
+    # Load full LLMConfig (carries user overrides) and resolve model info
     model_info = None
     try:
+        from strategy_research.core.llm.config import LLMConfig
         from strategy_research.core.llm.model_catalog import get_model_info
 
-        provider = llm.get("provider") or "unknown"
-        model = llm.get("model") or "unknown"
-        if provider != "unknown":
-            info = get_model_info(provider, model)
+        llm_config = LLMConfig.load()
+        provider = llm_config.provider
+        model = llm_config.model
+        if provider and provider != "auto" and model:
+            info = get_model_info(provider, model, user_config=llm_config)
+            # Reflect user-config overrides in the legacy dict too so
+            # the settings modal sees the same numbers.
+            if llm_config.model_context_tokens is not None:
+                llm["model_context_tokens"] = llm_config.model_context_tokens
+            if llm_config.model_max_output_tokens is not None:
+                llm["model_max_output_tokens"] = llm_config.model_max_output_tokens
             model_info = info.to_dict()
     except Exception as exc:
         logger.debug("Failed to load model info: %s", exc)
@@ -96,29 +104,35 @@ async def refresh_model_info(body: ModelInfoRefreshRequest):
     """Force-refresh model metadata from models.dev.
 
     Body is optional; if omitted, refreshes the currently configured
-    provider/model. Returns the ModelInfo that was written to cache.
+    provider/model. User-config overrides (model_context_tokens etc.)
+    are applied on top of fetched values so the user's declared
+    context window always wins.
     """
-    from strategy_research.cli.llm_config_check import check_llm_config
+    from strategy_research.core.llm.config import LLMConfig
     from strategy_research.core.llm.model_catalog import refresh_model_info
 
+    # Resolve provider/model — explicit body wins, else current LLMConfig
     provider = body.provider
     model = body.model
-    if not provider or not model or provider == "unknown":
-        try:
-            llm = check_llm_config()
-            provider = provider or llm.get("provider")
-            model = model or llm.get("model")
-        except Exception:
-            pass
+    user_config: LLMConfig | None = None
+    try:
+        user_config = LLMConfig.load()
+        if not provider or not model:
+            provider = provider or user_config.provider
+            model = model or user_config.model
+    except Exception:
+        pass
 
-    if not provider or not model or provider == "unknown" or model == "unknown":
+    if not provider or not model or provider == "auto" or model == "unknown":
         raise HTTPException(
             status_code=400,
             detail="provider and model are required (or configure LLM first)",
         )
 
     try:
-        info = await refresh_model_info(provider, model)
+        info = await refresh_model_info(
+            provider, model, user_config=user_config
+        )
         return info.to_dict()
     except Exception as exc:
         logger.exception("Model info refresh failed")

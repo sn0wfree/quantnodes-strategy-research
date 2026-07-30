@@ -206,3 +206,148 @@ def test_get_info_returns_cached_when_disk_cache_exists_but_no_bundled():
     assert info.context_tokens == 32000
     # Either 'cached' (fresh) or 'fallback' (stale). Cached since just-written.
     assert info.source in ("cached", "fallback")
+
+
+# ── 6. User config override (highest priority) ────────────────────────
+
+
+def test_user_config_context_tokens_overrides_bundled():
+    """LLMConfig.model_context_tokens wins over bundled data."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    cfg = LLMConfig(
+        provider="minimax",
+        model="minimax-M3",
+        model_context_tokens=2_000_000,
+    )
+    info = ModelCatalog().get_info("minimax", "minimax-M3", user_config=cfg)
+    assert info.context_tokens == 2_000_000
+    # Bundled source claimed 1M; user override applied.
+    assert info.source == "fetched"  # user_config is treated as authoritative
+
+
+def test_user_config_can_be_partial():
+    """Only model_context_tokens set; other fields fall through to defaults."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    cfg = LLMConfig(
+        provider="minimax",
+        model="minimax-M3",
+        model_context_tokens=123_456,
+    )
+    info = ModelCatalog().get_info("minimax", "minimax-M3", user_config=cfg)
+    assert info.context_tokens == 123_456
+    # max_output_tokens falls back to a sensible default (from
+    # _from_user_config) since user didn't set it
+    assert info.max_output_tokens == 4096
+    # Vision/reasoning defaults to False unless user sets them
+    assert info.supports_vision is False
+
+
+def test_user_config_none_falls_through_to_bundled():
+    """When user_config is given but model_context_tokens is None, fall through."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    cfg = LLMConfig(
+        provider="minimax",
+        model="minimax-M3",
+        model_context_tokens=None,
+    )
+    info = ModelCatalog().get_info("minimax", "minimax-M3", user_config=cfg)
+    # Falls through to bundled (or disk cache if present)
+    assert info.source in ("bundled", "cached")
+    assert info.context_tokens == 1_000_000  # bundled value
+
+
+def test_user_config_wins_over_disk_cache():
+    """User config overrides even when disk cache has a fresh entry."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    # Write a fresh disk cache entry with a different context value
+    cache_path = Path(os.environ["HOME"]) / ".quantnodes" / "model_catalog.json"
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps({
+        "minimax-cn-coding-plan/minimax-M3": {
+            "provider": "minimax",
+            "model": "minimax-M3",
+            "models_dev_id": "minimax-cn-coding-plan",
+            "context_tokens": 999_000,
+            "max_output_tokens": 64000,
+            "supports_vision": True,
+            "supports_audio": False,
+            "supports_pdf": False,
+            "supports_tools": True,
+            "supports_reasoning": True,
+            "supports_structured_output": False,
+            "cost_input": None,
+            "cost_output": None,
+            "cost_cache_read": None,
+            "cost_cache_write": None,
+            "description": "cached",
+            "release_date": "2026-06-01",
+            "source": "fetched",
+            "fetched_at": "2026-07-30T00:00:00+00:00",
+        }
+    }))
+
+    cfg = LLMConfig(
+        provider="minimax",
+        model="minimax-M3",
+        model_context_tokens=2_000_000,
+    )
+    info = ModelCatalog().get_info("minimax", "minimax-M3", user_config=cfg)
+    # User config wins over disk cache
+    assert info.context_tokens == 2_000_000
+    # Not from disk cache or bundled
+    assert info.source == "fetched"
+
+
+# ── 7. Refresh merges user_config on top of fetched ────────────────────
+
+
+def test_refresh_async_merges_user_overrides_on_top_of_fetched(tmp_path):
+    """When both fetch and user_config succeed, user wins for context_tokens."""
+    from strategy_research.core.llm.config import LLMConfig
+
+    cfg = LLMConfig(
+        provider="openai",
+        model="gpt-4o-mini",
+        model_context_tokens=500_000,
+    )
+
+    async def run():
+        catalog = ModelCatalog()
+        return await catalog.refresh_async(
+            "openai", "gpt-4o-mini", user_config=cfg
+        )
+
+    info = asyncio.run(run())
+    # User override wins
+    assert info.context_tokens == 500_000
+    # Other fields come from fetched (gpt-4o-mini supports vision)
+    assert info.supports_vision is True
+    assert info.supports_tools is True
+
+
+def test_refresh_async_failure_falls_back_to_user_config():
+    """When fetch fails, user_config still serves the request."""
+    from unittest.mock import patch
+    from strategy_research.core.llm.config import LLMConfig
+
+    cfg = LLMConfig(
+        provider="openai",
+        model="gpt-4o-mini",
+        model_context_tokens=750_000,
+    )
+
+    async def run():
+        catalog = ModelCatalog()
+        with patch.object(
+            catalog, "_fetch_toml", return_value=None,
+        ):
+            return await catalog.refresh_async(
+                "openai", "gpt-4o-mini", user_config=cfg
+            )
+
+    info = asyncio.run(run())
+    assert info.context_tokens == 750_000  # user config preserved
