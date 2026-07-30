@@ -99,6 +99,21 @@ export function AssistantMessage({
           if (item.type === 'tool_group') {
             return <ToolCallGroup key={idx} toolCalls={item.calls} />
           }
+
+          // Auto-collapse thinking when text content follows
+          if (item.type === 'single' && item.part.type === 'thinking') {
+            const nextItem = groupedParts[idx + 1]
+            const hasTextAfter = nextItem?.type === 'single' && nextItem.part.type === 'text'
+            return (
+              <ThinkingBlock
+                key={idx}
+                text={item.part.text}
+                collapsed={hasTextAfter || item.part.collapsed || isStreaming}
+                streaming={isStreaming}
+              />
+            )
+          }
+
           return <PartRenderer key={idx} part={item.part} isStreaming={!!isStreaming} />
         })
       )}

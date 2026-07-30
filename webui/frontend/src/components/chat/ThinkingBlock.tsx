@@ -28,6 +28,11 @@ export function ThinkingBlock({
   const [copied, setCopied] = useState(false)
   const [tickMs, setTickMs] = useState(0)
 
+  // Sync expanded state with collapsed prop
+  useEffect(() => {
+    setIsExpanded(!collapsed)
+  }, [collapsed])
+
   useEffect(() => {
     if (!streaming || !startTime) return
     const id = setInterval(() => setTickMs(Date.now() - startTime), 100)
@@ -58,7 +63,7 @@ export function ThinkingBlock({
   }
 
   return (
-    <div className="my-2 border-l-2 border-violet-500/40 bg-violet-950/10 rounded-r-md overflow-hidden transition-colors duration-300">
+    <div className="my-1 border-l-2 border-violet-500/30 bg-violet-950/5 rounded-r-md overflow-hidden transition-colors duration-300">
       {/* Single-line header */}
       <div
         role="button"
@@ -70,19 +75,19 @@ export function ThinkingBlock({
             setIsExpanded((v) => !v)
           }
         }}
-        className="flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left text-[11px] text-violet-300/80 hover:bg-violet-950/20 transition-colors"
+        className="flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left text-[11px] text-violet-300/70 hover:bg-violet-950/20 transition-colors"
       >
         <ChevronRight
-          className={`h-3 w-3 text-violet-400 transition-transform duration-200 ${
+          className={`h-3 w-3 text-violet-400/70 transition-transform duration-200 ${
             isExpanded ? 'rotate-90' : ''
           }`}
         />
-        <Sparkles className="h-3 w-3 text-violet-400" />
+        <Sparkles className="h-3 w-3 text-violet-400/70" />
         <span className="font-medium">{label}</span>
         {streaming && (
           <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse ml-0.5" />
         )}
-        <span className="ml-auto flex items-center gap-2 text-[10px] text-violet-400/60">
+        <span className="ml-auto flex items-center gap-2 text-[10px] text-violet-400/50">
           {text.length > 50 && <span>{text.length} 字</span>}
           <button
             type="button"
@@ -95,10 +100,10 @@ export function ThinkingBlock({
         </span>
       </div>
 
-      {/* Expanded content - now uses MarkdownRenderer */}
+      {/* Expanded content */}
       {isExpanded && (
         <div className="border-t border-violet-500/20 px-3 py-2 max-h-72 overflow-y-auto">
-          <div className="text-[12px] leading-relaxed text-violet-200/80">
+          <div className="text-[11px] leading-relaxed text-violet-200/60">
             <MarkdownRenderer content={text} />
           </div>
         </div>
