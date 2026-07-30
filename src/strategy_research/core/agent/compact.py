@@ -76,25 +76,41 @@ class CompactConfig:
     """All tunable compaction parameters.
 
     Configurable via ``~/.quantnodes/llm.json`` ``"compact"`` section.
+
+    All defaults follow the opencode approach (packages/core/src/session/
+    compaction.ts) where reasonable. The 3-layer system (L1/L4/L3) is
+    our extension; opencode only has L4.
     """
 
     enabled: bool = True
 
-    # ── Thresholds (relative to threshold_tokens) ──────────────────
-    microcompact_ratio: float = 0.5       # L1: 50%
-    llm_summarize_ratio: float = 0.8      # L4: 80%
-    hard_truncate_ratio: float = 0.9      # L3: 90%
-    overflow_ratio: float = 0.95          # overflow detection
+    # ── Trigger ──────────────────────────────────────────────────
+    # None = derive from model context (opencode-style):
+    #   trigger = context - max(model_max_output, buffer)
+    # Explicit int = use as absolute threshold.
+    threshold_tokens: int | None = None
+    # Opencode DEFAULT_BUFFER: leave this much room for the response
+    compaction_buffer_tokens: int = 20_000
 
-    # ── L1: Smart Microcompact ─────────────────────────────────────
-    microcompact_tool_result_limit: int = 2000
-    tool_truncate_limits: dict[str, int] = field(default_factory=lambda: dict(_DEFAULT_TOOL_LIMITS))
+    # ── Layer ratios (relative to threshold_tokens) ──────────────
+    microcompact_ratio: float = 0.9        # L1: 90%  (was 0.5)
+    llm_summarize_ratio: float = 0.95      # L4: 95%  (was 0.8)
+    hard_truncate_ratio: float = 0.99      # L3: 99%  (was 0.9)
+    overflow_ratio: float = 0.99          # overflow detection (was 0.95)
+
+    # ── L1: Smart Microcompact ───────────────────────────────────
+    # Opencode: TOOL_OUTPUT_MAX_CHARS = 2_000 (chars, not tokens).
+    # Renamed for clarity: previous _limit was ambiguous.
+    microcompact_tool_result_chars: int = 2_000
+    tool_truncate_chars: dict[str, int] = field(default_factory=lambda: dict(_DEFAULT_TOOL_LIMITS))
     collapse_keep_recent: int = 4         # protect last N tool outputs
 
-    # ── L4: LLM Summarize ──────────────────────────────────────────
+    # ── L4: LLM Summarize ─────────────────────────────────────────
+    # Opencode formula: actual max_tokens = min(model_max_output, this)
+    # i.e. this is a CAP, not the absolute value.
     preserve_recent_tokens: int | None = None  # None = dynamic (25% of context)
     tail_turns: int = 2                        # keep last N turns verbatim
-    summary_output_tokens: int = 4096
+    summary_output_tokens: int = 4_096          # CAP, see opencode line 183
     enable_incremental_summary: bool = True
     summary_template: str | None = None        # None = DEFAULT_SUMMARY_TEMPLATE
 
@@ -255,8 +271,8 @@ def _smart_microcompact(
 
         # Per-tool limit
         tool_name = _get_tool_name(messages, i)
-        tool_limit = config.tool_truncate_limits.get(
-            tool_name, config.microcompact_tool_result_limit,
+        tool_limit = config.tool_truncate_chars.get(
+            tool_name, config.microcompact_tool_result_chars,
         )
 
         if len(content) > tool_limit:
@@ -356,19 +372,22 @@ def _llm_summarize_v2(
     messages: list[dict[str, Any]],
     config: CompactConfig,
     model_context_tokens: int | None,
+    model_max_output_tokens: int | None,
     llm_client: Any,
     previous_summary: str | None = None,
     session_id: str | None = None,
-) -> tuple[list[dict[str, Any]], str] | None:
+) -> tuple[list[dict[str, Any]], str, str] | None:
     """L4: LLM summarization with structured template + token budget.
 
     Key improvements:
     1. Token budget selection (not fixed message count)
     2. Structured Markdown template (opencode-style)
     3. Incremental summary update
-    4. opencode-aligned: returns recent messages WITHOUT inline summary;
-       the caller persists the CompactionMessage separately and projects
-       it via to_llm_message() with <conversation-checkpoint> wrap.
+    4. opencode-aligned:
+       - Returns 3-tuple (messages, summary_text, recent_text)
+       - recent_text is pre-serialized in compact (no recompute in loop)
+       - max_tokens for LLM = min(model_max_output, config.summary_output_tokens)
+         (opencode line 183: Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS))
     """
     system_msgs = [m for m in messages if m.get("role") == "system"]
     non_system = [m for m in messages if m.get("role") != "system"]
@@ -393,13 +412,22 @@ def _llm_summarize_v2(
     template = config.summary_template or DEFAULT_SUMMARY_TEMPLATE
     prompt = _build_summary_prompt(conversation, previous_summary, template)
 
+    # opencode formula: max_tokens = min(model_max_output, summary_output_tokens)
+    # See packages/core/src/session/compaction.ts:183:
+    #   const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
+    summary_max_tokens = config.summary_output_tokens
+    if model_max_output_tokens is not None:
+        summary_max_tokens = min(
+            model_max_output_tokens, config.summary_output_tokens,
+        )
+
     try:
         summary_response = llm_client.chat(
             [
                 {"role": "system", "content": "You are a concise conversation summarizer for a quant research agent."},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=config.summary_output_tokens,
+            max_tokens=summary_max_tokens,
         )
         summary_text = summary_response.content or ""
         if not summary_text.strip():
@@ -408,7 +436,7 @@ def _llm_summarize_v2(
         logger.debug("LLM summarize failed: %s", exc)
         return None
 
-    # opencode-aligned: return (messages, summary_text).
+    # opencode-aligned: return (messages, summary_text, recent_text).
     # The returned messages do NOT contain an inline summary; the
     # caller persists the CompactionMessage separately and projects
     # it via to_llm_message() with <conversation-checkpoint> wrap.
@@ -416,9 +444,13 @@ def _llm_summarize_v2(
     # as a previous assistant turn and continues the summary task on
     # the next user message.
     #
-    # We return summary_text so the caller can persist the CompactionMessage
-    # without re-querying the LLM.
-    return system_msgs + recent, summary_text
+    # recent_text is pre-serialized here in compact (single source of
+    # truth for "what's recent"). The loop no longer recomputes it.
+    recent_text = "\n\n".join(
+        _serialize_message(m) for m in recent if m
+    )
+
+    return system_msgs + recent, summary_text, recent_text
 
 
 # ── L3: Hard Truncate ────────────────────────────────────────────
@@ -489,53 +521,89 @@ def _fix_tool_pairs(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 # ── Main entry point ─────────────────────────────────────────────
 
+
+def _resolve_threshold_tokens(
+    config: CompactConfig,
+    model_context_tokens: int | None,
+    model_max_output_tokens: int | None,
+) -> int:
+    """Derive trigger threshold from model context (opencode-aligned).
+
+    Opencode formula (packages/core/src/session/compaction.ts:225-235):
+        trigger = context - max(model_max_output, buffer)
+
+    We extend with explicit override: if config.threshold_tokens is
+    set, use it as-is. Otherwise derive. Fall back to 8000 if
+    model context is unknown.
+    """
+    if config.threshold_tokens is not None:
+        return config.threshold_tokens
+    if model_context_tokens and model_context_tokens > 0:
+        buffer = config.compaction_buffer_tokens
+        output = model_max_output_tokens or buffer
+        trigger = model_context_tokens - max(output, buffer)
+        # Guard: trigger must be reasonable (at least 8K)
+        return max(8_000, trigger)
+    return 8_000  # fallback for unknown context
+
+
 def compact_messages(
     messages: list[dict[str, Any]],
     config: CompactConfig | None = None,
-    threshold_tokens: int = 8000,
+    threshold_tokens: int | None = None,
     model_context_tokens: int | None = None,
+    model_max_output_tokens: int | None = None,
     llm_client: Any | None = None,
     previous_summary: str | None = None,
     session_id: str | None = None,
     on_compaction: "CompactionCallback | None" = None,
-) -> tuple[list[dict[str, Any]], list[str], str | None]:
-    """Apply context compression if over threshold.
-    ...
-    Returns:
-        (compressed_messages, applied_layers, l4_summary_text)
-        - l4_summary_text is the text of the L4 summary, or None if L4 didn't run.
-          The caller is responsible for persisting it as a CompactionMessage
-          (opencode-aligned: never inject as inline assistant turn).
-    """
+) -> tuple[list[dict[str, Any]], list[str], str | None, str | None]:
     """Apply context compression if over threshold.
 
+    opencode-aligned:
+        - Trigger derived from model context when threshold_tokens is None
+        - 3-layer system (L1/L4/L3) is our extension
+        - Returns 4-tuple including recent_text pre-serialized by compact
+
     3-layer progressive compression:
-        L1 (50%): Smart microcompact — truncate oversized tool outputs
-        L4 (80%): LLM summarize — structured Markdown summary
-        L3 (90%): Hard truncate — keep only system + last N messages
+        L1 (microcompact_ratio): Truncate oversized tool outputs
+        L4 (llm_summarize_ratio): LLM-driven summary
+        L3 (hard_truncate_ratio): Drop oldest messages
 
     Args:
         messages: Conversation messages in OpenAI format.
         config: Compaction parameters (defaults to CompactConfig()).
-        threshold_tokens: Token budget for threshold calculation.
-        model_context_tokens: Model's context window size (for dynamic budget).
-        llm_client: LLM client for L4 summarization (sync .chat() method).
+        threshold_tokens: Absolute token budget for trigger. None =
+            derive from model context via opencode formula.
+        model_context_tokens: Model's context window size.
+        model_max_output_tokens: Model's max output tokens (for
+            summary cap formula).
+        llm_client: LLM client for L4 summarization (sync .chat()).
         previous_summary: Previous summary text for incremental update.
-        session_id: Session id (required for L4 to persist compaction event).
+        session_id: Session id (required for L4 to persist event).
         on_compaction: Optional callback invoked with the
-            CompactionMessage after L4 generates it. The caller is
-            responsible for persisting it. If None, the compaction
-            is silently dropped (legacy behavior).
+            CompactionMessage after L4 generates it.
 
     Returns:
-        (compressed_messages, applied_layers)
+        (compressed_messages, applied_layers, l4_summary_text, l4_recent_text)
+        - l4_summary_text: L4 output, or None if L4 didn't run
+        - l4_recent_text: pre-serialized recent messages for the LLM's
+          <recent-context> section, or None if L4 didn't run.
+          Caller persists both as a CompactionMessage event.
     """
     cfg = config or CompactConfig()
     applied: list[str] = []
     l4_summary_text: str | None = None
+    l4_recent_text: str | None = None
 
     if not cfg.enabled:
-        return messages, applied, l4_summary_text
+        return messages, applied, l4_summary_text, l4_recent_text
+
+    # Resolve threshold (opencode-style derivation)
+    if threshold_tokens is None:
+        threshold_tokens = _resolve_threshold_tokens(
+            cfg, model_context_tokens, model_max_output_tokens,
+        )
 
     tokens = _estimate_tokens(messages)
 
@@ -550,9 +618,9 @@ def compact_messages(
 
     # Early exit: below L1 threshold (skip when force_all)
     if not force_all and tokens < l1_threshold:
-        return messages, applied, l4_summary_text
+        return messages, applied, l4_summary_text, l4_recent_text
 
-    # ── L1: Smart Microcompact (50%) ──────────────────────────────
+    # ── L1: Smart Microcompact ──────────────────────────────
     if force_all or tokens >= l1_threshold:
         messages, l1_count = _smart_microcompact(messages, cfg)
         if l1_count:
@@ -560,21 +628,22 @@ def compact_messages(
 
     tokens = _estimate_tokens(messages)
 
-    # ── L4: LLM Summarize (80%) ───────────────────────────────────
+    # ── L4: LLM Summarize ───────────────────────────────────
     if (force_all or tokens >= l4_threshold) and llm_client is not None:
         old_len = len(messages)
         l4_result = _llm_summarize_v2(
-            messages, cfg, model_context_tokens, llm_client, previous_summary,
-            session_id=session_id,
+            messages, cfg, model_context_tokens, model_max_output_tokens,
+            llm_client, previous_summary, session_id=session_id,
         )
         if l4_result is not None:
-            new_messages, summary_text = l4_result
+            new_messages, summary_text, recent_text = l4_result
             if len(new_messages) < old_len and summary_text.strip():
                 messages = new_messages
                 applied.append(f"llm_summarize({old_len}->{len(messages)})")
-                l4_summary_text = summary_text  # exposed via 3-tuple return
+                l4_summary_text = summary_text
+                l4_recent_text = recent_text
 
-    # ── L3: Hard Truncate (90%) ───────────────────────────────────
+    # ── L3: Hard Truncate ───────────────────────────────────
     tokens = _estimate_tokens(messages)
     if force_all or tokens >= l3_threshold:
         old_len = len(messages)
@@ -588,4 +657,4 @@ def compact_messages(
     if len(messages) < pre_fix_len:
         applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
 
-    return messages, applied, l4_summary_text
+    return messages, applied, l4_summary_text, l4_recent_text

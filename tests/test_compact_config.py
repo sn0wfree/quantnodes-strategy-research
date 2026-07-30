@@ -30,28 +30,34 @@ class TestCompactConfig:
     def test_defaults(self):
         cfg = CompactConfig()
         assert cfg.enabled is True
-        assert cfg.microcompact_ratio == 0.5
-        assert cfg.llm_summarize_ratio == 0.8
-        assert cfg.hard_truncate_ratio == 0.9
-        assert cfg.overflow_ratio == 0.95
-        assert cfg.microcompact_tool_result_limit == 2000
+        # opencode-aligned defaults (user-specified)
+        assert cfg.microcompact_ratio == 0.9
+        assert cfg.llm_summarize_ratio == 0.95
+        assert cfg.hard_truncate_ratio == 0.99
+        assert cfg.overflow_ratio == 0.99
+        # opencode-aligned: chars not tokens
+        assert cfg.microcompact_tool_result_chars == 2000
         assert cfg.collapse_keep_recent == 4
         assert cfg.tail_turns == 2
         assert cfg.preserve_recent_tokens is None
         assert cfg.enable_incremental_summary is True
+        # opencode DEFAULT_BUFFER
+        assert cfg.compaction_buffer_tokens == 20_000
+        # opencode-aligned: None means derive from model context
+        assert cfg.threshold_tokens is None
 
     def test_custom_values(self):
         cfg = CompactConfig(
             microcompact_ratio=0.6,
             llm_summarize_ratio=0.7,
-            microcompact_tool_result_limit=3000,
+            microcompact_tool_result_chars=3000,
             collapse_keep_recent=6,
             tail_turns=3,
             preserve_recent_tokens=10000,
         )
         assert cfg.microcompact_ratio == 0.6
         assert cfg.llm_summarize_ratio == 0.7
-        assert cfg.microcompact_tool_result_limit == 3000
+        assert cfg.microcompact_tool_result_chars == 3000
         assert cfg.collapse_keep_recent == 6
         assert cfg.tail_turns == 3
         assert cfg.preserve_recent_tokens == 10000
@@ -61,17 +67,17 @@ class TestCompactConfig:
         with pytest.raises(AttributeError):
             cfg.microcompact_ratio = 0.9
 
-    def test_tool_truncate_limits_default(self):
+    def test_tool_truncate_chars_default(self):
         cfg = CompactConfig()
-        assert "read_file" in cfg.tool_truncate_limits
-        assert "backtest_run" in cfg.tool_truncate_limits
-        assert cfg.tool_truncate_limits["read_file"] == 3000
+        assert "read_file" in cfg.tool_truncate_chars
+        assert "backtest_run" in cfg.tool_truncate_chars
+        assert cfg.tool_truncate_chars["read_file"] == 3000
 
-    def test_tool_truncate_limits_custom(self):
+    def test_tool_truncate_chars_custom(self):
         limits = {"read_file": 5000, "custom_tool": 1000}
-        cfg = CompactConfig(tool_truncate_limits=limits)
-        assert cfg.tool_truncate_limits["read_file"] == 5000
-        assert cfg.tool_truncate_limits["custom_tool"] == 1000
+        cfg = CompactConfig(tool_truncate_chars=limits)
+        assert cfg.tool_truncate_chars["read_file"] == 5000
+        assert cfg.tool_truncate_chars["custom_tool"] == 1000
 
 
 # ── Token estimation ──────────────────────────────────────────────
@@ -102,7 +108,7 @@ class TestEstimateTokens:
 class TestSmartMicrocompact:
     def test_no_truncation_needed(self):
         msgs = [{"role": "tool", "content": "short output"}]
-        cfg = CompactConfig(microcompact_tool_result_limit=2000)
+        cfg = CompactConfig(microcompact_tool_result_chars=2000)
         result, count = _smart_microcompact(msgs, cfg)
         assert count == 0
         assert result[0]["content"] == "short output"
@@ -110,7 +116,7 @@ class TestSmartMicrocompact:
     def test_truncation_applied(self):
         long_content = "x" * 3000
         msgs = [{"role": "tool", "content": long_content, "tool_call_id": "c1"}]
-        cfg = CompactConfig(microcompact_tool_result_limit=2000)
+        cfg = CompactConfig(microcompact_tool_result_chars=2000)
         result, count = _smart_microcompact(msgs, cfg)
         assert count == 1
         assert len(result[0]["content"]) < 3000
@@ -119,7 +125,7 @@ class TestSmartMicrocompact:
     def test_head_tail_truncation(self):
         content = "A" * 1000 + "MIDDLE" + "Z" * 1000
         msgs = [{"role": "tool", "content": content, "tool_call_id": "c1"}]
-        cfg = CompactConfig(microcompact_tool_result_limit=200)
+        cfg = CompactConfig(microcompact_tool_result_chars=200)
         result, count = _smart_microcompact(msgs, cfg)
         assert count == 1
         truncated = result[0]["content"]
@@ -130,7 +136,7 @@ class TestSmartMicrocompact:
     def test_skip_error_messages(self):
         error_content = "Error: something went wrong"
         msgs = [{"role": "tool", "content": error_content}]
-        cfg = CompactConfig(microcompact_tool_result_limit=10)
+        cfg = CompactConfig(microcompact_tool_result_chars=10)
         result, count = _smart_microcompact(msgs, cfg)
         assert count == 0
 
@@ -141,7 +147,7 @@ class TestSmartMicrocompact:
             {"role": "tool", "content": "z" * 3000, "tool_call_id": "c3"},
             {"role": "tool", "content": "w" * 3000, "tool_call_id": "c4"},
         ]
-        cfg = CompactConfig(microcompact_tool_result_limit=2000, collapse_keep_recent=2)
+        cfg = CompactConfig(microcompact_tool_result_chars=2000, collapse_keep_recent=2)
         result, count = _smart_microcompact(msgs, cfg)
         # Last 2 should be protected
         assert count == 2
@@ -156,8 +162,8 @@ class TestSmartMicrocompact:
             {"role": "tool", "content": content, "tool_call_id": "c1"},
         ]
         cfg = CompactConfig(
-            microcompact_tool_result_limit=2000,
-            tool_truncate_limits={"read_file": 4000},
+            microcompact_tool_result_chars=2000,
+            tool_truncate_chars={"read_file": 4000},
         )
         result, count = _smart_microcompact(msgs, cfg)
         assert count == 0  # 3500 < 4000 limit for read_file
@@ -396,14 +402,14 @@ class TestCompactMessages:
     def test_no_compaction_below_threshold(self):
         msgs = [{"role": "user", "content": "hello"}]
         cfg = CompactConfig()
-        result, layers, _ = compact_messages(msgs, cfg, threshold_tokens=8000)
+        result, layers, _, _ = compact_messages(msgs, cfg, threshold_tokens=8000)
         assert layers == []
         assert len(result) == 1
 
     def test_disabled(self):
         msgs = [{"role": "user", "content": "x" * 10000}]
         cfg = CompactConfig(enabled=False)
-        result, layers, _ = compact_messages(msgs, cfg, threshold_tokens=100)
+        result, layers, _, _ = compact_messages(msgs, cfg, threshold_tokens=100)
         assert layers == []
 
     def test_microcompact_only(self):
@@ -413,8 +419,8 @@ class TestCompactMessages:
             {"role": "assistant", "content": "hi there, I will help you with this test"},
             {"role": "tool", "content": "x" * 5000, "tool_call_id": "c1"},
         ]
-        cfg = CompactConfig(microcompact_tool_result_limit=2000)
-        result, layers, _ = compact_messages(
+        cfg = CompactConfig(microcompact_tool_result_chars=2000)
+        result, layers, _, _ = compact_messages(
             msgs, cfg, threshold_tokens=100, llm_client=None,
         )
         assert any("microcompact" in l for l in layers)
@@ -423,7 +429,7 @@ class TestCompactMessages:
         # Create many messages to exceed threshold
         msgs = [{"role": "user", "content": f"message {i} " * 20} for i in range(20)]
         cfg = CompactConfig(hard_truncate_ratio=0.0, collapse_keep_recent=3)
-        result, layers, _ = compact_messages(msgs, cfg, threshold_tokens=100)
+        result, layers, _, _ = compact_messages(msgs, cfg, threshold_tokens=100)
         assert any("truncate" in l for l in layers)
         assert len(result) <= 3 + 1  # keep_recent + any system msgs
 
@@ -437,9 +443,9 @@ class TestCompactMessages:
             {"role": "assistant", "content": "hi"},
             {"role": "tool", "content": "x" * 5000, "tool_call_id": "c1"},
         ]
-        cfg = CompactConfig(microcompact_tool_result_limit=200)
+        cfg = CompactConfig(microcompact_tool_result_chars=200)
         # Without llm_client, L4 is skipped but L1 should still run.
-        result, layers, _ = compact_messages(
+        result, layers, _, _ = compact_messages(
             msgs, cfg, threshold_tokens=0, llm_client=None,
         )
         assert any("microcompact" in l for l in layers)
@@ -450,8 +456,8 @@ class TestCompactMessages:
 
         opencode-aligned: the summary is NOT injected as an inline
         assistant turn (that caused the "spontaneous summary" bug).
-        Instead, the summary text is returned via the 3-tuple for the
-        caller to persist as a CompactionMessage.
+        Instead, the summary text is returned via the 4-tuple for
+        the caller to persist as a CompactionMessage.
         """
         msgs = [
             {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
@@ -462,7 +468,7 @@ class TestCompactMessages:
         mock_client.chat.return_value = MagicMock(content="- bullet 1\n- bullet 2")
 
         cfg = CompactConfig(tail_turns=2)
-        result, layers, l4_summary = compact_messages(
+        result, layers, l4_summary, l4_recent = compact_messages(
             msgs, cfg, threshold_tokens=0, llm_client=mock_client,
         )
         assert any("llm_summarize" in l for l in layers)
@@ -471,7 +477,10 @@ class TestCompactMessages:
             m.get("content", "").startswith("[context summary]")
             for m in result
         )
-        # Instead, summary text is returned in the 3-tuple
+        # Instead, summary text is returned in the 4-tuple
+        assert l4_summary == "- bullet 1\n- bullet 2"
+        # recent is pre-serialized by compact (string)
+        assert isinstance(l4_recent, str)
         assert l4_summary == "- bullet 1\n- bullet 2"
 
 

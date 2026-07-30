@@ -105,7 +105,7 @@ class AgentLoop:
         workspace: Path | None = None,
         max_iterations: int = 10,
         no_progress_window: int = 3,
-        threshold_tokens: int = 8000,
+        threshold_tokens: int | None = None,
         heartbeat_interval: float = 15.0,
         trace_dir: Path | None = None,
         auto_git_commit: bool = False,
@@ -1173,14 +1173,23 @@ class AgentLoop:
     def _maybe_compact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
         """Apply context compression if over threshold.
 
-        3-layer progressive compression:
-            L1 (50%): Smart microcompact — truncate oversized tool outputs
-            L4 (80%): LLM summarize — structured Markdown summary
-            L3 (90%): Hard truncate — keep only system + last N messages
+        3-layer progressive compression (opencode-aligned):
+            L1 (microcompact_ratio=0.9): Smart microcompact
+            L4 (llm_summarize_ratio=0.95): LLM-driven summary
+            L3 (hard_truncate_ratio=0.99): Hard truncate (rare)
 
-        Also checks overflow (95%) to force compression when near context limit.
+        Also checks overflow (overflow_ratio=0.99) to force
+        compression when near context limit.
+
+        opencode-aligned trigger formula:
+            trigger = threshold_tokens (default derived from model
+            context: context - max(model_max_output, buffer))
+
+        If L4 fails (e.g. DB error during persistence), the
+        compaction is rolled back and the original messages are
+        kept. The LLM doesn't lose context.
         """
-        # Overflow detection: force compression even below normal thresholds
+        # Overflow detection: log only (no force compact in this path)
         if self.config.model_context_tokens:
             usable = self.config.model_context_tokens - 4096
             tokens = estimate_tokens(messages)
@@ -1191,62 +1200,47 @@ class AgentLoop:
                 )
 
         # Delegate to compact_messages engine
-        # opencode-aligned: returns 3-tuple (messages, applied, l4_summary_text).
-        # The summary text is the L4 output; the caller (us) persists
-        # it as a CompactionMessage event (opencode-aligned) so the
-        # LLM never sees it as a previous assistant turn.
-        messages, applied, l4_summary_text = compact_messages(
-            messages,
-            config=self.cc,
-            threshold_tokens=self.threshold_tokens,
-            model_context_tokens=self.config.model_context_tokens,
-            llm_client=self.client,
-            previous_summary=self._previous_summary,
-            session_id=self.session_id,
-        )
+        # opencode-aligned: returns 4-tuple (messages, applied, summary, recent_text).
+        # The summary text + recent text are pre-computed in compact and
+        # passed through to the persistence step. No more NoneType risk
+        # in the loop (the recent_count // 100 bug is gone).
+        try:
+            messages, applied, l4_summary_text, l4_recent_text = compact_messages(
+                messages,
+                config=self.cc,
+                threshold_tokens=self.threshold_tokens,
+                model_context_tokens=self.config.model_context_tokens,
+                model_max_output_tokens=self.config.model_max_output_tokens,
+                llm_client=self.client,
+                previous_summary=self._previous_summary,
+                session_id=self.session_id,
+            )
+        except Exception:
+            # Critical: L4 failed. Roll back to keep full history.
+            # The LLM is more useful with full history than with
+            # partial compaction.
+            logger.exception("L4 compaction failed; keeping full history")
+            return messages, []
 
-        if l4_summary_text:
+        if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
             self._previous_summary = l4_summary_text
-            if any(layer.startswith("llm_summarize") for layer in applied):
-                self._persist_compaction_event(messages, l4_summary_text)
-
-        # Track summary for incremental updates (legacy path)
-        if applied:
-            for layer in applied:
-                if layer.startswith("llm_summarize"):
-                    if self._previous_summary:
-                        # Already set by _persist_compaction_event
-                        break
-                    # Fallback: extract from old-style [context summary] msg
-                    for msg in messages:
-                        if (msg.get("role") == "assistant"
-                                and (msg.get("content", "").startswith("[context summary]")
-                                     or msg.get("message_type") == "compaction")):
-                            content = msg.get("content", "")
-                            if content.startswith("[context summary]"):
-                                self._previous_summary = content
-                            else:
-                                # New format: pull summary from parts_json
-                                import json as _json
-                                try:
-                                    parts = _json.loads(msg.get("parts_json") or "[]")
-                                    comp = next(
-                                        (p for p in parts
-                                         if isinstance(p, dict) and p.get("type") == "compaction"),
-                                        None,
-                                    )
-                                    if comp:
-                                        self._previous_summary = comp.get("summary", "")
-                                except Exception:
-                                    pass
-                            break
+            try:
+                self._persist_compaction_event(l4_summary_text, l4_recent_text or "")
+            except Exception:
+                # Persistence failed AFTER L4 generated summary.
+                # Roll back to original messages so the LLM keeps
+                # full history on the next turn.
+                logger.exception(
+                    "compaction persistence failed; rolling back to original messages",
+                )
+                return messages, []
 
         return messages, applied
 
     def _persist_compaction_event(
         self,
-        compacted_messages: list[dict[str, Any]],
         summary_text: str,
+        recent_text: str,
     ) -> None:
         """Persist a CompactionMessage event for the L4 layer.
 
@@ -1254,8 +1248,15 @@ class AgentLoop:
         with message_type='compaction'. The next LLM call will load
         it via the message store and project via to_llm_message().
 
-        Idempotent: if a compaction already exists in the session,
-        this updates the latest one with the new summary (incremental).
+        Args:
+            summary_text: LLM-generated summary (non-empty).
+            recent_text: Pre-serialized recent messages from compact
+                (may be empty). The compact module is the single
+                source of truth for "what's recent" — this method
+                never recomputes it.
+
+        Raises:
+            Exception: propagates critical errors (not silent fail).
         """
         session_id = self.session_id
         if not session_id:
@@ -1263,25 +1264,17 @@ class AgentLoop:
             return
 
         if not summary_text or not summary_text.strip():
+            logger.warning("L4 returned empty summary; skipping persistence")
             return
 
         try:
             from .compaction_message import new_compaction_message
             from ...api.routers.web_session import persist_message
-            from .compact import _serialize_message
-
-            # Serialize recent messages for the LLM's <recent-context>
-            # section. Take last N (where N is preserve_recent_tokens worth).
-            recent_count = max(4, self.cc.preserve_recent_tokens // 100)
-            recent_slice = compacted_messages[-recent_count:] if compacted_messages else []
-            recent_str = "\n\n".join(
-                _serialize_message(m) for m in recent_slice if _serialize_message(m)
-            )
 
             comp = new_compaction_message(
                 session_id=session_id,
                 summary=summary_text,
-                recent=recent_str,
+                recent=recent_text or "",
                 reason="auto",
             )
 
@@ -1297,8 +1290,12 @@ class AgentLoop:
                 "compaction event persisted: %s (summary=%d chars, recent=%d chars)",
                 comp.id, len(comp.summary), len(comp.recent),
             )
-        except Exception as exc:
-            logger.warning("compaction persistence failed: %s", exc)
+        except Exception:
+            # Critical: propagate with full traceback. The caller
+            # (compact_messages path) will see the error and roll
+            # back messages to keep full history intact.
+            logger.exception("compaction persistence failed")
+            raise
 
     async def _amaybe_compact(
         self, messages: list[dict[str, Any]]
@@ -1328,20 +1325,30 @@ class AgentLoop:
                 return asyncio.run(self._client.achat(messages, **kwargs))
 
         adapter = _AchatAdapter(self.client)
-        messages, applied, l4_summary_text = compact_messages(
-            messages,
-            config=self.cc,
-            threshold_tokens=self.threshold_tokens,
-            model_context_tokens=self.config.model_context_tokens,
-            llm_client=adapter,
-            previous_summary=self._previous_summary,
-            session_id=self.session_id,
-        )
+        try:
+            messages, applied, l4_summary_text, l4_recent_text = compact_messages(
+                messages,
+                config=self.cc,
+                threshold_tokens=self.threshold_tokens,
+                model_context_tokens=self.config.model_context_tokens,
+                model_max_output_tokens=self.config.model_max_output_tokens,
+                llm_client=adapter,
+                previous_summary=self._previous_summary,
+                session_id=self.session_id,
+            )
+        except Exception:
+            logger.exception("L4 compaction failed (async); keeping full history")
+            return messages, []
 
-        if l4_summary_text:
+        if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
             self._previous_summary = l4_summary_text
-            if any(layer.startswith("llm_summarize") for layer in applied):
-                self._persist_compaction_event(messages, l4_summary_text)
+            try:
+                self._persist_compaction_event(l4_summary_text, l4_recent_text or "")
+            except Exception:
+                logger.exception(
+                    "compaction persistence failed (async); rolling back",
+                )
+                return messages, []
 
         return messages, applied
 
