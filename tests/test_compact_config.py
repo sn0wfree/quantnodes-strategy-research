@@ -396,14 +396,14 @@ class TestCompactMessages:
     def test_no_compaction_below_threshold(self):
         msgs = [{"role": "user", "content": "hello"}]
         cfg = CompactConfig()
-        result, layers = compact_messages(msgs, cfg, threshold_tokens=8000)
+        result, layers, _ = compact_messages(msgs, cfg, threshold_tokens=8000)
         assert layers == []
         assert len(result) == 1
 
     def test_disabled(self):
         msgs = [{"role": "user", "content": "x" * 10000}]
         cfg = CompactConfig(enabled=False)
-        result, layers = compact_messages(msgs, cfg, threshold_tokens=100)
+        result, layers, _ = compact_messages(msgs, cfg, threshold_tokens=100)
         assert layers == []
 
     def test_microcompact_only(self):
@@ -414,7 +414,7 @@ class TestCompactMessages:
             {"role": "tool", "content": "x" * 5000, "tool_call_id": "c1"},
         ]
         cfg = CompactConfig(microcompact_tool_result_limit=2000)
-        result, layers = compact_messages(
+        result, layers, _ = compact_messages(
             msgs, cfg, threshold_tokens=100, llm_client=None,
         )
         assert any("microcompact" in l for l in layers)
@@ -423,7 +423,7 @@ class TestCompactMessages:
         # Create many messages to exceed threshold
         msgs = [{"role": "user", "content": f"message {i} " * 20} for i in range(20)]
         cfg = CompactConfig(hard_truncate_ratio=0.0, collapse_keep_recent=3)
-        result, layers = compact_messages(msgs, cfg, threshold_tokens=100)
+        result, layers, _ = compact_messages(msgs, cfg, threshold_tokens=100)
         assert any("truncate" in l for l in layers)
         assert len(result) <= 3 + 1  # keep_recent + any system msgs
 
@@ -439,15 +439,20 @@ class TestCompactMessages:
         ]
         cfg = CompactConfig(microcompact_tool_result_limit=200)
         # Without llm_client, L4 is skipped but L1 should still run.
-        result, layers = compact_messages(
+        result, layers, _ = compact_messages(
             msgs, cfg, threshold_tokens=0, llm_client=None,
         )
         assert any("microcompact" in l for l in layers)
 
     def test_force_all_threshold_zero_runs_llm_summarize(self):
         """When threshold_tokens=0 AND llm_client is provided, L4 should
-        run and produce a system+summary+recent messages list."""
-        import asyncio
+        run and return (messages, applied_layers, l4_summary_text).
+
+        opencode-aligned: the summary is NOT injected as an inline
+        assistant turn (that caused the "spontaneous summary" bug).
+        Instead, the summary text is returned via the 3-tuple for the
+        caller to persist as a CompactionMessage.
+        """
         msgs = [
             {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
         ]
@@ -457,15 +462,17 @@ class TestCompactMessages:
         mock_client.chat.return_value = MagicMock(content="- bullet 1\n- bullet 2")
 
         cfg = CompactConfig(tail_turns=2)
-        result, layers = compact_messages(
+        result, layers, l4_summary = compact_messages(
             msgs, cfg, threshold_tokens=0, llm_client=mock_client,
         )
         assert any("llm_summarize" in l for l in layers)
-        # Summary message should be present
-        assert any(
+        # opencode-aligned: summary is NOT inline in messages
+        assert not any(
             m.get("content", "").startswith("[context summary]")
             for m in result
         )
+        # Instead, summary text is returned in the 3-tuple
+        assert l4_summary == "- bullet 1\n- bullet 2"
 
 
 # ── LLMConfig integration ────────────────────────────────────────

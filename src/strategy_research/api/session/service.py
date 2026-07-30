@@ -676,13 +676,36 @@ class SessionService:
 
     @staticmethod
     def _extract_summary(messages: list[dict[str, Any]]) -> str:
-        """Extract [context summary] content from compressed messages."""
+        """Extract [context summary] content from compressed messages.
+
+        opencode-aligned: handles both new (message_type='compaction')
+        and legacy (content starts with [context summary]) formats.
+        """
         parts = []
         for m in messages:
-            if m.get("role") == "assistant":
-                content = m.get("content", "")
-                if content.startswith("[context summary]"):
-                    parts.append(content[len("[context summary]"):].strip())
+            msg_type = m.get("message_type") or m.get("role")
+            content = m.get("content", "") or ""
+            # New format: message_type='compaction' (parts_json has the summary)
+            if msg_type == "compaction":
+                try:
+                    parts_data = m.get("parts_json") or "[]"
+                    if isinstance(parts_data, str):
+                        import json as _json
+                        parts_data = _json.loads(parts_data)
+                    comp_part = next(
+                        (p for p in parts_data
+                         if isinstance(p, dict) and p.get("type") == "compaction"),
+                        None,
+                    )
+                    if comp_part:
+                        parts.append(comp_part.get("summary", content))
+                        continue
+                except Exception:
+                    pass
+                parts.append(content)
+            # Legacy format: content starts with [context summary]
+            elif content.startswith("[context summary]"):
+                parts.append(content[len("[context summary]"):].strip())
         return "\n\n".join(parts)
 
     @staticmethod
@@ -697,6 +720,9 @@ class SessionService:
         for m in original:
             role = m.get("role", "")
             content = (m.get("content") or "").strip()
+            # Skip compactions (opencode-aligned)
+            if m.get("message_type") == "compaction":
+                continue
             if not content or content.startswith("[context summary]"):
                 continue
             if role == "assistant" and len(content) > 20:

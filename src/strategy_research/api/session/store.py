@@ -57,6 +57,7 @@ class SessionStore:
         message_id: Optional[str] = None,
         parts: Optional[list[dict[str, Any]]] = None,
         created_at: Optional[float] = None,
+        message_type: str = "assistant",
     ) -> str:
         """Append a message to the session.
 
@@ -67,6 +68,8 @@ class SessionStore:
             parts: Optional structured parts (text/thinking/tool_call/etc.).
             created_at: Optional timestamp (epoch seconds). If None, uses
                 time.time().
+            message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
+                Defaults to 'assistant' for backward compat.
 
         Returns:
             The message_id used.
@@ -84,6 +87,7 @@ class SessionStore:
             message_id=msg_id,
             created_at=created_at,
             tool_call_id=message.tool_call_id,
+            message_type=message_type,
         )
         return msg_id
 

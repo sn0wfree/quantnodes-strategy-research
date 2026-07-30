@@ -358,13 +358,17 @@ def _llm_summarize_v2(
     model_context_tokens: int | None,
     llm_client: Any,
     previous_summary: str | None = None,
-) -> list[dict[str, Any]] | None:
+    session_id: str | None = None,
+) -> tuple[list[dict[str, Any]], str] | None:
     """L4: LLM summarization with structured template + token budget.
 
     Key improvements:
     1. Token budget selection (not fixed message count)
     2. Structured Markdown template (opencode-style)
     3. Incremental summary update
+    4. opencode-aligned: returns recent messages WITHOUT inline summary;
+       the caller persists the CompactionMessage separately and projects
+       it via to_llm_message() with <conversation-checkpoint> wrap.
     """
     system_msgs = [m for m in messages if m.get("role") == "system"]
     non_system = [m for m in messages if m.get("role") != "system"]
@@ -404,8 +408,17 @@ def _llm_summarize_v2(
         logger.debug("LLM summarize failed: %s", exc)
         return None
 
-    summary_msg = {"role": "assistant", "content": f"[context summary]\n{summary_text}"}
-    return system_msgs + [summary_msg] + recent
+    # opencode-aligned: return (messages, summary_text).
+    # The returned messages do NOT contain an inline summary; the
+    # caller persists the CompactionMessage separately and projects
+    # it via to_llm_message() with <conversation-checkpoint> wrap.
+    # This fixes the bug where the LLM sees the prior [context summary]
+    # as a previous assistant turn and continues the summary task on
+    # the next user message.
+    #
+    # We return summary_text so the caller can persist the CompactionMessage
+    # without re-querying the LLM.
+    return system_msgs + recent, summary_text
 
 
 # ── L3: Hard Truncate ────────────────────────────────────────────
@@ -483,7 +496,17 @@ def compact_messages(
     model_context_tokens: int | None = None,
     llm_client: Any | None = None,
     previous_summary: str | None = None,
-) -> tuple[list[dict[str, Any]], list[str]]:
+    session_id: str | None = None,
+    on_compaction: "CompactionCallback | None" = None,
+) -> tuple[list[dict[str, Any]], list[str], str | None]:
+    """Apply context compression if over threshold.
+    ...
+    Returns:
+        (compressed_messages, applied_layers, l4_summary_text)
+        - l4_summary_text is the text of the L4 summary, or None if L4 didn't run.
+          The caller is responsible for persisting it as a CompactionMessage
+          (opencode-aligned: never inject as inline assistant turn).
+    """
     """Apply context compression if over threshold.
 
     3-layer progressive compression:
@@ -498,15 +521,21 @@ def compact_messages(
         model_context_tokens: Model's context window size (for dynamic budget).
         llm_client: LLM client for L4 summarization (sync .chat() method).
         previous_summary: Previous summary text for incremental update.
+        session_id: Session id (required for L4 to persist compaction event).
+        on_compaction: Optional callback invoked with the
+            CompactionMessage after L4 generates it. The caller is
+            responsible for persisting it. If None, the compaction
+            is silently dropped (legacy behavior).
 
     Returns:
         (compressed_messages, applied_layers)
     """
     cfg = config or CompactConfig()
     applied: list[str] = []
+    l4_summary_text: str | None = None
 
     if not cfg.enabled:
-        return messages, applied
+        return messages, applied, l4_summary_text
 
     tokens = _estimate_tokens(messages)
 
@@ -521,7 +550,7 @@ def compact_messages(
 
     # Early exit: below L1 threshold (skip when force_all)
     if not force_all and tokens < l1_threshold:
-        return messages, applied
+        return messages, applied, l4_summary_text
 
     # ── L1: Smart Microcompact (50%) ──────────────────────────────
     if force_all or tokens >= l1_threshold:
@@ -534,12 +563,16 @@ def compact_messages(
     # ── L4: LLM Summarize (80%) ───────────────────────────────────
     if (force_all or tokens >= l4_threshold) and llm_client is not None:
         old_len = len(messages)
-        summarized = _llm_summarize_v2(
+        l4_result = _llm_summarize_v2(
             messages, cfg, model_context_tokens, llm_client, previous_summary,
+            session_id=session_id,
         )
-        if summarized is not None and len(summarized) < old_len:
-            messages = summarized
-            applied.append(f"llm_summarize({old_len}->{len(messages)})")
+        if l4_result is not None:
+            new_messages, summary_text = l4_result
+            if len(new_messages) < old_len and summary_text.strip():
+                messages = new_messages
+                applied.append(f"llm_summarize({old_len}->{len(messages)})")
+                l4_summary_text = summary_text  # exposed via 3-tuple return
 
     # ── L3: Hard Truncate (90%) ───────────────────────────────────
     tokens = _estimate_tokens(messages)
@@ -555,4 +588,4 @@ def compact_messages(
     if len(messages) < pre_fix_len:
         applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
 
-    return messages, applied
+    return messages, applied, l4_summary_text

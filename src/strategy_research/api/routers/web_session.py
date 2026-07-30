@@ -98,6 +98,16 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
     _add_column(conn, "messages", "tool_call_id", "TEXT")
 
+    # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
+    _add_column(
+        conn, "messages", "message_type",
+        "TEXT NOT NULL DEFAULT 'assistant'",
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_session_type_created "
+        "ON messages(session_id, message_type, created_at)"
+    )
+
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS attempts (
@@ -267,6 +277,35 @@ def _migrate_text_part_ids(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_message_types(conn: sqlite3.Connection) -> None:
+    """Mark historical [context summary] / Anchored messages as compaction.
+
+    Part of the opencode-aligned compaction fix. Old assistant messages
+    with [context summary] prefix or ## Anchored Summary structure
+    are L4-compaction artifacts, NOT regular assistant turns. Without
+    the message_type='compaction' flag, the LLM treats them as
+    previous turns and continues the summary task on the next user
+    message — producing "spontaneous summaries".
+
+    Idempotent: only updates rows where message_type='assistant' (the
+    default), so re-running the migration is a no-op.
+    """
+    updated = conn.execute("""
+        UPDATE messages
+        SET message_type = 'compaction'
+        WHERE message_type = 'assistant'
+          AND (
+              content LIKE '[context summary]%'
+              OR content LIKE '## Anchored Summary%'
+          )
+    """).rowcount
+    if updated:
+        logger.info(
+            "compaction migration: marked %d historical messages as compaction",
+            updated,
+        )
+
+
 def _get_db() -> sqlite3.Connection:
     """Open the shared SQLite connection. Ensures schema is up to date."""
     conn = sqlite3.connect(str(_get_db_path()))
@@ -274,6 +313,8 @@ def _get_db() -> sqlite3.Connection:
     _ensure_schema(conn)
     # Idempotent migration: ensure every text part has an id (text-part-routing)
     _migrate_text_part_ids(conn)
+    # Idempotent migration: mark historical compaction messages (opencode-aligned)
+    _migrate_message_types(conn)
     conn.commit()
     return conn
 
@@ -343,10 +384,15 @@ def persist_message(
     message_id: Optional[str] = None,
     created_at: Optional[float] = None,
     tool_call_id: Optional[str] = None,
+    message_type: str = "assistant",
 ) -> str:
     """Insert a message and bump session counters. Returns message id.
 
     Safe to call from background tasks — does not raise on failure (logs only).
+
+    Args:
+        message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
+            Defaults to 'assistant' for backward compat.
     """
     msg_id = message_id or str(uuid.uuid4())
     ts = created_at or time.time()
@@ -359,9 +405,9 @@ def persist_message(
             logger.warning("persist_message: session %s not found", session_id)
             return msg_id
         conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json),
+            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json, message_type),
         )
         conn.execute(
             "UPDATE sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?",

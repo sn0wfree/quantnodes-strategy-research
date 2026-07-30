@@ -1191,26 +1191,114 @@ class AgentLoop:
                 )
 
         # Delegate to compact_messages engine
-        messages, applied = compact_messages(
+        # opencode-aligned: returns 3-tuple (messages, applied, l4_summary_text).
+        # The summary text is the L4 output; the caller (us) persists
+        # it as a CompactionMessage event (opencode-aligned) so the
+        # LLM never sees it as a previous assistant turn.
+        messages, applied, l4_summary_text = compact_messages(
             messages,
             config=self.cc,
             threshold_tokens=self.threshold_tokens,
             model_context_tokens=self.config.model_context_tokens,
             llm_client=self.client,
             previous_summary=self._previous_summary,
+            session_id=self.session_id,
         )
 
-        # Track summary for incremental updates
+        if l4_summary_text:
+            self._previous_summary = l4_summary_text
+            if any(layer.startswith("llm_summarize") for layer in applied):
+                self._persist_compaction_event(messages, l4_summary_text)
+
+        # Track summary for incremental updates (legacy path)
         if applied:
             for layer in applied:
                 if layer.startswith("llm_summarize"):
-                    # Extract summary from the new messages for future incremental updates
+                    if self._previous_summary:
+                        # Already set by _persist_compaction_event
+                        break
+                    # Fallback: extract from old-style [context summary] msg
                     for msg in messages:
-                        if msg.get("role") == "assistant" and msg.get("content", "").startswith("[context summary]"):
-                            self._previous_summary = msg["content"]
+                        if (msg.get("role") == "assistant"
+                                and (msg.get("content", "").startswith("[context summary]")
+                                     or msg.get("message_type") == "compaction")):
+                            content = msg.get("content", "")
+                            if content.startswith("[context summary]"):
+                                self._previous_summary = content
+                            else:
+                                # New format: pull summary from parts_json
+                                import json as _json
+                                try:
+                                    parts = _json.loads(msg.get("parts_json") or "[]")
+                                    comp = next(
+                                        (p for p in parts
+                                         if isinstance(p, dict) and p.get("type") == "compaction"),
+                                        None,
+                                    )
+                                    if comp:
+                                        self._previous_summary = comp.get("summary", "")
+                                except Exception:
+                                    pass
                             break
 
         return messages, applied
+
+    def _persist_compaction_event(
+        self,
+        compacted_messages: list[dict[str, Any]],
+        summary_text: str,
+    ) -> None:
+        """Persist a CompactionMessage event for the L4 layer.
+
+        opencode-aligned: stores summary in a dedicated message
+        with message_type='compaction'. The next LLM call will load
+        it via the message store and project via to_llm_message().
+
+        Idempotent: if a compaction already exists in the session,
+        this updates the latest one with the new summary (incremental).
+        """
+        session_id = self.session_id
+        if not session_id:
+            logger.debug("L4 ran but no session_id; skipping compaction persistence")
+            return
+
+        if not summary_text or not summary_text.strip():
+            return
+
+        try:
+            from .compaction_message import new_compaction_message
+            from ...api.routers.web_session import persist_message
+            from .compact import _serialize_message
+
+            # Serialize recent messages for the LLM's <recent-context>
+            # section. Take last N (where N is preserve_recent_tokens worth).
+            recent_count = max(4, self.cc.preserve_recent_tokens // 100)
+            recent_slice = compacted_messages[-recent_count:] if compacted_messages else []
+            recent_str = "\n\n".join(
+                _serialize_message(m) for m in recent_slice if _serialize_message(m)
+            )
+
+            comp = new_compaction_message(
+                session_id=session_id,
+                summary=summary_text,
+                recent=recent_str,
+                reason="auto",
+            )
+
+            persist_message(
+                session_id=comp.session_id,
+                role="assistant",  # DB compat
+                content=comp.summary,
+                parts=comp.to_parts(),
+                message_id=comp.id,
+                message_type="compaction",
+            )
+            logger.info(
+                "compaction event persisted: %s (summary=%d chars, recent=%d chars)",
+                comp.id, len(comp.summary), len(comp.recent),
+            )
+        except Exception as exc:
+            logger.warning("compaction persistence failed: %s", exc)
 
     async def _amaybe_compact(
         self, messages: list[dict[str, Any]]
@@ -1240,23 +1328,20 @@ class AgentLoop:
                 return asyncio.run(self._client.achat(messages, **kwargs))
 
         adapter = _AchatAdapter(self.client)
-        messages, applied = compact_messages(
+        messages, applied, l4_summary_text = compact_messages(
             messages,
             config=self.cc,
             threshold_tokens=self.threshold_tokens,
             model_context_tokens=self.config.model_context_tokens,
             llm_client=adapter,
             previous_summary=self._previous_summary,
+            session_id=self.session_id,
         )
 
-        # Track summary for incremental updates
-        if applied:
-            for layer in applied:
-                if layer.startswith("llm_summarize"):
-                    for msg in messages:
-                        if msg.get("role") == "assistant" and msg.get("content", "").startswith("[context summary]"):
-                            self._previous_summary = msg["content"]
-                            break
+        if l4_summary_text:
+            self._previous_summary = l4_summary_text
+            if any(layer.startswith("llm_summarize") for layer in applied):
+                self._persist_compaction_event(messages, l4_summary_text)
 
         return messages, applied
 

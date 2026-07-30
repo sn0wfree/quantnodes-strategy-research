@@ -277,7 +277,10 @@ class ResearchApp(App):
             history = [
                 {"role": m.role, "content": m.content}
                 for m in messages
-                if m.role in {"user", "assistant"} and (m.content or "").strip()
+                if m.role in {"user", "assistant"}
+                and (m.content or "").strip()
+                # Skip compaction events (opencode-aligned, hidden from UI)
+                and (getattr(m, "message_type", None) or m.role) != "compaction"
             ][-6:]
         except Exception:
             history = []
