@@ -26,6 +26,8 @@ export function useSSE(sessionId: string | null) {
   const setStreamingMessage = useChatStore((s) => s.setStreamingMessage)
   const setStreamingText = useChatStore((s) => s.setStreamingText)
   const appendStreamingText = useChatStore((s) => s.appendStreamingText)
+  const setQueuePaused = useChatStore((s) => s.setQueuePaused)
+  const setQueueLength = useChatStore((s) => s.setQueueLength)
   const updateAgent = useAgentStore((s) => s.updateAgent)
   const updateNodeStatus = useWorkflowStore((s) => s.updateNodeStatus)
   const addToast = useToastStore((s) => s.addToast)
@@ -164,6 +166,12 @@ export function useSSE(sessionId: string | null) {
           // so subsequent text_delta / thinking_* / assistant_message events
           // (which carry that same id) can update it correctly.
           //
+          // Per-session FIFO queue: backend may attach status="queued" and
+          // queue_position/length to indicate the message is waiting behind
+          // an in-flight attempt. In that case we create the placeholder
+          // but do NOT switch streamingMessageId; we wait for the
+          // attempt.started event before kicking off streaming.
+          //
           // Uses incremental addMessage (immer set) instead of Map
           // replacement to avoid race conditions with Composer's optimistic
           // addMessage.
@@ -171,44 +179,102 @@ export function useSSE(sessionId: string | null) {
             user_message_id: userMsgId,
             assistant_message_id: assistantMsgId,
             content: userContent,
+            created_at: backendCreatedAt,
+            status: queueStatus,
+            queue_position,
+            queue_length,
           } = data as {
             user_message_id?: string
             assistant_message_id?: string
             attempt_id?: string
             content?: string
             message_id?: string
+            created_at?: number
+            status?: 'processing' | 'queued'
+            queue_position?: number
+            queue_length?: number
           }
           const userId = userMsgId || (data.message_id as string | undefined)
 
+          // Use backend-authoritative created_at when available
+          // (server time.time(), microsecond precision). This ensures
+          // user + assistant in the same exchange share the same
+          // timestamp, so stable sort groups them correctly.
+          const createdAt = backendCreatedAt ?? Date.now() / 1000
+          const isQueued = queueStatus === 'queued'
+
           // Ensure user message exists with correct backend ID.
-          // If Composer's optimistic temp message already renamed it,
-          // this is a no-op (same id). If SSE arrived before rename,
-          // this creates it.
           if (userId && userContent !== undefined) {
             const existing = useChatStore.getState().messages.get(userId)
-            if (!existing) {
+            if (existing) {
+              updateMessage(userId, (msg) => { msg.created_at = createdAt })
+            } else {
               addMessage({
                 id: userId,
                 session_id: sessionId!,
                 role: 'user',
                 parts: [{ type: 'text', text: userContent }],
-                created_at: Date.now() / 1000,
+                created_at: createdAt,
               })
             }
           }
 
           // Create assistant placeholder with backend's assistant_message_id.
-          // addMessage uses immer's set (incremental), not Map replacement.
+          // Uses the SAME created_at as the user message so they sort
+          // together within the same exchange. Queue metadata is attached
+          // so AssistantMessage can render the "等待中... 2/3" state.
           if (assistantMsgId) {
             addMessage({
               id: assistantMsgId,
               session_id: sessionId!,
               role: 'assistant',
               parts: [{ type: 'text', text: '' }],
-              created_at: Date.now() / 1000,
+              created_at: createdAt,
+              metadata: {
+                queue_position,
+                queue_length,
+                queue_status: queueStatus ?? 'processing',
+              },
             })
-            setStreamingMessage(assistantMsgId)
+            if (!isQueued) {
+              // Head-of-queue: kick off streaming immediately (legacy path).
+              setStreamingMessage(assistantMsgId)
+              setStreamingText('')
+            } else if (typeof queue_length === 'number' && sessionId) {
+              // Queued: track queue length for banner/UI; do NOT stream.
+              setQueueLength(sessionId, queue_length)
+            }
+          }
+          break
+        }
+        case 'attempt.started': {
+          // Backend queue consumer picked up the next queued attempt and
+          // is starting streaming on the assistant_message_id. Frontend
+          // switches streamingMessageId to this message and resets the
+          // streaming text buffer.
+          const mid = (data.message_id as string | undefined) ?? messageId
+          if (mid && sessionId) {
+            setStreamingMessage(mid)
             setStreamingText('')
+            // Clear queue-paused flag once we resume processing
+            if (useChatStore.getState().queuePaused.get(sessionId)) {
+              setQueuePaused(sessionId, false)
+            }
+          }
+          break
+        }
+        case 'queue_paused': {
+          // Backend queue consumer paused after an explicit cancel; the
+          // frontend shows the "队列已暂停" banner with a resume button.
+          if (sessionId) {
+            setQueuePaused(sessionId, true)
+          }
+          break
+        }
+        case 'queue_state': {
+          // Backend emitted a snapshot of the current queue length.
+          if (sessionId && typeof (data as any).queue_length === 'number') {
+            setQueueLength(sessionId, (data as any).queue_length)
           }
           break
         }

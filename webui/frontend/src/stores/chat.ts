@@ -70,6 +70,9 @@ export interface Message {
     model?: string
     tokens_used?: number
     iteration?: number
+    queue_position?: number
+    queue_length?: number
+    queue_status?: 'processing' | 'queued'
   }
 }
 
@@ -78,6 +81,10 @@ interface ChatState {
   streamingMessageId: string | null
   streamingText: string
   activeAttemptId: string | null
+  /** Per-session flag: true when the consumer queue was paused after cancel. */
+  queuePaused: Map<string, boolean>
+  /** Per-session current queue length snapshot. */
+  queueLengths: Map<string, number>
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
   updateMessage: (id: string, updater: (msg: Message) => void) => void
@@ -86,6 +93,9 @@ interface ChatState {
   appendStreamingText: (delta: string) => void
   setActiveAttempt: (attemptId: string | null) => void
   cancelAttempt: () => Promise<void>
+  resumeQueue: () => Promise<void>
+  setQueuePaused: (sessionId: string, paused: boolean) => void
+  setQueueLength: (sessionId: string, length: number) => void
   loadMessages: (sessionId: string) => Promise<void>
   clearMessages: () => void
 }
@@ -96,6 +106,8 @@ export const useChatStore = create<ChatState>()(
     streamingMessageId: null,
     streamingText: '',
     activeAttemptId: null,
+    queuePaused: new Map(),
+    queueLengths: new Map(),
     setMessages: (messages) =>
       set((state) => {
         state.messages.clear()
@@ -138,12 +150,34 @@ export const useChatStore = create<ChatState>()(
         state.activeAttemptId = null
       })
     },
+    resumeQueue: async () => {
+      const sessionId = useSessionStore.getState().currentSessionId
+      if (!sessionId) return
+      try {
+        await api.post('/chat/queue/resume', { session_id: sessionId })
+        set((state) => {
+          state.queuePaused.set(sessionId, false)
+        })
+      } catch (err) {
+        console.error('Resume queue failed:', err)
+      }
+    },
+    setQueuePaused: (sessionId, paused) =>
+      set((state) => {
+        state.queuePaused.set(sessionId, paused)
+      }),
+    setQueueLength: (sessionId, length) =>
+      set((state) => {
+        state.queueLengths.set(sessionId, length)
+      }),
     clearMessages: () =>
       set((state) => {
         state.messages.clear()
         state.streamingMessageId = null
         state.streamingText = ''
         state.activeAttemptId = null
+        state.queuePaused.clear()
+        state.queueLengths.clear()
       }),
     loadMessages: async (sessionId: string) => {
       try {

@@ -17,6 +17,7 @@ interface AssistantMessageProps {
   message: Message
   isStreaming?: boolean
   streamingText?: string
+  isQueued?: boolean
   layout: ChatLayout
 }
 
@@ -25,6 +26,34 @@ function formatTime(ts: number): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+/**
+ * Indicator shown while an assistant message is queued behind an
+ * in-flight attempt on the same session. Displays a pulsing dot and
+ * "等待中... {position}/{length}" so the user knows their message was
+ * accepted and is queued.
+ */
+function QueuedIndicator({
+  queuePosition,
+  queueLength,
+}: {
+  queuePosition?: number
+  queueLength?: number
+}) {
+  const pos = queuePosition ?? 1
+  const len = queueLength ?? pos
+  return (
+    <div
+      className="inline-flex items-center gap-2 rounded-md border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-xs text-slate-400 animate-pulse"
+      aria-label={`消息排队中，第 ${pos} 位，共 ${len} 条`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+      <span>
+        等待中... {pos}/{len}
+      </span>
+    </div>
+  )
 }
 
 /**
@@ -85,6 +114,7 @@ export function AssistantMessage({
   message,
   isStreaming,
   streamingText,
+  isQueued,
   layout,
 }: AssistantMessageProps) {
   const provider = useSystemStore((s) => s.llm.provider)
@@ -134,7 +164,12 @@ export function AssistantMessage({
 
   const body = (
     <div className="text-sm text-slate-200 space-y-3">
-      {isStreaming && streamingText !== undefined ? (
+      {isQueued ? (
+        <QueuedIndicator
+          queuePosition={message.metadata?.queue_position}
+          queueLength={message.metadata?.queue_length}
+        />
+      ) : isStreaming && streamingText !== undefined ? (
         <StreamingText text={streamingText} isDone={false} />
       ) : (
         groupedParts.map((item, idx) => {

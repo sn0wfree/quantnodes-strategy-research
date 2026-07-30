@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, Image as ImageIcon, X, Square } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
 import { useSessionStore } from '../../stores/session'
+import { useToastStore } from '../../stores/toast'
 import { api } from '../../api/client'
 import { uuid } from '../../utils/uuid'
 
@@ -15,6 +16,7 @@ export function Composer() {
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const setActiveAttempt = useChatStore((s) => s.setActiveAttempt)
   const cancelAttempt = useChatStore((s) => s.cancelAttempt)
+  const addToast = useToastStore((s) => s.addToast)
 
   const isStreaming = streamingMessageId !== null
 
@@ -81,6 +83,16 @@ export function Composer() {
       }
     } catch (err: any) {
       console.error('Send failed:', err)
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail
+      if (status === 429 && detail?.error === 'queue_full') {
+        addToast(
+          'error',
+          `队列已满（上限 ${detail.limit} 条），请等待完成或取消当前轮次`,
+        )
+      } else if (err?.message) {
+        addToast('error', `发送失败：${err.message}`)
+      }
       useChatStore.setState((state) => {
         state.messages.delete(tempUserId)
       })
