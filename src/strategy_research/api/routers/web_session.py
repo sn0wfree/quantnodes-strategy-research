@@ -86,6 +86,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             role TEXT NOT NULL,
             content TEXT NOT NULL DEFAULT '',
             parts_json TEXT,
+            tool_call_id TEXT,
             created_at REAL NOT NULL,
             metadata_json TEXT,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -95,6 +96,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_messages_session_created "
         "ON messages(session_id, created_at)"
     )
+    _add_column(conn, "messages", "tool_call_id", "TEXT")
 
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
@@ -269,6 +271,7 @@ def _row_to_message(row: sqlite3.Row) -> dict:
         "role": row["role"],
         "content": row["content"],
         "parts": parts,
+        "tool_call_id": row["tool_call_id"] if "tool_call_id" in row.keys() else None,
         "created_at": row["created_at"],
         "metadata": metadata,
     }
@@ -287,6 +290,7 @@ def persist_message(
     metadata: Optional[dict[str, Any]] = None,
     message_id: Optional[str] = None,
     created_at: Optional[float] = None,
+    tool_call_id: Optional[str] = None,
 ) -> str:
     """Insert a message and bump session counters. Returns message id.
 
@@ -298,16 +302,14 @@ def persist_message(
     metadata_json = json.dumps(metadata, ensure_ascii=False) if metadata is not None else None
     try:
         conn = _get_db()
-        # Verify session exists and belongs to the implicit user (we don't enforce
-        # user_id here because chat.py doesn't pass it — multi-user is best-effort).
         row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not row:
             logger.warning("persist_message: session %s not found", session_id)
             return msg_id
         conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, parts_json, created_at, metadata_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (msg_id, session_id, role, content, parts_json, ts, metadata_json),
+            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json),
         )
         conn.execute(
             "UPDATE sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?",

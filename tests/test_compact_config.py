@@ -324,12 +324,12 @@ class TestSerializeMessage:
             "tool_calls": [{"function": {"name": "test", "arguments": '{"k":"v"}'}}],
         }
         result = _serialize_message(msg)
-        assert "[ToolCall]: test" in result
+        assert "[Assistant tool call]: test" in result
 
     def test_tool_result(self):
         msg = {"role": "tool", "content": "output", "tool_call_id": "c1"}
         result = _serialize_message(msg)
-        assert "[ToolResult:c1]:" in result
+        assert "[Tool result]:" in result
         assert "output" in result
 
     def test_tool_result_truncation(self):
@@ -337,6 +337,39 @@ class TestSerializeMessage:
         result = _serialize_message(msg)
         assert "truncated" in result
         assert len(result) < 3000
+
+    def test_think_block_split(self):
+        msg = {"role": "assistant", "content": "<think>thinking about it</think>final answer"}
+        result = _serialize_message(msg)
+        assert "[Assistant reasoning]: thinking about it" in result
+        assert "[Assistant]: final answer" in result
+        assert "<think>" not in result
+
+    def test_think_block_only(self):
+        msg = {"role": "assistant", "content": "<think>just thinking</think>"}
+        result = _serialize_message(msg)
+        assert "[Assistant reasoning]: just thinking" in result
+        assert "[Assistant]:" not in result
+
+    def test_no_think_block(self):
+        msg = {"role": "assistant", "content": "just text"}
+        result = _serialize_message(msg)
+        assert "[Assistant]: just text" in result
+        assert "[Assistant reasoning]:" not in result
+
+    def test_system_message(self):
+        msg = {"role": "system", "content": "you are helpful"}
+        result = _serialize_message(msg)
+        assert result == "[System update]: you are helpful"
+
+    def test_tool_error_detected(self):
+        import json
+        error_content = json.dumps({"status": "error", "message": "file not found"})
+        msg = {"role": "tool", "content": error_content, "tool_call_id": "c1"}
+        result = _serialize_message(msg)
+        assert "[Tool error]:" in result
+        assert "file not found" in result
+        assert "[Tool result]:" not in result
 
 
 # ── Summary prompt ────────────────────────────────────────────────
@@ -393,6 +426,46 @@ class TestCompactMessages:
         result, layers = compact_messages(msgs, cfg, threshold_tokens=100)
         assert any("truncate" in l for l in layers)
         assert len(result) <= 3 + 1  # keep_recent + any system msgs
+
+    def test_force_all_threshold_zero_runs_all_layers(self):
+        """threshold_tokens=0 is a sentinel for manual /compact — every
+        layer should run regardless of ratio. Previously this was
+        broken because 0 * ratio = 0 made the L4 condition always true
+        but the L1 early-exit skip fired silently."""
+        msgs = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+            {"role": "tool", "content": "x" * 5000, "tool_call_id": "c1"},
+        ]
+        cfg = CompactConfig(microcompact_tool_result_limit=200)
+        # Without llm_client, L4 is skipped but L1 should still run.
+        result, layers = compact_messages(
+            msgs, cfg, threshold_tokens=0, llm_client=None,
+        )
+        assert any("microcompact" in l for l in layers)
+
+    def test_force_all_threshold_zero_runs_llm_summarize(self):
+        """When threshold_tokens=0 AND llm_client is provided, L4 should
+        run and produce a system+summary+recent messages list."""
+        import asyncio
+        msgs = [
+            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
+        ]
+        msgs += [{"role": "assistant", "content": f"reply {i} " * 30} for i in range(5)]
+
+        mock_client = MagicMock()
+        mock_client.chat.return_value = MagicMock(content="- bullet 1\n- bullet 2")
+
+        cfg = CompactConfig(tail_turns=2)
+        result, layers = compact_messages(
+            msgs, cfg, threshold_tokens=0, llm_client=mock_client,
+        )
+        assert any("llm_summarize" in l for l in layers)
+        # Summary message should be present
+        assert any(
+            m.get("content", "").startswith("[context summary]")
+            for m in result
+        )
 
 
 # ── LLMConfig integration ────────────────────────────────────────

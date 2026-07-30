@@ -14,6 +14,7 @@ Design inspired by opencode's compaction architecture:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -54,7 +55,8 @@ Rules:
 - Keep every section, even when empty.
 - Use terse bullets, not prose paragraphs.
 - Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers when known.
-- Do not mention the summary process or that context was compacted."""
+- Do not mention the summary process or that context was compacted.
+- "[Assistant reasoning]" blocks are internal thought process — extract only final decisions and conclusions, not the deliberation itself."""
 
 
 # ── Config ────────────────────────────────────────────────────────
@@ -126,31 +128,76 @@ def _estimate_single_tokens(text: str) -> int:
 
 # ── Message serialization (opencode-style) ───────────────────────
 
+_THINK_RE = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
+
+TOOL_OUTPUT_MAX_CHARS = 2000
+
+
 def _serialize_message(msg: dict[str, Any]) -> str:
-    """Serialize a message for LLM summarization input."""
+    """Serialize a message for LLM summarization input.
+
+    Format aligned with opencode core compaction serialize():
+      [User]: ...
+      [Assistant]: ... (text content)
+      [Assistant reasoning]: ... (extracted from <think> tags)
+      [Assistant tool call]: name(input)
+      [Tool result]: ... (truncated)
+      [Tool error]: ...
+      [System update]: ...
+    """
     role = msg.get("role", "?")
     content = msg.get("content", "") or ""
 
     if role == "user":
         return f"[User]: {content}"
 
+    if role == "system":
+        return f"[System update]: {content}"
+
     if role == "assistant":
         parts: list[str] = []
+
+        # Extract <think> blocks as reasoning content
         if content:
-            parts.append(f"[Assistant]: {content}")
+            think_matches = _THINK_RE.findall(content)
+            if think_matches:
+                reasoning_text = "\n".join(m.strip() for m in think_matches if m.strip())
+                if reasoning_text:
+                    parts.append(f"[Assistant reasoning]: {reasoning_text}")
+            # Remove think blocks from main content
+            clean_content = _THINK_RE.sub("", content).strip()
+            if clean_content:
+                parts.append(f"[Assistant]: {clean_content}")
+
+        # Tool calls
         for tc in msg.get("tool_calls") or []:
             if isinstance(tc, dict):
                 fn = tc.get("function", {})
                 args_str = fn.get("arguments", "")
                 if isinstance(args_str, str) and len(args_str) > 100:
                     args_str = args_str[:100] + "..."
-                parts.append(f"[ToolCall]: {fn.get('name', '?')}({args_str})")
+                elif not isinstance(args_str, str):
+                    args_str = str(args_str)[:100]
+                parts.append(f"[Assistant tool call]: {fn.get('name', '?')}({args_str})")
         return "\n".join(parts)
 
     if role == "tool":
-        tc_id = msg.get("tool_call_id", "?")
-        truncated = content[:2000] + "\n[truncated]" if len(content) > 2000 else content
-        return f"[ToolResult:{tc_id}]: {truncated}"
+        truncated = content[:TOOL_OUTPUT_MAX_CHARS] + "\n[truncated]" if len(content) > TOOL_OUTPUT_MAX_CHARS else content
+        # Detect error status
+        is_error = False
+        if truncated.startswith("{") and '"status"' in truncated[:100]:
+            try:
+                import json
+                parsed = json.loads(truncated[:TOOL_OUTPUT_MAX_CHARS])
+                if isinstance(parsed, dict) and parsed.get("status") == "error":
+                    is_error = True
+                    error_msg = parsed.get("message") or parsed.get("error") or str(parsed)
+                    truncated = error_msg
+            except Exception:
+                pass
+        if is_error:
+            return f"[Tool error]: {truncated}"
+        return f"[Tool result]: {truncated}"
 
     return ""
 
@@ -265,7 +312,7 @@ def _select_by_token_budget(
     if config.preserve_recent_tokens is not None:
         budget = config.preserve_recent_tokens
     elif model_context_tokens is not None:
-        budget = min(8000, max(2000, int(model_context_tokens * 0.25)))
+        budget = min(8000, max(2000, int(model_context_tokens * 0.20)))
     else:
         budget = 4000
 
@@ -463,12 +510,21 @@ def compact_messages(
 
     tokens = _estimate_tokens(messages)
 
-    # Early exit: below L1 threshold
-    if tokens < threshold_tokens * cfg.microcompact_ratio:
+    # threshold_tokens=0 is a sentinel meaning "force every layer to run"
+    # (used by manual /compact). The downstream comparisons multiply by
+    # threshold_tokens, so 0 would make "skip below L1" meaningless and
+    # "run L4" always true. We bypass ratio gating in force mode.
+    force_all = threshold_tokens == 0
+    l1_threshold = 0 if force_all else threshold_tokens * cfg.microcompact_ratio
+    l4_threshold = 0 if force_all else threshold_tokens * cfg.llm_summarize_ratio
+    l3_threshold = 0 if force_all else threshold_tokens * cfg.hard_truncate_ratio
+
+    # Early exit: below L1 threshold (skip when force_all)
+    if not force_all and tokens < l1_threshold:
         return messages, applied
 
     # ── L1: Smart Microcompact (50%) ──────────────────────────────
-    if tokens >= threshold_tokens * cfg.microcompact_ratio:
+    if force_all or tokens >= l1_threshold:
         messages, l1_count = _smart_microcompact(messages, cfg)
         if l1_count:
             applied.append(f"microcompact({l1_count})")
@@ -476,7 +532,7 @@ def compact_messages(
     tokens = _estimate_tokens(messages)
 
     # ── L4: LLM Summarize (80%) ───────────────────────────────────
-    if tokens >= threshold_tokens * cfg.llm_summarize_ratio and llm_client is not None:
+    if (force_all or tokens >= l4_threshold) and llm_client is not None:
         old_len = len(messages)
         summarized = _llm_summarize_v2(
             messages, cfg, model_context_tokens, llm_client, previous_summary,
@@ -487,7 +543,7 @@ def compact_messages(
 
     # ── L3: Hard Truncate (90%) ───────────────────────────────────
     tokens = _estimate_tokens(messages)
-    if tokens >= threshold_tokens * cfg.hard_truncate_ratio:
+    if force_all or tokens >= l3_threshold:
         old_len = len(messages)
         messages = _hard_truncate(messages, cfg.collapse_keep_recent)
         if len(messages) < old_len:

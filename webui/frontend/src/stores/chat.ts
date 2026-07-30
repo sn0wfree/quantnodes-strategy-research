@@ -7,7 +7,7 @@ import { useSessionStore } from './session'
 // Required for immer to handle Map/Set types in chat state
 enableMapSet()
 
-export type MessageRole = 'user' | 'assistant' | 'system'
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface TextPart {
   type: 'text'

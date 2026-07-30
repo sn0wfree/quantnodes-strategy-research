@@ -80,6 +80,14 @@ export function MessageList() {
         data={messageList}
         totalCount={messageList.length}
         itemContent={(_index, message) => {
+          // Tool messages are persisted to DB for history reconstruction
+          // (see _convert_messages_to_history in backend) but should NOT
+          // render as Agent cards in the UI. Each tool result is already
+          // shown inline inside the assistant message's ToolCallGroup.
+          // Previously these 13+ tool records were rendered as empty Agent
+          // cards, polluting the chat view.
+          if (message.role === 'tool') return null
+
           const isStreaming = message.id === streamingMessageId
           // Queued: assistant placeholder with no parts and not currently streaming.
           const isQueued =

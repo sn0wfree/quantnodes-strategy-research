@@ -83,6 +83,7 @@ class SessionStore:
             metadata=message.metadata,
             message_id=msg_id,
             created_at=created_at,
+            tool_call_id=message.tool_call_id,
         )
         return msg_id
 
@@ -110,8 +111,12 @@ class SessionStore:
                     session_id=session_id,
                     role=m["role"],
                     content=m.get("content", ""),
+                    tool_call_id=m.get("tool_call_id"),
                     linked_attempt_id=m.get("metadata", {}).get("linked_attempt_id"),
-                    metadata=m.get("metadata", {}),
+                    metadata={
+                        **(m.get("metadata") or {}),
+                        "_parts": m.get("parts", []),
+                    },
                 )
             )
         return out

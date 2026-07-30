@@ -98,6 +98,7 @@ class Message:
     session_id: str = ""
     role: str = "user"
     content: str = ""
+    tool_call_id: Optional[str] = None
     created_at: str = field(default_factory=_utc_now_iso)
     linked_attempt_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)

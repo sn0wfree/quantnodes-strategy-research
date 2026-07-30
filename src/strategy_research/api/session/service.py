@@ -572,6 +572,25 @@ class SessionService:
             # Accumulate parts for persistence
             _accumulate_part(accumulated_parts, event_type, data)
 
+            # Persist tool result messages immediately as role=tool rows
+            # so the next AgentLoop invocation can rebuild full history.
+            if event_type == "tool_result":
+                tc_id = data.get("id") or data.get("call_id")
+                result_text = data.get("result") or data.get("preview") or ""
+                if tc_id and result_text:
+                    try:
+                        self.store.append_message(
+                            Message(
+                                session_id=attempt.session_id,
+                                role="tool",
+                                content=result_text,
+                                tool_call_id=tc_id,
+                                metadata={"attempt_id": attempt.attempt_id},
+                            ),
+                        )
+                    except Exception as exc:
+                        logger.warning("persist tool result failed: %s", exc)
+
             # Track token usage so the frontend can show a context
             # usage bar. llm_usage is emitted by AgentLoop after each
             # LLM call (see core/agent/loop.py).
@@ -734,15 +753,17 @@ class SessionService:
     ) -> dict[str, Any]:
         """Compress session history in-place using compact_messages.
 
+        Writes compressed results back to the database.
         Returns dict with keys: layers, before_tokens, after_tokens, summary.
         """
-        messages = self.store.get_messages(session_id, limit=100)
+        from ..routers.chat import _build_llm_config
+        from ..routers.web_session import delete_messages
+
+        messages = self.store.get_messages(session_id, limit=10000)
         history = self._convert_messages_to_history(messages)
 
         if not history:
             return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
-
-        from ..routers.chat import _build_llm_config
 
         cfg = _build_llm_config()
         llm_client = None
@@ -771,6 +792,52 @@ class SessionService:
         if not summary and layers:
             summary = self._build_fallback_summary(compressed, history)
 
+        # Persist compressed history back to DB (replace old messages)
+        if layers:
+            try:
+                # Collect IDs of all non-last messages (the ones that were compressed)
+                old_ids = [m.message_id for m in messages[:-1]]
+                if old_ids:
+                    delete_messages(session_id, old_ids)
+
+                # Insert compressed messages in order, assigning fresh IDs
+                import uuid
+                new_ids: list[str] = []
+                for i, m in enumerate(compressed):
+                    mid = f"cmp_{uuid.uuid4().hex[:10]}"
+                    new_ids.append(mid)
+                    role = m.get("role", "assistant")
+                    content = m.get("content", "") or ""
+                    tool_call_id = m.get("tool_call_id")
+
+                    # Build parts for assistant messages with tool_calls
+                    parts = None
+                    if role == "assistant" and m.get("tool_calls"):
+                        parts = []
+                        for tc in m["tool_calls"]:
+                            parts.append({
+                                "type": "tool_call",
+                                "id": tc.get("id", ""),
+                                "name": tc.get("function", {}).get("name", ""),
+                                "arguments": tc.get("function", {}).get("arguments", "{}"),
+                                "status": "done",
+                                "result": "",
+                            })
+
+                    self.store.append_message(
+                        Message(
+                            session_id=session_id,
+                            role=role,
+                            content=content,
+                            tool_call_id=tool_call_id,
+                            metadata={"compacted": True, "order": i},
+                        ),
+                        message_id=mid,
+                        parts=parts,
+                    )
+            except Exception:
+                logger.exception("failed to persist compacted history")
+
         return {
             "layers": layers,
             "before_tokens": before_tokens,
@@ -779,32 +846,76 @@ class SessionService:
             "compressed": compressed,
         }
 
-    # ── History conversion (borrowed verbatim from vibe_trading) ──────
+    # ── History conversion ────────────────────────────────────────────
 
     @staticmethod
     def _convert_messages_to_history(messages: list[Message]) -> list[dict[str, Any]]:
         """Convert Session messages to OpenAI-format history.
 
+        Handles two storage formats:
+        1. New: role=tool messages with tool_call_id (1:1 with OpenAI format)
+        2. Legacy: tool_calls embedded in assistant message parts (reconstructed from parts)
+
         Excludes the current turn (last message). Trims by character budget
         from the newest items so the LLM still sees the most recent context.
-
-        Borrowed from vibe_trading ``SessionService._convert_messages_to_history``.
         """
         history: list[dict[str, Any]] = []
         for msg in messages[:-1]:
             role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
             content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-            if not content or not content.strip():
+            parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
+
+            if role == "tool":
+                tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
+                if not tc_id:
+                    continue
+                history.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": content or "",
+                })
                 continue
+
             if role not in ("user", "assistant"):
                 continue
-            history.append({"role": role, "content": content})
 
-        # Trim by character budget from newest → oldest.
+            entry: dict[str, Any] = {"role": role, "content": content or ""}
+
+            if role == "assistant" and parts:
+                tool_calls = []
+                for p in parts:
+                    if p.get("type") != "tool_call":
+                        continue
+                    tc_id = p.get("id") or p.get("call_id")
+                    if not tc_id:
+                        continue
+                    args_str = p.get("arguments") or "{}"
+                    if not isinstance(args_str, str):
+                        args_str = json.dumps(args_str, ensure_ascii=False)
+                    tool_calls.append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {
+                            "name": p.get("name", ""),
+                            "arguments": args_str,
+                        },
+                    })
+                if tool_calls:
+                    entry["tool_calls"] = tool_calls
+
+            if not content and not entry.get("tool_calls"):
+                continue
+
+            history.append(entry)
+
+        # Trim by character budget from newest → oldest, but never break
+        # an assistant message with tool_calls away from its tool results.
         total_chars = 0
         trimmed: list[dict[str, Any]] = []
         for msg in reversed(history):
             msg_len = len(msg.get("content", ""))
+            for tc in msg.get("tool_calls") or []:
+                msg_len += len(tc.get("function", {}).get("arguments", ""))
             if total_chars + msg_len > MAX_HISTORY_CHARS:
                 break
             trimmed.append(msg)
