@@ -1199,6 +1199,10 @@ class AgentLoop:
                     tokens, usable, self.cc.overflow_ratio,
                 )
 
+        # Save original for rollback. compact_messages reassigns `messages`
+        # in the loop, so we need a reference to the pre-compaction list.
+        original_messages = list(messages)
+
         # Delegate to compact_messages engine
         # opencode-aligned: returns 4-tuple (messages, applied, summary, recent_text).
         # The summary text + recent text are pre-computed in compact and
@@ -1220,7 +1224,7 @@ class AgentLoop:
             # The LLM is more useful with full history than with
             # partial compaction.
             logger.exception("L4 compaction failed; keeping full history")
-            return messages, []
+            return original_messages, []
 
         if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
             self._previous_summary = l4_summary_text
@@ -1233,7 +1237,7 @@ class AgentLoop:
                 logger.exception(
                     "compaction persistence failed; rolling back to original messages",
                 )
-                return messages, []
+                return original_messages, []
 
         return messages, applied
 
@@ -1325,6 +1329,7 @@ class AgentLoop:
                 return asyncio.run(self._client.achat(messages, **kwargs))
 
         adapter = _AchatAdapter(self.client)
+        original_messages = list(messages)
         try:
             messages, applied, l4_summary_text, l4_recent_text = compact_messages(
                 messages,
@@ -1338,7 +1343,7 @@ class AgentLoop:
             )
         except Exception:
             logger.exception("L4 compaction failed (async); keeping full history")
-            return messages, []
+            return original_messages, []
 
         if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
             self._previous_summary = l4_summary_text
@@ -1348,7 +1353,7 @@ class AgentLoop:
                 logger.exception(
                     "compaction persistence failed (async); rolling back",
                 )
-                return messages, []
+                return original_messages, []
 
         return messages, applied
 
