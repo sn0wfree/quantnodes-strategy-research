@@ -282,6 +282,7 @@ class WriteFileTool(BaseTool):
     }
     repeatable = True
     is_readonly = False
+    strict = True  # All params required, no dict-shape → strict-safe
 
     def execute(self, **kwargs: Any) -> str:
         try:
@@ -1064,6 +1065,7 @@ class LoadSkillTool(BaseTool):
         "required": ["workspace", "name"],
     }
     repeatable = True
+    strict = True  # Simple shape, all required → safe for strict mode
 
     def execute(self, **kwargs: Any) -> str:
         try:
@@ -1130,6 +1132,7 @@ class OptionsPricingTool(BaseTool):
         "required": ["spot", "strike", "rate", "volatility", "time_to_expiry", "option_type"],
     }
     repeatable = True
+    strict = True  # Simple shape — OpenAI strict mode applies cleanly
 
     def execute(self, **kwargs: Any) -> str:
         try:

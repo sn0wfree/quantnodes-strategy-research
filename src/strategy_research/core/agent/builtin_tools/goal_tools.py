@@ -63,17 +63,19 @@ class CreateGoalTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "session_id": {"type": "string", "description": "Session ID (auto-injected)."},
+            "session_id": {"type": "string", "description": "Session ID (auto-injected by AgentLoop)."},
             "objective": {"type": "string", "description": "Research objective description."},
             "criteria": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "List of success criteria (optional, uses defaults if omitted).",
+                "description": "List of success criteria. Pass null to use defaults.",
+                "nullable": True,
             },
         },
-        "required": ["objective"],
+        "required": ["session_id", "objective", "criteria"],
     }
     repeatable = False
+    strict = True  # All params required (criteria nullable)
 
     def execute(self, **kwargs: Any) -> str:
         session_id = _get_session_id(kwargs)
@@ -137,15 +139,24 @@ class AddEvidenceTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "session_id": {"type": "string", "description": "Session ID (auto-injected)."},
+            "session_id": {"type": "string", "description": "Session ID (auto-injected by AgentLoop)."},
             "text": {"type": "string", "description": "Evidence text (required)."},
-            "criterion_id": {"type": "string", "description": "Link to a specific criterion (optional)."},
-            "source_type": {"type": "string", "description": "Source type (e.g. 'analysis', 'backtest')."},
-            "run_id": {"type": "string", "description": "Related run ID (optional)."},
+            "criterion_id": {
+                "type": "string",
+                "description": "Link to a specific criterion. Pass null if not applicable.",
+                "nullable": True,
+            },
+            "source_type": {"type": "string", "description": "Source type (e.g. 'analysis', 'backtest'). Default 'evidence' if null."},
+            "run_id": {
+                "type": "string",
+                "description": "Related run ID. Pass null if not applicable.",
+                "nullable": True,
+            },
         },
-        "required": ["text"],
+        "required": ["session_id", "text", "criterion_id", "source_type", "run_id"],
     }
     repeatable = True
+    strict = True  # All params required (nullable for optional)
 
     def execute(self, **kwargs: Any) -> str:
         session_id = _get_session_id(kwargs)

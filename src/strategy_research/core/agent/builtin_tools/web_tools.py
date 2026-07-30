@@ -32,11 +32,12 @@ class WebSearchTool(BaseTool):
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query."},
-            "max_results": {"type": "integer", "description": "Max results (default 10)."},
+            "max_results": {"type": "integer", "description": "Max results (default 10, omit to use default)."},
         },
-        "required": ["query"],
+        "required": ["query", "max_results"],
     }
     repeatable = True
+    strict = True  # All params required (max_results may use default 10)
 
     @classmethod
     def check_available(cls) -> bool:
@@ -78,11 +79,12 @@ class ReadUrlTool(BaseTool):
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch."},
-            "max_chars": {"type": "integer", "description": "Max characters (default 10000)."},
+            "max_chars": {"type": "integer", "description": "Max characters (default 10000, omit to use default)."},
         },
-        "required": ["url"],
+        "required": ["url", "max_chars"],
     }
     repeatable = True
+    strict = True  # All params required
 
     def execute(self, **kwargs: Any) -> str:
         from ...web.fetch import read_url
@@ -116,11 +118,12 @@ class ReadDocumentTool(BaseTool):
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to PDF file."},
-            "max_pages": {"type": "integer", "description": "Max pages (default 50)."},
+            "max_pages": {"type": "integer", "description": "Max pages (default 50, omit to use default)."},
         },
-        "required": ["path"],
+        "required": ["path", "max_pages"],
     }
     repeatable = True
+    strict = True  # All params required
 
     @classmethod
     def check_available(cls) -> bool:
