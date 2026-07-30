@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { AssistantMessage } from '../components/chat/AssistantMessage'
+import { useSystemStore } from '../stores/system'
 import type { Message } from '../stores/chat'
 
 const baseMsg: Message = {
@@ -12,7 +13,17 @@ const baseMsg: Message = {
   metadata: { model: 'gpt-4o' },
 }
 
+function setProvider(provider: string, model = 'default') {
+  useSystemStore.setState({
+    llm: { provider, model, configured: !!provider },
+  })
+}
+
 describe('AssistantMessage', () => {
+  beforeEach(() => {
+    setProvider('') // passthrough by default
+  })
+
   it('renders avatar + label in bubble mode', () => {
     const { container } = render(
       <AssistantMessage message={baseMsg} layout="bubble" />
@@ -43,5 +54,34 @@ describe('AssistantMessage', () => {
     expect(screen.getByText('Agent')).toBeTruthy()
     rerender(<AssistantMessage message={msgNoModel} layout="flat" />)
     expect(screen.getByText('Agent')).toBeTruthy()
+  })
+
+  it('splits MiniMax <think> tags into ThinkingBlock + content (provider=minimax)', () => {
+    setProvider('minimax', 'minimax-M3')
+    const msg: Message = {
+      ...baseMsg,
+      parts: [{ type: 'text', text: '<think>plan content</think>你好' }],
+    }
+    const { container } = render(
+      <AssistantMessage message={msg} layout="flat" />
+    )
+    // ThinkingBlock rendered
+    expect(screen.getByText(/Thought/)).toBeTruthy()
+    // Content (without tags) visible
+    expect(screen.getByText('你好')).toBeTruthy()
+    // Tags themselves should not be visible as plain text
+    expect(container.textContent).not.toContain('<think>')
+  })
+
+  it('does NOT parse thinking when provider has no parser', () => {
+    setProvider('unknown-provider')
+    const msg: Message = {
+      ...baseMsg,
+      parts: [{ type: 'text', text: '<think>plan</think>你好' }],
+    }
+    render(<AssistantMessage message={msg} layout="flat" />)
+    // Tags appear as-is in the content (Markdown renderer shows them)
+    // The text content should contain the tags
+    expect(screen.getByText(/<think>plan<\/think>你好/)).toBeTruthy()
   })
 })

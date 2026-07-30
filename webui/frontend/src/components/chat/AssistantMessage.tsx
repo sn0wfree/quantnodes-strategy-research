@@ -1,6 +1,8 @@
 import { Bot } from 'lucide-react'
 import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
+import { useSystemStore } from '../../stores/system'
+import { getThinkingParser } from '../../utils/thinkingParsers'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallGroup } from './ToolCallGroup'
@@ -23,6 +25,39 @@ function formatTime(ts: number): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+/**
+ * Parse a text part using the active provider's thinking parser.
+ * If thinking is extracted, return [thinking_part, text_part].
+ * If no thinking or parser throws, return the original part.
+ */
+function expandTextPart(part: MessagePart, provider: string | null): MessagePart[] {
+  if (part.type !== 'text') return [part]
+  const text = part.text
+  if (!text) return [part]
+
+  const parser = getThinkingParser(provider)
+  let parsed: { thinking: string; content: string }
+  try {
+    parsed = parser(text)
+  } catch (err) {
+    // Fail-safe: silent + console.warn, keep original text
+    console.warn('[thinkingParsers] parse failed:', err)
+    return [part]
+  }
+
+  if (!parsed.thinking) {
+    return [part]
+  }
+
+  const result: MessagePart[] = [
+    { type: 'thinking', text: parsed.thinking, collapsed: true },
+  ]
+  if (parsed.content) {
+    result.push({ type: 'text', text: parsed.content })
+  }
+  return result
 }
 
 function PartRenderer({ part, isStreaming, onRetry }: { part: MessagePart; isStreaming: boolean; onRetry?: (tc: ToolCallPart) => void }) {
@@ -52,6 +87,8 @@ export function AssistantMessage({
   streamingText,
   layout,
 }: AssistantMessageProps) {
+  const provider = useSystemStore((s) => s.llm.provider)
+
   const groupedParts: Array<{ type: 'single'; part: MessagePart } | { type: 'tool_group'; calls: any[] }> = []
   let i = 0
   while (i < message.parts.length) {
@@ -64,7 +101,12 @@ export function AssistantMessage({
       }
       groupedParts.push({ type: 'tool_group', calls })
     } else {
-      groupedParts.push({ type: 'single', part })
+      // Provider-aware thinking extraction: split text parts that contain
+      // inline thinking tags into [thinking, content] parts.
+      const expanded = expandTextPart(part, provider)
+      for (const p of expanded) {
+        groupedParts.push({ type: 'single', part: p })
+      }
       i++
     }
   }

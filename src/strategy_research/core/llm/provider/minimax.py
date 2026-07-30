@@ -17,6 +17,8 @@ from .base import ProviderAdapter
 
 class MiniMaxAdapter(ProviderAdapter):
     THINK_PATTERN = re.compile(r"<think>([\s\S]*?)<\/think>")
+    THINK_OPEN = "<think>"
+    THINK_CLOSE = "</think>"
 
     @property
     def name(self) -> str:
