@@ -67,26 +67,23 @@ ENV_LLM_API_KEY = "LLM_API_KEY"
 ENV_PROFILE: str = "STRATEGY_RESEARCH_LLM_PROFILE"     # no longer read
 LEGACY_DEFAULT_PROFILE: str = "default"                  # always returns "default"
 
-# Supported providers (used for hinting/defaults; any string OK).
-# ``max_tokens`` is a recommended output budget per provider — users
-# override via ``~/.quantnodes/llm.json`` or ``max_tokens`` override.
-PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
-    "openai":   {"base_url": "https://api.openai.com/v1",
-                 "model": "gpt-4o-mini",
-                 "max_tokens": 16384},
-    "deepseek": {"base_url": "https://api.deepseek.com/v1",
-                 "model": "deepseek-chat",
-                 "max_tokens": 8192},
-    "kimi":     {"base_url": "https://api.moonshot.cn/v1",
-                 "model": "moonshot-v1-8k",
-                 "max_tokens": 8192},
-    "qwen":     {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                 "model": "qwen-plus",
-                 "max_tokens": 8192},
-    "minimax":  {"base_url": "https://api.minimaxi.com/v1",
-                 "model": "minimax-M3",
-                 "max_tokens": 32000},
-}
+# Provider defaults are now sourced from the provider adapter registry
+# (provider/*.py). This dict is kept for backward compatibility — it is
+# dynamically rebuilt from the adapter registry on import.
+def _build_provider_defaults() -> dict[str, dict[str, Any]]:
+    """Build PROVIDER_DEFAULTS from the provider adapter registry.
+
+    Adding a new provider = new file in provider/ + register in __init__.py.
+    This dict auto-updates.
+    """
+    from .provider import get_provider_defaults
+    out: dict[str, dict[str, Any]] = {}
+    for name in ("openai", "deepseek", "kimi", "qwen", "minimax"):
+        out[name] = get_provider_defaults(name)
+    return out
+
+
+PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = _build_provider_defaults()
 
 # Global conservative fallback when neither user config nor provider
 # recommendation supplies ``max_tokens``.  Safe for most chat workloads
@@ -130,6 +127,9 @@ class LLMConfig:
     stream: bool = True
     parallel_tool_calls: bool = True
     tool_choice: str = "auto"                      # auto|required|none|{"name":..}
+
+    # ── Thinking ─────────────────────────────────
+    enable_thinking: bool = True                   # emit thinking tokens (when provider supports them)
 
     # ── Methods ──────────────────────────────────
 

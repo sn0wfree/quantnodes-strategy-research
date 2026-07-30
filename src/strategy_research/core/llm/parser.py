@@ -44,6 +44,7 @@ class LLMResponse:
     """Parsed non-streaming chat completion response."""
 
     content: str = ""
+    reasoning_content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = "stop"               # stop | tool_calls | length | content_filter
     usage: dict[str, int] = field(default_factory=dict)
@@ -55,6 +56,7 @@ class LLMResponse:
     def to_dict(self) -> dict[str, Any]:
         return {
             "content": self.content,
+            "reasoning_content": self.reasoning_content,
             "tool_calls": [tc.to_dict() for tc in self.tool_calls],
             "finish_reason": self.finish_reason,
             "usage": dict(self.usage),
@@ -67,9 +69,13 @@ class StreamChunk:
 
     In OpenAI's SSE protocol, content arrives as delta strings and tool_calls
     arrive incrementally (arguments may span multiple chunks).
+
+    Thinking/reasoning tokens are extracted by the provider adapter and
+    surfaced via delta_thinking — see provider/registry for details.
     """
 
     delta_content: str = ""
+    delta_thinking: str = ""
     delta_tool_calls: list[dict[str, Any]] = field(default_factory=list)
     finish_reason: str | None = None
     usage: dict[str, int] | None = None  # only in final chunk (stream_options)
@@ -78,14 +84,18 @@ class StreamChunk:
 # ── Response parsing ────────────────────────────────────────────────
 
 
-def parse_chat_response(raw: dict[str, Any]) -> LLMResponse:
+def parse_chat_response(
+    raw: dict[str, Any],
+    provider_name: str | None = None,
+) -> LLMResponse:
     """Parse a complete Chat Completions response.
 
     Args:
         raw: The parsed JSON response dict.
+        provider_name: Provider name for thinking-token extraction. None = fallback.
 
     Returns:
-        LLMResponse with content, tool_calls, finish_reason, usage.
+        LLMResponse with content, tool_calls, finish_reason, usage, reasoning_content.
 
     Raises:
         LLMMalformedResponseError: If structure is unexpected.
@@ -111,6 +121,16 @@ def parse_chat_response(raw: dict[str, Any]) -> LLMResponse:
 
     content = message.get("content") or ""
     finish_reason = first.get("finish_reason") or "stop"
+
+    # Provider-specific thinking extraction from non-streaming message
+    reasoning_content = ""
+    if isinstance(message, dict):
+        from .provider import get_provider
+        adapter = get_provider(provider_name)
+        reasoning_content = adapter.extract_thinking_from_message(message) or ""
+        # Strip thinking tags from content (e.g. MiniMax <think> tags)
+        stripped = adapter.strip_thinking_from_message(message)
+        content = stripped.get("content", content) or ""
 
     # Parse tool_calls
     raw_tool_calls = message.get("tool_calls") or []
@@ -141,6 +161,7 @@ def parse_chat_response(raw: dict[str, Any]) -> LLMResponse:
 
     return LLMResponse(
         content=content,
+        reasoning_content=reasoning_content,
         tool_calls=tool_calls,
         finish_reason=str(finish_reason),
         usage=usage_clean,
@@ -248,8 +269,15 @@ def parse_stream_chunk(raw_line: str) -> StreamChunk | None:
     return _chunk_from_dict(payload)
 
 
-def _chunk_from_dict(payload: dict[str, Any]) -> StreamChunk | None:
-    """Convert a chunk payload dict to StreamChunk."""
+def _chunk_from_dict(
+    payload: dict[str, Any],
+    provider_name: str | None = None,
+) -> StreamChunk | None:
+    """Convert a chunk payload dict to StreamChunk.
+
+    The provider_name selects which ProviderAdapter handles thinking-token
+    extraction. When None, fallback adapter is used (no extraction).
+    """
     if not isinstance(payload, dict):
         return None
 
@@ -272,6 +300,17 @@ def _chunk_from_dict(payload: dict[str, Any]) -> StreamChunk | None:
 
     delta_content = delta.get("content") or ""
 
+    # Provider-specific thinking extraction
+    delta_thinking = ""
+    if isinstance(delta, dict):
+        from .provider import get_provider
+        adapter = get_provider(provider_name)
+        delta_thinking = adapter.extract_thinking_from_delta(delta) or ""
+        # For providers that embed thinking inside content (e.g. MiniMax),
+        # strip the tags so delta_content only has the actual response.
+        stripped = adapter.strip_thinking_from_delta(delta)
+        delta_content = stripped.get("content", delta_content) or ""
+
     delta_tool_calls: list[dict[str, Any]] = []
     raw_dtc = delta.get("tool_calls")
     if isinstance(raw_dtc, list):
@@ -281,6 +320,7 @@ def _chunk_from_dict(payload: dict[str, Any]) -> StreamChunk | None:
 
     return StreamChunk(
         delta_content=delta_content,
+        delta_thinking=delta_thinking,
         delta_tool_calls=delta_tool_calls,
         finish_reason=str(finish_reason) if finish_reason else None,
         usage=usage_clean,

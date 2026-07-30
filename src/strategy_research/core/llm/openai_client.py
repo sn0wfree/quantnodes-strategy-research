@@ -64,12 +64,17 @@ def _ensure_api_key(config: LLMConfig) -> str:
 
 
 def _build_headers(config: LLMConfig) -> dict[str, str]:
+    from .provider import get_provider
+
     api_key = _ensure_api_key(config)
-    return {
+    headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+    adapter = get_provider(config.provider)
+    headers.update(adapter.custom_headers(config))
+    return headers
 
 
 def _build_payload(
@@ -80,6 +85,8 @@ def _build_payload(
     overrides: dict[str, Any],
 ) -> dict[str, Any]:
     """Build OpenAI Chat Completions request body."""
+    from .provider import get_provider
+
     payload: dict[str, Any] = {
         "model": overrides.get("model") or config.model,
         "messages": list(messages),
@@ -110,6 +117,15 @@ def _build_payload(
         payload["tool_choice"] = tool_choice or config.tool_choice
         payload["parallel_tool_calls"] = config.parallel_tool_calls
 
+    # Provider-specific payload modifications
+    adapter = get_provider(config.provider)
+    payload = adapter.custom_payload(payload, config)
+
+    # Provider-specific stream_options
+    stream_opts = adapter.custom_stream_options()
+    if stream_opts is not None:
+        payload["stream_options"] = stream_opts
+
     return payload
 
 
@@ -134,8 +150,14 @@ def _extract_error_code(body: Any) -> str:
     return ""
 
 
-def _raise_for_status(response: httpx.Response) -> None:
-    """Map httpx status to LLM-specific exception."""
+def _raise_for_status(response: httpx.Response, provider_name: str = "auto") -> None:
+    """Map httpx status to LLM-specific exception.
+
+    Provider-specific error semantics are delegated to the ProviderAdapter
+    (e.g. MiniMax uses 403 for quota, not auth failure).
+    """
+    from .provider import get_provider
+
     status = response.status_code
     if status < 400:
         return
@@ -144,17 +166,16 @@ def _raise_for_status(response: httpx.Response) -> None:
     except Exception:                              # noqa: BLE001
         body = {"raw": response.text[:500]}
 
+    # Provider-specific error mapping (e.g. MiniMax 403-as-quota)
+    adapter = get_provider(provider_name)
+    custom_exception = adapter.handle_error(status, body)
+    if custom_exception is not None:
+        raise custom_exception
+
+    # Default status-code mapping
     if status in (401, 403):
-        # Some providers (MiniMax, etc.) use 403 to signal quota exhaustion.
-        error_code = _extract_error_code(body)
-        if "quota" in error_code or "billing" in error_code:
-            raise LLMQuotaError(f"quota exceeded ({status}): {body}")
         raise LLMAuthError(f"auth failed ({status}): {body}")
     if status == 429:
-        # MiniMax quota vs per-minute rate limit: distinguish by error code.
-        error_code = _extract_error_code(body)
-        if "quota" in error_code or "billing" in error_code:
-            raise LLMQuotaError(f"quota exceeded (429): {body}")
         raise LLMRateLimitError(f"rate limited (429): {body}")
     if 500 <= status < 600:
         raise LLMServerError(f"server error ({status}): {body}")
@@ -251,8 +272,7 @@ class OpenAICompatClient:
         """
         payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
         payload["stream"] = True
-        # OpenAI uses stream_options to include usage in final chunk
-        payload["stream_options"] = {"include_usage": True}
+        # stream_options moved to ProviderAdapter.custom_stream_options()
 
         headers = _build_headers(self.config)
         url = self._chat_url()
@@ -267,7 +287,7 @@ class OpenAICompatClient:
                     if response.status_code >= 400:
                         response.read()
                     try:
-                        _raise_for_status(response)
+                        _raise_for_status(response, self.config.provider)
                         for line in response.iter_lines():
                             chunk = parse_stream_chunk(line)
                             if chunk is not None:
@@ -314,7 +334,7 @@ class OpenAICompatClient:
                 if response.status_code >= 400:
                     await response.aread()
                 try:
-                    _raise_for_status(response)
+                    _raise_for_status(response, self.config.provider)
                     async for line in response.aiter_lines():
                         chunk = parse_stream_chunk(line)
                         if chunk is not None:
@@ -357,7 +377,7 @@ class OpenAICompatClient:
                     return response
                 # Determine if retryable
                 if not _is_retryable_status(response.status_code):
-                    _raise_for_status(response)  # raises
+                    _raise_for_status(response, self.config.provider)  # raises
                 # retryable
                 delay = _backoff_delay(attempt, self.config.retry_backoff_s)
                 logger.warning(
@@ -406,7 +426,7 @@ class OpenAICompatClient:
                 if response.status_code < 400:
                     return response
                 if not _is_retryable_status(response.status_code):
-                    _raise_for_status(response)
+                    _raise_for_status(response, self.config.provider)
                 delay = _backoff_delay(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "async retryable status %s (attempt %d/%d); sleeping %.1fs",

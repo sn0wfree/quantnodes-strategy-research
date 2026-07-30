@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
-import { ThinkingBlock } from './ThinkingBlock'
-import { parseContentTags, hasContentTags } from './contentTagParser'
 
 interface StreamingTextProps {
   text: string
@@ -29,35 +27,6 @@ function nextRevealLen(text: string, lastLen: number): number {
   if (newLen < target && /[\s\n]/.test(text[newLen])) newLen++
 
   return Math.min(newLen, target)
-}
-
-function StreamingContent({ text, isDone }: { text: string; isDone: boolean }) {
-  // Parse <think> and <system-reminder> tags
-  if (hasContentTags(text)) {
-    const parsed = parseContentTags(text)
-    return (
-      <>
-        {parsed.map((p, i) => {
-          if (p.type === 'thinking') {
-            return (
-              <ThinkingBlock
-                key={`think-${i}`}
-                text={p.content}
-                collapsed={true}
-                streaming={!isDone}
-              />
-            )
-          }
-          if (p.type === 'system') {
-            // Hide system-reminder tags
-            return null
-          }
-          return <MarkdownRenderer key={`text-${i}`} content={p.content} streaming={!isDone} />
-        })}
-      </>
-    )
-  }
-  return <MarkdownRenderer content={text} streaming={!isDone} />
 }
 
 export function StreamingText({ text, isDone }: StreamingTextProps) {
@@ -97,11 +66,11 @@ export function StreamingText({ text, isDone }: StreamingTextProps) {
           boxShadow: '0 0 24px -4px rgba(99, 102, 241, 0.12), 0 0 8px -2px rgba(99, 102, 241, 0.06)',
         }}
       >
-        <StreamingContent text={displayed} isDone={false} />
+        <MarkdownRenderer content={displayed} streaming />
         <span className="inline-block w-2 h-4 bg-primary-400 animate-pulse ml-0.5 align-middle" />
       </div>
     )
   }
 
-  return <StreamingContent text={displayed || text} isDone={true} />
+  return <MarkdownRenderer content={displayed || text} />
 }

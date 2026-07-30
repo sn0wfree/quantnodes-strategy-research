@@ -232,6 +232,10 @@ class AgentLoop:
     def _stream_chat(self, messages: list[dict[str, Any]], iteration: int) -> Any:
         """Stream chat completion and emit text_delta events.
 
+        Thinking/reasoning tokens are already extracted by the provider
+        adapter into chunk.delta_thinking — we just forward them as
+        thinking_delta SSE events.
+
         Returns an LLMResponse-like object with content and tool_calls.
         """
         from ..llm.parser import LLMResponse
@@ -244,6 +248,10 @@ class AgentLoop:
         tools = self.registry.get_definitions() or None
         try:
             for chunk in self.client.stream(messages, tools=tools):
+                # Thinking tokens (extracted by provider adapter)
+                if chunk.delta_thinking:
+                    self._emit("thinking_delta", {"delta": chunk.delta_thinking})
+
                 if chunk.delta_content:
                     if full_content == "" and chunk.delta_content:
                         # Transition: thinking_done before first text token

@@ -10,7 +10,6 @@ import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
 import { ImageBlock } from './ImageBlock'
 import { StreamingText } from './StreamingText'
-import { parseContentTags, hasContentTags } from './contentTagParser'
 
 interface AssistantMessageProps {
   message: Message
@@ -26,39 +25,10 @@ function formatTime(ts: number): string {
   })
 }
 
-function TextPartRenderer({ text, isStreaming }: { text: string; isStreaming: boolean }) {
-  // Parse <think> and <system-reminder> tags
-  if (hasContentTags(text)) {
-    const parsed = parseContentTags(text)
-    return (
-      <>
-        {parsed.map((p, i) => {
-          if (p.type === 'thinking') {
-            return (
-              <ThinkingBlock
-                key={`think-${i}`}
-                text={p.content}
-                collapsed={true}
-                streaming={isStreaming}
-              />
-            )
-          }
-          if (p.type === 'system') {
-            // Hide system-reminder tags
-            return null
-          }
-          return <MarkdownRenderer key={`text-${i}`} content={p.content} />
-        })}
-      </>
-    )
-  }
-  return <MarkdownRenderer content={text} />
-}
-
 function PartRenderer({ part, isStreaming, onRetry }: { part: MessagePart; isStreaming: boolean; onRetry?: (tc: ToolCallPart) => void }) {
   switch (part.type) {
     case 'text':
-      return <TextPartRenderer text={part.text} isStreaming={isStreaming} />
+      return <MarkdownRenderer content={part.text} />
     case 'tool_call':
       return <ToolCallBlock toolCall={part} onRetry={onRetry} />
     case 'thinking':
