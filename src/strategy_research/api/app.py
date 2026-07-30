@@ -87,6 +87,15 @@ def create_app(
         except Exception as exc:
             logger.warning("DuckDB init failed: %s", exc)
 
+        # Smart scaffold: recursively ensure workspace templates/ mirrors
+        # package templates/. Idempotent — user customizations preserved.
+        # See core/workspace_setup.py and docs/scaffold-fix.md.
+        try:
+            from ..core.workspace_setup import smart_init_workspace_templates
+            smart_init_workspace_templates(workspace_path)
+        except Exception as exc:
+            logger.warning("Smart scaffold failed: %s", exc)
+
     # CORS
     origins = cors_origins if cors_origins is not None else ["*"]
     app.add_middleware(

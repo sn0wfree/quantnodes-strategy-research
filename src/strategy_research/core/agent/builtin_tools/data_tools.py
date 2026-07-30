@@ -272,7 +272,18 @@ class ImportDataTool(BaseTool):
             "workspace": {"type": "string", "description": "Workspace root path."},
             "data": {
                 "type": "object",
-                "description": "OHLCV data dict from get_market_data (code -> list of records).",
+                "description": (
+                    "OHLCV data dict from get_market_data. "
+                    "Format: {asset_code: [records]}. Each record has "
+                    "'trade_date' (or 'date') + OHLCV fields. "
+                    "Example: {'600519.SH': [{'trade_date': '2023-12-11', "
+                    "'close': 1544.555, 'open': 1536.555, 'high': 1550.555, "
+                    "'low': 1503.555, 'volume': 36831.0}, ...]}"
+                ),
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                },
             },
             "strategy_name": {
                 "type": "string",
@@ -307,8 +318,38 @@ class ImportDataTool(BaseTool):
             if conn is None:
                 return _err("failed to open DuckDB")
 
+            # Defensive unwrap: some LLMs (notably MiniMax-M3) wrap the
+            # per-code records list in a single-key object like
+            # {"item": [...]} or {"data": [...]}. We try common wrapper
+            # keys before falling through to a clear actionable error.
+            _LIST_WRAPPER_KEYS = (
+                "item", "data", "records", "bars", "rows", "ohlcv", "values",
+            )
+
             total_rows = 0
             for code, records in data.items():
+                if isinstance(records, dict):
+                    unwrapped = None
+                    for key in _LIST_WRAPPER_KEYS:
+                        if key in records and isinstance(records[key], list):
+                            unwrapped = records[key]
+                            logger.debug(
+                                "import_data: unwrapped data[%r][%r]", code, key,
+                            )
+                            break
+                    if unwrapped is None:
+                        return _err(
+                            f"data[{code!r}] is a dict (length {len(records)}) but "
+                            f"contains no list of records. Got keys: "
+                            f"{list(records.keys())[:5]}. "
+                            f"Expected: data[{code!r}] = "
+                            f"[{{'trade_date': '...', 'close': ...}}, ...]. "
+                            f"Fix: call get_market_data(codes=[{code!r}], "
+                            f"start_date='2023-01-01', end_date='2023-12-31') "
+                            f"first, then pass result.data as the data argument."
+                        )
+                    records = unwrapped
+
                 if not records:
                     continue
                 df = pd.DataFrame(records)
