@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { api } from '../api/client'
 
 interface LLMInfo {
   provider: string
@@ -21,9 +22,7 @@ export const useSystemStore = create<SystemState>((set) => ({
   llm: initialLLM,
   fetchSystemInfo: async () => {
     try {
-      const res = await fetch('/api/system/info')
-      if (!res.ok) return
-      const data = await res.json()
+      const data = await api.get<{ llm: { provider: string; model: string; configured: boolean } }>('/system/info')
       const llm = data?.llm
       if (!llm) return
       set({
