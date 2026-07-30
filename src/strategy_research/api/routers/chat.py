@@ -42,9 +42,6 @@ def _get_session_service() -> SessionService:
     return SessionService(store=store, event_bus=_event_bus)
 
 
-# Per-session LLM loop tasks (so we can cancel on new message)
-_loop_tasks: dict[str, asyncio.Task] = {}
-
 # Per-session conversation history (legacy in-memory cache; replaced by DB)
 _session_histories: dict[str, list[dict[str, Any]]] = {}
 
@@ -402,43 +399,45 @@ async def _run_test_script(
 
 @router.post("/send_async", response_model=SendMessageResponse)
 async def send_async(body: ChatMessage, request: Request):
-    """Send a message asynchronously. Spawns AgentLoop in background.
+    """Send a message asynchronously. Enqueues into per-session FIFO queue.
 
     Returns message_id + event_id for confirmation.
     Frontend should listen to /events SSE stream for real-time response.
 
-    Uses the unified SessionService (also shared with TUI). The Attempt's
-    message_id is what SSE events carry for correlation; the user message
-    gets its own auto-generated UUID (see chat.py history for the
-    loadMessages-key-collision bug this prevents).
+    Uses the unified SessionService (also shared with TUI). New messages
+    are appended to a per-session queue and processed FIFO; if the queue
+    is full (hard limit 10) the API returns 429.
     """
     # ── /goal command intercept ────────────────────────────────────────
     if body.content.strip().startswith("/goal"):
         return await _handle_goal_command(body)
 
-    # Cancel any existing loop for this session (new message replaces old)
-    if body.session_id in _loop_tasks:
-        _loop_tasks[body.session_id].cancel()
-
-    # Delegate to SessionService — it handles DB persistence, AgentLoop
-    # execution, history context, and event emission.
+    # Delegate to SessionService — it handles DB persistence, queueing,
+    # AgentLoop execution, history context, and event emission.
     service = _get_session_service()
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
     )
 
-    # Track the spawned attempt task so we can cancel future messages
-    for task in service._active_loops.values():
-        _loop_tasks[body.session_id] = task
-        break
+    # Queue-full guard: SessionService returns {"error": "queue_full", ...}
+    # when the session already has _QUEUE_LIMIT items waiting.
+    if result.get("error") == "queue_full":
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "queue_full",
+                "limit": result["limit"],
+                "current_size": result["current_size"],
+            },
+        )
 
     return SendMessageResponse(
         message_id=result["user_message_id"],
         user_message_id=result["user_message_id"],
         assistant_message_id=result["assistant_message_id"],
         event_id="",
-        status="processing",
+        status=result.get("status", "processing"),
         attempt_id=result.get("attempt_id"),
     )
 
@@ -638,21 +637,41 @@ async def cancel_attempt(body: CancelRequest):
 
     If attempt_id is provided, cancels that specific attempt.
     Otherwise, cancels any active attempt for the session.
-    """
-    # Cancel via loop task tracking (works without attempt_id)
-    task = _loop_tasks.pop(body.session_id, None)
-    if task is not None:
-        task.cancel()
-        return {"status": "cancelled", "session_id": body.session_id}
 
-    # Fallback: try SessionService.cancel with attempt_id
+    After cancellation the per-session queue is **paused** (queue_paused
+    SSE event). Use ``POST /chat/queue/resume`` to continue processing.
+    """
+    service = _get_session_service()
+
+    # Prefer the session-scoped cancel (cancels the per-attempt task; the
+    # consumer loop catches CancelledError and pauses the queue).
     if body.attempt_id:
-        service = _get_session_service()
         ok = service.cancel(body.attempt_id)
         if ok:
             return {"status": "cancelled", "attempt_id": body.attempt_id}
 
+    # Fallback: cancel by session_id only
+    ok = service.cancel_session(body.session_id)
+    if ok:
+        return {"status": "cancelled", "session_id": body.session_id}
+
     return {"status": "no_active_attempt", "session_id": body.session_id}
+
+
+class QueueResumeRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/queue/resume")
+async def queue_resume(body: QueueResumeRequest):
+    """Resume a paused per-session queue after an explicit cancel.
+
+    Returns ``{"ok": true, "session_id": ...}`` if the queue was paused
+    and is now resumed; ``{"ok": false}`` if no paused queue exists.
+    """
+    service = _get_session_service()
+    ok = service.resume_queue(body.session_id)
+    return {"ok": ok, "session_id": body.session_id}
 
 
 @router.post("/send")
