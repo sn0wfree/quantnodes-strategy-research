@@ -655,6 +655,78 @@ class SessionService:
 
     # ── Compact ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_summary(messages: list[dict[str, Any]]) -> str:
+        """Extract [context summary] content from compressed messages."""
+        parts = []
+        for m in messages:
+            if m.get("role") == "assistant":
+                content = m.get("content", "")
+                if content.startswith("[context summary]"):
+                    parts.append(content[len("[context summary]"):].strip())
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _build_fallback_summary(
+        compressed: list[dict[str, Any]],
+        original: list[dict[str, Any]],
+    ) -> str:
+        """Build a basic structured summary when LLM summarization didn't run."""
+        # Collect assistant text snippets from original (last 5 turns)
+        assistant_snippets: list[str] = []
+        user_msgs: list[str] = []
+        for m in original:
+            role = m.get("role", "")
+            content = (m.get("content") or "").strip()
+            if not content or content.startswith("[context summary]"):
+                continue
+            if role == "assistant" and len(content) > 20:
+                # Keep first 200 chars of each assistant message
+                assistant_snippets.append(content[:200])
+            elif role == "user":
+                user_msgs.append(content[:100])
+
+        # Last user message = likely current objective
+        objective = user_msgs[-1] if user_msgs else "(none)"
+
+        # Build structured summary
+        lines = [
+            "## Objective",
+            f"- {objective}",
+            "",
+            "## Important Details",
+        ]
+        if len(compressed) < len(original):
+            removed = len(original) - len(compressed)
+            lines.append(f"- {removed} messages removed during compaction")
+        else:
+            lines.append("- (none)")
+        lines += [
+            "",
+            "## Work State",
+            "### Completed",
+        ]
+        # Last 2 assistant snippets as completed work
+        for snippet in assistant_snippets[-2:]:
+            lines.append(f"- {snippet[:150]}")
+        if not assistant_snippets:
+            lines.append("- (none)")
+        lines += [
+            "",
+            "### Active",
+            "- (none)",
+            "",
+            "### Blocked",
+            "- (none)",
+            "",
+            "## Next Move",
+            "1. Continue from where the conversation left off",
+            "",
+            "## Relevant Files",
+            "- (none)",
+        ]
+        return "\n".join(lines)
+
     async def compact_history(
         self,
         session_id: str,
@@ -694,12 +766,10 @@ class SessionService:
         before_tokens = sum(len(m.get("content", "")) for m in history)
         after_tokens = sum(len(m.get("content", "")) for m in compressed)
 
-        # Build summary text from compressed messages
-        summary_parts = []
-        for m in compressed:
-            if m.get("role") == "assistant" and m.get("content", "").startswith("[context summary]"):
-                summary_parts.append(m["content"])
-        summary = "\n\n".join(summary_parts)
+        # Build summary: prefer LLM-generated [context summary], fallback to extraction
+        summary = self._extract_summary(compressed)
+        if not summary and layers:
+            summary = self._build_fallback_summary(compressed, history)
 
         return {
             "layers": layers,

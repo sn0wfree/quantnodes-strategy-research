@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from ..sse_buffer import sse_buffer
 from ..session.bridge import attach_eventbus_to_sse
 from ..session.events import EventBus
+from ..session.models import Message
 from ..session.service import SessionService
 from ..session.store import SessionStore
 
