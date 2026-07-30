@@ -313,7 +313,7 @@ class AgentLoop:
         if usage:
             raw_response["usage"] = usage
 
-        return parse_chat_response(raw_response)
+        return parse_chat_response(raw_response, provider_name=self.config.provider)
 
     # ── Async helpers ─────────────────────────────
 
@@ -398,7 +398,7 @@ class AgentLoop:
         if usage:
             raw_response["usage"] = usage
 
-        return parse_chat_response(raw_response)
+        return parse_chat_response(raw_response, provider_name=self.config.provider)
 
     def _build_hook_context(
         self, iteration: int, messages: list[dict[str, Any]],

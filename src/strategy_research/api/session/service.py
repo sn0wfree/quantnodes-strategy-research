@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # Character budget for history (~3000 tokens) — borrowed verbatim from vibe_trading.
 MAX_HISTORY_CHARS = 12000
 
+# Hard limit for queued messages per session. Exceeding returns 429 to caller.
+_QUEUE_LIMIT = 10
+
 
 def _bootstrap_workspace(workspace: Path) -> None:
     """Ensure workspace has the required directory structure.
@@ -67,6 +70,11 @@ class SessionService:
         self.store = store
         self.event_bus = event_bus
         self._active_loops: dict[str, "asyncio.Task"] = {}
+        # Per-session FIFO message queue (see docs/chat-message-queue-design.md)
+        self._session_queues: dict[str, asyncio.Queue] = {}
+        self._processing_sessions: set[str] = set()
+        self._paused_sessions: dict[str, asyncio.Event] = {}
+        self._queue_consumers: dict[str, "asyncio.Task"] = {}
 
     # ── Session lifecycle ──────────────────────────────────────────────
 
@@ -111,7 +119,12 @@ class SessionService:
         system_prompt: Optional[str] = None,
         allow_shell_tools: bool = False,
     ) -> dict[str, str]:
-        """Send a user message and trigger background AgentLoop execution.
+        """Send a user message and enqueue background AgentLoop execution.
+
+        Messages are processed FIFO per session via ``_process_session_queue``.
+        If a session already has an in-flight attempt, new messages are queued
+        behind it. A hard limit of 10 queued items is enforced; exceeding it
+        returns ``{"error": "queue_full", "limit": 10}``.
 
         Args:
             session_id: Target session.
@@ -123,17 +136,21 @@ class SessionService:
             allow_shell_tools: Whether the registry may include shell tools.
 
         Returns:
-            ``{"message_id": ..., "attempt_id": ...}`` for the user message
-            and the spawned Attempt.
+            ``{"message_id": ..., "attempt_id": ..., "queue_position": N}``
+            for the user message and the spawned Attempt. On queue-full,
+            returns ``{"error": "queue_full", "limit": 10, "current_size": N}``.
         """
-        # 1. Persist user message — auto-generates UUID (don't reuse the
-        #    attempt's message_id, which belongs to the assistant message
-        #    so SSE text_delta events can find it).
+        # ── 1. Persist user message ────────────────────────────────────
+        # Capture created_at from a single authoritative clock (server
+        # time.time()) for correct cross-exchange message ordering.
+        import time
+        _ts = time.time()
         user_msg_id = self.store.append_message(
             Message(session_id=session_id, role="user", content=content),
+            created_at=_ts,
         )
 
-        # 2. Auto-title on first user message (preserve strategy-research feature).
+        # ── 2. Auto-title on first user message ───────────────────────
         try:
             from ..routers.web_session import auto_title_session, _get_db
 
@@ -157,11 +174,22 @@ class SessionService:
         except Exception as exc:
             logger.warning("auto_title_session failed: %s", exc)
 
-        # 3. Create Attempt and spawn background run.
+        # ── 3. Queue length hard limit ────────────────────────────────
+        queue = self._session_queues.get(session_id)
+        current_size = queue.qsize() if queue is not None else 0
+        if current_size >= _QUEUE_LIMIT:
+            return {
+                "error": "queue_full",
+                "limit": _QUEUE_LIMIT,
+                "current_size": current_size,
+                "message_id": user_msg_id,
+            }
+
+        # ── 4. Create Attempt ─────────────────────────────────────────
         attempt = Attempt(
             session_id=session_id,
             prompt=content,
-            message_id=str(uuid.uuid4()),  # assistant message ID for SSE correlation
+            message_id=str(uuid.uuid4()),
             status=AttemptStatus.PENDING,
             created_at=_utc_now_iso(),
         )
@@ -172,13 +200,15 @@ class SessionService:
             {"attempt_id": attempt.attempt_id, "prompt": content},
         )
 
-        # Unified message_received event (replaces both the old EventBus
-        # "message.received" and the redundant sse_buffer.push in chat.py).
-        # Carries BOTH message ids so the frontend can:
-        #   - rename its optimistic user message placeholder to user_message_id
-        #   - create the assistant placeholder directly with assistant_message_id
-        # (without it, frontend has to guess which id to use and ends up
-        # routing SSE text_delta events to the wrong message — the role-swap bug.)
+        # ── 5. Compute queue position + status ────────────────────────
+        queue_position = current_size + 1  # 1-based
+        is_first = (
+            session_id not in self._processing_sessions
+            and queue_position == 1
+        )
+        status = "processing" if is_first else "queued"
+
+        # ── 6. Emit message_received with queue metadata ──────────────
         self.event_bus.emit(
             session_id,
             "message_received",
@@ -189,37 +219,176 @@ class SessionService:
                 "role": "user",
                 "content": content,
                 "attempt_id": attempt.attempt_id,
-                "status": "processing",
+                "status": status,
+                "queue_position": queue_position,
+                "queue_length": queue_position,  # grows as items are added; later items will see actual length
+                "created_at": _ts,
             },
         )
 
-        task = asyncio.create_task(
-            self._run_attempt(
-                session_id=session_id,
-                attempt=attempt,
-                model=model,
-                max_iterations=max_iterations,
-                system_prompt=system_prompt,
-                allow_shell_tools=allow_shell_tools,
-            )
+        # ── 7. Enqueue + start consumer if not running ────────────────
+        if queue is None:
+            queue = asyncio.Queue()
+            self._session_queues[session_id] = queue
+        await queue.put(
+            {
+                "attempt_id": attempt.attempt_id,
+                "model": model,
+                "max_iterations": max_iterations,
+                "system_prompt": system_prompt,
+                "allow_shell_tools": allow_shell_tools,
+            }
         )
-        self._active_loops[attempt.attempt_id] = task
-        task.add_done_callback(lambda t: self._active_loops.pop(attempt.attempt_id, None))
+        # Recompute queue_length now that we've enqueued (best-effort snapshot
+        # for frontend display; full count will be consistent within tolerance).
+        self.event_bus.emit(
+            session_id,
+            "queue_state",
+            {
+                "session_id": session_id,
+                "queue_length": queue.qsize(),
+            },
+        )
+
+        if session_id not in self._processing_sessions:
+            self._processing_sessions.add(session_id)
+            consumer = asyncio.create_task(self._process_session_queue(session_id))
+            self._queue_consumers[session_id] = consumer
+            consumer.add_done_callback(
+                lambda t: self._queue_consumers.pop(session_id, None)
+            )
 
         return {
             "message_id": user_msg_id,
             "user_message_id": user_msg_id,
             "assistant_message_id": attempt.message_id,
             "attempt_id": attempt.attempt_id,
+            "queue_position": queue_position,
+            "status": status,
         }
 
     def cancel(self, attempt_id: str) -> bool:
-        """Cancel an in-flight Attempt."""
+        """Cancel an in-flight Attempt by its id.
+
+        Looks up the per-attempt task created inside ``_process_session_queue``
+        and cancels it. The consumer loop catches ``CancelledError`` and pauses
+        the queue until ``resume_queue()`` is called.
+        """
         task = self._active_loops.get(attempt_id)
         if task is None:
             return False
         task.cancel()
         return True
+
+    def cancel_session(self, session_id: str) -> bool:
+        """Cancel the in-flight attempt for a session (if any).
+
+        Used when the caller knows the session but not the attempt id
+        (e.g. the frontend's Cancel button). Returns True if cancelled.
+        """
+        consumer = self._queue_consumers.get(session_id)
+        if consumer is None:
+            return False
+        consumer.cancel()
+        return True
+
+    def resume_queue(self, session_id: str) -> bool:
+        """Resume a paused queue after an explicit cancel.
+
+        Returns True if a paused session was found and resumed.
+        """
+        event = self._paused_sessions.get(session_id)
+        if event is None:
+            return False
+        event.set()
+        return True
+
+    async def _process_session_queue(self, session_id: str) -> None:
+        """Consumer coroutine for a session's message queue.
+
+        Drains ``self._session_queues[session_id]`` one item at a time,
+        running each as ``_run_attempt``. After an explicit cancel
+        (``CancelledError`` raised by ``cancel(attempt_id)``), pauses
+        the queue and emits ``queue_paused`` until ``resume_queue``
+        sets the resume event.
+        """
+        queue = self._session_queues[session_id]
+        try:
+            while True:
+                item = await queue.get()
+
+                # If a previous attempt was explicitly cancelled, the queue is
+                # paused. Wait for resume before processing the next item.
+                pause_event = self._paused_sessions.get(session_id)
+                if pause_event is not None:
+                    await pause_event.wait()
+                    self._paused_sessions.pop(session_id, None)
+
+                # Resolve the attempt row from DB
+                attempt = self.store.get_attempt(session_id, item["attempt_id"])
+                if attempt is None:
+                    logger.warning(
+                        "Attempt %s vanished from DB before queue consumer "
+                        "could run it",
+                        item["attempt_id"],
+                    )
+                    queue.task_done()
+                    continue
+
+                # Run the attempt as a tracked task so cancel(attempt_id) works
+                attempt_task = asyncio.create_task(
+                    self._run_attempt(
+                        session_id=session_id,
+                        attempt=attempt,
+                        model=item.get("model"),
+                        max_iterations=item.get("max_iterations", 1),
+                        system_prompt=item.get("system_prompt"),
+                        allow_shell_tools=item.get("allow_shell_tools", False),
+                    )
+                )
+                self._active_loops[attempt.attempt_id] = attempt_task
+
+                try:
+                    await attempt_task
+                except asyncio.CancelledError:
+                    # User explicit cancel — pause the queue and emit SSE so
+                    # the frontend can render the "队列已暂停" banner.
+                    self.event_bus.emit(
+                        session_id,
+                        "queue_paused",
+                        {
+                            "session_id": session_id,
+                            "next_attempt_id": attempt.attempt_id,
+                        },
+                    )
+                    pause_evt = asyncio.Event()
+                    self._paused_sessions[session_id] = pause_evt
+                    # Wait for resume before continuing the loop
+                    await pause_evt.wait()
+                    self._paused_sessions.pop(session_id, None)
+                    queue.task_done()
+                    continue
+                except Exception as exc:
+                    logger.exception(
+                        "Queue consumer: attempt %s failed: %s",
+                        attempt.attempt_id,
+                        exc,
+                    )
+                finally:
+                    self._active_loops.pop(attempt.attempt_id, None)
+
+                queue.task_done()
+
+                if queue.empty():
+                    break
+        finally:
+            self._processing_sessions.discard(session_id)
+            # Keep the queue object around briefly so a follow-up send_message
+            # call finds it and reuses it; the next consumer task will
+            # naturally drain it. But if truly empty, drop it.
+            q = self._session_queues.get(session_id)
+            if q is not None and q.empty():
+                self._session_queues.pop(session_id, None)
 
     # ── Attempt execution ──────────────────────────────────────────────
 
@@ -236,7 +405,16 @@ class SessionService:
         """Execute an Attempt: load history → run AgentLoop → persist result."""
         attempt.mark_running()
         self.store.update_attempt(attempt)
-        self.event_bus.emit(session_id, "attempt.started", {"attempt_id": attempt.attempt_id})
+        # attempt.started carries message_id so the frontend can switch its
+        # streamingMessageId from queued placeholder to actual stream.
+        self.event_bus.emit(
+            session_id,
+            "attempt.started",
+            {
+                "attempt_id": attempt.attempt_id,
+                "message_id": attempt.message_id,
+            },
+        )
 
         accumulated_parts: list[dict[str, Any]] = []
 

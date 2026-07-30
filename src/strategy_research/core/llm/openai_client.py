@@ -234,7 +234,7 @@ class OpenAICompatClient:
             raise LLMMalformedResponseError(
                 f"response is not JSON: {response.text[:200]}"
             ) from exc
-        return parse_chat_response(raw)
+        return parse_chat_response(raw, provider_name=self.config.provider)
 
     async def achat(
         self,
@@ -255,7 +255,7 @@ class OpenAICompatClient:
             raise LLMMalformedResponseError(
                 f"response is not JSON: {response.text[:200]}"
             ) from exc
-        return parse_chat_response(raw)
+        return parse_chat_response(raw, provider_name=self.config.provider)
 
     def stream(
         self,

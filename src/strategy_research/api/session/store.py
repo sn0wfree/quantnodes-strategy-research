@@ -56,6 +56,7 @@ class SessionStore:
         *,
         message_id: Optional[str] = None,
         parts: Optional[list[dict[str, Any]]] = None,
+        created_at: Optional[float] = None,
     ) -> str:
         """Append a message to the session.
 
@@ -64,6 +65,8 @@ class SessionStore:
             message_id: Optional explicit ID (used by SSE event correlation
                 for assistant messages). If None, a UUID is generated.
             parts: Optional structured parts (text/thinking/tool_call/etc.).
+            created_at: Optional timestamp (epoch seconds). If None, uses
+                time.time().
 
         Returns:
             The message_id used.
@@ -79,6 +82,7 @@ class SessionStore:
             parts=parts or message.metadata.get("parts"),
             metadata=message.metadata,
             message_id=msg_id,
+            created_at=created_at,
         )
         return msg_id
 
