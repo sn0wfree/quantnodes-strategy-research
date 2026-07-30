@@ -43,22 +43,13 @@ from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
+from .compact import CompactConfig, compact_messages, _estimate_tokens
 from .context import ContextBuilder, estimate_tokens
 from .progress import HeartbeatTimer
 from .tools import ToolRegistry
 from .trace import TraceWriter
 
 logger = logging.getLogger(__name__)
-
-
-# ── Compression thresholds (relative to threshold_tokens) ───────────
-
-MICROCOMPACT_RATIO = 0.5    # at 50% of budget: trim large tool results
-COLLAPSE_RATIO = 0.7        # at 70% of budget: summarize old messages (string)
-LLM_SUMMARIZE_RATIO = 0.8   # at 80% of budget: LLM-structured summary
-HARD_TRUNCATE_RATIO = 0.9   # at 90% of budget: keep only recent N
-MICROCOMPACT_TOOL_RESULT_LIMIT = 500  # chars to keep per tool result in L1
-COLLAPSE_KEEP_RECENT = 4            # keep last N messages verbatim in L2
 
 
 # ── Result dataclass ────────────────────────────────────────────────
@@ -128,6 +119,7 @@ class AgentLoop:
         session_manager: Any | None = None,
         on_event: Any | None = None,
         stream_mode: bool = True,
+        compact_config: CompactConfig | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -145,6 +137,8 @@ class AgentLoop:
         self._session_manager = session_manager
         self._on_event = on_event
         self._stream_mode = stream_mode
+        self.cc = compact_config or config.compact_config or CompactConfig()
+        self._previous_summary: str | None = None
 
         # Tool filtering: allowed_tools > readonly > all
         if allowed_tools is not None:
@@ -1142,363 +1136,95 @@ class AgentLoop:
 
         return [r for r in results if r is not None]
 
-    # ── Context compression (3 layers) ─────────────
+    # ── Context compression ─────────────────────────
 
     def _maybe_compact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-        """Apply context compression if over threshold. Returns (compressed, applied_layers)."""
-        tokens = estimate_tokens(messages)
-        applied: list[str] = []
+        """Apply context compression if over threshold.
 
-        if tokens < self.threshold_tokens * MICROCOMPACT_RATIO:
-            return messages, applied
+        3-layer progressive compression:
+            L1 (50%): Smart microcompact — truncate oversized tool outputs
+            L4 (80%): LLM summarize — structured Markdown summary
+            L3 (90%): Hard truncate — keep only system + last N messages
 
-        # L1: Microcompact — trim large tool results
-        if tokens >= self.threshold_tokens * MICROCOMPACT_RATIO:
-            messages, l1_count = self._microcompact(messages)
-            if l1_count:
-                applied.append(f"microcompact({l1_count})")
+        Also checks overflow (95%) to force compression when near context limit.
+        """
+        # Overflow detection: force compression even below normal thresholds
+        if self.config.model_context_tokens:
+            usable = self.config.model_context_tokens - 4096
+            tokens = estimate_tokens(messages)
+            if tokens >= usable * self.cc.overflow_ratio:
+                logger.debug(
+                    "Overflow detected: %d tokens >= %d usable * %.2f",
+                    tokens, usable, self.cc.overflow_ratio,
+                )
 
-        # Recompute after L1
-        tokens = estimate_tokens(messages)
+        # Delegate to compact_messages engine
+        messages, applied = compact_messages(
+            messages,
+            config=self.cc,
+            threshold_tokens=self.threshold_tokens,
+            model_context_tokens=self.config.model_context_tokens,
+            llm_client=self.client,
+            previous_summary=self._previous_summary,
+        )
 
-        # L2: Context collapse — summarize old messages, keep recent verbatim
-        if tokens >= self.threshold_tokens * COLLAPSE_RATIO:
-            old_len = len(messages)
-            messages = self._context_collapse(messages)
-            if len(messages) < old_len:
-                applied.append(f"collapse({old_len}->{len(messages)})")
-
-        # L2.5: Fix orphaned tool_call/tool_result pairs
-        pre_fix_len = len(messages)
-        messages = self._fix_tool_pairs(messages)
-        if len(messages) < pre_fix_len:
-            applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
-
-        # L4: LLM-structured summary (between L2 and L3)
-        tokens = estimate_tokens(messages)
-        if tokens >= self.threshold_tokens * LLM_SUMMARIZE_RATIO:
-            old_len = len(messages)
-            summarized = self._llm_summarize(messages)
-            if summarized is not None and len(summarized) < old_len:
-                messages = summarized
-                applied.append(f"llm_summarize({old_len}->{len(messages)})")
-
-        # L3: Hard truncate — keep only recent N + system message
-        tokens = estimate_tokens(messages)
-        if tokens >= self.threshold_tokens * HARD_TRUNCATE_RATIO:
-            old_len = len(messages)
-            messages = self._hard_truncate(messages)
-            if len(messages) < old_len:
-                applied.append(f"truncate({old_len}->{len(messages)})")
-
-        # L3.5: Fix again after truncation
-        pre_fix_len = len(messages)
-        messages = self._fix_tool_pairs(messages)
-        if len(messages) < pre_fix_len:
-            applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
+        # Track summary for incremental updates
+        if applied:
+            for layer in applied:
+                if layer.startswith("llm_summarize"):
+                    # Extract summary from the new messages for future incremental updates
+                    for msg in messages:
+                        if msg.get("role") == "assistant" and msg.get("content", "").startswith("[context summary]"):
+                            self._previous_summary = msg["content"]
+                            break
 
         return messages, applied
-
-    def _microcompact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-        """L1: Trim tool results > MICROCOMPACT_TOOL_RESULT_LIMIT chars."""
-        count = 0
-        for i, msg in enumerate(messages):
-            if msg.get("role") != "tool":
-                continue
-            content = msg.get("content", "")
-            if not isinstance(content, str) or len(content) <= MICROCOMPACT_TOOL_RESULT_LIMIT:
-                continue
-            truncated = content[:MICROCOMPACT_TOOL_RESULT_LIMIT] + "\n... [truncated]"
-            messages[i] = dict(msg, content=truncated)
-            count += 1
-        return messages, count
-
-    def _context_collapse(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """L2: Replace old messages with a summary; keep system + last N messages."""
-        if len(messages) <= COLLAPSE_KEEP_RECENT + 1:
-            return messages
-
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
-
-        # Keep system + recent verbatim
-        recent = non_system[-COLLAPSE_KEEP_RECENT:]
-        old = non_system[:-COLLAPSE_KEEP_RECENT]
-
-        if not old:
-            return messages
-
-        # Summarize old messages as a single assistant message
-        summary_parts = []
-        for m in old:
-            role = m.get("role", "?")
-            content = m.get("content")
-            if role == "user":
-                summary_parts.append(f"[user] {(content or '')[:100]}")
-            elif role == "assistant":
-                if content:
-                    summary_parts.append(f"[assistant] {content[:100]}")
-                for tc in m.get("tool_calls") or []:
-                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                    summary_parts.append(f"[tool_call] {fn.get('name', '?')}")
-            elif role == "tool":
-                tc_id = m.get("tool_call_id", "?")
-                summary_parts.append(f"[tool_result:{tc_id}] {(content or '')[:80]}")
-
-        summary = "[compressed summary]\n" + "\n".join(summary_parts)
-        collapse_msg = {"role": "assistant", "content": summary}
-        return system_msgs + [collapse_msg] + recent
-
-    def _hard_truncate(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """L3: Keep only system + last COLLAPSE_KEEP_RECENT messages."""
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
-        return system_msgs + non_system[-COLLAPSE_KEEP_RECENT:]
-
-    # ── Tool pair repair after compression ─────────
-
-    def _fix_tool_pairs(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Repair orphaned tool_call / tool_result pairs after compression.
-
-        After L2 collapse or L3 truncation, assistant messages with tool_calls
-        may be removed while their tool results survive (or vice versa).
-        This method:
-          1. Collects all tool_call_ids from assistant messages
-          2. Collects all tool_call_ids from tool result messages
-          3. Removes orphaned tool results (no matching tool_call)
-          4. Removes orphaned tool_calls from assistant messages (no matching result)
-        """
-        # Build sets of tool_call_ids from both sides
-        assistant_call_ids: set[str] = set()
-        result_ids: set[str] = set()
-
-        for msg in messages:
-            if msg.get("role") == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    tc_id = tc.get("id") if isinstance(tc, dict) else None
-                    if tc_id:
-                        assistant_call_ids.add(tc_id)
-            elif msg.get("role") == "tool":
-                tc_id = msg.get("tool_call_id")
-                if tc_id:
-                    result_ids.add(tc_id)
-
-        # Find orphans
-        orphan_results = result_ids - assistant_call_ids
-        orphan_calls = assistant_call_ids - result_ids
-
-        if not orphan_results and not orphan_calls:
-            return messages
-
-        logger.debug(
-            "fix_tool_pairs: removing %d orphan results, %d orphan calls",
-            len(orphan_results), len(orphan_calls),
-        )
-        self._trace({
-            "type": "fix_tool_pairs",
-            "orphan_results": len(orphan_results),
-            "orphan_calls": len(orphan_calls),
-        })
-
-        fixed: list[dict[str, Any]] = []
-        for msg in messages:
-            role = msg.get("role")
-
-            # Remove orphaned tool results
-            if role == "tool":
-                tc_id = msg.get("tool_call_id")
-                if tc_id in orphan_results:
-                    continue
-                fixed.append(msg)
-                continue
-
-            # Remove orphaned tool_calls from assistant messages
-            if role == "assistant" and orphan_calls:
-                tool_calls = msg.get("tool_calls") or []
-                if tool_calls:
-                    cleaned = []
-                    for tc in tool_calls:
-                        tc_id = tc.get("id") if isinstance(tc, dict) else None
-                        if tc_id and tc_id not in orphan_calls:
-                            cleaned.append(tc)
-                    if cleaned:
-                        msg = dict(msg, tool_calls=cleaned)
-                    elif not msg.get("content"):
-                        # assistant message with only orphaned tool_calls and no content: drop entirely
-                        continue
-
-            fixed.append(msg)
-
-        return fixed
-
-    # ── L4: LLM-based structured summary ──────────
-
-    _LLM_SUMMARIZE_PROMPT = (
-        "Summarize the following conversation into a concise structured note. "
-        "Preserve: key decisions, tool results (metrics, data findings), "
-        "file paths modified, and any open questions. "
-        "Output 3-8 bullet points in plaintext. "
-        "Do NOT include the system prompt or meta-instructions.\n\n"
-        "{conversation}"
-    )
-
-    def _llm_summarize(
-        self, messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]] | None:
-        """L4: Use LLM to summarize old messages into a structured note.
-
-        Returns compressed messages or None on failure.
-        Keeps: system messages + last COLLAPSE_KEEP_RECENT messages.
-        Replaces: everything in between with LLM-generated summary.
-        """
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
-
-        if len(non_system) <= COLLAPSE_KEEP_RECENT:
-            return None
-
-        recent = non_system[-COLLAPSE_KEEP_RECENT:]
-        old = non_system[:-COLLAPSE_KEEP_RECENT]
-
-        if not old:
-            return None
-
-        # Build conversation text for summarization (truncated for token safety)
-        parts: list[str] = []
-        for m in old:
-            role = m.get("role", "?")
-            content = m.get("content", "")
-            if role == "user":
-                parts.append(f"User: {(content or '')[:300]}")
-            elif role == "assistant":
-                if content:
-                    parts.append(f"Assistant: {content[:300]}")
-                for tc in m.get("tool_calls") or []:
-                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                    args_str = fn.get("arguments", "")[:100]
-                    parts.append(f"ToolCall: {fn.get('name', '?')}({args_str})")
-            elif role == "tool":
-                tc_id = m.get("tool_call_id", "?")
-                parts.append(f"ToolResult[{tc_id}]: {(content or '')[:200]}")
-
-        conversation = "\n".join(parts)
-        prompt = self._LLM_SUMMARIZE_PROMPT.format(conversation=conversation)
-
-        try:
-            summary_response = self.client.chat([
-                {"role": "system", "content": "You are a concise conversation summarizer."},
-                {"role": "user", "content": prompt},
-            ])
-            summary_text = summary_response.content or ""
-            if not summary_text.strip():
-                return None
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("LLM summarize failed: %s", exc)
-            return None
-
-        summary_msg = {"role": "assistant", "content": f"[LLM summary]\n{summary_text}"}
-        return system_msgs + [summary_msg] + recent
-
-    # ── Async compression ─────────────────────────
-
-    async def _allm_summarize(
-        self, messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]] | None:
-        """Async version of _llm_summarize using client.achat()."""
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
-
-        if len(non_system) <= COLLAPSE_KEEP_RECENT:
-            return None
-
-        recent = non_system[-COLLAPSE_KEEP_RECENT:]
-        old = non_system[:-COLLAPSE_KEEP_RECENT]
-
-        if not old:
-            return None
-
-        parts: list[str] = []
-        for m in old:
-            role = m.get("role", "?")
-            content = m.get("content", "")
-            if role == "user":
-                parts.append(f"User: {(content or '')[:300]}")
-            elif role == "assistant":
-                if content:
-                    parts.append(f"Assistant: {content[:300]}")
-                for tc in m.get("tool_calls") or []:
-                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                    args_str = fn.get("arguments", "")[:100]
-                    parts.append(f"ToolCall: {fn.get('name', '?')}({args_str})")
-            elif role == "tool":
-                tc_id = m.get("tool_call_id", "?")
-                parts.append(f"ToolResult[{tc_id}]: {(content or '')[:200]}")
-
-        conversation = "\n".join(parts)
-        prompt = self._LLM_SUMMARIZE_PROMPT.format(conversation=conversation)
-
-        try:
-            summary_response = await self.client.achat([
-                {"role": "system", "content": "You are a concise conversation summarizer."},
-                {"role": "user", "content": prompt},
-            ])
-            summary_text = summary_response.content or ""
-            if not summary_text.strip():
-                return None
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("LLM summarize failed: %s", exc)
-            return None
-
-        summary_msg = {"role": "assistant", "content": f"[LLM summary]\n{summary_text}"}
-        return system_msgs + [summary_msg] + recent
 
     async def _amaybe_compact(
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Async version of _maybe_compact - only L4 (LLM summarize) differs."""
-        tokens = estimate_tokens(messages)
-        applied: list[str] = []
+        """Async version of _maybe_compact — uses sync compact_messages with achat fallback for L4."""
+        # Overflow detection
+        if self.config.model_context_tokens:
+            usable = self.config.model_context_tokens - 4096
+            tokens = estimate_tokens(messages)
+            if tokens >= usable * self.cc.overflow_ratio:
+                logger.debug("Overflow detected (async): %d tokens", tokens)
 
-        if tokens < self.threshold_tokens * MICROCOMPACT_RATIO:
-            return messages, applied
+        # For async path, use compact_messages with achat-wrapped client
+        class _AchatAdapter:
+            """Wraps self.client.achat as sync .chat() for compact_messages."""
+            def __init__(self, client: Any) -> None:
+                self._client = client
+            def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop and loop.is_running():
+                    # Already in async context — use sync fallback
+                    return self._client.chat(messages, **kwargs)
+                return asyncio.run(self._client.achat(messages, **kwargs))
 
-        if tokens >= self.threshold_tokens * MICROCOMPACT_RATIO:
-            messages, l1_count = self._microcompact(messages)
-            if l1_count:
-                applied.append(f"microcompact({l1_count})")
+        adapter = _AchatAdapter(self.client)
+        messages, applied = compact_messages(
+            messages,
+            config=self.cc,
+            threshold_tokens=self.threshold_tokens,
+            model_context_tokens=self.config.model_context_tokens,
+            llm_client=adapter,
+            previous_summary=self._previous_summary,
+        )
 
-        tokens = estimate_tokens(messages)
-
-        if tokens >= self.threshold_tokens * COLLAPSE_RATIO:
-            old_len = len(messages)
-            messages = self._context_collapse(messages)
-            if len(messages) < old_len:
-                applied.append(f"collapse({old_len}->{len(messages)})")
-
-        pre_fix_len = len(messages)
-        messages = self._fix_tool_pairs(messages)
-        if len(messages) < pre_fix_len:
-            applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
-
-        tokens = estimate_tokens(messages)
-        if tokens >= self.threshold_tokens * LLM_SUMMARIZE_RATIO:
-            old_len = len(messages)
-            summarized = await self._allm_summarize(messages)
-            if summarized is not None and len(summarized) < old_len:
-                messages = summarized
-                applied.append(f"llm_summarize({old_len}->{len(messages)})")
-
-        tokens = estimate_tokens(messages)
-        if tokens >= self.threshold_tokens * HARD_TRUNCATE_RATIO:
-            old_len = len(messages)
-            messages = self._hard_truncate(messages)
-            if len(messages) < old_len:
-                applied.append(f"truncate({old_len}->{len(messages)})")
-
-        pre_fix_len = len(messages)
-        messages = self._fix_tool_pairs(messages)
-        if len(messages) < pre_fix_len:
-            applied.append(f"fix_pairs({pre_fix_len}->{len(messages)})")
+        # Track summary for incremental updates
+        if applied:
+            for layer in applied:
+                if layer.startswith("llm_summarize"):
+                    for msg in messages:
+                        if msg.get("role") == "assistant" and msg.get("content", "").startswith("[context summary]"):
+                            self._previous_summary = msg["content"]
+                            break
 
         return messages, applied
 

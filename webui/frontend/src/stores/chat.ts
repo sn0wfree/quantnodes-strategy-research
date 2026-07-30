@@ -87,6 +87,9 @@ interface ChatState {
   queueLengths: Map<string, number>
   /** Per-session cumulative token usage (LLM total). Drives ContextUsageBar. */
   tokensUsed: Map<string, number>
+  /** Most recent compaction event (for CompactBanner). */
+  lastCompaction: { layer: string; timestamp: number } | null
+  setLastCompaction: (c: { layer: string; timestamp: number } | null) => void
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
   updateMessage: (id: string, updater: (msg: Message) => void) => void
@@ -112,6 +115,8 @@ export const useChatStore = create<ChatState>()(
     queuePaused: new Map(),
     queueLengths: new Map(),
     tokensUsed: new Map(),
+    lastCompaction: null,
+    setLastCompaction: (c) => set({ lastCompaction: c }),
     setMessages: (messages) =>
       set((state) => {
         state.messages.clear()

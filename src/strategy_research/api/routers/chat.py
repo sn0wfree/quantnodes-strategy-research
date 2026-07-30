@@ -255,6 +255,7 @@ async def _run_agent_loop_background(
             session_id=session_id,
             system_prompt=system_prompt,
             allowed_tools=[],  # chat-only: no tools
+            compact_config=cfg.compact_config,
         )
 
         # Run the loop
@@ -411,6 +412,10 @@ async def send_async(body: ChatMessage, request: Request):
     # ── /goal command intercept ────────────────────────────────────────
     if body.content.strip().startswith("/goal"):
         return await _handle_goal_command(body)
+
+    # ── /compact command intercept ────────────────────────────────────
+    if body.content.strip() == "/compact":
+        return await _handle_compact_command(body)
 
     # Delegate to SessionService — it handles DB persistence, queueing,
     # AgentLoop execution, history context, and event emission.
@@ -626,6 +631,85 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     )
 
 
+# ── /compact command handler ──────────────────────────────────────
+
+
+async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
+    """Handle /compact command — compress session history in-place."""
+    import uuid
+
+    service = _get_session_service()
+    cfg = _build_llm_config()
+
+    # Persist user message
+    user_msg_id = str(uuid.uuid4())
+    service.store.append_message(
+        Message(
+            session_id=body.session_id,
+            role="user",
+            content="/compact",
+        ),
+        message_id=user_msg_id,
+    )
+
+    # Execute compaction
+    try:
+        result = await service.compact_history(
+            session_id=body.session_id,
+            config=cfg.compact_config if cfg else None,
+        )
+        layers = result.get("layers", [])
+        before = result.get("before_tokens", 0)
+        after = result.get("after_tokens", 0)
+        summary = result.get("summary", "")
+        compressed = result.get("compressed", [])
+
+        if layers:
+            response_text = f"✅ 上下文已压缩: {', '.join(layers)}（{before} → {after} tokens）"
+            if summary:
+                response_text += f"\n\n{summary}"
+        else:
+            response_text = "ℹ️ 上下文无需压缩，当前 token 使用量在阈值以下。"
+    except Exception as exc:
+        logger.exception("compact_history failed")
+        response_text = f"❌ 压缩失败: {exc}"
+
+    # Persist assistant message
+    assistant_msg_id = str(uuid.uuid4())
+    service.store.append_message(
+        Message(
+            session_id=body.session_id,
+            role="assistant",
+            content=response_text,
+        ),
+        message_id=assistant_msg_id,
+    )
+
+    # Emit SSE events
+    event_bus = service.event_bus
+    event_bus.emit(body.session_id, "message_received", {
+        "user_message_id": user_msg_id,
+        "assistant_message_id": assistant_msg_id,
+        "status": "done",
+    })
+    event_bus.emit(body.session_id, "text_delta", {
+        "text": response_text,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "agent_done", {
+        "message_id": assistant_msg_id,
+        "status": "completed",
+    })
+
+    return SendMessageResponse(
+        message_id=user_msg_id,
+        user_message_id=user_msg_id,
+        assistant_message_id=assistant_msg_id,
+        event_id="",
+        status="done",
+    )
+
+
 class CancelRequest(BaseModel):
     session_id: str
     attempt_id: Optional[str] = None
@@ -704,6 +788,7 @@ async def send_sync(body: ChatMessage, request: Request):
         session_id=body.session_id,
         system_prompt=system_prompt,
         allowed_tools=[],
+        compact_config=cfg.compact_config,
     )
 
     result = await loop.arun(body.content)

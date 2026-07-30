@@ -35,6 +35,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..agent.compact import CompactConfig
 from .quantnodes_bridge import (
     CONFIG_PATH as QUANTNODES_LLM_JSON,
 )
@@ -141,6 +142,9 @@ class LLMConfig:
     model_max_output_tokens: int | None = None     # e.g. 32000
     model_supports_vision: bool | None = None
     model_supports_reasoning: bool | None = None
+
+    # ── Compaction ───────────────────────────────
+    compact_config: CompactConfig | None = None
 
     # ── Methods ──────────────────────────────────
 
@@ -327,6 +331,17 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
 
     for bool_field in ("model_supports_vision", "model_supports_reasoning"):
         _coerce_bool(out, bool_field, raw.get(bool_field))
+
+    # ── CompactConfig from "compact" section ───────────────────────
+    compact_raw = raw.get("compact")
+    if isinstance(compact_raw, dict):
+        valid_fields = {f.name for f in dataclasses.fields(CompactConfig)}
+        compact_kwargs: dict[str, Any] = {}
+        for k, v in compact_raw.items():
+            if k in valid_fields and v is not None:
+                compact_kwargs[k] = v
+        if compact_kwargs:
+            out["compact_config"] = CompactConfig(**compact_kwargs)
 
     # Provider→base_url/model/max_tokens fallback when the JSON omitted them.
     if (p := out.get("provider")):

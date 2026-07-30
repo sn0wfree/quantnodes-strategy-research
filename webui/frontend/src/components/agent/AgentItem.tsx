@@ -125,7 +125,10 @@ export function AgentItem({ agent, onSelect, isSelected }: AgentItemProps) {
               <span>上下文: {Math.round(agent.context_tokens / 1000)}K</span>
             )}
             {agent.compaction_count > 0 && (
-              <span>压缩: {agent.compaction_count}次</span>
+              <span>
+                压缩: {agent.compaction_count}次
+                {agent.last_compaction ? ` · ${agent.last_compaction.layer}` : ''}
+              </span>
             )}
             {agent.finished_reason && (
               <span>退出: {agent.finished_reason}</span>

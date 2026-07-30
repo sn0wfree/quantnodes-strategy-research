@@ -355,6 +355,28 @@ export function useSSE(sessionId: string | null) {
           useChatStore.getState().setActiveAttempt(null)
           break
         }
+        case 'compact': {
+          const compactData = data as {
+            agent_id?: string
+            layer?: string
+            iteration?: number
+            summary?: string
+          }
+          if (compactData.agent_id) {
+            updateAgent(compactData.agent_id, (agent) => {
+              agent.compaction_count = (agent.compaction_count || 0) + 1
+              agent.last_compaction = {
+                layer: compactData.layer || 'unknown',
+                timestamp: Date.now(),
+              }
+            })
+          }
+          useChatStore.getState().setLastCompaction({
+            layer: compactData.layer || 'unknown',
+            timestamp: Date.now(),
+          })
+          break
+        }
         case 'error': {
           const error = data.error as string
           if (error) {
@@ -514,6 +536,7 @@ export function useSSE(sessionId: string | null) {
       'dag_update', 'progress', 'message_received', 'error',
       'session_meta_updated',
       'goal_updated', 'goal_evidence_added', 'goal_completed',
+      'compact',
       'llm_usage', 'session_total_tokens',
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))

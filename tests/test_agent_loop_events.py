@@ -32,9 +32,8 @@ class EventSink:
 
 def _make_loop(sink: EventSink, *, max_iterations: int = 1) -> AgentLoop:
     """Construct a minimal AgentLoop with a captured event sink."""
-    cfg = mock.MagicMock()
-    cfg.model = "fake-model"
-    cfg.temperature = 0.7
+    from strategy_research.core.llm import LLMConfig
+    cfg = LLMConfig(api_key="sk-test", model="fake-model", temperature=0.7)
     registry = mock.MagicMock()
     memory = mock.MagicMock()
     memory.history = []

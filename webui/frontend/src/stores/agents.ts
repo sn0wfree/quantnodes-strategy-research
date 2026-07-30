@@ -26,6 +26,7 @@ export interface Agent {
   finished_reason?: 'success' | 'failure' | 'abort' | 'max_iterations'
   tool_calls_count: number
   compaction_count: number
+  last_compaction?: { layer: string; timestamp: number }
   context_tokens: number
   context_tokens_limit: number
   iterations_detail: IterationDetail[]

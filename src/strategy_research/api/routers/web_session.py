@@ -448,6 +448,50 @@ async def delete_session(session_id: str, request: Request):
     return {"status": "ok", "deleted_id": session_id}
 
 
+def delete_messages(session_id: str, message_ids: list[str]) -> None:
+    """Delete specific messages by ID from a session."""
+    if not message_ids:
+        return
+    try:
+        conn = _get_db()
+        placeholders = ",".join("?" for _ in message_ids)
+        conn.execute(
+            f"DELETE FROM messages WHERE session_id = ? AND id IN ({placeholders})",
+            [session_id, *message_ids],
+        )
+        conn.execute(
+            "UPDATE sessions SET message_count = message_count - ?, updated_at = ? WHERE id = ?",
+            (len(message_ids), time.time(), session_id),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.error("delete_messages failed for session %s: %s", session_id, exc)
+
+
+def update_message_content(
+    message_id: str,
+    content: str,
+    parts: Optional[list[dict[str, Any]]] = None,
+) -> None:
+    """Update a message's content and optionally its parts."""
+    try:
+        conn = _get_db()
+        parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
+        if parts is not None:
+            conn.execute(
+                "UPDATE messages SET content = ?, parts_json = ? WHERE id = ?",
+                (content, parts_json, message_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE messages SET content = ? WHERE id = ?",
+                (content, message_id),
+            )
+        conn.commit()
+    except Exception as exc:
+        logger.error("update_message_content failed for message %s: %s", message_id, exc)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Messages endpoint
 # ─────────────────────────────────────────────────────────────────────────────

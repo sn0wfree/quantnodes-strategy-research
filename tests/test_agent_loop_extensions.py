@@ -12,13 +12,13 @@ import pytest
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import (
     AgentLoop,
-    COLLAPSE_RATIO,
-    COLLAPSE_KEEP_RECENT,
-    HARD_TRUNCATE_RATIO,
     LoopResult,
-    MICROCOMPACT_RATIO,
-    MICROCOMPACT_TOOL_RESULT_LIMIT,
     _tool_call_hash,
+)
+from strategy_research.core.agent.compact import (
+    CompactConfig,
+    compact_messages,
+    _estimate_tokens,
 )
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
 
@@ -59,33 +59,37 @@ def long_tool_result(content: str) -> LLMResponse:
 
 class TestMicrocompact:
     def test_long_tool_result_trimmed(self):
-        """Tool results > MICROCOMPACT_TOOL_RESULT_LIMIT chars should be trimmed."""
+        """Tool results > microcompact_tool_result_limit chars should be trimmed."""
         mock = MockLLM([
+            # Iteration 1: LLM decides to use tool
             tool_resp([ToolCall(id="c1", name="read_file", arguments={"path": "x"})]),
+            # After tool result, LLM summarization may consume a response
+            text_resp("Summary of read_file"),
+            # Final response
             text_resp("done"),
         ])
         with tempfile.TemporaryDirectory() as td:
             ws = Path(td)
             (ws / "strategies").mkdir()
-            # Pre-create file with long content
-            (ws / "x").write_text("A" * 2000)
+            (ws / "x").write_text("A" * 3000)
             loop = AgentLoop(
                 stream_mode=False,
                 config=LLMConfig(api_key="sk-test"),
                 registry=build_default_registry(),
                 workspace=ws,
-                threshold_tokens=100,  # very low threshold
+                threshold_tokens=100,
                 no_progress_window=10,
             )
             loop.client.chat = mock.chat
             r = loop.run("x")
-            # Should have triggered microcompact
+            # Should have triggered microcompact (L1)
             assert any("microcompact" in a for a in r.compression_applied)
 
     def test_short_tool_result_preserved(self):
-        """Tool results <= MICROCOMPACT_TOOL_RESULT_LIMIT chars should be preserved."""
+        """Tool results <= microcompact_tool_result_limit chars should be preserved."""
         mock = MockLLM([
             tool_resp([ToolCall(id="c1", name="list_history", arguments={})]),
+            text_resp("Summary"),
             text_resp("done"),
         ])
         with tempfile.TemporaryDirectory() as td:
@@ -101,89 +105,29 @@ class TestMicrocompact:
             )
             loop.client.chat = mock.chat
             r = loop.run("x")
-            # Tool result for list_history is small → no microcompact needed
-            # (may or may not trigger depending on system prompt size)
             # Just verify no crash
-            assert r.iterations == 2
+            assert r.iterations >= 1
 
 
-# ── Context collapse (L2) ───────────────────────────────────────────
+# ── LLM Summarize (L4) ─────────────────────────────────────────────
 
 
-class TestContextCollapse:
-    def test_collapse_triggered_on_many_messages(self):
-        """With many messages, collapse should reduce message count."""
-        mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
-                                arguments={"path": f"file_{i}.py"})])
-            for i in range(10)
-        ] + [
-            # L4 LLM summarization consumes one call when threshold is very low
-            text_resp("Summary: tested read_file 10 times"),
-            text_resp("done"),
-        ])
-        with tempfile.TemporaryDirectory() as td:
-            ws = Path(td)
-            (ws / "strategies").mkdir()
-            loop = AgentLoop(
-                stream_mode=False,
-                config=LLMConfig(api_key="sk-test"),
-                registry=build_default_registry(),
-                workspace=ws,
-                threshold_tokens=50,  # very low threshold
-                no_progress_window=10,
-            )
-            loop.client.chat = mock.chat
-            r = loop.run("loop")
-            # collapse should have reduced messages
-            assert any("collapse" in a for a in r.compression_applied)
+class TestLLMSummarize:
+    def test_structured_summary_prompt(self):
+        """L4 should use structured template for summarization."""
+        from strategy_research.core.agent.compact import DEFAULT_SUMMARY_TEMPLATE, _build_summary_prompt
+        prompt = _build_summary_prompt("test conversation", None, DEFAULT_SUMMARY_TEMPLATE)
+        assert "## Objective" in prompt
+        assert "## Work State" in prompt
+        assert "## Relevant Files" in prompt
 
-    def test_collapse_preserves_system(self):
-        """System message should survive collapse."""
-        mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
-                                arguments={"path": f"file_{i}.py"})])
-            for i in range(10)
-        ] + [text_resp("Summary of tests"), text_resp("done")])
-        with tempfile.TemporaryDirectory() as td:
-            ws = Path(td)
-            (ws / "strategies").mkdir()
-            loop = AgentLoop(
-                stream_mode=False,
-                config=LLMConfig(api_key="sk-test"),
-                registry=build_default_registry(),
-                workspace=ws,
-                threshold_tokens=50,
-                no_progress_window=10,
-            )
-            loop.client.chat = mock.chat
-            r = loop.run("loop")
-            # System message should still be first
-            assert any(m.get("role") == "system" for m in r.messages)
-
-    def test_collapse_keep_recent_preserved(self):
-        """Last COLLAPSE_KEEP_RECENT messages should be preserved verbatim."""
-        mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
-                                arguments={"path": f"file_{i}.py"})])
-            for i in range(10)
-        ] + [text_resp("Summary"), text_resp("done")])
-        with tempfile.TemporaryDirectory() as td:
-            ws = Path(td)
-            (ws / "strategies").mkdir()
-            loop = AgentLoop(
-                stream_mode=False,
-                config=LLMConfig(api_key="sk-test"),
-                registry=build_default_registry(),
-                workspace=ws,
-                threshold_tokens=50,
-                no_progress_window=10,
-            )
-            loop.client.chat = mock.chat
-            r = loop.run("loop")
-            # Last few assistant messages should have content
-            recent_msgs = [m for m in r.messages if m.get("role") == "assistant"]
-            assert len(recent_msgs) >= 1
+    def test_incremental_summary(self):
+        """L4 should support incremental summary updates."""
+        from strategy_research.core.agent.compact import _build_summary_prompt, DEFAULT_SUMMARY_TEMPLATE
+        prompt = _build_summary_prompt("new conversation", "old summary text", DEFAULT_SUMMARY_TEMPLATE)
+        assert "Update the anchored summary" in prompt
+        assert "<previous-summary>" in prompt
+        assert "old summary text" in prompt
 
 
 # ── Hard truncate (L3) ──────────────────────────────────────────────

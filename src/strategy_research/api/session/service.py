@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from strategy_research.core.agent.compact import CompactConfig, compact_messages
 from .events import EventBus
 from .models import Attempt, AttemptStatus, Message
 from .store import SessionStore
@@ -628,6 +629,7 @@ class SessionService:
             session_id=attempt.session_id,
             system_prompt=system_prompt,
             allowed_tools=None,
+            compact_config=cfg.compact_config,
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).
@@ -649,6 +651,62 @@ class SessionService:
                 "output_tokens": usage_state["output"],
                 "total_tokens": usage_state["input"] + usage_state["output"],
             },
+        }
+
+    # ── Compact ──────────────────────────────────────────────────────
+
+    async def compact_history(
+        self,
+        session_id: str,
+        config: CompactConfig | None = None,
+    ) -> dict[str, Any]:
+        """Compress session history in-place using compact_messages.
+
+        Returns dict with keys: layers, before_tokens, after_tokens, summary.
+        """
+        messages = self.store.get_messages(session_id, limit=100)
+        history = self._convert_messages_to_history(messages)
+
+        if not history:
+            return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
+
+        from ..routers.chat import _build_llm_config
+
+        cfg = _build_llm_config()
+        llm_client = None
+        model_context_tokens = None
+        if cfg:
+            model_context_tokens = cfg.model_context_tokens
+            try:
+                from strategy_research.core.llm import OpenAICompatClient
+                llm_client = OpenAICompatClient(cfg)
+            except Exception:
+                pass
+
+        compressed, layers = compact_messages(
+            history,
+            config=config,
+            threshold_tokens=0,  # force all layers for manual /compact
+            model_context_tokens=model_context_tokens,
+            llm_client=llm_client,
+        )
+
+        before_tokens = sum(len(m.get("content", "")) for m in history)
+        after_tokens = sum(len(m.get("content", "")) for m in compressed)
+
+        # Build summary text from compressed messages
+        summary_parts = []
+        for m in compressed:
+            if m.get("role") == "assistant" and m.get("content", "").startswith("[context summary]"):
+                summary_parts.append(m["content"])
+        summary = "\n\n".join(summary_parts)
+
+        return {
+            "layers": layers,
+            "before_tokens": before_tokens,
+            "after_tokens": after_tokens,
+            "summary": summary,
+            "compressed": compressed,
         }
 
     # ── History conversion (borrowed verbatim from vibe_trading) ──────
