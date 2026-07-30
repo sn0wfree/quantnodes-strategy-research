@@ -58,7 +58,7 @@ const userMessage: Message = {
   id: 'msg-user-1',
   session_id: 'demo',
   role: 'user',
-  parts: [{ type: 'text', text: '请帮我分析 AAPL 最近 30 天的动量因子。' }],
+  parts: [{ type: 'text', id: 'story-user-1', text: '请帮我分析 AAPL 最近 30 天的动量因子。' }],
   created_at: Date.now() / 1000,
 }
 
@@ -67,7 +67,7 @@ const assistantMessage: Message = {
   session_id: 'demo',
   role: 'assistant',
   parts: [
-    { type: 'text', text: '好的，我先读取 AAPL 的历史数据，然后计算 30 日动量。' },
+    { type: 'text', id: 'story-cap-1', text: '好的，我先读取 AAPL 的历史数据，然后计算 30 日动量。' },
     {
       type: 'tool_call',
       id: 'tc-1',
@@ -78,6 +78,7 @@ const assistantMessage: Message = {
     },
     {
       type: 'text',
+      id: 'story-1-text',
       text: '数据加载完成，开始计算。\n\n**结果**：IC = 0.08, Sharpe = 1.42',
     },
   ],

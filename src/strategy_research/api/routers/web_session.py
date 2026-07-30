@@ -217,11 +217,63 @@ def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) ->
         pass
 
 
+def _migrate_text_part_ids(conn: sqlite3.Connection) -> None:
+    """Assign deterministic ids to text parts missing one (text-part-routing).
+
+    After the opencode-style 3-step text protocol (PR1), every text part
+    in `parts_json` must carry an `id` field so the frontend can route
+    streaming deltas to the correct segment via findLast by id.
+
+    This migration scans all messages and assigns ``f"legacy-{msg_id}-{idx}"``
+    to any text part without an id. Idempotent: parts that already have an
+    id are left untouched. Failures are logged and skipped so a single
+    corrupt row doesn't abort the whole migration.
+    """
+    rows = conn.execute(
+        "SELECT id, parts_json FROM messages WHERE parts_json IS NOT NULL"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        msg_id = row["id"]
+        try:
+            parts = json.loads(row["parts_json"])
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning("migration: msg %s parse failed: %s", msg_id, exc)
+            continue
+        if not isinstance(parts, list):
+            continue
+        changed = False
+        for i, p in enumerate(parts):
+            if (
+                isinstance(p, dict)
+                and p.get("type") == "text"
+                and not p.get("id")
+            ):
+                p["id"] = f"legacy-{msg_id}-{i}"
+                changed = True
+        if changed:
+            try:
+                conn.execute(
+                    "UPDATE messages SET parts_json = ? WHERE id = ?",
+                    (json.dumps(parts, ensure_ascii=False), msg_id),
+                )
+                updated += 1
+            except sqlite3.Error as exc:
+                logger.warning("migration: msg %s update failed: %s", msg_id, exc)
+    if updated:
+        logger.info(
+            "text-part-routing migration: assigned ids to %d legacy text parts",
+            updated,
+        )
+
+
 def _get_db() -> sqlite3.Connection:
     """Open the shared SQLite connection. Ensures schema is up to date."""
     conn = sqlite3.connect(str(_get_db_path()))
     conn.row_factory = sqlite3.Row
     _ensure_schema(conn)
+    # Idempotent migration: ensure every text part has an id (text-part-routing)
+    _migrate_text_part_ids(conn)
     conn.commit()
     return conn
 

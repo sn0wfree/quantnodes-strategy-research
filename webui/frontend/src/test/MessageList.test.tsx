@@ -34,14 +34,14 @@ describe('MessageList tool filtering', () => {
         id: 'u1',
         session_id: 's1',
         role: 'user',
-        parts: [{ type: 'text', text: '分析' }],
+        parts: [{ type: 'text', id: 'm1-text', text: '分析' }],
         created_at: 1,
       },
       {
         id: 'a1',
         session_id: 's1',
         role: 'assistant',
-        parts: [{ type: 'text', text: '回复' }],
+        parts: [{ type: 'text', id: 'm2-text', text: '回复' }],
         created_at: 2,
       },
     ]

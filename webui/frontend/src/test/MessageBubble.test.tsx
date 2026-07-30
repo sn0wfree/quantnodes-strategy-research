@@ -7,7 +7,7 @@ const baseMsg: Message = {
   id: 'm1',
   session_id: 's1',
   role: 'user',
-  parts: [{ type: 'text', text: '你好' }],
+  parts: [{ type: 'text', id: 'test-1', text: '你好' }],
   created_at: 1700000000,
 }
 

@@ -934,13 +934,50 @@ def _accumulate_part(
     """Accumulate SSE event payloads into a structured parts list.
 
     Mirrors the logic in chat.py:_run_agent_loop_background.
+
+    Text events use the opencode-style 3-step lifecycle keyed by text_id:
+        text.started { text_id }    → push new text part with id
+        text_delta   { text_id, text } → findLast by id, append
+        text.ended   { text_id, text } → findLast by id, override final
+
+    text_delta events MUST carry text_id; missing text_id is a protocol
+    error and the chunk is dropped.
     """
-    if event_type == "text_delta":
+    if event_type == "text.started":
+        text_id = data.get("text_id")
+        if not text_id:
+            logger.warning("text.started without text_id")
+            return
+        # Idempotent: SSE replay / duplicate emission. If a text part
+        # with this id already exists, treat as a no-op.
+        for p in reversed(parts):
+            if p.get("type") == "text" and p.get("id") == text_id:
+                return
+        parts.append({"type": "text", "id": text_id, "text": ""})
+    elif event_type == "text_delta":
+        text_id = data.get("text_id")
         text = data.get("text", "")
-        if parts and parts[-1].get("type") == "text":
-            parts[-1]["text"] += text
+        if not text_id:
+            logger.warning("text_delta without text_id, dropping chunk")
+            return
+        for p in reversed(parts):
+            if p.get("type") == "text" and p.get("id") == text_id:
+                p["text"] += text
+                break
         else:
-            parts.append({"type": "text", "text": text})
+            # Orphan: text.started hasn't arrived yet (replay / late join).
+            logger.warning("text_delta with orphan text_id=%s, pushing new", text_id)
+            parts.append({"type": "text", "id": text_id, "text": text})
+    elif event_type == "text.ended":
+        text_id = data.get("text_id")
+        final_text = data.get("text", "")
+        if not text_id:
+            logger.warning("text.ended without text_id")
+            return
+        for p in reversed(parts):
+            if p.get("type") == "text" and p.get("id") == text_id:
+                p["text"] = final_text
+                break
     elif event_type == "tool_call":
         raw_args = data.get("arguments")
         args_str = (

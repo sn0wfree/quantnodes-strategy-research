@@ -19,7 +19,7 @@ describe('useChatStore', () => {
       id: 'msg-1',
       session_id: 'sess-1',
       role: 'user',
-      parts: [{ type: 'text', text: 'Hello' }],
+      parts: [{ type: 'text', id: 'test-1', text: 'Hello' }],
       created_at: Date.now() / 1000,
     }
 
@@ -34,7 +34,7 @@ describe('useChatStore', () => {
       id: 'msg-2',
       session_id: 'sess-1',
       role: 'assistant',
-      parts: [{ type: 'text', text: 'Initial' }],
+      parts: [{ type: 'text', id: 'test-2', text: 'Initial' }],
       created_at: Date.now() / 1000,
     }
 
@@ -71,11 +71,11 @@ describe('useChatStore', () => {
     const messages: Message[] = [
       {
         id: 'm1', session_id: 's', role: 'user',
-        parts: [{ type: 'text', text: 'a' }], created_at: 1,
+        parts: [{ type: 'text', id: 'seed-1', text: 'a' }], created_at: 1,
       },
       {
         id: 'm2', session_id: 's', role: 'assistant',
-        parts: [{ type: 'text', text: 'b' }], created_at: 2,
+        parts: [{ type: 'text', id: 'seed-2', text: 'b' }], created_at: 2,
       },
     ]
 

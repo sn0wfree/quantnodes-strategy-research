@@ -84,7 +84,13 @@ function expandTextPart(part: MessagePart, provider: string | null): MessagePart
     { type: 'thinking', text: parsed.thinking, collapsed: true },
   ]
   if (parsed.content) {
-    result.push({ type: 'text', text: parsed.content })
+    // Reuse the source text part's id so the derived text part has
+    // the same id (covers the persisted view + the live stream view).
+    result.push({
+      type: 'text',
+      id: part.id,
+      text: parsed.content,
+    })
   }
   return result
 }

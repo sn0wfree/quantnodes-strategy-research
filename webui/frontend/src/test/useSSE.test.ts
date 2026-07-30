@@ -62,12 +62,15 @@ const { useSSEStore } = await import('../stores/sse')
 const getCurrentES = () => MockEventSource.instances[MockEventSource.instances.length - 1]
 
 // Helper to seed chat/agent/workflow with a message
+// After PR1 (text-part-routing), every text part requires an id.
+// Tests that need a pre-existing text part can call emitTextSegment()
+// or push a part with id explicitly.
 const seedMessage = (id: string, role: 'user' | 'assistant' = 'assistant') => {
   useChatStore.getState().addMessage({
     id,
     session_id: 'sess-1',
     role,
-    parts: [{ type: 'text', text: '' }],
+    parts: [],
     created_at: Date.now() / 1000,
   })
 }
@@ -169,38 +172,66 @@ describe('useSSE', () => {
       es = getCurrentES()
     })
 
-    it('text_delta updates message text + appends to streaming', () => {
+    it('text_delta with text_id appends to matching part', () => {
       seedMessage('msg-1')
       useChatStore.getState().setStreamingMessage('msg-1')
 
+      // Backend now requires text_delta to carry text_id (3-step protocol).
+      // We push a started event first so a proper text part exists.
       act(() => {
-        es.emit('text_delta', { text: 'hello', message_id: 'msg-1' })
+        es.emit('text.started', { text_id: 't1', message_id: 'msg-1' })
+        es.emit('text_delta', { text_id: 't1', message_id: 'msg-1', text: 'hello' })
       })
 
       const msg = useChatStore.getState().messages.get('msg-1')!
-      const textPart = msg.parts.find((p) => p.type === 'text') as any
-      expect(textPart.text).toBe('hello')
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      expect(textParts).toHaveLength(1)
+      expect(textParts[0].id).toBe('t1')
+      expect(textParts[0].text).toBe('hello')
       expect(useChatStore.getState().streamingText).toBe('hello')
     })
 
-    it('text_delta accumulates on multiple calls', () => {
+    it('text_delta accumulates on multiple chunks with same text_id', () => {
       seedMessage('msg-1')
       useChatStore.getState().setStreamingMessage('msg-1')
 
       act(() => {
-        es.emit('text_delta', { text: 'foo', message_id: 'msg-1' })
-        es.emit('text_delta', { text: ' bar', message_id: 'msg-1' })
+        es.emit('text.started', { text_id: 't1', message_id: 'msg-1' })
+        es.emit('text_delta', { text_id: 't1', message_id: 'msg-1', text: 'foo' })
+        es.emit('text_delta', { text_id: 't1', message_id: 'msg-1', text: ' bar' })
       })
 
       const msg = useChatStore.getState().messages.get('msg-1')!
-      const textPart = msg.parts.find((p) => p.type === 'text') as any
-      expect(textPart.text).toBe('foo bar')
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      expect(textParts).toHaveLength(1)
+      expect(textParts[0].text).toBe('foo bar')
     })
 
-    it('assistant_message replaces text content', () => {
+    it('text_delta without text_id is dropped (hard-break)', () => {
       seedMessage('msg-1')
+      useChatStore.getState().setStreamingMessage('msg-1')
+
+      // Suppress console.warn noise during this test
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      act(() => {
+        es.emit('text_delta', { text: 'orphan', message_id: 'msg-1' })
+      })
+
+      const msg = useChatStore.getState().messages.get('msg-1')!
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      // No text part created (orphan chunk dropped — hard-break)
+      expect(textParts).toHaveLength(0)
+      // streamingText still updated (caller-side highlight during streaming)
+      expect(useChatStore.getState().streamingText).toBe('orphan')
+      warnSpy.mockRestore()
+    })
+
+    it('assistant_message replaces last text content', () => {
+      seedMessage('msg-1')
+      // Seed a text part manually (mimics what text.started would do)
       useChatStore.getState().updateMessage('msg-1', (m) => {
-        if (m.parts[0].type === 'text') m.parts[0].text = 'old'
+        m.parts.push({ type: 'text', id: 'seg-1', text: 'old' })
       })
 
       act(() => {
@@ -403,6 +434,121 @@ describe('useSSE', () => {
           es.listeners.get('text_delta')!({ type: 'text_delta', data: 'not json{' })
         })
       }).not.toThrow()
+    })
+  })
+
+  // ──────────── text-part-routing (3-step protocol) ────────────
+
+  describe('text-part-routing 3-step protocol', () => {
+    let es: MockEventSource
+
+    beforeEach(() => {
+      renderHook(() => useSSE('sess-1'))
+      es = getCurrentES()
+    })
+
+    it('text.started pushes a new text part with id', () => {
+      seedMessage('msg-1')
+      useChatStore.getState().setStreamingMessage('msg-1')
+
+      act(() => {
+        es.emit('text.started', { text_id: 'seg-1', message_id: 'msg-1' })
+      })
+
+      const msg = useChatStore.getState().messages.get('msg-1')!
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      expect(textParts).toHaveLength(1)
+      expect(textParts[0].id).toBe('seg-1')
+      expect(textParts[0].text).toBe('')
+    })
+
+    it('text.ended overrides the part final text', () => {
+      seedMessage('msg-1')
+      useChatStore.getState().setStreamingMessage('msg-1')
+
+      act(() => {
+        es.emit('text.started', { text_id: 'seg-1', message_id: 'msg-1' })
+        es.emit('text_delta', { text_id: 'seg-1', message_id: 'msg-1', text: 'partial' })
+        es.emit('text.ended', { text_id: 'seg-1', message_id: 'msg-1', text: 'final' })
+      })
+
+      const msg = useChatStore.getState().messages.get('msg-1')!
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      expect(textParts).toHaveLength(1)
+      expect(textParts[0].text).toBe('final')
+    })
+
+    it('text_delta after tool_call creates new text part (regression)', () => {
+      // Reproduces the original bug: text_delta after a tool_call must
+      // land in a NEW text part, not be appended to the existing text.
+      seedMessage('msg-1')
+      useChatStore.getState().setStreamingMessage('msg-1')
+
+      act(() => {
+        // Iter 1: text → tool_call
+        es.emit('text.started', { text_id: 'iter1', message_id: 'msg-1' })
+        es.emit('text_delta', { text_id: 'iter1', message_id: 'msg-1', text: 'T1' })
+        es.emit('text.ended', { text_id: 'iter1', message_id: 'msg-1', text: 'T1' })
+        es.emit('tool_call', {
+          message_id: 'msg-1',
+          id: 'tc-1',
+          name: 'foo',
+          arguments: '{}',
+        })
+        // Iter 2: text after tool_call
+        es.emit('text.started', { text_id: 'iter2', message_id: 'msg-1' })
+        es.emit('text_delta', { text_id: 'iter2', message_id: 'msg-1', text: 'T2' })
+        es.emit('text.ended', { text_id: 'iter2', message_id: 'msg-1', text: 'T2' })
+      })
+
+      const msg = useChatStore.getState().messages.get('msg-1')!
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      const toolParts = msg.parts.filter((p) => p.type === 'tool_call')
+
+      expect(textParts).toHaveLength(2)
+      expect(textParts[0].id).toBe('iter1')
+      expect(textParts[0].text).toBe('T1')
+      expect(textParts[1].id).toBe('iter2')
+      expect(textParts[1].text).toBe('T2')
+      expect(toolParts).toHaveLength(1)
+      // Tool call is positioned between the two text parts
+      const textIdx0 = msg.parts.findIndex((p) => p.type === 'text' && (p as any).id === 'iter1')
+      const tcIdx = msg.parts.findIndex((p) => p.type === 'tool_call')
+      const textIdx1 = msg.parts.findIndex((p) => p.type === 'text' && (p as any).id === 'iter2')
+      expect(textIdx0).toBeLessThan(tcIdx)
+      expect(tcIdx).toBeLessThan(textIdx1)
+    })
+
+    it('text_delta with orphan text_id pushes new part (defensive)', () => {
+      seedMessage('msg-1')
+      useChatStore.getState().setStreamingMessage('msg-1')
+
+      // No text.started before text_delta — simulate replay / late join.
+      act(() => {
+        es.emit('text_delta', { text_id: 'late-1', message_id: 'msg-1', text: 'orphan' })
+      })
+
+      const msg = useChatStore.getState().messages.get('msg-1')!
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      expect(textParts).toHaveLength(1)
+      expect(textParts[0].id).toBe('late-1')
+      expect(textParts[0].text).toBe('orphan')
+    })
+
+    it('text.started with duplicate id is idempotent', () => {
+      seedMessage('msg-1')
+      useChatStore.getState().setStreamingMessage('msg-1')
+
+      act(() => {
+        es.emit('text.started', { text_id: 'seg-1', message_id: 'msg-1' })
+        es.emit('text.started', { text_id: 'seg-1', message_id: 'msg-1' })  // replay
+        es.emit('text_delta', { text_id: 'seg-1', message_id: 'msg-1', text: 'abc' })
+      })
+
+      const msg = useChatStore.getState().messages.get('msg-1')!
+      const textParts = msg.parts.filter((p) => p.type === 'text') as any
+      expect(textParts).toHaveLength(1)
+      expect(textParts[0].text).toBe('abc')
     })
   })
 

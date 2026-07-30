@@ -32,6 +32,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -230,10 +231,23 @@ class AgentLoop:
         adapter into chunk.delta_thinking — we just forward them as
         thinking_delta SSE events.
 
+        Text streaming uses an opencode-style 3-step protocol keyed by a
+        per-iteration text_id:
+            text.started { text_id }
+            text_delta   { text_id, text }
+            text.ended   { text_id, text }
+
+        Each LLM iteration gets a fresh text_id; consumers can route
+        deltas to the correct text part via findLast by id. This fixes
+        the bug where text_delta streamed after a tool_call was appended
+        to the FIRST text part of the message instead of a new one.
+
         Returns an LLMResponse-like object with content and tool_calls.
         """
         from ..llm.parser import LLMResponse
 
+        text_id = str(uuid.uuid4())
+        self._emit("text.started", {"text_id": text_id})
         self._emit("thinking_start", {})
         full_content = ""
         accumulated_tool_calls: list[dict[str, Any]] = []
@@ -251,7 +265,10 @@ class AgentLoop:
                         # Transition: thinking_done before first text token
                         self._emit("thinking_done", {})
                     full_content += chunk.delta_content
-                    self._emit("text_delta", {"text": chunk.delta_content})
+                    self._emit("text_delta", {
+                        "text": chunk.delta_content,
+                        "text_id": text_id,
+                    })
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
@@ -281,9 +298,11 @@ class AgentLoop:
                     break
         except Exception as exc:  # noqa: BLE001
             self._emit("thinking_end", {})
+            self._emit("text.ended", {"text_id": text_id, "text": full_content})
             raise
 
         self._emit("thinking_end", {})
+        self._emit("text.ended", {"text_id": text_id, "text": full_content})
 
         # Convert accumulated tool_calls to LLMResponse format
         from ..llm.parser import parse_chat_response
@@ -324,7 +343,15 @@ class AgentLoop:
             logger.warning("Hook %s failed", method_name, exc_info=True)
 
     async def _astream_chat(self, messages: list[dict[str, Any]], iteration: int) -> Any:
-        """Async version of _stream_chat using client.astream()."""
+        """Async version of _stream_chat using client.astream().
+
+        Uses the same 3-step text protocol as _stream_chat (text.started /
+        text_delta{text_id} / text.ended). Each async LLM iteration gets
+        a fresh text_id so the frontend can route deltas correctly even
+        when text and tool calls interleave.
+        """
+        text_id = str(uuid.uuid4())
+        self._emit("text.started", {"text_id": text_id})
         self._emit("thinking_start", {})
         full_content = ""
         accumulated_tool_calls: list[dict[str, Any]] = []
@@ -337,7 +364,10 @@ class AgentLoop:
                     if full_content == "":
                         self._emit("thinking_done", {})
                     full_content += chunk.delta_content
-                    self._emit("text_delta", {"text": chunk.delta_content})
+                    self._emit("text_delta", {
+                        "text": chunk.delta_content,
+                        "text_id": text_id,
+                    })
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
@@ -367,9 +397,11 @@ class AgentLoop:
                     break
         except Exception as exc:  # noqa: BLE001
             self._emit("thinking_end", {})
+            self._emit("text.ended", {"text_id": text_id, "text": full_content})
             raise
 
         self._emit("thinking_end", {})
+        self._emit("text.ended", {"text_id": text_id, "text": full_content})
 
         from ..llm.parser import parse_chat_response
         raw_response: dict[str, Any] = {

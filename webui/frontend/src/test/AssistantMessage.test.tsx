@@ -8,7 +8,7 @@ const baseMsg: Message = {
   id: 'm1',
   session_id: 's1',
   role: 'assistant',
-  parts: [{ type: 'text', text: '回复内容' }],
+  parts: [{ type: 'text', id: 'test-1', text: '回复内容' }],
   created_at: 1700000000,
   metadata: { model: 'gpt-4o' },
 }
@@ -60,7 +60,7 @@ describe('AssistantMessage', () => {
     setProvider('minimax', 'minimax-M3')
     const msg: Message = {
       ...baseMsg,
-      parts: [{ type: 'text', text: '<think>plan content</think>你好' }],
+      parts: [{ type: 'text', id: 'msg-1', text: '<think>plan content</think>你好' }],
     }
     const { container } = render(
       <AssistantMessage message={msg} layout="flat" />
@@ -77,7 +77,7 @@ it('does NOT parse thinking when provider has no parser', () => {
     setProvider('unknown-provider')
     const msg: Message = {
       ...baseMsg,
-      parts: [{ type: 'text', text: 'plan你好' }],
+      parts: [{ type: 'text', id: 'msg-2', text: 'plan你好' }],
     }
     render(<AssistantMessage message={msg} layout="flat" />)
     // Tags appear as-is in the content (Markdown renderer shows them)

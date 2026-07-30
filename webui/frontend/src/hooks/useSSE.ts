@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { useChatStore } from '../stores/chat'
+import { useChatStore, type TextPart } from '../stores/chat'
 import { useAgentStore } from '../stores/agents'
 import { useWorkflowStore } from '../stores/workflow'
 import { useGoalStore } from '../stores/goal'
@@ -8,7 +8,8 @@ import { useSSEStore } from '../stores/sse'
 import { useSessionStore } from '../stores/session'
 
 type SSEEventType =
-  | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_progress'
+  | 'text.started' | 'text_delta' | 'text.ended'
+  | 'tool_call' | 'tool_result' | 'tool_progress'
   | 'thinking_delta' | 'thinking_done' | 'thinking_start' | 'thinking_end'
   | 'file_edit' | 'table' | 'chart' | 'image'
   | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
@@ -48,33 +49,97 @@ export function useSSE(sessionId: string | null) {
       const messageId = data.message_id as string | undefined
 
       switch (event) {
-        case 'text_delta': {
-          // Backend sends {"text": "delta_content", "message_id": "..."}
-          const text = (data.text || data.delta) as string
-          if (text && messageId) {
-            // Append to the streaming message's text part
+        case 'text.started': {
+          // Backend (opencode-style protocol) signals a new text segment.
+          // Push a fresh text part with this id so subsequent text_delta
+          // events with the same text_id can route to it.
+          const textId = data.text_id as string | undefined
+          if (textId && messageId) {
             updateMessage(messageId, (msg) => {
-              const textPart = msg.parts.find((p) => p.type === 'text')
-              if (textPart && textPart.type === 'text') {
-                textPart.text += text
+              const existing = msg.parts.find(
+                (p) => p.type === 'text' && (p as TextPart).id === textId
+              )
+              if (!existing) {
+                msg.parts.push({ type: 'text', id: textId, text: '' })
               }
             })
+          }
+          break
+        }
+        case 'text_delta': {
+          // 3-step text protocol: text_delta MUST carry text_id (hard-break
+          // — no legacy "always first text part" fallback). We findLast by
+          // id so deltas route to the correct text segment even when text
+          // and tool calls interleave across LLM iterations.
+          const text = (data.text || data.delta) as string
+          const textId = data.text_id as string | undefined
+          if (text && messageId) {
+            if (!textId) {
+              // Protocol error: drop the chunk. This protects against
+              // future regressions where backend forgets to emit
+              // text.started first.
+              console.warn('[useSSE] text_delta without text_id, dropping chunk')
+            } else {
+              updateMessage(messageId, (msg) => {
+                for (let i = msg.parts.length - 1; i >= 0; i--) {
+                  const p = msg.parts[i]
+                  if (p && p.type === 'text' && (p as TextPart).id === textId) {
+                    (p as TextPart).text += text
+                    return
+                  }
+                }
+                // Orphan: text.started hasn't arrived yet (replay / late
+                // join). Push a new part with this id to keep the chunk.
+                msg.parts.push({ type: 'text', id: textId, text })
+              })
+            }
           }
           // Also update the global streaming text for the StreamingText component
           appendStreamingText(text || '')
           break
         }
+        case 'text.ended': {
+          // Backend signals the text segment is finalized. Override the
+          // text part's content with the authoritative final text (last
+          // write wins, same as opencode Text.Ended).
+          const textId = data.text_id as string | undefined
+          const finalText = (data.text || '') as string
+          if (textId && messageId) {
+            updateMessage(messageId, (msg) => {
+              for (let i = msg.parts.length - 1; i >= 0; i--) {
+                const p = msg.parts[i]
+                if (p && p.type === 'text' && (p as TextPart).id === textId) {
+                  (p as TextPart).text = finalText
+                  return
+                }
+              }
+            })
+          }
+          break
+        }
         case 'assistant_message': {
           // Backend sends {"content": "full text", "message_id": "..."}
+          // Find the LAST text part (by id) and replace if the new content
+          // is longer. This preserves the text_id-routing semantics even
+          // for this one-shot final-answer event.
           const content = data.content as string
           if (content && messageId) {
             updateMessage(messageId, (msg) => {
-              const textPart = msg.parts.find((p) => p.type === 'text')
-              if (textPart && textPart.type === 'text') {
+              // Find last text part with content (skip empty seeded ones)
+              let lastTextIdx = -1
+              for (let i = msg.parts.length - 1; i >= 0; i--) {
+                const p = msg.parts[i]
+                if (p && p.type === 'text') {
+                  lastTextIdx = i
+                  break
+                }
+              }
+              if (lastTextIdx >= 0) {
+                const p = msg.parts[lastTextIdx] as TextPart
                 // Only replace if new content is longer (prevents max_iter
                 // from wiping accumulated text_delta content)
-                if (content.length > textPart.text.length || textPart.text === '') {
-                  textPart.text = content
+                if (content.length > p.text.length || p.text === '') {
+                  p.text = content
                 }
               }
             })
@@ -216,7 +281,7 @@ export function useSSE(sessionId: string | null) {
                 id: userId,
                 session_id: sessionId!,
                 role: 'user',
-                parts: [{ type: 'text', text: userContent }],
+                parts: [{ type: 'text', id: `seed-${userId}`, text: userContent }],
                 created_at: createdAt,
               })
             }
@@ -226,12 +291,15 @@ export function useSSE(sessionId: string | null) {
           // Uses the SAME created_at as the user message so they sort
           // together within the same exchange. Queue metadata is attached
           // so AssistantMessage can render the "等待中... 2/3" state.
+          //
+          // The initial text part uses a placeholder id; the real id arrives
+          // via text.started once streaming begins.
           if (assistantMsgId) {
             addMessage({
               id: assistantMsgId,
               session_id: sessionId!,
               role: 'assistant',
-              parts: [{ type: 'text', text: '' }],
+              parts: [{ type: 'text', id: `seed-${assistantMsgId}`, text: '' }],
               created_at: createdAt,
               metadata: {
                 queue_position,
@@ -529,7 +597,8 @@ export function useSSE(sessionId: string | null) {
     }
 
     const eventTypes = [
-      'text_delta', 'tool_call', 'tool_result', 'tool_progress',
+      'text.started', 'text_delta', 'text.ended',
+      'tool_call', 'tool_result', 'tool_progress',
       'thinking_start', 'thinking_delta', 'thinking_done', 'thinking_end',
       'file_edit', 'table', 'chart', 'image',
       'agent_status', 'agent_loop', 'agent_done', 'assistant_message',

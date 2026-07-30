@@ -11,6 +11,7 @@ export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface TextPart {
   type: 'text'
+  id: string
   text: string
 }
 

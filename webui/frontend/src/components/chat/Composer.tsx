@@ -46,7 +46,7 @@ export function Composer() {
       session_id: currentSessionId,
       role: 'user',
       parts: [
-        ...(content ? [{ type: 'text' as const, text: content }] : []),
+        ...(content ? [{ type: 'text' as const, id: `seed-${tempUserId}`, text: content }] : []),
         ...messageImages.map((url) => ({ type: 'image' as const, url })),
       ],
       created_at: Date.now() / 1000,

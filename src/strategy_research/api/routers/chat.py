@@ -196,13 +196,37 @@ async def _run_agent_loop_background(
         event_data = {**data, "message_id": message_id}
         sse_buffer.push(event_type, json.dumps(event_data, ensure_ascii=False), session_id)
 
-        # Accumulate for persistence
-        if event_type == "text_delta":
+        # Accumulate for persistence (3-step text protocol with text_id)
+        if event_type == "text.started":
+            text_id = event_data.get("text_id")
+            if text_id:
+                # Idempotent: skip when a part with this id already exists.
+                for p in reversed(accumulated_parts):
+                    if p.get("type") == "text" and p.get("id") == text_id:
+                        break
+                else:
+                    accumulated_parts.append({"type": "text", "id": text_id, "text": ""})
+        elif event_type == "text_delta":
+            text_id = event_data.get("text_id")
             text = event_data.get("text", "")
-            if accumulated_parts and accumulated_parts[-1].get("type") == "text":
-                accumulated_parts[-1]["text"] += text
+            if not text_id:
+                logger.warning("text_delta without text_id, dropping chunk")
+                return
+            for p in reversed(accumulated_parts):
+                if p.get("type") == "text" and p.get("id") == text_id:
+                    p["text"] += text
+                    break
             else:
-                accumulated_parts.append({"type": "text", "text": text})
+                # Orphan: push as new part (defensive against replay/ordering)
+                accumulated_parts.append({"type": "text", "id": text_id, "text": text})
+        elif event_type == "text.ended":
+            text_id = event_data.get("text_id")
+            final_text = event_data.get("text", "")
+            if text_id:
+                for p in reversed(accumulated_parts):
+                    if p.get("type") == "text" and p.get("id") == text_id:
+                        p["text"] = final_text
+                        break
         elif event_type == "tool_call":
             accumulated_parts.append({
                 "type": "tool_call",
@@ -593,11 +617,31 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
         logger.exception("goal command failed: %s", subcmd)
         response_text = f"Goal command failed: {exc}"
 
-    # Emit text_delta with the response
+    # Emit 3-step text protocol (text.started → text_delta → text.ended)
+    # so the frontend can route the text chunk to the correct text part.
+    goal_text_id = str(uuid.uuid4())
+    sse_buffer.push(
+        "text.started",
+        json.dumps({
+            "message_id": assistant_msg_id,
+            "text_id": goal_text_id,
+        }, ensure_ascii=False),
+        session_id,
+    )
     sse_buffer.push(
         "text_delta",
         json.dumps({
             "message_id": assistant_msg_id,
+            "text_id": goal_text_id,
+            "text": response_text,
+        }, ensure_ascii=False),
+        session_id,
+    )
+    sse_buffer.push(
+        "text.ended",
+        json.dumps({
+            "message_id": assistant_msg_id,
+            "text_id": goal_text_id,
             "text": response_text,
         }, ensure_ascii=False),
         session_id,
@@ -686,14 +730,25 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
         message_id=assistant_msg_id,
     )
 
-    # Emit SSE events
+    # Emit SSE events (3-step text protocol)
     event_bus = service.event_bus
+    compact_text_id = str(uuid.uuid4())
     event_bus.emit(body.session_id, "message_received", {
         "user_message_id": user_msg_id,
         "assistant_message_id": assistant_msg_id,
         "status": "done",
     })
+    event_bus.emit(body.session_id, "text.started", {
+        "text_id": compact_text_id,
+        "message_id": assistant_msg_id,
+    })
     event_bus.emit(body.session_id, "text_delta", {
+        "text": response_text,
+        "text_id": compact_text_id,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "text.ended", {
+        "text_id": compact_text_id,
         "text": response_text,
         "message_id": assistant_msg_id,
     })
