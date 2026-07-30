@@ -15,6 +15,7 @@ type SSEEventType =
   | 'dag_update' | 'progress' | 'message_received' | 'error'
   | 'session_meta_updated'
   | 'goal_updated' | 'goal_evidence_added' | 'goal_completed'
+  | 'llm_usage' | 'session_total_tokens'
 
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
@@ -28,6 +29,7 @@ export function useSSE(sessionId: string | null) {
   const appendStreamingText = useChatStore((s) => s.appendStreamingText)
   const setQueuePaused = useChatStore((s) => s.setQueuePaused)
   const setQueueLength = useChatStore((s) => s.setQueueLength)
+  const setTokensUsed = useChatStore((s) => s.setTokensUsed)
   const updateAgent = useAgentStore((s) => s.updateAgent)
   const updateNodeStatus = useWorkflowStore((s) => s.updateNodeStatus)
   const addToast = useToastStore((s) => s.addToast)
@@ -278,6 +280,38 @@ export function useSSE(sessionId: string | null) {
           }
           break
         }
+        case 'session_total_tokens': {
+          // Backend authoritative cumulative for the current attempt.
+          // Used by ContextUsageBar to show context window usage.
+          const { total_tokens } = data as { total_tokens: number }
+          if (sessionId && typeof total_tokens === 'number') {
+            setTokensUsed(sessionId, total_tokens)
+          }
+          break
+        }
+        case 'llm_usage': {
+          // Per-call usage delta. Backend accumulates into
+          // session_total_tokens and re-emits; we don't need to add
+          // here, but use it as a fallback in case session_total_tokens
+          // is dropped.
+          const d = data as {
+            input_tokens?: number
+            output_tokens?: number
+            prompt_tokens?: number
+            completion_tokens?: number
+            total_tokens?: number
+          }
+          const inc =
+            d.total_tokens ??
+            (d.input_tokens ?? d.prompt_tokens ?? 0) +
+              (d.output_tokens ?? d.completion_tokens ?? 0)
+          if (sessionId && inc > 0) {
+            const current =
+              useChatStore.getState().tokensUsed.get(sessionId) ?? 0
+            setTokensUsed(sessionId, current + inc)
+          }
+          break
+        }
         case 'thinking_delta': {
           const delta = data.delta as string
           if (delta && messageId) {
@@ -433,6 +467,7 @@ export function useSSE(sessionId: string | null) {
       setStreamingMessage,
       setStreamingText,
       appendStreamingText,
+      setTokensUsed,
       updateAgent,
       updateNodeStatus,
       addToast,
@@ -478,6 +513,7 @@ export function useSSE(sessionId: string | null) {
       'dag_update', 'progress', 'message_received', 'error',
       'session_meta_updated',
       'goal_updated', 'goal_evidence_added', 'goal_completed',
+      'llm_usage', 'session_total_tokens',
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))
 

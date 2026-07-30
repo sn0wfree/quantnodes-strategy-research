@@ -8,6 +8,7 @@ import { MessageBubble } from './MessageBubble'
 import { AssistantMessage } from './AssistantMessage'
 import { EmptyState } from '../common/EmptyState'
 import { QueuePauseBanner } from './QueuePauseBanner'
+import { ContextUsageBar } from './ContextUsageBar'
 import { MessageSquare } from 'lucide-react'
 
 export function MessageList() {
@@ -48,11 +49,13 @@ export function MessageList() {
   }, [messageList.length])
 
   const banner = isQueuePaused ? <QueuePauseBanner /> : null
+  const usageBar = <ContextUsageBar />
 
   if (messageList.length === 0) {
     return (
       <div className="flex h-full flex-col">
         {banner}
+        {usageBar}
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             icon={<MessageSquare className="h-12 w-12" />}
@@ -67,6 +70,7 @@ export function MessageList() {
   return (
     <div className="flex h-full flex-col">
       {banner}
+      {usageBar}
       <Virtuoso
         ref={virtuosoRef}
         data={messageList}

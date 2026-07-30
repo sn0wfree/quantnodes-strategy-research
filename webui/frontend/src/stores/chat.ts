@@ -85,6 +85,8 @@ interface ChatState {
   queuePaused: Map<string, boolean>
   /** Per-session current queue length snapshot. */
   queueLengths: Map<string, number>
+  /** Per-session cumulative token usage (LLM total). Drives ContextUsageBar. */
+  tokensUsed: Map<string, number>
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
   updateMessage: (id: string, updater: (msg: Message) => void) => void
@@ -96,6 +98,7 @@ interface ChatState {
   resumeQueue: () => Promise<void>
   setQueuePaused: (sessionId: string, paused: boolean) => void
   setQueueLength: (sessionId: string, length: number) => void
+  setTokensUsed: (sessionId: string, tokens: number) => void
   loadMessages: (sessionId: string) => Promise<void>
   clearMessages: () => void
 }
@@ -108,6 +111,7 @@ export const useChatStore = create<ChatState>()(
     activeAttemptId: null,
     queuePaused: new Map(),
     queueLengths: new Map(),
+    tokensUsed: new Map(),
     setMessages: (messages) =>
       set((state) => {
         state.messages.clear()
@@ -169,6 +173,10 @@ export const useChatStore = create<ChatState>()(
     setQueueLength: (sessionId, length) =>
       set((state) => {
         state.queueLengths.set(sessionId, length)
+      }),
+    setTokensUsed: (sessionId, tokens) =>
+      set((state) => {
+        state.tokensUsed.set(sessionId, tokens)
       }),
     clearMessages: () =>
       set((state) => {
