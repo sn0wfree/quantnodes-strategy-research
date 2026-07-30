@@ -541,6 +541,16 @@ export function useSSE(sessionId: string | null) {
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))
 
+    // Heartbeat handling: the backend sends periodic SSE comment lines
+    // (no event type, just ": heartbeat\n\n"). We also listen for the
+    // explicit "heartbeat" event in case the backend uses named events
+    // in the future. Receiving either signal keeps the connection
+    // marked as alive — defending against the browser prematurely
+    // reporting onerror on idle streams.
+    es.addEventListener('heartbeat', () => {
+      useSSEStore.getState().setStatus('connected')
+    })
+
     sourceRef.current = es
   }, [sessionId, handleEvent])
 

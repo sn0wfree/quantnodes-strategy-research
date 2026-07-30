@@ -814,6 +814,14 @@ async def chat_events(
     notification_event = sse_buffer.register_session(session_id)
 
     async def event_generator():
+        # Send SSE comment immediately so the browser's EventSource
+        # fires onopen without waiting for the first real event or
+        # the 15s heartbeat. Without this, a new session with empty
+        # buffer blocks 15s and the browser reports onerror → reconnect
+        # loop. Comment lines (: prefix) are ignored by EventSource
+        # but cause StreamingResponse to flush response headers.
+        yield ": connected\n\n"
+
         last_id = last_event_id or ""
 
         try:
@@ -876,5 +884,12 @@ def _format_sse(evt) -> str:
 
 
 def _heartbeat_sse(count: int) -> str:
-    """Format a heartbeat SSE event."""
-    return f"id: hb_{count}\nevent: heartbeat\ndata: {json.dumps({'ts': time.time()})}\n\n"
+    """SSE comment-line keep-alive (opencode style).
+
+    Pure comment lines are ignored by the browser's EventSource
+    (no onerror, no onmessage) but they keep the TCP connection alive
+    and re-arm the browser's 3-minute idle timeout. See
+    opencode packages/server/src/handlers/event.ts:37 for the
+    reference implementation.
+    """
+    return ": heartbeat\n\n"

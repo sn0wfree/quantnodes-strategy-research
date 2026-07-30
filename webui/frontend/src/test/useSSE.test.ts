@@ -56,6 +56,7 @@ const { useChatStore } = await import('../stores/chat')
 const { useAgentStore } = await import('../stores/agents')
 const { useWorkflowStore } = await import('../stores/workflow')
 const { useToastStore } = await import('../stores/toast')
+const { useSSEStore } = await import('../stores/sse')
 
 // Helper to get current EventSource instance
 const getCurrentES = () => MockEventSource.instances[MockEventSource.instances.length - 1]
@@ -89,6 +90,7 @@ describe('useSSE', () => {
       executionProgress: 0,
     })
     useToastStore.setState({ toasts: [] })
+    useSSEStore.setState({ status: 'connecting' })
   })
 
   afterEach(() => {
@@ -401,6 +403,55 @@ describe('useSSE', () => {
           es.listeners.get('text_delta')!({ type: 'text_delta', data: 'not json{' })
         })
       }).not.toThrow()
+    })
+  })
+
+  // ──────────── heartbeat listener ────────────
+
+  describe('heartbeat listener', () => {
+    it('registers a heartbeat listener on EventSource', () => {
+      renderHook(() => useSSE('sess-1'))
+      const es = getCurrentES()
+      // The heartbeat listener must be attached so the backend's
+      // periodic comment lines keep the connection marked alive.
+      expect(es.listeners.has('heartbeat')).toBe(true)
+    })
+
+    it('heartbeat event marks the connection as connected', () => {
+      useSSEStore.setState({ status: 'disconnected' })
+      renderHook(() => useSSE('sess-1'))
+      const es = getCurrentES()
+
+      expect(useSSEStore.getState().status).toBe('connecting')
+
+      act(() => {
+        es.listeners.get('heartbeat')!({
+          type: 'heartbeat',
+          data: JSON.stringify({ ts: 1234 }),
+        })
+      })
+
+      expect(useSSEStore.getState().status).toBe('connected')
+    })
+
+    it('heartbeat recovers from transient disconnected state', () => {
+      renderHook(() => useSSE('sess-1'))
+      const es = getCurrentES()
+
+      // Simulate the browser firing onerror briefly, then a heartbeat
+      // comes in to confirm the connection is healthy.
+      act(() => {
+        es.onerror?.({})
+      })
+      expect(useSSEStore.getState().status).toBe('disconnected')
+
+      act(() => {
+        es.listeners.get('heartbeat')!({
+          type: 'heartbeat',
+          data: JSON.stringify({ ts: 1234 }),
+        })
+      })
+      expect(useSSEStore.getState().status).toBe('connected')
     })
   })
 })
