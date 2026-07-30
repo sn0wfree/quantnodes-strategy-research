@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from ..tools import BaseTool, ToolRegistry
+from .utils import err_actionable, safe_get_param, try_unwrap_list
 
 logger = logging.getLogger(__name__)
 
@@ -61,28 +62,71 @@ class GetMarketDataTool(BaseTool):
         )
         from ...data_source.utils import detect_market
 
-        codes = kwargs.get("codes", [])
+        # Defensive reads: LLM may stringify codes as JSON, or pass them
+        # as a single string "A,B,C", or wrap them in a dict.
+        try:
+            codes = safe_get_param(kwargs, "codes", list)
+        except TypeError as exc:
+            # Fall back: maybe the LLM passed "A,B,C" as a single string
+            raw_codes = kwargs.get("codes")
+            if isinstance(raw_codes, str):
+                codes = [c.strip() for c in raw_codes.split(",") if c.strip()]
+            else:
+                return err_actionable(
+                    f"codes parameter has wrong shape: {exc}",
+                    received=raw_codes,
+                    expected="list[str] of asset codes, e.g. ['000001.SZ', '600519.SH']",
+                    fix="pass codes as a JSON array string OR a list, e.g. "
+                        "codes=['000001.SZ', '600519.SH']",
+                    tool="get_market_data",
+                )
+
         start_date = kwargs.get("start_date", "")
         end_date = kwargs.get("end_date", "")
         interval = kwargs.get("interval", "1D")
         source = kwargs.get("source")
-        max_rows = int(kwargs.get("max_rows", 500))
+        try:
+            max_rows = safe_get_param(kwargs, "max_rows", int, default=500)
+        except TypeError:
+            max_rows = 500
 
         if not codes:
-            return _err("codes is required and must be non-empty")
+            return err_actionable(
+                "codes is required and must be non-empty",
+                expected="list[str] of asset codes, e.g. ['000001.SZ', '600519.SH']",
+                fix="pass at least one code, e.g. codes=['600519.SH']",
+                tool="get_market_data",
+            )
         if not start_date or not end_date:
-            return _err("start_date and end_date are required")
+            return err_actionable(
+                "start_date and end_date are required",
+                expected="ISO date strings, e.g. start_date='2023-01-01'",
+                fix="pass both, e.g. start_date='2023-01-01', end_date='2023-12-31'",
+                tool="get_market_data",
+            )
 
         try:
             validate_date_range(start_date, end_date)
         except ValueError as exc:
-            return _err(str(exc))
+            return err_actionable(
+                str(exc),
+                received={"start_date": start_date, "end_date": end_date},
+                expected="valid date range, e.g. start_date='2023-01-01', end_date='2023-12-31'",
+                fix="ensure start_date is before end_date and both are valid ISO dates",
+                tool="get_market_data",
+            )
 
         try:
             if source and source in LOADER_REGISTRY:
                 loader = LOADER_REGISTRY[source]()
                 if not loader.is_available():
-                    return _err(f"source '{source}' is not available")
+                    return err_actionable(
+                        f"source '{source}' is not available",
+                        received=source,
+                        expected="one of " + ", ".join(sorted(LOADER_REGISTRY.keys())),
+                        fix="either omit `source` to use auto-detection, or pick an available one",
+                        tool="get_market_data",
+                    )
                 effective_source = source
             else:
                 market = detect_market(codes[0])
@@ -134,10 +178,22 @@ class GetMarketDataTool(BaseTool):
             })
 
         except NoAvailableSourceError as exc:
-            return _err(f"no available data source: {exc}")
+            return err_actionable(
+                f"no available data source: {exc}",
+                received=kwargs.get("codes"),
+                expected="list of asset codes with a registered data source",
+                fix="use list_data_sources() to see what's available, or check your network",
+                tool="get_market_data",
+            )
         except Exception as exc:
             logger.exception("get_market_data failed")
-            return _err(f"fetch failed: {exc}")
+            return err_actionable(
+                f"fetch failed: {exc}",
+                received={"codes": codes, "start_date": start_date, "end_date": end_date},
+                expected="valid codes + date range",
+                fix="verify codes are correct, dates are valid, and a data source is registered",
+                tool="get_market_data",
+            )
 
 
 # ── 2. ListDataSourcesTool ──────────────────────────────────────
@@ -210,10 +266,18 @@ class SearchSymbolTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         query = kwargs.get("query", "")
         market = kwargs.get("market", "a_share")
-        limit = int(kwargs.get("limit", 10))
+        try:
+            limit = safe_get_param(kwargs, "limit", int, default=10)
+        except TypeError:
+            limit = 10
 
         if not query:
-            return _err("query is required")
+            return err_actionable(
+                "query is required",
+                expected="non-empty string, e.g. 'maotai' or '600519'",
+                fix="pass a non-empty query, e.g. query='maotai'",
+                tool="search_symbol",
+            )
 
         try:
             import akshare as ak
@@ -248,10 +312,19 @@ class SearchSymbolTool(BaseTool):
             })
 
         except ImportError:
-            return _err("akshare not installed. Install with: pip install akshare")
+            return err_actionable(
+                "akshare not installed",
+                fix="install with: pip install akshare",
+                tool="search_symbol",
+            )
         except Exception as exc:
             logger.warning("search_symbol failed for %r: %s", query, exc)
-            return _err(f"search failed: {exc}")
+            return err_actionable(
+                f"search failed: {exc}",
+                received=query,
+                fix="try a different query, or check that akshare is installed and network is up",
+                tool="search_symbol",
+            )
 
 
 # ── 4. ImportDataTool ────────────────────────────────────────
@@ -298,11 +371,40 @@ class ImportDataTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         workspace = kwargs.get("workspace")
         if not workspace:
-            return _err("missing required kwarg 'workspace'")
+            return err_actionable(
+                "missing required parameter 'workspace'",
+                expected="absolute path to workspace root, e.g. '/home/user/research'",
+                fix="set workspace='/path/to/your/workspace'",
+                tool="import_data",
+            )
 
-        data = kwargs.get("data")
-        if not data or not isinstance(data, dict):
-            return _err("missing or invalid 'data' (expect dict from get_market_data)")
+        # Defensive read: data may be stringified JSON, or wrapped in a dict.
+        try:
+            data = safe_get_param(kwargs, "data", dict)
+        except TypeError as exc:
+            return err_actionable(
+                f"data parameter has wrong shape: {exc}",
+                received=kwargs.get("data"),
+                expected="dict[asset_code, list[record]] — output of get_market_data(data field)",
+                fix=(
+                    "call get_market_data(codes=['600519.SH'], "
+                    "start_date='2023-01-01', end_date='2023-12-31') first, "
+                    "then call import_data(data=<result.data>)"
+                ),
+                tool="import_data",
+            )
+
+        if not data:
+            return err_actionable(
+                "missing or invalid 'data' (expect dict from get_market_data)",
+                expected="non-empty dict, e.g. {'600519.SH': [{'trade_date': '2023-12-11', 'close': 1544.555, ...}, ...]}",
+                fix=(
+                    "call get_market_data(codes=['600519.SH'], "
+                    "start_date='2023-01-01', end_date='2023-12-31') first, "
+                    "then call import_data(data=<result.data>)"
+                ),
+                tool="import_data",
+            )
 
         strategy_name = kwargs.get("strategy_name", "default")
 
@@ -316,39 +418,37 @@ class ImportDataTool(BaseTool):
 
             conn = get_connection(ws)
             if conn is None:
-                return _err("failed to open DuckDB")
+                return err_actionable(
+                    "failed to open DuckDB",
+                    received=str(workspace),
+                    expected="writable workspace path",
+                    fix="run `quantnodes-research init` first, or check workspace permissions",
+                    tool="import_data",
+                )
 
-            # Defensive unwrap: some LLMs (notably MiniMax-M3) wrap the
-            # per-code records list in a single-key object like
-            # {"item": [...]} or {"data": [...]}. We try common wrapper
-            # keys before falling through to a clear actionable error.
-            _LIST_WRAPPER_KEYS = (
-                "item", "data", "records", "bars", "rows", "ohlcv", "values",
-            )
-
+            # Defensive unwrap per-code: LLM may wrap records in single-key
+            # object like {"item": [...]} or {"data": [...]}.
             total_rows = 0
             for code, records in data.items():
                 if isinstance(records, dict):
-                    unwrapped = None
-                    for key in _LIST_WRAPPER_KEYS:
-                        if key in records and isinstance(records[key], list):
-                            unwrapped = records[key]
-                            logger.debug(
-                                "import_data: unwrapped data[%r][%r]", code, key,
-                            )
-                            break
+                    unwrapped = try_unwrap_list(records)
                     if unwrapped is None:
-                        return _err(
-                            f"data[{code!r}] is a dict (length {len(records)}) but "
-                            f"contains no list of records. Got keys: "
-                            f"{list(records.keys())[:5]}. "
-                            f"Expected: data[{code!r}] = "
-                            f"[{{'trade_date': '...', 'close': ...}}, ...]. "
-                            f"Fix: call get_market_data(codes=[{code!r}], "
-                            f"start_date='2023-01-01', end_date='2023-12-31') "
-                            f"first, then pass result.data as the data argument."
+                        return err_actionable(
+                            f"data[{code!r}] is a dict but contains no list of records",
+                            received=records,
+                            expected=(
+                                f"data[{code!r}] = [{{'trade_date': '2023-12-11', "
+                                "'close': 1544.555, ...}}, ...]"
+                            ),
+                            fix=(
+                                f"call get_market_data(codes=[{code!r}], "
+                                "start_date='2023-01-01', end_date='2023-12-31') first, "
+                                "then pass result.data as the data argument"
+                            ),
+                            tool="import_data",
                         )
                     records = unwrapped
+                    logger.debug("import_data: unwrapped data[%r]", code)
 
                 if not records:
                     continue
@@ -371,7 +471,14 @@ class ImportDataTool(BaseTool):
                 if "asset_code" not in df.columns:
                     df["asset_code"] = code
                 if "date" not in df.columns:
-                    return _err(f"no date column in data for {code}")
+                    return err_actionable(
+                        f"data[{code!r}] has no 'date' or 'trade_date' column",
+                        received=list(df.columns),
+                        expected="records with 'trade_date' (or 'date') + OHLCV fields",
+                        fix="ensure data comes from get_market_data, which produces "
+                            "{trade_date, open, high, low, close, volume} records",
+                        tool="import_data",
+                    )
 
                 # Fill missing OHLCV columns
                 for c in ("open", "high", "low", "close", "volume"):
@@ -398,7 +505,14 @@ class ImportDataTool(BaseTool):
             })
 
         except Exception as exc:
-            return _err(f"import failed: {exc}")
+            logger.exception("import_data failed")
+            return err_actionable(
+                f"import failed: {exc}",
+                received=str(kwargs.get("data"))[:200],
+                expected="dict[asset_code, list[record]] from get_market_data",
+                fix="verify data shape and workspace is writable",
+                tool="import_data",
+            )
 
 
 def register_data_tools(registry: ToolRegistry) -> None:

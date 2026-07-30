@@ -8,19 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from ..tools import BaseTool, ToolRegistry
+from .utils import err_actionable, safe_get_param
 
 logger = logging.getLogger(__name__)
 
 
 def _ok(payload: dict[str, Any]) -> str:
     return json.dumps({"status": "ok", **payload}, ensure_ascii=False)
-
-
-def _err(message: str, **extra: Any) -> str:
-    return json.dumps(
-        {"status": "error", "error": str(message), **extra},
-        ensure_ascii=False,
-    )
 
 
 # ── 1. WebSearchTool ─────────────────────────────────────────────
@@ -55,7 +49,17 @@ class WebSearchTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         from ...web.search import web_search
         query = kwargs.get("query", "")
-        max_results = int(kwargs.get("max_results", 10))
+        if not query:
+            return err_actionable(
+                "missing required parameter 'query'",
+                expected="non-empty search string, e.g. 'quantitative trading A-share momentum'",
+                fix="pass a non-empty query, e.g. query='Python pandas tutorial'",
+                tool="web_search",
+            )
+        try:
+            max_results = safe_get_param(kwargs, "max_results", int, default=10)
+        except TypeError:
+            max_results = 10
         return web_search(query=query, max_results=max_results)
 
 
@@ -83,7 +87,17 @@ class ReadUrlTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         from ...web.fetch import read_url
         url = kwargs.get("url", "")
-        max_chars = int(kwargs.get("max_chars", 10_000))
+        if not url:
+            return err_actionable(
+                "missing required parameter 'url'",
+                expected="non-empty URL string, e.g. 'https://docs.python.org/3/'",
+                fix="pass a valid http(s) URL, e.g. url='https://example.com/article'",
+                tool="read_url",
+            )
+        try:
+            max_chars = safe_get_param(kwargs, "max_chars", int, default=10_000)
+        except TypeError:
+            max_chars = 10_000
         return read_url(url=url, max_chars=max_chars)
 
 
@@ -119,7 +133,17 @@ class ReadDocumentTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         from ...web.pdf import read_document
         path = kwargs.get("path", "")
-        max_pages = int(kwargs.get("max_pages", 50))
+        if not path:
+            return err_actionable(
+                "missing required parameter 'path'",
+                expected="absolute path to a PDF file",
+                fix="pass an absolute path, e.g. path='/home/user/papers/momentum.pdf'",
+                tool="read_document",
+            )
+        try:
+            max_pages = safe_get_param(kwargs, "max_pages", int, default=50)
+        except TypeError:
+            max_pages = 50
         return read_document(path=path, max_pages=max_pages)
 
 

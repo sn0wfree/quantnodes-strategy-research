@@ -33,6 +33,7 @@ from ..sandbox import (
     validate_python_source,
 )
 from ..tools import BaseTool, ToolRegistry
+from .utils import err_actionable, safe_get_param, try_unwrap_list, try_unwrap_dict
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,16 @@ def _err(message: str, **extra: Any) -> str:
     return json.dumps(
         {"status": "error", "error": str(message), **extra},
         ensure_ascii=False,
+    )
+
+
+def _workspace_error(exc: ValueError, *, tool: str) -> str:
+    """Convert _workspace_from_kwargs ValueError to actionable error."""
+    return err_actionable(
+        str(exc),
+        expected="absolute path to workspace root, e.g. '/home/user/qn-research'",
+        fix="pass workspace='/path/to/your/workspace' (the project root containing strategies/, data.duckdb)",
+        tool=tool,
     )
 
 
@@ -91,31 +102,69 @@ class ReadFileTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="read_file")
 
         path = kwargs.get("path")
         if not isinstance(path, str) or not path:
-            return _err("missing or invalid 'path'")
-        limit = kwargs.get("limit")
-        offset = kwargs.get("offset", 0) or 0
+            return err_actionable(
+                "missing or invalid 'path'",
+                received=path,
+                expected="non-empty string path relative to workspace, e.g. 'strategies/momentum_20d/strategy.py'",
+                fix="pass path='strategies/<name>/strategy.py' or 'templates/strategy.py'",
+                tool="read_file",
+            )
+        try:
+            limit = safe_get_param(kwargs, "limit", int) if kwargs.get("limit") is not None else None
+        except TypeError:
+            limit = None
+        try:
+            offset = safe_get_param(kwargs, "offset", int, default=0)
+        except TypeError:
+            offset = 0
 
         wl = PathWhitelist(workspace=workspace)
         try:
             resolved = wl.resolve_read(path)
         except PathValidationError as exc:
-            return _err(str(exc))
+            return err_actionable(
+                str(exc),
+                received=path,
+                expected="path under an allowed read root (strategies/templates/memory/logs/data/docs/)",
+                fix="use a path under strategies/, templates/, memory/, logs/, data/, or docs/",
+                tool="read_file",
+            )
 
         if not resolved.exists():
-            return _err(f"file not found: {path}", path=str(resolved))
+            return err_actionable(
+                f"file not found: {path}",
+                received=path,
+                fix="verify the path exists with list_files(workspace=..., path='<dir>')",
+                tool="read_file",
+                extra={"resolved_path": str(resolved)},
+            )
         if not resolved.is_file():
-            return _err(f"not a regular file: {path}", path=str(resolved))
+            return err_actionable(
+                f"not a regular file: {path}",
+                received=path,
+                fix="use list_files to list a directory, read_file on a file",
+                tool="read_file",
+                extra={"resolved_path": str(resolved)},
+            )
 
         try:
             content = resolved.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            return _err(f"file is not valid UTF-8: {path}", path=str(resolved))
+            return err_actionable(
+                f"file is not valid UTF-8: {path}",
+                fix="file may be binary; use read_document for PDF, or skip this file",
+                tool="read_file",
+            )
         except OSError as exc:
-            return _err(f"read failed: {exc}")
+            return err_actionable(
+                f"read failed: {exc}",
+                fix="check file permissions",
+                tool="read_file",
+            )
 
         all_lines = content.splitlines()
         if offset:
@@ -159,16 +208,27 @@ class ListFilesTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="list_files")
 
         rel_path = kwargs.get("path", ".") or "."
         pattern = kwargs.get("pattern")
 
         target = (workspace / rel_path).resolve()
         if not target.exists():
-            return _err(f"path not found: {rel_path}")
+            return err_actionable(
+                f"path not found: {rel_path}",
+                received=rel_path,
+                expected="directory path relative to workspace, e.g. 'strategies' or '.' for root",
+                fix="verify the path exists; use list_files(path='.') to see top-level dirs",
+                tool="list_files",
+            )
         if not target.is_dir():
-            return _err(f"not a directory: {rel_path}")
+            return err_actionable(
+                f"not a directory: {rel_path}",
+                received=rel_path,
+                fix="use read_file for files, list_files for directories",
+                tool="list_files",
+            )
 
         try:
             entries = []
@@ -192,7 +252,11 @@ class ListFilesTool(BaseTool):
                 "count": len(entries),
             })
         except Exception as exc:
-            return _err(f"list failed: {exc}")
+            return err_actionable(
+                f"list failed: {exc}",
+                fix="check filesystem permissions",
+                tool="list_files",
+            )
 
 
 # ── 2. WriteFileTool ────────────────────────────────────────────────
@@ -223,32 +287,59 @@ class WriteFileTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="write_file")
 
         path = kwargs.get("path")
         content = kwargs.get("content")
         if not isinstance(path, str) or not path:
-            return _err("missing or invalid 'path'")
+            return err_actionable(
+                "missing or invalid 'path'",
+                received=path,
+                expected="non-empty string path, e.g. 'strategies/momentum_20d/strategy.py'",
+                fix="pass a non-empty path",
+                tool="write_file",
+            )
         if not isinstance(content, str):
-            return _err("missing or invalid 'content'")
+            return err_actionable(
+                "missing or invalid 'content'",
+                received=type(content).__name__,
+                expected="string content for the file",
+                fix="pass content as a string, e.g. content='# strategy parameters\\nPARAMS = {...}'",
+                tool="write_file",
+            )
 
         # AST guard for .py files
         if path.endswith(".py"):
             ok, msg = validate_python_source(content)
             if not ok:
-                return _err(f"AST validation failed: {msg}")
+                return err_actionable(
+                    f"AST validation failed: {msg}",
+                    received=content[:200],
+                    fix="remove dangerous code (exec/eval, blocked imports, dunder access); see sandbox rules",
+                    tool="write_file",
+                )
 
         wl = PathWhitelist(workspace=workspace)
         try:
             resolved = wl.resolve_write(path)
         except PathValidationError as exc:
-            return _err(str(exc))
+            return err_actionable(
+                str(exc),
+                received=path,
+                expected="path under an allowed write root (strategies/templates/memory/logs)",
+                fix="use a path under strategies/, templates/, memory/, or logs/",
+                tool="write_file",
+            )
 
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(content, encoding="utf-8")
         except OSError as exc:
-            return _err(f"write failed: {exc}")
+            return err_actionable(
+                f"write failed: {exc}",
+                fix="check filesystem permissions and disk space",
+                tool="write_file",
+            )
 
         return _ok({
             "path": str(resolved),
@@ -284,11 +375,17 @@ class RunBacktestTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="run_backtest")
 
         strategy_name = kwargs.get("strategy_name")
         if not isinstance(strategy_name, str) or not strategy_name:
-            return _err("missing or invalid 'strategy_name'")
+            return err_actionable(
+                "missing or invalid 'strategy_name'",
+                received=strategy_name,
+                expected="non-empty strategy name, e.g. 'momentum_20d'",
+                fix="list strategies with list_files(workspace=..., path='strategies') and pick an existing name",
+                tool="run_backtest",
+            )
         action = kwargs.get("action") or "agent"
         description = kwargs.get("description") or ""
         yaml_path = kwargs.get("yaml_path")
@@ -305,13 +402,35 @@ class RunBacktestTool(BaseTool):
             )
         except Exception as exc:                    # noqa: BLE001
             logger.exception("run_backtest failed")
-            return _err(f"backtest raised: {exc}")
+            return err_actionable(
+                f"backtest raised: {exc}",
+                received=strategy_name,
+                fix="check that strategies/<name>/config.yaml exists and is valid YAML",
+                tool="run_backtest",
+            )
 
         if not result.get("success", False):
-            return _err(
-                result.get("error", "unknown backtest failure"),
-                run=result.get("run", ""),
-                metrics=result.get("metrics", {}),
+            err_msg = result.get("error", "unknown backtest failure")
+            # Hint when data is empty (chained failure)
+            extra: dict = {
+                "run": result.get("run", ""),
+                "metrics": result.get("metrics", {}),
+            }
+            fix_msg = "check strategies/<name>/config.yaml and runs/<name>/logs for details"
+            if "数据为空" in err_msg or "empty" in err_msg.lower():
+                fix_msg = (
+                    "data is empty. Workflow: 1) get_market_data(codes=[...], "
+                    "start_date='...', end_date='...') to fetch OHLCV; "
+                    "2) import_data(data=<result.data>) to persist in DuckDB; "
+                    "3) run_backtest(strategy_name=...) again"
+                )
+                extra["workflow"] = ["get_market_data", "import_data", "run_backtest"]
+            return err_actionable(
+                err_msg,
+                received=strategy_name,
+                fix=fix_msg,
+                tool="run_backtest",
+                extra=extra,
             )
 
         return _ok({
@@ -356,23 +475,40 @@ class ComputeFactorTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="compute_factor")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return _err("missing or invalid 'factor_code'")
+            return err_actionable(
+                "missing or invalid 'factor_code'",
+                received=factor_code,
+                expected="non-empty factor expression, e.g. 'ts_mean(close, 20) / ts_mean(close, 60) - 1'",
+                fix="pass a valid expression; see templates/.skills/factor-research.md for operators",
+                tool="compute_factor",
+            )
         asset = kwargs.get("asset")
         factor_name = kwargs.get("factor_name") or ""
-        n_samples = int(kwargs.get("n_samples", 5))
+        try:
+            n_samples = safe_get_param(kwargs, "n_samples", int, default=5)
+        except TypeError:
+            n_samples = 5
 
         # Load price data from workspace DuckDB
         try:
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:                    # noqa: BLE001
-            return _err(f"db open failed: {exc}")
+            return err_actionable(
+                f"db open failed: {exc}",
+                fix="ensure workspace has data.duckdb; run quantnodes-research init or import_data first",
+                tool="compute_factor",
+            )
         if conn is None:
-            return _err("workspace has no DuckDB; run cmd_import first")
+            return err_actionable(
+                "workspace has no DuckDB",
+                fix="call import_data first to populate the ohlcv table",
+                tool="compute_factor",
+            )
 
         try:
             prices_df = conn.execute(
@@ -380,22 +516,40 @@ class ComputeFactorTool(BaseTool):
                 "FROM ohlcv ORDER BY date, asset"
             ).fetch_df()
         except Exception as exc:                    # noqa: BLE001
-            return _err(f"ohlcv query failed: {exc} (table may not exist)")
+            return err_actionable(
+                f"ohlcv query failed: {exc}",
+                fix="call import_data to create the ohlcv table; see workflow: get_market_data → import_data → compute_factor",
+                tool="compute_factor",
+            )
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable(
+                "ohlcv table is empty",
+                fix=(
+                    "1) get_market_data(codes=['600519.SH'], start_date='2023-01-01', end_date='2023-12-31'); "
+                    "2) import_data(data=<result.data>); "
+                    "3) compute_factor(...)"
+                ),
+                tool="compute_factor",
+            )
 
         # Pick asset (default: first)
         available_assets = sorted(prices_df["asset"].unique())
         if not available_assets:
-            return _err("no assets in ohlcv table")
+            return err_actionable(
+                "no assets in ohlcv table",
+                fix="import data for at least one asset",
+                tool="compute_factor",
+            )
         if asset is None:
             asset = available_assets[0]
         elif asset not in available_assets:
-            return _err(
-                f"asset '{asset}' not found; available: {available_assets[:5]}..."
-                if len(available_assets) > 5 else
-                f"asset '{asset}' not found; available: {available_assets}"
+            return err_actionable(
+                f"asset '{asset}' not found",
+                received=asset,
+                expected=f"one of {available_assets[:10]}",
+                fix="omit `asset` to use the first available, or pass a valid asset code",
+                tool="compute_factor",
             )
 
         # Build single-asset wide DataFrame (date index, ohlcv columns)
@@ -407,14 +561,22 @@ class ComputeFactorTool(BaseTool):
             series = compute_factor(factor_code, asset_df, factor_name=factor_name)
         except Exception as exc:                    # noqa: BLE001
             logger.exception("compute_factor failed")
-            return _err(f"compute failed: {exc}")
+            return err_actionable(
+                f"compute failed: {exc}",
+                received=factor_code,
+                fix="check factor expression syntax; see templates/.skills/factor-research.md",
+                tool="compute_factor",
+            )
 
         # Sample the result
         non_null = series.dropna()
         if len(non_null) == 0:
-            return _err(
+            return err_actionable(
                 "factor produced no non-null values",
-                factor_name=factor_name, asset=asset,
+                received={"factor_code": factor_code, "asset": asset},
+                fix="factor may need more data or different parameters",
+                tool="compute_factor",
+                extra={"factor_name": factor_name, "asset": asset},
             )
         sample = non_null.head(n_samples).to_dict()
         sample = {str(k): (None if v != v else float(v)) for k, v in sample.items()}
@@ -460,13 +622,16 @@ class GitDiffTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="git_diff")
 
         staged = bool(kwargs.get("staged", False))
         ref1 = kwargs.get("ref1")
         ref2 = kwargs.get("ref2")
         pathspec = kwargs.get("pathspec")
-        max_lines = int(kwargs.get("max_lines", 200))
+        try:
+            max_lines = safe_get_param(kwargs, "max_lines", int, default=200)
+        except TypeError:
+            max_lines = 200
 
         cmd = ["git", "diff", "--no-color"]
         if staged:
@@ -478,7 +643,12 @@ class GitDiffTool(BaseTool):
         if pathspec:
             # Sanitize pathspec (basic guard against flag injection)
             if pathspec.startswith("-"):
-                return _err(f"pathspec must not start with '-': {pathspec}")
+                return err_actionable(
+                    f"pathspec must not start with '-': {pathspec}",
+                    received=pathspec,
+                    fix="pass a relative path, e.g. pathspec='strategies/momentum_20d/'",
+                    tool="git_diff",
+                )
             cmd.extend(["--", pathspec])
 
         try:
@@ -491,14 +661,30 @@ class GitDiffTool(BaseTool):
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            return _err("git diff timed out (30s)")
+            return err_actionable(
+                "git diff timed out (30s)",
+                fix="diff may be too large; try pathspec='strategies/<name>/' to limit scope",
+                tool="git_diff",
+            )
         except FileNotFoundError:
-            return _err("git not found in PATH")
+            return err_actionable(
+                "git not found in PATH",
+                fix="install git or check PATH",
+                tool="git_diff",
+            )
         except Exception as exc:                    # noqa: BLE001
-            return _err(f"git diff failed: {exc}")
+            return err_actionable(
+                f"git diff failed: {exc}",
+                fix="check workspace is a git repo with `git status`",
+                tool="git_diff",
+            )
 
         if result.returncode != 0:
-            return _err(f"git diff returned {result.returncode}: {result.stderr.strip()}")
+            return err_actionable(
+                f"git diff returned {result.returncode}: {result.stderr.strip()}",
+                fix="verify workspace is a git repo (git init if needed)",
+                tool="git_diff",
+            )
 
         diff = result.stdout
         lines = diff.splitlines()
@@ -540,10 +726,13 @@ class ListHistoryTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="list_history")
 
         strategy_name = kwargs.get("strategy_name")
-        limit = int(kwargs.get("limit", 20))
+        try:
+            limit = safe_get_param(kwargs, "limit", int, default=20)
+        except TypeError:
+            limit = 20
 
         results_path: Path | None = None
         if strategy_name:
@@ -571,7 +760,11 @@ class ListHistoryTool(BaseTool):
             with open(results_path, encoding="utf-8") as f:
                 lines = [ln.rstrip("\n") for ln in f if ln.strip()]
         except OSError as exc:
-            return _err(f"read failed: {exc}")
+            return err_actionable(
+                f"read failed: {exc}",
+                fix="check file permissions on results.tsv",
+                tool="list_history",
+            )
 
         if not lines:
             return _ok({"runs": [], "source": str(results_path)})
@@ -623,11 +816,11 @@ class FactorAnalysisTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="FactorAnalysisTool")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return _err("missing or invalid 'factor_code'")
+            return err_actionable("missing or invalid 'factor_code'", tool="FactorAnalysisTool")
         asset = kwargs.get("asset")
         forward_days = int(kwargs.get("forward_days", 5))
 
@@ -635,26 +828,26 @@ class FactorAnalysisTool(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:  # noqa: BLE001
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="FactorAnalysisTool")
 
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="FactorAnalysisTool")
 
         try:
             prices_df = conn.execute(
                 "SELECT date, asset, close FROM ohlcv ORDER BY date, asset"
             ).fetch_df()
         except Exception as exc:  # noqa: BLE001
-            return _err(f"ohlcv query failed: {exc}")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="FactorAnalysisTool")
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable("ohlcv table is empty", tool="FactorAnalysisTool")
 
         available_assets = sorted(prices_df["asset"].unique())
         if asset is None:
             asset = available_assets[0]
         elif asset not in available_assets:
-            return _err(f"asset '{asset}' not found")
+            return err_actionable(f"asset '{asset}' not found", tool="FactorAnalysisTool")
 
         asset_df = prices_df[prices_df["asset"] == asset].copy()
         asset_df = asset_df.set_index("date")[["close"]]
@@ -663,7 +856,7 @@ class FactorAnalysisTool(BaseTool):
         try:
             factor_series = compute_factor(factor_code, asset_df)
         except Exception as exc:  # noqa: BLE001
-            return _err(f"compute failed: {exc}")
+            return err_actionable(f"compute failed: {exc}", tool="FactorAnalysisTool")
 
         # Compute forward returns
         asset_df["fwd_ret"] = asset_df["close"].pct_change(forward_days).shift(-forward_days)
@@ -672,7 +865,7 @@ class FactorAnalysisTool(BaseTool):
         import pandas as pd
         aligned = pd.concat([factor_series, asset_df["fwd_ret"]], axis=1).dropna()
         if len(aligned) < 10:
-            return _err("insufficient data for IC analysis (need >= 10 rows)")
+            return err_actionable("insufficient data for IC analysis (need >= 10 rows)", tool="FactorAnalysisTool")
 
         ic = aligned.iloc[:, 0].corr(aligned["fwd_ret"])
         ic_mean = float(aligned.iloc[:, 0].corr(aligned["fwd_ret"], method="spearman")) if len(aligned) > 5 else 0.0
@@ -713,7 +906,7 @@ class PatternRecognitionTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="PatternRecognitionTool")
 
         asset = kwargs.get("asset")
         lookback = int(kwargs.get("lookback", 60))
@@ -722,27 +915,27 @@ class PatternRecognitionTool(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:  # noqa: BLE001
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="PatternRecognitionTool")
 
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="PatternRecognitionTool")
 
         try:
             prices_df = conn.execute(
                 "SELECT date, asset, open, high, low, close, volume FROM ohlcv ORDER BY date"
             ).fetch_df()
         except Exception as exc:  # noqa: BLE001
-            return _err(f"ohlcv query failed: {exc}")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="PatternRecognitionTool")
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable("ohlcv table is empty", tool="PatternRecognitionTool")
 
         if asset:
             prices_df = prices_df[prices_df["asset"] == asset]
 
         prices_df = prices_df.tail(lookback)
         if len(prices_df) < 10:
-            return _err("insufficient data")
+            return err_actionable("insufficient data", tool="PatternRecognitionTool")
 
         closes = prices_df["close"].values
         highs = prices_df["high"].values
@@ -811,7 +1004,7 @@ class ListSkillsTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="ListSkillsTool")
 
         category = kwargs.get("category")
 
@@ -848,7 +1041,7 @@ class ListSkillsTool(BaseTool):
                 "skills": skill_list,
             })
         except Exception as exc:  # noqa: BLE001
-            return _err(f"list_skills failed: {exc}")
+            return err_actionable(f"list_skills failed: {exc}", tool="ListSkillsTool")
 
 
 # ── 10. LoadSkillTool ─────────────────────────────────────────────
@@ -876,11 +1069,11 @@ class LoadSkillTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="LoadSkillTool")
 
         name = kwargs.get("name")
         if not isinstance(name, str) or not name:
-            return _err("missing or invalid 'name'")
+            return err_actionable("missing or invalid 'name'", tool="LoadSkillTool")
 
         try:
             from ...skills import SkillRegistry
@@ -898,7 +1091,7 @@ class LoadSkillTool(BaseTool):
             skill = registry.get(name)
             if skill is None:
                 available = [s.name for s in registry.list_all()][:20]
-                return _err(
+                return err_actionable(
                     f"skill '{name}' not found",
                     available=available,
                 )
@@ -911,7 +1104,7 @@ class LoadSkillTool(BaseTool):
                 "content": skill.content,
             })
         except Exception as exc:  # noqa: BLE001
-            return _err(f"load_skill failed: {exc}")
+            return err_actionable(f"load_skill failed: {exc}", tool="LoadSkillTool")
 
 
 # ── 11. OptionsPricingTool ──────────────────────────────────────────
@@ -947,12 +1140,12 @@ class OptionsPricingTool(BaseTool):
             T = float(kwargs["time_to_expiry"])
             option_type = kwargs.get("option_type", "call").lower()
         except (KeyError, ValueError, TypeError) as exc:
-            return _err(f"invalid parameters: {exc}")
+            return err_actionable(f"invalid parameters: {exc}", tool="OptionsPricingTool")
 
         if option_type not in ("call", "put"):
-            return _err("option_type must be 'call' or 'put'")
+            return err_actionable("option_type must be 'call' or 'put'", tool="OptionsPricingTool")
         if T <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
-            return _err("spot, strike, volatility, and time_to_expiry must be positive")
+            return err_actionable("spot, strike, volatility, and time_to_expiry must be positive", tool="OptionsPricingTool")
 
         from math import exp, log, sqrt
 
@@ -1029,11 +1222,11 @@ class FactorCrossSectionalAnalysis(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return _err("missing or invalid 'factor_code'")
+            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1043,9 +1236,9 @@ class FactorCrossSectionalAnalysis(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1059,10 +1252,10 @@ class FactorCrossSectionalAnalysis(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return _err(f"ohlcv query failed: {exc}")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
 
         # Filter universe
         all_assets = sorted(prices_df["asset"].unique())
@@ -1070,12 +1263,12 @@ class FactorCrossSectionalAnalysis(BaseTool):
             assets = [a.strip() for a in universe_str.split(",")]
             missing = [a for a in assets if a not in all_assets]
             if missing:
-                return _err(f"assets not found: {missing[:5]}")
+                return err_actionable(f"assets not found: {missing[:5]}", tool="OptionsPricingTool")
         else:
             assets = all_assets
 
         if len(assets) < 3:
-            return _err(f"need >= 3 assets for cross-sectional IC, got {len(assets)}")
+            return err_actionable(f"need >= 3 assets for cross-sectional IC, got {len(assets)}", tool="OptionsPricingTool")
 
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
@@ -1093,7 +1286,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
                 continue
 
         if len(factor_panel) < 3:
-            return _err(f"factor computation succeeded on < 3 assets ({len(factor_panel)})")
+            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="OptionsPricingTool")
 
         # Build forward return panel
         ret_panel = {}
@@ -1127,7 +1320,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
                 valid_dates.append(dt)
 
         if len(ic_pearson_list) < 5:
-            return _err(f"too few valid IC observations ({len(ic_pearson_list)})")
+            return err_actionable(f"too few valid IC observations ({len(ic_pearson_list)})", tool="OptionsPricingTool")
 
         ic_arr = np.array(ic_pearson_list)
         spear_arr = np.array(ic_spearman_list)
@@ -1180,11 +1373,11 @@ class FactorQuintileReturns(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return _err("missing or invalid 'factor_code'")
+            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1195,9 +1388,9 @@ class FactorQuintileReturns(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1211,10 +1404,10 @@ class FactorQuintileReturns(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return _err(f"ohlcv query failed: {exc}")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
 
         all_assets = sorted(prices_df["asset"].unique())
         if universe_str != "all":
@@ -1223,7 +1416,7 @@ class FactorQuintileReturns(BaseTool):
             assets = all_assets
 
         if len(assets) < n_groups * 2:
-            return _err(f"need >= {n_groups * 2} assets for {n_groups}-group analysis, got {len(assets)}")
+            return err_actionable(f"need >= {n_groups * 2} assets for {n_groups}-group analysis, got {len(assets)}", tool="OptionsPricingTool")
 
         import pandas as pd
         df = prices_df[prices_df["asset"].isin(assets)].copy()
@@ -1329,11 +1522,11 @@ class FactorICDecay(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return _err("missing or invalid 'factor_code'")
+            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1344,9 +1537,9 @@ class FactorICDecay(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1360,10 +1553,10 @@ class FactorICDecay(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return _err(f"ohlcv query failed: {exc}")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
 
         all_assets = sorted(prices_df["asset"].unique())
         if universe_str != "all":
@@ -1387,7 +1580,7 @@ class FactorICDecay(BaseTool):
                 continue
 
         if len(factor_panel) < 3:
-            return _err(f"factor computation succeeded on < 3 assets ({len(factor_panel)})")
+            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="OptionsPricingTool")
 
         factor_df = pd.DataFrame(factor_panel)
 
@@ -1466,11 +1659,11 @@ class FactorTurnover(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return _err("missing or invalid 'factor_code'")
+            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1480,9 +1673,9 @@ class FactorTurnover(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1496,10 +1689,10 @@ class FactorTurnover(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return _err(f"ohlcv query failed: {exc}")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
 
         if prices_df.empty:
-            return _err("ohlcv table is empty")
+            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
 
         all_assets = sorted(prices_df["asset"].unique())
         if universe_str != "all":
@@ -1523,7 +1716,7 @@ class FactorTurnover(BaseTool):
                 continue
 
         if len(factor_panel) < 3:
-            return _err(f"factor computation succeeded on < 3 assets ({len(factor_panel)})")
+            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="OptionsPricingTool")
 
         factor_df = pd.DataFrame(factor_panel)
 
@@ -1531,7 +1724,7 @@ class FactorTurnover(BaseTool):
         dates = sorted(factor_df.index)
         sampled_dates = dates[::rebalance_freq]
         if len(sampled_dates) < 2:
-            return _err("not enough rebalancing periods")
+            return err_actionable("not enough rebalancing periods", tool="OptionsPricingTool")
 
         # Compute rank correlation between consecutive periods
         turnover_list = []
@@ -1546,7 +1739,7 @@ class FactorTurnover(BaseTool):
                 turnover_list.append(1.0 - float(rank_corr))
 
         if not turnover_list:
-            return _err("no valid turnover observations")
+            return err_actionable("no valid turnover observations", tool="OptionsPricingTool")
 
         arr = np.array(turnover_list)
         return _ok({
@@ -1593,11 +1786,11 @@ class StrategyCompare(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         strategy_names_str = kwargs.get("strategy_names", "")
         if not strategy_names_str:
-            return _err("missing 'strategy_names'")
+            return err_actionable("missing 'strategy_names'", tool="OptionsPricingTool")
         strategy_names = [s.strip() for s in strategy_names_str.split(",")]
         metrics_str = kwargs.get("metrics", "sharpe,ann_return,max_dd,calmar,turnover,win_rate")
         metrics_keys = [m.strip() for m in metrics_str.split(",")]
@@ -1672,21 +1865,21 @@ class DrawdownAnalysis(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         strategy_name = kwargs.get("strategy_name", "")
         if not strategy_name:
-            return _err("missing 'strategy_name'")
+            return err_actionable("missing 'strategy_name'", tool="OptionsPricingTool")
         top_n = int(kwargs.get("top_n", 5))
 
         # Find latest run
         runs_dir = workspace / "strategies" / strategy_name / "runs"
         if not runs_dir.exists():
-            return _err(f"runs directory not found: {runs_dir}")
+            return err_actionable(f"runs directory not found: {runs_dir}", tool="OptionsPricingTool")
 
         run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
         if not run_dirs:
-            return _err("no runs found")
+            return err_actionable("no runs found", tool="OptionsPricingTool")
 
         latest_run = run_dirs[-1]
 
@@ -1724,7 +1917,7 @@ class DrawdownAnalysis(BaseTool):
                     pass
 
         if equity is None or len(equity) < 10:
-            return _err("could not find equity curve data in the latest run")
+            return err_actionable("could not find equity curve data in the latest run", tool="OptionsPricingTool")
 
         equity = np.array(equity, dtype=float)
 
@@ -1815,7 +2008,7 @@ class BenchmarkComparison(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _err(str(exc))
+            return _workspace_error(exc, tool="OptionsPricingTool")
 
         strategy_name = kwargs.get("strategy_name", "")
         benchmark_code = kwargs.get("benchmark_code", "")
@@ -1823,18 +2016,18 @@ class BenchmarkComparison(BaseTool):
         end_date = kwargs.get("end_date")
 
         if not strategy_name:
-            return _err("missing 'strategy_name'")
+            return err_actionable("missing 'strategy_name'", tool="OptionsPricingTool")
         if not benchmark_code:
-            return _err("missing 'benchmark_code'")
+            return err_actionable("missing 'benchmark_code'", tool="OptionsPricingTool")
 
         # Get strategy equity from latest run
         runs_dir = workspace / "strategies" / strategy_name / "runs"
         if not runs_dir.exists():
-            return _err(f"runs directory not found: {runs_dir}")
+            return err_actionable(f"runs directory not found: {runs_dir}", tool="OptionsPricingTool")
 
         run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
         if not run_dirs:
-            return _err("no runs found")
+            return err_actionable("no runs found", tool="OptionsPricingTool")
 
         latest_run = run_dirs[-1]
 
@@ -1855,16 +2048,16 @@ class BenchmarkComparison(BaseTool):
                     continue
 
         if strategy_equity is None or len(strategy_equity) < 10:
-            return _err("could not find strategy equity curve")
+            return err_actionable("could not find strategy equity curve", tool="OptionsPricingTool")
 
         # Get benchmark prices from DuckDB
         try:
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return _err(f"db open failed: {exc}")
+            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
         if conn is None:
-            return _err("workspace has no DuckDB")
+            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
 
         try:
             query = f"SELECT date, close FROM ohlcv WHERE asset = '{benchmark_code}'"
@@ -1875,10 +2068,10 @@ class BenchmarkComparison(BaseTool):
             query += " ORDER BY date"
             bench_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return _err(f"benchmark query failed: {exc}")
+            return err_actionable(f"benchmark query failed: {exc}", tool="OptionsPricingTool")
 
         if bench_df.empty:
-            return _err(f"no data found for benchmark '{benchmark_code}'")
+            return err_actionable(f"no data found for benchmark '{benchmark_code}'", tool="OptionsPricingTool")
 
         bench_equity = bench_df["close"].values.astype(float)
 

@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from ..tools import BaseTool
+from .utils import err_actionable, safe_get_param, try_unwrap_list
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +79,25 @@ class CreateGoalTool(BaseTool):
         session_id = _get_session_id(kwargs)
         objective = kwargs.get("objective", "")
         if not objective:
-            return _err("missing 'objective'")
+            return err_actionable(
+                "missing 'objective'",
+                expected="non-empty research objective string, e.g. 'build a momentum strategy for A-shares'",
+                fix="pass a non-empty objective describing the research goal",
+                tool="create_goal",
+            )
 
+        # Defensive: criteria may be string, list, or wrapped list
         criteria = kwargs.get("criteria")
         if isinstance(criteria, str):
             try:
                 criteria = json.loads(criteria)
             except (json.JSONDecodeError, TypeError):
                 criteria = [c.strip() for c in criteria.split(",") if c.strip()]
+        elif isinstance(criteria, dict):
+            # LLM wrapped list in dict (e.g. {"items": [...]})
+            unwrapped = try_unwrap_list(criteria)
+            if unwrapped is not None:
+                criteria = unwrapped
 
         try:
             from ...goal.context import default_goal_criteria
@@ -103,7 +115,12 @@ class CreateGoalTool(BaseTool):
             })
         except Exception as exc:
             logger.exception("create_goal failed")
-            return _err(f"create_goal failed: {exc}")
+            return err_actionable(
+                f"create_goal failed: {exc}",
+                received={"objective": objective, "criteria": criteria},
+                fix="verify objective is a non-empty string and criteria is a list of strings",
+                tool="create_goal",
+            )
 
 
 # ── 2. AddEvidenceTool ─────────────────────────────────────────────
@@ -134,7 +151,12 @@ class AddEvidenceTool(BaseTool):
         session_id = _get_session_id(kwargs)
         text = kwargs.get("text", "")
         if not text:
-            return _err("missing 'text'")
+            return err_actionable(
+                "missing 'text'",
+                expected="non-empty evidence string describing the observation/metric",
+                fix="pass a non-empty text, e.g. text='Backtest IC = 0.045 on 2023-12-15'",
+                tool="add_evidence",
+            )
 
         criterion_id = kwargs.get("criterion_id")
         source_type = kwargs.get("source_type", "evidence")
@@ -145,7 +167,11 @@ class AddEvidenceTool(BaseTool):
             store = _get_store()
             current = store.get_current_goal(session_id)
             if current is None:
-                return _err("no active goal for this session; use create_goal first")
+                return err_actionable(
+                    "no active goal for this session; use create_goal first",
+                    fix="call create_goal(objective='...') first to set a research goal",
+                    tool="add_evidence",
+                )
 
             evidence = EvidenceInput(
                 text=text,
@@ -169,7 +195,12 @@ class AddEvidenceTool(BaseTool):
             })
         except Exception as exc:
             logger.exception("add_evidence failed")
-            return _err(f"add_evidence failed: {exc}")
+            return err_actionable(
+                f"add_evidence failed: {exc}",
+                received={"text": text[:200] if isinstance(text, str) else text},
+                fix="check the error detail and verify the session has an active goal",
+                tool="add_evidence",
+            )
 
 
 # ── 3. CompleteGoalTool ────────────────────────────────────────────
@@ -202,7 +233,11 @@ class CompleteGoalTool(BaseTool):
             store = _get_store()
             current = store.get_current_goal(session_id)
             if current is None:
-                return _err("no active goal for this session")
+                return err_actionable(
+                    "no active goal for this session",
+                    fix="call create_goal(objective='...') first to set a research goal",
+                    tool="complete_goal",
+                )
 
             updated = store.complete_lite(
                 session_id=session_id,
@@ -217,7 +252,11 @@ class CompleteGoalTool(BaseTool):
             })
         except Exception as exc:
             logger.exception("complete_goal failed")
-            return _err(f"complete_goal failed: {exc}")
+            return err_actionable(
+                f"complete_goal failed: {exc}",
+                fix="check the error detail; the goal may have already been completed",
+                tool="complete_goal",
+            )
 
 
 # ── 4. GetGoalStatusTool ───────────────────────────────────────────
@@ -276,7 +315,11 @@ class GetGoalStatusTool(BaseTool):
             })
         except Exception as exc:
             logger.exception("get_goal_status failed")
-            return _err(f"get_goal_status failed: {exc}")
+            return err_actionable(
+                f"get_goal_status failed: {exc}",
+                fix="verify the database is accessible and the session_id is valid",
+                tool="get_goal_status",
+            )
 
 
 # ── 5. ListGoalsTool ───────────────────────────────────────────────
@@ -304,7 +347,10 @@ class ListGoalsTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         session_id = kwargs.get("session_id")
         status_str = kwargs.get("status")
-        limit = int(kwargs.get("limit", 10))
+        try:
+            limit = safe_get_param(kwargs, "limit", int, default=10)
+        except TypeError:
+            limit = 10
 
         try:
             from ...goal import GoalStatus, GoalStore
@@ -329,9 +375,22 @@ class ListGoalsTool(BaseTool):
                 ],
                 "count": len(goals),
             })
+        except ValueError as exc:
+            # GoalStatus enum parsing failed
+            return err_actionable(
+                f"invalid status value: {status_str!r}",
+                received=status_str,
+                expected="one of: active, complete, abandoned (or omit for all)",
+                fix="either omit `status` to list all, or pass a valid status like 'active'",
+                tool="list_goals",
+            )
         except Exception as exc:
             logger.exception("list_goals failed")
-            return _err(f"list_goals failed: {exc}")
+            return err_actionable(
+                f"list_goals failed: {exc}",
+                fix="check the database connection and parameter values",
+                tool="list_goals",
+            )
 
 
 # ── Registration ────────────────────────────────────────────────────

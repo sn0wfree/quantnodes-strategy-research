@@ -150,21 +150,23 @@ class TestImportDataActionableError:
         data = {"600519.SH": {"foo": "...", "bar": "..."}}
         result = _execute(workspace, data)
         assert result["status"] == "error"
-        err = result["error"]
-        assert "data['600519.SH']" in err or "600519.SH" in err
-        assert "Expected" in err
-        assert "Fix:" in err
+        # The error message itself mentions 600519.SH
+        assert "600519.SH" in result["error"]
+        # Structured fields guide recovery
+        assert "expected" in result
+        assert "fix" in result
+        assert "received" in result
         # Should mention get_market_data as the fix
-        assert "get_market_data" in err
+        assert "get_market_data" in result["fix"]
 
     def test_dict_no_known_key_lists_actual_keys(self, workspace: Path):
-        """Error message includes the actual keys received."""
+        """Error message's `received` field includes the actual keys received."""
         data = {"600519.SH": {"foo": "x", "bar": "y", "baz": "z"}}
         result = _execute(workspace, data)
         assert result["status"] == "error"
-        # The error mentions the keys we got
+        # The 'received' field has the actual dict (with our keys)
         for k in ("foo", "bar", "baz"):
-            assert k in result["error"], f"missing key {k} in error"
+            assert k in str(result["received"]), f"missing key {k} in received"
 
     def test_real_session_failure_shape_caught(self, workspace: Path):
         """Reproduce the actual session 700dc7f7 failure shape.
