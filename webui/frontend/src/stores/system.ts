@@ -42,7 +42,7 @@ const initialLLM: LLMInfo = {
   configured: false,
 }
 
-export const useSystemStore = create<SystemState>((set, get) => ({
+export const useSystemStore = create<SystemState>((set) => ({
   llm: initialLLM,
   modelInfo: null,
   fetchSystemInfo: async () => {

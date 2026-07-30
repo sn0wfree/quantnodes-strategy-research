@@ -15,6 +15,7 @@ type SSEEventType =
   | 'dag_update' | 'progress' | 'message_received' | 'error'
   | 'session_meta_updated'
   | 'goal_updated' | 'goal_evidence_added' | 'goal_completed'
+  | 'attempt.started' | 'queue_paused' | 'queue_state'
   | 'llm_usage' | 'session_total_tokens'
 
 export function useSSE(sessionId: string | null) {
