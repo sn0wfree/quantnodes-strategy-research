@@ -360,12 +360,13 @@ def _build_summary_prompt(
     """Build prompt for LLM summary with incremental update support."""
     if previous_summary:
         return (
+            f"{conversation}\n\n"
             f"Update the anchored summary below using the conversation history above.\n"
             f"Preserve still-true details, remove stale details, and merge in the new facts.\n"
             f"<previous-summary>\n{previous_summary}\n</previous-summary>\n\n"
             f"{template}"
         )
-    return f"Create a new anchored summary from the conversation history.\n\n{template}"
+    return f"{conversation}\n\nCreate a new anchored summary from the conversation history.\n\n{template}"
 
 
 def _llm_summarize_v2(
