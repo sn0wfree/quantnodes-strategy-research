@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -62,11 +65,64 @@ async def system_info():
     except Exception:
         llm = {"configured": False, "provider": "unknown", "model": "unknown", "api_key_source": "unknown"}
 
+    # Model info from catalog (context window, capabilities, cost)
+    model_info = None
+    try:
+        from strategy_research.core.llm.model_catalog import get_model_info
+
+        provider = llm.get("provider") or "unknown"
+        model = llm.get("model") or "unknown"
+        if provider != "unknown":
+            info = get_model_info(provider, model)
+            model_info = info.to_dict()
+    except Exception as exc:
+        logger.debug("Failed to load model info: %s", exc)
+
     return {
         "workspace_path": workspace,
         "user_count": db.user_count(),
         "llm": llm,
+        "model_info": model_info,
     }
+
+
+class ModelInfoRefreshRequest(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
+@router.post("/model-info/refresh")
+async def refresh_model_info(body: ModelInfoRefreshRequest):
+    """Force-refresh model metadata from models.dev.
+
+    Body is optional; if omitted, refreshes the currently configured
+    provider/model. Returns the ModelInfo that was written to cache.
+    """
+    from strategy_research.cli.llm_config_check import check_llm_config
+    from strategy_research.core.llm.model_catalog import refresh_model_info
+
+    provider = body.provider
+    model = body.model
+    if not provider or not model or provider == "unknown":
+        try:
+            llm = check_llm_config()
+            provider = provider or llm.get("provider")
+            model = model or llm.get("model")
+        except Exception:
+            pass
+
+    if not provider or not model or provider == "unknown" or model == "unknown":
+        raise HTTPException(
+            status_code=400,
+            detail="provider and model are required (or configure LLM first)",
+        )
+
+    try:
+        info = await refresh_model_info(provider, model)
+        return info.to_dict()
+    except Exception as exc:
+        logger.exception("Model info refresh failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/llm")

@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import os
-import re
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -84,6 +84,7 @@ class SessionService:
         Returns the session metadata dict.
         """
         import time
+
         from ..routers.web_session import _get_db
 
         now = time.time()
@@ -152,7 +153,7 @@ class SessionService:
 
         # ── 2. Auto-title on first user message ───────────────────────
         try:
-            from ..routers.web_session import auto_title_session, _get_db
+            from ..routers.web_session import _get_db, auto_title_session
 
             new_title = auto_title_session(session_id, content)
             if new_title:
@@ -561,9 +562,49 @@ class SessionService:
 
         # Event callback: forward AgentLoop events → EventBus.
         # Each event carries message_id so SSE clients can correlate.
+        # Also accumulates llm_usage tokens into attempt-local metrics so
+        # the frontend can show context usage progress.
+        usage_lock = threading.Lock()
+        usage_state: dict[str, int] = {"input": 0, "output": 0}
+
         def event_callback(event_type: str, data: dict[str, Any]) -> None:
             # Accumulate parts for persistence
             _accumulate_part(accumulated_parts, event_type, data)
+
+            # Track token usage so the frontend can show a context
+            # usage bar. llm_usage is emitted by AgentLoop after each
+            # LLM call (see core/agent/loop.py).
+            if event_type == "llm_usage" and isinstance(data, dict):
+                with usage_lock:
+                    # OpenAI-compatible providers use input_tokens /
+                    # output_tokens; some send prompt_tokens /
+                    # completion_tokens. Accept both.
+                    inc_in = int(
+                        data.get("input_tokens")
+                        or data.get("prompt_tokens")
+                        or 0
+                    )
+                    inc_out = int(
+                        data.get("output_tokens")
+                        or data.get("completion_tokens")
+                        or 0
+                    )
+                    usage_state["input"] += inc_in
+                    usage_state["output"] += inc_out
+                total = usage_state["input"] + usage_state["output"]
+                # Emit a session_total_tokens event so the frontend
+                # has an authoritative figure (not the per-call delta).
+                self.event_bus.emit(
+                    attempt.session_id,
+                    "session_total_tokens",
+                    {
+                        "input_tokens": usage_state["input"],
+                        "output_tokens": usage_state["output"],
+                        "total_tokens": total,
+                        "message_id": attempt.message_id,
+                        "attempt_id": attempt.attempt_id,
+                    },
+                )
 
             # Add attempt/message context
             data = dict(data)
@@ -603,7 +644,11 @@ class SessionService:
             "iterations": loop_result.iterations,
             "tool_calls_made": loop_result.tool_calls_made,
             "finished_reason": loop_result.finished_reason,
-            "metrics": {},
+            "metrics": {
+                "input_tokens": usage_state["input"],
+                "output_tokens": usage_state["output"],
+                "total_tokens": usage_state["input"] + usage_state["output"],
+            },
         }
 
     # ── History conversion (borrowed verbatim from vibe_trading) ──────

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
 from .. import __version__
@@ -47,10 +49,28 @@ def create_app(
         cors_str = os.environ.get("CORS_ORIGINS")
         cors_origins = cors_str.split(",") if cors_str else None
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Background tasks that run during the app's lifetime.
+
+        - Schedule model catalog refresh 5s after startup so the user
+          sees fresh metadata without blocking first response.
+        """
+        task = asyncio.create_task(_refresh_model_catalog_async())
+        try:
+            yield
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
     app = FastAPI(
         title="Strategy Research API",
         version=__version__,
         description="HTTP API for quantnodes strategy research framework",
+        lifespan=lifespan,
     )
 
     # Store config in app state
@@ -158,4 +178,33 @@ def configure_from_env():
     return config
 
 
-__all__ = ["create_app", "configure_from_env"]
+async def _refresh_model_catalog_async() -> None:
+    """Background: refresh model catalog for the currently configured LLM.
+
+    Runs 5s after startup so the first user request doesn't pay the
+    network cost. Failure is silent (log warning; bundled data is used).
+    """
+    await asyncio.sleep(5)
+    try:
+        from ..cli.llm_config_check import check_llm_config
+        from ..core.llm.model_catalog import refresh_model_info
+
+        llm = check_llm_config()
+        provider = llm.get("provider")
+        model = llm.get("model")
+        if not provider or not model or provider == "unknown":
+            logger.debug("Model catalog refresh skipped: LLM not configured")
+            return
+        info = await refresh_model_info(provider, model)
+        logger.info(
+            "Model catalog refreshed: %s/%s context=%d source=%s",
+            info.provider,
+            info.model,
+            info.context_tokens,
+            info.source,
+        )
+    except Exception as exc:
+        logger.warning("Model catalog refresh failed: %s", exc)
+
+
+__all__ = ["create_app", "configure_from_env", "_refresh_model_catalog_async"]

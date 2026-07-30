@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Optional, Callable
+from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -18,7 +18,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     SKIP_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
-    PUBLIC_PREFIXES = ["/api/auth/", "/api/chat/", "/assets/"]
+    PUBLIC_PREFIXES = [
+        "/api/auth/",
+        "/api/chat/",
+        "/api/system/",
+        "/assets/",
+    ]
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -86,8 +91,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     def _verify_token(self, token: str) -> Optional[str]:
         """Verify JWT token and return user_id."""
-        import json
         import base64
+        import json
         try:
             payload = json.loads(base64.urlsafe_b64decode(token))
             if payload.get("exp", 0) < time.time():
