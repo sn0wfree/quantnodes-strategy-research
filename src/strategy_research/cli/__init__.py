@@ -10,6 +10,7 @@ import yaml
 
 from .commands.autoresearch import _spawn_agent as _spawn_agent
 from .commands.autoresearch import cmd_autoresearch
+from .commands.compact_show import cmd_compact_show
 from .commands.export import cmd_export
 from .commands.server import (
     cmd_api_serve,
@@ -886,6 +887,18 @@ def main() -> int:
     serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
     serve_parser.add_argument("--static-dir", help="前端静态文件目录 (默认 webui/static)")
 
+    # ── compact show (opencode-aligned config inspector) ─────────
+    compact_parser = subparsers.add_parser(
+        "compact", help="compact 配置相关命令"
+    )
+    compact_subparsers = compact_parser.add_subparsers(dest="compact_command")
+    compact_show_parser = compact_subparsers.add_parser(
+        "show", help="显示当前生效的 compact 配置（含派生值）"
+    )
+    compact_show_parser.add_argument(
+        "--llm-config", help="llm.json 路径 (默认 ~/.quantnodes/llm.json)"
+    )
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -1041,6 +1054,12 @@ def main() -> int:
             return cmd_webui_serve(args)
         else:
             webui_parser.print_help()
+            return 0
+    elif args.command == "compact":
+        if getattr(args, "compact_command", None) == "show":
+            return cmd_compact_show(args)
+        else:
+            compact_parser.print_help()
             return 0
     elif args.command == "serve":
         # Top-level alias — same as `webui serve`

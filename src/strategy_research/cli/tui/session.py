@@ -269,6 +269,7 @@ class ChatSession:
             session_id=getattr(self.ctx, "session_id", "cli"),
             system_prompt=system_prompt,
             allowed_tools=None,  # all tools enabled
+            compact_config=(cfg or self.llm_client.config).compact_config,
         )
 
         # Inject user message into loop's internal state via _build_messages
