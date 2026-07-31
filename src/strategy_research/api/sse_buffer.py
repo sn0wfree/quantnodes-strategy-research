@@ -61,10 +61,18 @@ class SSEEventBuffer:
             self._buffer.append(sse_event)
         self._cleanup()
         # Notify ALL waiting SSE consumers for this session
+        # Use call_soon_threadsafe for thread-safe asyncio.Event.set()
         for evt in self._session_events.get(session_id, set()):
             try:
-                evt.set()
-            except RuntimeError:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.call_soon_threadsafe(evt.set)
+                    else:
+                        evt.set()
+                except RuntimeError:
+                    pass
+            except Exception:
                 pass
         return event_id
 

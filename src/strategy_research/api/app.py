@@ -35,6 +35,15 @@ def create_app(
         static_dir: Static files directory (e.g. `webui/static/`). If exists, will be served at `/`.
         cors_origins: CORS allowed origins (default: `["*"]` for dev).
     """
+    # 配置应用日志级别 - 确保 info 级别日志可见
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    # 设置 strategy_research 命名空间日志级别
+    logging.getLogger("strategy_research").setLevel(logging.INFO)
+    logger.info("[STARTUP] create_app called")
     # Resolve from environment if not explicitly provided (supports uvicorn --reload factory mode)
     if workspace_path is None:
         env = os.environ.get("SR_WORKSPACE_PATH")
@@ -53,9 +62,16 @@ def create_app(
     async def lifespan(app: FastAPI):
         """Background tasks that run during the app's lifetime.
 
+        - Set EventBus loop for thread-safe event publishing
         - Schedule model catalog refresh 5s after startup so the user
           sees fresh metadata without blocking first response.
         """
+        # Set EventBus loop for thread-safe event publishing
+        from .routers.chat import _event_bus
+        loop = asyncio.get_event_loop()
+        _event_bus.set_loop(loop)
+        logger.info("[STARTUP] EventBus loop set for thread-safe events")
+
         task = asyncio.create_task(_refresh_model_catalog_async())
         try:
             yield

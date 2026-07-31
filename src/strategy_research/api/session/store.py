@@ -57,7 +57,7 @@ class SessionStore:
         message_id: Optional[str] = None,
         parts: Optional[list[dict[str, Any]]] = None,
         created_at: Optional[float] = None,
-        message_type: str = "assistant",
+        message_type: Optional[str] = None,
     ) -> str:
         """Append a message to the session.
 
@@ -69,11 +69,15 @@ class SessionStore:
             created_at: Optional timestamp (epoch seconds). If None, uses
                 time.time().
             message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
-                Defaults to 'assistant' for backward compat.
+                If None, uses message.role (user/assistant/tool).
 
         Returns:
             The message_id used.
         """
+        # 默认使用 message.role，而不是固定 assistant
+        if message_type is None:
+            message_type = message.role
+
         logger.debug("[STORE] append_message session=%s role=%s type=%s content_len=%d",
                     message.session_id, message.role, message_type, len(message.content))
 
