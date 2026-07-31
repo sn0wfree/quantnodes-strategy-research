@@ -36,15 +36,20 @@ logger = logging.getLogger(__name__)
 
 def infer_message_type(db_message: dict) -> str:
     """Infer message_type for old data without the column.
-    
+
+    This is a backward-compat fallback. New code should read the
+    message_type column directly from the database.
+
     Order:
     1. tool_call_id present → tool
     2. role = user → user
-    3. role = assistant + content prefix [context summary] / Anchored → compaction
+    3. role = assistant + content matches compaction patterns → compaction
     4. default → assistant
-    
-    New code reads `message_type` column directly; this is the
-    backward-compat fallback.
+
+    Compaction patterns (L4 artifacts):
+    - [context summary] prefix (legacy)
+    - ## Anchored Summary prefix (legacy)
+    - ## Objective...## Important Details (LLM-generated summary)
     """
     tool_call_id = db_message.get("tool_call_id")
     if tool_call_id:
@@ -54,7 +59,11 @@ def infer_message_type(db_message: dict) -> str:
         return MESSAGE_TYPE_USER
     if role == MESSAGE_TYPE_ASSISTANT:
         content = (db_message.get("content") or "").strip()
+        # Legacy patterns
         if content.startswith("[context summary]") or content.startswith("## Anchored"):
+            return MESSAGE_TYPE_COMPACTION
+        # LLM-generated summary pattern
+        if content.startswith("## Objective") or "## Important Details" in content:
             return MESSAGE_TYPE_COMPACTION
     return MESSAGE_TYPE_ASSISTANT
 

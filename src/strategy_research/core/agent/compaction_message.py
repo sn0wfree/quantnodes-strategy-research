@@ -77,9 +77,12 @@ class CompactionMessage:
     def from_db_row(cls, row: dict | Any) -> "CompactionMessage":
         """Reconstruct from a `messages` table row.
 
-        Looks for the compaction part inside `parts_json` (preferred)
-        and falls back to `content` (legacy data where summary was
-        stored as plain text with [context summary] prefix).
+        Supports two storage formats:
+        1. New: parts_json contains a compaction part with summary/recent
+        2. Legacy: content field has summary with [context summary] prefix
+
+        The legacy format check is for backward compatibility with old data
+        that hasn't been migrated yet.
         """
         # sqlite3.Row: use index access. dict: use .get. MagicMock etc:
         # assume Mapping-compatible.
@@ -107,7 +110,7 @@ class CompactionMessage:
         except (json.JSONDecodeError, TypeError) as exc:
             logger.warning("CompactionMessage: parts_json parse failed: %s", exc)
 
-        # Fallback: legacy content with [context summary] prefix
+        # Legacy fallback: content with [context summary] prefix
         if not summary:
             content = get("content", "") or ""
             if content.startswith("[context summary]"):

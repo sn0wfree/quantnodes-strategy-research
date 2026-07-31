@@ -676,10 +676,13 @@ class SessionService:
 
     @staticmethod
     def _extract_summary(messages: list[dict[str, Any]]) -> str:
-        """Extract [context summary] content from compressed messages.
+        """Extract summary content from compressed messages.
 
-        opencode-aligned: handles both new (message_type='compaction')
-        and legacy (content starts with [context summary]) formats.
+        Supports two storage formats:
+        1. New: message_type='compaction' with parts_json containing summary
+        2. Legacy: content field starts with [context summary] prefix
+
+        The legacy format check is for backward compatibility with old data.
         """
         parts = []
         for m in messages:
@@ -720,9 +723,10 @@ class SessionService:
         for m in original:
             role = m.get("role", "")
             content = (m.get("content") or "").strip()
-            # Skip compactions (opencode-aligned)
+            # Skip compaction messages (new format: message_type='compaction')
             if m.get("message_type") == "compaction":
                 continue
+            # Skip legacy compaction messages (content starts with [context summary])
             if not content or content.startswith("[context summary]"):
                 continue
             if role == "assistant" and len(content) > 20:
