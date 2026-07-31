@@ -1180,6 +1180,14 @@ def _utc_now_iso() -> str:
 def _friendly_error_text(error_detail: str) -> str:
     """Map raw error detail to a user-friendly short message."""
     detail = (error_detail or "").lower()
+    # MiniMax-specific: empty chat content (2013) usually means the
+    # conversation history was over-compressed and the next LLM call
+    # has no user content. Suggest creating a new session.
+    if "2013" in detail or "chat content is empty" in detail:
+        return "⚠️ 会话内容已压缩为空，请发送新消息或新建会话"
+    # 400 + invalid params (e.g. malformed tool call or empty content)
+    if "invalid params" in detail and "400" in detail:
+        return "⚠️ 请求参数无效，请稍后重试或新建会话"
     if "rate" in detail or "429" in detail or "too many" in detail:
         return "⚠️ 模型请求频率过高，请稍后再试"
     if "timeout" in detail or "timed out" in detail:

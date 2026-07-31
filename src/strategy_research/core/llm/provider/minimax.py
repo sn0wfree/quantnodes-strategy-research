@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..errors import LLMQuotaError
+from ..errors import LLMConfigError, LLMQuotaError
 from .base import ProviderAdapter
 
 
@@ -79,6 +79,23 @@ class MiniMaxAdapter(ProviderAdapter):
             error_code = self.extract_error_code(body)
             if "quota" in error_code or "billing" in error_code:
                 return LLMQuotaError(f"quota exceeded (429): {body}")
+        # MiniMax-specific: 400 with code 2013 means "chat content is empty"
+        # This usually happens when over-compression leaves an empty context.
+        # Map to LLMConfigError so:
+        # 1. _is_stream_required_error returns True (no stream→achat fallback)
+        #    — retrying via non-streaming won't help.
+        # 2. The error is propagated as a user-visible configuration error
+        #    with a clear "send new message or create new session" message.
+        if status == 400:
+            body_str = str(body)
+            error_code = self.extract_error_code(body)
+            if "2013" in body_str or "chat content is empty" in body_str.lower() \
+                    or "2013" in error_code:
+                return LLMConfigError(
+                    f"empty chat content (MiniMax 2013): {body}. "
+                    f"This usually means the conversation history was over-compressed. "
+                    f"Please send a new message or create a new session."
+                )
         return None
 
     def quota_error_message(self) -> str:
