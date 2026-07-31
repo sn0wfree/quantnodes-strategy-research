@@ -1,27 +1,16 @@
-"""Projector — derive message state from event_log (Level 3, B1 commit 4).
+"""Projector — derive message state from event_log (Level 3, B2 commit 1).
 
 This module is the read-side complement to EventBusV2. It reads events
 from event_log and projects them into the same shape as messages +
 message_parts (the Level 2 PartTable). The projector is the
 authoritative source of message state in the eventual event-sourced
-architecture; in B1 it's a pure read tool (no DB writes yet).
+architecture; in B2 it can also flush state to messages + message_parts.
 
 Opencode reference (packages/core/src/session/projector.ts:458):
 The projector is a state machine that handles each event type and
 mutates an in-memory state object. On commit, the state is flushed
-to messages + message_parts. In our implementation, B1 keeps the
-state in memory only — DB writes are deferred to B2 when we switch
-the read path.
-
-Why B1 is read-only:
-- The current code path (service.py) still writes to messages +
-  message_parts directly. If the projector also writes, we'd have
-  two writers, which is the source of bugs.
-- B1 is the foundation: the projector must PROVE it can rebuild
-  the state from events before we trust it as the source of truth.
-- B2 wires EventBusV2 → projector → messages. At that point, the
-  service code stops writing directly; the projector becomes the
-  sole writer.
+to messages + message_parts. In B2, flush() writes idempotently to
+messages + message_parts via UPSERT.
 
 State model:
 - ProjectedSession holds messages + parts as in-memory structures
@@ -228,6 +217,104 @@ class Projector:
         - Future: live projector that maintains state in memory
         """
         self._apply(event, state)
+
+    # ── Flush (B2) ──────────────────────────────────────────────
+
+    def flush(self, state: ProjectedSession) -> None:
+        """Atomically UPSERT the projected state to messages + message_parts.
+
+        Idempotent: calling flush() twice with the same state produces
+        the same result (no duplicate rows). Uses INSERT OR REPLACE
+        for both messages and message_parts.
+
+        Safety:
+        - Runs in a single transaction
+        - Only touches rows belonging to state.session_id
+        - Deletes message_parts rows that no longer exist in the
+          projection (handles part deletion edge cases)
+
+        This is the B2 write path. In B2, service.py publishes events
+        via EventBusV2 which writes to event_log, then calls flush()
+        to materialize the state to messages + message_parts for the
+        existing read path (SessionStore.get_messages).
+
+        Eventually (B3+), the read path will use the projector
+        directly and messages + message_parts can be removed.
+        """
+        msg_rows = state.to_message_rows()
+        part_rows = state.to_part_rows()
+        part_ids = {r["id"] for r in part_rows}
+
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("BEGIN")
+
+            # UPSERT messages
+            for row in msg_rows:
+                conn.execute(
+                    "INSERT OR REPLACE INTO messages "
+                    "(id, session_id, role, content, created_at, "
+                    "message_type, seq, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        row["id"],
+                        row["session_id"],
+                        row["role"],
+                        row["content"],
+                        row["created_at"],
+                        row["message_type"],
+                        row["seq"],
+                    ),
+                )
+
+            # UPSERT message_parts
+            for row in part_rows:
+                conn.execute(
+                    "INSERT OR REPLACE INTO message_parts "
+                    "(id, message_id, session_id, type, data_json, "
+                    "seq, time_created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        row["id"],
+                        row["message_id"],
+                        row["session_id"],
+                        row["type"],
+                        row["data_json"],
+                        row["seq"],
+                        row["time_created"],
+                    ),
+                )
+
+            # Delete parts that no longer exist (for this session only)
+            if part_ids:
+                placeholders = ",".join("?" * len(part_ids))
+                conn.execute(
+                    f"DELETE FROM message_parts "
+                    f"WHERE session_id = ? AND id NOT IN ({placeholders})",
+                    (state.session_id, *part_ids),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM message_parts WHERE session_id = ?",
+                    (state.session_id,),
+                )
+
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    def project_and_flush(self, session_id: str) -> ProjectedSession:
+        """Convenience: project + flush in one call."""
+        state = self.project(session_id)
+        self.flush(state)
+        return state
 
     # ── Event handlers ──────────────────────────────────────────
 
