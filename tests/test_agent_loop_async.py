@@ -308,7 +308,7 @@ class TestAruncEvents:
         assert len(tool_calls) == 1
         assert tool_calls[0][1]["tool"] == "list_history"
         assert len(tool_results) == 1
-        assert tool_results[0][1]["status"] == "ok"
+        assert tool_results[0][1]["status"] == "done"
 
 
 # ── arun with async hooks ────────────────────────────────────────────
