@@ -115,6 +115,10 @@ class SessionStore:
         per-session monotonic counter that eliminates clock-skew
         ambiguity. Falls back to `created_at` if seq is unavailable
         (defensive — should not happen after backfill).
+
+        Level 2 / Phase 2 commit 5: parts are read from the
+        message_parts table (via _row_to_message's `parts` param).
+        Batch-fetched in a single query to avoid N+1.
         """
         logger.debug("[STORE] get_messages session=%s limit=%d", session_id, limit)
         from ..routers.web_session import _get_db, _row_to_message
@@ -126,9 +130,30 @@ class SessionStore:
                 "ORDER BY seq ASC, created_at ASC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
+
+            # Batch-fetch parts from message_parts (Level 2)
+            parts_by_msg: dict[str, list[Any]] = {}
+            if rows:
+                message_ids = [r["id"] for r in rows]
+                placeholders = ",".join("?" * len(message_ids))
+                parts_rows = conn.execute(
+                    f"SELECT message_id, data_json FROM message_parts "
+                    f"WHERE message_id IN ({placeholders}) ORDER BY message_id, seq",
+                    message_ids,
+                ).fetchall()
+                for mid, data_json in parts_rows:
+                    try:
+                        part = json.loads(data_json)
+                        if isinstance(part, dict):
+                            parts_by_msg.setdefault(mid, []).append(part)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
         out: list[Message] = []
         for r in rows:
-            m = _row_to_message(r)
+            # Pass batch-fetched parts; missing key signals fallback
+            # to parts_json for pre-migration rows
+            m = _row_to_message(r, parts=parts_by_msg.get(r["id"]))
             out.append(
                 Message(
                     message_id=m["id"],
