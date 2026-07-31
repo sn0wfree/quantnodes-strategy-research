@@ -404,15 +404,34 @@ def _row_to_session(row: sqlite3.Row) -> dict:
     }
 
 
-def _row_to_message(row: sqlite3.Row) -> dict:
-    """Convert a messages row to API JSON shape."""
-    parts: list[Any] = []
-    if row["parts_json"]:
-        try:
-            parsed = json.loads(row["parts_json"])
-            parts = parsed if isinstance(parsed, list) else []
-        except (json.JSONDecodeError, TypeError):
-            parts = []
+def _row_to_message(
+    row: sqlite3.Row,
+    parts: list[Any] | None = None,
+) -> dict:
+    """Convert a messages row to API JSON shape.
+
+    Args:
+        row: sqlite3.Row from a `SELECT * FROM messages ...` query.
+        parts: Optional pre-fetched parts (Level 2, Phase 2). If None,
+            falls back to `parts_json` column on the row. Callers
+            should pass parts explicitly to avoid the N+1 problem
+            and to support the new message_parts table (commit 5).
+
+    Reads parts from:
+    1. The `parts` parameter (preferred; batch-fetched by caller)
+    2. The legacy `parts_json` column (fallback for pre-migration
+       rows and test fixtures)
+    """
+    if parts is None:
+        # Fallback: legacy parts_json column
+        parts = []
+        if row["parts_json"]:
+            try:
+                parsed = json.loads(row["parts_json"])
+                parts = parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                parts = []
+
     metadata = None
     if row["metadata_json"]:
         try:
@@ -733,7 +752,37 @@ async def list_messages(
         params,
     ).fetchall()
     has_more = len(rows) > limit
-    messages = [_row_to_message(r) for r in rows[:limit]]
+
+    # Batch-fetch parts for all messages in one query (avoids N+1).
+    # Level 2 / Phase 2 commit 4: parts are now in the message_parts
+    # table. Read from there; fall back to parts_json only if no
+    # message_parts rows exist (pre-migration rows).
+    if rows:
+        message_ids = [r["id"] for r in rows[:limit]]
+        placeholders = ",".join("?" * len(message_ids))
+        parts_rows = conn.execute(
+            f"SELECT message_id, data_json FROM message_parts "
+            f"WHERE message_id IN ({placeholders}) ORDER BY message_id, seq",
+            message_ids,
+        ).fetchall()
+        # Group by message_id, preserving seq order. Only include
+        # messages that have at least one message_parts row; missing
+        # keys (via .get) signal to _row_to_message that the caller
+        # didn't pre-fetch (so it falls back to parts_json).
+        parts_by_msg: dict[str, list[Any]] = {}
+        for mid, data_json in parts_rows:
+            try:
+                part = json.loads(data_json)
+                if isinstance(part, dict):
+                    parts_by_msg.setdefault(mid, []).append(part)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    else:
+        parts_by_msg = {}
+    messages = [
+        _row_to_message(r, parts=parts_by_msg.get(r["id"]))
+        for r in rows[:limit]
+    ]
     total = conn.execute(
         "SELECT COUNT(*) AS c FROM messages WHERE session_id = ?", (session_id,)
     ).fetchone()["c"]
