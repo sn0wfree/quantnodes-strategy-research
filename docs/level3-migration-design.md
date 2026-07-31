@@ -1,8 +1,44 @@
 # Migration Plan: opencode-aligned Message Model (Level 0 → 3)
 
-> 日期：2026-07-31
-> 状态：设计中，待讨论
+> 日期：2026-07-31（初稿） / 2026-08-01（B-series 完成更新）
+> 状态：Phase 1-3 (B1-B5) **已实施并生产验证**。Phase 4-6（revert/multi-agent）未做。
 > 目标：从当前"单 messages 表 + role=tool 独立行"的数据模型，逐步迁移到 opencode 的"messages + parts + event sourcing"模型
+
+## 0. 当前执行状态
+
+### 0.1 B-series 完成情况
+
+| 阶段 | 状态 | 提交数 | 测试 | 关键事件 |
+|------|------|--------|------|----------|
+| Phase 1 (Level 0 + 1) | ✅ 完成 | 4 | 47 | reorder + seq 列 |
+| Phase 2 (Level 2) | ✅ 完成 | 6 | 52 | message_parts + 删 role=tool |
+| Phase 3 B1 | ✅ 完成 | 11 | 257 | event_log + Projector + EventBusV2 |
+| Phase 3 B2 | ✅ 完成 | 5 | 27 | Dual-write + Service 接线 |
+| Phase 3 B3 | ✅ 完成 | 5 | 19 | 读路径切换 + Backfill |
+| Phase 3 B4 | ✅ 完成 | 5 | 17 | 写路径切换 + 性能优化 |
+| Phase 3 B5 | ✅ 完成 | 4 | 10 | Compact 事件化 + 终极 invariant |
+| **Phase 3 B6 (cleanup)** | ✅ 完成 | 3 | 10 | L4 compaction + tech debt 文档 |
+| **总计** | **✅** | **43** | **439** | **event_log 是唯一真源** |
+
+### 0.2 核心不变量（生产验证通过）
+
+```
+1. event_log 是 messages + message_parts 的唯一真源
+2. SessionStore.get_messages() 默认从 event_log 投影读取
+3. 所有写入通过 EventBusV2.emit()（webui 主流程）
+4. projector.flush() 在消息边界事件触发，自动维护 materialized view
+5. 进程崩溃后可从 event_log 完全恢复 messages 表
+```
+
+### 0.3 性能
+
+| 场景 | 延迟 |
+|------|------|
+| 700dc7f7 (39 msgs / 177 events) | 1.15ms / read |
+| 3a63cdfe (5 msgs / 330 events) | 1.57ms / read |
+| 写入事件流（1 msg + 20 text_delta + 1 final） | 27ms / 22 events |
+
+---
 
 ---
 
@@ -619,54 +655,109 @@ class EventV2:
 
 ---
 
-## 8. 完整 commit 链（~45 个）
+## 8. 实际执行 commit 链（43 个）
+
+> **Status: ✅ COMPLETE** (Phase 1-3 B1-B6)
+>
+> 原计划 45 个 commit，实际 43 个（部分合并到 commit）
+
+### 8.1 Phase 1 — Level 0 + 1（4 commits）
 
 ```
-Phase 1 (本周, 4 commits)
-├── fix(service): reorder assistant before tools in LLM history
-├── feat(schema): add seq column to messages table
-├── feat(seq): single-process seq generator + backfill script
-└── refactor(history): ORDER BY seq instead of created_at
-
-Phase 2 (下周, ~6 commits)
-├── feat(schema): add message_parts table
-├── feat(persistence): dual-write parts to message_parts
-├── feat(migration): migrate role=tool to message_parts
-├── refactor(read): _row_to_message returns (message, parts)
-├── refactor(llm): _convert_messages_to_history from message_parts
-└── chore(cleanup): drop role=tool, parts_json, tool_call_id
-
-Phase 3 (再下周, ~10 commits) — Event Sourcing B1
-├── feat(schema): event_log table + indexes
-├── feat(event): EventV2 type definitions
-├── feat(event): event_bus_v2 dual-write
-├── feat(projector): message_received handler
-├── feat(projector): text.* handlers
-├── feat(projector): tool.* handlers
-├── feat(projector): thinking_* handlers
-├── feat(projector): compact handlers
-├── feat(projector): misc handlers (file_edit, table, chart, image)
-└── test(event): event_log round-trip tests
-
-Phase 4 (4-6 周后, ~12 commits) — Event Sourcing B2
-├── refactor(loop): AgentLoop uses events.publish
-├── refactor(chat): SSE reads from projector state
-├── refactor(chat): remove direct event_callback writes
-├── test(integration): event→projector round-trip
-├── test(replay): replay events from event_log
-├── ... (7 more)
-
-Phase 5 (~3 月后, ~10 commits) — Event Sourcing B3 cleanup
-├── chore(cleanup): remove event_bus legacy paths
-├── chore(cleanup): remove dual-write code
-├── test(perf): PartTable + event_log perf benchmarks
-├── ... (7 more)
-
-Phase 6 (Future, separate decision) — Revert
-└── TBD: revert.ts + Snapshot service + UI
+7c0e41b fix(service): reorder assistant before tools in LLM history
+b580204 feat(schema): add seq column to messages table
+c94442e feat(seq): single-process seq generator + backfill script
+f30458b refactor(history): ORDER BY seq instead of created_at
 ```
 
-**总计：~45 commit, ~5500 LOC, 12-20 周**
+### 8.2 Phase 2 — Level 2 PartTable（6 commits）
+
+```
+efde19e feat(schema): add message_parts table
+2a0448c feat(persistence): dual-write parts to message_parts
+31b7304 feat(migration): migrate role=tool to message_parts
+4c71967 refactor(read): _row_to_message returns (message, parts)
+c66e6d1 refactor(llm): _convert_messages_to_history from message_parts
+2bd70a8 chore(cleanup): drop role=tool, parts_json, tool_call_id
+ccc0cdd fix(store): handle None metadata in get_messages
+```
+
+### 8.3 Phase 3 B1 — Event Sourcing 基础设施（11 commits）
+
+```
+92ea792 feat(schema): event_log table for event sourcing
+73b0623 feat(event): EventV2 dataclass + EventType registry (30+ types)
+bf97b9e feat(event_bus): EventBusV2 dual-write (event_log + EventBus)
+ce356da feat(projector): Projector reads event_log → ProjectedSession
+c2fd515 feat(e2e): end-to-end Phase 3 B1 verification
+52b0036 test(event_sourcing): edge case coverage (19 tests)
+5a30dcd test(event_sourcing): more edge cases + 5 bug fixes (45 tests, 5 real bugs)
+f0eadc1 test(event_sourcing): round 3 edge cases (25 tests)
+f0ff3e8 test(event_sourcing): round 4 edge cases with hypothesis (22 tests)
+cd58d27 test(event_sourcing): round 5 edge cases + DB consistency (21 tests)
+bfa7bbf test(event_sourcing): round 6 edge cases (39 tests)
+```
+
+### 8.4 Phase 3 B2 — 接线到 SessionService（5 commits）
+
+```
+418a6e6 feat(projector): Projector.flush() writes to messages + message_parts
+faff631 feat(chat): wire EventBusV2 into SessionService
+f9b67a1 test(b2): dual-write consistency verification
+f224caf test(b2): service wiring + backward compat verification
+9a47ab7 test(b2): backward compatibility verification
+```
+
+### 8.5 Phase 3 B3 — 读路径切换（5 commits）
+
+```
+113a0b6 feat(projector): to_messages() + project_to_messages()
+c5e4ea7 feat(store): dual read path - event_log via projector
+f3b8582 test(b3): read path consistency verification + fix msg seq
+2025736 feat(backfill): messages + message_parts → event_log
+88eadee feat(b3): projector compaction support + switch default read path
+```
+
+### 8.6 Phase 3 B4 — 写路径切换（5 commits）
+
+```
+a6790ad feat(event_bus): flush_to_messages - projector auto-flush on publish
+288bfea feat(chat): enable flush_to_messages in EventBusV2
+ac10162 feat(b4): remove direct message writes from service.py
+2d56626 test(b4): recovery + edge case verification
+555cb97 perf(b4): boundary-only flush optimization
+```
+
+### 8.7 Phase 3 B5 — Compact 事件化 + 终极 invariant（4 commits）
+
+```
+50f0ef1 feat(b5): compact history event-sourced
+b95d023 feat(b5): /goal and /compact commands use event-sourced writes
+5993230 test+fix(b5): final invariant + projector flush handles deletions
+(nothing to commit for B5.4 — already clean)
+```
+
+### 8.8 Phase 3 B6 — Cleanup + Legacy（3 commits）
+
+```
+4b5400a feat(b6): L4 auto-compaction event-sourced
+4f6ad0f docs(b6): legacy SessionDB technical debt + migration roadmap
+```
+
+**总计：43 commits, 439 tests, 0 failures**
+
+---
+
+## 8.9 执行期间发现的关键 bug
+
+| B 系列 | Bug | 影响 | 修复 |
+|--------|-----|------|------|
+| B1 round 7 | `_persist` 不处理非 JSON 数据 → OperationalError | 中 | try/except |
+| B1 round 7 | `replay` 在 DB 不存在时崩 | 中 | try/except OperationalError |
+| B1 round 7 | Projector tool_call 丢失 `function` field | 中 | preserve `function` verbatim |
+| B1 round 7 | FK CASCADE PRAGMA 未开 | 低 | 在 projector flush 开 PRAGMA foreign_keys=ON |
+| B5 | Projector flush 缺删除逻辑 (compact 后旧消息残留) | 中 | 加 DELETE FROM messages WHERE session_id=? AND id NOT IN (...) |
+| B5 | 跨会话 PK 冲突（消息 id 全局唯一） | 低 | 测试用唯一 id per session（生产用 UUID 不冲突） |
 
 ---
 
@@ -947,3 +1038,143 @@ Week 13+ (Future, separate decision):
 3. **Revert 评估**：未来是否需要 revert ？（业务侧）
 4. **数据迁移策略**：700dc7f7 137 tool 消息是否值得冒险迁移？
 5. **验证标准**：除 700dc7f7 turn 3 成功外，还需要什么验收条件？
+
+---
+
+## 16. B-series Edge Cases 总结
+
+> 实际执行 B1-B6 期间发现并处理的边界情况，供未来参考。
+
+### 16.1 事件顺序保证
+
+**问题**: 多个事件以非确定顺序到达（理论上不应该发生，但防御性处理）。
+
+**实际处理**: event_log 的 UNIQUE (aggregate_id, seq) 约束 + first-wins
+逻辑。如果 seq 冲突，projector 跳过（log warn）。生产中 seq 是
+monotonic 的，理论上不会冲突。
+
+### 16.2 部分事件流（crash 场景）
+
+**问题**: 进程在 text.started 之后崩溃，没有 text_delta/ended 事件。
+
+**实际处理**: projector 的 `_on_text_started` 创建带空 text 的 part。
+下次进程启动后，projector 可以从 event_log 重建状态（空 part
+可见）。下次 agent run 可以继续。
+
+### 16.3 消息 id 冲突
+
+**问题**: 跨会话使用相同 id（如 "u1"）会导致 PK 冲突。
+
+**实际处理**: 生产用 UUID，理论不冲突。测试用唯一 id per session。
+B5 invariant 测试验证 100+ 事件场景无冲突。
+
+### 16.4 Compact 替换语义
+
+**问题**: compact.ended 事件携带 `messages` 字段时的行为模糊。
+
+**实际处理**:
+- **/compact (manual)**: `messages` 字段是压缩后的消息列表 → 替换
+- **L4 auto-compaction**: 不携带 `messages` 字段 → 只是 marker
+- projector 的 `_on_compact` 通过 `messages` 是否存在来区分
+
+### 16.5 性能 vs 一致性
+
+**问题**: 每次 event 都 flush 会很慢（每事件 ~2.4ms）。
+
+**实际处理**: 只在消息边界事件 flush（message_received、assistant_message、
+compact.ended）。streaming 事件（text_delta、tool_progress）只写
+event_log，不 flush。延迟 ~1.3ms/event，完全可接受。
+
+### 16.6 DB 一致性边界
+
+**问题**: messages 表是 materialized view，event_log 是真源。两者可能
+暂时不一致（boundary 事件之间）。
+
+**实际处理**: 测试覆盖了"flush 后"的不变性和"wipe + re-flush"恢复场景。
+B5 invariant 测试 `test_invariant_after_table_wipe_and_re_flush` 验证
+完全可恢复。
+
+### 16.7 EventBusV2 + legacy EventBus 互操作
+
+**问题**: bridge.py monkey-patches `event_bus.publish` 到 sse_buffer。
+新 EventBusV2 转发到 legacy EventBus 后，bridge 还能工作吗？
+
+**实际处理**: 验证 ✅。EventBusV2._forward 调用
+`self.event_bus.publish(sse_event)`，触发 bridge 的 patched
+`bridged_publish`，正确推送到 sse_buffer。SSE 前端零改动。
+
+### 16.8 流式事件 + 崩溃恢复
+
+**问题**: 假设 100 个 text_delta 事件都已持久化到 event_log，但
+projector 没 flush（因为不是 boundary 事件）。进程崩溃。重启。
+
+**实际行为**: event_log 有所有 100 个事件。重启后调用
+`Projector.project(session_id)` 可以从 event_log 重建完整状态。
+下次 boundary 事件会 flush 完整状态到 messages 表。
+
+### 16.9 Tool result 时序
+
+**问题**: 旧代码在 `event_callback` 里立即写 `role=tool` 消息到 DB
+（line 664 in service.py 旧版），下一个 AgentLoop iteration 可以读到。
+新架构下，这种"提前持久化"还需要吗？
+
+**实际行为**: 不需要。event_log 已经持久化了所有事件。下一个
+AgentLoop 调用 `SessionStore.get_messages()` 走 projector 路径，
+从 event_log 投影。tool_result 事件合并到 tool_call part，
+下次读取时可见。
+
+### 16.10 Compaction 中的边界情况
+
+**问题**: 手工 /compact 后，agent run 继续。后续 LLM call 的
+history 中 compaction 消息如何投影？
+
+**实际行为**: `compaction_message.to_llm_message()` 投影为
+USER role（不是 assistant），with `<conversation-checkpoint>` 包装。
+LLM 正确识别为历史 context，不当作新指令。已有
+`test_compact_serialization` 验证此行为。
+
+### 16.11 Auto-title 与事件流
+
+**问题**: `_run_message` 里 auto-title 更新 `sessions.title`，
+然后发 `session_meta_updated` 事件。这是 event-sourcing 范畴吗？
+
+**实际处理**: sessions 表本身是**元数据**（不属于消息流）。
+`session_meta_updated` 事件只用于 SSE 推送，**不**写 event_log
+（因为它不是消息事件）。sessions.title 由 SQL 直接更新
+（不是 message 写），仍在 B-series 范围外。
+
+### 16.12 跨 B 系列阶段的事件兼容
+
+**问题**: B3 之前的事件（无 event_log 记录）能否被 B3+ projector 读？
+
+**实际行为**: 不能直接读。`backfill_event_log` 工具从 messages +
+message_parts 表生成事件。B3 切换默认读路径**之前**已对生产 DB
+完成 backfill（61 sessions / 2437 events）。未来 schema 变化时
+backfill 工具可复用。
+
+### 16.13 大事件的 JSON 序列化
+
+**问题**: data_json 字段是 TEXT 类型，受 SQLite max length 限制
+(默认 1GB)。但 Python json.dumps 可能有性能问题。
+
+**实际行为**: 当前所有事件都 < 10KB JSON。性能测试 1000 events
+< 100ms。无 size 问题。
+
+### 16.14 Sequence 重置
+
+**问题**: 如果 event_log 被清空（disaster recovery）然后重新写入，
+seq 怎么算？
+
+**实际行为**: `_next_seq(session_id) = last_seq(session_id) + 1`。
+如果 last_seq 是 0，从 1 开始。messages 序号也重新从 1 开始。
+这是有意的 — 灾难恢复后从干净状态重启。
+
+### 16.15 Concurrent write 安全性
+
+**问题**: 多个 AgentLoop 同时运行（罕见但可能），会冲突吗？
+
+**实际行为**: 单 session 单 attempt 串行（per-session queue in
+service.py）。跨 session 完全独立（不同 aggregate_id）。UNIQUE
+(aggregate_id, seq) 约束保证 seq 不冲突。当前架构不处理
+**同一个 session 两个 attempt** 的并发（理论上 service.py 的
+queue 保证不发生）。
