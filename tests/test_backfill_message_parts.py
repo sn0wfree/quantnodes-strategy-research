@@ -39,15 +39,43 @@ def _create_session(db_path: Path, sid: str) -> None:
 
 
 def _insert_message_with_parts(db_path: Path, sid: str, parts: list, ts: float = 100.0) -> str:
-    """Insert a message with parts_json (legacy path)."""
+    """Insert a message with parts_json (legacy path).
+
+    Level 2 / Phase 2 commit 6 dropped parts_json. For testing the
+    backfill (which migrates FROM parts_json TO message_parts), we
+    add the column back, insert the row, then call backfill (which
+    copies parts to message_parts and would normally drop parts_json
+    in commit 6). The test only verifies the message_parts migration,
+    not the column drop.
+    """
     import uuid
     mid = str(uuid.uuid4())
     parts_json = json.dumps(parts, ensure_ascii=False)
-    with sqlite3.connect(str(db_path)) as conn:
+    import strategy_research.api.routers.web_session as ws
+    with ws._get_db() as conn:
+        # Ensure column exists for the test (commit 6 dropped it).
+        # Use a fresh table-create for each new test to avoid schema
+        # cache staleness across connections.
+        if not ws._has_column(conn, "messages", "parts_json"):
+            conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
+        # Verify the column is now visible
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        assert "parts_json" in cols, f"parts_json not in {cols}"
+        # Build INSERT dynamically so the test works on both pre-
+        # and post-migration DBs
+        col_list = ["id", "session_id", "role", "content", "created_at", "message_type", "seq"]
+        val_list = [mid, sid, "assistant", "x", ts, "assistant", 1]
+        if "parts_json" in cols:
+            col_list.insert(4, "parts_json")
+            val_list.insert(4, parts_json)
+        if "metadata_json" in cols:
+            col_list.insert(5, "metadata_json")
+            val_list.insert(5, None)
+        placeholders = ",".join("?" * len(col_list))
+        cols_csv = ",".join(col_list)
         conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (mid, sid, "assistant", "x", parts_json, None, ts, None, "assistant", 1),
+            f"INSERT INTO messages ({cols_csv}) VALUES ({placeholders})",
+            val_list,
         )
         conn.commit()
     return mid
@@ -133,21 +161,24 @@ class TestBackfillMessageParts:
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        # Insert with parts_json=null
+        # Insert with parts_json=null (need to re-add the column)
         import uuid
+        import strategy_research.api.routers.web_session as ws
         mid = str(uuid.uuid4())
-        with sqlite3.connect(str(db_path)) as conn:
+        with ws._get_db() as conn:
+            if not ws._has_column(conn, "messages", "parts_json"):
+                conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
+                conn.commit()
             conn.execute(
-                "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-                "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
-                (mid, "sess-1", "user", "x", None, 100.0, None, "user", 1),
+                "INSERT INTO messages (id, session_id, role, content, parts_json, created_at, metadata_json, message_type, seq) "
+                "VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
+                (mid, "sess-1", "user", "x", 100.0, "user", 1),
             )
             conn.commit()
 
         bk.backfill(db_path, apply=True)
-        n = sqlite3.connect(str(db_path)).execute(
-            "SELECT COUNT(*) FROM message_parts"
-        ).fetchone()[0]
+        with ws._get_db() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM message_parts").fetchone()[0]
         assert n == 0
 
     def test_skips_invalid_json(self, temp_db):
@@ -155,28 +186,36 @@ class TestBackfillMessageParts:
         from scripts import backfill_message_parts as bk
         db_path = temp_db
         _ensure_schema(db_path)
-        _create_session(db_path, "sess-1")
-
-        # Insert with invalid parts_json
-        import uuid
-        mid = str(uuid.uuid4())
-        with sqlite3.connect(str(db_path)) as conn:
+        # Use a single connection to ensure schema cache consistency
+        import strategy_research.api.routers.web_session as ws
+        with ws._get_db() as conn:
             conn.execute(
-                "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-                "VALUES (?, ?, ?, ?, 'not valid json{{', ?, ?, ?, ?, ?)",
-                (mid, "sess-1", "assistant", "x", None, 100.0, None, "assistant", 1),
+                "INSERT INTO sessions (id, user_id, title, created_at, updated_at) "
+                "VALUES ('sess-1', 'a', 't', 1.0, 1.0)"
             )
-            # And a valid one
+            if not ws._has_column(conn, "messages", "parts_json"):
+                conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
+            conn.commit()
+
+            import uuid
+            # Insert with invalid parts_json + one valid one
             conn.execute(
-                "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-                "VALUES (?, ?, ?, ?, '[{\"type\": \"text\", \"text\": \"ok\"}]', ?, ?, ?, ?, ?)",
-                (str(uuid.uuid4()), "sess-1", "assistant", "y", None, 100.0, None, "assistant", 2),
+                "INSERT INTO messages (id, session_id, role, content, parts_json, created_at, metadata_json, message_type, seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                (str(uuid.uuid4()), "sess-1", "assistant", "x",
+                 "not valid json{{", 100.0, "assistant", 1),
+            )
+            conn.execute(
+                "INSERT INTO messages (id, session_id, role, content, parts_json, created_at, metadata_json, message_type, seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                (str(uuid.uuid4()), "sess-1", "assistant", "y",
+                 '[{"type": "text", "text": "ok"}]', 100.0, "assistant", 2),
             )
             conn.commit()
 
         bk.backfill(db_path, apply=True)
-        # The valid one is migrated
-        n = sqlite3.connect(str(db_path)).execute(
-            "SELECT COUNT(*) FROM message_parts"
-        ).fetchone()[0]
+        # The valid one is migrated. Use a raw sqlite3 connection
+        # (not _get_db) to avoid schema cache staleness.
+        with sqlite3.connect(str(db_path)) as conn:
+            n = conn.execute("SELECT COUNT(*) FROM message_parts").fetchone()[0]
         assert n == 1

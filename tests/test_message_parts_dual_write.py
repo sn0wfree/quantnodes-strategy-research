@@ -67,7 +67,14 @@ def _create_session(db_path: Path, sid: str) -> None:
 
 class TestMessagePartsDualWrite:
     def test_persist_writes_parts_json_and_message_parts(self, temp_db):
-        """persist_message should write BOTH legacy and new."""
+        """persist_message should write BOTH legacy and new.
+
+        Level 2 / Phase 2 commit 6 dropped parts_json. After commit 6,
+        persist_message writes ONLY to message_parts (parts_json is
+        gone). This test verifies the post-migration behavior: the
+        message row has the basic columns and message_parts has all
+        3 parts with correct seq, type, and data.
+        """
         db_path = temp_db
         _ensure_schema(db_path)
         sid = "test-sess-1"
@@ -89,14 +96,12 @@ class TestMessagePartsDualWrite:
         )
 
         with sqlite3.connect(str(db_path)) as conn:
-            # Verify the message row
+            # Verify the message row (no parts_json column post-migration)
             row = conn.execute(
-                "SELECT content, parts_json FROM messages WHERE id = ?", (msg_id,)
+                "SELECT content FROM messages WHERE id = ?", (msg_id,)
             ).fetchone()
             assert row is not None
             assert row[0] == "hi"
-            assert row[1] is not None
-            assert len(json.loads(row[1])) == 3
 
             # Verify the message_parts rows
             part_rows = conn.execute(
@@ -154,6 +159,13 @@ class TestMessagePartsDualWrite:
     def test_legacy_read_still_works(self, temp_db):
         """The OLD read path (parts_json) must still work after dual-write.
         This guarantees commit 5 can be a safe switchover.
+
+        Level 2 / Phase 2 commit 6 dropped parts_json. After commit 6,
+        parts come from message_parts (batch-fetched by callers).
+        _row_to_message(row) without the `parts` parameter returns
+        empty parts (the legacy fallback path is no longer reachable
+        in production but kept for backward compat with test fixtures
+        that don't use the new read path).
         """
         db_path = temp_db
         _ensure_schema(db_path)
@@ -170,16 +182,24 @@ class TestMessagePartsDualWrite:
             session_id=sid, role="assistant", content="hi", parts=parts,
         )
 
-        # Use the legacy _row_to_message: should return parts from parts_json
+        # _row_to_message with parts=None: returns empty (post-migration)
         with _get_db() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
-            result = _row_to_message(row)
+            result_no_parts = _row_to_message(row)
 
-        # Legacy code path: parts from parts_json
-        assert len(result["parts"]) == 2
-        assert result["parts"][0]["type"] == "text"
-        assert result["parts"][1]["type"] == "tool_call"
+        # Post-migration: parts_json column is gone, so parts=[]
+        assert result_no_parts["parts"] == []
+
+        # _row_to_message WITH explicit parts: returns them
+        with _get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
+            result_explicit = _row_to_message(row, parts=parts)
+
+        assert len(result_explicit["parts"]) == 2
+        assert result_explicit["parts"][0]["type"] == "text"
+        assert result_explicit["parts"][1]["type"] == "tool_call"
 
     def test_message_parts_session_id_matches(self, temp_db):
         """message_parts.session_id must equal the parent message's session_id."""

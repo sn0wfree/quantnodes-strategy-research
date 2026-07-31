@@ -46,40 +46,36 @@ def _create_session(db_path: Path, sid: str) -> None:
 
 class TestRowToMessageWithParts:
     def test_parts_param_used_when_provided(self, temp_db):
-        """If `parts` is passed, _row_to_message uses it instead of parts_json."""
+        """If `parts` is passed, _row_to_message uses it instead of falling back.
+
+        Level 2 / Phase 2 commit 6 dropped parts_json. We test that
+        the explicit `parts` parameter wins over any fallback path
+        (which is now: synthesize from content for user/error).
+        """
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
         from strategy_research.api.routers.web_session import persist_message, _row_to_message
 
-        # Create a message with both parts_json AND message_parts (commit 2 dual-write)
+        # Create a message with message_parts
         parts = [
-            {"type": "text", "text": "from_json"},
+            {"type": "text", "text": "from_message_parts"},
             {"type": "tool_call", "id": "tc1", "name": "x", "arguments": "{}"},
         ]
         msg_id = persist_message(
             session_id="sess-1", role="assistant", content="x", parts=parts,
         )
 
-        # Insert DIFFERENT data in parts_json to verify which is read
         with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                "UPDATE messages SET parts_json = ? WHERE id = ?",
-                (json.dumps([{"type": "text", "text": "from_json_only"}]), msg_id),
-            )
-            conn.commit()
-            row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
-            row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
-            # Use the new conn to read
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
 
-        # When parts=None, fallback to parts_json → "from_json_only"
+        # parts=None → no fallback (parts_json dropped), role=assistant
+        # with no user/content → empty parts list
         result_no_parts = _row_to_message(row, parts=None)
-        assert len(result_no_parts["parts"]) == 1
-        assert result_no_parts["parts"][0]["text"] == "from_json_only"
+        assert result_no_parts["parts"] == []
 
-        # When parts= is passed, use that → "from_json" (the original)
+        # When parts= is passed, use it
         explicit_parts = [
             {"type": "text", "text": "explicit"},
             {"type": "tool_call", "id": "tc1", "name": "x", "arguments": "{}"},
@@ -89,23 +85,35 @@ class TestRowToMessageWithParts:
         assert result_explicit["parts"][0]["text"] == "explicit"
 
     def test_none_parts_falls_back_to_parts_json(self, temp_db):
-        """When parts=None (no message_parts rows fetched), fallback to parts_json."""
+        """When parts=None (no message_parts rows fetched), fallback to parts_json.
+
+        Level 2 / Phase 2 commit 6 dropped the parts_json column. To
+        test the legacy fallback path, we add the column back,
+        insert a row with parts_json, then read. All operations
+        happen in the SAME connection so the schema cache is consistent.
+        """
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        from strategy_research.api.routers.web_session import persist_message, _row_to_message
+        from strategy_research.api.routers.web_session import _get_db, _row_to_message
 
-        parts = [{"type": "text", "text": "from_json"}]
-        msg_id = persist_message(
-            session_id="sess-1", role="assistant", content="x", parts=parts,
-        )
-
-        with sqlite3.connect(str(db_path)) as conn:
+        import uuid
+        mid = str(uuid.uuid4())
+        with _get_db() as conn:
+            conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
+            conn.execute(
+                "INSERT INTO messages (id, session_id, role, content, parts_json, created_at, metadata_json, message_type, seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                (mid, "sess-1", "assistant", "x",
+                 json.dumps([{"type": "text", "text": "from_json"}]),
+                 100.0, "assistant", 1),
+            )
+            conn.commit()
             conn.row_factory = sqlite3.Row
-            row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
+            row = conn.execute("SELECT * FROM messages WHERE id = ?", (mid,)).fetchone()
+            # No message_parts row → parts=None → fall back to parts_json
+            result = _row_to_message(row, parts=None)
 
-        # parts=None (default) → fall back to parts_json
-        result = _row_to_message(row, parts=None)
         assert len(result["parts"]) == 1
         assert result["parts"][0]["text"] == "from_json"
 
@@ -115,19 +123,22 @@ class TestRowToMessageWithParts:
         This is the actual list_messages case: parts_by_msg only has
         keys for messages with message_parts rows; missing keys
         signal fallback to parts_json.
+
+        Level 2 / Phase 2 commit 6: parts_json was dropped. We add it
+        back temporarily to test the fallback path.
         """
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        from strategy_research.api.routers.web_session import persist_message, _row_to_message
+        from strategy_research.api.routers.web_session import _get_db, _row_to_message
 
-        # Insert with parts_json only (no message_parts rows)
         import uuid
         mid = str(uuid.uuid4())
-        with sqlite3.connect(str(db_path)) as conn:
+        with _get_db() as conn:
+            conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
             conn.execute(
-                "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-                "VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
+                "INSERT INTO messages (id, session_id, role, content, parts_json, created_at, metadata_json, message_type, seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                 (mid, "sess-1", "assistant", "x",
                  json.dumps([{"type": "text", "text": "from_json"}]),
                  100.0, "assistant", 1),
@@ -135,10 +146,10 @@ class TestRowToMessageWithParts:
             conn.commit()
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (mid,)).fetchone()
+            # parts dict doesn't have this mid → fall back
+            parts_map = {}  # empty
+            result = _row_to_message(row, parts=parts_map.get(row["id"]))
 
-        # parts dict doesn't have this mid → fall back
-        parts_map = {}  # empty
-        result = _row_to_message(row, parts=parts_map.get(row["id"]))
         assert len(result["parts"]) == 1
         assert result["parts"][0]["text"] == "from_json"
 
@@ -191,11 +202,10 @@ class TestListMessagesReadsMessageParts:
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        from strategy_research.api.routers.web_session import persist_message, list_messages
+        from strategy_research.api.routers.web_session import persist_message
         from fastapi import Request
 
-        # Create a message with both message_parts and parts_json.
-        # The list_messages should prefer message_parts.
+        # Create a message with message_parts (Level 2 normal path)
         parts = [
             {"type": "text", "text": "hello"},
             {"type": "tool_call", "id": "tc1", "name": "x", "arguments": "{}"},
@@ -205,16 +215,7 @@ class TestListMessagesReadsMessageParts:
             created_at=100.0,
         )
 
-        # Modify parts_json to verify it's NOT used
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                "UPDATE messages SET parts_json = ? WHERE session_id = ?",
-                (json.dumps([{"type": "text", "text": "from_json_only"}]), "sess-1"),
-            )
-            conn.commit()
-
-        # Manually call list_messages' underlying function
-        # (it's an async endpoint, so we test the inner logic)
+        # Manually call list_messages' underlying logic
         from strategy_research.api.routers.web_session import _get_db
         with _get_db() as conn:
             conn.row_factory = sqlite3.Row
@@ -231,14 +232,14 @@ class TestListMessagesReadsMessageParts:
                 f"WHERE message_id IN ({placeholders}) ORDER BY message_id, seq",
                 message_ids,
             ).fetchall()
-            parts_by_msg = {mid: [] for mid in message_ids}
+            parts_by_msg = {}
             for mid, data_json in parts_rows:
                 part = json.loads(data_json)
                 if isinstance(part, dict):
-                    parts_by_msg[mid].append(part)
+                    parts_by_msg.setdefault(mid, []).append(part)
             results = [_row_to_message(r, parts=parts_by_msg.get(r["id"])) for r in rows]
 
-        # Verify message_parts data was used (not parts_json)
+        # Verify message_parts data was used
         assert len(results) == 1
         parts_returned = results[0]["parts"]
         assert len(parts_returned) == 2
@@ -246,31 +247,37 @@ class TestListMessagesReadsMessageParts:
         assert parts_returned[1]["id"] == "tc1"
 
     def test_list_messages_handles_messages_without_parts(self, temp_db):
-        """Messages without message_parts rows still get parts from parts_json fallback."""
+        """Messages without message_parts rows AND no parts_json column
+        get a synthesized text part from content (user/error) or empty parts.
+
+        Level 2 / Phase 2 commit 6 dropped parts_json. Messages that
+        were never migrated AND have no message_parts rows fall through
+        to the user/error synthesis path.
+        """
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
         import uuid as _uuid
         from strategy_research.api.routers.web_session import _get_db, _row_to_message
 
-        # Insert a message directly (skipping persist_message → no message_parts rows)
+        # Insert a user message with no parts anywhere
         mid = str(_uuid.uuid4())
         with sqlite3.connect(str(db_path)) as conn:
             conn.execute(
-                "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-                "VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
-                (mid, "sess-1", "assistant", "x",
-                 json.dumps([{"type": "text", "text": "from_json"}]),
-                 100.0, "assistant", 1),
+                "INSERT INTO messages (id, session_id, role, content, created_at, metadata_json, message_type, seq) "
+                "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+                (mid, "sess-1", "user", "hello world", 100.0, "user", 1),
             )
             conn.commit()
 
         with _get_db() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (mid,)).fetchone()
-            # No message_parts row → parts_by_msg.get(mid) is None → fallback
+            # No message_parts row → parts_by_msg.get(mid) is None
             result = _row_to_message(row, parts=None)
 
-        # Falls back to parts_json
+        # No parts_json, no message_parts → role=user with content →
+        # synthesize text part from content
         assert len(result["parts"]) == 1
-        assert result["parts"][0]["text"] == "from_json"
+        assert result["parts"][0]["type"] == "text"
+        assert result["parts"][0]["text"] == "hello world"

@@ -87,7 +87,15 @@ def _count_messages_with_parts(conn: sqlite3.Connection) -> int:
 
 
 def _count_orphan_tools(conn: sqlite3.Connection) -> int:
-    """role=tool messages whose tool_call_id has no matching assistant."""
+    """role=tool messages whose tool_call_id has no matching assistant.
+
+    Level 2 / Phase 2 commit 6 dropped tool_call_id. On post-migration
+    DBs this is a no-op (returns 0 — there are no role=tool messages).
+    """
+    # Check if tool_call_id column still exists (pre-migration DBs)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
+    if "tool_call_id" not in cols:
+        return 0  # post-migration: no orphan tracking possible
     return conn.execute(
         """
         SELECT COUNT(*) FROM messages
@@ -98,8 +106,7 @@ def _count_orphan_tools(conn: sqlite3.Connection) -> int:
             WHERE m.parts_json IS NOT NULL
             AND json_extract(p.value, '$.type') = 'tool_call'
         )
-        """
-    ).fetchone()[0]
+        """).fetchone()[0]
 
 
 def backfill(

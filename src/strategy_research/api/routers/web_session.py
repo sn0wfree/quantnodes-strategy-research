@@ -85,15 +85,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     _add_column(conn, "sessions", "message_count", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0")
 
-    # Messages table (FK cascade)
+    # Messages table (FK cascade).
+    #
+    # Note: parts_json and tool_call_id columns were dropped in
+    # Level 2 / Phase 2 commit 6 — see cleanup block below. The schema
+    # here reflects the post-cleanup state. For pre-commit-6 databases,
+    # the drop happens via the cleanup block; for fresh databases,
+    # the table is created with the new schema directly.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL DEFAULT '',
-            parts_json TEXT,
-            tool_call_id TEXT,
             created_at REAL NOT NULL,
             metadata_json TEXT,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -103,7 +107,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_messages_session_created "
         "ON messages(session_id, created_at)"
     )
-    _add_column(conn, "messages", "tool_call_id", "TEXT")
 
     # Per-session monotonic sequence number (Level 1, opencode-aligned).
     # Default 0 keeps existing rows valid; backfill script assigns real
@@ -158,6 +161,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_message_parts_session_seq "
         "ON message_parts(session_id, seq)"
     )
+
+    # ── Level 2 / Phase 2 commit 6 cleanup ────────────────────────────
+    # After commit 5 confirmed the read path uses message_parts, drop:
+    # 1. All role=tool rows (data consolidated into parent tool_call.result)
+    # 2. parts_json column (now redundant with message_parts.data_json)
+    # 3. tool_call_id column (now redundant — was a 1:1 with tool messages)
+    #
+    # All three steps are idempotent (no-op on already-clean state).
+    # The migration script (scripts/migrate_role_tool_to_assistant.py) must
+    # have been run BEFORE this code on existing DBs, otherwise the 146
+    # result-bearing tool results are lost.
+    conn.execute("DELETE FROM messages WHERE role = 'tool'")
+    if _has_column(conn, "messages", "tool_call_id"):
+        _drop_column(conn, "messages", "tool_call_id")
+    if _has_column(conn, "messages", "parts_json"):
+        _drop_column(conn, "messages", "parts_json")
 
     # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
     # Use nullable column first, then UPDATE existing rows, to avoid NOT NULL failure
@@ -289,6 +308,99 @@ def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) ->
         pass
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """True if the given table has the given column."""
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(r[1] == column for r in rows)
+
+
+def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
+    """Drop a column from a table.
+
+    SQLite has no DROP COLUMN directly until 3.35.0. For broad
+    compatibility we use the 12-step "rename-copy-drop" recipe:
+    1. Create new_<table> with desired schema (no dropped column)
+    2. Copy data from old → new
+    3. Drop old table
+    4. Rename new → old
+    5. Recreate indexes, triggers, foreign keys
+
+    This is heavy but correct on any SQLite version.
+    """
+    if not _has_column(conn, table, column):
+        return  # already dropped
+
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    keep_cols = [r[1] for r in rows if r[1] != column]
+    keep_cols_csv = ",".join(keep_cols)
+
+    new_table = f"_new_{table}"
+    # Build CREATE TABLE statement from existing schema
+    schema_rows = conn.execute(
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchall()
+    if not schema_rows:
+        return
+    original_sql = schema_rows[0][0]
+
+    # Extract the actual CREATE TABLE line (may be quoted or unquoted).
+    import re
+    create_match = re.match(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\"?[\w]+\"?)",
+        original_sql,
+        re.IGNORECASE,
+    )
+    if not create_match:
+        return
+    table_ref = create_match.group(1)
+    quoted = table_ref.startswith('"') and table_ref.endswith('"')
+
+    # Strip the column from the original CREATE TABLE
+    col_pattern = re.compile(
+        rf"\b{re.escape(column)}\b\s+[^,)\n]+,?\s*",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    new_sql = col_pattern.sub("", original_sql, count=1)
+    # If we left a trailing comma, remove it
+    new_sql = re.sub(r",\s*\)", ")", new_sql)
+    # Build the new CREATE TABLE with the new table name, preserving quoting
+    if quoted:
+        new_table_ref = f'"{new_table}"'
+    else:
+        new_table_ref = new_table
+    new_sql = re.sub(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?[\w]+\"?",
+        f"CREATE TABLE {new_table_ref}",
+        new_sql,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+    conn.execute(f"DROP TABLE IF EXISTS {new_table}")
+    conn.execute(new_sql)
+    conn.execute(
+        f"INSERT INTO {new_table} ({keep_cols_csv}) SELECT {keep_cols_csv} FROM {table}"
+    )
+    conn.execute(f"DROP TABLE {table}")
+    conn.execute(f"ALTER TABLE {new_table} RENAME TO {table}")
+
+    # Recreate indexes that referenced the dropped column
+    idx_rows = conn.execute(
+        f"SELECT name, sql FROM sqlite_master "
+        f"WHERE type='index' AND tbl_name='{table}' AND sql LIKE '%{column}%'"
+    ).fetchall()
+    for name, sql in idx_rows:
+        try:
+            conn.execute(f"DROP INDEX IF EXISTS {name}")
+        except sqlite3.OperationalError:
+            pass
+
+    # Note: triggers and FKs that reference the dropped column will
+    # be lost in the rebuild. For our case (parts_json, tool_call_id)
+    # neither is referenced by any trigger, so we're safe.
+
+
 def _migrate_text_part_ids(conn: sqlite3.Connection) -> None:
     """Assign deterministic ids to text parts missing one (text-part-routing).
 
@@ -300,7 +412,13 @@ def _migrate_text_part_ids(conn: sqlite3.Connection) -> None:
     to any text part without an id. Idempotent: parts that already have an
     id are left untouched. Failures are logged and skipped so a single
     corrupt row doesn't abort the whole migration.
+
+    Level 2 / Phase 2 commit 6: parts_json column was dropped. This
+    migration is a no-op (no rows to update) on post-migration DBs. We
+    guard the SELECT with a column-existence check to avoid OperationalError.
     """
+    if not _has_column(conn, "messages", "parts_json"):
+        return  # post-migration DB; nothing to do
     rows = conn.execute(
         "SELECT id, parts_json FROM messages WHERE parts_json IS NOT NULL"
     ).fetchall()
@@ -423,9 +541,9 @@ def _row_to_message(
        rows and test fixtures)
     """
     if parts is None:
-        # Fallback: legacy parts_json column
+        # Fallback: legacy parts_json column (Level 2 pre-migration)
         parts = []
-        if row["parts_json"]:
+        if "parts_json" in row.keys() and row["parts_json"]:
             try:
                 parsed = json.loads(row["parts_json"])
                 parts = parsed if isinstance(parsed, list) else []
@@ -498,11 +616,31 @@ def persist_message(
         if not row:
             logger.warning("[DB] persist_message: session %s not found", session_id)
             return msg_id
-        conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json, message_type, seq or 0),
+
+        # Level 2 / Phase 2 commit 6: parts_json and tool_call_id
+        # columns were dropped. Build the INSERT dynamically based on
+        # which columns are present, so this function works on both
+        # pre- and post-migration DBs during the cleanup window.
+        has_parts_json = _has_column(conn, "messages", "parts_json")
+        has_tool_call_id = _has_column(conn, "messages", "tool_call_id")
+
+        cols = ["id", "session_id", "role", "content", "created_at", "metadata_json", "message_type", "seq"]
+        placeholders = ["?", "?", "?", "?", "?", "?", "?", "?"]
+        vals: list[Any] = [msg_id, session_id, role, content, ts, metadata_json, message_type, seq or 0]
+        if has_parts_json:
+            cols.append("parts_json")
+            placeholders.append("?")
+            vals.append(parts_json)
+        if has_tool_call_id:
+            cols.append("tool_call_id")
+            placeholders.append("?")
+            vals.append(tool_call_id)
+
+        sql = (
+            f"INSERT INTO messages ({','.join(cols)}) "
+            f"VALUES ({','.join(placeholders)})"
         )
+        conn.execute(sql, vals)
         logger.debug("[DB] persisted id=%s", msg_id)
 
         # Dual-write: also insert parts into message_parts (Level 2, Phase 2
