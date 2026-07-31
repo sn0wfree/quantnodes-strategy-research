@@ -381,6 +381,7 @@ def _row_to_message(row: sqlite3.Row) -> dict:
         "parts": parts,
         "tool_call_id": row["tool_call_id"] if "tool_call_id" in row.keys() else None,
         "created_at": row["created_at"],
+        "seq": row["seq"] if "seq" in row.keys() else 0,
         "metadata": metadata,
         "message_type": row["message_type"] if "message_type" in row.keys() else "assistant",
     }
@@ -401,6 +402,7 @@ def persist_message(
     created_at: Optional[float] = None,
     tool_call_id: Optional[str] = None,
     message_type: str = "assistant",
+    seq: int | None = None,
 ) -> str:
     """Insert a message and bump session counters. Returns message id.
 
@@ -409,9 +411,12 @@ def persist_message(
     Args:
         message_type: One of 'user' | 'assistant' | 'tool' | 'compaction' | 'error'.
             Defaults to 'assistant' for backward compat.
+        seq: Per-session monotonic sequence number (Level 1, opencode-aligned).
+            If None, falls back to 0 (the column default). Callers SHOULD
+            pass an explicit seq via the SeqGenerator for new messages.
     """
-    logger.debug("[DB] persist_message session=%s role=%s type=%s content_len=%d",
-                session_id, role, message_type, len(content))
+    logger.debug("[DB] persist_message session=%s role=%s type=%s content_len=%d seq=%s",
+                session_id, role, message_type, len(content), seq)
     msg_id = message_id or str(uuid.uuid4())
     ts = created_at or time.time()
     parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
@@ -423,9 +428,9 @@ def persist_message(
             logger.warning("[DB] persist_message: session %s not found", session_id)
             return msg_id
         conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json, message_type),
+            "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type, seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json, message_type, seq or 0),
         )
         logger.debug("[DB] persisted id=%s", msg_id)
         conn.execute(
@@ -627,6 +632,11 @@ async def list_messages(
 
     Optional ``before`` cursor (unix ts) for pagination. ``has_more=True`` if
     there are additional older messages beyond ``limit``.
+
+    Order key: ``seq`` (Level 1, opencode-aligned). Per-session monotonic
+    counter that's invariant under clock skew. ``before`` continues to
+    accept a unix ts; we map it to the maximum seq seen before that ts
+    via a subquery for cursor-pagination compatibility.
     """
     conn = _get_db()
     row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -635,12 +645,19 @@ async def list_messages(
     params: list[Any] = [session_id]
     cursor_sql = ""
     if before is not None:
-        cursor_sql = "AND created_at < ?"
-        params.append(before)
+        # Convert unix-ts cursor into a seq cursor by finding the
+        # smallest seq with created_at > before. This preserves the
+        # external API while using seq internally for ordering.
+        cursor_sql = (
+            "AND seq > COALESCE("
+            "(SELECT MIN(seq) - 1 FROM messages "
+            "WHERE session_id = ? AND created_at >= ?), 0)"
+        )
+        params.extend([session_id, before])
     params.append(limit + 1)  # +1 to detect has_more
     rows = conn.execute(
         f"SELECT * FROM messages WHERE session_id = ? {cursor_sql} "
-        "ORDER BY created_at ASC LIMIT ?",
+        "ORDER BY seq ASC LIMIT ?",
         params,
     ).fetchall()
     has_more = len(rows) > limit

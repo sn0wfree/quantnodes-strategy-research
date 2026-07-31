@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from strategy_research.core.agent.compact import CompactConfig, compact_messages
 from strategy_research.core.llm import LLMConfig
+from strategy_research.core.seq_generator import get_default_generator
 
 from .events import EventBus
 from .models import Attempt, AttemptStatus, Message
@@ -149,13 +150,17 @@ class SessionService:
         # ── 1. Persist user message ────────────────────────────────────
         # Capture created_at from a single authoritative clock (server
         # time.time()) for correct cross-exchange message ordering.
+        # Also assign a per-session monotonic seq (Level 1, opencode-aligned)
+        # so LLM history projection has a stable order key.
         import time
         _ts = time.time()
+        _seq = get_default_generator().next(session_id)
         user_msg_id = self.store.append_message(
             Message(session_id=session_id, role="user", content=content),
             created_at=_ts,
+            seq=_seq,
         )
-        logger.info("[MSG] user_msg_persisted id=%s", user_msg_id)
+        logger.info("[MSG] user_msg_persisted id=%s seq=%s", user_msg_id, _seq)
 
         # ── 2. Auto-title on first user message ───────────────────────
         try:
@@ -511,6 +516,7 @@ class SessionService:
                     ),
                     message_id=attempt.message_id,
                     parts=None,
+                    seq=get_default_generator().next(session_id),
                 )
                 # Push assistant_message SSE so frontend displays the
                 # error bubble immediately (without waiting for reload).
@@ -544,6 +550,7 @@ class SessionService:
                     ),
                     message_id=attempt.message_id,
                     parts=accumulated_parts or None,
+                    seq=get_default_generator().next(session_id),
                 )
 
             # 4. Emit attempt.completed / attempt.failed
@@ -662,6 +669,7 @@ class SessionService:
                                 tool_call_id=tc_id,
                                 metadata={"attempt_id": attempt.attempt_id},
                             ),
+                            seq=get_default_generator().next(attempt.session_id),
                         )
                     except Exception as exc:
                         logger.warning("persist tool result failed: %s", exc)
@@ -948,6 +956,7 @@ class SessionService:
                         ),
                         message_id=mid,
                         parts=parts,
+                        seq=get_default_generator().next(session_id),
                     )
             except Exception:
                 logger.exception("failed to persist compacted history")

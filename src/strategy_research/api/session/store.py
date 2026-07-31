@@ -58,6 +58,7 @@ class SessionStore:
         parts: Optional[list[dict[str, Any]]] = None,
         created_at: Optional[float] = None,
         message_type: Optional[str] = None,
+        seq: Optional[int] = None,
     ) -> str:
         """Append a message to the session.
 
@@ -70,6 +71,9 @@ class SessionStore:
                 time.time().
             message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
                 If None, uses message.role (user/assistant/tool).
+            seq: Per-session monotonic sequence number (Level 1, opencode-aligned).
+                If None, the column default (0) is used. Callers SHOULD pass
+                an explicit seq from SeqGenerator for new messages.
 
         Returns:
             The message_id used.
@@ -78,8 +82,8 @@ class SessionStore:
         if message_type is None:
             message_type = message.role
 
-        logger.debug("[STORE] append_message session=%s role=%s type=%s content_len=%d",
-                    message.session_id, message.role, message_type, len(message.content))
+        logger.debug("[STORE] append_message session=%s role=%s type=%s content_len=%d seq=%s",
+                    message.session_id, message.role, message_type, len(message.content), seq)
 
         # Lazy import to avoid circular dependency
         from ..routers.web_session import persist_message
@@ -95,6 +99,7 @@ class SessionStore:
             created_at=created_at,
             tool_call_id=message.tool_call_id,
             message_type=message_type,
+            seq=seq,
         )
         logger.debug("[STORE] persisted id=%s", msg_id)
         return msg_id
@@ -104,7 +109,13 @@ class SessionStore:
         session_id: str,
         limit: int = 100,
     ) -> list[Message]:
-        """Read all messages for a session (chronological order)."""
+        """Read all messages for a session (chronological order).
+
+        Order key: `seq` (Level 1, opencode-aligned). `seq` is a
+        per-session monotonic counter that eliminates clock-skew
+        ambiguity. Falls back to `created_at` if seq is unavailable
+        (defensive — should not happen after backfill).
+        """
         logger.debug("[STORE] get_messages session=%s limit=%d", session_id, limit)
         from ..routers.web_session import _get_db, _row_to_message
 
@@ -112,7 +123,7 @@ class SessionStore:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM messages WHERE session_id = ? "
-                "ORDER BY created_at ASC LIMIT ?",
+                "ORDER BY seq ASC, created_at ASC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
         out: list[Message] = []
@@ -131,6 +142,7 @@ class SessionStore:
                         "_parts": m.get("parts", []),
                     },
                     message_type=m.get("message_type", "assistant"),
+                    seq=m.get("seq", 0),
                 )
             )
         logger.debug("[STORE] loaded %d messages, types: %s", len(out),

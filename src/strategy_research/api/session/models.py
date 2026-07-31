@@ -93,6 +93,9 @@ class Message:
         linked_attempt_id: Related Attempt ID, if any.
         metadata: Additional metadata.
         message_type: Message type for classification (user/assistant/tool/compaction/error).
+        seq: Per-session monotonic sequence number (Level 1, opencode-aligned).
+            0 if not yet assigned (legacy data). Used as the authoritative
+            ordering key for LLM history projection.
     """
 
     message_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
@@ -104,6 +107,7 @@ class Message:
     linked_attempt_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     message_type: str = "user"  # user / assistant / tool / compaction / error
+    seq: int = 0  # 0 means unassigned (legacy); see SeqGenerator
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the message to a dictionary.
