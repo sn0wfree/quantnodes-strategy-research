@@ -146,6 +146,26 @@ class CompactionMessage:
             "reason": self.reason,
         }]
 
+    def to_message_list(self) -> list[dict]:
+        """Serialize for compact.ended event (event-sourcing path).
+
+        Returns a list of compressed message dicts in the format the
+        projector expects for compact.ended event:
+        [
+            {"role": "system", "content": summary, "id": "compact-<id>"},
+        ]
+
+        The compaction is represented as a single system/compaction
+        message carrying the summary. The `recent` context is included
+        in the content for LLM history projection (to_llm_message uses
+        it separately).
+        """
+        return [{
+            "role": "system",
+            "content": self.summary,
+            "id": f"compact-{self.id[:12]}",
+        }]
+
     def to_db_kwargs(self) -> dict:
         """Return kwargs for INSERT/UPDATE on `messages` table."""
         return {

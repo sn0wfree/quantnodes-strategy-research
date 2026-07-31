@@ -694,6 +694,7 @@ class SessionService:
             system_prompt=system_prompt,
             allowed_tools=None,
             compact_config=cfg.compact_config,
+            event_bus=self.event_bus,
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).

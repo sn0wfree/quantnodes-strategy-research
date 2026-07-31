@@ -121,6 +121,7 @@ class AgentLoop:
         on_event: Any | None = None,
         stream_mode: bool = True,
         compact_config: CompactConfig | None = None,
+        event_bus: Any | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -138,6 +139,7 @@ class AgentLoop:
         self._session_manager = session_manager
         self._on_event = on_event
         self._stream_mode = stream_mode
+        self._event_bus = event_bus
         self.cc = compact_config or config.compact_config or CompactConfig()
         self._previous_summary: str | None = None
 
@@ -1258,16 +1260,16 @@ class AgentLoop:
     ) -> None:
         """Persist a CompactionMessage event for the L4 layer.
 
-        opencode-aligned: stores summary in a dedicated message
-        with message_type='compaction'. The next LLM call will load
-        it via the message store and project via to_llm_message().
+        B6: Event-sourced path. Emits a compact.ended event via the
+        injected EventBusV2. The projector handles materialization
+        to messages + message_parts tables.
+
+        Falls back to direct persist_message if no event_bus is
+        injected (for legacy code paths that haven't migrated yet).
 
         Args:
             summary_text: LLM-generated summary (non-empty).
-            recent_text: Pre-serialized recent messages from compact
-                (may be empty). The compact module is the single
-                source of truth for "what's recent" — this method
-                never recomputes it.
+            recent_text: Pre-serialized recent messages from compact.
 
         Raises:
             Exception: propagates critical errors (not silent fail).
@@ -1283,7 +1285,6 @@ class AgentLoop:
 
         try:
             from .compaction_message import new_compaction_message
-            from ...api.routers.web_session import persist_message
 
             comp = new_compaction_message(
                 session_id=session_id,
@@ -1292,18 +1293,47 @@ class AgentLoop:
                 reason="auto",
             )
 
-            persist_message(
-                session_id=comp.session_id,
-                role="assistant",  # DB compat
-                content=comp.summary,
-                parts=comp.to_parts(),
-                message_id=comp.id,
-                message_type="compaction",
-            )
-            logger.info(
-                "compaction event persisted: %s (summary=%d chars, recent=%d chars)",
-                comp.id, len(comp.summary), len(comp.recent),
-            )
+            if self._event_bus is not None:
+                # B6: Event-sourced path. Emit compact.ended event.
+                # Note: L4 auto-compaction is a "compaction happened"
+                # marker — it does NOT replace existing history. So
+                # we do NOT include the 'messages' field (which the
+                # projector interprets as a replacement set used by
+                # /compact manual command).
+                # The projector creates a single compaction marker
+                # message from the summary.
+                self._event_bus.emit(
+                    session_id,
+                    "compact.ended",
+                    {
+                        "summary": comp.summary,
+                        "reason": "auto",
+                        "compaction_id": comp.id,
+                        "metadata": comp.metadata,
+                    },
+                )
+                logger.info(
+                    "compaction event emitted: %s (summary=%d chars, recent=%d chars)",
+                    comp.id, len(comp.summary), len(comp.recent),
+                )
+            else:
+                # Legacy fallback: direct DB write. Used by tests
+                # and TUI/CLI paths that don't have an EventBusV2
+                # wired in. The webui path always provides event_bus.
+                from ...api.routers.web_session import persist_message
+
+                persist_message(
+                    session_id=comp.session_id,
+                    role="assistant",  # DB compat
+                    content=comp.summary,
+                    parts=comp.to_parts(),
+                    message_id=comp.id,
+                    message_type="compaction",
+                )
+                logger.info(
+                    "compaction event persisted (legacy): %s (summary=%d chars, recent=%d chars)",
+                    comp.id, len(comp.summary), len(comp.recent),
+                )
         except Exception:
             # Critical: propagate with full traceback. The caller
             # (compact_messages path) will see the error and roll
