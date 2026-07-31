@@ -360,8 +360,10 @@ def _row_to_message(row: sqlite3.Row) -> dict:
             metadata = None
     # For user messages without explicit parts, build a single text part
     # from content so the frontend doesn't need to handle null parts.
-    if not parts and row["role"] == "user" and row["content"]:
-        parts = [{"type": "text", "text": row["content"]}]
+    # Same for error messages (friendly text in content → text part).
+    if not parts and row["content"]:
+        if row["role"] == "user" or row["message_type"] == "error":
+            parts = [{"type": "text", "text": row["content"]}]
     return {
         "id": row["id"],
         "session_id": row["session_id"],
@@ -396,7 +398,7 @@ def persist_message(
     Safe to call from background tasks — does not raise on failure (logs only).
 
     Args:
-        message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
+        message_type: One of 'user' | 'assistant' | 'tool' | 'compaction' | 'error'.
             Defaults to 'assistant' for backward compat.
     """
     logger.debug("[DB] persist_message session=%s role=%s type=%s content_len=%d",

@@ -455,40 +455,65 @@ class SessionService:
             # 3. Update Attempt and persist assistant message
             answer = result_dict.get("content") or ""
             status = result_dict.get("status", "empty")
+            finished_reason = result_dict.get("finished_reason", "")
+            agent_error = result_dict.get("error")
+            is_error = finished_reason == "error" or status == "failed"
+
             if status == "success":
                 attempt.mark_completed(summary=answer)
-            elif status == "failed":
-                attempt.mark_failed(error=result_dict.get("reason", "unknown"))
+            elif is_error:
+                error_msg = agent_error or result_dict.get("reason", "unknown error")
+                attempt.mark_failed(error=error_msg)
             else:
-                # "empty" — agent ran but produced no output (e.g. LLM error
-                # was swallowed by AgentLoop and emitted via SSE). Don't mark
-                # as failed; the error event is already in the SSE stream.
+                # "empty" — agent ran but produced no output
                 attempt.mark_completed(summary="")
             attempt.run_dir = result_dict.get("run_dir")
             attempt.metrics = result_dict.get("metrics")
             attempt.message_id = result_dict.get("message_id") or attempt.message_id
             self.store.update_attempt(attempt)
 
-            # Persist assistant message with the Attempt's message_id
+            # Persist message with the Attempt's message_id
             # (this is the SAME id SSE events carry, so they can find it).
             assistant_content = answer or "".join(
                 p.get("text", "") for p in accumulated_parts if p.get("type") == "text"
             )
-            self.store.append_message(
-                Message(
-                    session_id=session_id,
-                    role="assistant",
-                    content=assistant_content,
-                    linked_attempt_id=attempt.attempt_id,
-                    metadata={
-                        "run_id": Path(attempt.run_dir).name if attempt.run_dir else None,
-                        "status": attempt.status.value,
-                        "metrics": attempt.metrics,
-                    },
-                ),
-                message_id=attempt.message_id,
-                parts=accumulated_parts or None,
-            )
+
+            if is_error:
+                # Error message: friendly text + detail in metadata
+                friendly = _friendly_error_text(agent_error or result_dict.get("reason", ""))
+                detail = agent_error or result_dict.get("reason", "unknown error")
+                self.store.append_message(
+                    Message(
+                        session_id=session_id,
+                        role="assistant",
+                        content=friendly,
+                        linked_attempt_id=attempt.attempt_id,
+                        metadata={
+                            "status": "error",
+                            "details": detail,
+                            "metrics": attempt.metrics,
+                        },
+                        message_type="error",
+                    ),
+                    message_id=attempt.message_id,
+                    parts=None,
+                )
+            else:
+                self.store.append_message(
+                    Message(
+                        session_id=session_id,
+                        role="assistant",
+                        content=assistant_content,
+                        linked_attempt_id=attempt.attempt_id,
+                        metadata={
+                            "run_id": Path(attempt.run_dir).name if attempt.run_dir else None,
+                            "status": attempt.status.value,
+                            "metrics": attempt.metrics,
+                        },
+                    ),
+                    message_id=attempt.message_id,
+                    parts=accumulated_parts or None,
+                )
 
             # 4. Emit attempt.completed / attempt.failed
             self.event_bus.emit(
@@ -681,6 +706,7 @@ class SessionService:
             "iterations": loop_result.iterations,
             "tool_calls_made": loop_result.tool_calls_made,
             "finished_reason": loop_result.finished_reason,
+            "error": loop_result.error,
             "metrics": {
                 "input_tokens": usage_state["input"],
                 "output_tokens": usage_state["output"],
@@ -1080,6 +1106,22 @@ def _accumulate_part(
 
 def _utc_now_iso() -> str:
     return datetime.utcnow().isoformat()
+
+
+def _friendly_error_text(error_detail: str) -> str:
+    """Map raw error detail to a user-friendly short message."""
+    detail = (error_detail or "").lower()
+    if "rate" in detail or "429" in detail or "too many" in detail:
+        return "⚠️ 模型请求频率过高，请稍后再试"
+    if "timeout" in detail or "timed out" in detail:
+        return "⚠️ 模型请求超时，请稍后再试"
+    if "auth" in detail or "401" in detail or "403" in detail:
+        return "⚠️ 模型鉴权失败，请检查 API Key 配置"
+    if "quota" in detail or "balance" in detail:
+        return "⚠️ 模型配额不足，请检查账户余额"
+    if "server" in detail or "500" in detail or "502" in detail or "503" in detail:
+        return "⚠️ 模型服务暂时不可用，请稍后再试"
+    return "⚠️ 模型请求失败，请稍后再试"
 
 
 __all__ = ["SessionService", "MAX_HISTORY_CHARS"]

@@ -9,7 +9,7 @@ enableMapSet()
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'compaction'
 
-export type MessageType = 'user' | 'assistant' | 'tool' | 'compaction'
+export type MessageType = 'user' | 'assistant' | 'tool' | 'compaction' | 'error'
 
 export interface TextPart {
   type: 'text'
@@ -77,6 +77,8 @@ export interface Message {
     queue_position?: number
     queue_length?: number
     queue_status?: 'processing' | 'queued'
+    status?: string
+    details?: string
   }
 }
 

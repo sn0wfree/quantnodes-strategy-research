@@ -95,6 +95,40 @@ export function MessageList() {
           // cards, polluting the chat view.
           if (message.role === 'tool') return null
 
+          // Error messages: show as warning bubble with collapsible detail
+          if (message.message_type === 'error') {
+            return (
+              <div className="px-4 py-3 transition-all">
+                <div className="flex gap-3">
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                    ⚠
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center gap-2 text-xs">
+                      <span className="font-medium text-amber-700">请求失败</span>
+                      <span className="text-slate-500">{formatTime(message.created_at)}</span>
+                    </div>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      {message.parts?.map((part, i) => (
+                        <span key={i}>{part.type === 'text' ? part.text : ''}</span>
+                      ))}
+                      {message.metadata?.details && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs text-amber-700 hover:text-amber-800">
+                            查看详情
+                          </summary>
+                          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-amber-100/60 p-2 text-xs text-amber-800">
+                            {message.metadata.details}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
           // Compaction messages: show as historical summary card
           if (message.message_type === 'compaction') {
             return (

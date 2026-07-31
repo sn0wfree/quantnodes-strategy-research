@@ -92,7 +92,7 @@ class Message:
         created_at: Creation time in ISO format.
         linked_attempt_id: Related Attempt ID, if any.
         metadata: Additional metadata.
-        message_type: Message type for classification (user/assistant/tool/compaction).
+        message_type: Message type for classification (user/assistant/tool/compaction/error).
     """
 
     message_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
@@ -103,7 +103,7 @@ class Message:
     created_at: str = field(default_factory=_utc_now_iso)
     linked_attempt_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    message_type: str = "user"  # user / assistant / tool / compaction
+    message_type: str = "user"  # user / assistant / tool / compaction / error
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the message to a dictionary.
