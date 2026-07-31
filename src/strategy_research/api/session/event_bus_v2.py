@@ -97,7 +97,7 @@ class EventBusV2:
         self._forward(event)
 
         # Sink 3 (optional): flush projector → messages table
-        if self._flush_to_messages:
+        if self._flush_to_messages and self._should_flush(event.type):
             self._flush_projection(event.aggregate_id)
 
     def emit(
@@ -137,7 +137,8 @@ class EventBusV2:
         # Sink 2: forward to legacy EventBus (live SSE)
         result = self._forward(event)
         # Sink 3 (optional): flush projector → messages table
-        if self._flush_to_messages:
+        # Only flush on message-boundary events for performance.
+        if self._flush_to_messages and self._should_flush(event.type):
             self._flush_projection(event.aggregate_id)
         return result
 
@@ -172,10 +173,12 @@ class EventBusV2:
 
         # Flush if enabled (only once per session in the batch)
         if self._flush_to_messages and events:
-            # Get unique session IDs from the batch
-            session_ids = list({e.aggregate_id for e in events})
-            for sid in session_ids:
-                self._flush_projection(sid)
+            # Only flush if at least one event is a boundary event
+            has_boundary = any(self._should_flush(e.type) for e in events)
+            if has_boundary:
+                session_ids = list({e.aggregate_id for e in events})
+                for sid in session_ids:
+                    self._flush_projection(sid)
 
     def _persist(self, event: EventV2) -> None:
         """INSERT event into event_log table.
@@ -281,6 +284,33 @@ class EventBusV2:
                 "EventBusV2: flush failed for session %s: %s",
                 session_id, exc,
             )
+
+    def _should_flush(self, event_type: str) -> bool:
+        """Determine if an event should trigger a projector flush.
+
+        For performance, we only flush on message-boundary events
+        (when a new message is created or finalized), not on every
+        streaming delta (text_delta, tool_progress, etc.).
+
+        Why this is safe:
+        - event_log always has all events (source of truth)
+        - messages table is a materialized view that can be stale
+          between boundaries (acceptable — it catches up on next flush)
+        - If the process crashes between flushes, replaying event_log
+          and re-flushing restores full state
+
+        Events that trigger flush:
+        - message_received: user message created
+        - assistant_message: assistant message finalized
+        - compact / compact.ended: compaction message created
+        """
+        boundary_types = {
+            "message_received",
+            "assistant_message",
+            "compact",
+            "compact.ended",
+        }
+        return event_type in boundary_types
 
     # ── Replay support ──────────────────────────────────────────────
     #
