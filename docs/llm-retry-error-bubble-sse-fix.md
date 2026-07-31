@@ -172,3 +172,38 @@
 Phase 1 → Phase 2（后端→前端）→ Phase 3（后端→前端）→ Phase 4
 
 每阶段通过对应测试后再进入下一阶段。
+
+---
+
+## 后续发现（2026-07-31 追加）
+
+部署后用户实际测试发现 session `700dc7f7-95de-45e0-b568-d713fe05065f` 仍然返回 400 错误，但**不是 429 而是 400**：
+```
+bad_request_error: invalid params, chat content is empty (2013)
+```
+
+### 真实根因（与 429 不同）
+
+虽然上述修复让 429 重试工作正常（截图显示错误气泡 + 折叠详情），但用户累积了 100 条消息后，触发了**新的 400 bug**：
+
+1. 会话累积 100 条消息（多次 L4 压缩）
+2. 用户发"你好" → history 73 条（含 5 次旧 compaction）
+3. Agent loop: `messages = [system] + history + [user("你好")]`
+4. L4 触发：`_split_into_turns` 按 assistant 角色切分
+5. 由于最新消息"你好"无 assistant 回复 → `len(turns) <= 2`
+6. `tail_turns_list = []` → `recent = []`（空）
+7. L4 把 74 条全部进 head，生成 3200 字符 summary
+8. 返回 `new_messages = [system]`（**只剩 system 消息**）
+9. 后续 LLM 调用发 `[system]` → MiniMax 400 `chat content is empty (2013)`
+
+### 后续修复
+
+详见 `docs/compaction-history-filter.md`，采用 opencode 方案：
+- **只保留最近 1 个 compaction**进 LLM history（5 个 → 1 个）
+- **L4 防御**：检查 new_messages 必须含 user role
+- **MiniMax 2013 友好提示**："会话内容已压缩为空，请发送新消息或新建会话"
+- **MiniMax 适配器**：2013 → `LLMConfigError`（避免 stream→achat 回退）
+- **Kill switch + 监控**：admin API + 内存计数器
+
+**结论**：429 重试 + 错误气泡正常工作（Phase 1-4 修复成功），但 400 错误暴露出历史压缩的**累积问题**——通过 compaction filter 修复。
+
