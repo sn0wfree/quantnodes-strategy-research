@@ -1,14 +1,19 @@
-"""Context compaction engine — 3-layer progressive compression.
+"""Context compaction engine — opencode-aligned L4 with safety check.
 
-Layers (relative to threshold_tokens):
-    L1 Smart Microcompact (50%): truncate oversized tool outputs
-    L4 LLM Summarize (80%): structured Markdown summary via LLM
-    L3 Hard Truncate (90%): keep only system + last N messages
+Layer (relative to threshold_tokens):
+    L4 LLM Summarize (95%): structured Markdown summary via LLM
 
 Design inspired by opencode's compaction architecture:
     - Structured summary template
     - Token budget selection (preserve_recent_tokens + tail_turns)
     - Incremental summary update
+    - Single L4 layer (matches opencode `packages/core/src/session/compaction.ts`)
+
+Phase A simplification (chore):
+    - Removed L1 (smart microcompact) and L3 (hard truncate)
+    - Kept deprecated fields in CompactConfig for backward compat
+    - Added `simplified_to_l4_only` flag to opt-in to legacy 3-layer behavior
+      (read-only; legacy code path removed; flag is controller-only)
 """
 
 from __future__ import annotations
@@ -123,11 +128,17 @@ class CompactConfig:
     Configurable via ``~/.quantnodes/llm.json`` ``"compact"`` section.
 
     All defaults follow the opencode approach (packages/core/src/session/
-    compaction.ts) where reasonable. The 3-layer system (L1/L4/L3) is
-    our extension; opencode only has L4.
+    compaction.ts). The current implementation is L4-only (matches opencode).
     """
 
     enabled: bool = True
+
+    # ── Phase A simplification toggle ─────────────────────────
+    # When True (default), use opencode-aligned L4-only 2-step flow.
+    # When False, fall back to legacy 3-layer (L1+L4+L3) flow.
+    # (Phase A: legacy code path removed; this flag is reserved for
+    # future use. Currently always True.)
+    simplified_to_l4_only: bool = True
 
     # ── Trigger ──────────────────────────────────────────────────
     # None = derive from model context (opencode-style):
@@ -136,19 +147,26 @@ class CompactConfig:
     threshold_tokens: int | None = None
     # Opencode DEFAULT_BUFFER: leave this much room for the response
     compaction_buffer_tokens: int = 20_000
+    # Fallback trigger when model context is unknown
+    fallback_threshold_tokens: int = 8_000
 
     # ── Layer ratios (relative to threshold_tokens) ──────────────
-    microcompact_ratio: float = 0.9        # L1: 90%  (was 0.5)
+    # DEPRECATED since Phase A: L1/L3 ratios are no longer used.
+    # Kept for backward compat with existing llm.json files.
+    # Ignored at runtime; only llm_summarize_ratio is used.
+    microcompact_ratio: float = 0.9        # DEPRECATED: was L1 ratio (0.9)
     llm_summarize_ratio: float = 0.95      # L4: 95%  (was 0.8)
-    hard_truncate_ratio: float = 0.99      # L3: 99%  (was 0.9)
-    overflow_ratio: float = 0.99          # overflow detection (was 0.95)
+    hard_truncate_ratio: float = 0.99      # DEPRECATED: was L3 ratio (0.99)
+    overflow_ratio: float = 0.99          # DEPRECATED: was overflow detection (0.99)
 
-    # ── L1: Smart Microcompact ───────────────────────────────────
-    # Opencode: TOOL_OUTPUT_MAX_CHARS = 2_000 (chars, not tokens).
-    # Renamed for clarity: previous _limit was ambiguous.
-    microcompact_tool_result_chars: int = 2_000
-    tool_truncate_chars: dict[str, int] = field(default_factory=lambda: dict(_DEFAULT_TOOL_LIMITS))
-    collapse_keep_recent: int = 4         # protect last N tool outputs
+    # ── L1: Smart Microcompact (DEPRECATED) ─────────────────────
+    # DEPRECATED since Phase A: L1 layer removed.
+    # Fields kept for backward compat with existing llm.json files.
+    # Ignored at runtime.
+    microcompact_tool_result_chars: int = 2_000  # DEPRECATED
+    tool_truncate_chars: dict[str, int] = field(default_factory=lambda: dict(_DEFAULT_TOOL_LIMITS))  # DEPRECATED
+    collapse_keep_recent: int = 4         # DEPRECATED: was L3 keep_recent
+    serialize_tool_max_chars: int = 2_000  # NEW: used by _serialize_message for L4 input
 
     # ── L4: LLM Summarize ─────────────────────────────────────────
     # Opencode formula: actual max_tokens = min(model_max_output, this)
@@ -158,6 +176,12 @@ class CompactConfig:
     summary_output_tokens: int = 4_096          # CAP, see opencode line 183
     enable_incremental_summary: bool = True
     summary_template: str | None = None        # None = DEFAULT_SUMMARY_TEMPLATE
+    # Minimum number of messages required from L4 (safety check).
+    # If L4 produces fewer, the compaction is aborted to avoid
+    # provider errors like MiniMax 2013 "chat content is empty".
+    l4_min_messages: int = 2
+    # Token estimation: avg chars per token. Used by _estimate_tokens.
+    chars_per_token: float = 3.0
 
     # ── History projection ────────────────────────
     # When True, send ALL compaction messages in history (legacy behavior).
@@ -170,10 +194,8 @@ class CompactConfig:
 
 # ── Token estimation ──────────────────────────────────────────────
 
-_CHARS_PER_TOKEN = 3.0
 
-
-def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
+def _estimate_tokens(messages: list[dict[str, Any]], chars_per_token: float = 3.0) -> int:
     """Rough token count for a list of messages."""
     total_chars = 0
     for msg in messages:
@@ -187,12 +209,12 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
                 total_chars += len(json.dumps(fn.get("arguments", "")))
         if msg.get("role") == "tool":
             total_chars += 100
-    return max(1, int(total_chars / _CHARS_PER_TOKEN))
+    return max(1, int(total_chars / chars_per_token))
 
 
-def _estimate_single_tokens(text: str) -> int:
+def _estimate_single_tokens(text: str, chars_per_token: float = 3.0) -> int:
     """Rough token count for a plain string."""
-    return max(1, int(len(text) / _CHARS_PER_TOKEN))
+    return max(1, int(len(text) / chars_per_token))
 
 
 # ── Message serialization (opencode-style) ───────────────────────
@@ -202,13 +224,13 @@ _THINK_RE = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
 TOOL_OUTPUT_MAX_CHARS = 2000
 
 
-def _serialize_message(msg: dict[str, Any]) -> str:
+def _serialize_message(msg: dict[str, Any], tool_max_chars: int = TOOL_OUTPUT_MAX_CHARS) -> str:
     """Serialize a message for LLM summarization input.
 
     Format aligned with opencode core compaction serialize():
       [User]: ...
       [Assistant]: ... (text content)
-      [Assistant reasoning]: ... (extracted from <think> tags)
+      [Assistant reasoning]: ... (extracted from person thinking tags)
       [Assistant tool call]: name(input)
       [Tool result]: ... (truncated)
       [Tool error]: ...
@@ -226,7 +248,7 @@ def _serialize_message(msg: dict[str, Any]) -> str:
     if role == "assistant":
         parts: list[str] = []
 
-        # Extract <think> blocks as reasoning content
+        # Extract person thinking blocks as reasoning content
         if content:
             think_matches = _THINK_RE.findall(content)
             if think_matches:
@@ -251,13 +273,13 @@ def _serialize_message(msg: dict[str, Any]) -> str:
         return "\n".join(parts)
 
     if role == "tool":
-        truncated = content[:TOOL_OUTPUT_MAX_CHARS] + "\n[truncated]" if len(content) > TOOL_OUTPUT_MAX_CHARS else content
+        truncated = content[:tool_max_chars] + "\n[truncated]" if len(content) > tool_max_chars else content
         # Detect error status
         is_error = False
         if truncated.startswith("{") and '"status"' in truncated[:100]:
             try:
                 import json
-                parsed = json.loads(truncated[:TOOL_OUTPUT_MAX_CHARS])
+                parsed = json.loads(truncated[:tool_max_chars])
                 if isinstance(parsed, dict) and parsed.get("status") == "error":
                     is_error = True
                     error_msg = parsed.get("message") or parsed.get("error") or str(parsed)
@@ -510,10 +532,10 @@ def _llm_summarize_v2(
     # like MiniMax 2013 "chat content is empty". Return None to let
     # the caller skip L4 and keep the original messages.
     new_messages = system_msgs + recent
-    if len(new_messages) < 2:
+    if len(new_messages) < config.l4_min_messages:
         logger.warning(
-            "L4 produced too few messages (len=%d), aborting compaction",
-            len(new_messages),
+            "L4 produced too few messages (len=%d, min=%d), aborting compaction",
+            len(new_messages), config.l4_min_messages,
         )
         _compaction_metrics["l4_aborts"] += 1
         return None
@@ -607,8 +629,8 @@ def _resolve_threshold_tokens(
         trigger = context - max(model_max_output, buffer)
 
     We extend with explicit override: if config.threshold_tokens is
-    set, use it as-is. Otherwise derive. Fall back to 8000 if
-    model context is unknown.
+    set, use it as-is. Otherwise derive. Fall back to
+    ``config.fallback_threshold_tokens`` when model context is unknown.
     """
     if config.threshold_tokens is not None:
         return config.threshold_tokens
@@ -616,9 +638,9 @@ def _resolve_threshold_tokens(
         buffer = config.compaction_buffer_tokens
         output = model_max_output_tokens or buffer
         trigger = model_context_tokens - max(output, buffer)
-        # Guard: trigger must be reasonable (at least 8K)
-        return max(8_000, trigger)
-    return 8_000  # fallback for unknown context
+        # Guard: trigger must be reasonable (at least fallback_threshold_tokens)
+        return max(config.fallback_threshold_tokens, trigger)
+    return config.fallback_threshold_tokens
 
 
 def compact_messages(
