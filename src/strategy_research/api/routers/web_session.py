@@ -99,9 +99,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     _add_column(conn, "messages", "tool_call_id", "TEXT")
 
     # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
-    _add_column(
-        conn, "messages", "message_type",
-        "TEXT NOT NULL DEFAULT 'assistant'",
+    # Use nullable column first, then UPDATE existing rows, to avoid NOT NULL failure
+    _add_column(conn, "messages", "message_type", "TEXT")
+    conn.execute(
+        "UPDATE messages SET message_type = 'assistant' WHERE message_type IS NULL"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_session_type_created "
@@ -278,14 +279,15 @@ def _migrate_text_part_ids(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_message_types(conn: sqlite3.Connection) -> None:
-    """Mark historical [context summary] / Anchored messages as compaction.
+    """Mark historical compaction messages.
 
     Part of the opencode-aligned compaction fix. Old assistant messages
-    with [context summary] prefix or ## Anchored Summary structure
-    are L4-compaction artifacts, NOT regular assistant turns. Without
-    the message_type='compaction' flag, the LLM treats them as
-    previous turns and continues the summary task on the next user
-    message — producing "spontaneous summaries".
+    with [context summary] prefix, ## Anchored Summary structure, or
+    LLM-generated summary format (## Objective...) are L4-compaction
+    artifacts, NOT regular assistant turns. Without the
+    message_type='compaction' flag, the LLM treats them as previous
+    turns and continues the summary task on the next user message —
+    producing "spontaneous summaries".
 
     Idempotent: only updates rows where message_type='assistant' (the
     default), so re-running the migration is a no-op.
@@ -297,6 +299,8 @@ def _migrate_message_types(conn: sqlite3.Connection) -> None:
           AND (
               content LIKE '[context summary]%'
               OR content LIKE '## Anchored Summary%'
+              OR content LIKE '## Objective%'
+              OR content LIKE '%## Important Details%'
           )
     """).rowcount
     if updated:
@@ -367,6 +371,7 @@ def _row_to_message(row: sqlite3.Row) -> dict:
         "tool_call_id": row["tool_call_id"] if "tool_call_id" in row.keys() else None,
         "created_at": row["created_at"],
         "metadata": metadata,
+        "message_type": row["message_type"] if "message_type" in row.keys() else "assistant",
     }
 
 

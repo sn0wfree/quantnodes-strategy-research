@@ -7,7 +7,9 @@ import { useSessionStore } from './session'
 // Required for immer to handle Map/Set types in chat state
 enableMapSet()
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'compaction'
+
+export type MessageType = 'user' | 'assistant' | 'tool' | 'compaction'
 
 export interface TextPart {
   type: 'text'
@@ -67,6 +69,7 @@ export interface Message {
   agent_id?: string
   parts: MessagePart[]
   created_at: number
+  message_type?: MessageType
   metadata?: {
     model?: string
     tokens_used?: number

@@ -878,18 +878,34 @@ class SessionService:
     def _convert_messages_to_history(messages: list[Message]) -> list[dict[str, Any]]:
         """Convert Session messages to OpenAI-format history.
 
-        Handles two storage formats:
+        Handles three storage formats:
         1. New: role=tool messages with tool_call_id (1:1 with OpenAI format)
         2. Legacy: tool_calls embedded in assistant message parts (reconstructed from parts)
+        3. Compaction: message_type='compaction' → user role with checkpoint wrap
 
         Excludes the current turn (last message). Trims by character budget
         from the newest items so the LLM still sees the most recent context.
         """
+        from strategy_research.core.agent.compaction_message import CompactionMessage
+
         history: list[dict[str, Any]] = []
         for msg in messages[:-1]:
             role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
             content = msg.content if hasattr(msg, "content") else msg.get("content", "")
             parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
+            message_type = msg.message_type if hasattr(msg, "message_type") else "assistant"
+
+            # Handle compaction messages: convert to user role + checkpoint wrap
+            if message_type == "compaction":
+                comp = CompactionMessage(
+                    id=msg.message_id,
+                    session_id=msg.session_id,
+                    summary=content,
+                    recent="",
+                    reason="auto",
+                )
+                history.append(comp.to_llm_message())
+                continue
 
             if role == "tool":
                 tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None

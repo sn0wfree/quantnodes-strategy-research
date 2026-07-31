@@ -12,6 +12,13 @@ import { ContextUsageBar } from './ContextUsageBar'
 import { CompactBanner } from './CompactBanner'
 import { MessageSquare } from 'lucide-react'
 
+function formatTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function MessageList() {
   const messages = useChatStore((s) => s.messages)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
@@ -87,6 +94,23 @@ export function MessageList() {
           // Previously these 13+ tool records were rendered as empty Agent
           // cards, polluting the chat view.
           if (message.role === 'tool') return null
+
+          // Compaction messages: show as historical summary card
+          if (message.message_type === 'compaction') {
+            return (
+              <div className="px-4 py-3 transition-all">
+                <div className="mb-1 flex items-center gap-2 text-xs">
+                  <span className="font-medium text-slate-500">📋 历史摘要</span>
+                  <span className="text-slate-600">{formatTime(message.created_at)}</span>
+                </div>
+                <div className="text-sm text-slate-400 leading-relaxed">
+                  {message.parts?.map((part, i) => (
+                    <span key={i}>{part.type === 'text' ? part.text : ''}</span>
+                  )) || message.content}
+                </div>
+              </div>
+            )
+          }
 
           const isStreaming = message.id === streamingMessageId
           // Queued: assistant placeholder with no parts and not currently streaming.

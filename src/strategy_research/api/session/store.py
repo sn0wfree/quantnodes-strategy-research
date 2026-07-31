@@ -121,6 +121,7 @@ class SessionStore:
                         **(m.get("metadata") or {}),
                         "_parts": m.get("parts", []),
                     },
+                    message_type=m.get("message_type", "assistant"),
                 )
             )
         return out
