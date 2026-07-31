@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -868,14 +868,17 @@ async def send_sync(body: ChatMessage, request: Request):
 async def chat_events(
     session_id: str = Query(...),
     token: Optional[str] = Query(None),
-    last_event_id: Optional[str] = Query(None, alias="Last-Event-ID"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    last_event_id_query: Optional[str] = Query(None, alias="Last-Event-ID"),
 ):
     """SSE event stream for a session.
 
     Streams real-time events from AgentLoop (text_delta, tool_call, etc.)
     Supports Last-Event-ID header for replay on reconnection.
+    (Query param supported as fallback for older clients.)
     """
-    logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, last_event_id)
+    resolved_last_event_id = last_event_id or last_event_id_query or ""
+    logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, resolved_last_event_id)
 
     # Register for async notifications
     notification_event = sse_buffer.register_session(session_id)
@@ -889,8 +892,12 @@ async def chat_events(
         # loop. Comment lines (: prefix) are ignored by EventSource
         # but cause StreamingResponse to flush response headers.
         yield ": connected\n\n"
+        # Tell the browser's native EventSource to reconnect after 3s
+        # if the connection drops. This replaces the old manual reconnect
+        # and enables proper Last-Event-ID based replay.
+        yield "retry: 3000\n\n"
 
-        last_id = last_event_id or ""
+        last_id = resolved_last_event_id or ""
         event_count = 0
 
         try:

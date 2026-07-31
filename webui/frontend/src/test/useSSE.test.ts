@@ -138,7 +138,7 @@ describe('useSSE', () => {
       expect(closeSpy).toHaveBeenCalled()
     })
 
-    it('reconnects on error with exponential backoff', () => {
+    it('onerror sets status disconnected but does not create new EventSource (native reconnect)', () => {
       vi.useFakeTimers()
       renderHook(() => useSSE('sess-1'))
       const initialCount = MockEventSource.instances.length
@@ -149,14 +149,15 @@ describe('useSSE', () => {
         if (es.onerror) es.onerror(new Event('error'))
       })
 
-      expect(MockEventSource.instances.length).toBe(initialCount) // not yet
+      expect(useSSEStore.getState().status).toBe('disconnected')
+      // No new EventSource instance — browser native reconnect handles it
+      expect(MockEventSource.instances.length).toBe(initialCount)
 
+      // Advance timers and verify still no manual reconnect
       act(() => {
-        vi.advanceTimersByTime(1000)
+        vi.advanceTimersByTime(5000)
       })
-
-      // reconnect should have happened (initial delay = 1000ms)
-      expect(MockEventSource.instances.length).toBe(initialCount + 1)
+      expect(MockEventSource.instances.length).toBe(initialCount)
 
       vi.useRealTimers()
     })

@@ -93,12 +93,14 @@ class SSEEventBuffer:
     def get_events_since(self, session_id: str, last_id: str = "") -> list[SSEEvent]:
         """Get all events for a session after (or from) the given ID.
 
-        If last_id is empty, returns all recent events for the session.
+        If last_id is empty, returns recent events for the session
+        (capped at 200 to avoid excessive first-connect replay).
         """
         with self._lock:
             if not last_id:
-                # Return all recent events for this session
-                return [e for e in self._buffer if e.session_id == session_id]
+                # Return most recent events for this session (capped)
+                all_session = [e for e in self._buffer if e.session_id == session_id]
+                return all_session[-200:]
             events = []
             found = False
             for e in self._buffer:

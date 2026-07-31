@@ -21,8 +21,6 @@ type SSEEventType =
 
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const reconnectCount = useRef(0)
 
   const addMessage = useChatStore((s) => s.addMessage)
   const updateMessage = useChatStore((s) => s.updateMessage)
@@ -584,16 +582,20 @@ export function useSSE(sessionId: string | null) {
     const es = new EventSource(`/api/chat/events?${params}`)
 
     es.onopen = () => {
-      reconnectCount.current = 0
       useSSEStore.getState().setStatus('connected')
     }
 
-    es.onerror = () => {
-      es.close()
+    es.onerror = (e) => {
+      // Let the browser's native EventSource reconnect automatically —
+      // it sends the Last-Event-ID header so missed events are replayed.
+      // We only update status; no manual close/setTimeout reconnect.
+      const target = e.currentTarget as EventSource | null
+      if (target) {
+        console.debug('[SSE] onerror readyState=%s', target.readyState)
+      } else {
+        console.debug('[SSE] onerror')
+      }
       useSSEStore.getState().setStatus('disconnected')
-      const delay = Math.min(1000 * Math.pow(2, reconnectCount.current), 30000)
-      reconnectCount.current++
-      reconnectTimer.current = setTimeout(connect, delay)
     }
 
     const eventTypes = [
@@ -627,7 +629,6 @@ export function useSSE(sessionId: string | null) {
     connect()
     return () => {
       sourceRef.current?.close()
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
     }
   }, [connect])
 }
