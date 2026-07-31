@@ -414,16 +414,42 @@ class Projector:
             return
         if tc_id in msg.parts:
             return
+        # Build tool_call data: opencode Part shape + preserve any
+        # LLM-API-style "function" sub-object if present.
+        #
+        # Two input shapes are supported:
+        # 1. Flat: {tool, input} — used by service.py after event_callback
+        #    flattens
+        # 2. Nested: {function: {name, arguments}} — LLM API style
+        #    (arguments may be a JSON string, not a dict)
+        #
+        # Both shapes are preserved: the part's `tool` and `input`
+        # fields provide the opencode Part view, while `function`
+        # is preserved verbatim if it was in the event data.
+        data: Dict[str, Any] = {
+            "type": "tool_call",
+            "id": tc_id,
+            "state": "call",
+        }
+        # Tool name resolution: prefer flat `tool`, fall back to function.name
+        function = event.data.get("function")
+        if isinstance(function, dict):
+            data["function"] = function
+            data["tool"] = function.get("name", "")
+        else:
+            data["tool"] = event.data.get("tool", "")
+        # Input/arguments resolution: prefer flat `input`, fall back to arguments
+        if "input" in event.data:
+            data["input"] = event.data["input"]
+        elif "arguments" in event.data:
+            data["input"] = event.data["arguments"]
+        elif isinstance(function, dict) and "arguments" in function:
+            data["input"] = function["arguments"]
+
         msg.parts[tc_id] = ProjectedPart(
             id=tc_id,
             type="tool_call",
-            data={
-                "type": "tool_call",
-                "id": tc_id,
-                "tool": event.data.get("tool", event.data.get("function", {}).get("name", "")),
-                "input": event.data.get("input", event.data.get("arguments")),
-                "state": "call",
-            },
+            data=data,
             seq=len(msg.parts),
             time_created=event.time_created,
         )

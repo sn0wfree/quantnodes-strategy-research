@@ -114,9 +114,23 @@ class EventBusV2:
         forward still happens (so live clients see the event) but
         replay will be missing this event. For production, we'd want
         a retry queue; for B1 we keep it simple.
+
+        Handled errors:
+        - sqlite3.IntegrityError: UNIQUE (aggregate_id, seq) collision
+          or PK collision on event id. Log and skip.
+        - TypeError: data is not JSON-serializable. Log and skip.
+        - sqlite3.OperationalError: DB file doesn't exist, no event_log
+          table, FK violation, etc. Log and skip.
         """
         try:
             row = event.to_row()
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "EventBusV2: data not serializable for event %s: %s",
+                event.id, exc,
+            )
+            return
+        try:
             with self._lock:
                 conn = sqlite3.connect(str(self.db_path))
                 try:
@@ -136,6 +150,12 @@ class EventBusV2:
             logger.error(
                 "EventBusV2: seq collision for aggregate=%s seq=%s: %s",
                 event.aggregate_id, event.seq, exc,
+            )
+        except sqlite3.OperationalError as exc:
+            # DB doesn't exist, no event_log table, FK violation, etc.
+            logger.error(
+                "EventBusV2: DB error for event %s: %s",
+                event.id, exc,
             )
         except sqlite3.Error as exc:
             logger.error(
@@ -182,7 +202,9 @@ class EventBusV2:
             limit: Optional cap on number of events returned.
 
         Returns:
-            List of EventV2 ordered by seq ASC.
+            List of EventV2 ordered by seq ASC. Returns [] if the
+            DB doesn't exist, has no event_log table, or the session
+            has no events.
         """
         sql = (
             "SELECT id, aggregate_id, seq, type, data_json, time_created "
@@ -194,42 +216,68 @@ class EventBusV2:
             sql += " LIMIT ?"
             params = (session_id, after_seq, limit)
 
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
         try:
-            rows = conn.execute(sql, params).fetchall()
-        finally:
-            conn.close()
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as exc:
+            # DB doesn't exist, or event_log table is missing
+            logger.debug(
+                "EventBusV2.replay: DB unavailable for %s: %s",
+                self.db_path, exc,
+            )
+            return []
         return [EventV2.from_row(r) for r in rows]
 
     def last_seq(self, session_id: str) -> int:
-        """Return the highest seq stored for this session, or 0."""
-        conn = sqlite3.connect(str(self.db_path))
+        """Return the highest seq stored for this session, or 0.
+
+        Returns 0 if the DB doesn't exist or has no event_log table.
+        """
         try:
-            row = conn.execute(
-                "SELECT MAX(seq) AS max_seq FROM event_log "
-                "WHERE aggregate_id = ?",
-                (session_id,),
-            ).fetchone()
-        finally:
-            conn.close()
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                row = conn.execute(
+                    "SELECT MAX(seq) AS max_seq FROM event_log "
+                    "WHERE aggregate_id = ?",
+                    (session_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as exc:
+            logger.debug(
+                "EventBusV2.last_seq: DB unavailable: %s", exc,
+            )
+            return 0
         if row is None or row[0] is None:
             return 0
         return int(row[0])
 
     def count(self, session_id: Optional[str] = None) -> int:
-        """Return event_log row count. If session_id given, only that session."""
-        conn = sqlite3.connect(str(self.db_path))
+        """Return event_log row count. If session_id given, only that session.
+
+        Returns 0 if the DB doesn't exist or has no event_log table.
+        """
         try:
-            if session_id is None:
-                row = conn.execute("SELECT COUNT(*) FROM event_log").fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM event_log WHERE aggregate_id = ?",
-                    (session_id,),
-                ).fetchone()
-        finally:
-            conn.close()
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                if session_id is None:
+                    row = conn.execute("SELECT COUNT(*) FROM event_log").fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM event_log WHERE aggregate_id = ?",
+                        (session_id,),
+                    ).fetchone()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as exc:
+            logger.debug(
+                "EventBusV2.count: DB unavailable: %s", exc,
+            )
+            return 0
         return int(row[0]) if row else 0
 
 
