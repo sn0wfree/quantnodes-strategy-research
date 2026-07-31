@@ -98,6 +98,17 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
     _add_column(conn, "messages", "tool_call_id", "TEXT")
 
+    # Per-session monotonic sequence number (Level 1, opencode-aligned).
+    # Default 0 keeps existing rows valid; backfill script assigns real
+    # values from created_at order. The UNIQUE INDEX is created after
+    # backfill (see scripts/backfill_seq.py) to avoid constraint conflicts
+    # on legacy rows.
+    _add_column(conn, "messages", "seq", "INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_session_seq "
+        "ON messages(session_id, seq)"
+    )
+
     # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
     # Use nullable column first, then UPDATE existing rows, to avoid NOT NULL failure
     _add_column(conn, "messages", "message_type", "TEXT")
