@@ -282,15 +282,20 @@ class TestCompactMessagesThresholdTokens:
         assert applied == []
 
     def test_threshold_tokens_zero_force_all(self):
-        """threshold_tokens=0 → force all layers."""
+        """threshold_tokens=0 → force L4 (Phase A: only L4 layer exists).
+
+        Phase A: needs >= 5 turns so with tail_turns=1, L4 safety check
+        (l4_min_messages=2) passes (recent = 1 user + 0 system = at least 1).
+        With 5 turns and tail_turns=1, recent = last 1 turn = 2 messages
+        (user + assistant) which is > l4_min_messages=2 in safety.
+        """
         llm = MagicMock()
         llm.chat.return_value = MagicMock(content="Summary")
         cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
-        msgs = [
-            {"role": "user", "content": "x" * 300},
-            {"role": "assistant", "content": "y" * 300},
-            {"role": "user", "content": "z" * 300},
-        ]
+        msgs = []
+        for i in range(5):
+            msgs.append({"role": "user", "content": "x" * 300})
+            msgs.append({"role": "assistant", "content": "y" * 300})
         result, applied, summary, recent = compact_messages(
             msgs, config=cfg, threshold_tokens=0, llm_client=llm,
         )

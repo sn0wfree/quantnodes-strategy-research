@@ -588,23 +588,27 @@ def compact_messages(
     session_id: str | None = None,
     on_compaction: "CompactionCallback | None" = None,
 ) -> tuple[list[dict[str, Any]], list[str], str | None, str | None]:
-    """Apply context compression if over threshold.
+    """Apply context compression if over threshold (opencode-aligned L4-only).
 
-    opencode-aligned:
+    opencode-aligned (Phase A):
+        - Single L4 layer (no L1/L3 pre/post processing)
         - Trigger derived from model context when threshold_tokens is None
-        - 3-layer system (L1/L4/L3) is our extension
         - Returns 4-tuple including recent_text pre-serialized by compact
+        - threshold_tokens=0 still forces L4 to run (manual /compact)
+        - L4 safety check (l4_min_messages) prevents hung-state
 
-    3-layer progressive compression:
-        L1 (microcompact_ratio): Truncate oversized tool outputs
-        L4 (llm_summarize_ratio): LLM-driven summary
-        L3 (hard_truncate_ratio): Drop oldest messages
+    L4 layer:
+        1. Resolve threshold (opencode formula: context - max(output, buffer))
+        2. Skip if under llm_summarize_ratio * threshold
+        3. Run _llm_summarize_v2 with safety check
+        4. Fix orphaned tool pairs (post-L4 repair)
+        5. Return (messages, applied_layers, l4_summary, l4_recent)
 
     Args:
         messages: Conversation messages in OpenAI format.
         config: Compaction parameters (defaults to CompactConfig()).
         threshold_tokens: Absolute token budget for trigger. None =
-            derive from model context via opencode formula.
+            derive from model context via opencode formula. 0 = force L4.
         model_context_tokens: Model's context window size.
         model_max_output_tokens: Model's max output tokens (for
             summary cap formula).
@@ -637,29 +641,17 @@ def compact_messages(
 
     tokens = _estimate_tokens(messages)
 
-    # threshold_tokens=0 is a sentinel meaning "force every layer to run"
-    # (used by manual /compact). The downstream comparisons multiply by
-    # threshold_tokens, so 0 would make "skip below L1" meaningless and
-    # "run L4" always true. We bypass ratio gating in force mode.
-    force_all = threshold_tokens == 0
-    l1_threshold = 0 if force_all else threshold_tokens * cfg.microcompact_ratio
-    l4_threshold = 0 if force_all else threshold_tokens * cfg.llm_summarize_ratio
-    l3_threshold = 0 if force_all else threshold_tokens * cfg.hard_truncate_ratio
+    # threshold_tokens=0 is a sentinel meaning "force L4 to run"
+    # (used by manual /compact). Bypass ratio gating in force mode.
+    force_l4 = threshold_tokens == 0
+    l4_threshold = 0 if force_l4 else threshold_tokens * cfg.llm_summarize_ratio
 
-    # Early exit: below L1 threshold (skip when force_all)
-    if not force_all and tokens < l1_threshold:
+    # Early exit: below L4 threshold (skip when force_l4)
+    if not force_l4 and tokens < l4_threshold:
         return messages, applied, l4_summary_text, l4_recent_text
 
-    # ── L1: Smart Microcompact ──────────────────────────────
-    if force_all or tokens >= l1_threshold:
-        messages, l1_count = _smart_microcompact(messages, cfg)
-        if l1_count:
-            applied.append(f"microcompact({l1_count})")
-
-    tokens = _estimate_tokens(messages)
-
-    # ── L4: LLM Summarize ───────────────────────────────────
-    if (force_all or tokens >= l4_threshold) and llm_client is not None:
+    # ── L4: LLM Summarize (opencode-aligned single layer) ─────
+    if llm_client is not None:
         old_len = len(messages)
         l4_result = _llm_summarize_v2(
             messages, cfg, model_context_tokens, model_max_output_tokens,
@@ -673,15 +665,7 @@ def compact_messages(
                 l4_summary_text = summary_text
                 l4_recent_text = recent_text
 
-    # ── L3: Hard Truncate ───────────────────────────────────
-    tokens = _estimate_tokens(messages)
-    if force_all or tokens >= l3_threshold:
-        old_len = len(messages)
-        messages = _hard_truncate(messages, cfg.collapse_keep_recent)
-        if len(messages) < old_len:
-            applied.append(f"truncate({old_len}->{len(messages)})")
-
-    # ── Fix orphaned tool pairs ────────────────────────────────────
+    # ── Fix orphaned tool pairs (post-L4 repair) ───────────────
     pre_fix_len = len(messages)
     messages = _fix_tool_pairs(messages)
     if len(messages) < pre_fix_len:

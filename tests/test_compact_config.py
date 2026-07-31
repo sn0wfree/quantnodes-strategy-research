@@ -436,10 +436,37 @@ class TestCompactMessages:
         pytest.skip("L1/L3 removed in Phase A; see test_compact_opencode_style.py")
 
     def test_force_all_threshold_zero_runs_llm_summarize(self):
-        """DEPRECATED: skips until A4 (compact_messages simplification).
-        See test_compact_opencode_style.py::test_force_all_runs_l4_only.
+        """opencode-aligned: the summary is NOT injected as an inline
+        assistant turn (that caused the "spontaneous summary" bug).
+        Instead, the summary text is returned via the 4-tuple for
+        the caller to persist as a CompactionMessage.
+
+        Phase A: msgs must be user/assistant alternation so turn-split
+        produces > tail_turns turns. With tail_turns=2 and 5 turns,
+        the L4 safety check (l4_min_messages) passes.
         """
-        pytest.skip("Compaction pipeline updating in A4; see test_compact_opencode_style.py")
+        msgs = []
+        for i in range(5):
+            msgs.append({"role": "user", "content": f"msg {i} " * 30})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 30})
+
+        mock_client = MagicMock()
+        mock_client.chat.return_value = MagicMock(content="- bullet 1\n- bullet 2")
+
+        cfg = CompactConfig(tail_turns=2)
+        result, layers, l4_summary, l4_recent = compact_messages(
+            msgs, cfg, threshold_tokens=0, llm_client=mock_client,
+        )
+        assert any("llm_summarize" in l for l in layers)
+        # opencode-aligned: summary is NOT inline in messages
+        assert not any(
+            m.get("content", "").startswith("[context summary]")
+            for m in result
+        )
+        # Instead, summary text is returned in the 4-tuple
+        assert l4_summary == "- bullet 1\n- bullet 2"
+        # recent is pre-serialized by compact (string)
+        assert isinstance(l4_recent, str)
 
 
 # ── LLMConfig integration ────────────────────────────────────────

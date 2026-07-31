@@ -84,24 +84,24 @@ class TestCompactMessagesNoTrigger:
         assert summary is None
 
 
-# Phase A: L4 tests blocked on A4 (compact_messages simplification).
-# When A4 lands, compact_messages will be L4-only and these tests
-# should pass as-is.
-@pytest.mark.skip(reason="compact_messages simplification in A4 unblocks these")
+# Phase A: L4 tests (A4 unblocked - compact_messages is now L4-only).
 class TestCompactMessagesL4:
     def test_llm_summarize_applied(self):
-        """L4 runs when token count exceeds threshold."""
+        """L4 runs when token count exceeds threshold.
+
+        Phase A: needs >= 3 turns so that with tail_turns=1, the L4 safety
+        check (l4_min_messages=2) passes (recent = 1 user + 1 system = 2+).
+        """
         llm = FakeLLM(responses=["## Objective\nTest summary"])
         cfg = CompactConfig(
             threshold_tokens=100,
             tail_turns=1,
             preserve_recent_tokens=500,
         )
-        msgs = [
-            {"role": "user", "content": "x" * 300},
-            {"role": "assistant", "content": "y" * 300},
-            {"role": "user", "content": "z" * 300},
-        ]
+        msgs = []
+        for i in range(5):
+            msgs.append({"role": "user", "content": "x" * 300})
+            msgs.append({"role": "assistant", "content": "y" * 300})
         result, applied, summary, recent = compact_messages(
             msgs, config=cfg, threshold_tokens=0,
             llm_client=llm,
@@ -162,8 +162,7 @@ class TestCompactMessagesL3:
         pass
 
 
-# Phase A: tests blocked on A4 (compact_messages simplification).
-@pytest.mark.skip(reason="compact_messages simplification in A4 unblocks these")
+# Phase A: tests unblocked by A4 (compact_messages is now L4-only).
 class TestCompactMessagesDedup:
     def test_empty_short_summary_dedup(self):
         """Empty/short/whitespace summary → L4 result ignored."""
@@ -222,8 +221,7 @@ class TestCompactMessagesForceAll:
         pass
 
 
-# Phase A: tests blocked on A4 (compact_messages simplification).
-@pytest.mark.skip(reason="compact_messages simplification in A4 unblocks these")
+# Phase A: tests unblocked by A4.
 class TestCompactMessagesFixToolPairs:
     def test_fix_tool_pairs_called(self):
         """After compaction, _fix_tool_pairs repairs orphans."""
@@ -248,8 +246,7 @@ class TestCompactMessagesFixToolPairs:
         assert len(tool_msgs) == 0
 
 
-# Phase A: tests blocked on A4 (compact_messages simplification).
-@pytest.mark.skip(reason="compact_messages simplification in A4 unblocks these")
+# Phase A: tests unblocked by A4.
 class TestCompactMessagesPreviousSummary:
     def test_previous_summary_passed_to_llm(self):
         """previous_summary is passed to _llm_summarize_v2."""
@@ -298,8 +295,7 @@ class TestCompactMessagesEdgeCases:
         result, applied, summary, recent = compact_messages(msgs, config=cfg)
         assert result == msgs
 
-    # Phase A: blocked on A4 (compact_messages simplification).
-    @pytest.mark.skip(reason="compact_messages simplification in A4 unblocks this")
+    # Phase A: unblocked by A4.
     def test_on_compaction_callback_accepted(self):
         """on_compaction parameter is accepted without error."""
         callback = MagicMock()
