@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from ..sse_buffer import sse_buffer
 from ..session.bridge import attach_eventbus_to_sse
+from ..session.event_bus_v2 import EventBusV2
 from ..session.events import EventBus
 from ..session.models import Message
 from ..session.service import SessionService
@@ -36,12 +37,17 @@ attach_eventbus_to_sse(_event_bus)
 
 
 def _get_session_service() -> SessionService:
-    """Return the singleton SessionService bound to the active DB."""
+    """Return the singleton SessionService bound to the active DB.
+
+    Uses EventBusV2 for dual-write: events go to both the legacy
+    EventBus (SSE delivery) and event_log (persistent replay log).
+    """
     from .web_session import _get_db_path
 
     db_path = _get_db_path()
     store = SessionStore(db_path=db_path)
-    return SessionService(store=store, event_bus=_event_bus)
+    v2_bus = EventBusV2(_event_bus, db_path)
+    return SessionService(store=store, event_bus=v2_bus)
 
 
 # Per-session conversation history (legacy in-memory cache; replaced by DB)

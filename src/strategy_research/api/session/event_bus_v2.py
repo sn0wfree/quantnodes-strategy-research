@@ -1,4 +1,4 @@
-"""EventBusV2 — dual-write event publisher (Level 3, B1 commit 3).
+"""EventBusV2 — dual-write event publisher (Level 3, B2 commit 2).
 
 This module sits between the producers (AgentLoop, service.py) and
 two sinks:
@@ -7,11 +7,9 @@ two sinks:
 
 Both sinks receive the same event. The legacy EventBus is unchanged;
 EventBusV2 is purely additive. This means:
-- Phase 3 B1: service.py can opt in to use EventBusV2 instead of
+- Phase 3 B2: service.py can opt in to use EventBusV2 instead of
   event_bus.emit. Old behavior preserved; events additionally land in
   event_log.
-- Phase 3 B2: SSE handler can be enhanced to replay from event_log
-  for late-rejoining clients (using the last_event_id).
 - Phase 3 B3: legacy EventBus can be removed once the projector is
   the sole source of SSE state.
 
@@ -19,20 +17,24 @@ Why dual-write:
 - Replay-after-restart: if the process crashes mid-iteration, the
   event_log preserves all events; subscribers that reconnect can
   request replay via last_event_id.
-- Decoupling: the projector (B1.4) can subscribe to event_log
+- Decoupling: the projector can subscribe to event_log
   without holding a reference to the EventBus. The projector just
   reads the log; it doesn't care HOW events got there.
 - Revert: at any point during B2/B3, EventBusV2 can be swapped
   back for direct event_bus.emit. Just two import lines.
 
-This module does NOT yet wire into service.py — that's a separate
-commit. The test suite verifies the dual-write behavior in isolation.
+In B2, EventBusV2 is a drop-in replacement for EventBus in the
+service.py constructor. It implements emit() with the same
+signature, auto-assigns seq numbers per-session, and dual-writes
+to both event_log and the legacy bus.
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
 import threading
+import time
+import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -77,6 +79,43 @@ class EventBusV2:
 
         # Sink 2: forward to legacy EventBus (live SSE)
         self._forward(event)
+
+    def emit(
+        self,
+        session_id: str,
+        event_type: str,
+        data: Optional[dict] = None,
+    ) -> SSEEvent:
+        """Build and publish an event — drop-in replacement for EventBus.emit.
+
+        Same signature as EventBus.emit(). Auto-assigns a monotonic
+        seq number per session. Dual-writes to event_log + legacy bus.
+
+        This is the B2 entry point: service.py doesn't need to change
+        any call sites — just swap the bus instance.
+
+        Args:
+            session_id: Session / aggregate ID.
+            event_type: Event type string.
+            data: Event payload dict.
+
+        Returns:
+            The published SSEEvent (for backward compatibility with
+            any callers that check the return value).
+        """
+        seq = self._next_seq(session_id)
+        event = EventV2(
+            id=uuid.uuid4().hex[:16],
+            aggregate_id=session_id,
+            seq=seq,
+            type=event_type,
+            data=data or {},
+            time_created=time.time(),
+        )
+        # Sink 1: persist to event_log
+        self._persist(event)
+        # Sink 2: forward to legacy EventBus (returns SSEEvent)
+        return self._forward(event)
 
     def publish_batch(self, events: List[EventV2]) -> None:
         """Publish multiple events as a single transaction.
@@ -163,11 +202,14 @@ class EventBusV2:
                 event.id, exc,
             )
 
-    def _forward(self, event: EventV2) -> None:
+    def _forward(self, event: EventV2) -> SSEEvent:
         """Forward to legacy EventBus as SSEEvent.
 
         The SSE event id matches the event_log event id so that
         last_event_id recovery works seamlessly across both sinks.
+
+        Returns:
+            The SSEEvent that was published.
         """
         sse_event = SSEEvent(
             event_id=event.id,
@@ -177,6 +219,18 @@ class EventBusV2:
             timestamp=event.time_created,
         )
         self.event_bus.publish(sse_event)
+        return sse_event
+
+    def _next_seq(self, session_id: str) -> int:
+        """Return the next monotonic seq number for a session.
+
+        Uses event_log MAX(seq) + 1 for each call. This is safe for
+        the current single-writer architecture (one attempt at a time
+        per session). For high-throughput scenarios, we'd use a
+        cached counter with atomic increment, but for B2 this is
+        sufficient.
+        """
+        return self.last_seq(session_id) + 1
 
     # ── Replay support ──────────────────────────────────────────────
     #
