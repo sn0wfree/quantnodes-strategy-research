@@ -1,32 +1,28 @@
-"""EventBusV2 — dual-write event publisher (Level 3, B2 commit 2).
+"""EventBusV2 — event publisher with 3 sinks (Level 3, B4 commit 1).
 
 This module sits between the producers (AgentLoop, service.py) and
-two sinks:
-  1. event_log table (persistence — the source of truth for replay)
+three sinks:
+  1. event_log table (persistence — the source of truth)
   2. Legacy EventBus (live SSE delivery to connected clients)
+  3. Projector.flush() — materializes events to messages + message_parts
+     tables (B4: the only write path for those tables)
 
-Both sinks receive the same event. The legacy EventBus is unchanged;
-EventBusV2 is purely additive. This means:
-- Phase 3 B2: service.py can opt in to use EventBusV2 instead of
-  event_bus.emit. Old behavior preserved; events additionally land in
-  event_log.
-- Phase 3 B3: legacy EventBus can be removed once the projector is
-  the sole source of SSE state.
+In B4, service.py stops writing directly to messages/message_parts.
+Instead, it emits events via EventBusV2. EventBusV2 persists to
+event_log, then calls Projector.flush() to update messages +
+message_parts tables (which become materialized views).
 
-Why dual-write:
-- Replay-after-restart: if the process crashes mid-iteration, the
-  event_log preserves all events; subscribers that reconnect can
-  request replay via last_event_id.
-- Decoupling: the projector can subscribe to event_log
-  without holding a reference to the EventBus. The projector just
-  reads the log; it doesn't care HOW events got there.
-- Revert: at any point during B2/B3, EventBusV2 can be swapped
-  back for direct event_bus.emit. Just two import lines.
+Why three sinks:
+- event_log: append-only source of truth, replayable, auditable
+- Legacy EventBus: live SSE delivery to connected clients (kept for
+  backward compat with existing SSE endpoint)
+- Projector.flush: materialized view in messages + message_parts,
+  readable by existing code paths that haven't switched to projector
 
-In B2, EventBusV2 is a drop-in replacement for EventBus in the
+In B4, EventBusV2 is a drop-in replacement for EventBus in the
 service.py constructor. It implements emit() with the same
-signature, auto-assigns seq numbers per-session, and dual-writes
-to both event_log and the legacy bus.
+signature, auto-assigns seq numbers per session, and writes to
+all three sinks.
 """
 from __future__ import annotations
 
@@ -56,10 +52,30 @@ class EventBusV2:
         self,
         event_bus: EventBus,
         db_path: Path,
+        flush_to_messages: bool = False,
     ) -> None:
+        """
+        Args:
+            event_bus: Legacy EventBus for SSE delivery.
+            db_path: Path to SQLite DB (for event_log + messages tables).
+            flush_to_messages: If True, call Projector.flush() after
+                each publish to keep messages + message_parts tables
+                in sync. In B4 this becomes the sole write path for
+                those tables. Default False (B2/B3 backward compat).
+        """
         self.event_bus = event_bus
         self.db_path = Path(db_path)
         self._lock = threading.Lock()
+        self._flush_to_messages = flush_to_messages
+        # Lazy-import projector to avoid circular imports at startup
+        self._projector = None
+
+    def _get_projector(self):
+        """Lazy-get the projector instance."""
+        if self._projector is None:
+            from .projector import Projector
+            self._projector = Projector(self.db_path)
+        return self._projector
 
     def publish(self, event: EventV2) -> None:
         """Publish to event_log AND forward to legacy EventBus.
@@ -79,6 +95,10 @@ class EventBusV2:
 
         # Sink 2: forward to legacy EventBus (live SSE)
         self._forward(event)
+
+        # Sink 3 (optional): flush projector → messages table
+        if self._flush_to_messages:
+            self._flush_projection(event.aggregate_id)
 
     def emit(
         self,
@@ -114,8 +134,12 @@ class EventBusV2:
         )
         # Sink 1: persist to event_log
         self._persist(event)
-        # Sink 2: forward to legacy EventBus (returns SSEEvent)
-        return self._forward(event)
+        # Sink 2: forward to legacy EventBus (live SSE)
+        result = self._forward(event)
+        # Sink 3 (optional): flush projector → messages table
+        if self._flush_to_messages:
+            self._flush_projection(event.aggregate_id)
+        return result
 
     def publish_batch(self, events: List[EventV2]) -> None:
         """Publish multiple events as a single transaction.
@@ -145,6 +169,13 @@ class EventBusV2:
         # Forward all events to SSE
         for event in events:
             self._forward(event)
+
+        # Flush if enabled (only once per session in the batch)
+        if self._flush_to_messages and events:
+            # Get unique session IDs from the batch
+            session_ids = list({e.aggregate_id for e in events})
+            for sid in session_ids:
+                self._flush_projection(sid)
 
     def _persist(self, event: EventV2) -> None:
         """INSERT event into event_log table.
@@ -231,6 +262,25 @@ class EventBusV2:
         sufficient.
         """
         return self.last_seq(session_id) + 1
+
+    def _flush_projection(self, session_id: str) -> None:
+        """Flush event_log → messages + message_parts via projector.
+
+        Idempotent: projector.flush() uses INSERT OR REPLACE.
+
+        Best-effort: if flush fails, log and continue. The event_log
+        still has all events, so the projection can be rebuilt at
+        any time. This is safer than blocking the event stream.
+        """
+        try:
+            proj = self._get_projector()
+            state = proj.project(session_id)
+            proj.flush(state)
+        except Exception as exc:
+            logger.error(
+                "EventBusV2: flush failed for session %s: %s",
+                session_id, exc,
+            )
 
     # ── Replay support ──────────────────────────────────────────────
     #
