@@ -106,7 +106,7 @@ export function MessageList() {
                 <div className="text-sm text-slate-400 leading-relaxed">
                   {message.parts?.map((part, i) => (
                     <span key={i}>{part.type === 'text' ? part.text : ''}</span>
-                  )) || message.content}
+                  ))}
                 </div>
               </div>
             )
