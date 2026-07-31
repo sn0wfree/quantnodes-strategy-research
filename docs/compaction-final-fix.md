@@ -1,5 +1,10 @@
 # L4 Compaction: opencode-aligned + Bug Fix
 
+> **Note (Phase A, 2026-07-31)**: This doc describes the L4 design
+> introduced alongside the 3-layer system. Phase A simplified to
+> L4-only (L1 and L3 removed). See
+> `compaction-phase-a-simplification.md` for the current design.
+
 ## Background
 
 Session `700dc7f7-95de-45e0-b568-d713fe05065f` triggered L4 compaction

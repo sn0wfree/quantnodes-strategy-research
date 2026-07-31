@@ -4,6 +4,11 @@
 状态：实施中
 相关会话：`700dc7f7-95de-45e0-b568-d713fe05065f`
 
+> **Note (Phase A, 2026-07-31)**: This doc describes the L1/L3/L4
+> 3-layer system. Phase A (commits A1-A5) simplified to L4-only.
+> See `compaction-phase-a-simplification.md` for the opencode-aligned
+> redesign that fixes the 700dc7f7 infinite loop root cause.
+
 ---
 
 ## 问题概述

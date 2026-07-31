@@ -1,5 +1,11 @@
 # Context Compaction Design
 
+> **Note (Phase A, 2026-07-31)**: This doc describes the legacy
+> 3-layer system (L1 + L4 + L3). Phase A simplified to **L4-only**
+> (opencode-aligned). L1 smart microcompact and L3 hard truncate
+> have been removed. See `compaction-phase-a-simplification.md`
+> for the current design.
+
 ## Overview
 
 Context compaction (compact) is the system for compressing conversation history when token usage approaches the model's context limit. The system uses a 3-layer progressive compression strategy with configurable parameters, inspired by [opencode](https://github.com/anomalyco/opencode)'s compaction architecture.

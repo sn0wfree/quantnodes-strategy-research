@@ -1,5 +1,9 @@
 # Compaction Summary Bug Fix (opencode-aligned)
 
+> **Note (Phase A, 2026-07-31)**: This doc describes a bug in the
+> 3-layer summary pipeline. Phase A simplified to L4-only.
+> See `compaction-phase-a-simplification.md` for the current design.
+
 ## Background
 
 Session `700dc7f7-95de-45e0-b568-d713fe05065f` accumulated 12 "summary-style"
