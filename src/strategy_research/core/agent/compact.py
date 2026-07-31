@@ -488,16 +488,11 @@ def _llm_summarize_v2(
     return new_messages, summary_text, recent_text
 
 
-# ── L3: Hard Truncate ────────────────────────────────────────────
-
-def _hard_truncate(
-    messages: list[dict[str, Any]],
-    keep_recent: int,
-) -> list[dict[str, Any]]:
-    """L3: Keep only system + last keep_recent messages."""
-    system_msgs = [m for m in messages if m.get("role") == "system"]
-    non_system = [m for m in messages if m.get("role") != "system"]
-    return system_msgs + non_system[-keep_recent:]
+# ── L3: Hard Truncate (DEPRECATED, removed in Phase A) ────────────
+# L3 was redundant: L4 summary + safety check with l4_min_messages
+# already prevents hung-state. L3 dropped oldest messages, which
+# could lose user context. Removed in commit A3.
+# collapse_keep_recent config field kept (deprecated) for backward compat.
 
 
 # ── Tool pair repair ─────────────────────────────────────────────

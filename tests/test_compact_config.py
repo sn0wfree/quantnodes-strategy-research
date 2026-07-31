@@ -13,7 +13,6 @@ from strategy_research.core.agent.compact import (
     _build_summary_prompt,
     _estimate_tokens,
     _fix_tool_pairs,
-    _hard_truncate,
     _select_by_token_budget,
     _serialize_message,
     _split_into_turns,
