@@ -1,25 +1,14 @@
-"""Projector — derive message state from event_log (Level 3, B2 commit 1).
+"""Projector — derive message state from event_log (Level 3, B3 commit 1).
 
 This module is the read-side complement to EventBusV2. It reads events
 from event_log and projects them into the same shape as messages +
 message_parts (the Level 2 PartTable). The projector is the
-authoritative source of message state in the eventual event-sourced
-architecture; in B2 it can also flush state to messages + message_parts.
+authoritative source of message state in the event-sourced architecture.
 
-Opencode reference (packages/core/src/session/projector.ts:458):
-The projector is a state machine that handles each event type and
-mutates an in-memory state object. On commit, the state is flushed
-to messages + message_parts. In B2, flush() writes idempotently to
-messages + message_parts via UPSERT.
-
-State model:
-- ProjectedSession holds messages + parts as in-memory structures
-- Each message is keyed by message_id; parts are keyed by part_id
-- The apply_* methods handle one event type each; unknown types
-  are silently skipped (forward-compat)
-- The final state can be compared against the live DB to verify
-  consistency
-"""
+In B3, the projector becomes the primary read path: SessionStore reads
+messages via projector instead of directly from the messages table.
+The messages + message_parts tables become materialized views (cached
+projection), and event_log is the source of truth."""
 from __future__ import annotations
 
 import json
@@ -132,6 +121,45 @@ class ProjectedSession:
                     "time_created": p.time_created,
                 })
         return rows
+
+    def to_messages(self) -> List[Any]:
+        """Convert to list[Message] (same shape as SessionStore.get_messages).
+
+        Produces Message objects with parts stored in metadata["_parts"],
+        matching the convention used by SessionStore.get_messages().
+
+        created_at is converted from epoch float to ISO string to match
+        the Message model convention.
+        """
+        from .models import Message
+        from datetime import datetime, timezone
+
+        out: List[Message] = []
+        for m in self.messages_in_order():
+            parts_list = [
+                {
+                    "id": p.id,
+                    "type": p.type,
+                    **p.data,
+                }
+                for p in m.parts_in_order()
+            ]
+            created_iso = datetime.fromtimestamp(
+                m.created_at, tz=timezone.utc
+            ).isoformat() if m.created_at > 0 else ""
+            out.append(Message(
+                message_id=m.id,
+                session_id=m.session_id,
+                role=m.role,
+                content=m.content,
+                created_at=created_iso,
+                message_type=m.message_type,
+                seq=m.seq,
+                metadata={
+                    "_parts": parts_list,
+                },
+            ))
+        return out
 
 
 # ── Projector ──────────────────────────────────────────────────────
@@ -315,6 +343,29 @@ class Projector:
         state = self.project(session_id)
         self.flush(state)
         return state
+
+    def project_to_messages(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Any]:
+        """Project event_log → list[Message] (B3 primary read path).
+
+        Drop-in replacement for SessionStore.get_messages(). Returns
+        the same Message objects with parts in metadata["_parts"].
+
+        Args:
+            session_id: Session to project.
+            limit: Max messages to return (most recent last).
+
+        Returns:
+            List of Message in chronological order (by seq).
+        """
+        state = self.project(session_id)
+        messages = state.to_messages()
+        if limit and len(messages) > limit:
+            messages = messages[-limit:]
+        return messages
 
     # ── Event handlers ──────────────────────────────────────────
 
