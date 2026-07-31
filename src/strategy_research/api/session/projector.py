@@ -665,13 +665,86 @@ class Projector:
         Compaction messages are system-level messages that mark where
         the history was compressed. They have role='system' and
         message_type='compaction'. The content is the summary.
+
+        If the event has a 'messages' field (compact.ended with full
+        replacement data), we replace the pre-compaction messages with
+        the compressed set, keeping only the most recent message
+        (the current turn) plus the compaction message itself.
         """
         data = event.data
         summary = data.get("summary") or data.get("content") or ""
-        # Generate a deterministic ID from the event id
         msg_id = f"compact-{event.id[:8]}"
+
+        # If messages list is provided, do full replacement
+        compressed_msgs = data.get("messages")
+        if compressed_msgs and isinstance(compressed_msgs, list):
+            # Save the last message (current turn, not compressed)
+            ordered = state.messages_in_order()
+            last_msg = ordered[-1] if ordered else None
+
+            # Clear all existing messages
+            state.messages.clear()
+
+            # Insert compressed messages
+            for i, m_data in enumerate(compressed_msgs):
+                role = m_data.get("role", "assistant")
+                content = m_data.get("content", "") or ""
+                cid = m_data.get("id") or f"cmp_{event.id[:8]}_{i}"
+
+                pmsg = ProjectedMessage(
+                    id=cid,
+                    session_id=event.aggregate_id,
+                    role=role,
+                    content=content,
+                    message_type=role if role in ("user", "assistant", "system") else "assistant",
+                    created_at=event.time_created,
+                    seq=len(state.messages) + 1,
+                )
+
+                # Add tool_call parts if present
+                tool_calls = m_data.get("tool_calls")
+                if role == "assistant" and tool_calls:
+                    for j, tc in enumerate(tool_calls):
+                        tc_id = tc.get("id", "") or f"tc_{i}_{j}"
+                        func = tc.get("function", {})
+                        pmsg.parts[tc_id] = ProjectedPart(
+                            id=tc_id,
+                            type="tool_call",
+                            data={
+                                "type": "tool_call",
+                                "id": tc_id,
+                                "state": "done",
+                                "tool": func.get("name", ""),
+                                "input": func.get("arguments", "{}"),
+                                "result": tc.get("result", ""),
+                                "status": "done",
+                            },
+                            seq=len(pmsg.parts),
+                            time_created=event.time_created,
+                        )
+
+                state.messages[cid] = pmsg
+
+            # Insert the compaction marker message
+            state.messages[msg_id] = ProjectedMessage(
+                id=msg_id,
+                session_id=event.aggregate_id,
+                role="system",
+                content=summary,
+                message_type="compaction",
+                created_at=event.time_created,
+                seq=len(state.messages) + 1,
+            )
+
+            # Re-add the last message (current turn) if it existed
+            if last_msg:
+                last_msg.seq = len(state.messages) + 1
+                state.messages[last_msg.id] = last_msg
+
+            return
+
+        # Simple case: just add a compaction marker message
         if msg_id in state.messages:
-            # Update content if we have a newer version
             if summary:
                 state.messages[msg_id].content = summary
             return

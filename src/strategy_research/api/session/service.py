@@ -876,52 +876,28 @@ class SessionService:
         if not summary and layers:
             summary = self._build_fallback_summary(compressed, history)
 
-        # Persist compressed history back to DB (replace old messages)
+        # Persist compressed history via event-sourcing (B4/B5)
+        # Emit compact.ended event with the compressed message set.
+        # The projector handles:
+        # 1. Replacing old messages with compressed versions
+        # 2. Adding a compaction marker message
+        # 3. Preserving the last (current turn) message
+        # EventBusV2.flush_to_messages=True ensures messages table is updated.
         if layers:
             try:
-                # Collect IDs of all non-last messages (the ones that were compressed)
-                old_ids = [m.message_id for m in messages[:-1]]
-                if old_ids:
-                    delete_messages(session_id, old_ids)
-
-                # Insert compressed messages in order, assigning fresh IDs
-                import uuid
-                new_ids: list[str] = []
-                for i, m in enumerate(compressed):
-                    mid = f"cmp_{uuid.uuid4().hex[:10]}"
-                    new_ids.append(mid)
-                    role = m.get("role", "assistant")
-                    content = m.get("content", "") or ""
-                    tool_call_id = m.get("tool_call_id")
-
-                    # Build parts for assistant messages with tool_calls
-                    parts = None
-                    if role == "assistant" and m.get("tool_calls"):
-                        parts = []
-                        for tc in m["tool_calls"]:
-                            parts.append({
-                                "type": "tool_call",
-                                "id": tc.get("id", ""),
-                                "name": tc.get("function", {}).get("name", ""),
-                                "arguments": tc.get("function", {}).get("arguments", "{}"),
-                                "status": "done",
-                                "result": "",
-                            })
-
-                    self.store.append_message(
-                        Message(
-                            session_id=session_id,
-                            role=role,
-                            content=content,
-                            tool_call_id=tool_call_id,
-                            metadata={"compacted": True, "order": i},
-                        ),
-                        message_id=mid,
-                        parts=parts,
-                        seq=get_default_generator().next(session_id),
-                    )
+                self.event_bus.emit(
+                    session_id,
+                    "compact.ended",
+                    {
+                        "summary": summary or f"Compressed {before_tokens} → {after_tokens} tokens",
+                        "before_tokens": before_tokens,
+                        "after_tokens": after_tokens,
+                        "layers": layers,
+                        "messages": compressed,
+                    },
+                )
             except Exception:
-                logger.exception("failed to persist compacted history")
+                logger.exception("failed to emit compact event")
 
         return {
             "layers": layers,
