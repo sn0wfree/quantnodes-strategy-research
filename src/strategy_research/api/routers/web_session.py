@@ -213,6 +213,54 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "ON attempts(session_id, created_at)"
     )
 
+    # event_log (Level 3, Phase 3 B1 commit 1) — append-only event store.
+    #
+    # Every AgentLoop event (message_received, text.started, text_delta,
+    # text.ended, tool.call, tool.result, llm_usage, agent_done, ...) is
+    # persisted here as an immutable row. The projector reads from this
+    # log to update messages + message_parts; the EventBus reads from
+    # here to replay events for SSE reconnect.
+    #
+    # Schema (opencode-aligned):
+    #   id           — stable per-event UUID
+    #   aggregate_id — session_id (the aggregate root)
+    #   seq          — per-aggregate monotonic integer (UNIQUE)
+    #   type         — event type string (dot-namespaced: "text.started")
+    #   data_json    — event payload as JSON (preserves opencode shape)
+    #   time_created — wall-clock timestamp (server time.time())
+    #
+    # The (aggregate_id, seq) UNIQUE INDEX ensures events are append-only
+    # and provides efficient replay (WHERE aggregate_id = ? ORDER BY seq).
+    # The (type, time_created) index supports time-range queries by event
+    # type (e.g. "all tool_result events in the last hour").
+    #
+    # Phase 3 B1: this table is created empty and unused. Service code
+    # still writes directly to messages + message_parts. Phase 3 B2 will
+    # add EventBusV2 dual-write; B3 will switch the read path to read
+    # from the projector (which materializes from event_log).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS event_log (
+            id TEXT PRIMARY KEY,
+            aggregate_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            time_created REAL NOT NULL,
+            FOREIGN KEY (aggregate_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            UNIQUE (aggregate_id, seq)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_log_aggregate_seq "
+        "ON event_log(aggregate_id, seq)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_log_type_time "
+        "ON event_log(type, time_created)"
+    )
+
     # FTS5 virtual table (graceful fallback if FTS5 not compiled in).
     # Use trigram tokenizer for substring matching across Chinese/English boundaries
     # (unicode61 default doesn't split Latin/Chinese tokens).
