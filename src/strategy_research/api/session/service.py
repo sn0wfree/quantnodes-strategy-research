@@ -975,8 +975,24 @@ class SessionService:
         2. Legacy: tool_calls embedded in assistant message parts (reconstructed from parts)
         3. Compaction: message_type='compaction' → user role with checkpoint wrap
 
-        Excludes the current turn (last message). Trims by character budget
-        from the newest items so the LLM still sees the most recent context.
+        **Assistant-Tool ordering (opencode-aligned, Level 0)**:
+        For each assistant message with tool_calls, all corresponding tool
+        result messages are emitted IMMEDIATELY AFTER the assistant (not
+        in raw `created_at` order). This is required by the OpenAI tool
+        protocol: `tool` messages must follow the `assistant(tool_calls)`
+        that generated them. Violating this order causes provider errors
+        like MiniMax 400 "chat content is empty" (2013).
+
+        See opencode `to-llm-message.ts:assistant()` for the reference
+        implementation: tools are physically part of the assistant message
+        there, making the correct order a structural invariant. We achieve
+        the same effect by reordering at conversion time.
+
+        Trim semantics: character budget is enforced from newest → oldest,
+        with assistant-tool groups kept intact (either the whole group
+        fits or the whole group is dropped).
+
+        Excludes the current turn (last message).
 
         Args:
             keep_all_compactions: When True, include all compaction messages
@@ -1014,9 +1030,39 @@ class SessionService:
                     hidden,
                 )
 
-        # ── Second pass: convert with filter ──
-        history: list[dict[str, Any]] = []
+        # ── Pre-build indexes for assistant-tool reordering ──
+        # tool_to_assistant_idx: tool_call_id -> assistant message index
+        # tc_to_tool_idx: tool_call_id -> tool message index
+        # These let us enforce the OpenAI protocol invariant:
+        #   assistant(tool_calls) MUST be followed by its tool result(s)
+        # opencode's to-llm-message.ts:assistant() guarantees this by
+        # physical structure (tool is a part of the assistant message).
+        # We achieve the same effect by reordering at conversion time.
+        tool_to_assistant_idx: dict[str, int] = {}
+        tc_to_tool_idx: dict[str, int] = {}
+        for i, msg in enumerate(messages[:-1]):
+            role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
+            if role == "assistant":
+                parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
+                for p in parts:
+                    if isinstance(p, dict) and p.get("type") == "tool_call":
+                        tc_id = p.get("id") or p.get("call_id")
+                        if tc_id:
+                            tool_to_assistant_idx.setdefault(tc_id, i)
+            elif role == "tool":
+                tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
+                if tc_id and tc_id not in tc_to_tool_idx:
+                    tc_to_tool_idx[tc_id] = i  # take first
+
+        # ── Second pass: convert with filter + reorder ──
+        # Each item: (entry_dict, group_id)
+        # group_id is non-None for assistant+tools that must stay together
+        # (preserved by trim).
+        history_with_groups: list[tuple[dict[str, Any], int | None]] = []
         compaction_count = 0
+        emitted_assistant_idxs: set[int] = set()
+        emitted_tool_msg_idxs: set[int] = set()
+
         for i, msg in enumerate(messages[:-1]):
             role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
             content = msg.content if hasattr(msg, "content") else msg.get("content", "")
@@ -1037,29 +1083,42 @@ class SessionService:
                     recent="",
                     reason="auto",
                 )
-                history.append(comp.to_llm_message())
+                history_with_groups.append((comp.to_llm_message(), None))
                 continue
 
             if role == "tool":
+                # Tool messages are emitted as part of their assistant.
+                # Three cases:
+                # 1. Already emitted alongside its assistant → skip
+                # 2. Assistant comes later in the list → defer (we'll pair it then)
+                # 3. Assistant not in this history slice (orphan) → drop with log
+                if i in emitted_tool_msg_idxs:
+                    continue
                 tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
                 if not tc_id:
                     continue
-                history.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": content or "",
-                })
+                assistant_idx = tool_to_assistant_idx.get(tc_id)
+                if assistant_idx is None or assistant_idx in emitted_assistant_idxs:
+                    # Orphan or already-paired-but-skipped → drop
+                    if assistant_idx is None:
+                        logger.debug(
+                            "[HIST] orphan tool dropped: tc_id=%s msg_id=%s",
+                            tc_id, msg.message_id,
+                        )
+                    continue
+                # Defer: assistant is later, will be paired then
                 continue
 
             if role not in ("user", "assistant"):
                 continue
 
             entry: dict[str, Any] = {"role": role, "content": content or ""}
+            group_id: int | None = None
 
             if role == "assistant" and parts:
                 tool_calls = []
                 for p in parts:
-                    if p.get("type") != "tool_call":
+                    if not isinstance(p, dict) or p.get("type") != "tool_call":
                         continue
                     tc_id = p.get("id") or p.get("call_id")
                     if not tc_id:
@@ -1077,25 +1136,79 @@ class SessionService:
                     })
                 if tool_calls:
                     entry["tool_calls"] = tool_calls
+                    group_id = i  # this assistant + its tools share group_id
 
             if not content and not entry.get("tool_calls"):
                 continue
 
-            history.append(entry)
+            history_with_groups.append((entry, group_id))
+            emitted_assistant_idxs.add(i)
 
-        # Trim by character budget from newest → oldest, but never break
-        # an assistant message with tool_calls away from its tool results.
+            # Immediately follow with all matching tool messages in
+            # their original (created_at) order. Tools may have been
+            # seen earlier in the iteration (chronologically before
+            # the assistant's final text) — that's fine, we pair them
+            # here using tc_to_tool_idx.
+            if role == "assistant" and entry.get("tool_calls"):
+                seen_tc_ids: set[str] = set()
+                for tc in entry["tool_calls"]:
+                    tc_id = tc["id"]
+                    if tc_id in seen_tc_ids:
+                        continue
+                    seen_tc_ids.add(tc_id)
+                    tool_msg_idx = tc_to_tool_idx.get(tc_id)
+                    if tool_msg_idx is None or tool_msg_idx in emitted_tool_msg_idxs:
+                        continue
+                    tool_msg = messages[tool_msg_idx]
+                    tool_content = (
+                        tool_msg.content if hasattr(tool_msg, "content")
+                        else tool_msg.get("content", "")
+                    )
+                    tool_entry = {
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": tool_content or "",
+                    }
+                    history_with_groups.append((tool_entry, group_id))
+                    emitted_tool_msg_idxs.add(tool_msg_idx)
+
+        # ── Trim by character budget from newest → oldest, preserving
+        #    assistant-tool group integrity. ──
+        # Group consecutive entries that share the same group_id;
+        # each group is either kept whole or dropped whole. Within
+        # a group, the order is preserved (assistant before its tools).
+        grouped: list[list[tuple[dict[str, Any], int | None]]] = []
+        current_group: list[tuple[dict[str, Any], int | None]] = []
+        current_group_id: int | None = -1  # sentinel: no group yet
+        for entry, gid in history_with_groups:
+            if gid == current_group_id and gid is not None:
+                current_group.append((entry, gid))
+            else:
+                if current_group:
+                    grouped.append(current_group)
+                current_group = [(entry, gid)]
+                current_group_id = gid
+        if current_group:
+            grouped.append(current_group)
+
         total_chars = 0
-        trimmed: list[dict[str, Any]] = []
-        for msg in reversed(history):
-            msg_len = len(msg.get("content", ""))
-            for tc in msg.get("tool_calls") or []:
-                msg_len += len(tc.get("function", {}).get("arguments", ""))
-            if total_chars + msg_len > MAX_HISTORY_CHARS:
-                break
-            trimmed.append(msg)
-            total_chars += msg_len
-        return list(reversed(trimmed))
+        kept_groups: list[list[dict[str, Any]]] = []  # outer: groups in arrival order
+        for group in reversed(grouped):
+            group_chars = 0
+            for e, _ in group:
+                group_chars += len(e.get("content", ""))
+                for tc in e.get("tool_calls") or []:
+                    group_chars += len(tc.get("function", {}).get("arguments", ""))
+            if total_chars + group_chars > MAX_HISTORY_CHARS:
+                # Drop this whole group; older groups are even larger
+                # relative to budget and also dropped
+                continue
+            kept_groups.append([e for e, _ in group])
+            total_chars += group_chars
+        # Reverse the outer group order (oldest group first), but keep
+        # each group's internal order (assistant before tools).
+        kept_groups.reverse()
+        return [e for group in kept_groups for e in group]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
