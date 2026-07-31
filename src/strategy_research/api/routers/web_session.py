@@ -57,6 +57,13 @@ def _get_db_path() -> Path:
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create all tables + indexes + FTS5 triggers (idempotent)."""
+    # Enable foreign key constraints (Level 2, Phase 2 commit 2).
+    # Required for the new message_parts.session_id / .message_id
+    # FOREIGN KEY ... ON DELETE CASCADE to actually fire. The existing
+    # messages.session_id FK has been declared since the original
+    # schema, but was inert without this PRAGMA — see comments on
+    # the message_parts table below.
+    conn.execute("PRAGMA foreign_keys=ON")
     # Main sessions table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
@@ -478,6 +485,26 @@ def persist_message(
             (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json, message_type, seq or 0),
         )
         logger.debug("[DB] persisted id=%s", msg_id)
+
+        # Dual-write: also insert parts into message_parts (Level 2, Phase 2
+        # commit 2). The old parts_json column remains the source of truth
+        # until commit 5 switches the read path. This commit only adds
+        # the parallel write so commits 3-4 (migration + read switch) can
+        # proceed without losing data.
+        if parts:
+            for i, p in enumerate(parts):
+                if not isinstance(p, dict):
+                    continue
+                part_id = str(uuid.uuid4())
+                part_type = p.get("type", "text")
+                part_data_json = json.dumps(p, ensure_ascii=False)
+                conn.execute(
+                    "INSERT INTO message_parts "
+                    "(id, message_id, session_id, type, data_json, seq, time_created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (part_id, msg_id, session_id, part_type, part_data_json, i, ts),
+                )
+
         conn.execute(
             "UPDATE sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?",
             (ts, session_id),
