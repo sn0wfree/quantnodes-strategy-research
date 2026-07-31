@@ -111,7 +111,10 @@ Rules:
 
 # ── Config ────────────────────────────────────────────────────────
 
-_DEFAULT_TOOL_LIMITS: dict[str, int] = {
+# DEPRECATED since Phase A: was the L1 per-tool-type threshold table.
+# Kept only as documentation reference for the (now-unused) tool_truncate_chars
+# field default. Field default now uses an empty dict; L4 doesn't pre-truncate.
+_LEGACY_L1_TOOL_LIMITS_DOC: dict[str, int] = {
     "read_file": 3000,
     "search_code": 2000,
     "run_command": 2000,
@@ -164,7 +167,7 @@ class CompactConfig:
     # Fields kept for backward compat with existing llm.json files.
     # Ignored at runtime.
     microcompact_tool_result_chars: int = 2_000  # DEPRECATED
-    tool_truncate_chars: dict[str, int] = field(default_factory=lambda: dict(_DEFAULT_TOOL_LIMITS))  # DEPRECATED
+    tool_truncate_chars: dict[str, int] = field(default_factory=dict)  # DEPRECATED
     collapse_keep_recent: int = 4         # DEPRECATED: was L3 keep_recent
     serialize_tool_max_chars: int = 2_000  # NEW: used by _serialize_message for L4 input
 
@@ -293,75 +296,11 @@ def _serialize_message(msg: dict[str, Any], tool_max_chars: int = TOOL_OUTPUT_MA
     return ""
 
 
-# ── L1: Smart Microcompact ───────────────────────────────────────
-
-def _get_tool_name(messages: list[dict[str, Any]], tool_msg_index: int) -> str:
-    """Find the tool name for a tool result by scanning backwards for the matching assistant tool_call."""
-    tool_call_id = messages[tool_msg_index].get("tool_call_id")
-    if not tool_call_id:
-        return "_default"
-    for j in range(tool_msg_index - 1, -1, -1):
-        msg = messages[j]
-        if msg.get("role") == "assistant":
-            for tc in msg.get("tool_calls") or []:
-                if isinstance(tc, dict):
-                    # id is at top level of tool_call, not inside function
-                    if tc.get("id") == tool_call_id:
-                        fn = tc.get("function", {})
-                        return fn.get("name", "_default")
-    return "_default"
-
-
-def _smart_microcompact(
-    messages: list[dict[str, Any]],
-    config: CompactConfig,
-) -> tuple[list[dict[str, Any]], int]:
-    """L1: Smart tool output truncation.
-
-    Improvements over naive truncation:
-    1. Per-tool-type thresholds
-    2. Keep head 60% + tail 40% (tail often has results)
-    3. Skip error messages (preserve for debugging)
-    4. Skip recent N tool outputs (protected)
-    """
-    tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    # Protect only the last N tool outputs when there are MORE than N total
-    if config.collapse_keep_recent > 0 and len(tool_indices) > config.collapse_keep_recent:
-        protected = set(tool_indices[-config.collapse_keep_recent:])
-    else:
-        protected = set()
-
-    count = 0
-    for i in tool_indices:
-        if i in protected:
-            continue
-        msg = messages[i]
-        content = msg.get("content") or ""
-        if not isinstance(content, str):
-            continue
-
-        # Skip error messages
-        if "error" in content.lower()[:200]:
-            continue
-
-        # Per-tool limit
-        tool_name = _get_tool_name(messages, i)
-        tool_limit = config.tool_truncate_chars.get(
-            tool_name, config.microcompact_tool_result_chars,
-        )
-
-        if len(content) > tool_limit:
-            head = int(tool_limit * 0.6)
-            tail = tool_limit - head
-            truncated = (
-                content[:head]
-                + f"\n... [{len(content) - tool_limit} chars truncated] ...\n"
-                + content[-tail:]
-            )
-            messages[i] = {**msg, "content": truncated}
-            count += 1
-
-    return messages, count
+# ── L1: Smart Microcompact (DEPRECATED, removed in Phase A) ───────
+# L1 was over-aggressive (truncated tool outputs before L4 sees them).
+# Removed in commit A2. L4 + _serialize_message tool truncation is sufficient.
+# Config fields (microcompact_tool_result_chars, tool_truncate_chars,
+# collapse_keep_recent) kept for backward compat; ignored at runtime.
 
 
 # ── L4: LLM Summarize (structured template + token budget) ────────

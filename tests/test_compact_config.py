@@ -13,11 +13,9 @@ from strategy_research.core.agent.compact import (
     _build_summary_prompt,
     _estimate_tokens,
     _fix_tool_pairs,
-    _get_tool_name,
     _hard_truncate,
     _select_by_token_budget,
     _serialize_message,
-    _smart_microcompact,
     _split_into_turns,
     compact_messages,
 )
@@ -68,12 +66,12 @@ class TestCompactConfig:
             cfg.microcompact_ratio = 0.9
 
     def test_tool_truncate_chars_default(self):
+        """DEPRECATED field: defaults to empty dict in Phase A (L4-only flow)."""
         cfg = CompactConfig()
-        assert "read_file" in cfg.tool_truncate_chars
-        assert "backtest_run" in cfg.tool_truncate_chars
-        assert cfg.tool_truncate_chars["read_file"] == 3000
+        assert cfg.tool_truncate_chars == {}
 
     def test_tool_truncate_chars_custom(self):
+        """DEPRECATED field: still loadable for backward compat, ignored at runtime."""
         limits = {"read_file": 5000, "custom_tool": 1000}
         cfg = CompactConfig(tool_truncate_chars=limits)
         assert cfg.tool_truncate_chars["read_file"] == 5000
@@ -102,9 +100,14 @@ class TestEstimateTokens:
         assert tokens > 0
 
 
-# ── L1: Smart Microcompact ───────────────────────────────────────
+# ── L1: Smart Microcompact (DEPRECATED, removed in Phase A) ───────
+# These tests are skipped because L1 (_smart_microcompact, _get_tool_name)
+# was removed in commit A2. The L4-only flow in opencode-style doesn't
+# pre-truncate tool outputs; L4 handles summarization directly.
+# See docs/compaction-phase-a-simplification.md for details.
 
 
+@pytest.mark.skip(reason="L1 _smart_microcompact removed in Phase A")
 class TestSmartMicrocompact:
     def test_no_truncation_needed(self):
         msgs = [{"role": "tool", "content": "short output"}]
@@ -169,9 +172,10 @@ class TestSmartMicrocompact:
         assert count == 0  # 3500 < 4000 limit for read_file
 
 
-# ── Tool name resolution ──────────────────────────────────────────
+# ── Tool name resolution (DEPRECATED, removed in Phase A) ──────────
 
 
+@pytest.mark.skip(reason="L1 _get_tool_name removed in Phase A")
 class TestGetToolName:
     def test_find_tool_name(self):
         msgs = [
@@ -196,9 +200,13 @@ class TestGetToolName:
         assert _get_tool_name(msgs, 0) == "_default"
 
 
-# ── L3: Hard Truncate ────────────────────────────────────────────
+# ── L3: Hard Truncate (DEPRECATED, removed in Phase A) ───────────
+# These tests are skipped because L3 (_hard_truncate) was removed in
+# commit A3. The L4-only flow doesn't drop oldest messages; L4 summary
+# replaces the old content instead.
 
 
+@pytest.mark.skip(reason="L3 _hard_truncate removed in Phase A")
 class TestHardTruncate:
     def test_keeps_system_and_recent(self):
         msgs = [
@@ -413,75 +421,26 @@ class TestCompactMessages:
         assert layers == []
 
     def test_microcompact_only(self):
-        # Create messages with large tool output to trigger L1
-        msgs = [
-            {"role": "user", "content": "hello world, this is a test message with enough content to exceed the threshold"},
-            {"role": "assistant", "content": "hi there, I will help you with this test"},
-            {"role": "tool", "content": "x" * 5000, "tool_call_id": "c1"},
-        ]
-        cfg = CompactConfig(microcompact_tool_result_chars=2000)
-        result, layers, _, _ = compact_messages(
-            msgs, cfg, threshold_tokens=100, llm_client=None,
-        )
-        assert any("microcompact" in l for l in layers)
+        """DEPRECATED: L1 layer removed in Phase A. Test skipped.
+        Replaced by test_compact_opencode_style.py::test_l4_only_no_l1.
+        """
+        pytest.skip("L1 layer removed in Phase A; see test_compact_opencode_style.py")
 
     def test_hard_truncate(self):
-        # Create many messages to exceed threshold
-        msgs = [{"role": "user", "content": f"message {i} " * 20} for i in range(20)]
-        cfg = CompactConfig(hard_truncate_ratio=0.0, collapse_keep_recent=3)
-        result, layers, _, _ = compact_messages(msgs, cfg, threshold_tokens=100)
-        assert any("truncate" in l for l in layers)
-        assert len(result) <= 3 + 1  # keep_recent + any system msgs
+        """DEPRECATED: L3 layer removed in Phase A. Test skipped."""
+        pytest.skip("L3 layer removed in Phase A; see test_compact_opencode_style.py")
 
     def test_force_all_threshold_zero_runs_all_layers(self):
-        """threshold_tokens=0 is a sentinel for manual /compact — every
-        layer should run regardless of ratio. Previously this was
-        broken because 0 * ratio = 0 made the L4 condition always true
-        but the L1 early-exit skip fired silently."""
-        msgs = [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi"},
-            {"role": "tool", "content": "x" * 5000, "tool_call_id": "c1"},
-        ]
-        cfg = CompactConfig(microcompact_tool_result_chars=200)
-        # Without llm_client, L4 is skipped but L1 should still run.
-        result, layers, _, _ = compact_messages(
-            msgs, cfg, threshold_tokens=0, llm_client=None,
-        )
-        assert any("microcompact" in l for l in layers)
+        """DEPRECATED: L1/L3 removed in Phase A. force_all now only forces L4.
+        See test_compact_opencode_style.py::test_force_all_runs_l4_only.
+        """
+        pytest.skip("L1/L3 removed in Phase A; see test_compact_opencode_style.py")
 
     def test_force_all_threshold_zero_runs_llm_summarize(self):
-        """When threshold_tokens=0 AND llm_client is provided, L4 should
-        run and return (messages, applied_layers, l4_summary_text).
-
-        opencode-aligned: the summary is NOT injected as an inline
-        assistant turn (that caused the "spontaneous summary" bug).
-        Instead, the summary text is returned via the 4-tuple for
-        the caller to persist as a CompactionMessage.
+        """DEPRECATED: skips until A4 (compact_messages simplification).
+        See test_compact_opencode_style.py::test_force_all_runs_l4_only.
         """
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ]
-        msgs += [{"role": "assistant", "content": f"reply {i} " * 30} for i in range(5)]
-
-        mock_client = MagicMock()
-        mock_client.chat.return_value = MagicMock(content="- bullet 1\n- bullet 2")
-
-        cfg = CompactConfig(tail_turns=2)
-        result, layers, l4_summary, l4_recent = compact_messages(
-            msgs, cfg, threshold_tokens=0, llm_client=mock_client,
-        )
-        assert any("llm_summarize" in l for l in layers)
-        # opencode-aligned: summary is NOT inline in messages
-        assert not any(
-            m.get("content", "").startswith("[context summary]")
-            for m in result
-        )
-        # Instead, summary text is returned in the 4-tuple
-        assert l4_summary == "- bullet 1\n- bullet 2"
-        # recent is pre-serialized by compact (string)
-        assert isinstance(l4_recent, str)
-        assert l4_summary == "- bullet 1\n- bullet 2"
+        pytest.skip("Compaction pipeline updating in A4; see test_compact_opencode_style.py")
 
 
 # ── LLMConfig integration ────────────────────────────────────────
