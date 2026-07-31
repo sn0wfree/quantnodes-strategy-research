@@ -122,7 +122,7 @@ class LLMConfig:
 
     # ── Network ──────────────────────────────────
     timeout_s: float = 60.0
-    max_retries: int = 3
+    max_retries: int = 3                            # total attempts (default 3)
     retry_backoff_s: float = 1.0
     proxy: str | None = None
 

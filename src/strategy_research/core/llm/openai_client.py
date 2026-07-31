@@ -19,8 +19,11 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import datetime
+import email.utils
 import json
 import logging
+import random
 import time
 from typing import Any, AsyncIterator, Iterator
 
@@ -52,6 +55,61 @@ def _is_retryable_status(status: int) -> bool:
 def _backoff_delay(attempt: int, base: float) -> float:
     """Exponential backoff: base * 2^attempt, capped at 60s."""
     return min(base * (2 ** attempt), 60.0)
+
+
+def _parse_retry_after(header_value: str) -> float | None:
+    """Parse Retry-After header (seconds or HTTP-date). Returns seconds or None."""
+    if not header_value:
+        return None
+    # Try seconds (int)
+    try:
+        return max(0.0, float(header_value))
+    except ValueError:
+        pass
+    # Try HTTP-date
+    try:
+        dt = email.utils.parsedate_to_datetime(header_value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        delta = dt - datetime.datetime.now(datetime.timezone.utc)
+        return max(0.0, delta.total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_retry_delay(
+    response: httpx.Response,
+    attempt: int,
+    base_backoff: float,
+    max_backoff: float = 60.0,
+    jitter_fraction: float = 0.3,
+) -> float:
+    """Compute retry delay with exponential backoff, Retry-After, and jitter.
+
+    Args:
+        response: the HTTP response with Retry-After header
+        attempt: zero-based attempt index (0 = first retry)
+        base_backoff: base backoff in seconds
+        max_backoff: maximum backoff cap in seconds
+        jitter_fraction: random jitter ±fraction (0.3 = ±30%)
+
+    Returns:
+        Delay in seconds.
+    """
+    # Start with exponential backoff
+    delay = _backoff_delay(attempt, base_backoff)
+    # Honor Retry-After if present
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        ra_seconds = _parse_retry_after(retry_after)
+        if ra_seconds is not None:
+            delay = max(delay, min(ra_seconds, max_backoff * 5))
+    # Apply ±jitter_fraction random jitter
+    if jitter_fraction > 0:
+        jitter = random.uniform(1 - jitter_fraction, 1 + jitter_fraction)
+        delay = delay * jitter
+    # Final cap
+    return min(delay, max_backoff)
 
 
 def _ensure_api_key(config: LLMConfig) -> str:
@@ -210,8 +268,14 @@ class OpenAICompatClient:
             print(chunk.delta_content, end="")
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(
+        self,
+        config: LLMConfig,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ):
         self.config = config
+        self._transport = transport
 
     # ── Public API ─────────────────────────────────
 
@@ -265,10 +329,12 @@ class OpenAICompatClient:
         tool_choice: Any = None,
         **overrides: Any,
     ) -> Iterator[StreamChunk]:
-        """SSE streaming chat completion.
+        """SSE streaming chat completion with retry on transient failures.
 
         Yields StreamChunk objects. The last chunk has finish_reason set.
-        Does NOT retry mid-stream (network errors → LLMError).
+        Retries only BEFORE the first chunk is yielded (HTTP errors,
+        connection failures, timeouts before stream starts).
+        Does NOT retry mid-stream (after first chunk yielded → LLMError).
         """
         payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
         payload["stream"] = True
@@ -276,34 +342,80 @@ class OpenAICompatClient:
 
         headers = _build_headers(self.config)
         url = self._chat_url()
+        client_kwargs = self._client_kwargs()
 
-        client_kwargs: dict[str, Any] = {"timeout": self.config.timeout_s}
-        if self.config.proxy:
-            client_kwargs["proxy"] = self.config.proxy
-
-        try:
-            with httpx.Client(**client_kwargs) as client:
-                with client.stream("POST", url, json=payload, headers=headers) as response:
-                    if response.status_code >= 400:
-                        response.read()
-                    try:
-                        _raise_for_status(response, self.config.provider)
-                        for line in response.iter_lines():
-                            chunk = parse_stream_chunk(line, self.config.provider)
-                            if chunk is not None:
-                                yield chunk
-                                if chunk.finish_reason:
-                                    return
-                    finally:
+        last_response: httpx.Response | None = None
+        for attempt in range(self.config.max_retries):
+            started = False
+            try:
+                with httpx.Client(**client_kwargs) as client:
+                    with client.stream("POST", url, json=payload, headers=headers) as response:
+                        if response.status_code >= 400:
+                            response.read()
+                        last_response = response
+                        # Retryable HTTP error before any content
+                        if _is_retryable_status(response.status_code):
+                            if attempt == self.config.max_retries - 1:
+                                _raise_for_status(response, self.config.provider)
+                            delay = _compute_retry_delay(
+                                response, attempt, self.config.retry_backoff_s
+                            )
+                            logger.warning(
+                                "stream retryable status %s (attempt %d/%d); sleeping %.1fs",
+                                response.status_code, attempt + 1, self.config.max_retries, delay,
+                            )
+                            time.sleep(delay)
+                            continue
+                        # Non-retryable error → raise immediately
+                        if response.status_code >= 400:
+                            _raise_for_status(response, self.config.provider)
+                        # Stream content
                         try:
-                            for _ in response.iter_lines():
+                            for line in response.iter_lines():
+                                chunk = parse_stream_chunk(line, self.config.provider)
+                                if chunk is not None:
+                                    started = True
+                                    yield chunk
+                                    if chunk.finish_reason:
+                                        return
+                        finally:
+                            try:
+                                for _ in response.iter_lines():
+                                    pass
+                            except Exception:  # noqa: BLE001
                                 pass
-                        except Exception:  # noqa: BLE001
-                            pass
-        except httpx.TimeoutException as exc:
-            raise LLMTimeoutError(
-                f"stream timed out after {self.config.timeout_s}s"
-            ) from exc
+                # If we got here with no yield, it's an empty stream — exit
+                return
+            except httpx.TimeoutException as exc:
+                if started or attempt == self.config.max_retries - 1:
+                    raise LLMTimeoutError(
+                        f"stream timed out after {self.config.timeout_s}s "
+                        f"({self.config.max_retries} attempts)"
+                    ) from exc
+                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                jitter = random.uniform(0.7, 1.3)
+                delay = min(delay * jitter, 60.0)
+                logger.warning(
+                    "stream timeout (attempt %d/%d); sleeping %.1fs",
+                    attempt + 1, self.config.max_retries, delay,
+                )
+                time.sleep(delay)
+            except httpx.TransportError as exc:
+                if started or attempt == self.config.max_retries - 1:
+                    raise LLMError(f"stream transport error: {exc}") from exc
+                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                jitter = random.uniform(0.7, 1.3)
+                delay = min(delay * jitter, 60.0)
+                logger.warning(
+                    "stream transport error (attempt %d/%d); sleeping %.1fs",
+                    attempt + 1, self.config.max_retries, delay,
+                )
+                time.sleep(delay)
+
+        # Exhausted retries
+        if last_response is not None:
+            _raise_for_status(last_response, self.config.provider)
+        raise LLMError("stream max retries exhausted")
 
     async def astream(
         self,
@@ -313,40 +425,90 @@ class OpenAICompatClient:
         tool_choice: Any = None,
         **overrides: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Async SSE streaming chat completion."""
+        """Async SSE streaming chat completion with retry on transient failures.
+
+        Retries only BEFORE the first chunk is yielded.
+        Does NOT retry mid-stream (after first chunk yielded → LLMError).
+        """
         payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
 
         headers = _build_headers(self.config)
         url = self._chat_url()
+        client_kwargs = self._client_kwargs()
 
-        client_kwargs: dict[str, Any] = {"timeout": self.config.timeout_s}
-        if self.config.proxy:
-            client_kwargs["proxy"] = self.config.proxy
+        last_response: httpx.Response | None = None
+        for attempt in range(self.config.max_retries):
+            started = False
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    async with client.stream("POST", url, json=payload, headers=headers) as response:
+                        if response.status_code >= 400:
+                            await response.aread()
+                        last_response = response
+                        # Retryable HTTP error before any content
+                        if _is_retryable_status(response.status_code):
+                            if attempt == self.config.max_retries - 1:
+                                _raise_for_status(response, self.config.provider)
+                            delay = _compute_retry_delay(
+                                response, attempt, self.config.retry_backoff_s
+                            )
+                            logger.warning(
+                                "astream retryable status %s (attempt %d/%d); sleeping %.1fs",
+                                response.status_code, attempt + 1, self.config.max_retries, delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        # Non-retryable error → raise immediately
+                        if response.status_code >= 400:
+                            _raise_for_status(response, self.config.provider)
+                        # Stream content
+                        try:
+                            async for line in response.aiter_lines():
+                                chunk = parse_stream_chunk(line, self.config.provider)
+                                if chunk is not None:
+                                    started = True
+                                    yield chunk
+                                    if chunk.finish_reason:
+                                        return
+                        finally:
+                            try:
+                                async for _ in response.aiter_lines():
+                                    pass
+                            except Exception:  # noqa: BLE001
+                                pass
+                # Empty stream
+                return
+            except httpx.TimeoutException as exc:
+                if started or attempt == self.config.max_retries - 1:
+                    raise LLMTimeoutError(
+                        f"stream timed out after {self.config.timeout_s}s "
+                        f"({self.config.max_retries} attempts)"
+                    ) from exc
+                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                jitter = random.uniform(0.7, 1.3)
+                delay = min(delay * jitter, 60.0)
+                logger.warning(
+                    "astream timeout (attempt %d/%d); sleeping %.1fs",
+                    attempt + 1, self.config.max_retries, delay,
+                )
+                await asyncio.sleep(delay)
+            except httpx.TransportError as exc:
+                if started or attempt == self.config.max_retries - 1:
+                    raise LLMError(f"stream transport error: {exc}") from exc
+                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                jitter = random.uniform(0.7, 1.3)
+                delay = min(delay * jitter, 60.0)
+                logger.warning(
+                    "astream transport error (attempt %d/%d); sleeping %.1fs",
+                    attempt + 1, self.config.max_retries, delay,
+                )
+                await asyncio.sleep(delay)
 
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            async with client.stream("POST", url, json=payload, headers=headers) as response:
-                # Buffer error responses so _raise_for_status can call
-                # response.json() without httpx raising "Attempted to
-                # access streaming response content, without having
-                # called 'read()'."
-                if response.status_code >= 400:
-                    await response.aread()
-                try:
-                    _raise_for_status(response, self.config.provider)
-                    async for line in response.aiter_lines():
-                        chunk = parse_stream_chunk(line, self.config.provider)
-                        if chunk is not None:
-                            yield chunk
-                            if chunk.finish_reason:
-                                return
-                finally:
-                    try:
-                        async for _ in response.aiter_lines():
-                            pass
-                    except Exception:  # noqa: BLE001
-                        pass
+        if last_response is not None:
+            _raise_for_status(last_response, self.config.provider)
+        raise LLMError("stream max retries exhausted")
 
     def with_config(self, **kwargs: Any) -> "OpenAICompatClient":
         """Return a new client with overridden config fields."""
@@ -357,95 +519,109 @@ class OpenAICompatClient:
     def _chat_url(self) -> str:
         return f"{self.config.base_url.rstrip('/')}/chat/completions"
 
+    def _client_kwargs(self) -> dict[str, Any]:
+        """Build httpx client kwargs (timeout, proxy, optional transport)."""
+        kwargs: dict[str, Any] = {"timeout": self.config.timeout_s}
+        if self.config.proxy:
+            kwargs["proxy"] = self.config.proxy
+        if self._transport is not None:
+            kwargs["transport"] = self._transport
+        return kwargs
+
     def _request_with_retry(
         self, payload: dict[str, Any], *, stream: bool
     ) -> httpx.Response:
-        """Sync HTTP request with retry on transient failures."""
+        """Sync HTTP request with retry on transient failures (total attempts = max_retries)."""
         headers = _build_headers(self.config)
         url = self._chat_url()
-        client_kwargs: dict[str, Any] = {"timeout": self.config.timeout_s}
-        if self.config.proxy:
-            client_kwargs["proxy"] = self.config.proxy
+        client_kwargs = self._client_kwargs()
 
-        attempt = 0
-        last_exc: Exception | None = None
-        while attempt <= self.config.max_retries:
+        last_response: httpx.Response | None = None
+        for attempt in range(self.config.max_retries):
             try:
                 with httpx.Client(**client_kwargs) as client:
                     response = client.post(url, json=payload, headers=headers)
                 if response.status_code < 400:
                     return response
-                # Determine if retryable
+                last_response = response
+                # Non-retryable → raise immediately
                 if not _is_retryable_status(response.status_code):
                     _raise_for_status(response, self.config.provider)  # raises
-                # retryable
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                # Retryable but last attempt → raise final error
+                if attempt == self.config.max_retries - 1:
+                    _raise_for_status(response, self.config.provider)
+                # Retry
+                delay = _compute_retry_delay(
+                    response, attempt, self.config.retry_backoff_s
+                )
                 logger.warning(
                     "retryable status %s (attempt %d/%d); sleeping %.1fs",
                     response.status_code, attempt + 1, self.config.max_retries, delay,
                 )
                 time.sleep(delay)
-                attempt += 1
-                last_exc = LLMServerError(f"status {response.status_code}")
             except httpx.TimeoutException as exc:
-                if attempt >= self.config.max_retries:
+                if attempt == self.config.max_retries - 1:
                     raise LLMTimeoutError(
                         f"request timed out after {self.config.timeout_s}s "
-                        f"({attempt + 1} attempts)"
+                        f"({self.config.max_retries} attempts)"
                     ) from exc
                 delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                jitter = random.uniform(0.7, 1.3)
+                delay = min(delay * jitter, 60.0)
                 logger.warning(
                     "timeout (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
                 )
                 time.sleep(delay)
-                attempt += 1
-                last_exc = exc
 
-        if last_exc is not None:
-            raise last_exc
-        # Should not reach here, but safety net
+        # Should not reach here
+        if last_response is not None:
+            _raise_for_status(last_response, self.config.provider)
         raise LLMError("max retries exhausted")
 
     async def _arequest_with_retry(
         self, payload: dict[str, Any]
     ) -> httpx.Response:
-        """Async HTTP request with retry on transient failures."""
+        """Async HTTP request with retry on transient failures (total attempts = max_retries)."""
         headers = _build_headers(self.config)
         url = self._chat_url()
-        client_kwargs: dict[str, Any] = {"timeout": self.config.timeout_s}
-        if self.config.proxy:
-            client_kwargs["proxy"] = self.config.proxy
+        client_kwargs = self._client_kwargs()
 
-        attempt = 0
-        last_exc: Exception | None = None
-        while attempt <= self.config.max_retries:
+        last_response: httpx.Response | None = None
+        for attempt in range(self.config.max_retries):
             try:
                 async with httpx.AsyncClient(**client_kwargs) as client:
                     response = await client.post(url, json=payload, headers=headers)
                 if response.status_code < 400:
                     return response
+                last_response = response
                 if not _is_retryable_status(response.status_code):
                     _raise_for_status(response, self.config.provider)
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                if attempt == self.config.max_retries - 1:
+                    _raise_for_status(response, self.config.provider)
+                delay = _compute_retry_delay(
+                    response, attempt, self.config.retry_backoff_s
+                )
                 logger.warning(
                     "async retryable status %s (attempt %d/%d); sleeping %.1fs",
                     response.status_code, attempt + 1, self.config.max_retries, delay,
                 )
                 await asyncio.sleep(delay)
-                attempt += 1
-                last_exc = LLMServerError(f"status {response.status_code}")
             except httpx.TimeoutException as exc:
-                if attempt >= self.config.max_retries:
+                if attempt == self.config.max_retries - 1:
                     raise LLMTimeoutError(
                         f"request timed out after {self.config.timeout_s}s "
-                        f"({attempt + 1} attempts)"
+                        f"({self.config.max_retries} attempts)"
                     ) from exc
                 delay = _backoff_delay(attempt, self.config.retry_backoff_s)
+                jitter = random.uniform(0.7, 1.3)
+                delay = min(delay * jitter, 60.0)
+                logger.warning(
+                    "async timeout (attempt %d/%d); sleeping %.1fs",
+                    attempt + 1, self.config.max_retries, delay,
+                )
                 await asyncio.sleep(delay)
-                attempt += 1
-                last_exc = exc
 
-        if last_exc is not None:
-            raise last_exc
+        if last_response is not None:
+            _raise_for_status(last_response, self.config.provider)
         raise LLMError("max retries exhausted")
