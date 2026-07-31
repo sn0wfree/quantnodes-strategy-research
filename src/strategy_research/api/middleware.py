@@ -22,6 +22,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         "/api/auth/",
         "/api/chat/",
         "/api/system/",
+        "/api/admin/",  # Admin endpoints use X-Admin-Token header
         "/assets/",
     ]
 

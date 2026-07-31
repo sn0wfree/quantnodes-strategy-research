@@ -977,8 +977,10 @@ class SessionService:
                 See docs/compaction-history-filter.md.
         """
         from strategy_research.core.agent.compaction_message import CompactionMessage
+        from strategy_research.core.agent.compact import _compaction_metrics
 
         logger.debug("[HIST] converting %d messages", len(messages))
+        _compaction_metrics["filter_calls"] += 1
 
         # ── First pass: locate all compaction indices ──
         compaction_indices: list[int] = []
@@ -995,6 +997,8 @@ class SessionService:
             # opencode-aligned: keep only the most recent compaction
             keep_compaction_indices = {compaction_indices[-1]}
             hidden = len(compaction_indices) - 1
+            _compaction_metrics["total_hidden"] += hidden
+            _compaction_metrics["total_kept"] += 1
             if hidden > 0:
                 logger.debug(
                     "[HIST] hiding %d older compactions, keeping 1 most recent",

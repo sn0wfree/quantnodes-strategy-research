@@ -1,0 +1,263 @@
+"""Tests for admin API: kill switch, metrics, audit log, auth."""
+
+from __future__ import annotations
+
+import os
+from unittest.mock import patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from strategy_research.api.app import create_app
+from strategy_research.core.agent.compact import (
+    _compaction_metrics,
+    get_compaction_metrics,
+    reset_compaction_metrics,
+    set_keep_all_override,
+)
+
+
+@pytest.fixture
+def client_with_admin_token(monkeypatch):
+    """Create test client with admin token enabled."""
+    monkeypatch.setenv("SR_ADMIN_TOKEN", "test-admin-secret-123")
+    reset_compaction_metrics()
+    app = create_app()
+    return TestClient(app)
+
+
+@pytest.fixture
+def client_no_admin_token(monkeypatch):
+    """Create test client with admin token DISABLED."""
+    monkeypatch.delenv("SR_ADMIN_TOKEN", raising=False)
+    app = create_app()
+    return TestClient(app)
+
+
+# ── Auth tests ───────────────────────────────────────────────────────
+
+
+class TestAdminAuth:
+    def test_health_check_no_auth_required(self, client_no_admin_token):
+        """Health endpoint accessible without token."""
+        r = client_no_admin_token.get("/api/admin/health")
+        assert r.status_code == 200
+        assert r.json() == {"admin_enabled": False}
+
+    def test_health_check_shows_enabled(self, client_with_admin_token):
+        """Health endpoint shows admin is enabled."""
+        r = client_with_admin_token.get("/api/admin/health")
+        assert r.status_code == 200
+        assert r.json() == {"admin_enabled": True}
+
+    def test_protected_endpoint_without_token_401(self, client_with_admin_token):
+        r = client_with_admin_token.get("/api/admin/compaction/metrics")
+        assert r.status_code == 401
+
+    def test_protected_endpoint_wrong_token_401(self, client_with_admin_token):
+        r = client_with_admin_token.get(
+            "/api/admin/compaction/metrics",
+            headers={"X-Admin-Token": "wrong"},
+        )
+        assert r.status_code == 401
+
+    def test_admin_disabled_503(self, client_no_admin_token):
+        """When SR_ADMIN_TOKEN unset, admin endpoints return 503."""
+        r = client_no_admin_token.get("/api/admin/compaction/metrics")
+        assert r.status_code == 503
+
+
+# ── Keep-all toggle tests ────────────────────────────────────────────
+
+
+class TestKeepAllToggle:
+    def test_toggle_to_true(self, client_with_admin_token):
+        r = client_with_admin_token.post(
+            "/api/admin/compaction/keep-all/true?confirm=yes",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "ok"
+        assert body["keep_all_compactions"] is True
+        from strategy_research.core.agent import compact
+        assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is True
+
+    def test_toggle_to_false(self, client_with_admin_token):
+        # Set true first
+        client_with_admin_token.post(
+            "/api/admin/compaction/keep-all/true?confirm=yes",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        # Then false
+        r = client_with_admin_token.post(
+            "/api/admin/compaction/keep-all/false?confirm=yes",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 200
+        assert r.json()["keep_all_compactions"] is False
+
+    def test_toggle_requires_confirm(self, client_with_admin_token):
+        r = client_with_admin_token.post(
+            "/api/admin/compaction/keep-all/true",  # no confirm
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 400
+
+    def test_toggle_wrong_confirm_value(self, client_with_admin_token):
+        r = client_with_admin_token.post(
+            "/api/admin/compaction/keep-all/true?confirm=no",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 400
+
+
+# ── Metrics tests ────────────────────────────────────────────────────
+
+
+class TestCompactionMetrics:
+    def test_get_initial_metrics(self, client_with_admin_token):
+        r = client_with_admin_token.get(
+            "/api/admin/compaction/metrics",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert "metrics" in body
+        assert body["metrics"]["total_hidden"] == 0
+        assert body["metrics"]["total_kept"] == 0
+        assert body["metrics"]["l4_aborts"] == 0
+        assert body["metrics"]["filter_calls"] == 0
+
+    def test_metrics_reflect_changes(self, client_with_admin_token):
+        # Directly bump metrics
+        _compaction_metrics["total_hidden"] = 5
+        _compaction_metrics["total_kept"] = 1
+        _compaction_metrics["l4_aborts"] = 2
+        r = client_with_admin_token.get(
+            "/api/admin/compaction/metrics",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        body = r.json()
+        assert body["metrics"]["total_hidden"] == 5
+        assert body["metrics"]["total_kept"] == 1
+        assert body["metrics"]["l4_aborts"] == 2
+
+    def test_reset_metrics(self, client_with_admin_token):
+        _compaction_metrics["total_hidden"] = 99
+        r = client_with_admin_token.post(
+            "/api/admin/compaction/metrics/reset?confirm=yes",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 200
+        assert _compaction_metrics["total_hidden"] == 0
+
+    def test_reset_requires_confirm(self, client_with_admin_token):
+        r = client_with_admin_token.post(
+            "/api/admin/compaction/metrics/reset",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 400
+
+
+# ── Audit log tests ──────────────────────────────────────────────────
+
+
+class TestAuditLog:
+    def test_audit_log_records_toggle(self, client_with_admin_token):
+        client_with_admin_token.post(
+            "/api/admin/compaction/keep-all/true?confirm=yes",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        r = client_with_admin_token.get(
+            "/api/admin/audit-log",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] >= 1
+        actions = [e["action"] for e in body["entries"]]
+        assert "compaction.keep_all.toggle" in actions
+
+    def test_audit_log_records_reset(self, client_with_admin_token):
+        client_with_admin_token.post(
+            "/api/admin/compaction/metrics/reset?confirm=yes",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        r = client_with_admin_token.get(
+            "/api/admin/audit-log",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        body = r.json()
+        actions = [e["action"] for e in body["entries"]]
+        assert "compaction.metrics.reset" in actions
+
+    def test_audit_log_limit(self, client_with_admin_token):
+        r = client_with_admin_token.get(
+            "/api/admin/audit-log?limit=5",
+            headers={"X-Admin-Token": "test-admin-secret-123"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] <= 5
+
+
+# ── Module-level functions ──────────────────────────────────────────
+
+
+class TestModuleFunctions:
+    def test_get_compaction_metrics_returns_copy(self):
+        m = get_compaction_metrics()
+        assert isinstance(m, dict)
+        m["total_hidden"] = 999
+        # Original should not be modified
+        assert _compaction_metrics["total_hidden"] != 999
+
+    def test_set_keep_all_override(self):
+        set_keep_all_override(True)
+        from strategy_research.core.agent import compact
+        assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is True
+        set_keep_all_override(False)
+        assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is False
+
+    def test_reset_compaction_metrics(self):
+        _compaction_metrics["total_hidden"] = 100
+        _compaction_metrics["total_kept"] = 10
+        _compaction_metrics["l4_aborts"] = 5
+        _compaction_metrics["filter_calls"] = 20
+        reset_compaction_metrics()
+        assert _compaction_metrics["total_hidden"] == 0
+        assert _compaction_metrics["total_kept"] == 0
+        assert _compaction_metrics["l4_aborts"] == 0
+        assert _compaction_metrics["filter_calls"] == 0
+
+
+# ── Integration: filter updates metrics ──────────────────────────────
+
+
+class TestMetricsIntegration:
+    def test_filter_increments_metrics(self):
+        """_convert_messages_to_history should increment filter_calls."""
+        from strategy_research.api.session.service import SessionService
+        from strategy_research.api.session.models import Message
+
+        reset_compaction_metrics()
+        messages = [
+            Message(message_id=f"m{i}", session_id="s1", role="user",
+                   content=f"m{i}", message_type="user")
+            for i in range(5)
+        ]
+        # Add 3 compactions
+        for i in range(3):
+            messages.insert(
+                i * 2 + 1,
+                Message(message_id=f"c{i}", session_id="s1", role="user",
+                       content=f"s{i}", message_type="compaction"),
+            )
+        # Don't include the last message (current turn)
+        SessionService._convert_messages_to_history(messages[:-1])
+        # Verify metrics incremented
+        assert _compaction_metrics["filter_calls"] == 1
+        # 3 compactions: 1 kept, 2 hidden
+        assert _compaction_metrics["total_kept"] == 1
+        assert _compaction_metrics["total_hidden"] == 2

@@ -32,6 +32,40 @@ _KEEP_ALL_COMPACTIONS_OVERRIDE: bool = os.environ.get(
 ).lower() in ("1", "true", "yes", "on")
 
 
+# ── In-memory monitoring counters ────────────────────────────────────
+# Lightweight metrics for observability. Not thread-safe by design
+# (Python GIL makes simple int++ atomic enough for monitoring).
+_compaction_metrics: dict[str, int] = {
+    "total_hidden": 0,           # Total older compactions hidden from LLM
+    "total_kept": 0,             # Total compactions kept in LLM
+    "l4_aborts": 0,              # L4 safety aborts (would produce empty context)
+    "filter_calls": 0,           # Total _convert_messages_to_history calls
+}
+
+
+def get_compaction_metrics() -> dict[str, int]:
+    """Return a snapshot of compaction metrics (read-only copy)."""
+    return dict(_compaction_metrics)
+
+
+def reset_compaction_metrics() -> None:
+    """Reset all compaction metrics to zero. Used by tests."""
+    _compaction_metrics["total_hidden"] = 0
+    _compaction_metrics["total_kept"] = 0
+    _compaction_metrics["l4_aborts"] = 0
+    _compaction_metrics["filter_calls"] = 0
+
+
+def set_keep_all_override(enabled: bool) -> None:
+    """Runtime kill switch toggle (used by admin API)."""
+    global _KEEP_ALL_COMPACTIONS_OVERRIDE
+    _KEEP_ALL_COMPACTIONS_OVERRIDE = enabled
+    logger.warning(
+        "compaction kill switch: keep_all_compactions_in_history=%s",
+        enabled,
+    )
+
+
 # ── Structured summary template (opencode-style) ─────────────────
 
 DEFAULT_SUMMARY_TEMPLATE = """\
@@ -481,11 +515,13 @@ def _llm_summarize_v2(
             "L4 produced too few messages (len=%d), aborting compaction",
             len(new_messages),
         )
+        _compaction_metrics["l4_aborts"] += 1
         return None
     if not any(m.get("role") == "user" for m in new_messages):
         logger.warning(
             "L4 produced messages without any user role, aborting compaction",
         )
+        _compaction_metrics["l4_aborts"] += 1
         return None
 
     return new_messages, summary_text, recent_text
