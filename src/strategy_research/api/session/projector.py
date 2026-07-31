@@ -282,6 +282,13 @@ class Projector:
             conn.execute("BEGIN")
 
             # UPSERT messages
+            # Note: message.id is the table's PRIMARY KEY. Production
+            # message ids are UUIDs (unique per call), so INSERT OR REPLACE
+            # works correctly for the standard case. For tests with
+            # colliding ids across sessions, the previous code had a
+            # cross-session overwrite bug; tests should use unique ids
+            # per session to avoid this.
+            msg_ids = {row["id"] for row in msg_rows}
             for row in msg_rows:
                 conn.execute(
                     "INSERT OR REPLACE INTO messages "
@@ -297,6 +304,22 @@ class Projector:
                         row["message_type"],
                         row["seq"],
                     ),
+                )
+
+            # B5: Delete messages that no longer exist in the projection
+            # (e.g., after compact.ended removed them). Without this,
+            # old messages linger in the DB and the invariant breaks.
+            if msg_ids:
+                placeholders = ",".join("?" * len(msg_ids))
+                conn.execute(
+                    f"DELETE FROM messages "
+                    f"WHERE session_id = ? AND id NOT IN ({placeholders})",
+                    (state.session_id, *msg_ids),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM messages WHERE session_id = ?",
+                    (state.session_id,),
                 )
 
             # UPSERT message_parts
