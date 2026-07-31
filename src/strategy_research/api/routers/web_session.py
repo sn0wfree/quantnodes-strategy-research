@@ -100,14 +100,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
     # Per-session monotonic sequence number (Level 1, opencode-aligned).
     # Default 0 keeps existing rows valid; backfill script assigns real
-    # values from created_at order. The UNIQUE INDEX is created after
-    # backfill (see scripts/backfill_seq.py) to avoid constraint conflicts
-    # on legacy rows.
+    # values from created_at order. The UNIQUE INDEX is created in
+    # scripts/backfill_seq.py after backfill to avoid constraint
+    # conflicts on legacy rows.
     _add_column(conn, "messages", "seq", "INTEGER NOT NULL DEFAULT 0")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_messages_session_seq "
-        "ON messages(session_id, seq)"
-    )
+    # No index here — backfill creates UNIQUE INDEX uq_messages_session_seq
+    # which is strictly stronger than a non-unique index on the same cols.
 
     # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
     # Use nullable column first, then UPDATE existing rows, to avoid NOT NULL failure
