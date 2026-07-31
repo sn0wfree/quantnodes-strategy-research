@@ -147,20 +147,14 @@ class SessionService:
         """
         logger.info("[MSG] send_message session=%s content_len=%d", session_id, len(content))
 
-        # ── 1. Persist user message ────────────────────────────────────
-        # Capture created_at from a single authoritative clock (server
-        # time.time()) for correct cross-exchange message ordering.
-        # Also assign a per-session monotonic seq (Level 1, opencode-aligned)
-        # so LLM history projection has a stable order key.
+        # ── 1. Generate user message ID + timestamp ────────────────────
+        # B4: user message is persisted via EventBusV2 → projector.flush(),
+        # not via direct store.append_message(). The message_received event
+        # carries the same data that the old direct write used.
         import time
         _ts = time.time()
-        _seq = get_default_generator().next(session_id)
-        user_msg_id = self.store.append_message(
-            Message(session_id=session_id, role="user", content=content),
-            created_at=_ts,
-            seq=_seq,
-        )
-        logger.info("[MSG] user_msg_persisted id=%s seq=%s", user_msg_id, _seq)
+        user_msg_id = str(uuid.uuid4())
+        logger.info("[MSG] user_msg_id=%s", user_msg_id)
 
         # ── 2. Auto-title on first user message ───────────────────────
         try:
@@ -501,27 +495,7 @@ class SessionService:
                 # Error message: friendly text + detail in metadata
                 friendly = _friendly_error_text(agent_error or result_dict.get("reason", ""))
                 detail = agent_error or result_dict.get("reason", "unknown error")
-                self.store.append_message(
-                    Message(
-                        session_id=session_id,
-                        role="assistant",
-                        content=friendly,
-                        linked_attempt_id=attempt.attempt_id,
-                        metadata={
-                            "status": "error",
-                            "details": detail,
-                            "metrics": attempt.metrics,
-                        },
-                        message_type="error",
-                    ),
-                    message_id=attempt.message_id,
-                    parts=None,
-                    seq=get_default_generator().next(session_id),
-                )
-                # Push assistant_message SSE so frontend displays the
-                # error bubble immediately (without waiting for reload).
-                # message_type='error' tells the UI to render the warning
-                # style with collapsible detail.
+                # B4: persisted via EventBusV2 → projector.flush()
                 self.event_bus.emit(
                     session_id,
                     "assistant_message",
@@ -536,21 +510,23 @@ class SessionService:
                     },
                 )
             else:
-                self.store.append_message(
-                    Message(
-                        session_id=session_id,
-                        role="assistant",
-                        content=assistant_content,
-                        linked_attempt_id=attempt.attempt_id,
-                        metadata={
-                            "run_id": Path(attempt.run_dir).name if attempt.run_dir else None,
+                # B4: success path — emit assistant_message with final content
+                # so the projector can finalize the message. The parts
+                # (text, tool_call, thinking) were already emitted via
+                # event_callback during streaming.
+                self.event_bus.emit(
+                    session_id,
+                    "assistant_message",
+                    {
+                        "message_id": attempt.message_id,
+                        "content": assistant_content,
+                        "message_type": "assistant",
+                        "metadata": {
+                            "run_id": str(Path(attempt.run_dir).name) if attempt.run_dir else None,
                             "status": attempt.status.value,
                             "metrics": attempt.metrics,
                         },
-                    ),
-                    message_id=attempt.message_id,
-                    parts=accumulated_parts or None,
-                    seq=get_default_generator().next(session_id),
+                    },
                 )
 
             # 4. Emit attempt.completed / attempt.failed
@@ -654,25 +630,11 @@ class SessionService:
             # Accumulate parts for persistence
             _accumulate_part(accumulated_parts, event_type, data)
 
-            # Persist tool result messages immediately as role=tool rows
-            # so the next AgentLoop invocation can rebuild full history.
-            if event_type == "tool_result":
-                tc_id = data.get("id") or data.get("call_id")
-                result_text = data.get("result") or data.get("preview") or ""
-                if tc_id and result_text:
-                    try:
-                        self.store.append_message(
-                            Message(
-                                session_id=attempt.session_id,
-                                role="tool",
-                                content=result_text,
-                                tool_call_id=tc_id,
-                                metadata={"attempt_id": attempt.attempt_id},
-                            ),
-                            seq=get_default_generator().next(attempt.session_id),
-                        )
-                    except Exception as exc:
-                        logger.warning("persist tool result failed: %s", exc)
+            # B4: tool result persistence is handled by EventBusV2 →
+            # projector.flush(). The tool_result event lands in event_log,
+            # the projector merges it into the assistant message's tool_call
+            # part, and flush writes the updated message to messages table.
+            # No direct DB write needed here.
 
             # Track token usage so the frontend can show a context
             # usage bar. llm_usage is emitted by AgentLoop after each

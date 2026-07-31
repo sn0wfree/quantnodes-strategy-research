@@ -447,9 +447,11 @@ class Projector:
                 event.seq,
             )
             return
+        msg_type = event.data.get("message_type", "assistant")
         if message_id in state.messages:
-            # Update content with the final summary
+            # Update content and type with the final summary
             state.messages[message_id].content = event.data.get("content", "")
+            state.messages[message_id].message_type = msg_type
             return
         msg_seq = len(state.messages) + 1
         state.messages[message_id] = ProjectedMessage(
@@ -457,7 +459,7 @@ class Projector:
             session_id=event.aggregate_id,
             role="assistant",
             content=event.data.get("content", ""),
-            message_type="assistant",
+            message_type=msg_type,
             created_at=event.time_created,
             seq=msg_seq,
             attempt_id=event.data.get("attempt_id"),
