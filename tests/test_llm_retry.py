@@ -15,11 +15,9 @@ from strategy_research.core.llm import (
     LLMConfig,
     LLMRateLimitError,
     LLMServerError,
-    LLMTimeoutError,
     OpenAICompatClient,
 )
 from strategy_research.core.llm import openai_client as oc_mod
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 

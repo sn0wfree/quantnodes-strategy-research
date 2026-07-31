@@ -35,7 +35,6 @@ from .errors import (
     LLMConfigError,
     LLMError,
     LLMMalformedResponseError,
-    LLMQuotaError,
     LLMRateLimitError,
     LLMServerError,
     LLMTimeoutError,
@@ -335,7 +334,7 @@ class OpenAICompatClient:
         Retries only BEFORE the first chunk is yielded (HTTP errors,
         connection failures, timeouts before stream starts).
         Does NOT retry mid-stream (after first chunk yielded → LLMError).
-        """
+        """  # noqa: C901
         payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
         payload["stream"] = True
         # stream_options moved to ProviderAdapter.custom_stream_options()
@@ -429,7 +428,7 @@ class OpenAICompatClient:
 
         Retries only BEFORE the first chunk is yielded.
         Does NOT retry mid-stream (after first chunk yielded → LLMError).
-        """
+        """  # noqa: C901
         payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}

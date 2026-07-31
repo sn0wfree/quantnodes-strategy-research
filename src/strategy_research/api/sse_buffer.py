@@ -6,11 +6,10 @@ Supports multicast: multiple listeners per session are notified independently.
 from __future__ import annotations
 
 import asyncio
-import time
 import threading
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 
 @dataclass
