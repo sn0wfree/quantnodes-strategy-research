@@ -196,6 +196,9 @@ class Projector:
             EventType.THINKING_DELTA: lambda e, s: None,
             EventType.THINKING_DONE: lambda e, s: None,
             EventType.THINKING_END: lambda e, s: None,
+            # Compaction events create a compaction message (system)
+            EventType.COMPACT: self._on_compact,
+            EventType.COMPACT_ENDED: self._on_compact,
         }
 
     # ── Public API ──────────────────────────────────────────────
@@ -651,6 +654,35 @@ class Projector:
             "time": event.time_created,
         })
         part.data["progress"] = progress
+
+    def _on_compact(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """Handle compaction event — create a compaction message.
+
+        Compaction messages are system-level messages that mark where
+        the history was compressed. They have role='system' and
+        message_type='compaction'. The content is the summary.
+        """
+        data = event.data
+        summary = data.get("summary") or data.get("content") or ""
+        # Generate a deterministic ID from the event id
+        msg_id = f"compact-{event.id[:8]}"
+        if msg_id in state.messages:
+            # Update content if we have a newer version
+            if summary:
+                state.messages[msg_id].content = summary
+            return
+        msg_seq = len(state.messages) + 1
+        state.messages[msg_id] = ProjectedMessage(
+            id=msg_id,
+            session_id=event.aggregate_id,
+            role="system",
+            content=summary,
+            message_type="compaction",
+            created_at=event.time_created,
+            seq=msg_seq,
+        )
 
 
 __all__ = [

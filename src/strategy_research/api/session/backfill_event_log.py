@@ -291,7 +291,18 @@ def _generate_events_for_session(
                 "time_created": created_at,
             })
 
-        # Other roles (tool, system, compaction, error) — skip for now
+        elif msg_type == "compaction":
+            events.append({
+                "type": "compact",
+                "data": {
+                    "message_id": msg_id,
+                    "summary": content,
+                    "content": content,
+                },
+                "time_created": created_at,
+            })
+
+        # Other roles (tool, system, error) — skip for now
         # since the projector doesn't handle them in B3. They're still
         # in the messages table and readable via the legacy path.
 

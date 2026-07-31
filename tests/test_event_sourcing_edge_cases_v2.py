@@ -293,22 +293,33 @@ class TestProjectorSessionLifecycleHandlers(unittest.TestCase):
         self.projector.apply(e, self.state)
         self.assertEqual(len(self.state.messages), 0)
 
-    def test_compact_skipped(self) -> None:
+    def test_compact_creates_compaction_message(self) -> None:
         e = EventV2.create("s1", 1, EventType.COMPACT, {
-            "summary": "compacted",
+            "summary": "compacted to 3 layers",
         })
         self.projector.apply(e, self.state)
-        self.assertEqual(len(self.state.messages), 0)
+        self.assertEqual(len(self.state.messages), 1)
+        msg = list(self.state.messages.values())[0]
+        self.assertEqual(msg.role, "system")
+        self.assertEqual(msg.message_type, "compaction")
+        self.assertIn("3 layers", msg.content)
 
     def test_compact_started_skipped(self) -> None:
         e = EventV2.create("s1", 1, EventType.COMPACT_STARTED, {})
         self.projector.apply(e, self.state)
         self.assertEqual(len(self.state.messages), 0)
 
-    def test_compact_ended_skipped(self) -> None:
-        e = EventV2.create("s1", 1, EventType.COMPACT_ENDED, {})
+    def test_compact_ended_creates_compaction_message(self) -> None:
+        e = EventV2.create("s1", 1, EventType.COMPACT_ENDED, {
+            "summary": "compaction finished",
+            "before_tokens": 8000,
+            "after_tokens": 2000,
+        })
         self.projector.apply(e, self.state)
-        self.assertEqual(len(self.state.messages), 0)
+        self.assertEqual(len(self.state.messages), 1)
+        msg = list(self.state.messages.values())[0]
+        self.assertEqual(msg.message_type, "compaction")
+        self.assertEqual(msg.content, "compaction finished")
 
     def test_agent_done_skipped(self) -> None:
         e = EventV2.create("s1", 1, EventType.AGENT_DONE, {

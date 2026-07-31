@@ -42,8 +42,10 @@ class SessionStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # B3: read from event_log via projector? Controlled by env var
         # so we can toggle without code changes.
+        # Default: enabled (event_log is the source of truth in B3).
+        # Set SR_EVENT_LOG_READ=0 to fall back to direct DB reads.
         import os
-        self._use_event_log_read = os.environ.get("SR_EVENT_LOG_READ", "0") == "1"
+        self._use_event_log_read = os.environ.get("SR_EVENT_LOG_READ", "1") != "0"
 
     # ── Connection helper ──────────────────────────────────────────────
 
@@ -124,10 +126,10 @@ class SessionStore:
         message_parts table (via _row_to_message's `parts` param).
         Batch-fetched in a single query to avoid N+1.
 
-        Level 3 / B3: if SR_EVENT_LOG_READ=1, reads from event_log
-        via the projector instead of directly from messages table.
-        event_log is the source of truth; messages + message_parts
-        are materialized views.
+        Level 3 / B3: by default, reads from event_log via the projector
+        (event_log is the source of truth; messages + message_parts
+        are materialized views). Set SR_EVENT_LOG_READ=0 to fall
+        back to direct DB reads.
         """
         if self._use_event_log_read:
             return self._get_messages_from_event_log(session_id, limit)
