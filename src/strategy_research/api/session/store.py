@@ -40,6 +40,10 @@ class SessionStore:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # B3: read from event_log via projector? Controlled by env var
+        # so we can toggle without code changes.
+        import os
+        self._use_event_log_read = os.environ.get("SR_EVENT_LOG_READ", "0") == "1"
 
     # ── Connection helper ──────────────────────────────────────────────
 
@@ -119,8 +123,23 @@ class SessionStore:
         Level 2 / Phase 2 commit 5: parts are read from the
         message_parts table (via _row_to_message's `parts` param).
         Batch-fetched in a single query to avoid N+1.
+
+        Level 3 / B3: if SR_EVENT_LOG_READ=1, reads from event_log
+        via the projector instead of directly from messages table.
+        event_log is the source of truth; messages + message_parts
+        are materialized views.
         """
-        logger.debug("[STORE] get_messages session=%s limit=%d", session_id, limit)
+        if self._use_event_log_read:
+            return self._get_messages_from_event_log(session_id, limit)
+        return self._get_messages_from_db(session_id, limit)
+
+    def _get_messages_from_db(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> list[Message]:
+        """Read messages from messages + message_parts tables (legacy path)."""
+        logger.debug("[STORE] get_messages (db) session=%s limit=%d", session_id, limit)
         from ..routers.web_session import _get_db, _row_to_message
 
         with _get_db() as conn:
@@ -151,11 +170,7 @@ class SessionStore:
 
         out: list[Message] = []
         for r in rows:
-            # Pass batch-fetched parts; missing key signals fallback
-            # to parts_json for pre-migration rows
             m = _row_to_message(r, parts=parts_by_msg.get(r["id"]))
-            # Defensive: _row_to_message returns dict, but keys may be missing
-            # for post-migration DBs. Default sensibly.
             metadata = m.get("metadata") or {}
             out.append(
                 Message(
@@ -173,10 +188,38 @@ class SessionStore:
                     seq=m.get("seq", 0),
                 )
             )
-        logger.debug("[STORE] loaded %d messages, types: %s", len(out),
+        logger.debug("[STORE] loaded %d messages (db), types: %s", len(out),
                     dict(sorted({m.message_type: sum(1 for x in out if x.message_type == m.message_type)
                                 for m in out}.items())))
         return out
+
+    def _get_messages_from_event_log(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> list[Message]:
+        """Read messages from event_log via projector (B3 path).
+
+        event_log is the source of truth; the projector rebuilds
+        message state from the event stream. This is the B3 read
+        path that replaces direct messages table reads.
+
+        Falls back to DB path if event_log is empty or projector
+        fails (defensive).
+        """
+        logger.debug("[STORE] get_messages (event_log) session=%s limit=%d", session_id, limit)
+        try:
+            from .projector import Projector
+            proj = Projector(self.db_path)
+            msgs = proj.project_to_messages(session_id, limit=limit)
+            logger.debug("[STORE] loaded %d messages (event_log)", len(msgs))
+            return msgs
+        except Exception as exc:
+            logger.warning(
+                "[STORE] event_log read failed for %s: %s — falling back to DB",
+                session_id, exc,
+            )
+            return self._get_messages_from_db(session_id, limit)
 
     def get_session_metadata(self, session_id: str) -> Optional[dict[str, Any]]:
         """Return session metadata (title, message_count, starred, tags)."""
