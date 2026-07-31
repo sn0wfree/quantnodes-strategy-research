@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from strategy_research.core.agent.compact import CompactConfig, compact_messages
+from strategy_research.core.llm import LLMConfig
 
 from .events import EventBus
 from .models import Attempt, AttemptStatus, Message
@@ -459,6 +460,7 @@ class SessionService:
                 max_iterations=max_iterations,
                 system_prompt=system_prompt,
                 allow_shell_tools=allow_shell_tools,
+                cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
                 accumulated_parts=accumulated_parts,
             )
             logger.info("[EXEC] agent_result status=%s content_len=%d",
@@ -603,12 +605,19 @@ class SessionService:
         system_prompt: Optional[str],
         allow_shell_tools: bool,
         accumulated_parts: list[dict[str, Any]],
+        cfg: LLMConfig,
     ) -> dict[str, Any]:
-        """Build AgentLoop and run it. Returns ``{content, status, ...}``."""
+        """Build AgentLoop and run it. Returns ``{content, status, ...}``.
+
+        Args:
+            cfg: Pre-built LLM config from caller (_run_attempt). Required
+                to avoid the cfg-undefined NameError regression that
+                happened when Phase 1 compaction filter changes were made.
+        """
         from strategy_research.core.agent.builtin_tools import build_default_registry
         from strategy_research.core.agent.loop import AgentLoop
 
-        # cfg was built at function start; just apply model override
+        # cfg is passed in by caller; just apply model override
         if cfg and model:
             cfg.model = model
 

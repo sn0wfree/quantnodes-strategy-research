@@ -8,7 +8,7 @@ Covers:
 
 from __future__ import annotations
 
-from strategy_research.api.session.service import _friendly_error_text
+from strategy_research.api.session.service import SessionService, _friendly_error_text
 
 
 class TestFriendlyErrorText:
@@ -209,3 +209,116 @@ class TestAssistantMessageSSEEvent:
         """Direct test: 429 should produce friendly Chinese text."""
         friendly = _friendly_error_text("LLMRateLimitError: rate limited (429): {...}")
         assert "频率过高" in friendly
+
+
+class TestRunWithAgentCfgParam:
+    """Regression tests for _run_with_agent cfg parameter.
+
+    Bug: Phase 1 compaction filter changes accidentally left _run_with_agent
+    using a `cfg` variable that was never defined in its scope. The old
+    stub-based test in TestAssistantMessageSSEEvent didn't catch this
+    because it completely replaced _run_with_agent.
+
+    Fix: Pass cfg as a keyword arg from _run_attempt to _run_with_agent.
+    """
+
+    def test_run_with_agent_signature_accepts_cfg(self):
+        """_run_with_agent must accept cfg as a keyword argument."""
+        import inspect
+        sig = inspect.signature(SessionService._run_with_agent)
+        assert "cfg" in sig.parameters, (
+            "Regression: _run_with_agent lost the cfg parameter. "
+            "Without it, line 614 raises NameError."
+        )
+
+    def test_run_with_agent_cfg_is_required(self):
+        """_run_with_agent cfg parameter should not have a default.
+
+        Making it required ensures callers always pass it explicitly.
+        """
+        import inspect
+        sig = inspect.signature(SessionService._run_with_agent)
+        cfg_param = sig.parameters["cfg"]
+        # cfg should be required (no default value)
+        assert cfg_param.default is inspect.Parameter.empty, (
+            "cfg should be required (no default) so all callers pass it"
+        )
+
+    def test_run_attempt_passes_cfg_to_run_with_agent(self, monkeypatch):
+        """_run_attempt should pass cfg=cfg when calling _run_with_agent.
+
+        This is the critical regression test: before the fix,
+        _run_with_agent would raise NameError because cfg was undefined.
+        """
+        import asyncio
+        import sqlite3
+        import time
+        from strategy_research.api.session.events import EventBus
+        from strategy_research.api.session.store import SessionStore
+        from strategy_research.api.session.models import Attempt
+        from strategy_research.core.llm import LLMConfig
+        from strategy_research.api.routers.web_session import _ensure_schema
+
+        # Set up minimal DB
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = f"{tmpdir}/test.db"
+            conn = sqlite3.connect(db_path)
+            _ensure_schema(conn)
+            now = time.time()
+            conn.execute(
+                "INSERT INTO sessions (id, user_id, title, created_at, updated_at, "
+                "starred, tags_json, message_count, archived) "
+                "VALUES (?, ?, ?, ?, ?, 0, '[]', 0, 0)",
+                ("sess-1", "u1", "t", now, now),
+            )
+            conn.commit()
+            conn.close()
+
+            store = SessionStore(db_path)
+            attempt = Attempt(session_id="sess-1", prompt="hi", message_id="msg-1")
+            store.create_attempt(attempt)
+            bus = EventBus()
+            service = SessionService(store=store, event_bus=bus)
+
+            # Capture the cfg passed to _run_with_agent
+            captured = {}
+
+            async def mock_run_with_agent(*, cfg, **kwargs):
+                captured["cfg"] = cfg
+                captured["kwargs"] = kwargs
+                return {
+                    "status": "empty",
+                    "content": "",
+                    "error": None,
+                    "iterations": 0,
+                    "tool_calls_made": 0,
+                    "finished_reason": "error",
+                    "metrics": {},
+                }
+
+            service._run_with_agent = mock_run_with_agent
+
+            # Build cfg same way _run_attempt does
+            from strategy_research.api.routers.chat import _build_llm_config
+            cfg = _build_llm_config()
+
+            # Call _run_attempt and verify cfg is passed
+            async def run():
+                await service._run_attempt(
+                    session_id="sess-1",
+                    attempt=attempt,
+                    model=None,
+                    max_iterations=1,
+                    system_prompt="",
+                    allow_shell_tools=False,
+                )
+
+            # Should NOT raise NameError
+            asyncio.run(run())
+
+            # Verify cfg was passed correctly
+            assert "cfg" in captured, "_run_with_agent must receive cfg kwarg"
+            assert captured["cfg"] is not None, "cfg should not be None"
+            # The cfg should be the same instance from _build_llm_config()
+            assert captured["cfg"] is cfg or isinstance(captured["cfg"], type(cfg))
