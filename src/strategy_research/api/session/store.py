@@ -154,6 +154,9 @@ class SessionStore:
             # Pass batch-fetched parts; missing key signals fallback
             # to parts_json for pre-migration rows
             m = _row_to_message(r, parts=parts_by_msg.get(r["id"]))
+            # Defensive: _row_to_message returns dict, but keys may be missing
+            # for post-migration DBs. Default sensibly.
+            metadata = m.get("metadata") or {}
             out.append(
                 Message(
                     message_id=m["id"],
@@ -161,9 +164,9 @@ class SessionStore:
                     role=m["role"],
                     content=m.get("content", ""),
                     tool_call_id=m.get("tool_call_id"),
-                    linked_attempt_id=m.get("metadata", {}).get("linked_attempt_id"),
+                    linked_attempt_id=metadata.get("linked_attempt_id"),
                     metadata={
-                        **(m.get("metadata") or {}),
+                        **metadata,
                         "_parts": m.get("parts", []),
                     },
                     message_type=m.get("message_type", "assistant"),
