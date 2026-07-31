@@ -356,7 +356,8 @@ class Projector:
 
         Args:
             session_id: Session to project.
-            limit: Max messages to return (most recent last).
+            limit: Max messages to return (first N by seq, matching
+                SessionStore.get_messages behavior).
 
         Returns:
             List of Message in chronological order (by seq).
@@ -364,7 +365,7 @@ class Projector:
         state = self.project(session_id)
         messages = state.to_messages()
         if limit and len(messages) > limit:
-            messages = messages[-limit:]
+            messages = messages[:limit]
         return messages
 
     # ── Event handlers ──────────────────────────────────────────
@@ -411,6 +412,7 @@ class Projector:
         if message_id in state.messages:
             # Duplicate — first event wins
             return
+        msg_seq = len(state.messages) + 1
         state.messages[message_id] = ProjectedMessage(
             id=message_id,
             session_id=event.aggregate_id,
@@ -418,7 +420,7 @@ class Projector:
             content=data.get("content", ""),
             message_type="user",
             created_at=event.time_created,
-            seq=event.seq,
+            seq=msg_seq,
         )
 
     def _on_assistant_message(
@@ -446,6 +448,7 @@ class Projector:
             # Update content with the final summary
             state.messages[message_id].content = event.data.get("content", "")
             return
+        msg_seq = len(state.messages) + 1
         state.messages[message_id] = ProjectedMessage(
             id=message_id,
             session_id=event.aggregate_id,
@@ -453,7 +456,7 @@ class Projector:
             content=event.data.get("content", ""),
             message_type="assistant",
             created_at=event.time_created,
-            seq=event.seq,
+            seq=msg_seq,
             attempt_id=event.data.get("attempt_id"),
         )
 
@@ -474,6 +477,7 @@ class Projector:
         if message_id in state.messages:
             return state.messages[message_id]
         # Lazy-create
+        msg_seq = len(state.messages) + 1
         msg = ProjectedMessage(
             id=message_id,
             session_id=event.aggregate_id,
@@ -481,7 +485,7 @@ class Projector:
             content="",
             message_type="assistant",
             created_at=event.time_created,
-            seq=event.seq,
+            seq=msg_seq,
             attempt_id=event.data.get("attempt_id"),
         )
         state.messages[message_id] = msg
