@@ -411,6 +411,10 @@ class SessionService:
         """Execute an Attempt: load history → run AgentLoop → persist result."""
         logger.info("[EXEC] start attempt=%s session=%s", attempt.attempt_id, session_id)
         attempt.mark_running()
+
+        # Build LLM config early — needed for compaction filter setting
+        from ..routers.chat import _build_llm_config
+        cfg = _build_llm_config()
         self.store.update_attempt(attempt)
         # attempt.started carries message_id so the frontend can switch its
         # streamingMessageId from queued placeholder to actual stream.
@@ -430,7 +434,14 @@ class SessionService:
             messages = self.store.get_messages(session_id, limit=100)
             logger.info("[EXEC] loaded %d messages from DB", len(messages))
 
-            history = self._convert_messages_to_history(messages)
+            # Get keep_all_compactions setting (default False if cfg unavailable)
+            keep_all = bool(
+                cfg and cfg.compact_config
+                and cfg.compact_config.keep_all_compactions_in_history
+            )
+            history = self._convert_messages_to_history(
+                messages, keep_all_compactions=keep_all
+            )
             logger.info("[EXEC] converted to %d history entries", len(history))
 
             # Log compaction messages in history
@@ -597,11 +608,7 @@ class SessionService:
         from strategy_research.core.agent.builtin_tools import build_default_registry
         from strategy_research.core.agent.loop import AgentLoop
 
-        # Build LLM config — reuse the existing _build_llm_config() from chat.py
-        # which correctly loads ~/.quantnodes/.env and resolves api_key.
-        from ..routers.chat import _build_llm_config
-
-        cfg = _build_llm_config()
+        # cfg was built at function start; just apply model override
         if cfg and model:
             cfg.model = model
 
@@ -850,7 +857,15 @@ class SessionService:
         from ..routers.web_session import delete_messages
 
         messages = self.store.get_messages(session_id, limit=10000)
-        history = self._convert_messages_to_history(messages)
+        # Get keep_all_compactions setting (default False if self.config unavailable)
+        keep_all = bool(
+            self.config
+            and getattr(self.config, "compact_config", None)
+            and self.config.compact_config.keep_all_compactions_in_history
+        )
+        history = self._convert_messages_to_history(
+            messages, keep_all_compactions=keep_all
+        )
 
         if not history:
             return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
@@ -939,7 +954,11 @@ class SessionService:
     # ── History conversion ────────────────────────────────────────────
 
     @staticmethod
-    def _convert_messages_to_history(messages: list[Message]) -> list[dict[str, Any]]:
+    def _convert_messages_to_history(
+        messages: list[Message],
+        *,
+        keep_all_compactions: bool = False,
+    ) -> list[dict[str, Any]]:
         """Convert Session messages to OpenAI-format history.
 
         Handles three storage formats:
@@ -949,22 +968,54 @@ class SessionService:
 
         Excludes the current turn (last message). Trims by character budget
         from the newest items so the LLM still sees the most recent context.
+
+        Args:
+            keep_all_compactions: When True, include all compaction messages
+                in LLM history (legacy behavior). When False (default), only
+                the MOST RECENT compaction is included; older compactions
+                are hidden from LLM but kept in DB for audit/UI display.
+                See docs/compaction-history-filter.md.
         """
         from strategy_research.core.agent.compaction_message import CompactionMessage
 
         logger.debug("[HIST] converting %d messages", len(messages))
+
+        # ── First pass: locate all compaction indices ──
+        compaction_indices: list[int] = []
+        for i, msg in enumerate(messages[:-1]):
+            mt = msg.message_type if hasattr(msg, "message_type") else "assistant"
+            if mt == "compaction":
+                compaction_indices.append(i)
+
+        # ── Decide which compactions to keep in LLM context ──
+        keep_compaction_indices: set[int]
+        if keep_all_compactions or not compaction_indices:
+            keep_compaction_indices = set(compaction_indices)
+        else:
+            # opencode-aligned: keep only the most recent compaction
+            keep_compaction_indices = {compaction_indices[-1]}
+            hidden = len(compaction_indices) - 1
+            if hidden > 0:
+                logger.debug(
+                    "[HIST] hiding %d older compactions, keeping 1 most recent",
+                    hidden,
+                )
+
+        # ── Second pass: convert with filter ──
         history: list[dict[str, Any]] = []
         compaction_count = 0
-        for msg in messages[:-1]:
+        for i, msg in enumerate(messages[:-1]):
             role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
             content = msg.content if hasattr(msg, "content") else msg.get("content", "")
             parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
             message_type = msg.message_type if hasattr(msg, "message_type") else "assistant"
 
-            # Handle compaction messages: convert to user role + checkpoint wrap
+            # Handle compaction messages: filter then convert
             if message_type == "compaction":
+                if i not in keep_compaction_indices:
+                    continue  # skip older compactions
                 compaction_count += 1
-                logger.debug("[HIST] compaction msg id=%s content_len=%d",
+                logger.debug("[HIST] keeping compaction msg id=%s content_len=%d",
                            msg.message_id, len(content))
                 comp = CompactionMessage(
                     id=msg.message_id,

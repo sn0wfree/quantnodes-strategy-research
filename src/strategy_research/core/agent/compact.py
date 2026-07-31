@@ -114,6 +114,14 @@ class CompactConfig:
     enable_incremental_summary: bool = True
     summary_template: str | None = None        # None = DEFAULT_SUMMARY_TEMPLATE
 
+    # ── History projection ────────────────────────
+    # When True, send ALL compaction messages in history (legacy behavior).
+    # When False (default), only the MOST RECENT compaction is included
+    # in LLM context. Older compactions are hidden from LLM but kept in DB
+    # so the UI can still render them as audit history.
+    # See docs/compaction-history-filter.md for the opencode-aligned rationale.
+    keep_all_compactions_in_history: bool = False
+
 
 # ── Token estimation ──────────────────────────────────────────────
 
