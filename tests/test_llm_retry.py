@@ -360,3 +360,91 @@ class TestAstreamRetry:
             async for _ in client.astream([{"role": "user", "content": "hi"}]):
                 pass
         assert call_count == 3
+
+
+# ── mid-stream no-retry tests ────────────────────────────────────────
+
+
+class TestStreamMidStreamNoRetry:
+    """Verify stream() does NOT retry after first chunk is yielded.
+
+    Once `started=True` is set, any further transport error must propagate
+    as LLMError to the caller (typically raising a mid-stream error that
+    the agent loop surfaces to the user).
+    """
+
+    def test_transport_error_after_first_chunk_does_not_retry(self, fast_config):
+        # First chunk (a valid SSE delta) followed by disconnect
+        first_chunk = b'data: {"choices": [{"delta": {"content": "hi"}, "finish_reason": null}]}\n\n'
+
+        class FailingTransport(httpx.BaseTransport):
+            def __init__(self):
+                self.calls = 0
+
+            def handle_request(self, request: httpx.Request) -> httpx.Response:
+                self.calls += 1
+
+                class _RaisingBody(httpx.SyncByteStream):
+                    def __iter__(self):
+                        yield first_chunk
+                        raise httpx.RemoteProtocolError(
+                            "simulated mid-stream disconnect"
+                        )
+
+                    def close(self):
+                        pass
+
+                return httpx.Response(
+                    200,
+                    headers={"Content-Type": "text/event-stream"},
+                    stream=_RaisingBody(),
+                )
+
+        transport = FailingTransport()
+        client = OpenAICompatClient(fast_config, transport=transport)
+
+        from strategy_research.core.llm import LLMError
+        with pytest.raises(LLMError):
+            for _chunk in client.stream([{"role": "user", "content": "hi"}]):
+                pass
+
+        # Critical assertion: only ONE request was made (no retry after
+        # first chunk yielded).
+        assert transport.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_atransport_error_after_first_chunk_does_not_retry(self, fast_config):
+        first_chunk = b'data: {"choices": [{"delta": {"content": "hi"}, "finish_reason": null}]}\n\n'
+
+        class FailingAsyncTransport(httpx.AsyncBaseTransport):
+            def __init__(self):
+                self.calls = 0
+
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                self.calls += 1
+
+                class _RaisingAsyncBody(httpx.AsyncByteStream):
+                    async def __aiter__(self):
+                        yield first_chunk
+                        raise httpx.RemoteProtocolError(
+                            "simulated mid-stream async disconnect"
+                        )
+
+                    async def aclose(self):
+                        pass
+
+                return httpx.Response(
+                    200,
+                    headers={"Content-Type": "text/event-stream"},
+                    stream=_RaisingAsyncBody(),
+                )
+
+        transport = FailingAsyncTransport()
+        client = OpenAICompatClient(fast_config, transport=transport)
+
+        from strategy_research.core.llm import LLMError
+        with pytest.raises(LLMError):
+            async for _ in client.astream([{"role": "user", "content": "hi"}]):
+                pass
+
+        assert transport.calls == 1

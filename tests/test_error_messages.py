@@ -114,3 +114,98 @@ class TestErrorMessagePersistence:
         msg = _row_to_message(row)
         assert msg["message_type"] == "assistant"
         assert msg["parts"] is None or len(msg["parts"]) == 0
+
+
+class TestAssistantMessageSSEEvent:
+    """Verify the service emits 'assistant_message' SSE on error path so
+    the frontend can display the error bubble in real-time."""
+
+    def test_error_result_emits_assistant_message_event(self, monkeypatch, tmp_path):
+        """When the agent loop returns finished_reason='error', the
+        service must emit an assistant_message SSE event with
+        message_type='error' so the frontend displays the bubble live.
+        """
+        import asyncio
+        import sqlite3
+        import time
+
+        from strategy_research.api.session.events import EventBus
+        from strategy_research.api.session.models import Attempt
+        from strategy_research.api.session.service import SessionService
+        from strategy_research.api.session.store import SessionStore
+
+        # Track emitted events
+        emitted = []
+        bus = EventBus()
+        original_emit = bus.emit
+        def track_emit(session_id, event, data):
+            emitted.append((event, data))
+            return original_emit(session_id, event, data)
+        bus.emit = track_emit  # type: ignore
+
+        # Set up minimal DB
+        from strategy_research.api.routers.web_session import _ensure_schema
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(db_path)
+        _ensure_schema(conn)
+        # Create session row directly (no SessionStore.create_session API)
+        now = time.time()
+        conn.execute(
+            "INSERT INTO sessions (id, user_id, title, created_at, updated_at, "
+            "starred, tags_json, message_count, archived) "
+            "VALUES (?, ?, ?, ?, ?, 0, '[]', 0, 0)",
+            ("sess-err-sse", "anonymous", "test", now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        store = SessionStore(db_path)
+        attempt = Attempt(session_id="sess-err-sse", prompt="hi", message_id="msg-err")
+        store.create_attempt(attempt)
+
+        service = SessionService(store=store, event_bus=bus)
+
+        # Stub _run_with_agent to return error
+        async def fake_run_with_agent(**kwargs):
+            return {
+                "status": "empty",
+                "content": "",
+                "run_dir": None,
+                "iterations": 1,
+                "tool_calls_made": 0,
+                "finished_reason": "error",
+                "error": "LLMRateLimitError: rate limited (429)",
+                "metrics": {"input_tokens": 10, "output_tokens": 0, "total_tokens": 10},
+            }
+        service._run_with_agent = fake_run_with_agent  # type: ignore
+
+        # Call _run_attempt
+        async def run():
+            await service._run_attempt(
+                session_id="sess-err-sse",
+                attempt=attempt,
+                model="test-model",
+                max_iterations=1,
+                system_prompt="",
+                allow_shell_tools=False,
+            )
+
+        asyncio.run(run())
+
+        # Verify the error path: mark_failed, error message, assistant_message event
+        assert attempt.status.value == "failed"
+        assert "429" in attempt.error or "rate" in attempt.error.lower()
+
+        # Find the assistant_message event
+        assistant_events = [e for e in emitted if e[0] == "assistant_message"]
+        assert len(assistant_events) == 1, f"Expected 1 assistant_message, got {len(assistant_events)}"
+        event_name, event_data = assistant_events[0]
+        assert event_data["message_type"] == "error"
+        assert "模型请求" in event_data["content"] or "频率" in event_data["content"]
+        assert event_data["metadata"]["status"] == "error"
+        assert "LLMRateLimitError" in event_data["metadata"]["details"]
+
+    def test_friendly_error_text_for_429(self):
+        """Direct test: 429 should produce friendly Chinese text."""
+        friendly = _friendly_error_text("LLMRateLimitError: rate limited (429): {...}")
+        assert "频率过高" in friendly

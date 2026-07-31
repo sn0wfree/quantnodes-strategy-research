@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from strategy_research.core.agent.compact import CompactConfig, compact_messages
+
 from .events import EventBus
 from .models import Attempt, AttemptStatus, Message
 from .store import SessionStore
@@ -497,6 +498,23 @@ class SessionService:
                     ),
                     message_id=attempt.message_id,
                     parts=None,
+                )
+                # Push assistant_message SSE so frontend displays the
+                # error bubble immediately (without waiting for reload).
+                # message_type='error' tells the UI to render the warning
+                # style with collapsible detail.
+                self.event_bus.emit(
+                    session_id,
+                    "assistant_message",
+                    {
+                        "message_id": attempt.message_id,
+                        "content": friendly,
+                        "message_type": "error",
+                        "metadata": {
+                            "status": "error",
+                            "details": detail,
+                        },
+                    },
                 )
             else:
                 self.store.append_message(

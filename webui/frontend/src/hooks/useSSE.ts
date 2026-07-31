@@ -117,10 +117,40 @@ export function useSSE(sessionId: string | null) {
         }
         case 'assistant_message': {
           // Backend sends {"content": "full text", "message_id": "..."}
-          // Find the LAST text part (by id) and replace if the new content
-          // is longer. This preserves the text_id-routing semantics even
-          // for this one-shot final-answer event.
+          // For error messages (message_type='error'), there's no streaming
+          // text — the message may not exist yet. Create it as an error
+          // bubble with the friendly text + collapsible detail.
           const content = data.content as string
+          const messageType = data.message_type as string | undefined
+          if (messageId && messageType === 'error' && content) {
+            const meta = data.metadata as { details?: string } | undefined
+            const details = meta?.details ?? ''
+            const existing = useChatStore.getState().messages.get(messageId)
+            if (existing) {
+              // Update existing placeholder to error type
+              updateMessage(messageId, (msg) => {
+                msg.message_type = 'error'
+                msg.parts = [{ type: 'text', id: `err-${messageId}`, text: content }]
+                if (!msg.metadata) msg.metadata = {}
+                msg.metadata.status = 'error'
+                msg.metadata.details = details
+              })
+            } else {
+              // Create new error bubble
+              addMessage({
+                id: messageId,
+                session_id: sessionId!,
+                role: 'assistant',
+                parts: [{ type: 'text', id: `err-${messageId}`, text: content }],
+                created_at: Date.now() / 1000,
+                message_type: 'error',
+                metadata: { status: 'error', details },
+              })
+            }
+            break
+          }
+          // Normal path: find the LAST text part (by id) and replace if
+          // the new content is longer. Preserves text_id-routing semantics.
           if (content && messageId) {
             updateMessage(messageId, (msg) => {
               // Find last text part with content (skip empty seeded ones)

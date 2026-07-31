@@ -601,4 +601,85 @@ describe('useSSE', () => {
       expect(useSSEStore.getState().status).toBe('connected')
     })
   })
+
+  // ──────────── error message bubble (Phase 2+ real-time fix) ────────────
+
+  describe('error message bubble', () => {
+    it('assistant_message with message_type=error creates an error bubble', () => {
+      renderHook(() => useSSE('sess-1'))
+      const es = getCurrentES()
+
+      act(() => {
+        es.emit('assistant_message', {
+          message_id: 'err-1',
+          content: '⚠️ 模型请求频率过高，请稍后再试',
+          message_type: 'error',
+          metadata: {
+            status: 'error',
+            details: 'LLMRateLimitError: rate limited (429)',
+          },
+        })
+      })
+
+      const msg = useChatStore.getState().messages.get('err-1')
+      expect(msg).toBeDefined()
+      expect(msg!.message_type).toBe('error')
+      expect(msg!.role).toBe('assistant')
+      expect(msg!.parts).toHaveLength(1)
+      expect(msg!.parts[0].type).toBe('text')
+      expect((msg!.parts[0] as any).text).toBe('⚠️ 模型请求频率过高，请稍后再试')
+      expect(msg!.metadata?.status).toBe('error')
+      expect(msg!.metadata?.details).toBe('LLMRateLimitError: rate limited (429)')
+    })
+
+    it('assistant_message with message_type=error updates existing placeholder', () => {
+      // Pre-existing placeholder (e.g. from message_received)
+      seedMessage('err-2')
+      renderHook(() => useSSE('sess-1'))
+      const es = getCurrentES()
+
+      act(() => {
+        es.emit('assistant_message', {
+          message_id: 'err-2',
+          content: '⚠️ 服务暂时不可用',
+          message_type: 'error',
+          metadata: {
+            status: 'error',
+            details: 'LLMServerError: 503',
+          },
+        })
+      })
+
+      const msg = useChatStore.getState().messages.get('err-2')
+      expect(msg).toBeDefined()
+      expect(msg!.message_type).toBe('error')
+      expect(msg!.parts).toHaveLength(1)
+      expect((msg!.parts[0] as any).text).toBe('⚠️ 服务暂时不可用')
+      expect(msg!.metadata?.details).toBe('LLMServerError: 503')
+    })
+
+    it('normal assistant_message still uses length-replace logic', () => {
+      // Pre-existing message with text part
+      useChatStore.getState().addMessage({
+        id: 'normal-1',
+        session_id: 'sess-1',
+        role: 'assistant',
+        parts: [{ type: 'text', id: 't1', text: 'old' }],
+        created_at: Date.now() / 1000,
+      })
+      renderHook(() => useSSE('sess-1'))
+      const es = getCurrentES()
+
+      act(() => {
+        es.emit('assistant_message', {
+          message_id: 'normal-1',
+          content: 'new longer text',
+          // no message_type — normal path
+        })
+      })
+
+      const msg = useChatStore.getState().messages.get('normal-1')
+      expect(msg!.parts[0]).toMatchObject({ type: 'text', text: 'new longer text' })
+    })
+  })
 })
