@@ -39,14 +39,21 @@ attach_eventbus_to_sse(_event_bus)
 def _get_session_service() -> SessionService:
     """Return the singleton SessionService bound to the active DB.
 
-    Uses EventBusV2 for dual-write: events go to both the legacy
-    EventBus (SSE delivery) and event_log (persistent replay log).
+    Uses EventBusV2 for triple-write:
+    1. event_log (persistent source of truth)
+    2. legacy EventBus (SSE delivery)
+    3. messages + message_parts tables via Projector.flush() (B4)
+
+    In B4, messages + message_parts are materialized views — the
+    projector is the sole writer. service.py's direct writes remain
+    during the B4 transition window for safety, and will be removed
+    in a subsequent commit.
     """
     from .web_session import _get_db_path
 
     db_path = _get_db_path()
     store = SessionStore(db_path=db_path)
-    v2_bus = EventBusV2(_event_bus, db_path)
+    v2_bus = EventBusV2(_event_bus, db_path, flush_to_messages=True)
     return SessionService(store=store, event_bus=v2_bus)
 
 
