@@ -654,6 +654,16 @@ class AgentLoop:
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
+        logger.info("[AGENT] run start task_len=%d history_len=%d",
+                   len(task), len(history) if history else 0)
+
+        # Log compaction messages in history
+        if history:
+            compaction_count = sum(1 for h in history
+                                  if h.get("role") == "user"
+                                  and "<conversation-checkpoint>" in h.get("content", ""))
+            logger.info("[AGENT] compaction_in_history=%d", compaction_count)
+
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
         hook_ctx = self._build_hook_context(0, messages)
         self._fire_hooks("before_run", hook_ctx)

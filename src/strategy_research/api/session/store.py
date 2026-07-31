@@ -74,6 +74,9 @@ class SessionStore:
         Returns:
             The message_id used.
         """
+        logger.debug("[STORE] append_message session=%s role=%s type=%s content_len=%d",
+                    message.session_id, message.role, message_type, len(message.content))
+
         # Lazy import to avoid circular dependency
         from ..routers.web_session import persist_message
 
@@ -89,6 +92,7 @@ class SessionStore:
             tool_call_id=message.tool_call_id,
             message_type=message_type,
         )
+        logger.debug("[STORE] persisted id=%s", msg_id)
         return msg_id
 
     def get_messages(
@@ -97,6 +101,7 @@ class SessionStore:
         limit: int = 100,
     ) -> list[Message]:
         """Read all messages for a session (chronological order)."""
+        logger.debug("[STORE] get_messages session=%s limit=%d", session_id, limit)
         from ..routers.web_session import _get_db, _row_to_message
 
         with _get_db() as conn:
@@ -124,6 +129,9 @@ class SessionStore:
                     message_type=m.get("message_type", "assistant"),
                 )
             )
+        logger.debug("[STORE] loaded %d messages, types: %s", len(out),
+                    dict(sorted({m.message_type: sum(1 for x in out if x.message_type == m.message_type)
+                                for m in out}.items())))
         return out
 
     def get_session_metadata(self, session_id: str) -> Optional[dict[str, Any]]:

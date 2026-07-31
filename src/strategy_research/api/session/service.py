@@ -142,6 +142,8 @@ class SessionService:
             for the user message and the spawned Attempt. On queue-full,
             returns ``{"error": "queue_full", "limit": 10, "current_size": N}``.
         """
+        logger.info("[MSG] send_message session=%s content_len=%d", session_id, len(content))
+
         # ── 1. Persist user message ────────────────────────────────────
         # Capture created_at from a single authoritative clock (server
         # time.time()) for correct cross-exchange message ordering.
@@ -151,6 +153,7 @@ class SessionService:
             Message(session_id=session_id, role="user", content=content),
             created_at=_ts,
         )
+        logger.info("[MSG] user_msg_persisted id=%s", user_msg_id)
 
         # ── 2. Auto-title on first user message ───────────────────────
         try:
@@ -405,6 +408,7 @@ class SessionService:
         allow_shell_tools: bool,
     ) -> None:
         """Execute an Attempt: load history → run AgentLoop → persist result."""
+        logger.info("[EXEC] start attempt=%s session=%s", attempt.attempt_id, session_id)
         attempt.mark_running()
         self.store.update_attempt(attempt)
         # attempt.started carries message_id so the frontend can switch its
@@ -423,9 +427,19 @@ class SessionService:
         try:
             # 1. Load full message history from DB and convert to OpenAI-format
             messages = self.store.get_messages(session_id, limit=100)
+            logger.info("[EXEC] loaded %d messages from DB", len(messages))
+
             history = self._convert_messages_to_history(messages)
+            logger.info("[EXEC] converted to %d history entries", len(history))
+
+            # Log compaction messages in history
+            compaction_count = sum(1 for h in history
+                                  if h.get("role") == "user"
+                                  and "<conversation-checkpoint>" in h.get("content", ""))
+            logger.info("[EXEC] compaction_messages_in_history=%d", compaction_count)
 
             # 2. Run AgentLoop with history context
+            logger.info("[EXEC] running agent_loop model=%s max_iter=%d", model, max_iterations)
             result_dict = await self._run_with_agent(
                 attempt=attempt,
                 history=history,
@@ -435,6 +449,8 @@ class SessionService:
                 allow_shell_tools=allow_shell_tools,
                 accumulated_parts=accumulated_parts,
             )
+            logger.info("[EXEC] agent_result status=%s content_len=%d",
+                       result_dict.get("status"), len(result_dict.get("content", "")))
 
             # 3. Update Attempt and persist assistant message
             answer = result_dict.get("content") or ""
@@ -892,7 +908,9 @@ class SessionService:
         """
         from strategy_research.core.agent.compaction_message import CompactionMessage
 
+        logger.debug("[HIST] converting %d messages", len(messages))
         history: list[dict[str, Any]] = []
+        compaction_count = 0
         for msg in messages[:-1]:
             role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
             content = msg.content if hasattr(msg, "content") else msg.get("content", "")
@@ -901,6 +919,9 @@ class SessionService:
 
             # Handle compaction messages: convert to user role + checkpoint wrap
             if message_type == "compaction":
+                compaction_count += 1
+                logger.debug("[HIST] compaction msg id=%s content_len=%d",
+                           msg.message_id, len(content))
                 comp = CompactionMessage(
                     id=msg.message_id,
                     session_id=msg.session_id,

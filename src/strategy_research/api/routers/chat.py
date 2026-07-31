@@ -24,6 +24,7 @@ from ..session.store import SessionStore
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ── Shared SessionService (singleton) ─────────────────────────────────────
 # Borrowed from vibe_trading: one service for the whole process, with an
@@ -434,6 +435,9 @@ async def send_async(body: ChatMessage, request: Request):
     are appended to a per-session queue and processed FIFO; if the queue
     is full (hard limit 10) the API returns 429.
     """
+    logger.info("[SEND] session=%s content_len=%d content_preview=%s",
+                body.session_id, len(body.content), body.content[:50])
+
     # ── /goal command intercept ────────────────────────────────────────
     if body.content.strip().startswith("/goal"):
         return await _handle_goal_command(body)
@@ -453,6 +457,8 @@ async def send_async(body: ChatMessage, request: Request):
     # Queue-full guard: SessionService returns {"error": "queue_full", ...}
     # when the session already has _QUEUE_LIMIT items waiting.
     if result.get("error") == "queue_full":
+        logger.warning("[SEND] queue_full session=%s limit=%d current=%d",
+                       body.session_id, result["limit"], result["current_size"])
         raise HTTPException(
             status_code=429,
             detail={
@@ -461,6 +467,10 @@ async def send_async(body: ChatMessage, request: Request):
                 "current_size": result["current_size"],
             },
         )
+
+    logger.info("[SEND] ok session=%s user_msg=%s attempt=%s status=%s",
+                body.session_id, result.get("user_message_id"),
+                result.get("attempt_id"), result.get("status"))
 
     return SendMessageResponse(
         message_id=result["user_message_id"],
@@ -865,10 +875,13 @@ async def chat_events(
     Streams real-time events from AgentLoop (text_delta, tool_call, etc.)
     Supports Last-Event-ID header for replay on reconnection.
     """
+    logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, last_event_id)
+
     # Register for async notifications
     notification_event = sse_buffer.register_session(session_id)
 
     async def event_generator():
+        logger.info("[SSE] generator started session=%s", session_id)
         # Send SSE comment immediately so the browser's EventSource
         # fires onopen without waiting for the first real event or
         # the 15s heartbeat. Without this, a new session with empty
@@ -878,6 +891,7 @@ async def chat_events(
         yield ": connected\n\n"
 
         last_id = last_event_id or ""
+        event_count = 0
 
         try:
             # Replay missed events first
@@ -886,15 +900,17 @@ async def chat_events(
                 for evt in missed:
                     yield _format_sse(evt)
                     last_id = evt.id
+                logger.debug("[SSE] replayed %d missed events session=%s", len(missed), session_id)
 
             # Flush any events that arrived before we started listening
             existing = sse_buffer.get_events_since(session_id, last_id)
             for evt in existing:
                 yield _format_sse(evt)
                 last_id = evt.id
+            if existing:
+                logger.debug("[SSE] flushed %d existing events session=%s", len(existing), session_id)
 
             # Stream new events
-            event_count = 0
             while True:
                 # Wait for new events (with timeout for heartbeat)
                 try:
@@ -903,6 +919,8 @@ async def chat_events(
                     # Send heartbeat
                     event_count += 1
                     yield _heartbeat_sse(event_count)
+                    if event_count % 4 == 0:  # Log every 60s
+                        logger.debug("[SSE] heartbeat #%d session=%s", event_count, session_id)
                     continue
 
                 # Clear the event and get new events
@@ -911,9 +929,19 @@ async def chat_events(
                 for evt in new_events:
                     yield _format_sse(evt)
                     last_id = evt.id
+                    event_count += 1
+                    if evt.event:
+                        logger.debug("[SSE] event=%s session=%s id=%s", evt.event, session_id, evt.id)
 
+        except asyncio.CancelledError:
+            logger.info("[SSE] client disconnected session=%s reason=cancelled events=%d",
+                       session_id, event_count)
+        except Exception as exc:
+            logger.error("[SSE] generator error session=%s: %s", session_id, exc)
+            raise
         finally:
             sse_buffer.unregister_session(session_id, notification_event)
+            logger.info("[SSE] generator ended session=%s total_events=%d", session_id, event_count)
 
     return StreamingResponse(
         event_generator(),

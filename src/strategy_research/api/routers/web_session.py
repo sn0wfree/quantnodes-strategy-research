@@ -399,6 +399,8 @@ def persist_message(
         message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
             Defaults to 'assistant' for backward compat.
     """
+    logger.debug("[DB] persist_message session=%s role=%s type=%s content_len=%d",
+                session_id, role, message_type, len(content))
     msg_id = message_id or str(uuid.uuid4())
     ts = created_at or time.time()
     parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
@@ -407,13 +409,14 @@ def persist_message(
         conn = _get_db()
         row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not row:
-            logger.warning("persist_message: session %s not found", session_id)
+            logger.warning("[DB] persist_message: session %s not found", session_id)
             return msg_id
         conn.execute(
             "INSERT INTO messages (id, session_id, role, content, parts_json, tool_call_id, created_at, metadata_json, message_type) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (msg_id, session_id, role, content, parts_json, tool_call_id, ts, metadata_json, message_type),
         )
+        logger.debug("[DB] persisted id=%s", msg_id)
         conn.execute(
             "UPDATE sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?",
             (ts, session_id),
