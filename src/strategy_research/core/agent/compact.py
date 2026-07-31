@@ -14,11 +14,22 @@ Design inspired by opencode's compaction architecture:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+
+# ── Emergency kill switch ────────────────────────────────────────────
+# Set SR_KEEP_ALL_COMPACTIONS=1 to globally force
+# keep_all_compactions_in_history=True without code changes or config edits.
+# Useful for emergency rollback if the new filter causes issues.
+# See docs/compaction-history-filter.md.
+_KEEP_ALL_COMPACTIONS_OVERRIDE: bool = os.environ.get(
+    "SR_KEEP_ALL_COMPACTIONS", ""
+).lower() in ("1", "true", "yes", "on")
 
 
 # ── Structured summary template (opencode-style) ─────────────────
@@ -459,7 +470,25 @@ def _llm_summarize_v2(
         _serialize_message(m) for m in recent if m
     )
 
-    return system_msgs + recent, summary_text, recent_text
+    # ── Safety check: ensure L4 result is usable ──
+    # If new_messages is too short or has no user role, the LLM would
+    # receive a context without user content — causing provider errors
+    # like MiniMax 2013 "chat content is empty". Return None to let
+    # the caller skip L4 and keep the original messages.
+    new_messages = system_msgs + recent
+    if len(new_messages) < 2:
+        logger.warning(
+            "L4 produced too few messages (len=%d), aborting compaction",
+            len(new_messages),
+        )
+        return None
+    if not any(m.get("role") == "user" for m in new_messages):
+        logger.warning(
+            "L4 produced messages without any user role, aborting compaction",
+        )
+        return None
+
+    return new_messages, summary_text, recent_text
 
 
 # ── L3: Hard Truncate ────────────────────────────────────────────
