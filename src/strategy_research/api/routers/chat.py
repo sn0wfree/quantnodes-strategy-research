@@ -499,9 +499,12 @@ async def send_async(body: ChatMessage, request: Request):
 
 
 async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
-    """Handle /goal slash commands without going through AgentLoop."""
-    from ..session.web_session import persist_message
-    from ...core.goal import GoalStore, GoalStatus, EvidenceInput, RiskTier
+    """Handle /goal slash commands without going through AgentLoop.
+
+    B5: All persistence via EventBusV2 → projector.flush(). No direct
+    persist_message / sse_buffer.push calls.
+    """
+    from ...core.goal import GoalStore, GoalStatus, EvidenceInput
     from ...core.goal.context import default_goal_criteria
 
     session_id = body.session_id
@@ -516,25 +519,18 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     user_msg_id = str(uuid.uuid4())
     assistant_msg_id = str(uuid.uuid4())
 
-    # Persist user message
-    persist_message(
-        session_id=session_id,
-        role="user",
-        content=content,
-        message_id=user_msg_id,
-    )
+    # Get EventBusV2 (with flush_to_messages=True)
+    service = _get_session_service()
+    event_bus = service.event_bus
 
-    # Emit message_received so frontend creates both message placeholders
-    sse_buffer.push(
-        "message_received",
-        json.dumps({
-            "message_id": user_msg_id,
-            "user_message_id": user_msg_id,
-            "assistant_message_id": assistant_msg_id,
-            "content": content,
-        }, ensure_ascii=False),
-        session_id,
-    )
+    # Emit message_received for user message — also flushes to messages table
+    event_bus.emit(session_id, "message_received", {
+        "message_id": user_msg_id,
+        "user_message_id": user_msg_id,
+        "assistant_message_id": assistant_msg_id,
+        "content": content,
+        "role": "user",
+    })
 
     # Execute goal command
     response_text = ""
@@ -642,53 +638,35 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
 
     # Emit 3-step text protocol (text.started → text_delta → text.ended)
     # so the frontend can route the text chunk to the correct text part.
+    # Also flushes the assistant message to the messages table.
     goal_text_id = str(uuid.uuid4())
-    sse_buffer.push(
-        "text.started",
-        json.dumps({
-            "message_id": assistant_msg_id,
-            "text_id": goal_text_id,
-        }, ensure_ascii=False),
-        session_id,
-    )
-    sse_buffer.push(
-        "text_delta",
-        json.dumps({
-            "message_id": assistant_msg_id,
-            "text_id": goal_text_id,
-            "text": response_text,
-        }, ensure_ascii=False),
-        session_id,
-    )
-    sse_buffer.push(
-        "text.ended",
-        json.dumps({
-            "message_id": assistant_msg_id,
-            "text_id": goal_text_id,
-            "text": response_text,
-        }, ensure_ascii=False),
-        session_id,
-    )
-
-    # Persist assistant message
-    persist_message(
-        session_id=session_id,
-        role="assistant",
-        content=response_text,
-        parts=[{"type": "text", "text": response_text}],
-        message_id=assistant_msg_id,
-        metadata={"model": "goal-handler"},
-    )
+    event_bus.emit(session_id, "text.started", {
+        "message_id": assistant_msg_id,
+        "text_id": goal_text_id,
+    })
+    event_bus.emit(session_id, "text_delta", {
+        "message_id": assistant_msg_id,
+        "text_id": goal_text_id,
+        "text": response_text,
+    })
+    event_bus.emit(session_id, "text.ended", {
+        "message_id": assistant_msg_id,
+        "text_id": goal_text_id,
+        "text": response_text,
+    })
+    # Final assistant_message event with content for message.content
+    event_bus.emit(session_id, "assistant_message", {
+        "message_id": assistant_msg_id,
+        "content": response_text,
+        "message_type": "assistant",
+        "metadata": {"model": "goal-handler"},
+    })
 
     # Emit agent_done
-    sse_buffer.push(
-        "agent_done",
-        json.dumps({
-            "message_id": assistant_msg_id,
-            "status": "success",
-        }, ensure_ascii=False),
-        session_id,
-    )
+    event_bus.emit(session_id, "agent_done", {
+        "message_id": assistant_msg_id,
+        "status": "success",
+    })
 
     return SendMessageResponse(
         message_id=user_msg_id,
@@ -709,16 +687,8 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
     service = _get_session_service()
     cfg = _build_llm_config()
 
-    # Persist user message
+    # B5: user message persisted via EventBusV2 → projector.flush()
     user_msg_id = str(uuid.uuid4())
-    service.store.append_message(
-        Message(
-            session_id=body.session_id,
-            role="user",
-            content="/compact",
-        ),
-        message_id=user_msg_id,
-    )
 
     # Execute compaction
     try:
@@ -742,23 +712,18 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
         logger.exception("compact_history failed")
         response_text = f"❌ 压缩失败: {exc}"
 
-    # Persist assistant message
+    # B5: assistant message persisted via EventBusV2 → projector.flush()
     assistant_msg_id = str(uuid.uuid4())
-    service.store.append_message(
-        Message(
-            session_id=body.session_id,
-            role="assistant",
-            content=response_text,
-        ),
-        message_id=assistant_msg_id,
-    )
 
-    # Emit SSE events (3-step text protocol)
+    # Emit SSE events (3-step text protocol) — also flushes to messages table
     event_bus = service.event_bus
     compact_text_id = str(uuid.uuid4())
     event_bus.emit(body.session_id, "message_received", {
+        "message_id": user_msg_id,
         "user_message_id": user_msg_id,
         "assistant_message_id": assistant_msg_id,
+        "content": body.content,
+        "role": "user",
         "status": "done",
     })
     event_bus.emit(body.session_id, "text.started", {
@@ -774,6 +739,11 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
         "text_id": compact_text_id,
         "text": response_text,
         "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "assistant_message", {
+        "message_id": assistant_msg_id,
+        "content": response_text,
+        "message_type": "assistant",
     })
     event_bus.emit(body.session_id, "agent_done", {
         "message_id": assistant_msg_id,
