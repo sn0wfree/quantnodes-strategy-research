@@ -23,18 +23,12 @@ class ForexEngine(BaseEngine):
         self.swap_enabled: bool = config.get("swap_enabled", True)
         self._last_swap_dates: dict = {}
 
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        return True
-
     def round_size(self, raw_size: float, price: float) -> float:
         return round(max(raw_size, 0.0), 2)
 
     def calc_commission(self, size: float, price: float, direction: int, is_open: bool) -> float:
         spread_cost = size * self.spread_pips * self.pip_value
         return spread_cost / 2  # half spread per side
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
 
     def on_bar(self, symbol: str, bar: pd.Series, timestamp: pd.Timestamp) -> None:
         if not self.swap_enabled:

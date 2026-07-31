@@ -23,18 +23,12 @@ class CryptoEngine(BaseEngine):
         self._funding_applied: set = set()
         self._funding_daily_done: set = set()
 
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        return True  # 24/7, long/short
-
     def round_size(self, raw_size: float, price: float) -> float:
         return round(max(raw_size, 0.0), 6)
 
     def calc_commission(self, size: float, price: float, direction: int, is_open: bool) -> float:
         rate = self.taker_rate if is_open else self.maker_rate
         return size * price * rate
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
 
     def on_bar(self, symbol: str, bar: pd.Series, timestamp: pd.Timestamp) -> None:
         # Funding fee

@@ -44,12 +44,6 @@ class ChinaFuturesEngine(FuturesBaseEngine):
         super().__init__(config)
         self.slippage_rate: float = config.get("slippage", 0.0005)
 
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        return True  # T+0, long/short
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
-
     def run_backtest(self, data_map, signal_map, codes, **kwargs):
         # 动态设置合约乘数
         for code in codes:

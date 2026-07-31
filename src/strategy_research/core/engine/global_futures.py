@@ -37,12 +37,6 @@ class GlobalFuturesEngine(FuturesBaseEngine):
         super().__init__(config)
         self.slippage_rate: float = config.get("slippage", 0.0005)
 
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        return True
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
-
     def run_backtest(self, data_map, signal_map, codes, **kwargs):
         for code in codes:
             product = _get_global_product_code(code)

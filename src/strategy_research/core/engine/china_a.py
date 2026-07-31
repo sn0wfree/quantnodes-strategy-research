@@ -42,6 +42,7 @@ class ChinaAEngine(BaseEngine):
         self.slippage_rate: float = config.get("slippage", 0.001)
 
     def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
+        """覆盖默认实现：添加 T+1 和涨跌停限制。"""
         # 1. 禁止做空
         if direction == -1:
             return False
@@ -76,9 +77,6 @@ class ChinaAEngine(BaseEngine):
         if not is_open:
             comm += notional * self.stamp_tax
         return comm
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
 
 
 __all__ = ["ChinaAEngine"]

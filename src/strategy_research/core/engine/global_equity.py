@@ -24,8 +24,10 @@ class GlobalEquityEngine(BaseEngine):
         self.hk_levy: float = config.get("hk_levy", 0.0000565)
         self.hk_settlement: float = config.get("hk_settlement", 0.00002)
 
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        return True  # US/HK: T+0, long/short all allowed
+    def apply_slippage(self, price: float, direction: int) -> float:
+        """覆盖默认实现：US/HK 不同滑点率。"""
+        rate = self.slippage_hk if self.market == "hk" else self.slippage_us
+        return price * (1 + direction * rate)
 
     def round_size(self, raw_size: float, price: float) -> float:
         if self.market == "hk":
@@ -41,10 +43,6 @@ class GlobalEquityEngine(BaseEngine):
             comm += notional * self.hk_settlement
             return comm
         return 0.0  # US: zero commission
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        rate = self.slippage_hk if self.market == "hk" else self.slippage_us
-        return price * (1 + direction * rate)
 
 
 __all__ = ["GlobalEquityEngine"]

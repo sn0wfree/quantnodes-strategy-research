@@ -19,13 +19,18 @@ from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
+from .market_mixin import MarketMixin
 from .models import EquitySnapshot, Position, TradeRecord
 
 logger = logging.getLogger(__name__)
 
 
-class BaseEngine(ABC):
-    """Bar-by-bar 回测引擎基类。"""
+class BaseEngine(ABC, MarketMixin):
+    """Bar-by-bar 回测引擎基类。
+
+    继承自 MarketMixin，提供 apply_slippage 和 can_execute 的默认实现。
+    子类需实现 2 个抽象方法：round_size / calc_commission
+    """
 
     def __init__(self, config: dict):
         self.config = config
@@ -41,11 +46,6 @@ class BaseEngine(ABC):
     # ── 抽象方法（子类必须实现） ──────────────────────
 
     @abstractmethod
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        """市场规则是否允许此交易。direction: 1=买, -1=卖, 0=平仓。"""
-        ...
-
-    @abstractmethod
     def round_size(self, raw_size: float, price: float) -> float:
         """整手/精度取整。"""
         ...
@@ -55,11 +55,6 @@ class BaseEngine(ABC):
         self, size: float, price: float, direction: int, is_open: bool
     ) -> float:
         """佣金计算。is_open=True 为开仓佣金，False 为平仓佣金。"""
-        ...
-
-    @abstractmethod
-    def apply_slippage(self, price: float, direction: int) -> float:
-        """滑点模型。direction: 1=买入(向上滑), -1=卖出(向下滑)。"""
         ...
 
     def on_bar(self, symbol: str, bar: pd.Series, timestamp: pd.Timestamp) -> None:

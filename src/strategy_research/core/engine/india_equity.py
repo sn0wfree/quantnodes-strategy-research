@@ -23,9 +23,6 @@ class IndiaEquityEngine(BaseEngine):
         self.gst: float = config.get("gst", 0.18)
         self.slippage_rate: float = config.get("slippage", 0.001)
 
-    def can_execute(self, symbol: str, direction: int, bar: pd.Series) -> bool:
-        return True
-
     def round_size(self, raw_size: float, price: float) -> float:
         return max(int(raw_size), 0)
 
@@ -39,9 +36,6 @@ class IndiaEquityEngine(BaseEngine):
             comm += notional * self.stamp_duty
         comm *= (1 + self.gst)
         return comm
-
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
 
 
 __all__ = ["IndiaEquityEngine"]

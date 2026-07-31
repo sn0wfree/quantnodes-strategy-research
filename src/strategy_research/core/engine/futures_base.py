@@ -38,8 +38,5 @@ class FuturesBaseEngine(BaseEngine):
     def calc_commission(self, size: float, price: float, direction: int, is_open: bool) -> float:
         return size * self.commission_per_contract
 
-    def apply_slippage(self, price: float, direction: int) -> float:
-        return price * (1 + direction * self.slippage_rate)
-
 
 __all__ = ["FuturesBaseEngine"]
