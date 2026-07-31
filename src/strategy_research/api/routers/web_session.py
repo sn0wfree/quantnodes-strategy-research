@@ -107,6 +107,51 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # No index here — backfill creates UNIQUE INDEX uq_messages_session_seq
     # which is strictly stronger than a non-unique index on the same cols.
 
+    # message_parts (Level 2, opencode-aligned, Phase 2 commit 1)
+    # Splits parts out of the messages.parts_json JSON column into a
+    # dedicated table. Each part is a row; the parent message_id links
+    # back. opencode's PartTable model.
+    #
+    # Fields:
+    #   id          : stable per-part UUID (independent of message_id)
+    #   message_id  : FK to messages.id (CASCADE delete)
+    #   session_id  : FK to sessions.id (CASCADE delete) — denormalized
+    #                 so list_messages can fetch all parts in one JOIN
+    #   type        : part type (text | tool_call | tool_result | thinking
+    #                 | file_edit | table | chart | image)
+    #   data_json   : full part data as JSON (preserves opencode shape)
+    #   seq         : part ordering within the message (Level 1 invariant)
+    #   time_created: when this part was created (vs message.created_at
+    #                 which is when the message row was inserted)
+    #
+    # No reads/writes yet — commit 2 (dual-write) wires the writes,
+    # commit 3 (migration) populates from existing parts_json, commit
+    # 5 switches the read path. Until commit 5, this table is empty
+    # and the old parts_json column is the source of truth.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS message_parts (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            seq INTEGER NOT NULL DEFAULT 0,
+            time_created REAL NOT NULL,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_parts_message_seq "
+        "ON message_parts(message_id, seq)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_parts_session_seq "
+        "ON message_parts(session_id, seq)"
+    )
+
     # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
     # Use nullable column first, then UPDATE existing rows, to avoid NOT NULL failure
     _add_column(conn, "messages", "message_type", "TEXT")
