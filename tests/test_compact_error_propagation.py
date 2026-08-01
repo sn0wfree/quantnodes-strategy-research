@@ -36,6 +36,9 @@ class TestPersistPropagatesErrors:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        # No EventBusV2 injected → legacy persist_message fallback path
+        # (see _persist_compaction_event in core/agent/loop.py).
+        loop._event_bus = None
         return loop
 
     def test_persist_message_failure_raises(self):
@@ -87,6 +90,7 @@ class TestMaybeCompactRollsBack:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        loop._event_bus = None
         # Skip __init__
         loop.client = MagicMock()
         # Use original messages as fallback
@@ -96,11 +100,13 @@ class TestMaybeCompactRollsBack:
     def test_rolls_back_when_persist_raises(self):
         """If _persist_compaction_event raises, _maybe_compact
         catches it and returns the original messages (no compaction)."""
-        # Create enough messages that L4 actually triggers
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ] * 5
-        msgs += [{"role": "assistant", "content": f"reply {i} " * 30} for i in range(5)] * 5
+        # Create enough messages that L4 actually triggers. Use properly
+        # alternated user/assistant turns so _select_by_token_budget keeps
+        # a user message in `recent` (L4 safety check requires it).
+        msgs = []
+        for i in range(25):
+            msgs.append({"role": "user", "content": f"msg {i} " * 30})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 30})
 
         loop = self._make_loop(msgs)
         mock_llm = MagicMock()
@@ -143,10 +149,12 @@ class TestMaybeCompactRollsBack:
     def test_successful_l4_returns_compressed_messages(self):
         """When L4 succeeds and persistence succeeds, compacted
         messages are returned (not original)."""
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ] * 5
-        msgs += [{"role": "assistant", "content": f"reply {i} " * 30} for i in range(5)] * 5
+        # Properly alternated user/assistant turns so L4 produces a
+        # smaller message set (the safety check requires a user role).
+        msgs = []
+        for i in range(25):
+            msgs.append({"role": "user", "content": f"msg {i} " * 30})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 30})
 
         loop = self._make_loop(msgs)
         mock_llm = MagicMock()

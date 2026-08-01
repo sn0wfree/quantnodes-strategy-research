@@ -29,6 +29,7 @@ class TestCompactionMessageFormat:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        loop._event_bus = None
         loop.client = MagicMock()
 
         with patch(
@@ -54,6 +55,7 @@ class TestCompactionMessageFormat:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        loop._event_bus = None
         loop.client = MagicMock()
 
         with patch(
@@ -75,6 +77,7 @@ class TestCompactionMessageFormat:
         loop.cc = cfg
         loop.session_id = None
         loop._previous_summary = None
+        loop._event_bus = None
         loop.client = MagicMock()
 
         with patch(
@@ -100,6 +103,7 @@ class TestAsyncMaybeCompact:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        loop._event_bus = None
         loop.threshold_tokens = None
         loop.client = MagicMock()
         return loop
@@ -206,6 +210,7 @@ class TestSyncMaybeCompact:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        loop._event_bus = None
         loop.threshold_tokens = None
         loop.client = MagicMock()
         return loop

@@ -114,7 +114,8 @@ class TestToolEventPayload:
         assert len(tool_calls) == 1
         tc_payload = tool_calls[0]
         assert tc_payload["tool"] == "read_file"
-        assert tc_payload["arguments"] == {"path": "/x.py"}
+        # arguments is serialized to a JSON string (loop.py json.dumps it)
+        assert tc_payload["arguments"] == '{"path": "/x.py"}'
         assert tc_payload["call_id"] == "call_abc"
         assert tc_payload["iter"] == 1
         # Old key must not be present
@@ -156,7 +157,9 @@ class TestToolEventPayload:
         results = [d for et, d in sink.events if et == "tool_result"]
         assert len(results) == 1
         payload = results[0]
-        assert payload["status"] == "ok"
+        # status value changed from "ok" to "done" (loop.py), ok stays as
+        # boolean compat key
+        assert payload["status"] == "done"
         assert payload["ok"] is True  # backward compat
         assert "elapsed_ms" in payload
         assert payload["preview"] == "output preview text"
@@ -210,7 +213,7 @@ class TestThinkingDone:
         # Stub streaming path
         from strategy_research.core.llm.parser import StreamChunk
 
-        def fake_stream(messages):
+        def fake_stream(messages, tools=None):
             yield StreamChunk(delta_content="hel")
             yield StreamChunk(delta_content="lo", finish_reason="stop")
 
@@ -384,4 +387,5 @@ class TestBackwardCompat:
         result_payload = sink.of_type("tool_result")[0]
         assert "ok" in result_payload
         assert "status" in result_payload
-        assert result_payload["ok"] == (result_payload["status"] == "ok")
+        # status value is now "done" (was "ok"); ok stays boolean compat
+        assert result_payload["ok"] == (result_payload["status"] == "done")

@@ -71,7 +71,14 @@ def sse_server():
         yield {"base_url": base_url, "proc": proc, "port": port}
     finally:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # uvicorn graceful shutdown can be held up by lingering SSE
+            # connections (open StreamingResponse generators). Don't fail
+            # teardown on it — SIGKILL and move on.
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -103,15 +110,19 @@ class TestSSEReconnection:
         def listen():
             with requests.get(url, stream=True, timeout=30) as resp:
                 connected.set()
-                for line in resp.iter_lines(decode_unicode=True):
-                    if line and line.startswith("event: "):
-                        evt_type = line[7:].strip()
-                    elif line and line.startswith("data: "):
-                        try:
-                            data = json.loads(line[6:])
-                        except Exception:
-                            data = {}
-                        events_received.append({"event": evt_type, "data": data})
+                try:
+                    for line in resp.iter_lines(decode_unicode=True):
+                        if line and line.startswith("event: "):
+                            evt_type = line[7:].strip()
+                        elif line and line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])
+                            except Exception:
+                                data = {}
+                            events_received.append({"event": evt_type, "data": data})
+                except requests.exceptions.RequestException:
+                    # Server shut down (fixture teardown) — safe to stop.
+                    pass
 
         t = threading.Thread(target=listen, daemon=True)
         t.start()
@@ -185,7 +196,9 @@ class TestSSEReconnection:
             with requests.get(url, stream=True, timeout=25) as resp:
                 connected.set()
                 for line in resp.iter_lines(decode_unicode=True):
-                    if line and line.startswith("event: heartbeat"):
+                    # Heartbeat is an SSE comment line (": heartbeat"),
+                    # not a named event — see _heartbeat_sse in chat.py.
+                    if line and line.startswith(": heartbeat"):
                         heartbeats.append(True)
                         return
 
@@ -219,30 +232,36 @@ class TestSSEReconnection:
         def listen_a():
             url = f"{base_url}/api/chat/events?session_id={sid_a}&token={token}"
             with requests.get(url, stream=True, timeout=10) as resp:
-                for line in resp.iter_lines(decode_unicode=True):
-                    if line and line.startswith("event: "):
-                        evt_type = line[7:].strip()
-                    elif line and line.startswith("data: "):
-                        try:
-                            data = json.loads(line[6:])
-                        except Exception:
-                            data = {}
-                        events_a.append({"event": evt_type, "data": data})
-                        if evt_type == "agent_done":
-                            return
+                try:
+                    for line in resp.iter_lines(decode_unicode=True):
+                        if line and line.startswith("event: "):
+                            evt_type = line[7:].strip()
+                        elif line and line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])
+                            except Exception:
+                                data = {}
+                            events_a.append({"event": evt_type, "data": data})
+                            if evt_type == "agent_done":
+                                return
+                except requests.exceptions.RequestException:
+                    pass
 
         def listen_b():
             url = f"{base_url}/api/chat/events?session_id={sid_b}&token={token}"
             with requests.get(url, stream=True, timeout=10) as resp:
-                for line in resp.iter_lines(decode_unicode=True):
-                    if line and line.startswith("event: "):
-                        evt_type = line[7:].strip()
-                    elif line and line.startswith("data: "):
-                        try:
-                            data = json.loads(line[6:])
-                        except Exception:
-                            data = {}
-                        events_b.append({"event": evt_type, "data": data})
+                try:
+                    for line in resp.iter_lines(decode_unicode=True):
+                        if line and line.startswith("event: "):
+                            evt_type = line[7:].strip()
+                        elif line and line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])
+                            except Exception:
+                                data = {}
+                            events_b.append({"event": evt_type, "data": data})
+                except requests.exceptions.RequestException:
+                    pass
 
         t_a = threading.Thread(target=listen_a, daemon=True)
         t_b = threading.Thread(target=listen_b, daemon=True)

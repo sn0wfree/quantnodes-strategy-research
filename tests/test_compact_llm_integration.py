@@ -59,10 +59,15 @@ class TestLLMSummarizeV2ReturnsNone:
         # Use system messages that serialize to something, but check the path
         llm = FakeLLM(responses=["Summary"])
         cfg = CompactConfig()
+        # 3 full user→assistant turns so head is non-empty and the L4
+        # safety check (>= l4_min_messages with a user role) passes.
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "user", "content": "z" * 300},
+            {"role": "assistant", "content": "a" * 300},
+            {"role": "user", "content": "b" * 300},
+            {"role": "assistant", "content": "c" * 300},
         ]
         result = _llm_summarize_v2(msgs, cfg, 1_000_000, 128_000, llm)
         # Non-empty conversation → LLM is called
@@ -112,10 +117,13 @@ class TestLLMSummarizeV2Success:
     def test_returns_3_tuple(self):
         llm = FakeLLM(responses=["## Objective\nTest summary"])
         cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
+        # End with a user→assistant turn so recent holds 2 messages and
+        # passes the L4 safety check (>= l4_min_messages with a user role).
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "user", "content": "z" * 300},
+            {"role": "assistant", "content": "w" * 300},
         ]
         result = _llm_summarize_v2(msgs, cfg, 1_000_000, 128_000, llm)
         assert result is not None
@@ -141,10 +149,13 @@ class TestLLMSummarizeV2Success:
     def test_recent_text_serializes_recent_messages(self):
         llm = FakeLLM(responses=["Summary"])
         cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
+        # End with a user→assistant turn so recent holds 2 messages and
+        # passes the L4 safety check.
         msgs = [
             {"role": "user", "content": "question"},
             {"role": "assistant", "content": "answer"},
             {"role": "user", "content": "follow up question"},
+            {"role": "assistant", "content": "follow up answer"},
         ]
         result = _llm_summarize_v2(msgs, cfg, 1_000_000, 128_000, llm)
         assert result is not None
@@ -191,10 +202,12 @@ class TestLLMSummarizeV2Success:
         """When previous_summary is set, prompt includes it."""
         llm = FakeLLM(responses=["Updated summary"])
         cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
+        # End with a user→assistant turn so the L4 safety check passes.
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "user", "content": "z" * 300},
+            {"role": "assistant", "content": "w" * 300},
         ]
         result = _llm_summarize_v2(
             msgs, cfg, 1_000_000, 128_000, llm,
@@ -238,10 +251,12 @@ class TestLLMSummarizeV2TokenBudget:
         llm = FakeLLM(responses=["Summary"])
         cfg = CompactConfig(tail_turns=1)
         # 1M context: 20% = 200K → capped at 8000
+        # End with a user→assistant turn so the L4 safety check passes.
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "user", "content": "z" * 300},
+            {"role": "assistant", "content": "w" * 300},
         ]
         result = _llm_summarize_v2(msgs, cfg, 1_000_000, 128_000, llm)
         assert result is not None
@@ -251,10 +266,12 @@ class TestLLMSummarizeV2TokenBudget:
         llm = FakeLLM(responses=["Summary"])
         cfg = CompactConfig(tail_turns=1)
         # 10K context: 20% = 2000 → min(8000, 2000) = 2000
+        # End with a user→assistant turn so the L4 safety check passes.
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "user", "content": "z" * 300},
+            {"role": "assistant", "content": "w" * 300},
         ]
         result = _llm_summarize_v2(msgs, cfg, 10_000, 1_000, llm)
         assert result is not None
@@ -263,10 +280,12 @@ class TestLLMSummarizeV2TokenBudget:
         """No model context: budget defaults to 4000."""
         llm = FakeLLM(responses=["Summary"])
         cfg = CompactConfig(tail_turns=1)
+        # End with a user→assistant turn so the L4 safety check passes.
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "user", "content": "z" * 300},
+            {"role": "assistant", "content": "w" * 300},
         ]
         result = _llm_summarize_v2(msgs, cfg, None, None, llm)
         assert result is not None
@@ -276,27 +295,38 @@ class TestLLMSummarizeV2EdgeCases:
     """Edge cases in LLM summarization."""
 
     def test_only_user_messages(self):
-        """All user messages, no assistant — still summarizes."""
+        """All-user conversations are NOT compacted (L4 safety check).
+
+        _split_into_turns merges consecutive user messages into a single
+        turn, so `recent` stays empty and new_messages would contain no
+        user content — exactly the unsafe case the l4_min_messages safety
+        check (Phase A / MiniMax 2013 fix) blocks. Return None keeps the
+        original messages.
+        """
         llm = FakeLLM(responses=["Summary"])
-        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
+        cfg = CompactConfig(tail_turns=2, preserve_recent_tokens=500)
         msgs = [
             {"role": "user", "content": "q1 " * 50},
             {"role": "user", "content": "q2 " * 50},
             {"role": "user", "content": "q3 " * 50},
+            {"role": "user", "content": "q4 " * 50},
         ]
         result = _llm_summarize_v2(msgs, cfg, 1_000_000, 128_000, llm)
-        assert result is not None
+        assert result is None
 
     def test_tool_messages_included(self):
         """Tool messages are serialized and sent to LLM for summarization."""
         llm = FakeLLM(responses=["Summary"])
         cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
+        # End with a user→assistant turn so recent holds 2 messages and
+        # the L4 safety check passes.
         msgs = [
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "y" * 300},
             {"role": "tool", "content": "tool result data"},
             {"role": "assistant", "content": "z" * 300},
             {"role": "user", "content": "w" * 300},
+            {"role": "assistant", "content": "t" * 300},
         ]
         result = _llm_summarize_v2(msgs, cfg, 1_000_000, 128_000, llm)
         assert result is not None

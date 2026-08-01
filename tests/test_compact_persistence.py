@@ -104,6 +104,9 @@ class TestPersistCompactionEvent:
         loop.cc = cfg
         loop.session_id = "ses_test"
         loop._previous_summary = None
+        # No EventBusV2 injected → legacy persist_message fallback path
+        # (see _persist_compaction_event in core/agent/loop.py).
+        loop._event_bus = None
         return loop
 
     def test_works_with_preserve_recent_none(self):
