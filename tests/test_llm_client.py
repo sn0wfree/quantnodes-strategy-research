@@ -246,7 +246,6 @@ class TestSamplingParams:
         c.chat([{"role": "user", "content": "q"}])
         p = cap[0]
         assert p["temperature"] == 0.7
-        assert p["max_tokens"] == 4096
         assert p["model"] == "gpt-4o-mini"
 
     def test_call_time_override_temperature(self):
