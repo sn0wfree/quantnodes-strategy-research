@@ -81,7 +81,7 @@ def _build_provider_defaults() -> dict[str, dict[str, Any]]:
     """
     from .provider import get_provider_defaults
     out: dict[str, dict[str, Any]] = {}
-    for name in ("openai", "deepseek", "kimi", "qwen", "minimax"):
+    for name in ("openai", "deepseek", "kimi", "qwen", "minimax", "nvidia"):
         out[name] = get_provider_defaults(name)
     return out
 
@@ -109,7 +109,7 @@ class LLMConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "gpt-4o-mini"
-    provider: str = "auto"                         # auto|openai|deepseek|kimi|qwen|minimax|custom
+    provider: str = "auto"                         # auto|openai|deepseek|kimi|qwen|minimax|nvidia|custom
 
     # ── Sampling ────────────────────────────────
     temperature: float = 0.7

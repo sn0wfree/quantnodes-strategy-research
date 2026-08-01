@@ -24,6 +24,7 @@ from .deepseek import DeepSeekAdapter
 from .fallback import FallbackAdapter
 from .kimi import KimiAdapter
 from .minimax import MiniMaxAdapter
+from .nvidia import NvidiaAdapter
 from .openai import OpenAIAdapter
 from .qwen import QwenAdapter
 
@@ -33,6 +34,7 @@ _REGISTRY: dict[str, type[ProviderAdapter]] = {
     "minimax": MiniMaxAdapter,
     "qwen": QwenAdapter,
     "kimi": KimiAdapter,
+    "nvidia": NvidiaAdapter,
 }
 
 
@@ -47,6 +49,7 @@ MODELS_DEV_ID: dict[str, str] = {
     "deepseek": "deepseek",
     "qwen": "alibaba",
     "kimi": "moonshotai",
+    "nvidia": "nvidia",
 }
 
 
@@ -98,6 +101,7 @@ __all__ = [
     "OpenAIAdapter",
     "DeepSeekAdapter",
     "MiniMaxAdapter",
+    "NvidiaAdapter",
     "QwenAdapter",
     "KimiAdapter",
     "FallbackAdapter",
