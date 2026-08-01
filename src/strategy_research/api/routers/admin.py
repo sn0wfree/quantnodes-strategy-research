@@ -23,7 +23,7 @@ import time
 from collections import deque
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 

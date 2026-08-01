@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -27,8 +26,8 @@ _active_runners: dict[str, dict] = {}
 async def workflow_start(req: WorkflowStartRequest, request: Request):
     """Start a goal workflow by name."""
     try:
-        from ...core.goal.workflow_config import load_goal_workflow
         from ...core.goal.workflow import GoalWorkflowRunner
+        from ...core.goal.workflow_config import load_goal_workflow
 
         config = load_goal_workflow(req.workflow_name)
         runner = GoalWorkflowRunner(
@@ -114,7 +113,6 @@ async def workflow_events(goal_id: str):
 
     async def event_generator():
         import asyncio
-        import json
 
         queue: asyncio.Queue = asyncio.Queue()
 

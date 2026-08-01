@@ -50,8 +50,8 @@ from typing import TYPE_CHECKING
 from fastapi import Request
 
 if TYPE_CHECKING:
-    from .session.events import EventBus
     from .session.event_bus_v2 import EventBusV2
+    from .session.events import EventBus
     from .session.service import SessionService
     from .session.store import SessionStore
 
