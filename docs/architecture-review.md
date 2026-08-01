@@ -295,3 +295,26 @@ class SessionError(StrategyResearchError): pass
 - **2026-08-01:** Roadmap approved. Phase 1 to begin immediately. Each Phase = 1 git branch.
 - **2026-08-01:** Breaking changes accepted (`CHANGELOG` will note `BREAKING CHANGE`).
 - **2026-08-01:** New design patterns (Builder, Decorator) approved.
+
+## 10. Progress
+
+| Phase | Status | Branch | Notes |
+| --- | --- | --- | --- |
+| Phase 0 (doc) | ✅ | main | `docs/architecture-review.md` (297 LoC) |
+| Phase 1.1 | ✅ | refactor/phase-1-duplication | Provider Adapter consolidation (`OpenAIReasoningFieldAdapter`) |
+| Phase 1.2 | ✅ | refactor/phase-1-duplication | Alpha Zoo loader unification (`AlphaLoader`) |
+| Phase 1.3 | ✅ | refactor/phase-1-duplication | Test fixtures infrastructure (6 modules, 35 tests) |
+| Phase 2.1 | ✅ | refactor/phase-2-architecture | Unified 4-layer config loader (`load_layered_config`, `ConfigBuilder`) |
+| Phase 2.2 | ✅ | refactor/phase-2-architecture | CLI subcommand registration (`@cli_command` decorator) |
+| Phase 2.3 | ✅ | refactor/phase-2-architecture | Slash command decorator (`@slash_command`) |
+| Phase 2.4 | ✅ | refactor/phase-2-architecture | LLMConfigBuilder for fluent 4-layer composition |
+
+### Phase 2 Outcome
+
+| Phase | Files | Insertions | Deletions | New tests |
+| --- | --- | --- | --- | --- |
+| 2.1 | 3 | +453 | -36 | +17 |
+| 2.2 | 4 | +645 | -31 | +12 |
+| 2.3 | 2 | +229 | -0 | +8 |
+| 2.4 | 2 | +393 | -0 | +15 |
+| **Total** | **11** | **+1720** | **-67** | **+52** |
