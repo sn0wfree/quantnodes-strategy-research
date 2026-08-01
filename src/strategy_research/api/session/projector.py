@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -131,8 +130,9 @@ class ProjectedSession:
         created_at is converted from epoch float to ISO string to match
         the Message model convention.
         """
-        from .models import Message
         from datetime import datetime, timezone
+
+        from .models import Message
 
         out: List[Message] = []
         for m in self.messages_in_order():
@@ -288,13 +288,27 @@ class Projector:
             # colliding ids across sessions, the previous code had a
             # cross-session overwrite bug; tests should use unique ids
             # per session to avoid this.
+            #
+            # metadata_json: the projection doesn't carry metadata, so a
+            # plain REPLACE would NULL out model/run_id/etc. Use ON
+            # CONFLICT DO UPDATE that preserves the existing metadata
+            # when the incoming row has none.
             msg_ids = {row["id"] for row in msg_rows}
             for row in msg_rows:
                 conn.execute(
-                    "INSERT OR REPLACE INTO messages "
+                    "INSERT INTO messages "
                     "(id, session_id, role, content, created_at, "
                     "message_type, seq, metadata_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "session_id=excluded.session_id, "
+                    "role=excluded.role, "
+                    "content=excluded.content, "
+                    "created_at=excluded.created_at, "
+                    "message_type=excluded.message_type, "
+                    "seq=excluded.seq, "
+                    "metadata_json=COALESCE(excluded.metadata_json, "
+                    "                      messages.metadata_json)",
                     (
                         row["id"],
                         row["session_id"],
@@ -391,7 +405,7 @@ class Projector:
         state = self.project(session_id)
         messages = state.to_messages()
         if limit and len(messages) > limit:
-            messages = messages[:limit]
+            messages = messages[-limit:]  # most-recent N, chronological
         return messages
 
     # ── Event handlers ──────────────────────────────────────────

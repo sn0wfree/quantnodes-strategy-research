@@ -146,11 +146,14 @@ class SessionStore:
 
         with _get_db() as conn:
             conn.row_factory = sqlite3.Row
+            # Most-recent N (chronological): DESC + reverse. Previously
+            # this took the OLDEST N, breaking LLM context in long chats.
             rows = conn.execute(
                 "SELECT * FROM messages WHERE session_id = ? "
-                "ORDER BY seq ASC, created_at ASC LIMIT ?",
+                "ORDER BY seq DESC, created_at DESC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
+            rows = list(reversed(rows))
 
             # Batch-fetch parts from message_parts (Level 2)
             parts_by_msg: dict[str, list[Any]] = {}

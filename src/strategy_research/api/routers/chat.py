@@ -33,9 +33,15 @@ logger = logging.getLogger(__name__)
 _event_bus = EventBus()
 attach_eventbus_to_sse(_event_bus)
 
+# True process-wide singleton. Recreating the service per request was a
+# real bug: queues/tasks/pause state live on the instance, so cancel,
+# queue_full and FIFO ordering silently broke (two parallel AgentLoops
+# per session). Keyed by db path so tests/workspace switches re-create.
+_session_service_cache: dict[str, SessionService] = {}
+
 
 def _get_session_service() -> SessionService:
-    """Return the singleton SessionService bound to the active DB.
+    """Return the process-wide singleton SessionService for the DB.
 
     Uses EventBusV2 for triple-write:
     1. event_log (persistent source of truth)
@@ -50,9 +56,13 @@ def _get_session_service() -> SessionService:
     from .web_session import _get_db_path
 
     db_path = _get_db_path()
-    store = SessionStore(db_path=db_path)
-    v2_bus = EventBusV2(_event_bus, db_path, flush_to_messages=True)
-    return SessionService(store=store, event_bus=v2_bus)
+    service = _session_service_cache.get(db_path)
+    if service is None:
+        store = SessionStore(db_path=db_path)
+        v2_bus = EventBusV2(_event_bus, db_path, flush_to_messages=True)
+        service = SessionService(store=store, event_bus=v2_bus)
+        _session_service_cache[db_path] = service
+    return service
 
 
 # Per-session conversation history (legacy in-memory cache; replaced by DB)

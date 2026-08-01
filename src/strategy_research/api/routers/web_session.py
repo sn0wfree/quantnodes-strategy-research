@@ -162,22 +162,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "ON message_parts(session_id, seq)"
     )
 
-    # ── Level 2 / Phase 2 commit 6 cleanup ────────────────────────────
-    # After commit 5 confirmed the read path uses message_parts, drop:
-    # 1. All role=tool rows (data consolidated into parent tool_call.result)
-    # 2. parts_json column (now redundant with message_parts.data_json)
-    # 3. tool_call_id column (now redundant — was a 1:1 with tool messages)
-    #
-    # All three steps are idempotent (no-op on already-clean state).
-    # The migration script (scripts/migrate_role_tool_to_assistant.py) must
-    # have been run BEFORE this code on existing DBs, otherwise the 146
-    # result-bearing tool results are lost.
-    conn.execute("DELETE FROM messages WHERE role = 'tool'")
-    if _has_column(conn, "messages", "tool_call_id"):
-        _drop_column(conn, "messages", "tool_call_id")
-    if _has_column(conn, "messages", "parts_json"):
-        _drop_column(conn, "messages", "parts_json")
-
     # Compaction message type (opencode-aligned, fixes "spontaneous summary" bug)
     # Use nullable column first, then UPDATE existing rows, to avoid NOT NULL failure
     _add_column(conn, "messages", "message_type", "TEXT")
@@ -188,6 +172,29 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_messages_session_type_created "
         "ON messages(session_id, message_type, created_at)"
     )
+
+    # ── One-time destructive/expensive migrations (versioned) ────────
+    # Run once per database via PRAGMA user_version, not on every
+    # connection open. Previously the DELETE below executed on every
+    # _get_db() call (O(n) per write + any stray role='tool' rows — e.g.
+    # written by the B4 transition — were destroyed at runtime). The
+    # migration script (scripts/migrate_role_tool_to_assistant.py) must
+    # have been run BEFORE this code on existing DBs, otherwise
+    # result-bearing tool results are lost (same caveat, now only once).
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < 2:
+        # Backfill text-part ids while parts_json still exists
+        _migrate_text_part_ids(conn)
+        conn.execute("DELETE FROM messages WHERE role = 'tool'")
+        if _has_column(conn, "messages", "tool_call_id"):
+            _drop_column(conn, "messages", "tool_call_id")
+        if _has_column(conn, "messages", "parts_json"):
+            _drop_column(conn, "messages", "parts_json")
+        conn.execute("PRAGMA user_version = 2")
+    if version < 3:
+        # One-time compaction-type backfill (full-table LIKE scan)
+        _migrate_message_types(conn)
+        conn.execute("PRAGMA user_version = 3")
 
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
@@ -538,14 +545,20 @@ def _migrate_message_types(conn: sqlite3.Connection) -> None:
 
 
 def _get_db() -> sqlite3.Connection:
-    """Open the shared SQLite connection. Ensures schema is up to date."""
-    conn = sqlite3.connect(str(_get_db_path()))
+    """Open the shared SQLite connection. Ensures schema is up to date.
+
+    - WAL journal + busy_timeout: concurrent readers/writers no longer
+      hit immediate ``database is locked`` (previously concurrent
+      INSERT+UPDATE triggers could fail and messages were silently
+      lost because persist_message swallows exceptions).
+    - One-time schema migrations run inside _ensure_schema (guarded by
+      PRAGMA user_version), not per connection.
+    """
+    conn = sqlite3.connect(str(_get_db_path()), timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
     _ensure_schema(conn)
-    # Idempotent migration: ensure every text part has an id (text-part-routing)
-    _migrate_text_part_ids(conn)
-    # Idempotent migration: mark historical compaction messages (opencode-aligned)
-    _migrate_message_types(conn)
     conn.commit()
     return conn
 

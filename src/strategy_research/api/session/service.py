@@ -23,7 +23,6 @@ from typing import Any, Optional
 
 from strategy_research.core.agent.compact import CompactConfig, compact_messages
 from strategy_research.core.llm import LLMConfig
-from strategy_research.core.seq_generator import get_default_generator
 
 from .events import EventBus
 from .models import Attempt, AttemptStatus, Message
@@ -909,14 +908,12 @@ class SessionService:
         Returns dict with keys: layers, before_tokens, after_tokens, summary.
         """
         from ..routers.chat import _build_llm_config
-        from ..routers.web_session import delete_messages
 
         messages = self.store.get_messages(session_id, limit=10000)
-        # Get keep_all_compactions setting (default False if self.config unavailable)
+        # keep_all_compactions from the caller-supplied CompactConfig
         keep_all = bool(
-            self.config
-            and getattr(self.config, "compact_config", None)
-            and self.config.compact_config.keep_all_compactions_in_history
+            config
+            and config.keep_all_compactions_in_history
         )
         history = self._convert_messages_to_history(
             messages, keep_all_compactions=keep_all
@@ -1024,8 +1021,8 @@ class SessionService:
                 are hidden from LLM but kept in DB for audit/UI display.
                 See docs/compaction-history-filter.md.
         """
-        from strategy_research.core.agent.compaction_message import CompactionMessage
         from strategy_research.core.agent.compact import _compaction_metrics
+        from strategy_research.core.agent.compaction_message import CompactionMessage
 
         logger.debug("[HIST] converting %d messages", len(messages))
         _compaction_metrics["filter_calls"] += 1

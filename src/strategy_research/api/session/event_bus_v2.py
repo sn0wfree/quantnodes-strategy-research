@@ -91,7 +91,8 @@ class EventBusV2:
             )
 
         # Sink 1: persist to event_log (the source of truth)
-        self._persist(event)
+        with self._lock:
+            self._persist_locked(event)
 
         # Sink 2: forward to legacy EventBus (live SSE)
         self._forward(event)
@@ -123,17 +124,21 @@ class EventBusV2:
             The published SSEEvent (for backward compatibility with
             any callers that check the return value).
         """
-        seq = self._next_seq(session_id)
-        event = EventV2(
-            id=uuid.uuid4().hex[:16],
-            aggregate_id=session_id,
-            seq=seq,
-            type=event_type,
-            data=data or {},
-            time_created=time.time(),
-        )
-        # Sink 1: persist to event_log
-        self._persist(event)
+        # Sink 1: persist to event_log. seq assignment AND the INSERT
+        # happen inside a single critical section, so concurrent emit()
+        # calls can never reuse a seq (previously the loser's event was
+        # silently dropped on an IntegrityError).
+        with self._lock:
+            seq = self.last_seq(session_id) + 1
+            event = EventV2(
+                id=uuid.uuid4().hex[:16],
+                aggregate_id=session_id,
+                seq=seq,
+                type=event_type,
+                data=data or {},
+                time_created=time.time(),
+            )
+            self._persist_locked(event)
         # Sink 2: forward to legacy EventBus (live SSE)
         result = self._forward(event)
         # Sink 3 (optional): flush projector → messages table
@@ -181,7 +186,16 @@ class EventBusV2:
                     self._flush_projection(sid)
 
     def _persist(self, event: EventV2) -> None:
-        """INSERT event into event_log table.
+        """INSERT event into event_log (locking wrapper).
+
+        See ``_persist_locked``. Convenience for callers that don't
+        already hold the bus lock.
+        """
+        with self._lock:
+            self._persist_locked(event)
+
+    def _persist_locked(self, event: EventV2) -> None:
+        """INSERT event into event_log. Caller must hold ``self._lock``.
 
         Best-effort: if the DB write fails, log and continue. The SSE
         forward still happens (so live clients see the event) but
@@ -204,20 +218,19 @@ class EventBusV2:
             )
             return
         try:
-            with self._lock:
-                conn = sqlite3.connect(str(self.db_path))
-                try:
-                    conn.execute("PRAGMA foreign_keys=ON")
-                    conn.execute(
-                        "INSERT INTO event_log (id, aggregate_id, seq, "
-                        "type, data_json, time_created) VALUES "
-                        "(?, ?, ?, ?, ?, ?)",
-                        (row["id"], row["aggregate_id"], row["seq"],
-                         row["type"], row["data_json"], row["time_created"]),
-                    )
-                    conn.commit()
-                finally:
-                    conn.close()
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute(
+                    "INSERT INTO event_log (id, aggregate_id, seq, "
+                    "type, data_json, time_created) VALUES "
+                    "(?, ?, ?, ?, ?, ?)",
+                    (row["id"], row["aggregate_id"], row["seq"],
+                     row["type"], row["data_json"], row["time_created"]),
+                )
+                conn.commit()
+            finally:
+                conn.close()
         except sqlite3.IntegrityError as exc:
             # Likely a UNIQUE (aggregate_id, seq) violation — same seq reused
             logger.error(
@@ -258,27 +271,32 @@ class EventBusV2:
     def _next_seq(self, session_id: str) -> int:
         """Return the next monotonic seq number for a session.
 
-        Uses event_log MAX(seq) + 1 for each call. This is safe for
-        the current single-writer architecture (one attempt at a time
-        per session). For high-throughput scenarios, we'd use a
-        cached counter with atomic increment, but for B2 this is
-        sufficient.
+        Locked standalone helper (used by tests and any standalone
+        caller). ``emit()`` does its own inline locked seq-assignment
+        so that seq computation + INSERT are a single critical section.
         """
-        return self.last_seq(session_id) + 1
+        with self._lock:
+            return self.last_seq(session_id) + 1
 
     def _flush_projection(self, session_id: str) -> None:
         """Flush event_log → messages + message_parts via projector.
 
         Idempotent: projector.flush() uses INSERT OR REPLACE.
 
+        Serialized under the bus lock so two concurrent flushes of the
+        same session cannot interleave (the projector's DELETE of
+        non-projected rows must never run against a half-written
+        projection).
+
         Best-effort: if flush fails, log and continue. The event_log
         still has all events, so the projection can be rebuilt at
         any time. This is safer than blocking the event stream.
         """
         try:
-            proj = self._get_projector()
-            state = proj.project(session_id)
-            proj.flush(state)
+            with self._lock:
+                proj = self._get_projector()
+                state = proj.project(session_id)
+                proj.flush(state)
         except Exception as exc:
             logger.error(
                 "EventBusV2: flush failed for session %s: %s",
