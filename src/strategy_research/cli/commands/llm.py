@@ -158,7 +158,7 @@ def _backup_llm_json() -> Path | None:
     """Copy llm.json to llm.json.bak-<timestamp> before mutation."""
     if not LLM_JSON_PATH.exists():
         return None
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     dest = LLM_JSON_PATH.with_name(f"{LLM_JSON_PATH.name}.bak-{stamp}")
     shutil.copy2(LLM_JSON_PATH, dest)
     return dest

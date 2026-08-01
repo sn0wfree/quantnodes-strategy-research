@@ -30,15 +30,11 @@ from unittest.mock import patch
 import pytest
 
 from strategy_research.cli._auto_onboard import (
-    _QUANTNODES_LLM_JSON_PATH,
-    _QUANTNODES_DOTENV_PATH,
     _first_existing_dotenv_path,
     _maybe_run_onboarding,
     _migrate_legacy_env,
 )
 from strategy_research.cli.onboard import (
-    PROVIDERS,
-    TIMEOUT_CHOICES,
     _finalize_llm_json,
     _save_partial,
     _save_tokens_to_dotenv,
@@ -117,6 +113,38 @@ class TestRunOnboarding:
         )
         env_text = env_path.read_text(encoding="utf-8")
         assert "TUSHARE_TOKEN=tushare_token_xyz" in env_text
+
+    def test_wizard_writes_profiles_and_active(self, fresh):
+        """The wizard now seeds profiles + active_profile so the `llm --use`
+        switching machinery works immediately after onboarding."""
+        llm_path, env_path = fresh
+        result = run_onboarding(
+            inputs=["OpenAI", "gpt-4o", "sk-test123", "300", ""],
+            llm_json_path=llm_path,
+            dotenv_path=env_path,
+        )
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["active_profile"] == "openai"
+        assert data["llm"]["profiles"]["openai"] == {
+            "provider": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "api_key": "env:LLM_API_KEY",
+        }
+
+    def test_wizard_ollama_profile_omits_key_and_base_url(self, fresh):
+        llm_path, env_path = fresh
+        result = run_onboarding(
+            inputs=["Ollama", "qwen2.5:32b", "300", ""],
+            llm_json_path=llm_path,
+            dotenv_path=env_path,
+        )
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["llm"]["active_profile"] == "ollama"
+        profile = data["llm"]["profiles"]["ollama"]
+        assert "api_key" not in profile
+        assert profile["base_url"] == "http://localhost:11434"
+        assert profile["model"] == "qwen2.5:32b"
 
     def test_skip_tushare_short_circuits_final_step(self, fresh):
         llm_path, env_path = fresh
@@ -683,9 +711,10 @@ class TestStepProviderSwitch:
 
     def test_switch_from_openai_to_ollama_drops_openai_keys(self, fresh, monkeypatch):
         """OpenAI 残留 → BACK → Ollama → llm.json 不带 api_key/base_url。"""
-        from strategy_research.cli.onboard import _step_provider
         import unittest.mock as _mock
+
         import strategy_research.cli.onboard as onboard_mod
+        from strategy_research.cli.onboard import _step_provider
 
         llm_path, env_path = fresh
         with _mock.patch.object(

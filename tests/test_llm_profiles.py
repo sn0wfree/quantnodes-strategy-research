@@ -12,7 +12,9 @@ Covers:
 from __future__ import annotations
 
 import json
+import logging
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -269,3 +271,312 @@ class TestCliProfileFlag:
         args = SimpleNamespace(llm_profile="nvidia", llm_model="x")
         out = _cli_overrides_from_args(args)
         assert out == {"llm_model": "x"}
+
+
+# ── A: profile resolution edge cases ────────────────────────────────
+
+
+class TestProfileResolutionEdge:
+    def test_enabled_false_skips_profile(self, clear_env, fake_llm_json):
+        data = dict(PROFILE_JSON)
+        data["llm"] = dict(data["llm"], enabled=False)
+        fake_llm_json.write_text(json.dumps(data))
+        cfg = LLMConfig.load()
+        assert cfg.provider == "auto"  # bridge disabled → defaults
+
+    def test_empty_llm_profile_env_falls_back_to_file(
+        self, clear_env, fake_llm_json, monkeypatch
+    ):
+        fake_llm_json.write_text(json.dumps(PROFILE_JSON))
+        monkeypatch.setenv("MINIMAX_API_KEY", "sk-x")
+        monkeypatch.setenv(ENV_PROFILE_ACTIVE, "")  # empty → falsy
+        cfg = LLMConfig.load()
+        assert cfg.provider == "minimax"  # file's active_profile used
+
+    def test_profile_empty_values_keep_base(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps({
+            "llm": {
+                "active_profile": "minimax",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "base_url": "https://api.openai.com/v1",
+                "profiles": {
+                    "minimax": {
+                        "provider": "minimax",
+                        "model": None,
+                        "base_url": "",
+                        "api_key": "env:MINIMAX_API_KEY",
+                    },
+                },
+            }
+        }))
+        cfg = LLMConfig.load()
+        assert cfg.provider == "minimax"
+        assert cfg.model == "gpt-4o-mini"          # base kept
+        assert cfg.base_url == "https://api.openai.com/v1"  # base kept
+
+    def test_profile_meta_keys_skipped(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps({
+            "llm": {
+                "active_profile": "minimax",
+                "profiles": {
+                    "minimax": {
+                        "provider": "minimax",
+                        "profiles": {"nested": 1},
+                        "active_profile": "nested",
+                    },
+                },
+            }
+        }))
+        cfg = LLMConfig.load()
+        assert cfg.provider == "minimax"  # meta keys never merged
+
+    def test_unknown_profile_warns(self, clear_env, fake_llm_json, caplog):
+        fake_llm_json.write_text(json.dumps({
+            "llm": {"active_profile": "ghost", "provider": "openai",
+                    "profiles": {"minimax": {"provider": "minimax"}}}
+        }))
+        with caplog.at_level(logging.WARNING,
+                             logger="strategy_research.core.llm.config"):
+            cfg = LLMConfig.load()
+        assert cfg.provider == "openai"  # base untouched
+        assert "ghost" in caplog.text
+
+    def test_profiles_not_a_dict_ignored(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps({
+            "llm": {"active_profile": "minimax", "provider": "openai",
+                    "model": "gpt-4o-mini", "profiles": "nope"}
+        }))
+        cfg = LLMConfig.load()
+        assert cfg.provider == "openai"
+        assert cfg.model == "gpt-4o-mini"
+
+    def test_profile_env_var_unset_yields_empty_key(
+        self, clear_env, fake_llm_json
+    ):
+        fake_llm_json.write_text(json.dumps(PROFILE_JSON))
+        # load_dotenv=False keeps the (deleted) MINIMAX_API_KEY unset,
+        # otherwise _try_load_dotenv would re-import it from ~/.quantnodes/.env
+        cfg = LLMConfig.load(load_dotenv=False)
+        assert cfg.provider == "minimax"
+        assert cfg.api_key == ""
+
+    def test_cli_overrides_beat_profile(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps(PROFILE_JSON))
+        cfg = LLMConfig.load(cli_overrides={"llm_model": "cli-model"})
+        assert cfg.model == "cli-model"  # cli > profile
+        assert cfg.provider == "minimax"  # non-overridden still from profile
+
+    def test_bridge_env_api_key_beats_profile(
+        self, clear_env, fake_llm_json, monkeypatch
+    ):
+        fake_llm_json.write_text(json.dumps(PROFILE_JSON))
+        monkeypatch.setenv("QUANTNODES__LLM__API_KEY", "env-api-key")
+        cfg = LLMConfig.load()
+        assert cfg.api_key == "env-api-key"  # env override > profile
+
+
+# ── B: CLI sub-actions & edge cases ─────────────────────────────────
+
+
+class TestCliUseEdge:
+    def test_use_preserves_other_top_level_keys(self, clear_env, cli_paths):
+        llm_json, _ = cli_paths
+        data = dict(PROFILE_JSON)
+        data["tools"] = ["mcp_tool"]
+        data["agents"] = {"planner": "haiku"}
+        llm_json.write_text(json.dumps(data))
+        rc = llm_cmd._action_use("minimax")
+        assert rc == 0
+        saved = json.loads(llm_json.read_text())
+        assert saved["tools"] == ["mcp_tool"]
+        assert saved["agents"] == {"planner": "haiku"}
+
+    def test_use_creates_file_when_missing(self, clear_env, cli_paths):
+        llm_json, _ = cli_paths
+        assert not llm_json.exists()
+        assert llm_cmd._action_use("nvidia") == 0
+        assert llm_json.exists()
+        saved = json.loads(llm_json.read_text())
+        assert saved["llm"]["active_profile"] == "nvidia"
+        assert "nvidia" in saved["llm"]["profiles"]
+
+    def test_use_twice_creates_distinct_backups(
+        self, clear_env, cli_paths, monkeypatch
+    ):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps(PROFILE_JSON))
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-x")
+        assert llm_cmd._action_use("minimax") == 0
+        assert llm_cmd._action_use("nvidia") == 0
+        backups = sorted(llm_json.parent.glob("llm.json.bak-*"))
+        assert len(backups) == 2          # microsecond timestamps never collide
+        assert backups[0].name != backups[1].name
+        saved = json.loads(llm_json.read_text())
+        assert saved["llm"]["active_profile"] == "nvidia"  # final state
+
+    def test_backup_missing_file_returns_none(self, clear_env, cli_paths):
+        llm_json, _ = cli_paths
+        assert not llm_json.exists()
+        assert llm_cmd._backup_llm_json() is None
+
+    def test_load_profiles_malformed_json(self, clear_env, cli_paths):
+        llm_json, _ = cli_paths
+        llm_json.write_text("{ not json !!!", encoding="utf-8")
+        assert llm_cmd._load_profiles() == {}
+
+    def test_atomic_write_llm_json_chmod_600(self, clear_env, cli_paths):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps({"llm": {}}))
+        llm_json.chmod(0o644)
+        llm_cmd._atomic_write_llm_json({"llm": {"active_profile": "x"}})
+        mode = stat.S_IMODE(llm_json.stat().st_mode)
+        assert mode == 0o600
+
+    def test_add_key_overwrites_existing(self, clear_env, cli_paths, monkeypatch):
+        llm_json, dotenv = cli_paths
+        dotenv.write_text("QWEN_API_KEY=old-key\n", encoding="utf-8")
+        monkeypatch.setattr("getpass.getpass", lambda prompt: "sk-new-key")
+        assert llm_cmd._action_add_key("qwen") == 0
+        content = dotenv.read_text(encoding="utf-8")
+        assert content.count("QWEN_API_KEY=") == 1
+        assert "QWEN_API_KEY=sk-new-key" in content
+
+    def test_write_dotenv_chmod_600(self, clear_env, cli_paths):
+        llm_json, dotenv = cli_paths
+        llm_cmd._write_dotenv({"SOME_KEY": "v"})
+        mode = stat.S_IMODE(dotenv.stat().st_mode)
+        assert mode == 0o600
+
+    def test_profile_defaults_unknown_provider(self):
+        profile = llm_cmd._profile_defaults("ghost")
+        assert profile["provider"] == "ghost"
+        assert profile["api_key"] == "env:GHOST_API_KEY"
+
+
+class TestCliShow:
+    def test_show_prints_masked_config(
+        self, clear_env, cli_paths, capsys, monkeypatch
+    ):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps(PROFILE_JSON))
+        monkeypatch.setenv("MINIMAX_API_KEY", "sk-secret-123")
+        assert llm_cmd._action_show() == 0
+        out = capsys.readouterr().out
+        assert "minimax" in out
+        assert "minimax-M3" in out
+        assert "sk-" in out and "secret-123" not in out  # masked
+        assert "active_profile = minimax" in out
+
+    def test_show_no_profile_line_when_none(self, clear_env, cli_paths, capsys):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps({"llm": {"provider": "openai"}}))
+        assert llm_cmd._action_show() == 0
+        out = capsys.readouterr().out
+        assert "active_profile = (none)" in out
+
+
+class TestCliHelpers:
+    def test_key_var_for(self):
+        assert llm_cmd._key_var_for("openai") == "OPENAI_API_KEY"
+        assert llm_cmd._key_var_for("deepseek") == "DEEPSEEK_API_KEY"
+
+    def test_key_is_set(self, clear_env, monkeypatch):
+        assert llm_cmd._key_is_set("openai") is False
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+        assert llm_cmd._key_is_set("openai") is True
+
+    def test_list_empty_registry(self, clear_env, cli_paths, capsys, monkeypatch):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps({"llm": {}}))  # no profiles either
+        monkeypatch.setattr(llm_cmd, "_registry_providers", lambda: {})
+        assert llm_cmd._action_list() == 0
+        out = capsys.readouterr().out
+        assert "(no providers registered)" in out
+
+    def test_list_profile_only_row(self, clear_env, cli_paths, capsys):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps({
+            "llm": {"active_profile": "homelab",
+                    "profiles": {"homelab": {"provider": "homelab"}}}
+        }))
+        assert llm_cmd._action_list() == 0
+        out = capsys.readouterr().out
+        assert "* homelab" in out
+        assert "(profile only)" in out
+
+    def test_cmd_llm_no_flags_prints_usage(self, clear_env):
+        from types import SimpleNamespace
+
+        args = SimpleNamespace(list=False, use=None, show=False, add_key=None)
+        assert llm_cmd.cmd_llm(args) == 0
+
+
+# ── C: onboard._attach_profile ──────────────────────────────────────
+
+
+class TestAttachProfile:
+    @pytest.fixture
+    def provider(self):
+        from strategy_research.cli.onboard import PROVIDERS
+        return {p.key: p for p in PROVIDERS}
+
+    def test_attach_copies_fields(self, provider):
+        from strategy_research.cli.onboard import _attach_profile
+        llm = {"provider": "openai", "model": "gpt-4o",
+               "api_key": "env:LLM_API_KEY"}
+        out = _attach_profile(dict(llm), provider["openai"])
+        assert out["active_profile"] == "openai"
+        assert out["profiles"]["openai"] == {
+            "provider": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "api_key": "env:LLM_API_KEY",
+        }
+
+    def test_attach_omits_missing_model(self, provider):
+        from strategy_research.cli.onboard import _attach_profile
+        llm = {"provider": "openai"}
+        out = _attach_profile(llm, provider["openai"])
+        assert "model" not in out["profiles"]["openai"]
+
+    def test_attach_omits_missing_api_key(self, provider):
+        from strategy_research.cli.onboard import _attach_profile
+        llm = {"provider": "ollama", "model": "qwen2.5:32b"}
+        out = _attach_profile(llm, provider["ollama"])
+        profile = out["profiles"]["ollama"]
+        assert "api_key" not in profile
+        assert profile["base_url"] == "http://localhost:11434"
+        assert profile["model"] == "qwen2.5:32b"
+        assert out["active_profile"] == "ollama"
+
+    def test_attach_preserves_other_llm_keys(self, provider):
+        from strategy_research.cli.onboard import _attach_profile
+        llm = {"provider": "openai", "timeout": 300, "max_retries": 2}
+        out = _attach_profile(llm, provider["openai"])
+        assert out["timeout"] == 300
+        assert out["max_retries"] == 2
+
+
+# ── E: cli/llm_config.py edge cases ─────────────────────────────────
+
+
+class TestCliProfileFlagEdge:
+    def test_llm_profile_none_leaves_env_untouched(
+        self, clear_env, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        from strategy_research.cli.llm_config import _cli_overrides_from_args
+        monkeypatch.setenv(ENV_PROFILE_ACTIVE, "existing")
+        args = SimpleNamespace(llm_profile=None, llm_model="x")
+        out = _cli_overrides_from_args(args)
+        assert os.environ.get(ENV_PROFILE_ACTIVE) == "existing"
+        assert out == {"llm_model": "x"}
+
+    def test_build_llm_config_none_args(self, clear_env, monkeypatch):
+        from strategy_research.cli.llm_config import build_llm_config
+        monkeypatch.setenv(ENV_PROFILE_ACTIVE, "existing")
+        cfg = build_llm_config(None)
+        assert cfg is not None
+        assert os.environ.get(ENV_PROFILE_ACTIVE) == "existing"
