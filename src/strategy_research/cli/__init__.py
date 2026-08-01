@@ -1,4 +1,11 @@
-"""quantnodes-research CLI — 策略研究工作区管理。"""
+"""quantnodes-research CLI — 策略研究工作区管理。
+
+Phase 2.2 refactor: the simple top-level commands (init / status / run /
+evaluate / preflight / validate / list / import / autoresearch / reproduce)
+have been migrated to ``cli.commands.core_commands`` and registered via
+the ``@cli_command`` decorator. ``main()`` now builds the parser, wires
+all registered commands, then dispatches via ``registry.dispatch``.
+"""
 
 from __future__ import annotations
 
@@ -8,16 +15,11 @@ from pathlib import Path
 
 import yaml
 
+# Core commands: imports this side-effect to register them in the dispatcher.
+from .commands import core_commands  # noqa: F401  (registration side effect)
+from .commands.registry import dispatch as _dispatch, wire_commands as _wire
+
 from .commands.autoresearch import _spawn_agent as _spawn_agent
-from .commands.autoresearch import cmd_autoresearch
-from .commands.compact_show import cmd_compact_show
-from .commands.export import cmd_export
-from .commands.server import (
-    cmd_api_serve,
-    cmd_mcp_list_tools,
-    cmd_mcp_serve,
-    cmd_webui_serve,
-)
 from .commands.session import (
     cmd_session_delete,
     cmd_session_list,
@@ -31,6 +33,12 @@ from .commands.swarm import (
     cmd_swarm_inspect,
     cmd_swarm_list,
     cmd_swarm_run,
+)
+from .commands.server import (
+    cmd_api_serve,
+    cmd_mcp_list_tools,
+    cmd_mcp_serve,
+    cmd_webui_serve,
 )
 from .llm_config import _LLM_PARENT, _cmd_llm_list_profiles
 from .llm_config import _cli_overrides_from_args as _cli_overrides_from_args
@@ -899,6 +907,12 @@ def main() -> int:
         "--llm-config", help="llm.json 路径 (默认 ~/.quantnodes/llm.json)"
     )
 
+    # ── Wire registered commands (Phase 2.2) ──────────────
+    # All @cli_command-decorated commands (init/status/reproduce/run/
+    # evaluate/preflight/validate/list/import/autoresearch) are
+    # registered via cli.commands.core_commands on import.
+    _wire(subparsers)
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -906,27 +920,15 @@ def main() -> int:
     if getattr(args, "llm_list_profiles", False):
         return _cmd_llm_list_profiles()
 
-    if args.command == "init":
-        return cmd_run_onboarding(args)
-    elif args.command == "status":
-        return cmd_status(args)
-    elif args.command == "reproduce":
-        return cmd_reproduce(args)
-    elif args.command == "run":
-        return cmd_run(args)
-    elif args.command == "evaluate":
-        return cmd_evaluate(args)
-    elif args.command == "preflight":
-        return cmd_preflight(args)
-    elif args.command == "validate":
-        return cmd_validate(args)
-    elif args.command == "list":
-        return cmd_list(args)
-    elif args.command == "import":
-        return cmd_import(args)
-    elif args.command == "autoresearch":
-        return cmd_autoresearch(args)
-    elif args.command == "session":
+    # ── Dispatch to registered handler if present (Phase 2.2) ───
+    # Migrated commands (init / status / reproduce / run / evaluate /
+    # preflight / validate / list / import / autoresearch) have
+    # args.handler set by argparse's set_defaults(). For everything
+    # else we fall through to the legacy if/elif chain below.
+    if getattr(args, "handler", None) is not None:
+        return args.handler(args)
+
+    if args.command == "session":
         if args.session_command == "stats":
             return cmd_session_stats(args)
         elif args.session_command == "list":
