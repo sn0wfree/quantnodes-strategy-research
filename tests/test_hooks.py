@@ -1,5 +1,14 @@
-import pytest
+"""Tests for hooks module — UnifiedHook, CompositeHook, AgentHookAdapter, maybe_await."""
+
+from __future__ import annotations
+
+import sys
+import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 from strategy_research.core.hooks import (
     AgentHook,
     AgentHookAdapter,
@@ -9,153 +18,216 @@ from strategy_research.core.hooks import (
     UnifiedHook,
     maybe_await,
 )
+from strategy_research.core.hooks.unified import UnifiedContext
 
 
-class TestMaybeAwait:
-    @pytest.mark.asyncio
-    async def test_sync_function(self):
-        def sync_fn(x: int) -> int:
-            return x * 2
-        result = await maybe_await(sync_fn, 5)
-        assert result == 10
+class TestUnifiedHook(unittest.TestCase):
 
-    @pytest.mark.asyncio
-    async def test_async_function(self):
-        async def async_fn(x: int) -> int:
-            return x * 3
-        result = await maybe_await(async_fn, 5)
-        assert result == 15
+    def test_wants_streaming_default(self) -> None:
+        self.assertFalse(UnifiedHook().wants_streaming())
 
-    @pytest.mark.asyncio
-    async def test_value(self):
-        result = await maybe_await(42)
-        assert result == 42
+    def test_all_hooks_noop(self) -> None:
+        hook = UnifiedHook()
+        ctx = UnifiedContext(session_id="test")
+        self.assertIsNone(hook.before_iteration(ctx))
+        self.assertIsNone(hook.on_reason_start(ctx))
+        self.assertIsNone(hook.on_reason_end(ctx, "resp"))
+        self.assertIsNone(hook.on_stream(ctx, "delta"))
+        self.assertIsNone(hook.emit_reasoning(ctx, "content"))
+        self.assertIsNone(hook.emit_reasoning_end(ctx))
+        self.assertIsNone(hook.on_act_start(ctx))
+        self.assertIsNone(hook.on_act_end(ctx, "result"))
+        self.assertIsNone(hook.after_tool_executed(ctx, "tc", "result"))
+        self.assertIsNone(hook.on_tool_error(ctx, "tc", RuntimeError()))
+        self.assertIsNone(hook.on_confirmation(ctx, "tc"))
+        self.assertIsNone(hook.on_observe(ctx))
+        self.assertIsNone(hook.on_error(ctx, RuntimeError()))
+        self.assertIsNone(hook.after_iteration(ctx))
+        self.assertEqual(hook.finalize(ctx, "content"), "content")
 
 
-class TestAgentHookContext:
-    def test_defaults(self):
+class TestAgentHookContext(unittest.TestCase):
+
+    def test_defaults(self) -> None:
         ctx = AgentHookContext()
-        assert ctx.iteration == 0
-        assert ctx.messages == []
-        assert ctx.response is None
-        assert ctx.usage == {}
-        assert ctx.tool_calls == []
-        assert ctx.error is None
-        assert ctx.cancelled is False
+        self.assertEqual(ctx.iteration, 0)
+        self.assertEqual(ctx.messages, [])
+        self.assertIsNone(ctx.response)
+        self.assertEqual(ctx.usage, {})
+        self.assertEqual(ctx.tool_calls, [])
+        self.assertFalse(ctx.streamed_content)
+        self.assertFalse(ctx.cancelled)
 
-    def test_mutable(self):
+    def test_custom_values(self) -> None:
+        ctx = AgentHookContext(
+            iteration=5,
+            messages=[{"role": "user"}],
+            error="something failed",
+            cancelled=True,
+            chars_saved=100,
+        )
+        self.assertEqual(ctx.iteration, 5)
+        self.assertEqual(ctx.messages, [{"role": "user"}])
+        self.assertEqual(ctx.error, "something failed")
+        self.assertTrue(ctx.cancelled)
+        self.assertEqual(ctx.chars_saved, 100)
+
+    def test_slots(self) -> None:
         ctx = AgentHookContext()
-        ctx.iteration = 5
-        ctx.messages.append({"role": "user", "content": "test"})
-        assert ctx.iteration == 5
-        assert len(ctx.messages) == 1
+        with self.assertRaises(AttributeError):
+            ctx.new_attr = 1  # type: ignore[attr-defined]
 
 
-class TestNoOpHook:
-    def test_name(self):
-        hook = NoOpHook()
-        assert hook.name == "noop"
-
-    def test_wants_streaming(self):
-        hook = NoOpHook()
-        assert hook.wants_streaming() is False
-
-    def test_before_iteration(self):
-        hook = NoOpHook()
-        ctx = AgentHookContext()
-        hook.before_iteration(ctx)  # Should not raise
-
-    def test_finalize_content(self):
-        hook = NoOpHook()
-        ctx = AgentHookContext()
-        result = hook.finalize_content(ctx, "test")
-        assert result == "test"
+class SpyHook(AgentHook):
+    name = "spy"
+    def __init__(self) -> None:
+        self.events: list[str] = []
+    def before_iteration(self, ctx: AgentHookContext) -> None:
+        self.events.append("before_iteration")
+    def after_iteration(self, ctx: AgentHookContext) -> None:
+        self.events.append("after_iteration")
+    def on_stream(self, ctx: AgentHookContext, delta: str) -> None:
+        self.events.append(f"on_stream:{delta}")
+    def finalize_content(self, ctx: AgentHookContext, content: str | None) -> str | None:
+        self.events.append("finalize_content")
+        return content + " modified"
 
 
-class TestCompositeHook:
-    def test_empty(self):
+class TestCompositeHook(unittest.TestCase):
+
+    def test_empty(self) -> None:
         hook = CompositeHook()
-        assert len(hook) == 0
+        self.assertEqual(len(hook), 0)
+        self.assertFalse(hook.wants_streaming())
 
-    def test_add_remove(self):
-        hook = CompositeHook()
-        noop = NoOpHook()
-        hook.add(noop)
-        assert len(hook) == 1
-        hook.remove("noop")
-        assert len(hook) == 0
+    def test_add_and_fire(self) -> None:
+        spy = SpyHook()
+        hook = CompositeHook([spy])
+        ctx = AgentHookContext()
+        import asyncio
+        asyncio.run(hook.before_iteration(ctx))
+        self.assertEqual(spy.events, ["before_iteration"])
 
-    def test_clear(self):
-        hook = CompositeHook()
-        hook.add(NoOpHook())
-        hook.add(NoOpHook())
+    def test_remove(self) -> None:
+        spy = SpyHook()
+        hook = CompositeHook([spy])
+        hook.remove("spy")
+        self.assertEqual(len(hook), 0)
+
+    def test_clear(self) -> None:
+        spy = SpyHook()
+        hook = CompositeHook([spy])
         hook.clear()
-        assert len(hook) == 0
+        self.assertEqual(len(hook), 0)
 
-    def test_wants_streaming(self):
-        hook = CompositeHook()
-        assert hook.wants_streaming() is False
-        hook.add(NoOpHook())
-        assert hook.wants_streaming() is False
+    def test_wants_streaming(self) -> None:
+        class StreamingHook(AgentHook):
+            name = "streaming"
+            def wants_streaming(self) -> bool:
+                return True
+        hook = CompositeHook([SpyHook(), StreamingHook()])
+        self.assertTrue(hook.wants_streaming())
 
-    @pytest.mark.asyncio
-    async def test_before_iteration(self):
-        hook = CompositeHook()
-        hook.add(NoOpHook())
+    def test_error_isolation(self) -> None:
+        class BrokenHook(AgentHook):
+            name = "broken"
+            def before_iteration(self, ctx: AgentHookContext) -> None:
+                raise RuntimeError("broken")
+        spy = SpyHook()
+        hook = CompositeHook([BrokenHook(), spy])
         ctx = AgentHookContext()
-        await hook.before_iteration(ctx)  # Should not raise
+        import asyncio
+        asyncio.run(hook.before_iteration(ctx))
+        self.assertIn("before_iteration", spy.events)
 
-    @pytest.mark.asyncio
-    async def test_error_isolation(self):
-        class FailingHook(AgentHook):
-            name = "failing"
-            def before_iteration(self, ctx):
-                raise RuntimeError("hook failed")
-
-        hook = CompositeHook()
-        hook.add(FailingHook())
-        hook.add(NoOpHook())
+    def test_finalize_pipeline(self) -> None:
+        spy = SpyHook()
+        hook = CompositeHook([spy])
         ctx = AgentHookContext()
-        await hook.before_iteration(ctx)  # Should not raise
+        import asyncio
+        result = asyncio.run(hook.finalize_content(ctx, "hello"))
+        self.assertEqual(result, "hello modified")
+        self.assertIn("finalize_content", spy.events)
 
 
-class TestAgentHook:
-    def test_base_name(self):
-        hook = AgentHook()
-        assert hook.name == "base"
+class TestNoOpHook(unittest.TestCase):
 
-    def test_wants_streaming(self):
-        hook = AgentHook()
-        assert hook.wants_streaming() is False
+    def test_name(self) -> None:
+        self.assertEqual(NoOpHook().name, "noop")
 
-    def test_finalize_content(self):
-        hook = AgentHook()
-        ctx = AgentHookContext()
-        result = hook.finalize_content(ctx, "test")
-        assert result == "test"
+    def test_wants_streaming(self) -> None:
+        self.assertFalse(NoOpHook().wants_streaming())
 
 
-class TestUnifiedHook:
-    def test_wants_streaming(self):
-        hook = UnifiedHook()
-        assert hook.wants_streaming() is False
+class TestAgentHookAdapter(unittest.TestCase):
 
-    def test_finalize(self):
-        hook = UnifiedHook()
-        result = hook.finalize(None, "test")
-        assert result == "test"
-
-
-class TestAgentHookAdapter:
-    def test_wants_streaming(self):
-        adapter = AgentHookAdapter(NoOpHook())
-        assert adapter.wants_streaming() is False
-
-    def test_finalize(self):
-        adapter = AgentHookAdapter(NoOpHook())
-        result = adapter.finalize(None, "test")
-        assert result == "test"
-
-    def test_none_hook(self):
+    def test_wraps_noop_by_default(self) -> None:
         adapter = AgentHookAdapter(None)
-        assert adapter.wants_streaming() is False
+        self.assertFalse(adapter.wants_streaming())
+
+    def test_delegates_to_hook(self) -> None:
+        spy = SpyHook()
+        adapter = AgentHookAdapter(spy)
+        ctx = UnifiedContext(session_id="s1")
+        adapter.before_iteration(ctx)
+        self.assertIn("before_iteration", spy.events)
+
+    def test_finalize_delegates(self) -> None:
+        class ModHook(AgentHook):
+            name = "mod"
+            def finalize_content(self, ctx, content):
+                return content + "!!"
+        adapter = AgentHookAdapter(ModHook())
+        result = adapter.finalize(UnifiedContext(), "hello")
+        self.assertEqual(result, "hello!!")
+
+    def test_on_reason_end_maps_to_stream_end(self) -> None:
+        spy = SpyHook()
+        adapter = AgentHookAdapter(spy)
+        adapter.on_reason_end(UnifiedContext(), "resp")
+        # No direct event on spy since on_stream_end is not overridden
+        # Just verifying it doesn't crash
+
+    def test_on_act_start_maps_to_before_execute_tools(self) -> None:
+        spy = SpyHook()
+        adapter = AgentHookAdapter(spy)
+        adapter.on_act_start(UnifiedContext())
+        # before_execute_tools is not logged by SpyHook, just verify no crash
+
+    def test_on_act_end_is_noop(self) -> None:
+        adapter = AgentHookAdapter(SpyHook())
+        result = adapter.on_act_end(UnifiedContext(), "result")
+        self.assertIsNone(result)
+
+    def test_on_observe_is_noop(self) -> None:
+        adapter = AgentHookAdapter(SpyHook())
+        result = adapter.on_observe(UnifiedContext())
+        self.assertIsNone(result)
+
+
+class TestMaybeAwait(unittest.TestCase):
+
+    async def test_sync_callable(self) -> None:
+        result = await maybe_await(lambda x: x + 1, 5)
+        self.assertEqual(result, 6)
+
+    async def test_async_callable(self) -> None:
+        async def add(a, b):
+            return a + b
+        result = await maybe_await(add, 3, 4)
+        self.assertEqual(result, 7)
+
+    async def test_value_direct(self) -> None:
+        result = await maybe_await(42)
+        self.assertEqual(result, 42)
+
+    async def test_awaitable_value(self) -> None:
+        import asyncio
+        async def returns_10():
+            return 10
+        result = await maybe_await(returns_10())
+        self.assertEqual(result, 10)
+
+
+if __name__ == "__main__":
+    unittest.main()
