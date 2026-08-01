@@ -359,6 +359,75 @@ __alpha_meta__ = {
 
 
 # ============================================================
+# Phase 1.2: parse_alpha_id + AlphaLoader re-exports
+# ============================================================
+
+
+def test_parse_alpha_id_basic():
+    """parse_alpha_id('alpha101_alpha_001') -> ('alpha101', 'alpha_001')."""
+    from strategy_research.core.alpha_zoo import parse_alpha_id
+    assert parse_alpha_id("alpha101_alpha_001") == ("alpha101", "alpha_001")
+
+
+def test_parse_alpha_id_strips_zoo_prefix():
+    """parse_alpha_id('alpha101_001') -> ('alpha101', '001')."""
+    from strategy_research.core.alpha_zoo import parse_alpha_id
+    assert parse_alpha_id("alpha101_001") == ("alpha101", "001")
+
+
+def test_parse_alpha_id_qlib158():
+    """qlib158 prefix preserved."""
+    from strategy_research.core.alpha_zoo import parse_alpha_id
+    assert parse_alpha_id("qlib158_beta5") == ("qlib158", "beta5")
+
+
+def test_parse_alpha_id_academic_underscore_name():
+    """academic allows underscores in the name."""
+    from strategy_research.core.alpha_zoo import parse_alpha_id
+    assert parse_alpha_id("academic_carhart_mom") == ("academic", "carhart_mom")
+
+
+def test_parse_alpha_id_invalid_raises_value_error():
+    """Invalid id raises ValueError."""
+    from strategy_research.core.alpha_zoo import parse_alpha_id
+    with pytest.raises(ValueError):
+        parse_alpha_id("invalid")
+    with pytest.raises(ValueError):
+        parse_alpha_id("")
+
+
+def test_parse_alpha_id_unknown_zoo_raises():
+    """Unknown zoo prefix raises ValueError."""
+    from strategy_research.core.alpha_zoo import parse_alpha_id
+    with pytest.raises(ValueError):
+        parse_alpha_id("nonexistent_zoo_001")
+
+
+def test_alpha_loader_class_importable():
+    """AlphaLoader is the canonical class; AlphaZooAdapter kept as alias."""
+    from strategy_research.core.alpha_zoo import AlphaLoader
+    assert AlphaLoader is AlphaZooAdapter
+
+
+def test_alpha_zoo_adapter_module_path():
+    """The legacy import path still works (backward compat)."""
+    from strategy_research.core.alpha_zoo_adapter import AlphaZooAdapter
+    assert AlphaZooAdapter is not None
+
+
+def test_loader_compute_alpha_via_class():
+    """AlphaLoader().compute_as_wide delegates to module-level compute_alpha."""
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(7)
+    dates = pd.bdate_range("2024-01-01", periods=30)
+    prices = pd.DataFrame(rng.uniform(10, 50, (30, 3)),
+                          index=dates, columns=["A", "B", "C"])
+    r = AlphaZooAdapter().compute_as_wide("alpha101_alpha_001", prices)
+    assert r.shape == prices.shape
+
+
+# ============================================================
 # 数据驱动: 跨 zoo 的 alpha 计算一致性
 # ============================================================
 
