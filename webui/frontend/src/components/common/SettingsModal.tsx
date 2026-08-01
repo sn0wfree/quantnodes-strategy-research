@@ -15,18 +15,22 @@ interface LLMConfig {
   provider: string
   model: string
   api_key: string
+  api_key_masked: boolean
   base_url: string
+  active_profile: string
+  profiles: string[]
+  providers: ProviderInfo[]
 }
 
-const PROVIDERS = [
-  { value: 'minimax',  label: 'MiniMax',              models: ['minimax-M3'] },
-  { value: 'openai',   label: 'OpenAI',               models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-nano'] },
-  { value: 'anthropic', label: 'Anthropic',           models: ['claude-sonnet-4-20250514', 'claude-3-haiku-20240307'] },
-  { value: 'deepseek', label: 'DeepSeek',             models: ['deepseek-chat', 'deepseek-reasoner'] },
-  { value: 'kimi',     label: 'Kimi (Moonshot)',      models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
-  { value: 'qwen',     label: '通义千问',              models: ['qwen-plus', 'qwen-turbo', 'qwen-max'] },
-  { value: 'custom',   label: '自定义 (OpenAI 兼容)',  models: [] },
-]
+interface ProviderInfo {
+  name: string
+  label: string
+  model: string
+  models: string[]
+  base_url: string
+  key_var: string
+  key_configured: boolean
+}
 
 export function SettingsModal() {
   const open = useLayoutStore((s) => s.settingsOpen)
@@ -36,7 +40,8 @@ export function SettingsModal() {
   const user = useAuthStore((s) => s.user)
 
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>({ provider: '', model: '', api_key: '', base_url: '' })
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({ provider: '', model: '', api_key: '', api_key_masked: false, base_url: '', active_profile: '', profiles: [], providers: [] })
+  const [apiKeyInput, setApiKeyInput] = useState('')
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmMsg, setLlmMsg] = useState('')
   const [llmError, setLlmError] = useState('')
@@ -65,8 +70,11 @@ export function SettingsModal() {
       setPwError('')
       setLlmMsg('')
       setLlmError('')
+      setApiKeyInput('')
     }
   }, [open])
+
+  const providers = llmConfig.providers || []
 
   const handleSaveLLM = async () => {
     setLlmMsg('')
@@ -85,9 +93,17 @@ export function SettingsModal() {
     }
     setLlmLoading(true)
     try {
-      await api.put('/system/llm', llmConfig)
+      await api.put('/system/llm', {
+        provider: llmConfig.provider,
+        model: llmConfig.model,
+        base_url: llmConfig.base_url,
+        api_key: apiKeyInput,  // 空串 → 不修改密钥（掩码值永不上传）
+      })
       setLlmMsg('配置已保存')
-      // Reload system info
+      // Reload config + system info
+      const cfg = await api.get<LLMConfig>('/system/llm')
+      setLlmConfig(cfg)
+      setApiKeyInput('')
       const info = await api.get<SystemInfo>('/system/info')
       setSystemInfo(info)
     } catch (err: any) {
@@ -126,7 +142,8 @@ export function SettingsModal() {
     }
   }
 
-  const currentModels = PROVIDERS.find((p) => p.value === llmConfig.provider)?.models || []
+  const currentProvider = providers.find((p) => p.name === llmConfig.provider)
+  const currentModels = currentProvider?.models || []
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -156,14 +173,21 @@ export function SettingsModal() {
                     value={llmConfig.provider}
                     onChange={(e) => {
                       const provider = e.target.value
-                      const models = PROVIDERS.find((p) => p.value === provider)?.models || []
-                      setLlmConfig({ ...llmConfig, provider, model: models[0] || '' })
+                      const p = providers.find((x) => x.name === provider)
+                      setLlmConfig({
+                        ...llmConfig,
+                        provider,
+                        model: p?.model || '',
+                        base_url: p?.base_url || '',
+                      })
                     }}
                     className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-primary-500"
                   >
                     <option value="">选择 Provider</option>
-                    {PROVIDERS.map((p) => (
-                      <option key={p.value} value={p.value}>{p.label}</option>
+                    {providers.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {p.label}{p.key_configured ? ' ✓' : '（未配置密钥）'}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -199,9 +223,13 @@ export function SettingsModal() {
                   <div className="relative">
                     <input
                       type={showApiKey ? 'text' : 'password'}
-                      placeholder="输入 API Key"
-                      value={llmConfig.api_key}
-                      onChange={(e) => setLlmConfig({ ...llmConfig, api_key: e.target.value })}
+                      placeholder={
+                        llmConfig.api_key_masked && llmConfig.api_key
+                          ? `已配置 ${llmConfig.api_key}（留空则不修改）`
+                          : '输入 API Key'
+                      }
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 pr-10 text-sm text-slate-100 outline-none focus:border-primary-500"
                     />
                     <button
@@ -232,7 +260,7 @@ export function SettingsModal() {
                 {systemInfo?.llm && (
                   <div className="flex items-center gap-2 text-xs">
                     {systemInfo.llm.configured ? (
-                      <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">当前: {systemInfo.llm.provider} / {systemInfo.llm.model}</span></>
+                      <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">当前: {llmConfig.active_profile || llmConfig.provider || systemInfo.llm.provider} / {llmConfig.model || systemInfo.llm.model}</span></>
                     ) : (
                       <><AlertCircle className="h-3 w-3 text-amber-400" /><span className="text-amber-400">未配置</span></>
                     )}

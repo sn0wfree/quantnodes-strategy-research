@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -141,73 +140,194 @@ async def refresh_model_info(body: ModelInfoRefreshRequest):
 
 @router.get("/llm")
 async def get_llm_config():
-    """Get current LLM configuration."""
-    config = {"provider": "", "model": "", "api_key": "", "base_url": ""}
+    """Get the effective LLM configuration (profile-aware).
 
-    if _LLM_JSON_PATH.exists():
-        try:
-            data = json.loads(_LLM_JSON_PATH.read_text())
-            llm = data.get("llm", {})
-            config["provider"] = llm.get("provider", "")
-            config["model"] = llm.get("model", "")
-            config["base_url"] = llm.get("base_url", "")
-            # Mask API key
-            api_key_ref = llm.get("api_key", "")
-            if api_key_ref.startswith("env:"):
-                env_var = api_key_ref[4:]
-                dotenv = _read_dotenv()
-                real_key = dotenv.get(env_var, "")
-                config["api_key"] = real_key[:4] + "••••••••" + real_key[-4:] if len(real_key) > 8 else "••••"
-            else:
-                config["api_key"] = api_key_ref[:4] + "••••••••" if api_key_ref else ""
-        except Exception:
-            pass
+    Returns the resolved config (via LLMConfig, so an active provider
+    profile is honoured), the active profile name, and a provider
+    catalogue for the settings UI. API keys are always masked.
+    """
+    from strategy_research.core.llm.config import LLMConfig
+
+    config = {
+        "provider": "",
+        "model": "",
+        "base_url": "",
+        "api_key": "",
+        "api_key_masked": False,
+        "key_var": "",
+        "active_profile": _active_profile(_LLM_JSON_PATH) or "",
+        "profiles": sorted(_load_profiles(_LLM_JSON_PATH)) or [],
+        "providers": _provider_catalog(),
+    }
+
+    try:
+        cfg = LLMConfig.load()
+        provider = cfg.provider
+        if provider == "auto":
+            provider = ""
+        config["provider"] = provider
+        config["model"] = cfg.model if cfg.model != "unknown" else ""
+        config["base_url"] = cfg.base_url or ""
+        real_key = cfg.api_key or ""
+        if real_key:
+            config["api_key"] = _mask_key(real_key)
+            config["api_key_masked"] = True
+        if provider:
+            config["key_var"] = _key_var_for(provider)
+    except Exception:
+        logger.debug("Failed to resolve LLM config", exc_info=True)
 
     return config
 
 
 @router.put("/llm")
 async def update_llm_config(body: LLMConfigUpdate):
-    """Update LLM configuration (writes to ~/.quantnodes/llm.json + .env)."""
-    _QUANTNODES_DIR.mkdir(parents=True, exist_ok=True)
+    """Update LLM configuration (profile-aware, atomic writes).
 
-    # Read existing config
-    existing = {}
-    if _LLM_JSON_PATH.exists():
-        try:
-            existing = json.loads(_LLM_JSON_PATH.read_text())
-        except Exception:
-            pass
+    - Sets ``active_profile`` and upserts the matching profile in
+      ``llm.json["llm"]["profiles"]``.
+    - Legacy configs (top-level provider/model, no profiles) are
+      auto-migrated into the profile structure on first save.
+    - A new API key is stored in ``~/.quantnodes/.env`` under the
+      ``<PROVIDER>_API_KEY`` convention; masked values are never
+      written back.
+    """
+    from strategy_research.cli.commands.llm import (
+        _atomic_write_llm_json,
+        _backup_llm_json,
+        _write_dotenv,
+    )
 
-    llm = existing.get("llm", {})
+    provider = body.provider or None
+    if not provider:
+        raise HTTPException(status_code=400, detail="provider is required")
 
-    # Provider env var mapping
-    provider_env_map = {
-        "minimax": "LLM_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-    }
+    data = _load_llm_json(_LLM_JSON_PATH)
+    llm = data.get("llm")
+    if not isinstance(llm, dict):
+        llm = {}
+    llm = dict(llm)
 
-    # Update fields
-    if body.provider is not None:
-        llm["provider"] = body.provider
-    if body.model is not None:
-        llm["model"] = body.model
-    if body.base_url is not None:
-        llm["base_url"] = body.base_url
-    if body.api_key is not None:
-        provider = llm.get("provider", "minimax")
-        env_var = provider_env_map.get(provider, "LLM_API_KEY")
-        llm["api_key"] = f"env:{env_var}"
-        _write_dotenv({env_var: body.api_key})
+    # ── Auto-migrate legacy top-level config into profiles ──────────
+    profiles = llm.get("profiles")
+    if not isinstance(profiles, dict):
+        migrated: dict[str, dict] = {}
+        legacy_provider = llm.get("provider")
+        if legacy_provider:
+            profile = {"provider": legacy_provider}
+            for k in ("model", "base_url", "api_key"):
+                if llm.get(k):
+                    profile[k] = llm[k]
+            migrated[legacy_provider] = profile
+        profiles = migrated
+    profiles = dict(profiles)
 
-    # Set defaults
-    llm.setdefault("enabled", True)
+    # ── Upsert the active profile ───────────────────────────────────
+    profile = dict(profiles.get(provider) or {})
+    profile["provider"] = provider
+    if body.model:
+        profile["model"] = body.model
+    if body.base_url:
+        profile["base_url"] = body.base_url
+    if body.api_key and "••••" not in body.api_key:
+        env_var = _key_var_for(provider)
+        profile["api_key"] = f"env:{env_var}"
+        _write_dotenv({env_var: body.api_key}, dotenv_path=_DOTENV_PATH)
+
+    profiles[provider] = profile
+    llm["profiles"] = profiles
+    llm["active_profile"] = provider
     llm.setdefault("timeout", 300)
     llm.setdefault("max_retries", 2)
+    data["llm"] = llm
 
-    existing["llm"] = llm
-    _LLM_JSON_PATH.write_text(json.dumps(existing, indent=2) + "\n")
+    _backup_llm_json(_LLM_JSON_PATH)
+    _atomic_write_llm_json(data, llm_json_path=_LLM_JSON_PATH)
 
-    return {"status": "ok", "provider": llm.get("provider"), "model": llm.get("model")}
+    return {
+        "status": "ok",
+        "provider": provider,
+        "model": profile.get("model", ""),
+        "active_profile": provider,
+    }
+
+
+# ── LLM helpers (shared with the `llm` CLI command) ─────────────────
+
+
+def _load_llm_json(path: Path) -> dict:
+    from strategy_research.cli.commands.llm import (
+        _load_llm_json as _cli_load_llm_json,
+    )
+    return _cli_load_llm_json(path)
+
+
+def _load_profiles(path: Path) -> dict[str, dict]:
+    from strategy_research.cli.commands.llm import (
+        _load_profiles as _cli_load_profiles,
+    )
+    return _cli_load_profiles(path)
+
+
+def _active_profile(path: Path) -> str | None:
+    from strategy_research.cli.commands.llm import (
+        _active_profile as _cli_active_profile,
+    )
+    return _cli_active_profile(path)
+
+
+def _key_var_for(name: str) -> str:
+    from strategy_research.cli.commands.llm import _key_var_for as _cli_kv
+    return _cli_kv(name)
+
+
+def _mask_key(key: str) -> str:
+    if len(key) <= 8:
+        return "••••"
+    return key[:4] + "••••••••" + key[-4:]
+
+
+def _provider_catalog() -> list[dict]:
+    """name → {label, model, models, base_url, key_var, key_configured}.
+
+    Union of the adapter registry and llm.json profiles; labels and
+    suggested models come from the onboarding provider catalogue when
+    available.
+    """
+    from strategy_research.core.llm.provider import (
+        _REGISTRY,  # noqa: PLC2701
+        get_provider_defaults,
+    )
+
+    profiles = _load_profiles(_LLM_JSON_PATH)
+    dotenv = _read_dotenv()
+
+    try:
+        from strategy_research.cli.onboard import PROVIDERS as ONBOARD
+        labels = {p.key: (p.label, p.suggested_models)
+                  for p in ONBOARD}
+    except Exception:
+        labels = {}
+
+    names = sorted(set(_REGISTRY) | set(profiles))
+    catalog: list[dict] = []
+    for name in names:
+        if name in ("auto", "fallback"):
+            continue
+        label, suggested = labels.get(name, (name, ()))
+        defaults = get_provider_defaults(name)
+        profile = profiles.get(name) or {}
+        key_var = _key_var_for(name)
+        catalog.append({
+            "name": name,
+            "label": label,
+            "model": profile.get("model") or defaults.get("model") or "",
+            "models": list(suggested) if suggested else
+                      ([defaults["model"]] if defaults.get("model") else []),
+            "base_url": profile.get("base_url") or defaults.get("base_url") or "",
+            "key_var": key_var,
+            "key_configured": bool(
+                os.environ.get(key_var) or dotenv.get(key_var)
+            ),
+        })
+    return catalog

@@ -55,18 +55,19 @@ def _registry_providers() -> dict[str, dict[str, str]]:
     return out
 
 
-def _load_llm_json() -> dict:
-    if not LLM_JSON_PATH.exists():
+def _load_llm_json(llm_json_path: Path | None = None) -> dict:
+    path = llm_json_path or LLM_JSON_PATH
+    if not path.exists():
         return {}
     try:
-        data = json.loads(LLM_JSON_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def _load_profiles() -> dict[str, dict]:
-    data = _load_llm_json()
+def _load_profiles(llm_json_path: Path | None = None) -> dict[str, dict]:
+    data = _load_llm_json(llm_json_path)
     profiles = (data.get("llm") or {}).get("profiles")
     return profiles if isinstance(profiles, dict) else {}
 
@@ -79,8 +80,8 @@ def _key_is_set(name: str) -> bool:
     return bool(os.environ.get(_key_var_for(name)))
 
 
-def _active_profile() -> str | None:
-    data = _load_llm_json()
+def _active_profile(llm_json_path: Path | None = None) -> str | None:
+    data = _load_llm_json(llm_json_path)
     llm = data.get("llm")
     return llm.get("active_profile") if isinstance(llm, dict) else None
 
@@ -104,8 +105,9 @@ def _read_dotenv(path: Path) -> dict[str, str]:
     return existing
 
 
-def _write_dotenv(tokens: dict[str, str]) -> Path:
-    path = DOTENV_PATH
+def _write_dotenv(tokens: dict[str, str], *,
+                  dotenv_path: Path | None = None) -> Path:
+    path = dotenv_path or DOTENV_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     merged = _read_dotenv(path)
     for k, v in tokens.items():
@@ -133,16 +135,18 @@ def _write_dotenv(tokens: dict[str, str]) -> Path:
 # ── llm.json write (atomic, preserves other top-level keys) ─────────
 
 
-def _atomic_write_llm_json(data: dict) -> Path:
-    LLM_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=".llm.json.", dir=str(LLM_JSON_PATH.parent))
+def _atomic_write_llm_json(data: dict, *,
+                           llm_json_path: Path | None = None) -> Path:
+    path = llm_json_path or LLM_JSON_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".llm.json.", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
-        os.replace(tmp_name, LLM_JSON_PATH)
+        os.replace(tmp_name, path)
         try:
-            LLM_JSON_PATH.chmod(0o600)
+            path.chmod(0o600)
         except OSError:
             pass
     except Exception:
@@ -154,13 +158,14 @@ def _atomic_write_llm_json(data: dict) -> Path:
     return LLM_JSON_PATH
 
 
-def _backup_llm_json() -> Path | None:
+def _backup_llm_json(llm_json_path: Path | None = None) -> Path | None:
     """Copy llm.json to llm.json.bak-<timestamp> before mutation."""
-    if not LLM_JSON_PATH.exists():
+    path = llm_json_path or LLM_JSON_PATH
+    if not path.exists():
         return None
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    dest = LLM_JSON_PATH.with_name(f"{LLM_JSON_PATH.name}.bak-{stamp}")
-    shutil.copy2(LLM_JSON_PATH, dest)
+    dest = path.with_name(f"{path.name}.bak-{stamp}")
+    shutil.copy2(path, dest)
     return dest
 
 

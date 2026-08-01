@@ -17,7 +17,6 @@ import os
 from pathlib import Path
 from typing import TypedDict
 
-
 # QuantNodes 标准配置位置（与 onboard.py 一致）
 QUANTNODES_DIR = Path.home() / ".quantnodes"
 LLM_JSON_PATH = QUANTNODES_DIR / "llm.json"
@@ -67,6 +66,38 @@ def _read_dotenv_api_key(path: Path) -> str:
     except OSError:
         pass
     return ""
+
+
+def _profile_effective(
+    llm_section: dict,
+    provider: str,
+    model: str,
+    effective_api_key: str,
+    api_key_source: str,
+) -> tuple[str, str, str, str]:
+    """Resolve provider/model through the profile layer.
+
+    When llm.json uses the ``profiles``/``active_profile`` structure the
+    top-level provider/model may be absent; the effective values come
+    from ``LLMConfig.load()``. Falls back to the given top-level values
+    on any error.
+    """
+    try:
+        from strategy_research.core.llm.config import LLMConfig
+
+        cfg = LLMConfig.load()
+        resolved_provider = cfg.provider or ""
+        resolved_model = cfg.model or ""
+        if resolved_provider not in ("", "auto") and resolved_model not in ("", "unknown"):
+            provider = resolved_provider
+            model = resolved_model
+            if not effective_api_key:
+                effective_api_key = cfg.api_key or ""
+                if effective_api_key and api_key_source == "none":
+                    api_key_source = "config"
+    except Exception:
+        pass
+    return provider, model, effective_api_key, api_key_source
 
 
 def check_llm_config() -> LLMConfigStatus:
@@ -120,9 +151,12 @@ def check_llm_config() -> LLMConfigStatus:
         api_key_source = "none"
         effective_api_key = ""
 
-    # 5. provider / model
+    # 5. provider / model（profile 感知：生效配置优先于顶层字段）
     provider = llm_section.get("provider", "") if llm_section else ""
     model = llm_section.get("model", "") if llm_section else ""
+    provider, model, effective_api_key, api_key_source = _profile_effective(
+        llm_section, provider, model, effective_api_key, api_key_source,
+    )
 
     # 6. 综合判断
     configured = bool(provider and model and effective_api_key)
