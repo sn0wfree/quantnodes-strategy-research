@@ -55,8 +55,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-import yaml
-
 from .llm_eval import LLMEvaluator
 from .rules import HardThresholdRule, RuleResult
 
@@ -295,42 +293,20 @@ def load_config(
     malformed YAML raises ``yaml.YAMLError`` (transparent from PyYAML).
     Unknown keys are silently ignored (forward-compat).
     """
-    layers: list[dict[str, Any]] = []
+    from ..config_loader import load_layered_config, scalar_key_filter
 
-    # 3: User-level
-    if user_config is None:
-        user_config = Path.home() / ".quantnodes-research" / "acceptance.yaml"
-    if user_config.exists():
-        layers.append(_read_yaml(user_config))
-
-    # 2: Workspace
-    if workspace_config is not None and workspace_config.exists():
-        layers.append(_read_yaml(workspace_config))
-
-    # 1: CLI (highest priority)
-    if cli_overrides:
-        layers.append(dict(cli_overrides))
-
-    merged: dict[str, Any] = {}
-    for layer in layers:
-        merged.update({k: v for k, v in layer.items() if v is not None})
-
+    user_path = user_config if user_config is not None else (
+        Path.home() / ".quantnodes-research" / "acceptance.yaml"
+    )
+    defaults = {f.name: getattr(DEFAULT_CONFIG, f.name) for f in _config_fields()}
+    merged = load_layered_config(
+        defaults=defaults,
+        cli_overrides=cli_overrides,
+        workspace_path=workspace_config,
+        user_path=user_path,
+        key_filter=scalar_key_filter,
+    )
     return DEFAULT_CONFIG.with_overrides(**merged)
-
-
-def _read_yaml(path: Path) -> dict[str, Any]:
-    """Read YAML file and return top-level mapping (or empty if root is not a dict)."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {k: v for k, v in data.items() if isinstance(v, (str, int, float, bool))}
-
-
-# ── Helpers ──────────────────────────────────────────────────────────
 
 
 def _coerce_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
