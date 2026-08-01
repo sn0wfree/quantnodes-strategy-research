@@ -1,9 +1,17 @@
-"""LLM-specific exception types."""
+"""LLM-specific exception types.
+
+These leaf exceptions are part of the unified ``StrategyResearchError``
+hierarchy via :class:`core.errors.ConfigError`. LLM provider failures
+typically reflect configuration problems (bad api_key, missing model
+settings, etc.) so ``ConfigError`` is the natural parent.
+"""
 
 from __future__ import annotations
 
+from ..errors import ConfigError
 
-class LLMError(Exception):
+
+class LLMError(ConfigError):
     """Base class for all LLM-related errors."""
 
 
@@ -38,3 +46,15 @@ class LLMMalformedResponseError(LLMError):
 
 class LLMConfigError(LLMError):
     """Configuration invalid (e.g., missing api_key at call time)."""
+
+
+__all__ = [
+    "LLMError",
+    "LLMAuthError",
+    "LLMRateLimitError",
+    "LLMQuotaError",
+    "LLMTimeoutError",
+    "LLMServerError",
+    "LLMMalformedResponseError",
+    "LLMConfigError",
+]
