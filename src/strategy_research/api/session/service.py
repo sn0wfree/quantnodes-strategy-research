@@ -597,6 +597,17 @@ class SessionService:
                 to avoid the cfg-undefined NameError regression that
                 happened when Phase 1 compaction filter changes were made.
         """
+        # Test mode: when STRATEGY_RESEARCH_TEST_CHAT=1, emit a scripted
+        # SSE stream and return immediately — no LLM needed. Restores the
+        # pre-refactor behavior (chat.py:_run_agent_loop_background) that
+        # send_async used to short-circuit to in test mode; the unified
+        # SessionService path lost that hook when send_async was migrated.
+        if os.environ.get("STRATEGY_RESEARCH_TEST_CHAT") == "1":
+            return await self._run_test_script(
+                attempt=attempt,
+                accumulated_parts=accumulated_parts,
+            )
+
         from strategy_research.core.agent.builtin_tools import build_default_registry
         from strategy_research.core.agent.loop import AgentLoop
 
@@ -717,6 +728,70 @@ class SessionService:
                 "output_tokens": usage_state["output"],
                 "total_tokens": usage_state["input"] + usage_state["output"],
             },
+        }
+
+    async def _run_test_script(
+        self,
+        *,
+        attempt: Attempt,
+        accumulated_parts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Emit a scripted SSE stream for E2E tests (no LLM needed).
+
+        Mirrors the real AgentLoop event sequence (iter_start → text_delta
+        → iter_end) so SSE tests are deterministic and offline. The caller
+        (_run_attempt) persists the assistant message and emits
+        attempt.completed / agent_done afterwards, matching production.
+        """
+        session_id = attempt.session_id
+        message_id = attempt.message_id
+        attempt_id = attempt.attempt_id
+        text_id = f"txt_{uuid.uuid4().hex[:12]}"
+
+        reply_parts = [
+            f"这是对「{attempt.prompt[:40]}」的脚本化回复。",
+            " 主要演示 SSE 流式事件分发链路。",
+            "\n\n**测试要点**：",
+            "\n- 事件 message_id 关联",
+            "\n- streamingText 累积",
+            "\n- agent_done 清空 streamingMessageId",
+        ]
+        full_text = "".join(reply_parts)
+
+        def emit(event_type: str, data: dict[str, Any]) -> None:
+            data = dict(data)
+            data.setdefault("message_id", message_id)
+            data.setdefault("attempt_id", attempt_id)
+            self.event_bus.emit(session_id, event_type, data)
+
+        emit("iter_start", {"iteration": 1, "max_iterations": 9999999999})
+        emit("text.started", {"text_id": text_id})
+
+        emit("thinking_start", {})
+        think_chunks = ["分析用户问题", " → 检索相关策略", " → 准备回复"]
+        for chunk in think_chunks:
+            await asyncio.sleep(0.03)
+            emit("thinking_delta", {"delta": chunk})
+        emit("thinking_done", {})
+
+        for part in reply_parts:
+            await asyncio.sleep(0.03)
+            emit("text_delta", {"text_id": text_id, "text": part})
+        emit("thinking_end", {})
+        emit("text.ended", {"text_id": text_id, "text": full_text})
+        emit("iter_end", {"iteration": 1, "finish_reason": "stop", "tool_calls_made": 0})
+
+        accumulated_parts.append({"type": "text", "text": full_text})
+
+        return {
+            "status": "success",
+            "content": full_text,
+            "run_dir": None,
+            "iterations": 1,
+            "tool_calls_made": 0,
+            "finished_reason": "stop",
+            "error": None,
+            "metrics": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         }
 
     # ── Compact ──────────────────────────────────────────────────────
