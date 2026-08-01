@@ -20,7 +20,6 @@ from strategy_research.cli import (
     main,
 )
 
-
 # ── Parent parser has all expected flags ─────────────────────────────
 
 
@@ -75,10 +74,14 @@ class TestLLMParentParser:
         with pytest.raises(SystemExit):
             _LLM_PARENT.parse_args(["--llm-bogus", "x"])
 
-    def test_parent_parser_drops_profile(self):
-        """The retired --llm-profile flag is no longer accepted."""
-        with pytest.raises(SystemExit):
-            _LLM_PARENT.parse_args(["--llm-profile", "deepseek"])
+    def test_parent_parser_accepts_profile_flag(self):
+        """--llm-profile is accepted (single-run provider profile override)."""
+        ns = _LLM_PARENT.parse_args(["--llm-profile", "deepseek"])
+        assert ns.llm_profile == "deepseek"
+
+    def test_parent_parser_profile_defaults_none(self):
+        ns = _LLM_PARENT.parse_args([])
+        assert ns.llm_profile is None
 
 
 # ── Helper functions ─────────────────────────────────────────────────

@@ -56,8 +56,11 @@ ENV_API_KEY = "OPENAI_API_KEY"
 ENV_BASE_URL = "OPENAI_BASE_URL"
 ENV_MODEL = "OPENAI_MODEL"
 ENV_CONFIG_PATH = "STRATEGY_RESEARCH_LLM_CONFIG"
+# Selects an active provider profile from llm.json["llm"]["profiles"].
+# Beats the file's "active_profile" field; CLI --llm-profile beats both.
+ENV_PROFILE_ACTIVE = "LLM_PROFILE"
 
-# Wizard writes this into ~/.quantnodes/strategy_research/.env; we accept
+# Wizard writes this into ~/.quantnodes/.env; we accept
 # it as a credential source so users with the new wizard don't need to
 # also export OPENAI_API_KEY (which would defeat the point of putting
 # the secret in the local .env). Precedence still prefers OPENAI_API_KEY.
@@ -277,7 +280,12 @@ def _resolve_bridge_path(env: Mapping[str, str]) -> Path:
 
 
 def _try_load_dotenv() -> None:
-    """Best-effort .env load; no-op if python-dotenv is not installed."""
+    """Best-effort .env load; no-op if python-dotenv is not installed.
+
+    Loads ``.env`` from the current directory first, then the canonical
+    secrets file ``~/.quantnodes/.env`` (wizard-written API keys) when it
+    exists. Explicit process env vars always win (override=False).
+    """
     try:
         from dotenv import load_dotenv as _ld
     except ImportError:
@@ -285,8 +293,25 @@ def _try_load_dotenv() -> None:
         return
     try:
         _ld()  # load from cwd by default
+        quantnodes_env = Path.home() / ".quantnodes" / ".env"
+        if quantnodes_env.exists():
+            _ld(quantnodes_env)
     except Exception as exc:                       # noqa: BLE001
         logger.debug("dotenv load failed: %s", exc)
+
+
+def _bridge_env_override_fields() -> set[str]:
+    """Names of llm.json fields that QUANTNODES__LLM__* env vars set.
+
+    Used by profile resolution so a profile never clobbers a runtime
+    env override (env priority is higher than the file/profile layer).
+    """
+    from .quantnodes_bridge import _ENV_OVERRIDE_KEYS
+    fields: set[str] = set()
+    for key in _ENV_OVERRIDE_KEYS:
+        if os.environ.get(key):
+            fields.add(key.rsplit("__", 1)[-1].lower())
+    return fields
 
 
 def _load_bridge_dict(path: Path) -> dict[str, Any]:
@@ -307,14 +332,53 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
     if raw.get("enabled") is False:
         return {}
 
+    # ── Provider profile resolution ─────────────────────────────────
+    # llm.json["llm"]["profiles"] holds named provider presets. The
+    # active one (env LLM_PROFILE > file "active_profile") is merged ON
+    # TOP of the base llm fields, but NEVER overrides a field that came
+    # from a QUANTNODES__LLM__* env override (those already won inside
+    # the bridge loader). Priority: env overrides > profile > base.
+    profile_name = os.environ.get(ENV_PROFILE_ACTIVE) or raw.get("active_profile")
+    if profile_name:
+        profiles = raw.get("profiles")
+        profile = (
+            profiles.get(profile_name)
+            if isinstance(profiles, dict) else None
+        )
+        if isinstance(profile, dict):
+            env_overridden = _bridge_env_override_fields()
+            merged = dict(raw)
+            for key, value in profile.items():
+                if key in ("profiles", "active_profile"):
+                    continue
+                if key in env_overridden:
+                    continue
+                if value is None or value == "":
+                    continue
+                merged[key] = value
+            raw = merged
+        else:
+            logger.warning(
+                "LLM profile %r not found in llm.json profiles; "
+                "using base config", profile_name,
+            )
+
     out: dict[str, Any] = {}
 
     # Pass through all non-empty fields. _merge_flat in LLMConfig silently
     # ignores unknown keys; this preserves user-config extension fields.
     for key, value in raw.items():
+        if key in ("profiles", "active_profile"):
+            continue
         if value is None or value == "":
             continue
         out[key] = value
+
+    # api_key may have been re-written by the profile after the bridge
+    # already expanded the base section's env:VAR reference.
+    api_key = out.get("api_key")
+    if isinstance(api_key, str) and api_key.startswith("env:"):
+        out["api_key"] = os.environ.get(api_key[4:], "")
 
     # Typed conversions
     _coerce_int(out, "timeout_s", raw.get("timeout"))

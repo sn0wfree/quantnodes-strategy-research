@@ -74,6 +74,7 @@ _DEFAULT_BASE_URLS: Final[dict[str, str]] = {
     "anthropic":  "https://api.anthropic.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "minimax":    "https://api.minimaxi.com/v1",
+    "nvidia":     "https://integrate.api.nvidia.com/v1",
 }
 
 
@@ -107,6 +108,12 @@ PROVIDERS: Final[tuple[Provider, ...]] = (
         "qwen2.5:32b", None,
         ("qwen2.5:32b", "llama3.3:70b", "deepseek-r1:14b"),
         "http://localhost:11434", False,
+    ),
+    Provider(
+        "nvidia", "NVIDIA NIM", "NVIDIA-hosted models (GLM/DeepSeek/… via integrate.api.nvidia.com)",
+        "z-ai/glm-5.2", "nvapi-",
+        ("z-ai/glm-5.2", "deepseek-ai/deepseek-v4-flash"),
+        _DEFAULT_BASE_URLS["nvidia"], True,
     ),
 )
 
@@ -339,6 +346,7 @@ def _select_with_back(
     Falls back to a numeric stdin prompt if prompt_toolkit is unavailable.
     """
     from rich.console import Console
+
     from strategy_research.cli.theme import Theme
 
     console = Console()
@@ -451,6 +459,7 @@ def _select_numeric(
 def _prompt_secret(prompt: str) -> str | object:
     """Read masked input. Returns str, BACK, or CANCEL."""
     from rich.console import Console
+
     from strategy_research.cli.theme import Theme
 
     console = Console()
@@ -491,6 +500,7 @@ def _prompt_secret(prompt: str) -> str | object:
 def _prompt_text(prompt: str, *, default: str = "") -> str | object:
     """Read plain text. Returns str, BACK, or CANCEL."""
     from rich.console import Console
+
     from strategy_research.cli.theme import Theme
 
     console = Console()
@@ -607,6 +617,7 @@ def _step_key(
     provider: Provider = state["provider"]
     if not provider.key_required:
         from rich.console import Console
+
         from strategy_research.cli.theme import Theme
 
         msg = (
@@ -630,6 +641,7 @@ def _step_key(
             _save_partial(llm)
             return "ok"
         from rich.console import Console
+
         from strategy_research.cli.theme import Theme
 
         Console().print(
@@ -676,6 +688,27 @@ def _step_tushare(
 
 
 # ─── Public flow ──────────────────────────────────────────────────────
+
+
+def _attach_profile(llm: dict, chosen: Provider) -> dict:
+    """Attach a provider profile + ``active_profile`` to an llm section.
+
+    The profile mirrors the top-level keys the wizard just collected
+    (provider / base_url / model / api_key), so the ``llm --use`` /
+    ``--llm-profile`` switching machinery works right after onboarding.
+    Values fall back to the top-level section, keeping old files
+    compatible.
+    """
+    profile: dict[str, object] = {"provider": chosen.key}
+    if chosen.base_url:
+        profile["base_url"] = chosen.base_url
+    if llm.get("model"):
+        profile["model"] = llm["model"]
+    if llm.get("api_key"):
+        profile["api_key"] = llm["api_key"]
+    llm["profiles"] = {chosen.key: profile}
+    llm["active_profile"] = chosen.key
+    return llm
 
 
 def run_onboarding(
@@ -777,6 +810,7 @@ def run_onboarding(
         if tokens:
             _save_tokens_to_dotenv(tokens, dotenv_path=env_path)
 
+        _attach_profile(llm, chosen)
         return _finalize_llm_json(llm, llm_json_path=llm_path)
 
     # ─── TTY-mode branch (prompt_toolkit with BACK/CANCEL) ─────────────
@@ -799,7 +833,7 @@ def run_onboarding(
     if _issues:
         from rich.console import Console
         from rich.panel import Panel
-        from strategy_research.cli.theme import Theme
+
 
         console = Console()
         console.print(
@@ -866,6 +900,7 @@ def run_onboarding(
     if tokens:
         _save_tokens_to_dotenv(tokens, dotenv_path=env_path)
 
+    _attach_profile(llm, state["provider"])
     return _finalize_llm_json(llm, llm_json_path=llm_path)
 
 

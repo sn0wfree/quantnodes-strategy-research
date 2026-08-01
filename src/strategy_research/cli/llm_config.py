@@ -10,7 +10,7 @@ Contains:
 from __future__ import annotations
 
 import argparse
-
+import os
 
 _LLM_PARENT = argparse.ArgumentParser(
     add_help=False,
@@ -34,14 +34,25 @@ _llm_g.add_argument("--llm-stream", dest="llm_stream",
                     action="store_true", default=None, help="强制流式")
 _llm_g.add_argument("--llm-no-stream", dest="llm_stream",
                     action="store_false", help="禁用流式")
+_llm_g.add_argument("--llm-profile", default=None,
+                    help="单次运行使用 llm.json 中的指定 provider profile（不改文件）")
 
 
 def _cli_overrides_from_args(args: argparse.Namespace | None) -> dict:
-    """Extract --llm-* kwargs from argparse Namespace."""
+    """Extract --llm-* kwargs from argparse Namespace.
+
+    ``--llm-profile`` is handled separately (sets ``LLM_PROFILE`` env so
+    the config's profile resolution picks it up); it is NOT a config key.
+    """
     if args is None:
         return {}
+    profile = getattr(args, "llm_profile", None)
+    if profile:
+        os.environ["LLM_PROFILE"] = profile
     out = {}
     for key, value in vars(args).items():
+        if key == "llm_profile":
+            continue
         if key.startswith("llm_") and value is not None:
             out[key] = value
     return out

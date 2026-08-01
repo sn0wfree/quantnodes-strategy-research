@@ -17,6 +17,7 @@ import yaml
 
 # Core commands: imports this side-effect to register them in the dispatcher.
 from .commands import core_commands  # noqa: F401  (registration side effect)
+from .commands import llm as _llm_cmd  # noqa: F401  (registration side effect)
 from .commands.registry import dispatch as _dispatch, wire_commands as _wire
 
 from .commands.autoresearch import _spawn_agent as _spawn_agent
