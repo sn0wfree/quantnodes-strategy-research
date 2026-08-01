@@ -83,8 +83,8 @@ export function Composer() {
       }
     } catch (err: any) {
       console.error('Send failed:', err)
-      const status = err?.response?.status
-      const detail = err?.response?.data?.detail
+      const status = err?.status
+      const detail = err?.detail
       if (status === 429 && detail?.error === 'queue_full') {
         addToast(
           'error',

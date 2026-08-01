@@ -112,6 +112,11 @@ interface ChatState {
   clearMessages: () => void
 }
 
+// Bump on every loadMessages call so stale responses are dropped
+// (rapid session switching must not let an old response overwrite
+// the currently viewed session's messages).
+let loadMessagesSeq = 0
+
 export const useChatStore = create<ChatState>()(
   immer((set, get) => ({
     messages: new Map(),
@@ -199,10 +204,12 @@ export const useChatStore = create<ChatState>()(
         state.queueLengths.clear()
       }),
     loadMessages: async (sessionId: string) => {
+      const seq = ++loadMessagesSeq
       try {
         const data = await api.get<{ messages: Message[] }>(
           `/chat/session/${sessionId}/messages?limit=200`
         )
+        if (seq !== loadMessagesSeq) return // stale response (session switched)
         set((state) => {
           state.messages.clear()
           data.messages.forEach((m) => state.messages.set(m.id, m))

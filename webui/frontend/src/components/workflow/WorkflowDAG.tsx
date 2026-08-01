@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import {
   ReactFlow,
   Background,
@@ -102,8 +102,9 @@ export function WorkflowDAG({
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges)
 
-  // Update nodes/edges when props change
-  useMemo(() => {
+  // Update nodes/edges when props change (effect, not memo — side
+  // effects belong in useEffect; useMemo must stay pure).
+  useEffect(() => {
     const { nodes: newNodes, edges: newEdges } = layoutWithDagre(rawNodes, rawEdges)
     setNodes(newNodes)
     setEdges(newEdges)

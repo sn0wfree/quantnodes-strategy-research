@@ -46,7 +46,7 @@ function IterationRow({ iteration }: { iteration: IterationDetail }) {
 
 export function AgentItem({ agent, onSelect, isSelected }: AgentItemProps) {
   const [expanded, setExpanded] = useState(false)
-  const config = STATUS_CONFIG[agent.status]
+  const config = STATUS_CONFIG[agent.status] ?? STATUS_CONFIG.pending
   const Icon = config.icon
   const isRunning = agent.status === 'running'
 

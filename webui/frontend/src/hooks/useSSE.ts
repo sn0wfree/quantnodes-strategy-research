@@ -581,6 +581,7 @@ export function useSSE(sessionId: string | null) {
       }
     },
     [
+      sessionId,
       addMessage,
       updateMessage,
       setStreamingMessage,

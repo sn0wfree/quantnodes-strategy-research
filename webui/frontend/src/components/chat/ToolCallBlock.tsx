@@ -160,7 +160,7 @@ export function ToolCallBlock({ toolCall, startTime, onRetry }: ToolCallBlockPro
     return () => clearInterval(id)
   }, [toolCall.status, startTime])
 
-  const config = STATUS_CONFIG[toolCall.status]
+  const config = STATUS_CONFIG[toolCall.status] ?? STATUS_CONFIG.pending
   const ToolIcon = TOOL_ICONS[toolCall.name] ?? Wrench
   const StatusIcon = config.icon
   const argsPreview = summarizeArgs(toolCall.arguments)

@@ -3,6 +3,9 @@ import { persist } from 'zustand/middleware'
 import { api } from '../api/client'
 import type { Message } from './chat'
 import { useChatStore } from './chat'
+import { useWorkflowStore } from './workflow'
+import { useAgentStore } from './agents'
+import { useGoalStore } from './goal'
 
 export interface Session {
   id: string
@@ -54,6 +57,9 @@ interface SessionState {
   clearSearch: () => void
 }
 
+// Bump per runSearch call so stale search responses are dropped.
+let searchSeq = 0
+
 export const useSessionStore = create<SessionState>()(
   persist(
     (set, get) => ({
@@ -102,6 +108,11 @@ export const useSessionStore = create<SessionState>()(
         chat.setMessages([])
         chat.setStreamingMessage(null)
         chat.setStreamingText('')
+        // Per-session panels: workflow DAG / agents / goal are session-
+        // scoped and must not bleed across sessions.
+        useWorkflowStore.getState().setDAG([], [])
+        useAgentStore.getState().setAgents([])
+        useGoalStore.getState().clearGoal()
         await chat.loadMessages(id)
       },
 
@@ -119,6 +130,9 @@ export const useSessionStore = create<SessionState>()(
         chat.setMessages([])
         chat.setStreamingMessage(null)
         chat.setStreamingText('')
+        useWorkflowStore.getState().setDAG([], [])
+        useAgentStore.getState().setAgents([])
+        useGoalStore.getState().clearGoal()
         return session
       },
 
@@ -212,6 +226,7 @@ export const useSessionStore = create<SessionState>()(
       setSearchOpen: (open) => set({ searchOpen: open }),
 
       runSearch: async (query: string) => {
+        const seq = ++searchSeq
         set({ searchQuery: query })
         if (!query.trim()) {
           set({ searchResults: [], isSearching: false })
@@ -223,12 +238,13 @@ export const useSessionStore = create<SessionState>()(
             query,
             limit: 20,
           })
+          if (seq !== searchSeq) return // stale response (newer query in flight)
           set({ searchResults: res.hits })
         } catch (err) {
           console.error('runSearch failed:', err)
-          set({ searchResults: [] })
+          if (seq === searchSeq) set({ searchResults: [] })
         } finally {
-          set({ isSearching: false })
+          if (seq === searchSeq) set({ isSearching: false })
         }
       },
 

@@ -2,6 +2,20 @@ import { useState, useEffect, useRef } from 'react'
 import { Search, X, User, Bot, FileText, Loader2 } from 'lucide-react'
 import { useSessionStore, type SearchHit } from '../../stores/session'
 
+/** Escape HTML then re-enable only the <mark> highlight tags the
+ * backend uses to emphasize matched terms (XSS-safe snippet render). */
+function safeSnippet(snippet: string): string {
+  const escaped = snippet
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  return escaped
+    .replace(/&lt;mark&gt;/g, '<mark>')
+    .replace(/&lt;\/mark&gt;/g, '</mark>')
+}
+
 export function SearchModal() {
   const open = useSessionStore((s) => s.searchOpen)
   const setOpen = useSessionStore((s) => s.setSearchOpen)
@@ -159,7 +173,7 @@ export function SearchModal() {
                   </div>
                   <div
                     className="mt-1 text-xs text-slate-400 line-clamp-2 [&_mark]:bg-amber-500/30 [&_mark]:text-amber-200 [&_mark]:rounded-sm [&_mark]:px-0.5"
-                    dangerouslySetInnerHTML={{ __html: hit.snippet }}
+                    dangerouslySetInnerHTML={{ __html: safeSnippet(hit.snippet) }}
                   />
                 </div>
               </button>

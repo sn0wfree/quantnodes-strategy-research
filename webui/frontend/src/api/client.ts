@@ -2,6 +2,18 @@ import { useAuthStore } from '../stores/auth'
 
 const API_BASE = '/api'
 
+export class ApiError extends Error {
+  status: number
+  detail: unknown
+
+  constructor(status: number, message: string, detail?: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
 export interface GoalStatusResponse {
   status: string
   goal_id?: string
@@ -69,7 +81,10 @@ class APIClient {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }))
-      throw new Error(err.detail || 'Request failed')
+      const detail = (err as any)?.detail
+      const message =
+        typeof detail === 'string' && detail ? detail : 'Request failed'
+      throw new ApiError(res.status, message, detail)
     }
 
     return res.json()
