@@ -308,6 +308,18 @@ class SessionError(StrategyResearchError): pass
 | Phase 2.2 | ✅ | refactor/phase-2-architecture | CLI subcommand registration (`@cli_command` decorator) |
 | Phase 2.3 | ✅ | refactor/phase-2-architecture | Slash command decorator (`@slash_command`) |
 | Phase 2.4 | ✅ | refactor/phase-2-architecture | LLMConfigBuilder for fluent 4-layer composition |
+| Phase 3.1 | ✅ | refactor/phase-3-api-di | FastAPI Depends providers (`api/dependencies.py`) |
+| Phase 3.2 | ✅ | refactor/phase-3-api-di | Lightweight DI container (`AppContainer`) |
+| Phase 3.3 | ✅ | refactor/phase-3-api-di | Unified error hierarchy (`StrategyResearchError`) |
+
+### Phase 3 Outcome
+
+| Phase | Files | Insertions | Deletions | New tests |
+| --- | --- | --- | --- | --- |
+| 3.1 | 2 | +361 | -0 | +10 |
+| 3.2 | 2 | +410 | -0 | +11 |
+| 3.3 | 3 | +385 | -2 | +15 |
+| **Total** | **7** | **+1156** | **-2** | **+36** |
 
 ### Phase 2 Outcome
 
