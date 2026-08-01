@@ -6,10 +6,9 @@ Default admin account: admin / admin (seeded on first startup).
 
 from __future__ import annotations
 
-import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -31,7 +30,7 @@ class TokenResponse(BaseModel):
     user: dict
 
 
-# ── Token helpers (placeholder — real JWT later) ─────────────
+# ── Token helpers (signed HMAC tokens — see api/auth_tokens.py) ──
 
 
 def _hash_password(password: str) -> str:
@@ -40,27 +39,19 @@ def _hash_password(password: str) -> str:
 
 
 def _create_token(user_id: str) -> str:
-    """Create a simple JWT-like token (placeholder — real JWT later)."""
-    import json, base64
-    payload = {"sub": user_id, "exp": time.time() + 86400}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    """Create a signed token for the user (24h expiry)."""
+    from ..auth_tokens import create_token
+    return create_token(user_id)
 
 
 def _verify_token(token: str) -> Optional[str]:
-    """Verify token and return user_id, or None."""
-    import json, base64
-    try:
-        payload = json.loads(base64.urlsafe_b64decode(token))
-        if payload.get("exp", 0) < time.time():
-            return None
-        return payload.get("sub")
-    except Exception:
-        return None
+    """Verify signed token and return user_id, or None."""
+    from ..auth_tokens import verify_token
+    return verify_token(token)
 
 
 async def get_current_user_id(token: str = "") -> str:
     """Dependency: extract user_id from token. Used by protected endpoints."""
-    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
     # This is a simplified version — real implementation uses middleware
     return "anonymous"
 

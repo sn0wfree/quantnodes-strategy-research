@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import json
-import time
 import asyncio
+import json
 import logging
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query, Header
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..sse_buffer import sse_buffer
 from ..session.bridge import attach_eventbus_to_sse
 from ..session.event_bus_v2 import EventBusV2
 from ..session.events import EventBus
-from ..session.models import Message
 from ..session.service import SessionService
 from ..session.store import SessionStore
+from ..sse_buffer import sse_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +69,9 @@ def _get_or_create_history(session_id: str) -> list[dict[str, Any]]:
 def _build_llm_config():
     """Build LLMConfig from env/settings. Same logic as TUI's __main__.py."""
     try:
-        from dotenv import load_dotenv
         from pathlib import Path
+
+        from dotenv import load_dotenv
         load_dotenv(Path.home() / ".quantnodes" / ".env", override=True)
     except Exception:
         pass
@@ -135,7 +134,7 @@ async def _run_agent_loop_background(
     import os
 
     # ── Persist user message + auto-title ────────────────────────────────
-    from .web_session import persist_message, auto_title_session, _get_db
+    from .web_session import _get_db, auto_title_session, persist_message
     persist_message(
         session_id=session_id,
         role="user",
@@ -273,8 +272,8 @@ async def _run_agent_loop_background(
                 accumulated_parts[-1]["status"] = "done"
 
     try:
-        from strategy_research.core.agent.loop import AgentLoop
         from strategy_research.core.agent.builtin_tools import build_default_registry
+        from strategy_research.core.agent.loop import AgentLoop
 
         try:
             registry = build_default_registry()
@@ -451,6 +450,15 @@ async def send_async(body: ChatMessage, request: Request):
     logger.info("[SEND] session=%s content_len=%d content_preview=%s",
                 body.session_id, len(body.content), body.content[:50])
 
+    # Ownership check: only the session owner may post messages
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _conn = _get_db()
+    try:
+        _fetch_session_owned(_conn, body.session_id, user_id)
+    finally:
+        _conn.close()
+
     # ── /goal command intercept ────────────────────────────────────────
     if body.content.strip().startswith("/goal"):
         return await _handle_goal_command(body)
@@ -504,7 +512,7 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     B5: All persistence via EventBusV2 → projector.flush(). No direct
     persist_message / sse_buffer.push calls.
     """
-    from ...core.goal import GoalStore, GoalStatus, EvidenceInput
+    from ...core.goal import EvidenceInput, GoalStatus, GoalStore
     from ...core.goal.context import default_goal_criteria
 
     session_id = body.session_id
@@ -700,7 +708,6 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
         before = result.get("before_tokens", 0)
         after = result.get("after_tokens", 0)
         summary = result.get("summary", "")
-        compressed = result.get("compressed", [])
 
         if layers:
             response_text = f"✅ 上下文已压缩: {', '.join(layers)}（{before} → {after} tokens）"
@@ -765,7 +772,7 @@ class CancelRequest(BaseModel):
 
 
 @router.post("/cancel")
-async def cancel_attempt(body: CancelRequest):
+async def cancel_attempt(body: CancelRequest, request: Request):
     """Cancel an in-flight agent attempt for a session.
 
     If attempt_id is provided, cancels that specific attempt.
@@ -774,6 +781,13 @@ async def cancel_attempt(body: CancelRequest):
     After cancellation the per-session queue is **paused** (queue_paused
     SSE event). Use ``POST /chat/queue/resume`` to continue processing.
     """
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _conn = _get_db()
+    try:
+        _fetch_session_owned(_conn, body.session_id, user_id)
+    finally:
+        _conn.close()
     service = _get_session_service()
 
     # Prefer the session-scoped cancel (cancels the per-attempt task; the
@@ -796,12 +810,19 @@ class QueueResumeRequest(BaseModel):
 
 
 @router.post("/queue/resume")
-async def queue_resume(body: QueueResumeRequest):
+async def queue_resume(body: QueueResumeRequest, request: Request):
     """Resume a paused per-session queue after an explicit cancel.
 
     Returns ``{"ok": true, "session_id": ...}`` if the queue was paused
     and is now resumed; ``{"ok": false}`` if no paused queue exists.
     """
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _conn = _get_db()
+    try:
+        _fetch_session_owned(_conn, body.session_id, user_id)
+    finally:
+        _conn.close()
     service = _get_session_service()
     ok = service.resume_queue(body.session_id)
     return {"ok": ok, "session_id": body.session_id}
@@ -817,8 +838,8 @@ async def send_sync(body: ChatMessage, request: Request):
     if cfg is None or not cfg.api_key:
         raise HTTPException(status_code=503, detail="LLM 未配置")
 
-    from strategy_research.core.agent.loop import AgentLoop
     from strategy_research.core.agent.builtin_tools import build_default_registry
+    from strategy_research.core.agent.loop import AgentLoop
 
     try:
         registry = build_default_registry()
@@ -853,6 +874,7 @@ async def chat_events(
     token: Optional[str] = Query(None),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     last_event_id_query: Optional[str] = Query(None, alias="Last-Event-ID"),
+    request: Request = None,
 ):
     """SSE event stream for a session.
 
@@ -860,6 +882,14 @@ async def chat_events(
     Supports Last-Event-ID header for replay on reconnection.
     (Query param supported as fallback for older clients.)
     """
+    # Ownership check: only the session owner may subscribe
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _conn = _get_db()
+    try:
+        _fetch_session_owned(_conn, session_id, user_id)
+    finally:
+        _conn.close()
     resolved_last_event_id = last_event_id or last_event_id_query or ""
     logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, resolved_last_event_id)
 

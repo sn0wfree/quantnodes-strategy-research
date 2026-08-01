@@ -170,10 +170,17 @@ def create_app(
                 from fastapi import HTTPException
                 raise HTTPException(status_code=404, detail="Not found")
 
-            # Check if file exists in static dir
-            file_path = static_path / full_path
-            if file_path.is_file():
-                return FileResponse(file_path)
+            # Resolve + contain the path inside the static dir (blocks
+            # path traversal via ".." / encoded segments).
+            try:
+                resolved = (static_path / full_path).resolve()
+                resolved.relative_to(static_path.resolve())
+            except (ValueError, OSError):
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail="Not found")
+
+            if resolved.is_file():
+                return FileResponse(resolved)
             # Fallback to index.html (SPA routing)
             return FileResponse(static_path / "index.html")
 

@@ -385,7 +385,7 @@ def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
     new_table = f"_new_{table}"
     # Build CREATE TABLE statement from existing schema
     schema_rows = conn.execute(
-        f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
         (table,),
     ).fetchall()
     if not schema_rows:
@@ -548,6 +548,19 @@ def _get_db() -> sqlite3.Connection:
     _migrate_message_types(conn)
     conn.commit()
     return conn
+
+
+def _fetch_session_owned(conn: sqlite3.Connection, session_id: str, user_id: str) -> sqlite3.Row:
+    """Fetch a session row, enforcing ownership (IDOR protection).
+
+    Returns the row, or raises 404 (not found) / 403 (other user's).
+    """
+    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if row["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return row
 
 
 def _row_to_session(row: sqlite3.Row) -> dict:
@@ -799,20 +812,18 @@ async def list_sessions(request: Request, limit: int = 50, include_archived: boo
 @router.get("/{session_id}")
 async def get_session(session_id: str, request: Request):
     """Get a single session."""
+    user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
-    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Session not found")
+    row = _fetch_session_owned(conn, session_id, user_id)
     return _row_to_session(row)
 
 
 @router.patch("/{session_id}")
 async def update_session(session_id: str, body: WebSessionUpdate, request: Request):
     """Update session metadata: title, starred, archived, tags."""
+    user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
-    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Session not found")
+    row = _fetch_session_owned(conn, session_id, user_id)
     now = time.time()
     fields: dict[str, Any] = {"updated_at": now}
     if body.title is not None:
@@ -838,10 +849,9 @@ async def update_session(session_id: str, body: WebSessionUpdate, request: Reque
 @router.delete("/{session_id}")
 async def delete_session(session_id: str, request: Request):
     """Delete a session. CASCADE removes its messages and FTS rows."""
+    user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
-    row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _fetch_session_owned(conn, session_id, user_id)
     # messages FK CASCADE handles the delete; explicit delete also fine
     conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
@@ -915,10 +925,9 @@ async def list_messages(
     accept a unix ts; we map it to the maximum seq seen before that ts
     via a subquery for cursor-pagination compatibility.
     """
+    user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
-    row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _fetch_session_owned(conn, session_id, user_id)
     params: list[Any] = [session_id]
     cursor_sql = ""
     if before is not None:

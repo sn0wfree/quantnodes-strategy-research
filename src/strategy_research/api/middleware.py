@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -44,6 +43,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Skip auth for public endpoints
         for prefix in self.PUBLIC_PREFIXES:
             if path.startswith(prefix):
+                # Mutating /api/system/* (e.g. PUT /llm writes API keys)
+                # requires a valid token even though GET reads are public.
+                if prefix == "/api/system/" and request.method not in ("GET", "HEAD"):
+                    break
                 # For session/goal endpoints, extract user from token if present
                 user_id = self._extract_user_id(request)
                 request.state.user_id = user_id or "anonymous"
@@ -91,13 +94,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return self._verify_token(token)
 
     def _verify_token(self, token: str) -> Optional[str]:
-        """Verify JWT token and return user_id."""
-        import base64
-        import json
-        try:
-            payload = json.loads(base64.urlsafe_b64decode(token))
-            if payload.get("exp", 0) < time.time():
-                return None
-            return payload.get("sub")
-        except Exception:
-            return None
+        """Verify signed token and return user_id, or None."""
+        from .auth_tokens import verify_token
+        return verify_token(token)

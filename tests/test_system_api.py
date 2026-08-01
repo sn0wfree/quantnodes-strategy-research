@@ -16,6 +16,17 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture
+def auth_headers(client):
+    """Signed token for the seeded admin (POST /system/* needs auth)."""
+    resp = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "admin"},
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
 def _make_llm_config(provider="minimax", model="minimax-M3", **overrides):
     """Build a mock LLMConfig for patching."""
     from strategy_research.core.llm.config import LLMConfig
@@ -109,7 +120,7 @@ def test_info_respects_user_config_override(client):
     assert body["llm"]["model_context_tokens"] == 2_500_000
 
 
-def test_refresh_endpoint_returns_model_info(client):
+def test_refresh_endpoint_returns_model_info(client, auth_headers):
     """POST /api/system/model-info/refresh returns ModelInfo."""
     fake_llm = {
         "configured": True,
@@ -127,6 +138,7 @@ def test_refresh_endpoint_returns_model_info(client):
     ):
         resp = client.post(
             "/api/system/model-info/refresh",
+            headers=auth_headers,
             json={"provider": "openai", "model": "gpt-4o-mini"},
         )
     assert resp.status_code == 200
@@ -136,7 +148,7 @@ def test_refresh_endpoint_returns_model_info(client):
     assert body["context_tokens"] > 0
 
 
-def test_refresh_endpoint_uses_current_config_when_no_body(client):
+def test_refresh_endpoint_uses_current_config_when_no_body(client, auth_headers):
     """POST /api/system/model-info/refresh with empty body uses current LLM."""
     fake_llm = {
         "configured": True,
@@ -152,13 +164,13 @@ def test_refresh_endpoint_uses_current_config_when_no_body(client):
         "strategy_research.core.llm.config.LLMConfig.load",
         return_value=cfg,
     ):
-        resp = client.post("/api/system/model-info/refresh", json={})
+        resp = client.post("/api/system/model-info/refresh", headers=auth_headers, json={})
     assert resp.status_code == 200
     body = resp.json()
     assert body["provider"] == "minimax"
 
 
-def test_refresh_endpoint_400_when_no_llm(client):
+def test_refresh_endpoint_400_when_no_llm(client, auth_headers):
     """POST /api/system/model-info/refresh without LLM config returns 400."""
     fake_llm = {
         "configured": False,
@@ -174,5 +186,5 @@ def test_refresh_endpoint_400_when_no_llm(client):
         "strategy_research.core.llm.config.LLMConfig.load",
         return_value=cfg,
     ):
-        resp = client.post("/api/system/model-info/refresh", json={})
+        resp = client.post("/api/system/model-info/refresh", headers=auth_headers, json={})
     assert resp.status_code == 400

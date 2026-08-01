@@ -61,6 +61,22 @@ def client():
 
 
 @pytest.fixture
+def auth_headers(client):
+    """Login as the seeded admin and return signed Authorization headers.
+
+    PUT /api/system/llm and other mutating system endpoints require a
+    valid (HMAC-signed) token.
+    """
+    resp = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "admin"},
+    )
+    assert resp.status_code == 200, resp.text
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 def isolated(tmp_path: Path, monkeypatch):
     """Point system router paths at tmp_path + freeze dotenv loading."""
     llm_json = tmp_path / "llm.json"
@@ -144,10 +160,10 @@ class TestGetLLM:
 
 
 class TestPutLLM:
-    def test_switches_profile_and_upserts(self, client, isolated):
+    def test_switches_profile_and_upserts(self, client, auth_headers, isolated):
         llm_json, _ = isolated
         llm_json.write_text(json.dumps(PROFILE_JSON))
-        resp = client.put("/api/system/llm", json={
+        resp = client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "nvidia",
             "model": "deepseek-ai/deepseek-v4-flash",
         })
@@ -161,10 +177,10 @@ class TestPutLLM:
         assert profile["base_url"] == "https://integrate.api.nvidia.com/v1"
         assert data["llm"]["timeout"] == 300  # defaults preserved
 
-    def test_writes_new_key_to_dotenv(self, client, isolated):
+    def test_writes_new_key_to_dotenv(self, client, auth_headers, isolated):
         llm_json, dotenv = isolated
         llm_json.write_text(json.dumps(PROFILE_JSON))
-        resp = client.put("/api/system/llm", json={
+        resp = client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "nvidia",
             "model": "z-ai/glm-5.2",
             "api_key": "nvapi-new-key-123",
@@ -177,11 +193,11 @@ class TestPutLLM:
         mode = stat.S_IMODE(dotenv.stat().st_mode)
         assert mode == 0o600
 
-    def test_masked_key_never_written(self, client, isolated):
+    def test_masked_key_never_written(self, client, auth_headers, isolated):
         llm_json, dotenv = isolated
         llm_json.write_text(json.dumps(PROFILE_JSON))
         dotenv.write_text("MINIMAX_API_KEY=sk-original\n", encoding="utf-8")
-        resp = client.put("/api/system/llm", json={
+        resp = client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "minimax",
             "model": "minimax-M3",
             "api_key": "sk-m••••••••real",
@@ -191,10 +207,10 @@ class TestPutLLM:
         assert "sk-original" in content
         assert "••••" not in content
 
-    def test_legacy_config_auto_migrates(self, client, isolated):
+    def test_legacy_config_auto_migrates(self, client, auth_headers, isolated):
         llm_json, dotenv = isolated
         llm_json.write_text(json.dumps(LEGACY_JSON))
-        resp = client.put("/api/system/llm", json={
+        resp = client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "minimax",
             "model": "minimax-M3",
         })
@@ -208,10 +224,10 @@ class TestPutLLM:
         assert llm["profiles"]["minimax"]["base_url"] == \
             "https://api.minimaxi.com/v1"
 
-    def test_creates_file_from_scratch(self, client, isolated):
+    def test_creates_file_from_scratch(self, client, auth_headers, isolated):
         llm_json, _ = isolated
         assert not llm_json.exists()
-        resp = client.put("/api/system/llm", json={
+        resp = client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "nvidia",
             "model": "z-ai/glm-5.2",
             "api_key": "nvapi-fresh",
@@ -221,21 +237,21 @@ class TestPutLLM:
         assert data["llm"]["active_profile"] == "nvidia"
         assert data["llm"]["profiles"]["nvidia"]["model"] == "z-ai/glm-5.2"
 
-    def test_preserves_other_top_level_keys(self, client, isolated):
+    def test_preserves_other_top_level_keys(self, client, auth_headers, isolated):
         llm_json, _ = isolated
         data = dict(PROFILE_JSON)
         data["tools"] = ["mcp_tool"]
         llm_json.write_text(json.dumps(data))
-        client.put("/api/system/llm", json={
+        client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "nvidia", "model": "z-ai/glm-5.2",
         })
         saved = json.loads(llm_json.read_text())
         assert saved["tools"] == ["mcp_tool"]
 
-    def test_backs_up_before_write(self, client, isolated):
+    def test_backs_up_before_write(self, client, auth_headers, isolated):
         llm_json, _ = isolated
         llm_json.write_text(json.dumps(PROFILE_JSON))
-        client.put("/api/system/llm", json={
+        client.put("/api/system/llm", headers=auth_headers, json={
             "provider": "nvidia", "model": "z-ai/glm-5.2",
         })
         backups = sorted(llm_json.parent.glob("llm.json.bak-*"))
@@ -243,10 +259,10 @@ class TestPutLLM:
         assert json.loads(backups[-1].read_text())["llm"]["active_profile"] \
             == "minimax"
 
-    def test_provider_required(self, client, isolated):
+    def test_provider_required(self, client, auth_headers, isolated):
         llm_json, _ = isolated
         llm_json.write_text(json.dumps(PROFILE_JSON))
-        resp = client.put("/api/system/llm", json={"model": "x"})
+        resp = client.put("/api/system/llm", headers=auth_headers, json={"model": "x"})
         assert resp.status_code == 400
 
 
