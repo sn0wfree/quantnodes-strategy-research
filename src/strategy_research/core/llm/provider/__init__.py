@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ._reasoning_field import OpenAIReasoningFieldAdapter
 from .base import ProviderAdapter
 from .deepseek import DeepSeekAdapter
 from .fallback import FallbackAdapter
@@ -93,6 +94,7 @@ def get_provider_defaults(name: str | None) -> dict[str, Any]:
 
 __all__ = [
     "ProviderAdapter",
+    "OpenAIReasoningFieldAdapter",
     "OpenAIAdapter",
     "DeepSeekAdapter",
     "MiniMaxAdapter",

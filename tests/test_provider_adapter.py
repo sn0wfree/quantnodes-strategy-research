@@ -624,3 +624,103 @@ class TestProviderNamePassThrough:
         assert chunk is not None
         assert chunk.delta_thinking == "thinking"
         assert chunk.delta_content == "response"
+
+
+# ── OpenAIReasoningFieldAdapter Tests (Phase 1.1 refactor) ──────
+
+
+class TestOpenAIReasoningFieldAdapter:
+    """Verify the shared base class for reasoning_content-based providers."""
+
+    def test_is_provider_adapter(self):
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+        assert issubclass(OpenAIReasoningFieldAdapter, ProviderAdapter)
+
+    def test_delta_with_reasoning_content(self):
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+
+        class Stub(OpenAIReasoningFieldAdapter):
+            @property
+            def name(self): return "stub"
+            @property
+            def default_base_url(self): return ""
+            @property
+            def default_model(self): return ""
+
+        adapter = Stub()
+        assert adapter.extract_thinking_from_delta(
+            {"reasoning_content": "I'm thinking"}
+        ) == "I'm thinking"
+
+    def test_message_with_reasoning_content(self):
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+
+        class Stub(OpenAIReasoningFieldAdapter):
+            @property
+            def name(self): return "stub"
+            @property
+            def default_base_url(self): return ""
+            @property
+            def default_model(self): return ""
+
+        adapter = Stub()
+        assert adapter.extract_thinking_from_message(
+            {"reasoning_content": "deep thought"}
+        ) == "deep thought"
+
+    def test_delta_without_reasoning_content(self):
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+
+        class Stub(OpenAIReasoningFieldAdapter):
+            @property
+            def name(self): return "stub"
+            @property
+            def default_base_url(self): return ""
+            @property
+            def default_model(self): return ""
+
+        adapter = Stub()
+        assert adapter.extract_thinking_from_delta({}) is None
+        assert adapter.extract_thinking_from_delta({"reasoning_content": ""}) is None
+        assert adapter.extract_thinking_from_delta({"content": "no reasoning"}) is None
+
+    def test_normalization_applied(self):
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+
+        class Stub(OpenAIReasoningFieldAdapter):
+            @property
+            def name(self): return "stub"
+            @property
+            def default_base_url(self): return ""
+            @property
+            def default_model(self): return ""
+
+        adapter = Stub()
+        # normalize_thinking strips bold markdown
+        result = adapter.extract_thinking_from_delta({"reasoning_content": "**bold**"})
+        assert result is not None
+        assert "**" not in result
+
+    def test_deepseek_inherits(self):
+        """DeepSeekAdapter should be a subclass of OpenAIReasoningFieldAdapter."""
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+        assert issubclass(DeepSeekAdapter, OpenAIReasoningFieldAdapter)
+
+    def test_qwen_inherits(self):
+        """QwenAdapter should be a subclass of OpenAIReasoningFieldAdapter."""
+        from strategy_research.core.llm.provider._reasoning_field import (
+            OpenAIReasoningFieldAdapter,
+        )
+        assert issubclass(QwenAdapter, OpenAIReasoningFieldAdapter)

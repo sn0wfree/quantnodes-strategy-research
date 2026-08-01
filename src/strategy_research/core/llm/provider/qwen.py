@@ -1,17 +1,16 @@
 """Qwen (Aliyun DashScope) provider adapter.
 
 Uses OpenAI-compatible mode. Thinking tokens come via `reasoning_content`
-when enable_thinking is set on the model.
+when enable_thinking is set on the model, inherited from
+OpenAIReasoningFieldAdapter.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from .base import ProviderAdapter
+from ._reasoning_field import OpenAIReasoningFieldAdapter
 
 
-class QwenAdapter(ProviderAdapter):
+class QwenAdapter(OpenAIReasoningFieldAdapter):
     @property
     def name(self) -> str:
         return "qwen"
@@ -23,15 +22,3 @@ class QwenAdapter(ProviderAdapter):
     @property
     def default_model(self) -> str:
         return "qwen-plus"
-
-    def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
-        content = delta.get("reasoning_content")
-        if content:
-            return self.normalize_thinking(content)
-        return None
-
-    def extract_thinking_from_message(self, message: dict[str, Any]) -> str | None:
-        content = message.get("reasoning_content")
-        if content:
-            return self.normalize_thinking(content)
-        return None
