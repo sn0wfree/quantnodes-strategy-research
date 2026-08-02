@@ -82,9 +82,9 @@ def _build_provider_defaults() -> dict[str, dict[str, Any]]:
     Adding a new provider = new file in provider/ + register in __init__.py.
     This dict auto-updates.
     """
-    from .provider import get_provider_defaults
+    from .provider import _REGISTRY, get_provider_defaults  # noqa: PLC2701
     out: dict[str, dict[str, Any]] = {}
-    for name in ("openai", "deepseek", "kimi", "qwen", "minimax", "nvidia"):
+    for name in sorted(_REGISTRY):
         out[name] = get_provider_defaults(name)
     return out
 
@@ -417,8 +417,67 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
                 out["model"] = defaults["model"]
             if out.get("max_tokens") is None and defaults.get("max_tokens"):
                 out["max_tokens"] = defaults["max_tokens"]
+            # Context/output window fallback chain (profile → catalog →
+            # adapter default) so compaction thresholds match the real
+            # model window instead of the conservative 8192:
+            #   1. catalog bundled/cached data is authoritative when it
+            #      exists (core/llm/data/providers/<id>/<model>.toml)
+            #   2. otherwise the provider adapter's default_context_tokens
+            #      (siliconflow, nvidia override it)
+            #   3. otherwise leave unset (compact falls back to 8192)
+            if out.get("model_context_tokens") is None:
+                ctx = _catalog_window(p, out.get("model") or defaults.get("model"))
+                if ctx is None and defaults.get("context_tokens"):
+                    ctx = defaults["context_tokens"]
+                if ctx:
+                    out["model_context_tokens"] = ctx
+            if out.get("model_max_output_tokens") is None:
+                out_ctx = _catalog_window(
+                    p, out.get("model") or defaults.get("model"), output=True
+                )
+                if out_ctx:
+                    out["model_max_output_tokens"] = out_ctx
 
     return out
+
+
+def _catalog_window(
+    provider: str, model: str | None, *, output: bool = False
+) -> int | None:
+    """Query the model catalog's bundled/cached window data (no network).
+
+    Returns the model's context (or max-output) window from the
+    bundled TOML / disk cache, or None when the catalog has no real
+    data for this model. Callers then use the adapter default or stay
+    conservative.
+
+    Heuristic: cached entries that carry the exact placeholder defaults
+    (8192 context / 4096 output) are treated as "unknown model" —
+    models.dev returns no entry for such models, and refresh_async
+    persists the placeholder as ``fetched`` (the stored ``source``
+    field is unreliable).
+    """
+    if not model:
+        return None
+    try:
+        from .model_catalog import get_model_info
+
+        info = get_model_info(provider, model)
+    except Exception:
+        return None
+    if info.source not in ("bundled", "cached"):
+        return None
+    if output:
+        value = info.max_output_tokens
+        if value == 4096:
+            return None  # placeholder default — no real data
+    else:
+        value = info.context_tokens
+        if value == 8192:
+            return None  # placeholder default — no real data
+    if isinstance(value, int) and value > 0:
+        return value
+    return None
 
 
 def _coerce_int(out: dict[str, Any], dst: str, src: Any) -> None:

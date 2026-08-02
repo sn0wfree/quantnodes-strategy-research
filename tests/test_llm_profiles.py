@@ -95,6 +95,70 @@ class TestProfileResolution:
         assert cfg.provider == "nvidia"
         assert cfg.api_key == "nvapi-nvidia-test"
 
+    def test_context_window_backfilled_from_catalog(
+        self, clear_env, fake_llm_json, monkeypatch
+    ):
+        """Profile without model_context_tokens gets the real window
+        from the bundled catalog (deepseek-chat TOML: 1M context)."""
+        fake_llm_json.write_text(json.dumps({
+            "llm": {
+                "active_profile": "deepseek",
+                "profiles": {
+                    "deepseek": {
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "api_key": "env:DEEPSEEK_API_KEY",
+                    },
+                },
+            },
+        }))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-test")
+        cfg = LLMConfig.load()
+        assert cfg.model_context_tokens == 1_000_000
+        assert cfg.model_max_output_tokens == 384_000
+
+    def test_context_window_falls_back_to_adapter_default(
+        self, clear_env, fake_llm_json, monkeypatch
+    ):
+        """No bundled TOML for the model (siliconflow) → the adapter's
+        default_context_tokens (131072) is used, not the 8192 base."""
+        fake_llm_json.write_text(json.dumps({
+            "llm": {
+                "active_profile": "siliconflow",
+                "profiles": {
+                    "siliconflow": {
+                        "provider": "siliconflow",
+                        "model": "deepseek-ai/DeepSeek-V4-Flash",
+                        "api_key": "env:SILICONFLOW_API_KEY",
+                    },
+                },
+            },
+        }))
+        monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-sf-test")
+        cfg = LLMConfig.load()
+        assert cfg.model_context_tokens == 131_072
+
+    def test_context_window_explicit_profile_value_wins(
+        self, clear_env, fake_llm_json, monkeypatch
+    ):
+        """A profile-provided model_context_tokens beats catalog data."""
+        fake_llm_json.write_text(json.dumps({
+            "llm": {
+                "active_profile": "deepseek",
+                "profiles": {
+                    "deepseek": {
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "api_key": "env:DEEPSEEK_API_KEY",
+                        "model_context_tokens": 65536,
+                    },
+                },
+            },
+        }))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-test")
+        cfg = LLMConfig.load()
+        assert cfg.model_context_tokens == 65536
+
     def test_llm_profile_env_beats_active_profile(
         self, clear_env, fake_llm_json, monkeypatch
     ):

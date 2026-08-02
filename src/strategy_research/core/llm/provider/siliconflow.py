@@ -28,3 +28,10 @@ class SiliconFlowAdapter(OpenAIReasoningFieldAdapter):
     @property
     def default_max_tokens(self) -> int:
         return 16384
+
+    @property
+    def default_context_tokens(self) -> int:
+        # DeepSeek-V4-Flash serves a 128K context window (DeepSeek
+        # lineage). Without this override the conservative 8192 base
+        # default would trigger compaction far too early.
+        return 131072

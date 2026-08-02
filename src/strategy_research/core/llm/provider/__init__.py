@@ -88,13 +88,16 @@ def register_provider(name: str, cls: type[ProviderAdapter]) -> None:
 def get_provider_defaults(name: str | None) -> dict[str, Any]:
     """Get default config values (base_url, model, max_tokens) for a provider.
 
-    Falls back to empty dict if the provider is unknown.
+    Falls back to empty dict if the provider is unknown. ``context_tokens``
+    is the model's context window (input + output), used by config.py as
+    the ``model_context_tokens`` fallback when a profile omits it.
     """
     adapter = get_provider(name)
     return {
         "base_url": adapter.default_base_url,
         "model": adapter.default_model,
         "max_tokens": adapter.default_max_tokens,
+        "context_tokens": adapter.default_context_tokens,
     }
 
 
