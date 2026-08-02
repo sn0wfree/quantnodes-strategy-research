@@ -370,6 +370,7 @@ class RunBacktestTool(BaseTool):
         },
         "required": ["workspace", "strategy_name"],
     }
+    is_readonly = False
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
@@ -442,6 +443,11 @@ class RunBacktestTool(BaseTool):
             "strategy": strategy_name,
             "metrics": result.get("metrics", {}),
             "status": result.get("status", "pending"),
+            "next_step": (
+                f"list_history(strategy_name='{strategy_name}') 对比历史；"
+                f"drawdown_analysis(strategy_name='{strategy_name}') 看回撤；"
+                f"或 benchmark_comparison(strategy_name='{strategy_name}', benchmark_code='...')"
+            ),
         })
 
 
@@ -594,6 +600,10 @@ class ComputeFactorTool(BaseTool):
             "sample": sample,
             "first_date": str(series.index.min()) if len(series) else None,
             "last_date": str(series.index.max()) if len(series) else None,
+            "next_step": (
+                "factor_analysis(factor_code=..., asset=...) 计算 IC/IR；"
+                "或 factor_cross_sectional_analysis 跨资产验证"
+            ),
         })
 
 
@@ -820,11 +830,11 @@ class FactorAnalysisTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="FactorAnalysisTool")
+            return _workspace_error(exc, tool="factor_analysis")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return err_actionable("missing or invalid 'factor_code'", tool="FactorAnalysisTool")
+            return err_actionable("missing or invalid 'factor_code'", tool="factor_analysis")
         asset = kwargs.get("asset")
         forward_days = int(kwargs.get("forward_days", 5))
 
@@ -832,26 +842,26 @@ class FactorAnalysisTool(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"db open failed: {exc}", tool="FactorAnalysisTool")
+            return err_actionable(f"db open failed: {exc}", tool="factor_analysis")
 
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="FactorAnalysisTool")
+            return err_actionable("workspace has no DuckDB", tool="factor_analysis")
 
         try:
             prices_df = conn.execute(
                 "SELECT date, asset, close FROM ohlcv ORDER BY date, asset"
             ).fetch_df()
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"ohlcv query failed: {exc}", tool="FactorAnalysisTool")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="factor_analysis")
 
         if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="FactorAnalysisTool")
+            return err_actionable("ohlcv table is empty", tool="factor_analysis")
 
         available_assets = sorted(prices_df["asset"].unique())
         if asset is None:
             asset = available_assets[0]
         elif asset not in available_assets:
-            return err_actionable(f"asset '{asset}' not found", tool="FactorAnalysisTool")
+            return err_actionable(f"asset '{asset}' not found", tool="factor_analysis")
 
         asset_df = prices_df[prices_df["asset"] == asset].copy()
         asset_df = asset_df.set_index("date")[["close"]]
@@ -860,7 +870,7 @@ class FactorAnalysisTool(BaseTool):
         try:
             factor_series = compute_factor(factor_code, asset_df)
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"compute failed: {exc}", tool="FactorAnalysisTool")
+            return err_actionable(f"compute failed: {exc}", tool="factor_analysis")
 
         # Compute forward returns
         asset_df["fwd_ret"] = asset_df["close"].pct_change(forward_days).shift(-forward_days)
@@ -869,7 +879,7 @@ class FactorAnalysisTool(BaseTool):
         import pandas as pd
         aligned = pd.concat([factor_series, asset_df["fwd_ret"]], axis=1).dropna()
         if len(aligned) < 10:
-            return err_actionable("insufficient data for IC analysis (need >= 10 rows)", tool="FactorAnalysisTool")
+            return err_actionable("insufficient data for IC analysis (need >= 10 rows)", tool="factor_analysis")
 
         ic = aligned.iloc[:, 0].corr(aligned["fwd_ret"])
         ic_mean = float(aligned.iloc[:, 0].corr(aligned["fwd_ret"], method="spearman")) if len(aligned) > 5 else 0.0
@@ -881,6 +891,10 @@ class FactorAnalysisTool(BaseTool):
             "ic_mean": round(ic, 4) if pd.notna(ic) else None,
             "spearman_ic": round(ic_mean, 4),
             "n_observations": len(aligned),
+            "next_step": (
+                "factor_cross_sectional_analysis(factor_code=..., universe='all') "
+                "跨资产验证 IC；或直接 run_backtest 构建策略"
+            ),
         })
 
 
@@ -910,7 +924,7 @@ class PatternRecognitionTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="PatternRecognitionTool")
+            return _workspace_error(exc, tool="pattern_recognition")
 
         asset = kwargs.get("asset")
         lookback = int(kwargs.get("lookback", 60))
@@ -919,27 +933,27 @@ class PatternRecognitionTool(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"db open failed: {exc}", tool="PatternRecognitionTool")
+            return err_actionable(f"db open failed: {exc}", tool="pattern_recognition")
 
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="PatternRecognitionTool")
+            return err_actionable("workspace has no DuckDB", tool="pattern_recognition")
 
         try:
             prices_df = conn.execute(
                 "SELECT date, asset, open, high, low, close, volume FROM ohlcv ORDER BY date"
             ).fetch_df()
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"ohlcv query failed: {exc}", tool="PatternRecognitionTool")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="pattern_recognition")
 
         if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="PatternRecognitionTool")
+            return err_actionable("ohlcv table is empty", tool="pattern_recognition")
 
         if asset:
             prices_df = prices_df[prices_df["asset"] == asset]
 
         prices_df = prices_df.tail(lookback)
         if len(prices_df) < 10:
-            return err_actionable("insufficient data", tool="PatternRecognitionTool")
+            return err_actionable("insufficient data", tool="pattern_recognition")
 
         closes = prices_df["close"].values
         highs = prices_df["high"].values
@@ -1008,7 +1022,7 @@ class ListSkillsTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="ListSkillsTool")
+            return _workspace_error(exc, tool="list_skills")
 
         category = kwargs.get("category")
 
@@ -1045,7 +1059,7 @@ class ListSkillsTool(BaseTool):
                 "skills": skill_list,
             })
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"list_skills failed: {exc}", tool="ListSkillsTool")
+            return err_actionable(f"list_skills failed: {exc}", tool="list_skills")
 
 
 # ── 10. LoadSkillTool ─────────────────────────────────────────────
@@ -1074,11 +1088,11 @@ class LoadSkillTool(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="LoadSkillTool")
+            return _workspace_error(exc, tool="load_skill")
 
         name = kwargs.get("name")
         if not isinstance(name, str) or not name:
-            return err_actionable("missing or invalid 'name'", tool="LoadSkillTool")
+            return err_actionable("missing or invalid 'name'", tool="load_skill")
 
         try:
             from ...skills import SkillRegistry
@@ -1109,7 +1123,7 @@ class LoadSkillTool(BaseTool):
                 "content": skill.content,
             })
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"load_skill failed: {exc}", tool="LoadSkillTool")
+            return err_actionable(f"load_skill failed: {exc}", tool="load_skill")
 
 
 # ── 11. OptionsPricingTool ──────────────────────────────────────────
@@ -1146,12 +1160,12 @@ class OptionsPricingTool(BaseTool):
             T = float(kwargs["time_to_expiry"])
             option_type = kwargs.get("option_type", "call").lower()
         except (KeyError, ValueError, TypeError) as exc:
-            return err_actionable(f"invalid parameters: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"invalid parameters: {exc}", tool="options_pricing")
 
         if option_type not in ("call", "put"):
-            return err_actionable("option_type must be 'call' or 'put'", tool="OptionsPricingTool")
+            return err_actionable("option_type must be 'call' or 'put'", tool="options_pricing")
         if T <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
-            return err_actionable("spot, strike, volatility, and time_to_expiry must be positive", tool="OptionsPricingTool")
+            return err_actionable("spot, strike, volatility, and time_to_expiry must be positive", tool="options_pricing")
 
         from math import exp, log, sqrt
 
@@ -1228,11 +1242,11 @@ class FactorCrossSectionalAnalysis(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="factor_cross_sectional_analysis")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
+            return err_actionable("missing or invalid 'factor_code'", tool="factor_cross_sectional_analysis")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1242,9 +1256,9 @@ class FactorCrossSectionalAnalysis(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"db open failed: {exc}", tool="factor_cross_sectional_analysis")
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
+            return err_actionable("workspace has no DuckDB", tool="factor_cross_sectional_analysis")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1258,10 +1272,10 @@ class FactorCrossSectionalAnalysis(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="factor_cross_sectional_analysis")
 
         if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
+            return err_actionable("ohlcv table is empty", tool="factor_cross_sectional_analysis")
 
         # Filter universe
         all_assets = sorted(prices_df["asset"].unique())
@@ -1269,12 +1283,12 @@ class FactorCrossSectionalAnalysis(BaseTool):
             assets = [a.strip() for a in universe_str.split(",")]
             missing = [a for a in assets if a not in all_assets]
             if missing:
-                return err_actionable(f"assets not found: {missing[:5]}", tool="OptionsPricingTool")
+                return err_actionable(f"assets not found: {missing[:5]}", tool="factor_cross_sectional_analysis")
         else:
             assets = all_assets
 
         if len(assets) < 3:
-            return err_actionable(f"need >= 3 assets for cross-sectional IC, got {len(assets)}", tool="OptionsPricingTool")
+            return err_actionable(f"need >= 3 assets for cross-sectional IC, got {len(assets)}", tool="factor_cross_sectional_analysis")
 
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
@@ -1292,7 +1306,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
                 continue
 
         if len(factor_panel) < 3:
-            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="OptionsPricingTool")
+            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_cross_sectional_analysis")
 
         # Build forward return panel
         ret_panel = {}
@@ -1326,7 +1340,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
                 valid_dates.append(dt)
 
         if len(ic_pearson_list) < 5:
-            return err_actionable(f"too few valid IC observations ({len(ic_pearson_list)})", tool="OptionsPricingTool")
+            return err_actionable(f"too few valid IC observations ({len(ic_pearson_list)})", tool="factor_cross_sectional_analysis")
 
         ic_arr = np.array(ic_pearson_list)
         spear_arr = np.array(ic_spearman_list)
@@ -1343,6 +1357,10 @@ class FactorCrossSectionalAnalysis(BaseTool):
             "ic_spearman_mean": round(float(np.mean(spear_arr)), 4),
             "ic_spearman_std": round(float(np.std(spear_arr)), 4),
             "sample_dates": [str(d) for d in valid_dates[:5]],
+            "next_step": (
+                "factor_quintile_returns(factor_code=..., universe=...) 验证分组收益单调性；"
+                "factor_ic_decay(factor_code=..., horizons='1,5,10,20,60') 看 IC 衰减"
+            ),
         })
 
 
@@ -1379,11 +1397,11 @@ class FactorQuintileReturns(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="factor_quintile_returns")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
+            return err_actionable("missing or invalid 'factor_code'", tool="factor_quintile_returns")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1394,9 +1412,9 @@ class FactorQuintileReturns(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"db open failed: {exc}", tool="factor_quintile_returns")
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
+            return err_actionable("workspace has no DuckDB", tool="factor_quintile_returns")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1410,10 +1428,10 @@ class FactorQuintileReturns(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="factor_quintile_returns")
 
         if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
+            return err_actionable("ohlcv table is empty", tool="factor_quintile_returns")
 
         all_assets = sorted(prices_df["asset"].unique())
         if universe_str != "all":
@@ -1422,7 +1440,7 @@ class FactorQuintileReturns(BaseTool):
             assets = all_assets
 
         if len(assets) < n_groups * 2:
-            return err_actionable(f"need >= {n_groups * 2} assets for {n_groups}-group analysis, got {len(assets)}", tool="OptionsPricingTool")
+            return err_actionable(f"need >= {n_groups * 2} assets for {n_groups}-group analysis, got {len(assets)}", tool="factor_quintile_returns")
 
         import pandas as pd
         df = prices_df[prices_df["asset"].isin(assets)].copy()
@@ -1490,6 +1508,10 @@ class FactorQuintileReturns(BaseTool):
             "holding_period": holding_period,
             "n_assets_used": len(factor_panel),
             **result,
+            "next_step": (
+                "factor_ic_decay(factor_code=..., horizons='1,5,10,20,60') 看 IC 衰减；"
+                "factor_turnover(factor_code=...) 看排名稳定性"
+            ),
         })
 
 
@@ -1528,11 +1550,11 @@ class FactorICDecay(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="factor_ic_decay")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
+            return err_actionable("missing or invalid 'factor_code'", tool="factor_ic_decay")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1543,9 +1565,9 @@ class FactorICDecay(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"db open failed: {exc}", tool="factor_ic_decay")
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
+            return err_actionable("workspace has no DuckDB", tool="factor_ic_decay")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1559,10 +1581,10 @@ class FactorICDecay(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="factor_ic_decay")
 
         if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
+            return err_actionable("ohlcv table is empty", tool="factor_ic_decay")
 
         all_assets = sorted(prices_df["asset"].unique())
         if universe_str != "all":
@@ -1586,7 +1608,7 @@ class FactorICDecay(BaseTool):
                 continue
 
         if len(factor_panel) < 3:
-            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="OptionsPricingTool")
+            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_ic_decay")
 
         factor_df = pd.DataFrame(factor_panel)
 
@@ -1630,6 +1652,10 @@ class FactorICDecay(BaseTool):
             "factor_code": factor_code,
             "n_assets": len(factor_panel),
             "ic_decay": results,
+            "next_step": (
+                "factor_turnover(factor_code=..., rebalance_freq=...) 看排名稳定性；"
+                "根据最佳 horizon 进入 run_backtest 构建策略"
+            ),
         })
 
 
@@ -1665,11 +1691,11 @@ class FactorTurnover(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="factor_turnover")
 
         factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
-            return err_actionable("missing or invalid 'factor_code'", tool="OptionsPricingTool")
+            return err_actionable("missing or invalid 'factor_code'", tool="factor_turnover")
         universe_str = kwargs.get("universe", "all")
         start_date = kwargs.get("start_date")
         end_date = kwargs.get("end_date")
@@ -1679,9 +1705,9 @@ class FactorTurnover(BaseTool):
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"db open failed: {exc}", tool="factor_turnover")
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
+            return err_actionable("workspace has no DuckDB", tool="factor_turnover")
 
         try:
             query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
@@ -1695,10 +1721,10 @@ class FactorTurnover(BaseTool):
             query += " ORDER BY date, asset"
             prices_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return err_actionable(f"ohlcv query failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"ohlcv query failed: {exc}", tool="factor_turnover")
 
         if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="OptionsPricingTool")
+            return err_actionable("ohlcv table is empty", tool="factor_turnover")
 
         all_assets = sorted(prices_df["asset"].unique())
         if universe_str != "all":
@@ -1722,7 +1748,7 @@ class FactorTurnover(BaseTool):
                 continue
 
         if len(factor_panel) < 3:
-            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="OptionsPricingTool")
+            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_turnover")
 
         factor_df = pd.DataFrame(factor_panel)
 
@@ -1730,7 +1756,7 @@ class FactorTurnover(BaseTool):
         dates = sorted(factor_df.index)
         sampled_dates = dates[::rebalance_freq]
         if len(sampled_dates) < 2:
-            return err_actionable("not enough rebalancing periods", tool="OptionsPricingTool")
+            return err_actionable("not enough rebalancing periods", tool="factor_turnover")
 
         # Compute rank correlation between consecutive periods
         turnover_list = []
@@ -1745,7 +1771,7 @@ class FactorTurnover(BaseTool):
                 turnover_list.append(1.0 - float(rank_corr))
 
         if not turnover_list:
-            return err_actionable("no valid turnover observations", tool="OptionsPricingTool")
+            return err_actionable("no valid turnover observations", tool="factor_turnover")
 
         arr = np.array(turnover_list)
         return _ok({
@@ -1757,6 +1783,10 @@ class FactorTurnover(BaseTool):
             "median_turnover": round(float(np.median(arr)), 4),
             "std_turnover": round(float(np.std(arr)), 4),
             "avg_rank_stability": round(1.0 - float(np.mean(arr)), 4),
+            "next_step": (
+                "低换手(排名稳定)时用该因子进入 factor_cross_sectional_analysis 复核，"
+                "然后 run_backtest 构建策略"
+            ),
         })
 
 
@@ -1792,11 +1822,11 @@ class StrategyCompare(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="strategy_compare")
 
         strategy_names_str = kwargs.get("strategy_names", "")
         if not strategy_names_str:
-            return err_actionable("missing 'strategy_names'", tool="OptionsPricingTool")
+            return err_actionable("missing 'strategy_names'", tool="strategy_compare")
         strategy_names = [s.strip() for s in strategy_names_str.split(",")]
         metrics_str = kwargs.get("metrics", "sharpe,ann_return,max_dd,calmar,turnover,win_rate")
         metrics_keys = [m.strip() for m in metrics_str.split(",")]
@@ -1871,21 +1901,21 @@ class DrawdownAnalysis(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="drawdown_analysis")
 
         strategy_name = kwargs.get("strategy_name", "")
         if not strategy_name:
-            return err_actionable("missing 'strategy_name'", tool="OptionsPricingTool")
+            return err_actionable("missing 'strategy_name'", tool="drawdown_analysis")
         top_n = int(kwargs.get("top_n", 5))
 
         # Find latest run
         runs_dir = workspace / "strategies" / strategy_name / "runs"
         if not runs_dir.exists():
-            return err_actionable(f"runs directory not found: {runs_dir}", tool="OptionsPricingTool")
+            return err_actionable(f"runs directory not found: {runs_dir}", tool="drawdown_analysis")
 
         run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
         if not run_dirs:
-            return err_actionable("no runs found", tool="OptionsPricingTool")
+            return err_actionable("no runs found", tool="drawdown_analysis")
 
         latest_run = run_dirs[-1]
 
@@ -1923,7 +1953,7 @@ class DrawdownAnalysis(BaseTool):
                     pass
 
         if equity is None or len(equity) < 10:
-            return err_actionable("could not find equity curve data in the latest run", tool="OptionsPricingTool")
+            return err_actionable("could not find equity curve data in the latest run", tool="drawdown_analysis")
 
         equity = np.array(equity, dtype=float)
 
@@ -2014,7 +2044,7 @@ class BenchmarkComparison(BaseTool):
         try:
             workspace = _workspace_from_kwargs(kwargs)
         except ValueError as exc:
-            return _workspace_error(exc, tool="OptionsPricingTool")
+            return _workspace_error(exc, tool="benchmark_comparison")
 
         strategy_name = kwargs.get("strategy_name", "")
         benchmark_code = kwargs.get("benchmark_code", "")
@@ -2022,18 +2052,18 @@ class BenchmarkComparison(BaseTool):
         end_date = kwargs.get("end_date")
 
         if not strategy_name:
-            return err_actionable("missing 'strategy_name'", tool="OptionsPricingTool")
+            return err_actionable("missing 'strategy_name'", tool="benchmark_comparison")
         if not benchmark_code:
-            return err_actionable("missing 'benchmark_code'", tool="OptionsPricingTool")
+            return err_actionable("missing 'benchmark_code'", tool="benchmark_comparison")
 
         # Get strategy equity from latest run
         runs_dir = workspace / "strategies" / strategy_name / "runs"
         if not runs_dir.exists():
-            return err_actionable(f"runs directory not found: {runs_dir}", tool="OptionsPricingTool")
+            return err_actionable(f"runs directory not found: {runs_dir}", tool="benchmark_comparison")
 
         run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
         if not run_dirs:
-            return err_actionable("no runs found", tool="OptionsPricingTool")
+            return err_actionable("no runs found", tool="benchmark_comparison")
 
         latest_run = run_dirs[-1]
 
@@ -2054,16 +2084,16 @@ class BenchmarkComparison(BaseTool):
                     continue
 
         if strategy_equity is None or len(strategy_equity) < 10:
-            return err_actionable("could not find strategy equity curve", tool="OptionsPricingTool")
+            return err_actionable("could not find strategy equity curve", tool="benchmark_comparison")
 
         # Get benchmark prices from DuckDB
         try:
             from ...db import get_connection
             conn = get_connection(workspace)
         except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"db open failed: {exc}", tool="benchmark_comparison")
         if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="OptionsPricingTool")
+            return err_actionable("workspace has no DuckDB", tool="benchmark_comparison")
 
         try:
             query = f"SELECT date, close FROM ohlcv WHERE asset = '{benchmark_code}'"
@@ -2074,10 +2104,10 @@ class BenchmarkComparison(BaseTool):
             query += " ORDER BY date"
             bench_df = conn.execute(query).fetch_df()
         except Exception as exc:
-            return err_actionable(f"benchmark query failed: {exc}", tool="OptionsPricingTool")
+            return err_actionable(f"benchmark query failed: {exc}", tool="benchmark_comparison")
 
         if bench_df.empty:
-            return err_actionable(f"no data found for benchmark '{benchmark_code}'", tool="OptionsPricingTool")
+            return err_actionable(f"no data found for benchmark '{benchmark_code}'", tool="benchmark_comparison")
 
         bench_equity = bench_df["close"].values.astype(float)
 

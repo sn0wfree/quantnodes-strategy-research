@@ -928,10 +928,12 @@ class AgentLoop:
             "iter": getattr(self, "_current_iter", 0),
         })
 
-        # Inject workspace kwarg if not present
+        # Inject workspace + session_id kwargs if not present
         kwargs = dict(tc.arguments)
         if "workspace" not in kwargs and self.workspace is not None:
             kwargs["workspace"] = self.workspace
+        if "session_id" not in kwargs and self.session_id is not None:
+            kwargs["session_id"] = self.session_id
 
         # Inject progress callback so tools can report progress steps
         def _progress_callback(steps: list[str]) -> None:
@@ -1110,6 +1112,8 @@ class AgentLoop:
         kwargs = dict(tc.arguments)
         if "workspace" not in kwargs and self.workspace is not None:
             kwargs["workspace"] = self.workspace
+        if "session_id" not in kwargs and self.session_id is not None:
+            kwargs["session_id"] = self.session_id
 
         t0 = time.perf_counter()
         try:

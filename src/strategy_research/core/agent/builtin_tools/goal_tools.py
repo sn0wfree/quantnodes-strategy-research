@@ -74,6 +74,7 @@ class CreateGoalTool(BaseTool):
         },
         "required": ["session_id", "objective", "criteria"],
     }
+    is_readonly = False
     repeatable = False
     strict = True  # All params required (criteria nullable)
 
@@ -155,6 +156,7 @@ class AddEvidenceTool(BaseTool):
         },
         "required": ["session_id", "text", "criterion_id", "source_type", "run_id"],
     }
+    is_readonly = False
     repeatable = True
     strict = True  # All params required (nullable for optional)
 
@@ -234,6 +236,7 @@ class CompleteGoalTool(BaseTool):
         },
         "required": [],
     }
+    is_readonly = False
     repeatable = False
 
     def execute(self, **kwargs: Any) -> str:

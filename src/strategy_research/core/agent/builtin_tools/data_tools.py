@@ -52,6 +52,7 @@ class GetMarketDataTool(BaseTool):
         },
         "required": ["codes", "start_date", "end_date"],
     }
+    is_readonly = False
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
@@ -206,6 +207,10 @@ class GetMarketDataTool(BaseTool):
                         "供回测使用。"
                     ),
                 },
+                "next_step": (
+                    f"commit_market_data(codes={codes}, cache_keys={list(cached.values())}, "
+                    "strategy_name='<strategy>', workspace=...) 将缓存行情合并入 DuckDB"
+                ),
             })
 
         except NoAvailableSourceError as exc:
@@ -399,6 +404,7 @@ class ImportDataTool(BaseTool):
         },
         "required": ["workspace", "data"],
     }
+    is_readonly = False
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
@@ -535,6 +541,10 @@ class ImportDataTool(BaseTool):
                 "n_codes": len(data),
                 "strategy_name": strategy_name,
                 "message": f"Imported {total_rows} rows from {len(data)} codes into ohlcv table",
+                "next_step": (
+                    f"run_backtest(strategy_name='{strategy_name}', workspace='{workspace}') "
+                    "或 factor_analysis(factor_code=..., workspace=...)"
+                ),
             })
 
         except Exception as exc:
@@ -593,6 +603,7 @@ class CommitMarketDataTool(BaseTool):
         },
         "required": ["workspace", "cache_keys", "codes"],
     }
+    is_readonly = False
     repeatable = True
 
     def execute(self, **kwargs: Any) -> str:
