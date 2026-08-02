@@ -152,6 +152,10 @@ def create_app(
     from .routers import system
     app.include_router(system.router, prefix="/api/system", tags=["system"])
 
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
     # WebUI routes (mounted inside factory so they survive --reload)
     from ..webui.routes import router as webui_router
     app.include_router(webui_router, tags=["webui"])
@@ -199,10 +203,6 @@ def create_app(
                 "version": __version__,
                 "docs": "/docs",
             }
-
-    @app.get("/health")
-    async def health():
-        return {"status": "ok"}
 
     return app
 

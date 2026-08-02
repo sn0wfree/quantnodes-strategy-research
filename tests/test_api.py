@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from strategy_research.api.app import create_app
+from strategy_research.api.auth_tokens import create_token
 
 
 # ============================================================
@@ -17,26 +18,38 @@ from strategy_research.api.app import create_app
 
 
 @pytest.fixture
-def client():
-    """创建测试客户端。"""
-    app = create_app()
-    return TestClient(app)
+def auth_headers():
+    """Bearer token for protected routers (goal/hypothesis/etc.)."""
+    return {"Authorization": f"Bearer {create_token('admin')}"}
 
 
 @pytest.fixture
-def client_with_goal(tmp_path):
+def client(auth_headers):
+    """创建测试客户端（带 auth 头；公开端点不受影响）。"""
+    app = create_app()
+    client = TestClient(app)
+    client.headers.update(auth_headers)
+    return client
+
+
+@pytest.fixture
+def client_with_goal(tmp_path, auth_headers):
     """带 goal DB 的测试客户端。"""
     db_path = str(tmp_path / "goals.db")
     app = create_app(goal_db_path=db_path)
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update(auth_headers)
+    return client
 
 
 @pytest.fixture
-def client_with_hypothesis(tmp_path):
+def client_with_hypothesis(tmp_path, auth_headers):
     """带 hypothesis 文件的测试客户端。"""
     hyp_path = str(tmp_path / "hypotheses.json")
     app = create_app(hypotheses_path=hyp_path)
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update(auth_headers)
+    return client
 
 
 # ============================================================
@@ -45,16 +58,18 @@ def client_with_hypothesis(tmp_path):
 
 
 class TestAppRoot:
-    def test_root(self, client):
+    def test_root_serves_spa(self, client):
+        """`/` serves the SPA index.html (static dir present in dev repo)."""
         resp = client.get("/")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["service"] == "strategy-research-api"
-        assert "docs" in data
+        assert resp.headers["content-type"].startswith("text/html")
 
     def test_health(self, client):
+        """`/health` must return JSON — it must not be shadowed by the
+        SPA catch-all route (regression for the routing-order bug)."""
         resp = client.get("/health")
         assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/json")
         assert resp.json()["status"] == "ok"
 
 

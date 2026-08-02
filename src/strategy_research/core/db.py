@@ -633,7 +633,7 @@ def save_weight_history(
             conn.close()
             return True
 
-        pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
         conn.execute("""
             INSERT OR REPLACE INTO weight_history
             (strategy_name, run, date, asset_code, weight)
@@ -695,7 +695,7 @@ def save_nav_history(
         return False
 
     try:
-        pd.DataFrame({
+        df = pd.DataFrame({
             "strategy_name": strategy_name,
             "run": run,
             "date": nav.index,

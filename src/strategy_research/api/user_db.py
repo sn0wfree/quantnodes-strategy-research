@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -23,11 +24,15 @@ class UserDB:
     def __init__(self, db_path: Path):
         self._db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()
         self._ensure_table()
 
     def _get_conn(self) -> sqlite3.Connection:
+        # check_same_thread=False: FastAPI serves requests on a thread
+        # pool; a per-instance cached connection must be usable from any
+        # worker thread (writes are serialized via self._lock).
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path))
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
@@ -63,12 +68,13 @@ class UserDB:
         uid = user_id or str(uuid.uuid4())
         ts = created_at or time.time()
         conn = self._get_conn()
-        conn.execute(
-            "INSERT INTO users (id, username, display_name, password_hash, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (uid, username, display_name, password_hash, ts),
-        )
-        conn.commit()
+        with self._lock:
+            conn.execute(
+                "INSERT INTO users (id, username, display_name, password_hash, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (uid, username, display_name, password_hash, ts),
+            )
+            conn.commit()
         return {
             "id": uid,
             "username": username,
@@ -76,6 +82,17 @@ class UserDB:
             "password_hash": password_hash,
             "created_at": ts,
         }
+
+    def update_password(self, user_id: str, new_password_hash: str) -> bool:
+        """Set a user's password hash. Returns True if the user exists."""
+        conn = self._get_conn()
+        with self._lock:
+            cur = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (new_password_hash, user_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
 
     def get_user_by_username(self, username: str) -> Optional[dict]:
         conn = self._get_conn()

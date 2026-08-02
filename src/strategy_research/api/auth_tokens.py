@@ -15,6 +15,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
@@ -23,11 +24,18 @@ from typing import Optional
 
 TOKEN_TTL_SECONDS = 86400  # 24h
 
+logger = logging.getLogger(__name__)
+
 _SECRET_CACHE: bytes | None = None
 
 
 def _load_secret() -> bytes:
-    """Resolve the signing secret: env JWT_SECRET > persisted file > dev fallback."""
+    """Resolve the signing secret: env JWT_SECRET > persisted file > dev fallback.
+
+    The dev fallback (public constant) is a last resort for read-only
+    filesystems and is logged loudly — tokens signed with it are
+    forgeable by anyone who knows the codebase.
+    """
     global _SECRET_CACHE
     if _SECRET_CACHE is not None:
         return _SECRET_CACHE
@@ -52,6 +60,12 @@ def _load_secret() -> bytes:
         return _SECRET_CACHE
     except OSError:
         _SECRET_CACHE = b"strategy-research-dev-secret"
+        logger.error(
+            "auth_tokens: cannot persist JWT secret to %s — falling back "
+            "to the forgeable dev secret. Set JWT_SECRET in the "
+            "environment for any non-local deployment.",
+            path,
+        )
         return _SECRET_CACHE
 
 

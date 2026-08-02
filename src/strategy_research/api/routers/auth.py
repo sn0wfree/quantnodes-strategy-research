@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -50,10 +50,15 @@ def _verify_token(token: str) -> Optional[str]:
     return verify_token(token)
 
 
-async def get_current_user_id(token: str = "") -> str:
-    """Dependency: extract user_id from token. Used by protected endpoints."""
-    # This is a simplified version — real implementation uses middleware
-    return "anonymous"
+async def get_current_user_id(request: Request) -> str:
+    """Dependency: return the user_id set by AuthMiddleware.
+
+    The middleware stores the verified token's user_id on
+    ``request.state.user_id`` (see api/middleware.py). Unauthenticated
+    requests that pass through a public prefix get ``"anonymous"``.
+    """
+    user_id = getattr(request.state, "user_id", None)
+    return user_id or "anonymous"
 
 
 # ── User DB (lazy init with workspace path) ──────────────────
@@ -111,7 +116,9 @@ async def login(body: UserLogin):
 
 @router.get("/me")
 async def me(user_id: str = Depends(get_current_user_id)):
-    """Get current user info."""
+    """Get current user info (requires a valid token)."""
+    if not user_id or user_id == "anonymous":
+        raise HTTPException(status_code=401, detail="Not authenticated")
     db = _get_user_db()
     user = db.get_user_by_id(user_id)
     if user:
@@ -124,24 +131,26 @@ async def me(user_id: str = Depends(get_current_user_id)):
 
 
 @router.post("/change-password")
-async def change_password(body: ChangePassword):
-    """Change password (requires old password)."""
+async def change_password(
+    body: ChangePassword,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Change password for the currently authenticated user.
+
+    The old password is verified against the token-bound account —
+    not a global password-hash scan (which could update the wrong
+    account when two users share a password).
+    """
+    if not user_id or user_id == "anonymous":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     db = _get_user_db()
-    old_hash = _hash_password(body.old_password)
-
-    # Find user by old password hash (works for small user base)
-    conn = db._get_conn()
-    row = conn.execute(
-        "SELECT id FROM users WHERE password_hash = ?", (old_hash,)
-    ).fetchone()
-
-    if not row:
+    user = db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user["password_hash"] != _hash_password(body.old_password):
         raise HTTPException(status_code=401, detail="Old password incorrect")
 
     from ..user_db import hash_password
-    conn.execute(
-        "UPDATE users SET password_hash = ? WHERE id = ?",
-        (hash_password(body.new_password), row["id"]),
-    )
-    conn.commit()
+    db.update_password(user["id"], hash_password(body.new_password))
     return {"message": "Password updated"}
