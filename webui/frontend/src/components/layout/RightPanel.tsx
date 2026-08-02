@@ -2,6 +2,7 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { useLayoutStore } from '../../stores/layout'
 import { useWorkflowStore } from '../../stores/workflow'
 import { useGoalStore } from '../../stores/goal'
+import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { Workflow, Target, Bot } from 'lucide-react'
 import { AgentList } from '../agent/AgentList'
 import { GoalTab } from '../goal/GoalTab'
@@ -28,6 +29,9 @@ export function RightPanel() {
 
   // Goal state
   const currentGoal = useGoalStore((s) => s.currentGoal)
+
+  // Poll goal status while the Goal tab is open (no backend goal_* SSE)
+  useGoalPolling(tab === 'goal')
 
   if (!visible) return null
 

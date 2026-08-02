@@ -61,21 +61,37 @@ async def goal_start(req: GoalStartRequest, request: Request):
 
 @router.get("/status")
 async def goal_status(session_id: str, request: Request):
-    """获取当前 goal 状态。"""
+    """获取当前 goal 状态（含 criteria / evidence_count / progress 完整快照）。"""
     try:
         from ...core.goal import GoalStore
 
         db_path = getattr(request.app.state, "goal_db_path", None)
         with GoalStore(db_path=db_path) as store:
-            current = store.get_current_goal(session_id)
-        if current is None:
+            snapshot = store.get_current_snapshot(session_id)
+        if snapshot is None:
             return {"status": "no_goal", "session_id": session_id}
+
+        goal = snapshot.get("goal", {})
+        criteria = snapshot.get("criteria", [])
         return {
             "status": "ok",
-            "goal_id": current.goal_id,
-            "goal_status": current.status.value,
-            "objective": current.objective,
+            "goal_id": goal.get("goal_id"),
+            "goal_status": goal.get("status"),
+            "objective": goal.get("objective"),
+            "progress_percent": goal.get("progress_percent", 0),
+            "recap": goal.get("recap"),
             "session_id": session_id,
+            "criteria": [
+                {
+                    "criterion_id": c.get("criterion_id"),
+                    "text": c.get("text"),
+                    "status": c.get("status"),
+                    "required": c.get("required", True),
+                }
+                for c in criteria
+            ],
+            "criteria_count": len(criteria),
+            "evidence_count": snapshot.get("evidence_count", 0),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

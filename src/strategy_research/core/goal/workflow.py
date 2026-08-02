@@ -336,11 +336,20 @@ class GoalWorkflowRunner:
             1 for s in agent_statuses.values() if s in ("success", "skipped")
         )
 
+        total_layers = 0
+        try:
+            from ..workflow.dag import topological_layers
+            dag = {a.id: [d for d in self._config.dag.get(a.id, [])]
+                   for a in self._config.agents}
+            total_layers = len(topological_layers(dag))
+        except Exception:  # noqa: BLE001
+            total_layers = 0
+
         return {
             "goal_id": self._goal_id,
             "status": self._state.status,
             "current_layer": self._state.current_layer,
-            "total_layers": len(self._config.agents),  # approximate
+            "total_layers": total_layers,
             "agents_completed": completed_count,
             "agents_total": total_agents,
             "evidence_count": evidence_count,
@@ -501,6 +510,7 @@ class GoalWorkflowRunner:
             goal_id=self._goal_id,
             evidence_map=evidence_map,
             store=self._store,
+            runner=self,
             completion_strategy=CompletionStrategyFactory.get(
                 self._config.completion.mode,
             ),

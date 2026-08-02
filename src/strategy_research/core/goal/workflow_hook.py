@@ -97,6 +97,11 @@ class GoalWorkflowHook:
         context: dict[str, Any],
     ) -> None:
         logger.info("GoalWorkflowHook: layer %d starting, agents=%s", layer_idx, agents)
+        runner_state = getattr(self._runner, "_state", None)
+        if runner_state is not None:
+            runner_state.current_layer = layer_idx + 1
+            for aid in agents:
+                runner_state.set_agent_status(aid, "running")
         if self._event_bus:
             self._event_bus.emit("layer_start", layer=layer_idx, agents=agents)
 
@@ -110,6 +115,14 @@ class GoalWorkflowHook:
         output_text = self._extract_output(result)
         if not output_text:
             return
+
+        runner_state = getattr(self._runner, "_state", None)
+        if runner_state is not None:
+            result_status = getattr(result, "status", None)
+            runner_state.set_agent_status(
+                agent_id,
+                "skipped" if result_status == "skipped" else "success",
+            )
 
         # Auto-collect evidence
         criterion_idx = self._evidence_map.get(agent_id, -1)
@@ -144,6 +157,13 @@ class GoalWorkflowHook:
         if self._event_bus:
             self._event_bus.emit("layer_complete", layer=layer_idx, agents=agents)
 
+        # P1.3: capture real layer_results so checkpoints save agent outputs.
+        for aid, res in results.items():
+            try:
+                self._layer_results[aid] = {"output": self._parse_output(res)}
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed to capture layer result for %s", aid)
+
         # Check if all criteria are covered
         if self._check_all_criteria_covered():
             logger.info(
@@ -151,6 +171,22 @@ class GoalWorkflowHook:
                 "triggering auto-complete", layer_idx,
             )
             self._auto_complete()
+
+    @staticmethod
+    def _parse_output(result: Any) -> Any:
+        """Parse an AgentResult/dict output into a JSON-able object."""
+        import json
+        raw = None
+        if hasattr(result, "output"):
+            raw = result.output
+        elif isinstance(result, dict):
+            raw = result.get("output", result.get("answer", ""))
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return raw
+        return raw
 
     def should_stop(self) -> bool:
         """Return True if the goal has been completed or the runner is cancelled.

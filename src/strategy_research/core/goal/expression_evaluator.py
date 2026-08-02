@@ -1,13 +1,13 @@
 """Expression DSL for workflow branch conditions (P3.7).
 
-TODO(architecture): parser/evaluator exist but are NOT wired into the
-Goal Workflow — ``BranchConfig.condition`` is parsed yet never
-evaluated (docs/phase-4-plan.md §5.4 "表达式 DSL 真求值"). Planned
-integration: ``GoalWorkflowHook.on_layer_complete`` evaluates
-``branch.condition`` against ``_layer_results`` and applies
-skip/retry/redirect actions; plus DSL enhancements (and/or/not,
-len/contains/min/max). Keep — this is an un-finished feature, not
-legacy.
+Wired into the Goal Workflow (2026-08-02): ``SwarmRuntime._apply_branches``
+evaluates ``BranchConfig.condition`` against per-layer ``layer_results``
+after each layer and applies ``skip`` / ``retry`` actions. ``redirect``
+is parsed but not implemented (documented as future work). The
+``layer_results`` shape is ``{agent_id: {"output": {field: val}}}`` built
+by ``SwarmRuntime._build_layer_results`` from each agent's worker output
+JSON; when ``answer`` is itself JSON its keys are merged up so
+``agent_id.output.field`` resolves directly.
 
 Evaluates expressions like:
   ``factor_analyst.output.sharpe < 0.3``

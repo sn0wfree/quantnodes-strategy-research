@@ -35,14 +35,10 @@ def client(app):
 
 
 def auth_header(user_id: str = "tester"):
-    """生成有效 JWT 头。"""
-    import base64
-    import json
-    import time
+    """生成有效 HMAC-SHA256 签名 token（AuthMiddleware 要求的格式）。"""
+    from strategy_research.api.auth_tokens import create_token
 
-    payload = {"sub": user_id, "exp": int(time.time()) + 3600}
-    token = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {create_token(user_id)}"}
 
 
 # ────────────────────────── /start ──────────────────────────

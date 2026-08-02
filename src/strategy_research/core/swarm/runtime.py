@@ -150,6 +150,7 @@ class SwarmRuntime:
 
         try:
             layers = topological_layers(preset.dag)
+            branches = preset.branches or []
 
             for layer_idx, layer in enumerate(layers):
                 if run_id not in self._active_runs:
@@ -206,6 +207,13 @@ class SwarmRuntime:
                     layer_idx, layer,
                     {aid: r for aid, r in result.agent_results.items()},
                 )
+
+                # ── Branch evaluation (P3.7): skip / retry on remaining layers
+                if branches:
+                    self._evaluate_branches_after_layer(
+                        branches, result.agent_results,
+                        layers, layer_idx,
+                    )
 
                 # ── Hook: should_stop
                 if self._any_hook_should_stop(hooks):
@@ -349,6 +357,137 @@ class SwarmRuntime:
             if r and r.status == AgentStatus.SUCCESS:
                 upstream[uid] = r.output
         return upstream
+
+    # ── Branch support (P3.7) ───────────────────────────────────
+
+    def _evaluate_branches_after_layer(
+        self,
+        branches: list[dict[str, Any]],
+        agent_results: dict[str, AgentResult],
+        layers: list[list[str]],
+        layer_idx: int,
+    ) -> None:
+        """Evaluate branches after a layer and log applied skip/retry."""
+        layer_results = self._build_layer_results(agent_results)
+        skip, retry = self._apply_branches(
+            branches, layer_results, layers, layer_idx,
+        )
+        if skip or retry:
+            logger.info(
+                "Branches after layer %d: skip=%s retry=%s",
+                layer_idx, skip, retry,
+            )
+
+    def _build_layer_results(
+        self,
+        agent_results: dict[str, AgentResult],
+    ) -> dict[str, Any]:
+        """Convert AgentResult dict → layer_results for expression evaluator.
+
+        Shape: ``{agent_id: {"output": {field: val}}}`` so conditions like
+        ``risk_controller.output.max_drawdown < -0.2`` resolve. Each agent's
+        ``output`` is the JSON-parsed worker payload; if its ``answer`` is
+        itself JSON, its keys are merged up so ``output.max_drawdown`` works
+        for both the wrapper payload and the inner answer dict.
+        """
+        import json
+
+        layer_results: dict[str, Any] = {}
+        for aid, ar in agent_results.items():
+            if ar.status != AgentStatus.SUCCESS or not ar.output:
+                continue
+            try:
+                parsed = json.loads(ar.output)
+            except (json.JSONDecodeError, TypeError):
+                parsed = {"output": ar.output}
+            if isinstance(parsed, dict):
+                out = dict(parsed)
+                answer = parsed.get("answer")
+                if isinstance(answer, str):
+                    try:
+                        answer_obj = json.loads(answer)
+                    except (json.JSONDecodeError, TypeError):
+                        answer_obj = None
+                    if isinstance(answer_obj, dict):
+                        # Merge inner answer keys up so output.<field> resolves
+                        out.update(answer_obj)
+                layer_results[aid] = {"output": out}
+            else:
+                layer_results[aid] = {"output": {"answer": ar.output}}
+        return layer_results
+
+    def _apply_branches(
+        self,
+        branches: list[dict[str, Any]],
+        layer_results: dict[str, Any],
+        layers: list[list[str]],
+        current_layer_idx: int,
+    ) -> tuple[list[str], list[str]]:
+        """Evaluate branch conditions and apply skip/retry to remaining layers.
+
+        Returns ``(skipped, retried)`` agent lists for logging.
+
+        Actions:
+          - ``skip``: remove target from all remaining layers.
+          - ``retry``: ensure target runs again — add it to the next
+            remaining layer if it is not already scheduled there.
+          - ``redirect``: NOT implemented (documented as future work).
+
+        Branch config shape: ``{condition, action, target, reason}``.
+        """
+        from ..goal.expression_evaluator import evaluate_condition
+
+        skipped: list[str] = []
+        retried: list[str] = []
+
+        remaining = layers[current_layer_idx + 1:]
+        if not branches or not remaining:
+            return skipped, retried
+
+        for branch in branches:
+            condition = branch.get("condition", "")
+            action = branch.get("action", "")
+            target = branch.get("target", "")
+            if not condition or not target:
+                continue
+            try:
+                hit = evaluate_condition(condition, layer_results)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Branch condition %r failed: %s", condition, exc)
+                continue
+            if not hit:
+                continue
+
+            self._apply_branch_action(
+                action, target, remaining,
+                layer_results, skipped, retried,
+            )
+        return skipped, retried
+
+    @staticmethod
+    def _apply_branch_action(
+        action: str,
+        target: str,
+        remaining: list[list[str]],
+        layer_results: dict[str, Any],
+        skipped: list[str],
+        retried: list[str],
+    ) -> None:
+        """Apply one branch action to the remaining layers."""
+        if action == "skip":
+            for layer in remaining:
+                if target in layer:
+                    layer.remove(target)
+                    skipped.append(target)
+        elif action == "retry":
+            if target in layer_results and target not in remaining[0]:
+                remaining[0].append(target)
+                retried.append(target)
+        else:
+            logger.info(
+                "Branch action %r for %s not implemented (redirect future work)",
+                action, target,
+            )
 
 
 

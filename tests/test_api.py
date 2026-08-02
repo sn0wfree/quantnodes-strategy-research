@@ -158,7 +158,12 @@ class TestGoalRouter:
         assert body["session_id"] == "sStruct"
         # Should NOT contain dataclass internals
         assert "_sa_instance_state" not in body
-        assert "progress_percent" not in body  # not exposed in the public contract
+        # P0-2: /status now returns the full snapshot for frontend polling
+        assert "progress_percent" in body
+        assert body["progress_percent"] == 0
+        assert "criteria" in body
+        assert body["criteria_count"] >= 1
+        assert "evidence_count" in body
 
     def test_goal_evidence_returns_evidence_id(self, client_with_goal):
         """POST /evidence returns the created evidence_id."""

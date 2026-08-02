@@ -293,3 +293,153 @@ class TestMetricsObserver:
         obs.clear()
         assert obs.event_counts == {}
         assert obs.agent_timings == {}
+
+
+# ── Branch DSL wiring (P0-1) ─────────────────────────────────
+
+
+class TestBranchWiring:
+    """SwarmRuntime evaluates branches and applies skip/retry (P3.7)."""
+
+    def _make_controller(self, outputs: dict[str, str]):
+        """Build a controller whose agents return fixed JSON outputs."""
+        class _StubExecutor:
+            def __init__(self, agent_id, out):
+                self.agent_id = agent_id
+                self.out = out
+
+            def execute(self, agent_call, task, workspace):
+                return self.out
+
+        from strategy_research.core.workflow.controller import WorkflowController
+
+        class _StubController(WorkflowController):
+            def execute_agent(self, agent_call, task, workspace=None):
+                return outputs.get(agent_call.agent_name, "{}")
+
+        return _StubController(registry=mock.MagicMock(), adj={}, config=mock.MagicMock())
+
+    def test_skip_removes_target_from_later_layer(self):
+        outputs = {
+            "risk": '{"agent": "risk", "status": "success", '
+                    '"answer": "{\\"max_drawdown\\": -0.3, \\"verdict\\": \\"fail\\"}"}',
+            "portfolio": '{"agent": "portfolio", "status": "success", "answer": "{}"}',
+        }
+        runtime = SwarmRuntime(controller=self._make_controller(outputs))
+        preset = SwarmPreset(
+            name="wf",
+            agents=[],
+            dag={"risk": [], "portfolio": ["risk"]},
+            branches=[{
+                "condition": "risk.output.max_drawdown < -0.2",
+                "action": "skip",
+                "target": "portfolio",
+                "reason": "回撤过大",
+            }],
+        )
+        # Register agents via AgentCall
+        from strategy_research.core.workflow.types import AgentCall
+        preset.agents = [
+            AgentCall(agent_name="risk", prompt=".prompts/risk.md",
+                      context={"tools": [], "input_from": [], "evidence_criterion": 0,
+                               "timeout": 30, "max_retries": 0}),
+            AgentCall(agent_name="portfolio", prompt=".prompts/pf.md",
+                      context={"tools": [], "input_from": ["risk"], "evidence_criterion": 0,
+                               "timeout": 30, "max_retries": 0}),
+        ]
+        result = runtime.execute(preset, Path("/tmp"), "task")
+        # portfolio should be skipped → never executed
+        assert "portfolio" not in result.agent_results
+        assert "risk" in result.agent_results
+
+    def test_retry_reruns_target_in_next_layer(self):
+        outputs = {
+            "a": '{"agent": "a", "status": "success", "answer": "{\\"x\\": 1}"}',
+            "b": '{"agent": "b", "status": "success", "answer": "{}"}',
+        }
+        runtime = SwarmRuntime(controller=self._make_controller(outputs))
+        from strategy_research.core.workflow.types import AgentCall
+        preset = SwarmPreset(
+            name="wf",
+            agents=[
+                AgentCall(agent_name="a", prompt=".prompts/a.md",
+                          context={"tools": [], "evidence_criterion": 0}),
+                AgentCall(agent_name="b", prompt=".prompts/b.md",
+                          context={"tools": [], "evidence_criterion": 0}),
+            ],
+            dag={"a": [], "b": ["a"]},
+            branches=[{
+                "condition": "a.output.x == 1",
+                "action": "retry",
+                "target": "b",
+            }],
+        )
+        result = runtime.execute(preset, Path("/tmp"), "task")
+        # retry → b is re-added to next layer, executed again
+        assert "a" in result.agent_results
+        assert "b" in result.agent_results
+
+    def test_layer_results_parses_nested_answer(self):
+        """_build_layer_results merges inner answer dict for output.field."""
+        runtime = SwarmRuntime()
+        ar = AgentResult(
+            agent_id="risk",
+            status=AgentStatus.SUCCESS,
+            output='{"agent": "risk", "answer": "{\\"max_drawdown\\": -0.3, '
+                   '\\"verdict\\": \\"fail\\"}"}',
+        )
+        lr = runtime._build_layer_results({"risk": ar})
+        assert lr["risk"]["output"]["max_drawdown"] == -0.3
+        assert lr["risk"]["output"]["verdict"] == "fail"
+
+    def test_layer_results_non_json_output(self):
+        runtime = SwarmRuntime()
+        ar = AgentResult(agent_id="a", status=AgentStatus.SUCCESS, output="plain text")
+        lr = runtime._build_layer_results({"a": ar})
+        assert "output" in lr["a"]
+
+
+# ── Progress tracking (P1-2) ─────────────────────────────────
+
+
+class TestProgressTracking:
+    def test_hook_updates_runner_state(self):
+        """Hook on_layer_start / on_agent_complete update runner state."""
+        from strategy_research.core.goal.workflow import GoalWorkflowState
+        state = GoalWorkflowState()
+        runner = mock.MagicMock()
+        runner._state = state
+
+        store = mock.MagicMock()
+        hook = GoalWorkflowHook(
+            session_id="s1", goal_id="g1",
+            evidence_map={"a": 0}, store=store, runner=runner,
+        )
+        hook.on_layer_start(0, ["a", "b"], {})
+        assert state.current_layer == 1
+        assert state.agent_statuses["a"] == "running"
+
+        result = AgentResult(agent_id="a", status=AgentStatus.SUCCESS,
+                             output="some meaningful output text here")
+        hook.on_agent_complete("a", result, {})
+        assert state.agent_statuses["a"] == "success"
+
+    def test_progress_total_layers_uses_topological(self):
+        from strategy_research.core.goal.workflow import (
+            GoalAgentConfig, GoalWorkflowConfig, GoalWorkflowGoalConfig,
+        )
+        config = GoalWorkflowConfig(
+            name="wf",
+            description="",
+            agents=[
+                GoalAgentConfig(id="a", prompt_file=".prompts/a.md"),
+                GoalAgentConfig(id="b", prompt_file=".prompts/b.md"),
+                GoalAgentConfig(id="c", prompt_file=".prompts/c.md"),
+            ],
+            dag={"a": [], "b": ["a"], "c": ["a", "b"]},
+            goal=GoalWorkflowGoalConfig(default_criteria=["c1"]),
+        )
+        runner = GoalWorkflowRunner(config, "s1")
+        progress = runner.get_progress()
+        # 3 agents, 3 layers (a | b | c)
+        assert progress["total_layers"] == 3
