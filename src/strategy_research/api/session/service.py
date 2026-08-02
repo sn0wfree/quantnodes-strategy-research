@@ -119,7 +119,7 @@ class SessionService:
         content: str,
         *,
         model: str | None = None,
-        max_iterations: int = 9999999999,
+        max_iterations: int = 50,
         system_prompt: Optional[str] = None,
         allow_shell_tools: bool = False,
     ) -> dict[str, str]:
@@ -134,7 +134,8 @@ class SessionService:
             session_id: Target session.
             content: User message text.
             model: Optional LLM model override (multi-model routing).
-            max_iterations: AgentLoop iterations (default 1 for plain chat).
+            max_iterations: AgentLoop iterations (default 50 for chat; the
+                caller may pass a larger value for agent/goal workflows).
             system_prompt: Optional custom system prompt (TUI goal mode uses
                 a different prompt than API chat mode).
             allow_shell_tools: Whether the registry may include shell tools.

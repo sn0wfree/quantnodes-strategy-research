@@ -477,9 +477,18 @@ async def send_async(body: ChatMessage, request: Request):
     # Delegate to SessionService — it handles DB persistence, queueing,
     # AgentLoop execution, history context, and event emission.
     service = _get_session_service()
+    # Chat mode: bounded iteration budget from llm.json (default 50).
+    # Prevents a failing tool loop from growing the prompt unboundedly.
+    from strategy_research.core.llm.config import LLMConfig
+    try:
+        _cfg = LLMConfig.load()
+        _max_iter = _cfg.max_iterations
+    except Exception:
+        _max_iter = 50
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
+        max_iterations=_max_iter,
     )
 
     # Queue-full guard: SessionService returns {"error": "queue_full", ...}

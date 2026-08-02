@@ -134,6 +134,14 @@ class LLMConfig:
     parallel_tool_calls: bool = True
     tool_choice: str = "auto"                      # auto|required|none|{"name":..}
 
+    # ── Iteration budget ─────────────────────────
+    # AgentLoop iteration caps. Chat mode is bounded (default 50) so a
+    # failing tool loop cannot grow the prompt unboundedly; agent/goal
+    # workflows get a much higher ceiling. Read from llm.json; falls back
+    # to these defaults when absent.
+    max_iterations: int = 50                        # chat / send_message
+    agent_max_iterations: int = 9999                # agent / goal workflows
+
     # ── Thinking ─────────────────────────────────
     enable_thinking: bool = True                   # emit thinking tokens (when provider supports them)
 
@@ -384,6 +392,8 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
     _coerce_int(out, "timeout_s", raw.get("timeout"))
     _coerce_int(out, "max_retries", raw.get("max_retries"))
     _coerce_int(out, "max_tokens", raw.get("max_tokens"))
+    _coerce_int(out, "max_iterations", raw.get("max_iterations"))
+    _coerce_int(out, "agent_max_iterations", raw.get("agent_max_iterations"))
     if "timeout_s" in out:
         out.pop("timeout", None)
 
