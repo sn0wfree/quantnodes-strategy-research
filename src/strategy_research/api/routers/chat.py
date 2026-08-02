@@ -464,11 +464,7 @@ async def send_async(body: ChatMessage, request: Request):
     # Ownership check: only the session owner may post messages
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
-    _conn = _get_db()
-    try:
-        _fetch_session_owned(_conn, body.session_id, user_id)
-    finally:
-        _conn.close()
+    _fetch_session_owned(_get_db(), body.session_id, user_id)
 
     # ── /goal command intercept ────────────────────────────────────────
     if body.content.strip().startswith("/goal"):
@@ -554,102 +550,101 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     # Execute goal command
     response_text = ""
     try:
-        store = GoalStore()
-
-        if subcmd == "start" or subcmd == "create":
-            objective = args or "Research goal"
-            goal = store.replace_goal(
-                session_id=session_id,
-                objective=objective,
-                criteria=default_goal_criteria(),
-            )
-            response_text = (
-                f"Goal created: {goal.goal_id[:12]}...\n"
-                f"Objective: {goal.objective}\n"
-                f"Status: {goal.status.value}"
-            )
-
-        elif subcmd == "status" or subcmd == "":
-            current = store.get_current_goal(session_id)
-            if current is None:
-                response_text = "No active goal. Use /goal start <objective> to create one."
-            else:
-                snapshot = store.get_current_snapshot(session_id)
-                criteria = snapshot.get("criteria", []) if snapshot else []
-                evidence_count = snapshot.get("evidence_count", 0) if snapshot else 0
-                response_text = (
-                    f"Goal: {current.goal_id[:12]}...\n"
-                    f"Objective: {current.objective}\n"
-                    f"Status: {current.status.value}\n"
-                    f"Progress: {current.progress_percent:.0f}%\n"
-                    f"Criteria: {len(criteria)} | Evidence: {evidence_count}"
-                )
-
-        elif subcmd == "evidence" or subcmd == "ev":
-            current = store.get_current_goal(session_id)
-            if current is None:
-                response_text = "No active goal. Create one first with /goal start <objective>."
-            else:
-                text = args or "No evidence text provided"
-                evidence = EvidenceInput(text=text, source_type="chat")
-                record = store.append_evidence(
+        with GoalStore() as store:
+            if subcmd == "start" or subcmd == "create":
+                objective = args or "Research goal"
+                goal = store.replace_goal(
                     session_id=session_id,
-                    goal_id=current.goal_id,
-                    expected_goal_id=current.goal_id,
-                    evidence=evidence,
+                    objective=objective,
+                    criteria=default_goal_criteria(),
                 )
-                updated = store.get_current_goal(session_id)
                 response_text = (
-                    f"Evidence added: {record.evidence_id[:12]}...\n"
-                    f"Progress: {updated.progress_percent:.0f}%"
+                    f"Goal created: {goal.goal_id[:12]}...\n"
+                    f"Objective: {goal.objective}\n"
+                    f"Status: {goal.status.value}"
                 )
 
-        elif subcmd == "complete" or subcmd == "done":
-            current = store.get_current_goal(session_id)
-            if current is None:
-                response_text = "No active goal to complete."
+            elif subcmd == "status" or subcmd == "":
+                current = store.get_current_goal(session_id)
+                if current is None:
+                    response_text = "No active goal. Use /goal start <objective> to create one."
+                else:
+                    snapshot = store.get_current_snapshot(session_id)
+                    criteria = snapshot.get("criteria", []) if snapshot else []
+                    evidence_count = snapshot.get("evidence_count", 0) if snapshot else 0
+                    response_text = (
+                        f"Goal: {current.goal_id[:12]}...\n"
+                        f"Objective: {current.objective}\n"
+                        f"Status: {current.status.value}\n"
+                        f"Progress: {current.progress_percent:.0f}%\n"
+                        f"Criteria: {len(criteria)} | Evidence: {evidence_count}"
+                    )
+
+            elif subcmd == "evidence" or subcmd == "ev":
+                current = store.get_current_goal(session_id)
+                if current is None:
+                    response_text = "No active goal. Create one first with /goal start <objective>."
+                else:
+                    text = args or "No evidence text provided"
+                    evidence = EvidenceInput(text=text, source_type="chat")
+                    record = store.append_evidence(
+                        session_id=session_id,
+                        goal_id=current.goal_id,
+                        expected_goal_id=current.goal_id,
+                        evidence=evidence,
+                    )
+                    updated = store.get_current_goal(session_id)
+                    response_text = (
+                        f"Evidence added: {record.evidence_id[:12]}...\n"
+                        f"Progress: {updated.progress_percent:.0f}%"
+                    )
+
+            elif subcmd == "complete" or subcmd == "done":
+                current = store.get_current_goal(session_id)
+                if current is None:
+                    response_text = "No active goal to complete."
+                else:
+                    recap = args or None
+                    updated = store.complete_lite(
+                        session_id=session_id,
+                        goal_id=current.goal_id,
+                        expected_goal_id=current.goal_id,
+                        recap=recap,
+                    )
+                    response_text = (
+                        f"Goal completed: {updated.goal_id[:12]}...\n"
+                        f"Status: {updated.status.value}"
+                    )
+
+            elif subcmd == "cancel":
+                current = store.get_current_goal(session_id)
+                if current is None:
+                    response_text = "No active goal to cancel."
+                else:
+                    updated = store.update_status(
+                        session_id=session_id,
+                        goal_id=current.goal_id,
+                        expected_goal_id=current.goal_id,
+                        status=GoalStatus.CANCELLED,
+                        recap=args or None,
+                    )
+                    response_text = (
+                        f"Goal cancelled: {updated.goal_id[:12]}...\n"
+                        f"Status: {updated.status.value}"
+                    )
+
+            elif subcmd == "help":
+                response_text = (
+                    "/goal start <objective>  — create a new goal\n"
+                    "/goal status             — show current goal\n"
+                    "/goal evidence <text>    — add evidence\n"
+                    "/goal complete [recap]   — mark complete\n"
+                    "/goal cancel [recap]     — cancel goal\n"
+                    "/goal help               — this message"
+                )
+
             else:
-                recap = args or None
-                updated = store.complete_lite(
-                    session_id=session_id,
-                    goal_id=current.goal_id,
-                    expected_goal_id=current.goal_id,
-                    recap=recap,
-                )
-                response_text = (
-                    f"Goal completed: {updated.goal_id[:12]}...\n"
-                    f"Status: {updated.status.value}"
-                )
-
-        elif subcmd == "cancel":
-            current = store.get_current_goal(session_id)
-            if current is None:
-                response_text = "No active goal to cancel."
-            else:
-                updated = store.update_status(
-                    session_id=session_id,
-                    goal_id=current.goal_id,
-                    expected_goal_id=current.goal_id,
-                    status=GoalStatus.CANCELLED,
-                    recap=args or None,
-                )
-                response_text = (
-                    f"Goal cancelled: {updated.goal_id[:12]}...\n"
-                    f"Status: {updated.status.value}"
-                )
-
-        elif subcmd == "help":
-            response_text = (
-                "/goal start <objective>  — create a new goal\n"
-                "/goal status             — show current goal\n"
-                "/goal evidence <text>    — add evidence\n"
-                "/goal complete [recap]   — mark complete\n"
-                "/goal cancel [recap]     — cancel goal\n"
-                "/goal help               — this message"
-            )
-
-        else:
-            response_text = f"Unknown subcommand: {subcmd}. Use /goal help for usage."
+                response_text = f"Unknown subcommand: {subcmd}. Use /goal help for usage."
 
     except Exception as exc:
         logger.exception("goal command failed: %s", subcmd)
@@ -794,11 +789,7 @@ async def cancel_attempt(body: CancelRequest, request: Request):
     """
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
-    _conn = _get_db()
-    try:
-        _fetch_session_owned(_conn, body.session_id, user_id)
-    finally:
-        _conn.close()
+    _fetch_session_owned(_get_db(), body.session_id, user_id)
     service = _get_session_service()
 
     # Prefer the session-scoped cancel (cancels the per-attempt task; the
@@ -829,11 +820,7 @@ async def queue_resume(body: QueueResumeRequest, request: Request):
     """
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
-    _conn = _get_db()
-    try:
-        _fetch_session_owned(_conn, body.session_id, user_id)
-    finally:
-        _conn.close()
+    _fetch_session_owned(_get_db(), body.session_id, user_id)
     service = _get_session_service()
     ok = service.resume_queue(body.session_id)
     return {"ok": ok, "session_id": body.session_id}
@@ -853,11 +840,7 @@ async def send_sync(body: ChatMessage, request: Request):
     # Ownership check: only the session owner may post messages
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
-    _conn = _get_db()
-    try:
-        _fetch_session_owned(_conn, body.session_id, user_id)
-    finally:
-        _conn.close()
+    _fetch_session_owned(_get_db(), body.session_id, user_id)
 
     service = _get_session_service()
     result = await service.send_message(
@@ -900,11 +883,7 @@ async def chat_events(
     # Ownership check: only the session owner may subscribe
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
-    _conn = _get_db()
-    try:
-        _fetch_session_owned(_conn, session_id, user_id)
-    finally:
-        _conn.close()
+    _fetch_session_owned(_get_db(), session_id, user_id)
     resolved_last_event_id = last_event_id or last_event_id_query or ""
     logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, resolved_last_event_id)
 

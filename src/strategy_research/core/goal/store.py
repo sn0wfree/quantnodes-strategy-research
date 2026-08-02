@@ -150,6 +150,28 @@ class GoalStore:
         self._lock = threading.RLock()
         self._init_db()
 
+    def close(self) -> None:
+        """Close the underlying SQLite connection (idempotent).
+
+        GoalStore owns one connection for its lifetime; always close
+        instances created per-request (or use the context manager).
+        Module-level long-lived stores (e.g. the agent loop's cached
+        snapshot store) stay open for the process lifetime.
+        """
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except sqlite3.Error:
+                    pass
+                self._conn = None
+
+    def __enter__(self) -> "GoalStore":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
     def _init_db(self) -> None:
         """Create goal tables and indexes if they do not exist."""
         with self._lock:

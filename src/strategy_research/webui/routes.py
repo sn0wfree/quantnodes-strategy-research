@@ -89,8 +89,8 @@ async def goals_list(request: Request):
     try:
         from ..core.goal import GoalStore
         db_path = getattr(request.app.state, "goal_db_path", None)
-        store = GoalStore(db_path=db_path)
-        goal_records = store.list_goals(limit=100)
+        with GoalStore(db_path=db_path) as store:
+            goal_records = store.list_goals(limit=100)
         goals = [
             {
                 "goal_id": g.goal_id,

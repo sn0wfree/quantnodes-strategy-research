@@ -18,7 +18,12 @@ def get_db_path(workspace_path: Path) -> Path:
 
 
 def get_connection(workspace_path: Path, read_only: bool = False):
-    """获取 DuckDB 连接。"""
+    """获取 DuckDB 连接。
+
+    Note: DuckDB is a single-writer database — concurrent processes
+    writing the same workspace DB can raise "Could not set lock".
+    Callers should serialize writes (or use read_only=True for reads).
+    """
     try:
         import duckdb
     except ImportError:

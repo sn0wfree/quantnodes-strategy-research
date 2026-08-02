@@ -14,6 +14,9 @@ class GoalStartRequest(BaseModel):
     session_id: str
     objective: str
     risk_tier: str = "research_general"
+    # TODO(feature): accepted for API compatibility but currently
+    # dropped on the floor — no goal handler reads it. Wire it into
+    # goal creation (universe/market routing) or remove from the schema.
     market: str = "a_share"
     criteria: Optional[list[str]] = None
 
@@ -41,17 +44,16 @@ async def goal_start(req: GoalStartRequest, request: Request):
         from ...core.goal.context import default_goal_criteria
 
         db_path = getattr(request.app.state, "goal_db_path", None)
-        store = GoalStore(db_path=db_path)
-
         criteria = req.criteria or default_goal_criteria()
         risk_tier = RiskTier(req.risk_tier)
 
-        goal = store.replace_goal(
-            session_id=req.session_id,
-            objective=req.objective,
-            criteria=criteria,
-            risk_tier=risk_tier,
-        )
+        with GoalStore(db_path=db_path) as store:
+            goal = store.replace_goal(
+                session_id=req.session_id,
+                objective=req.objective,
+                criteria=criteria,
+                risk_tier=risk_tier,
+            )
         return {"status": "ok", "goal_id": goal.goal_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -64,8 +66,8 @@ async def goal_status(session_id: str, request: Request):
         from ...core.goal import GoalStore
 
         db_path = getattr(request.app.state, "goal_db_path", None)
-        store = GoalStore(db_path=db_path)
-        current = store.get_current_goal(session_id)
+        with GoalStore(db_path=db_path) as store:
+            current = store.get_current_goal(session_id)
         if current is None:
             return {"status": "no_goal", "session_id": session_id}
         return {
@@ -91,14 +93,13 @@ async def goal_list(
         from ...core.goal import GoalStatus, GoalStore
 
         db_path = getattr(request.app.state, "goal_db_path", None)
-        store = GoalStore(db_path=db_path)
-
         status_filter = GoalStatus(status) if status else None
-        goals = store.list_goals(
-            session_id=session_id,
-            status=status_filter,
-            limit=limit,
-        )
+        with GoalStore(db_path=db_path) as store:
+            goals = store.list_goals(
+                session_id=session_id,
+                status=status_filter,
+                limit=limit,
+            )
         return {
             "status": "ok",
             "goals": [
@@ -123,23 +124,22 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
         from ...core.goal import EvidenceInput, GoalStore
 
         db_path = getattr(request.app.state, "goal_db_path", None)
-        store = GoalStore(db_path=db_path)
-        current = store.get_current_goal(req.session_id)
-        if current is None:
-            raise HTTPException(status_code=404, detail="No active goal for this session")
-
         evidence_input = EvidenceInput(
             text=req.evidence,
             source_type=req.source,
             run_id=req.run_id,
             criterion_id=req.criterion_id,
         )
-        evidence_record = store.append_evidence(
-            session_id=req.session_id,
-            goal_id=current.goal_id,
-            expected_goal_id=current.goal_id,
-            evidence=evidence_input,
-        )
+        with GoalStore(db_path=db_path) as store:
+            current = store.get_current_goal(req.session_id)
+            if current is None:
+                raise HTTPException(status_code=404, detail="No active goal for this session")
+            evidence_record = store.append_evidence(
+                session_id=req.session_id,
+                goal_id=current.goal_id,
+                expected_goal_id=current.goal_id,
+                evidence=evidence_input,
+            )
         return {
             "status": "ok",
             "goal_id": current.goal_id,
@@ -158,11 +158,6 @@ async def goal_complete(req: GoalCompleteRequest, request: Request):
 
     try:
         db_path = getattr(request.app.state, "goal_db_path", None)
-        store = GoalStore(db_path=db_path)
-        current = store.get_current_goal(req.session_id)
-        if current is None:
-            raise HTTPException(status_code=404, detail="No active goal for this session")
-
         try:
             target_status = GoalStatus(req.outcome)
         except ValueError:
@@ -171,13 +166,17 @@ async def goal_complete(req: GoalCompleteRequest, request: Request):
                 detail=f"Invalid outcome: {req.outcome}",
             )
 
-        updated = store.update_status(
-            session_id=req.session_id,
-            goal_id=current.goal_id,
-            expected_goal_id=current.goal_id,
-            status=target_status,
-            recap=req.summary,
-        )
+        with GoalStore(db_path=db_path) as store:
+            current = store.get_current_goal(req.session_id)
+            if current is None:
+                raise HTTPException(status_code=404, detail="No active goal for this session")
+            updated = store.update_status(
+                session_id=req.session_id,
+                goal_id=current.goal_id,
+                expected_goal_id=current.goal_id,
+                status=target_status,
+                recap=req.summary,
+            )
         return {
             "status": "ok",
             "goal_id": updated.goal_id,

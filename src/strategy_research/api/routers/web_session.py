@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -544,9 +545,21 @@ def _migrate_message_types(conn: sqlite3.Connection) -> None:
         )
 
 
-def _get_db() -> sqlite3.Connection:
-    """Open the shared SQLite connection. Ensures schema is up to date.
+_db_thread_local = threading.local()
 
+
+def _get_db() -> sqlite3.Connection:
+    """Return the per-thread SQLite connection. Ensures schema is up to date.
+
+    - One connection per worker thread (FastAPI serves requests on a
+      thread pool): endpoints that used to open a fresh connection per
+      request and rely on GC to close it now reuse a bounded set of
+      connections (F1-3). Connections live for the thread's lifetime
+      and are closed by GC at process exit; WAL mode keeps readers
+      non-blocking.
+    - The cache is keyed by db path (thread-local dict), so switching
+      workspace paths (tests, multiple workspaces) opens a fresh
+      connection instead of reusing a stale one.
     - WAL journal + busy_timeout: concurrent readers/writers no longer
       hit immediate ``database is locked`` (previously concurrent
       INSERT+UPDATE triggers could fail and messages were silently
@@ -554,12 +567,20 @@ def _get_db() -> sqlite3.Connection:
     - One-time schema migrations run inside _ensure_schema (guarded by
       PRAGMA user_version), not per connection.
     """
-    conn = sqlite3.connect(str(_get_db_path()), timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 5000")
-    conn.execute("PRAGMA journal_mode = WAL")
-    _ensure_schema(conn)
-    conn.commit()
+    db_path = str(_get_db_path())
+    cache = getattr(_db_thread_local, "conns", None)
+    if cache is None:
+        cache = {}
+        _db_thread_local.conns = cache
+    conn = cache.get(db_path)
+    if conn is None:
+        conn = sqlite3.connect(db_path, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        _ensure_schema(conn)
+        conn.commit()
+        cache[db_path] = conn
     return conn
 
 

@@ -53,6 +53,27 @@ from .trace import TraceWriter
 logger = logging.getLogger(__name__)
 
 
+# ── Cached GoalStore (goal-snapshot injection) ─────────────────────
+# Constructing a GoalStore per loop iteration leaked one SQLite
+# connection each (the store had no close() before F1-2); a single
+# long-lived store per db path avoids the churn while keeping test
+# isolation when QUANTNODES_RESEARCH_GOAL_DB_PATH is overridden.
+_goal_store_cache: dict[Path, Any] = {}
+
+
+def _get_goal_store() -> Any:
+    """Return the cached GoalStore for the default goal DB path."""
+    from ..goal.store import GoalStore
+    store = GoalStore()
+    key = store.db_path
+    cached = _goal_store_cache.get(key)
+    if cached is None:
+        _goal_store_cache[key] = store
+        return store
+    store.close()
+    return cached
+
+
 # ── Compaction persistence registration ─────────────────────────────
 #
 # The web/API layer owns the sqlite schema, so the core loop must not
@@ -1510,8 +1531,7 @@ class AgentLoop:
         if not self.session_id:
             return None
         try:
-            from ..goal.store import GoalStore
-            return GoalStore().get_current_snapshot(self.session_id)
+            return _get_goal_store().get_current_snapshot(self.session_id)
         except Exception:  # noqa: BLE001
             return None
 

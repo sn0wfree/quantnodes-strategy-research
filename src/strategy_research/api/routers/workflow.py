@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -18,8 +19,30 @@ class WorkflowStartRequest(BaseModel):
     objective: str
 
 
-# In-memory store for active workflow runners
+# In-memory store for active workflow runners. Entries are pruned when
+# the workflow reaches a terminal state (checked on every access and
+# in the SSE generator's finally) and after _ACTIVE_RUNNER_TTL as a
+# crash/abandoned-run safety net.
 _active_runners: dict[str, dict] = {}
+_ACTIVE_RUNNER_TTL = 3600.0  # 1h
+
+
+def _prune_runners() -> None:
+    """Drop terminal + expired runner entries (bounded memory)."""
+    now = time.time()
+    terminal = []
+    for goal_id, entry in list(_active_runners.items()):
+        try:
+            progress = entry["runner"].get_progress()
+        except Exception:
+            terminal.append(goal_id)
+            continue
+        if progress.get("status") in ("completed", "error") or progress.get("hook_completed"):
+            terminal.append(goal_id)
+        elif now - entry.get("started_at", 0) > _ACTIVE_RUNNER_TTL:
+            terminal.append(goal_id)
+    for goal_id in terminal:
+        _active_runners.pop(goal_id, None)
 
 
 @router.post("/start")
@@ -41,6 +64,7 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
             "runner": runner,
             "session_id": req.session_id,
             "workflow_name": req.workflow_name,
+            "started_at": time.time(),
         }
 
         return {
@@ -57,6 +81,7 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
 @router.get("/status")
 async def workflow_status(goal_id: str):
     """Get workflow progress for a goal."""
+    _prune_runners()
     entry = _active_runners.get(goal_id)
     if entry is None:
         return {"status": "not_found", "goal_id": goal_id}
@@ -74,6 +99,7 @@ async def workflow_status(goal_id: str):
 @router.post("/pause")
 async def workflow_pause(goal_id: str, immediate: bool = False):
     """Pause a running workflow."""
+    _prune_runners()
     entry = _active_runners.get(goal_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -86,6 +112,7 @@ async def workflow_pause(goal_id: str, immediate: bool = False):
 @router.post("/resume")
 async def workflow_resume(goal_id: str):
     """Resume a paused workflow."""
+    _prune_runners()
     entry = _active_runners.get(goal_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -152,6 +179,9 @@ async def workflow_event_stream(runner):
                     break
     finally:
         runner.unsubscribe(observer)
+        # Terminal (or abandoned) run: drop the runner entry so
+        # _active_runners cannot grow unbounded.
+        _prune_runners()
 
 
 @router.get("/events")
