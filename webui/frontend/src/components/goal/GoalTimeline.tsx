@@ -1,4 +1,5 @@
 import { Clock, FileText, MessageSquare, Zap } from 'lucide-react'
+import { formatTimestamp } from '../../utils/time'
 
 interface TimelineEvent {
   id: string
@@ -25,19 +26,6 @@ const EVENT_DOT = {
   iteration: 'bg-amber-500',
   message: 'bg-blue-500',
   system: 'bg-slate-500',
-}
-
-function formatTimestamp(ts: number): string {
-  const date = new Date(ts * 1000)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-
-  if (diffMin < 1) return '刚刚'
-  if (diffMin < 60) return `${diffMin} 分钟前`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr} 小时前`
-  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
 export function GoalTimeline({ events }: GoalTimelineProps) {

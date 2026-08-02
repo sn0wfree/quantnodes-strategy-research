@@ -4,6 +4,7 @@ import {
   XCircle, AlertCircle, Zap,
 } from 'lucide-react'
 import type { Agent, IterationDetail } from '../../stores/agents'
+import { formatTime } from '../../utils/time'
 
 interface AgentItemProps {
   agent: Agent
@@ -19,9 +20,6 @@ const STATUS_CONFIG = {
   aborted: { icon: AlertCircle, color: 'text-orange-400', bg: 'bg-orange-500/10', label: '已中止' },
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
 
 function IterationRow({ iteration }: { iteration: IterationDetail }) {
   return (

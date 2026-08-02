@@ -1,5 +1,10 @@
 import { useState, useCallback, useRef } from 'react'
 
+// TODO(feature): @-mention picker hook for the Composer — currently
+// unused (no callers). Planned: type '@' in the composer to trigger an
+// agent/file mention popover; wire into Composer once implemented.
+// Kept as the implementation skeleton.
+
 export interface MentionItem {
   id: string
   name: string

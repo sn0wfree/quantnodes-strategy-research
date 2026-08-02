@@ -399,6 +399,9 @@ function PasswordInput({ placeholder, value, onChange, show, onToggle }: {
   )
 }
 
+// TODO(feature): appearance settings (theme/font-size) are placeholders —
+// buttons below have no onClick. Wire to a theme store + font-size context
+// when the appearance feature lands.
 function ThemeBtn({ label, active }: { label: string; active?: boolean }) {
   return (
     <button className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${active ? 'bg-primary-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>

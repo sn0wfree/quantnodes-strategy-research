@@ -11,13 +11,8 @@ import { QueuePauseBanner } from './QueuePauseBanner'
 import { ContextUsageBar } from './ContextUsageBar'
 import { CompactBanner } from './CompactBanner'
 import { MessageSquare } from 'lucide-react'
+import { formatTime } from '../../utils/time'
 
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 export function MessageList() {
   const messages = useChatStore((s) => s.messages)

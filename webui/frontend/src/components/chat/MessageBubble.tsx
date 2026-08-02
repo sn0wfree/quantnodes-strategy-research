@@ -1,17 +1,12 @@
 import type { Message, MessagePart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
+import { formatTime } from '../../utils/time'
 
 interface MessageBubbleProps {
   message: Message
   layout: ChatLayout
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 function PartContent({ part }: { part: MessagePart }) {
   if (part.type === 'text') {

@@ -119,6 +119,9 @@ class APIClient {
     return this.request<T>(path, { method: 'DELETE' })
   }
 
+  // TODO(reuse): useSSE.ts currently hand-rolls its EventSource (token
+  // parsing, params) instead of calling this helper. Unify once the
+  // SSE hook refactor lands (see hooks/useSSE.ts connect()).
   sse(path: string, lastEventId?: string): EventSource {
     const token = this.getToken()
     const params = new URLSearchParams()

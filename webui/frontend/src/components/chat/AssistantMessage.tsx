@@ -12,6 +12,7 @@ import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
 import { ImageBlock } from './ImageBlock'
 import { StreamingText } from './StreamingText'
+import { formatTime } from '../../utils/time'
 
 interface AssistantMessageProps {
   message: Message
@@ -21,12 +22,6 @@ interface AssistantMessageProps {
   layout: ChatLayout
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 /**
  * Indicator shown while an assistant message is queued behind an
