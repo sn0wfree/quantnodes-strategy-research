@@ -410,12 +410,61 @@ describe('useSSE', () => {
       expect(useWorkflowStore.getState().dagNodes[0].status).toBe('completed')
     })
 
-    it('progress updates execution percentage', () => {
+    it('progress updates execution percentage from agents_completed/total', () => {
       act(() => {
-        es.emit('progress', { progress: 0.75 })
+        es.emit('progress', {
+          agents_completed: 3,
+          agents_total: 4,
+          agent_statuses: { a: 'success', b: 'success', c: 'success' },
+        })
       })
 
-      expect(useWorkflowStore.getState().executionProgress).toBe(0.75)
+      expect(useWorkflowStore.getState().executionProgress).toBe(75)
+    })
+
+    it('progress syncs agent_statuses into DAG nodes', () => {
+      // Pre-populate a DAG node so updateNodeStatus has something to update.
+      useWorkflowStore.getState().setDAG(
+        [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+        [],
+      )
+
+      act(() => {
+        es.emit('progress', {
+          agents_completed: 1,
+          agents_total: 2,
+          agent_statuses: { a: 'success', b: 'running' },
+        })
+      })
+
+      const nodes = useWorkflowStore.getState().dagNodes
+      const a = nodes.find((n) => n.id === 'a')!
+      const b = nodes.find((n) => n.id === 'b')!
+      expect(a.status).toBe('success')
+      expect(b.status).toBe('running')
+    })
+
+    it('progress with zero agents_total leaves executionProgress unchanged', () => {
+      const before = useWorkflowStore.getState().executionProgress
+      act(() => {
+        es.emit('progress', {
+          agents_completed: 0,
+          agents_total: 0,
+          agent_statuses: {},
+        })
+      })
+      expect(useWorkflowStore.getState().executionProgress).toBe(before)
+    })
+
+    it('progress without agent_statuses does not throw', () => {
+      expect(() => {
+        act(() => {
+          es.emit('progress', {
+            agents_completed: 1,
+            agents_total: 2,
+          })
+        })
+      }).not.toThrow()
     })
 
     it('malformed JSON is silently ignored', () => {

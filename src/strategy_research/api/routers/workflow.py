@@ -137,11 +137,20 @@ async def workflow_event_stream(runner):
     progress snapshot, then forwards observer events with heartbeats
     every 1s; terminates on workflow_completed / workflow_failed or a
     terminal progress state.
-    """
 
+    SSE frame conventions (frontend EVENT_TYPES contract):
+      - ``event: progress`` + data: ``get_progress()`` dict (initial snapshot,
+        heartbeat) — frontend updates executionProgress + agent statuses.
+      - ``event: dag_update`` + data: ``{node_id, status}`` — emitted for each
+        ``agent_complete`` observer event so the DAG panel can update
+        individual nodes in real time without waiting for the next heartbeat.
+    """
     import asyncio
 
     queue: asyncio.Queue = asyncio.Queue()
+
+    def _sse(name: str, data: dict) -> str:
+        return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
     class SSEObserver:
         def on_event(self, event: str, data: dict):
@@ -154,34 +163,58 @@ async def workflow_event_stream(runner):
     runner.subscribe(observer)
 
     try:
-        # Send initial state
-        progress = runner.get_progress()
-        yield f"data: {json.dumps({'event': 'progress', 'data': progress})}\n\n"
+        yield _sse("progress", runner.get_progress())
 
-        # Stream events until workflow completes
         while True:
             try:
                 event, data = await asyncio.wait_for(queue.get(), timeout=1.0)
-                payload = json.dumps({
-                    "event": event,
-                    "data": {k: str(v) for k, v in data.items()} if isinstance(data, dict) else str(data),
-                })
-                yield f"data: {payload}\n\n"
-
+                for frame in _handle_observer_event(event, data, runner):
+                    yield frame
                 if event in ("workflow_completed", "workflow_failed"):
                     break
             except asyncio.TimeoutError:
-                # Send heartbeat + progress
-                progress = runner.get_progress()
-                yield f"data: {json.dumps({'event': 'heartbeat', 'data': progress})}\n\n"
+                yield _sse("progress", runner.get_progress())
 
-                if progress.get("hook_completed") or progress.get("status") in ("completed", "error"):
+                if _is_terminal(runner):
                     break
     finally:
         runner.unsubscribe(observer)
         # Terminal (or abandoned) run: drop the runner entry so
         # _active_runners cannot grow unbounded.
         _prune_runners()
+
+
+def _is_terminal(runner) -> bool:
+    """Whether the runner has reached a terminal progress state."""
+    progress = runner.get_progress()
+    return (
+        progress.get("hook_completed")
+        or progress.get("status") in ("completed", "error")
+    )
+
+
+def _handle_observer_event(event: str, data: dict, runner) -> list[str]:
+    """Translate a runner observer event into one or more SSE frames."""
+    frames: list[str] = []
+
+    def _sse(name: str, payload: dict) -> str:
+        return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+
+    if event == "agent_complete" and isinstance(data, dict):
+        agent_id = data.get("agent_id")
+        if agent_id:
+            frames.append(_sse("dag_update", {
+                "node_id": agent_id,
+                "status": "success",
+            }))
+    elif event == "layer_start":
+        # Surface layer_start as a progress refresh so the frontend
+        # sees current_layer moving forward.
+        frames.append(_sse("progress", runner.get_progress()))
+    elif event in ("workflow_completed", "workflow_failed"):
+        frames.append(_sse("progress", runner.get_progress()))
+        frames.append(_sse(event, data))
+    return frames
 
 
 @router.get("/events")

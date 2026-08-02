@@ -38,6 +38,26 @@ export const dagUpdate: SSEHandler = (data, { updateNodeStatus }) => {
 }
 
 export const progress: SSEHandler = (data, ctx) => {
-  const { progress } = data as { progress: number }
-  ctx.setExecutionProgress(progress)
+  // Backend emits `event: progress\ndata: {…progress dict…}` from
+  // workflow_event_stream. The handler receives the inner data
+  // (already unwrapped by the dispatcher), so read directly.
+  const p = data as {
+    agents_completed?: number
+    agents_total?: number
+    agent_statuses?: Record<string, string>
+  }
+  if (
+    typeof p.agents_completed === 'number' &&
+    typeof p.agents_total === 'number' &&
+    p.agents_total > 0
+  ) {
+    ctx.setExecutionProgress(
+      Math.round((p.agents_completed / p.agents_total) * 100),
+    )
+  }
+  if (p.agent_statuses && typeof p.agent_statuses === 'object') {
+    for (const [nodeId, status] of Object.entries(p.agent_statuses)) {
+      ctx.updateNodeStatus(nodeId, status as any)
+    }
+  }
 }
