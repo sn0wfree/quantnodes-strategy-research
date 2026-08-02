@@ -149,6 +149,24 @@ Fix3' 的"两步 + parquet cache_key 中转"经评审后合并为一步：
 - `persist=False` 仅查看不写库；`INSERT OR REPLACE` 幂等。
 - 所有 `next_step` 字段删除（无第二工具；业界 ACI 惯例为返回值保持纯净）。
 
+### 合并判定依据
+
+为什么把两步合并为一步（判定框架，可复用于其它工具合并评估）：
+
+| 判据 | 通过条件（本次成立） | 若失败（不合并） |
+|------|---------------------|-----------------|
+| 1. 契约耦合 | `commit` 无独立价值，只是把 `get` 的产物搬进 DuckDB | 第二步有独立决策/审批价值 |
+| 2. 可及性一致 | `commit_market_data` 不在任何角色白名单，`get_market_data` 在 → 角色模式下数据流断链 | 两步在所有调用场景都可用 |
+| 3. 先例/复用 | 引擎 `auto+duckdb` 已是 `fetch → save_ohlcv_to_db` 一步实现，核心函数可复用 | 无先例，两步逻辑差异大 |
+| 4. 安全不变量 | 合并后返回值仍只含 summary+preview，全量行情不进 prompt（context 安全约束未破坏） | 合并会让全量数据进 prompt |
+| 5. 代价可逆 | `INSERT OR REPLACE` 幂等、重取可覆盖、`persist=False` 逃生 | 不可逆、需人工确认 |
+
+**业界背景**：Anthropic《Building Effective Agents》ACI 范式——工具返回值应保持
+纯净数据，引导放 tool description / workflow；唯一允许"返回值带下一步"的是状态
+依赖的契约式场景（对标 API `next_cursor`）。两步结构正是该特例，但与其让 LLM
+记住"必须再调 commit"，不如让第一步一步到位，消除契约场景本身。
+
+
 
 ## 相关文件
 
