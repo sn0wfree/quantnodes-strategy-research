@@ -11,21 +11,18 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
 from strategy_research.core.llm.provider import (
+    DeepSeekAdapter,
+    FallbackAdapter,
+    KimiAdapter,
+    MiniMaxAdapter,
+    OpenAIAdapter,
+    ProviderAdapter,
+    QwenAdapter,
     get_provider,
     get_provider_defaults,
     register_provider,
-    ProviderAdapter,
-    OpenAIAdapter,
-    DeepSeekAdapter,
-    MiniMaxAdapter,
-    QwenAdapter,
-    KimiAdapter,
-    FallbackAdapter,
 )
-
 
 # ── Registry Tests ────────────────────────────────────────────────
 
@@ -108,6 +105,25 @@ class TestProviderDefaults:
     def test_kimi_defaults(self):
         defaults = get_provider_defaults("kimi")
         assert "moonshot" in defaults["base_url"]
+
+    def test_siliconflow_defaults(self):
+        defaults = get_provider_defaults("siliconflow")
+        assert defaults["base_url"] == "https://api.siliconflow.cn/v1"
+        assert defaults["model"] == "deepseek-ai/DeepSeek-V4-Flash"
+        assert defaults["max_tokens"] == 16384
+
+    def test_siliconflow_extracts_reasoning_content(self):
+        """V4-Flash is a reasoning model — thinking must come from
+        reasoning_content (inherited extraction)."""
+        from strategy_research.core.llm.provider import get_provider
+
+        adapter = get_provider("siliconflow")
+        assert adapter.extract_thinking_from_message(
+            {"reasoning_content": " think ", "content": "answer"}
+        ) == "think"
+        assert adapter.extract_thinking_from_delta(
+            {"reasoning_content": " t2 "}
+        ) == "t2"
 
 
 # ── default_context_tokens Tests ─────────────────────────────────

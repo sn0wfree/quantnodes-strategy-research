@@ -27,6 +27,7 @@ from .minimax import MiniMaxAdapter
 from .nvidia import NvidiaAdapter
 from .openai import OpenAIAdapter
 from .qwen import QwenAdapter
+from .siliconflow import SiliconFlowAdapter
 
 _REGISTRY: dict[str, type[ProviderAdapter]] = {
     "openai": OpenAIAdapter,
@@ -35,6 +36,7 @@ _REGISTRY: dict[str, type[ProviderAdapter]] = {
     "qwen": QwenAdapter,
     "kimi": KimiAdapter,
     "nvidia": NvidiaAdapter,
+    "siliconflow": SiliconFlowAdapter,
 }
 
 
@@ -50,6 +52,7 @@ MODELS_DEV_ID: dict[str, str] = {
     "qwen": "alibaba",
     "kimi": "moonshotai",
     "nvidia": "nvidia",
+    "siliconflow": "siliconflow",
 }
 
 
@@ -104,6 +107,7 @@ __all__ = [
     "NvidiaAdapter",
     "QwenAdapter",
     "KimiAdapter",
+    "SiliconFlowAdapter",
     "FallbackAdapter",
     "get_provider",
     "register_provider",

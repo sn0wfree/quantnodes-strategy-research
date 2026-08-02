@@ -69,7 +69,8 @@ provider/模型，密钥输入留空 = 不修改。
 内置适配器（`core/llm/provider/*.py`）决定 `--use` 可自动创建哪些
 profile、以及各家的默认 base_url/模型/上下文窗口：
 
-`nvidia` · `minimax` · `openai` · `deepseek` · `qwen` · `kimi`
+`nvidia` · `minimax` · `openai` · `deepseek` · `qwen` · `kimi` ·
+`siliconflow`（硅基流动，默认 `deepseek-ai/DeepSeek-V4-Flash`）
 
 **registry 之外的服务（智谱/硅基流动/Gemini/Groq 等）不能 `--use`
 直接创建**，需手动加 profile（见下文「接入步骤」）；运行时对未知
@@ -82,7 +83,7 @@ provider 名回退 OpenAI 兼容行为，所以手动 profile 也可用。
 | 服务 | base_url | 推荐模型 | key 环境变量 | 免费/低价情况（写稿时） |
 |---|---|---|---|---|
 | **智谱 AI** | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash`（永久免费档） | `ZHIPU_API_KEY` | GLM-4-Flash 官方免费；GLM-4-Plus 等按量计费 |
-| **硅基流动** | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` 等 | `SILICONFLOW_API_KEY` | 注册送体验额度；大量低价模型 |
+| **硅基流动**（已内置） | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V4-Flash`（默认）等 | `SILICONFLOW_API_KEY` | 注册送体验额度；大量低价模型；`sr llm --use siliconflow` 一键接入 |
 | **阿里云百炼** | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-turbo` / `qwen-flash` | `DASHSCOPE_API_KEY` | 新用户送额度；qwen 轻量档有免费/低价档 |
 | **百度千帆** | `https://qianfan.baidubce.com/v2` | `ernie-speed-128k` | `QIANFAN_API_KEY` | 部分轻量模型免费档 + 新用户额度 |
 | **火山方舟（豆包）** | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-lite-*` | `ARK_API_KEY` | 新用户送 token，lite 档极低价 |

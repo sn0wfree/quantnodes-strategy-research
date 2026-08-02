@@ -207,6 +207,22 @@ class TestCliUse:
         assert profile["api_key"] == "env:NVIDIA_API_KEY"
         assert profile["base_url"] == "https://integrate.api.nvidia.com/v1"
 
+    def test_use_autocreates_siliconflow_profile(
+        self, clear_env, cli_paths
+    ):
+        llm_json, _ = cli_paths
+        llm_json.write_text(json.dumps({
+            "llm": {"active_profile": "minimax", "timeout": 300},
+        }))
+        rc = llm_cmd._action_use("siliconflow")
+        assert rc == 0
+        data = json.loads(llm_json.read_text())
+        profile = data["llm"]["profiles"]["siliconflow"]
+        assert profile["provider"] == "siliconflow"
+        assert profile["api_key"] == "env:SILICONFLOW_API_KEY"
+        assert profile["base_url"] == "https://api.siliconflow.cn/v1"
+        assert profile["model"] == "deepseek-ai/DeepSeek-V4-Flash"
+
     def test_use_unknown_provider_errors(self, clear_env, cli_paths):
         llm_json, _ = cli_paths
         llm_json.write_text(json.dumps(PROFILE_JSON))
@@ -263,6 +279,11 @@ class TestCliProfileFlag:
         args = SimpleNamespace(llm_profile="nvidia")
         build_llm_config(args)
         assert os.environ.get(ENV_PROFILE_ACTIVE) == "nvidia"
+        # build_llm_config writes os.environ DIRECTLY (not via
+        # monkeypatch), so it survives the test — clean it up or it
+        # leaks into every later test that resolves profiles
+        # (e.g. test_system_llm_api::test_profiles_only_config_...).
+        os.environ.pop(ENV_PROFILE_ACTIVE, None)
 
     def test_llm_profile_excluded_from_cli_overrides(self, monkeypatch):
         from types import SimpleNamespace

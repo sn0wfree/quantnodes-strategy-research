@@ -20,6 +20,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from strategy_research.core.llm.config import ENV_PROFILE_ACTIVE
+
 PROFILE_JSON = {
     "llm": {
         "active_profile": "minimax",
@@ -290,6 +292,9 @@ class TestCheckLLMConfig:
         monkeypatch.setenv("MINIMAX_API_KEY", "sk-minimax-real")
         for k in ("OPENAI_API_KEY", "LLM_API_KEY"):
             monkeypatch.delenv(k, raising=False)
+        # Defensive: a prior test may have left LLM_PROFILE set (a
+        # known leakage vector — see test_llm_profile_flag_sets_env).
+        monkeypatch.delenv(ENV_PROFILE_ACTIVE, raising=False)
 
         status = lcc.check_llm_config()
         assert status["configured"] is True
