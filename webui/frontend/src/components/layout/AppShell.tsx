@@ -33,15 +33,18 @@ export function AppShell() {
         )
 
         if (validOpenIds.length > 0) {
-          // Re-open tabs that exist
-          for (const id of validOpenIds) {
-            try {
-              await state.openSession(id)
-            } catch {
+          // Re-open tabs in PARALLEL (was sequential await per tab —
+          // N round-trips on boot; each openSession loads messages).
+          const results = await Promise.allSettled(
+            validOpenIds.map((id) => state.openSession(id))
+          )
+          results.forEach((r, i) => {
+            if (r.status === 'rejected') {
               // 404 — session deleted server-side, skip
+              console.debug('openSession rejected:', validOpenIds[i], r.reason)
             }
-            if (cancelled) return
-          }
+          })
+          if (cancelled) return
           // Switch to current (or first valid)
           const target =
             state.currentSessionId && validOpenIds.includes(state.currentSessionId)

@@ -72,6 +72,10 @@ describe('MessageList tool filtering', () => {
     // The MessageList component applies: if (message.role === 'tool') return null.
     // We assert via grep on the source file to lock the contract.
     // (Sufficient for regression: the source MUST contain the filter.)
+    // TODO(test): replace this source-grep with a behavior assertion —
+    // render MessageList with tool messages and assert they produce no
+    // Agent cards. Kept as-is (user decision) because the tool-role
+    // filter is cheap to break and the grep is stable.
     const fs = require('fs')
     const path = require('path')
     const src = fs.readFileSync(

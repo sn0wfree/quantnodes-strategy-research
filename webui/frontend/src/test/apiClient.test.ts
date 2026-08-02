@@ -191,6 +191,36 @@ describe('APIClient', () => {
 
       await expect(api.get('/x')).rejects.toThrow('Request failed')
     })
+
+    it('2xx with empty body does not throw (future 204 endpoints)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        text: async () => '',
+      })
+
+      const result = await api.get<null>('/x')
+      expect(result).toBeUndefined()
+    })
+
+    it('ApiError preserves non-string detail (e.g. FastAPI 422 array)', async () => {
+      const detail = [{ loc: ['body', 'x'], msg: 'field required' }]
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        json: async () => ({ detail }),
+      })
+
+      try {
+        await api.post('/x', {})
+        expect.unreachable('should have thrown')
+      } catch (err: any) {
+        expect(err.status).toBe(422)
+        expect(err.detail).toEqual(detail)
+        expect(err.message).toBe('Request failed')
+      }
+    })
   })
 
   // ──────────── SSE connection ────────────

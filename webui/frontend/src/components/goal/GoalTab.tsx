@@ -4,6 +4,11 @@ import { GoalTimeline } from './GoalTimeline'
 import { EmptyState } from '../common/EmptyState'
 import { statusLabel } from '../../utils/status'
 
+// TODO(architecture): this is a DISPLAY model (id/title/description/
+// timeline) distinct from the store model in stores/goal.ts
+// (goal_id/objective/criteria) — RightPanel converts between them by
+// hand. Once the goal panel is wired to real data (see the goal_* SSE
+// TODO in useSSE.ts), merge the two models instead of duplicating.
 interface Goal {
   id: string
   title: string

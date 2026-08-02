@@ -1,12 +1,7 @@
 import { create } from 'zustand'
+import type { Criterion } from '../api/client'
 
-export interface Criterion {
-  criterion_id: string
-  text: string
-  status: string
-  required: boolean
-  evidence_count?: number
-}
+export type { Criterion }
 
 export interface Goal {
   goal_id: string

@@ -87,6 +87,13 @@ class APIClient {
       throw new ApiError(res.status, message, detail)
     }
 
+    // Parse the body defensively: 2xx with an empty body (e.g. future
+    // 204 endpoints) must not throw on res.json().
+    if (typeof res.text === 'function') {
+      const text = await res.text()
+      if (text) return JSON.parse(text) as T
+      return undefined as T
+    }
     return res.json()
   }
 
