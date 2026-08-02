@@ -12,7 +12,7 @@
 | 文件/代码 | `read_file` `list_files` `write_file` `git_diff` | write_file 写文件 | 多角色 |
 | 回测 | `run_backtest` `list_history` `strategy_compare` `drawdown_analysis` `benchmark_comparison` | run_backtest 写 runs/ | strategist / backtest_diagnostics |
 | 因子 | `compute_factor` `factor_analysis` `factor_cross_sectional_analysis` `factor_quintile_returns` `factor_ic_decay` `factor_turnover` | 只读 | factor_analyst / researcher |
-| 行情数据 | `get_market_data` `commit_market_data` `import_data` `list_data_sources` `search_symbol` | get_market_data 写 parquet 缓存; commit/import 写 DuckDB | researcher / data_quality / strategist |
+| 行情数据 | `get_market_data` `import_data` `list_data_sources` `search_symbol` | get_market_data(persist=True) / import 写 DuckDB | researcher / data_quality / strategist |
 | 其他分析 | `options_pricing` `pattern_recognition` | 只读 | — |
 | 技能 | `list_skills` `load_skill` | 只读 | 通用 |
 | Web | `web_search` `read_url` `read_document` | 只读(需依赖) | researcher / strategist |
@@ -22,7 +22,7 @@
 
 - 所有工具返回 JSON 字符串。成功：`{"status": "ok", ...}`；失败：`{"status": "error", "error", "received", "expected", "fix", "tool"}`。
 - `workspace` 与 `session_id` 由 AgentLoop 自动注入，LLM 无需（也不应猜测）传值——但 schema 中仍列出。
-- 有副作用的工具（`is_readonly=False`）：`write_file` `run_backtest` `get_market_data` `import_data` `commit_market_data` `create_goal` `add_evidence` `complete_goal`。
+- 有副作用的工具（`is_readonly=False`）：`write_file` `run_backtest` `get_market_data` `import_data` `create_goal` `add_evidence` `complete_goal`。
 - 依赖检测：`web_search`/`read_document` 依赖对应 Python 包，缺失时被排除注册。
 
 ---
@@ -78,10 +78,10 @@
 
 - **用途**：运行回测，读取 `strategies/<name>/config.yaml`，产出 runs/。
 - **输入**：`workspace`(自动)、`strategy_name`(必填)、`action`(默认 "agent")、`description`(可选)、`yaml_path`(覆盖配置，可选)。
-- **预期输出**：`{run, strategy, metrics, status, next_step}`。`next_step` 提示 `list_history`/`drawdown_analysis`/`benchmark_comparison`。
+- **预期输出**：`{run, strategy, metrics, status}`。
 - **前置条件**：`strategies/<name>/config.yaml` 存在且合法；所需行情已入 DuckDB（`data.source: auto+duckdb` 或 `duckdb`）。
 - **注意事项**：
-  - 数据为空时错误响应自带 `workflow` 提示：`get_market_data` → `commit_market_data` → `run_backtest`。
+  - 数据为空时错误响应自带 `workflow` 提示：`get_market_data(persist=True)` → `run_backtest`。
   - `auto+duckdb`：DuckDB 缓存 + 在线刷新；`duckdb`：仅本地（需先导入）。
 - **后续引导**：成功后用 `list_history` 对比历史，`drawdown_analysis` 看回撤，`benchmark_comparison` 对照基准。
 
@@ -126,13 +126,13 @@
 ## 3. 因子
 
 > 所有因子工具从 DuckDB `ohlcv` 视图读数据（`ohlcv` 是 `price_data` 表的视图，含 `date/asset/open/high/low/close/volume`）。
-> 前置条件：至少一个资产已通过 `get_market_data` + `commit_market_data`（或 `import_data`）入库。
+> 前置条件：至少一个资产已通过 `get_market_data(persist=True)`（或 `import_data`）入库。
 
 ### compute_factor
 
 - **用途**：单资产计算因子表达式，返回序列样本。
 - **输入**：`workspace`(自动)、`factor_code`(必填，如 `ts_mean(close, 20)/ts_mean(close,60)-1`)、`asset`(可选，默认第一个)、`factor_name`(可选)、`n_samples`(默认 5)。
-- **预期输出**：`{factor_name, factor_code, asset, n_total, n_non_null, sample, first_date, last_date, next_step}`。
+- **预期输出**：`{factor_name, factor_code, asset, n_total, n_non_null, sample, first_date, last_date}`。
 - **注意事项**：
   - 需单资产宽表；数据来自 DuckDB `ohlcv`，按 asset 过滤后 `set_index('date')`。
   - 指定 asset 不存在时报错并列出可用资产前 10。
@@ -143,7 +143,7 @@
 
 - **用途**：单资产因子 IC/IR 统计。
 - **输入**：`workspace`(自动)、`factor_code`(必填)、`asset`(可选)、`forward_days`(默认 5)。
-- **预期输出**：`{factor_code, asset, forward_days, ic_mean, spearman_ic, n_observations, next_step}`。
+- **预期输出**：`{factor_code, asset, forward_days, ic_mean, spearman_ic, n_observations}`。
 - **注意事项**：对齐后样本 < 10 报错 "insufficient data"。
 - **后续引导**：跨资产验证或直接构建策略。
 
@@ -151,7 +151,7 @@
 
 - **用途**：跨资产截面 IC（Pearson + Spearman）、IR、IC>0 比例。
 - **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(逗号分隔代码或 `all`，默认 `all`)、`start_date`/`end_date`(可选)、`forward_days`(默认 5)。
-- **预期输出**：`{factor_code, n_assets, n_dates, forward_days, ic_pearson_mean, ic_pearson_std, ir, ic_pearson_gt0_ratio, ic_spearman_mean, ic_spearman_std, sample_dates, next_step}`。
+- **预期输出**：`{factor_code, n_assets, n_dates, forward_days, ic_pearson_mean, ic_pearson_std, ir, ic_pearson_gt0_ratio, ic_spearman_mean, ic_spearman_std, sample_dates}`。
 - **注意事项**：
   - **需 ≥3 资产**，因子计算成功也需 ≥3，有效 IC 观测 ≥5。
   - `universe` 中不存在的代码会报错。
@@ -161,7 +161,7 @@
 
 - **用途**：按因子值分组（默认 5 组）的平均前向收益 + 多空价差。
 - **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(默认 `all`)、`start_date`/`end_date`(可选)、`n_groups`(默认 5)、`holding_period`(默认 5)。
-- **预期输出**：`{factor_code, n_groups, holding_period, n_assets_used, Q1..Qn_mean_return, long_short_spread, next_step}`。
+- **预期输出**：`{factor_code, n_groups, holding_period, n_assets_used, Q1..Qn_mean_return, long_short_spread}`。
 - **注意事项**：需 `n_groups*2` 资产下限。
 - **后续引导**：看 Q1→Qn 单调性与价差符号；`factor_ic_decay`/`factor_turnover` 深入。
 
@@ -169,7 +169,7 @@
 
 - **用途**：多前向窗口（默认 1,5,10,20,60 天）的 IC 衰减曲线。
 - **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(默认 `all`)、`start_date`/`end_date`(可选)、`horizons`(逗号分隔，默认 `1,5,10,20,60`)。
-- **预期输出**：`{factor_code, n_assets, ic_decay: [{horizon, ic_mean, ic_std, ir, n_periods}], next_step}`。
+- **预期输出**：`{factor_code, n_assets, ic_decay: [{horizon, ic_mean, ic_std, ir, n_periods}]}`。
 - **注意事项**：需 ≥3 资产因子计算成功。
 - **后续引导**：根据最佳 horizon 进入策略构建。
 
@@ -177,7 +177,7 @@
 
 - **用途**：因子排名稳定性（低换手 = 稳定因子）。
 - **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(默认 `all`)、`start_date`/`end_date`(可选)、`rebalance_freq`(默认 5)。
-- **预期输出**：`{factor_code, n_assets, n_periods, rebalance_freq_days, avg_turnover, median_turnover, std_turnover, avg_rank_stability, next_step}`。
+- **预期输出**：`{factor_code, n_assets, n_periods, rebalance_freq_days, avg_turnover, median_turnover, std_turnover, avg_rank_stability}`。
 - **注意事项**：需 ≥3 资产；采样期 < 2 报错。
 - **后续引导**：低换手因子适合实盘；进截面复核 + 回测。
 
@@ -187,36 +187,29 @@
 
 ### get_market_data
 
-- **用途**：按 fallback 链获取 OHLCV 行情，**写入 parquet 缓存并返回摘要**（不进 prompt）。
-- **输入**：`codes`(必填，list[str] 或 "A,B,C" 字符串或 JSON 字符串)、`start_date`/`end_date`(必填，ISO 日期)、`interval`(默认 `1D`)、`source`(可选覆盖)、`max_rows`(默认 500)。
-- **预期输出**：`{cached: {code: cache_key}, summary: {code: {rows, status, cache_key, first_close, last_close, close_min, close_max, avg_volume}}, preview: {code: [前5行]}, meta: {...}, next_step}`。
-- **前置条件**：至少一个数据源可用（`list_data_sources` 可查）；网络可用。
+- **用途**：按 fallback 链获取 OHLCV 行情，**写入 workspace DuckDB 并返回摘要**（全量数据不进 prompt）。已与 `commit_market_data` 合并——fetch + persist 一步完成。
+- **输入**：`codes`(必填，list[str] 或 "A,B,C" 字符串或 JSON 字符串)、`start_date`/`end_date`(必填，ISO 日期)、`interval`(默认 `1D`)、`source`(可选覆盖)、`max_rows`(默认 500)、`persist`(默认 True，写 DuckDB)、`strategy_name`(默认 `default`)、`workspace`(自动注入，persist=True 时必需)。
+- **预期输出**：`{summary: {code: {rows, status, first_close, last_close, close_min, close_max, avg_volume}}, preview: {code: [前5行]}, persisted: bool, strategy_name, persisted_rows, meta: {codes, start_date, end_date, interval, source, total_rows}}`。
+- **前置条件**：至少一个数据源可用（`list_data_sources` 可查）；网络可用；persist=True 需 workspace（AgentLoop 自动注入）。
 - **注意事项**：
-  - **上下文安全设计**：全量行情写 `~/.quantnodes-research/loader_cache/<key>.parquet`，**不进入 LLM prompt**。这是 context 溢出修复的核心（见 `docs/context-overflow-fix.md`）。
+  - **上下文安全设计**：全量行情直接写 DuckDB，**不进入 LLM prompt**；返回值仅含 summary+preview。这是 context 溢出修复的核心（见 `docs/context-overflow-fix.md`）。
   - `source` 指定且不可用 → 报错；不指定 → `detect_market` 自动选源。
   - **纯数字代码（如 `510300`）会被误判为 FRED/macro**；A 股代码务必带后缀 `600519.SH`/`000858.SZ`。
   - `codes` 形状错误时容错：支持 list / 逗号分隔字符串 / JSON 字符串 / 单键 dict 包裹。
-- **后续引导**：**必须调用 `commit_market_data`** 把缓存合并入 DuckDB，否则数据不可用于回测/因子。`next_step` 字段已给出示例。
-
-### commit_market_data
-
-- **用途**：把 `get_market_data` 的 parquet 缓存合并入 workspace DuckDB `price_data`。
-- **输入**：`workspace`(自动)、`cache_keys`(必填，list)、`codes`(必填，list，与 cache_keys 平行)、`strategy_name`(默认 `default`)。
-- **预期输出**：`{committed: [{code, rows}], total_rows, missing, strategy_name, next_step, message}`。
-- **前置条件**：cache_keys 来自 `get_market_data` 返回；缓存文件存在。
-- **注意事项**：`cache_keys` 与 `codes` 必须等长非空；`INSERT OR REPLACE` 幂等（重复 commit 不重复插入）。
-- **后续引导**：`next_step` 指向 `run_backtest(strategy_name=...)`。
+  - `persist=True`（默认）写入 `price_data`（`ohlcv` 视图可见），`run_backtest`/`compute_factor`/`factor_*` 立即可用。`persist=False` 仅查看不写库。
+  - **幂等**：`INSERT OR REPLACE` 按 (strategy_name, asset_code, date) 覆盖，重复获取不重复插入。
+- **后续引导**：无需额外步骤——persist=True 已入库，可直接 `run_backtest` 或因子分析。
 
 ### import_data
 
 - **用途**：手动/外部 OHLCV 数据导入 DuckDB（**非推荐主流程**）。
 - **输入**：`workspace`(自动)、`data`(必填，`{asset_code: [records]}`)、`strategy_name`(默认 `default`)。
-- **预期输出**：`{imported, n_codes, strategy_name, message, next_step}`。
+- **预期输出**：`{imported, n_codes, strategy_name, message}`。
 - **注意事项**：
-  - **推荐流程已改为 `get_market_data` → `commit_market_data`**；`import_data` 仅用于粘贴外部数据/CSV。
+  - **主流程为 `get_market_data(persist=True)`**；`import_data` 仅用于粘贴外部数据/CSV。
   - `data` 支持各种 LLM 错误包裹（单键 dict、JSON 字符串）的容错。
   - 记录需含 `trade_date`/`date` + OHLCV；缺 close 列会报错。
-- **后续引导**：`next_step` 指向 `run_backtest` 或 `factor_analysis`。
+- **后续引导**：导入后可 `run_backtest` 或 `factor_analysis`。
 
 ### list_data_sources
 
@@ -357,25 +350,26 @@
 
 ## 标准工作流
 
-### 工作流 A：数据获取 → 入库 → 回测（推荐）
+### 工作流 A：数据获取 → 回测（推荐，一步入库）
 
 ```
-get_market_data(codes=['600519.SH','000858.SZ'], start_date='2023-01-01', end_date='2024-12-31')
-  └─ 评估 summary/preview 数据质量（不进 prompt，安全）
-commit_market_data(cache_keys=[...], codes=[...], strategy_name='mom')
-  └─ 合并入 DuckDB（返回 next_step）
+get_market_data(codes=['600519.SH','000858.SZ'], start_date='2023-01-01',
+                end_date='2024-12-31', persist=True, strategy_name='mom')
+  └─ fetch + 写入 DuckDB 一步完成，返回 summary/preview（不进 prompt）
 run_backtest(strategy_name='mom')
 ```
+
+> 已合并 `commit_market_data`：`get_market_data` 的 `persist=True`（默认）直接把行情写入 DuckDB，无需二次调用。
 
 ### 工作流 B：因子研究四连
 
 ```
 factor_cross_sectional_analysis(factor_code='ts_mean(close,20)/ts_mean(close,60)-1', universe='all')
-  └─ 截面 IC → next_step
+  └─ 截面 IC
 factor_quintile_returns(factor_code=..., universe='all')
-  └─ 分组单调性 → next_step
+  └─ 分组单调性
 factor_ic_decay(factor_code=..., horizons='1,5,10,20,60')
-  └─ 衰减 → next_step
+  └─ 衰减
 factor_turnover(factor_code=..., rebalance_freq=5)
   └─ 稳定性 → 若稳定则 run_backtest
 ```
@@ -447,13 +441,13 @@ read_document(path='/abs/path/paper.pdf')
 5. **`list_history` 无 strategy 参数时只扫第一个策略目录**。
 6. **`drawdown_analysis`/`benchmark_comparison` 依赖权益曲线文件名约定**：`equity.csv`/`equity_curve.csv`/`portfolio.csv`/`nav.csv`。
 7. **web 工具条件注册**：`web_search`/`read_document` 依赖包未装则不注册——`list_data_sources` 之外无直接前端指示。
-8. **`import_data` 已降级**：描述与错误提示均引导走 `get_market_data` → `commit_market_data` 主流程。
+8. **`import_data` 已降级**：主流程为 `get_market_data(persist=True)` 一步入库；`import_data` 仅用于手动/外部数据。
 
 ---
 
 ## 工具后续引导策略（next_step 取舍）
 
-> 本节记录业界调研结论与本项目的引导决策，供评审讨论。结论未定稿前，以本节为准同步工具行为。
+> 本节记录业界调研结论与本项目的最终决策。
 
 ### 业界调研结论
 
@@ -474,21 +468,13 @@ read_document(path='/abs/path/paper.pdf')
 | GitHub Copilot 等代码 agent | ❌ 工具不返回建议 | planner 单独决策 |
 | **API 分页/游标**（GitHub cursor 等） | ✅ 有 `next_cursor` | 唯一被业界认可的"返回值带下一步"范式——且**仅在状态依赖**时存在 |
 
-**核心结论**：业界主流不在返回值里做通用"下一步建议"。唯一例外是**契约式/状态依赖的必需下一步**——像 `get_market_data` → `commit_market_data`：数据已缓存但**不 commit 就无法用于回测**，LLM 无法从纯数据推断，必须显式告知。
+### 最终决策
 
-### 当前决策（评审中）
+**所有 `next_step` 字段已移除。** 通用"下一步建议"（run_backtest→list_history、因子四连互相指向、import_data→run_backtest 等）不符合业界惯例且跨角色不可达，全部删除。
 
-| 工具输出中的 next_step | 决策 | 理由 |
-|------------------------|------|------|
-| `get_market_data` → `commit_market_data` | ✅ **保留** | 契约式必需下一步（对标业界 `next_cursor`）；与 `meta.note` 冗余待合并 |
-| `commit_market_data` → `run_backtest` | ❌ **移除** | 通用建议，非必需契约 |
-| `import_data` → `run_backtest`/`factor_analysis` | ❌ **移除** | 通用建议 |
-| `run_backtest` → `list_history`/`drawdown_analysis`/`benchmark_comparison` | ❌ **移除** | 通用建议；且跨角色不可达 |
-| `compute_factor` / `factor_analysis` / 因子四连 → 下一分析 | ❌ **移除** | 通用建议；研究顺序属工作流，应放 prompt/文档 |
-| 补 `write_file`/`web_search`/`list_skills`/goal 等 next_step | ❌ **不补** | 业界无此惯例 |
+**唯一的契约式场景通过合并解决**：`get_market_data` 原本需要"先返回摘要、再 `commit_market_data` 入库"的两步契约。经评审，将该两步**合并为一步**——`get_market_data(persist=True)` 直接写入 DuckDB 并返回摘要，`commit_market_data` 工具退役。由此消除了唯一需要"返回值带下一步"的场景，与业界"返回值纯净"的 ACI 惯例对齐。
 
-### 待定项
-
-1. **`get_market_data` 的 `meta.note` 与 `next_step` 冗余**：二选一保留，或 note 精简为一句、next_step 保留结构化。
-2. **契约式引导是否同时写入 tool description**：业界 ACI 范式倾向 description 承担引导，返回值只留必要契约信号。
-3. **工作流引导归属**：数据流/因子研究顺序是否应固化到 `chat.md` / `SYSTEM_PROMPT_HEADER`（另立任务），而非散落在工具输出。
+**引导归属**：
+- 工具 description 写明 `何时用` / `边界` / `persist` 语义（ACI 范式）。
+- 工作流（数据流、因子研究顺序）由 `chat.md` / `SYSTEM_PROMPT_HEADER` / skill 文档承担。
+- 返回值保持纯净数据（summary + preview），不含指令性文本。

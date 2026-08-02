@@ -134,11 +134,10 @@ read_file(workspace="{workspace}", path="templates/.skills/factor-research.md")
 > `read_file("{workspace}/templates/program.md")`
 
 ### 因子分析流程
-1. `get_market_data` → 获取行情数据
-2. `import_data` → 导入 DuckDB
-3. `factor_cross_sectional_analysis` → 横截面IC分析
-4. `factor_quintile_returns` → 五分位收益
-5. `factor_ic_decay` → IC衰减分析
+1. `get_market_data(codes=[...], start_date=..., end_date=..., persist=True)` → 获取行情并写入 DuckDB（一步完成，全量数据不进上下文）
+2. `factor_cross_sectional_analysis` → 横截面IC分析
+3. `factor_quintile_returns` → 五分位收益
+4. `factor_ic_decay` → IC衰减分析
 
 ### 策略创建流程
 1. `list_files(workspace, path="strategies")` → 确认目录存在

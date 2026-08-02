@@ -94,14 +94,12 @@ max_iterations: int = 9999999999,
 3. CLI `import --source cache`：同一合并逻辑的手动入口。
 4. `import_data` 保留为手动/外部数据入口，描述与错误提示更新。
 
-数据流（修复后）：
+数据流（修复后，第三批已合并）：
 
 ```
-get_market_data(codes=[...]) → fetch → 写 parquet 缓存 → 返回摘要
-   ↓ agent 评估摘要（数据 OK）
-commit_market_data(codes=[...], cache_keys=[...]) → parquet → DuckDB
-   ↓
-run_backtest(strategy_name=...) → 从 DuckDB 读  ← 行情不进 prompt
+get_market_data(codes=[...], persist=True) → fetch → 写 DuckDB → 返回摘要
+   ↓ （行情直接入库，不进 prompt）
+run_backtest(strategy_name=...) → 从 DuckDB 读
 ```
 
 ## 明确不做
@@ -136,9 +134,21 @@ run_backtest(strategy_name=...) → 从 DuckDB 读  ← 行情不进 prompt
 
 ### 测试
 
-`tests/test_market_data_cache_flow.py`（7 个）：摘要不含全量、preview 限
-5 行、parquet 落盘、commit 入库 DuckDB、key 不匹配报错、缺 key 报告
-missing、工具注册。
+`tests/test_market_data_cache_flow.py`：摘要不含全量、preview 限 5 行、
+persist 写入 DuckDB、persist=False 不写库、strategy 分区、幂等、缺 workspace
+报错、`commit_market_data` 已退役（不在注册表）。
+
+### 第三批（已合入）：合并 get_market_data + commit_market_data
+
+Fix3' 的"两步 + parquet cache_key 中转"经评审后合并为一步：
+
+- `get_market_data(persist=True)` 直接写 DuckDB `price_data`（复用
+  `db.save_ohlcv_to_db`），返回 `{summary, preview, persisted,
+  persisted_rows, strategy_name, meta}`——全量行情仍不进 prompt。
+- `commit_market_data` 工具退役（移除注册、CLI `--source cache`、错误提示引用）。
+- `persist=False` 仅查看不写库；`INSERT OR REPLACE` 幂等。
+- 所有 `next_step` 字段删除（无第二工具；业界 ACI 惯例为返回值保持纯净）。
+
 
 ## 相关文件
 
