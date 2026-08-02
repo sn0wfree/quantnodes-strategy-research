@@ -869,7 +869,26 @@ async def delete_session(session_id: str, request: Request):
     conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
+    _invalidate_projection(session_id)
     return {"status": "ok", "deleted_id": session_id}
+
+
+def _invalidate_projection(session_id: str) -> None:
+    """Drop the projector's in-memory state for a deleted session.
+
+    The projector cache lives on the EventBusV2 held by the process-wide
+    SessionService (owned by routers/chat.py). Lazy import avoids a
+    web_session → chat module cycle.
+    """
+    try:
+        from .chat import _session_service_cache
+        for service in _session_service_cache.values():
+            bus = getattr(service, "event_bus", None)
+            invalidate = getattr(bus, "invalidate", None)
+            if callable(invalidate):
+                invalidate(session_id)
+    except Exception as exc:
+        logger.debug("projection invalidation skipped: %s", exc)
 
 
 def delete_messages(session_id: str, message_ids: list[str]) -> None:
@@ -879,13 +898,16 @@ def delete_messages(session_id: str, message_ids: list[str]) -> None:
     try:
         conn = _get_db()
         placeholders = ",".join("?" for _ in message_ids)
-        conn.execute(
+        cur = conn.execute(
             f"DELETE FROM messages WHERE session_id = ? AND id IN ({placeholders})",
             [session_id, *message_ids],
         )
+        # Only decrement by the number of rows actually deleted, so
+        # message_count can never go negative when some ids don't exist.
+        deleted = cur.rowcount
         conn.execute(
             "UPDATE sessions SET message_count = message_count - ?, updated_at = ? WHERE id = ?",
-            (len(message_ids), time.time(), session_id),
+            (deleted, time.time(), session_id),
         )
         conn.commit()
     except Exception as exc:

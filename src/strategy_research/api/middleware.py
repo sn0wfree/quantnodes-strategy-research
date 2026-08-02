@@ -32,12 +32,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in self.SKIP_PATHS or path.startswith("/docs"):
             return await call_next(request)
 
-        # Skip auth for static files (frontend assets)
-        # Static files have extensions like .js, .css, .png, .svg, .ico, .json, .html, .woff, .woff2, .ttf
-        if any(path.endswith(ext) for ext in [
-            ".js", ".css", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".json",
-            ".html", ".woff", ".woff2", ".ttf", ".eot", ".map",
-        ]):
+        # Non-API paths: SPA static files are public. Static files have
+        # extensions like .js, .css, .png, .svg, .ico, .json, .html, etc.
+        # IMPORTANT: this must be gated to non-API paths — otherwise any
+        # protected route with a trailing {param} path segment could be
+        # hit without auth by suffixing an extension (e.g.
+        # /api/hypothesis/{id}.json).
+        if not path.startswith("/api/") and any(
+            path.endswith(ext) for ext in [
+                ".js", ".css", ".png", ".jpg", ".jpeg", ".svg", ".ico",
+                ".json", ".html", ".woff", ".woff2", ".ttf", ".eot", ".map",
+            ]
+        ):
             return await call_next(request)
 
         # Skip auth for public endpoints

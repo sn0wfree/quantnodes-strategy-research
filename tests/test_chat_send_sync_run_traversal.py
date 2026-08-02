@@ -1,0 +1,140 @@
+"""Regression tests for the sync chat path + run router traversal guard."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from strategy_research.api.app import create_app
+from strategy_research.api.auth_tokens import create_token
+
+
+@pytest.fixture
+def auth_headers():
+    return {"Authorization": f"Bearer {create_token('admin')}"}
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    """Session DB under tmp_path via web_session._get_db_path patch."""
+    import strategy_research.api.routers.web_session as ws
+    monkeypatch.setattr(ws, "_get_db_path", lambda: str(tmp_path / "sr.db"))
+    return TestClient(create_app())
+
+
+def _new_session(client: TestClient, headers: dict) -> str:
+    r = client.post("/api/chat/session", json={
+        "user_id": "anonymous", "title": "t",
+    }, headers=headers)
+    assert r.status_code == 200
+    return r.json()["id"]
+
+
+class TestSendSync:
+    def test_send_requires_ownership_and_persists(
+        self, client: TestClient, monkeypatch,
+    ) -> None:
+        """send_sync must: enforce ownership, go through the unified
+        SessionService, and persist the exchange (message_received +
+        assistant_message rows)."""
+        monkeypatch.setenv("STRATEGY_RESEARCH_TEST_CHAT", "1")
+        headers = {"Authorization": f"Bearer {create_token('admin')}"}
+        sid = _new_session(client, headers)
+
+        r = client.post("/api/chat/send", json={
+            "session_id": sid, "content": "hello sync",
+        }, headers=headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "completed"
+        assert "测试要点" in body["reply"]
+
+        # The exchange must be persisted (not a bare AgentLoop run)
+        msgs = client.get(f"/api/chat/session/{sid}/messages", headers=headers)
+        assert msgs.status_code == 200
+        roles = [m["role"] for m in msgs.json()["messages"]]
+        assert "user" in roles and "assistant" in roles
+
+    def test_send_rejects_foreign_session(self, client: TestClient) -> None:
+        """An authenticated user must not post to a session owned by
+        another user (ownership check present in the sync path)."""
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setenv("STRATEGY_RESEARCH_TEST_CHAT", "1")
+        try:
+            headers = {"Authorization": f"Bearer {create_token('admin')}"}
+            sid = _new_session(client, headers)
+            other = {"Authorization": f"Bearer {create_token('bob')}"}
+            r = client.post("/api/chat/send", json={
+                "session_id": sid, "content": "hi",
+            }, headers=other)
+            assert r.status_code == 403
+        finally:
+            monkeypatch.undo()
+
+
+class TestRunTraversal:
+    def test_run_status_rejects_traversal(
+        self, tmp_path, client: TestClient, auth_headers,
+    ) -> None:
+        """run_name with '..' must not escape the workspace."""
+        ws = tmp_path / "ws"
+        (ws / "strategies" / "s1" / "runs").mkdir(parents=True)
+        outside = tmp_path / "secret.json"
+        outside.write_text(json.dumps({"leak": True}))
+
+        r = client.get(
+            "/api/run/status",
+            params={
+                "workspace_path": str(ws),
+                "strategy_name": "s1",
+                "run_name": "../../../secret",
+            },
+            headers=auth_headers,
+        )
+        # Either 400 (containment guard) or 404 (not found) — never 200
+        assert r.status_code in (400, 404)
+
+    def test_run_list_inside_workspace(self, tmp_path, client: TestClient,
+                                       auth_headers) -> None:
+        ws = tmp_path / "ws"
+        runs = ws / "strategies" / "s1" / "runs" / "run_0001"
+        runs.mkdir(parents=True)
+        (runs / "metrics.json").write_text(json.dumps({"sharpe": 1.2}))
+
+        r = client.get(
+            "/api/run/list",
+            params={"workspace_path": str(ws), "strategy_name": "s1"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200
+        assert r.json()["runs"][0]["metrics"]["sharpe"] == 1.2
+
+    def test_run_list_missing_workspace_returns_empty(
+        self, client: TestClient, auth_headers,
+    ) -> None:
+        r = client.get(
+            "/api/run/list",
+            params={
+                "workspace_path": "/nonexistent",
+                "strategy_name": "test",
+            },
+            headers=auth_headers,
+        )
+        assert r.status_code == 200
+        assert r.json()["runs"] == []
+
+    def test_run_status_missing_workspace_404(
+        self, client: TestClient, auth_headers,
+    ) -> None:
+        r = client.get(
+            "/api/run/status",
+            params={
+                "workspace_path": "/nonexistent",
+                "strategy_name": "test",
+                "run_name": "run_0001",
+            },
+            headers=auth_headers,
+        )
+        assert r.status_code == 404

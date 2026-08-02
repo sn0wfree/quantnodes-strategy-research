@@ -1384,8 +1384,12 @@ class AgentLoop:
                 except RuntimeError:
                     loop = None
                 if loop and loop.is_running():
-                    # Already in async context — use sync fallback
-                    return self._client.chat(messages, **kwargs)
+                    # We're inside the running event loop (async agent
+                    # path); a blocking sync LLM call here would freeze
+                    # the whole server. Run it in a worker thread.
+                    return asyncio.run(
+                        asyncio.to_thread(self._client.chat, messages, **kwargs)
+                    )
                 return asyncio.run(self._client.achat(messages, **kwargs))
 
         adapter = _AchatAdapter(self.client)

@@ -17,7 +17,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .event_v2 import EventType, EventV2, is_known_event_type
 
@@ -200,6 +200,106 @@ class Projector:
             EventType.COMPACT: self._on_compact,
             EventType.COMPACT_ENDED: self._on_compact,
         }
+        # Per-session in-memory projections, keyed by session_id. Only
+        # used by project_incremental(); project() remains a pure
+        # function. Entries are invalidated on session deletion.
+        # See docs/projector-incremental.md.
+        self._cache: Dict[str, ProjectedSession] = {}
+
+    # ── Incremental projection (see docs/projector-incremental.md) ─
+
+    def project_incremental(
+        self,
+        session_id: str,
+        collect_touched: bool = False,
+    ) -> Tuple[ProjectedSession, Optional[Set[str]]]:
+        """Extend the cached projection with only the new events.
+
+        On a cache hit, only events after the cached ``last_seq`` are
+        replayed (O(delta) instead of O(N)). On a cache miss, falls
+        back to a full ``project()``.
+
+        Returns ``(state, touched)``:
+        - ``state``: the (mutated) cached ProjectedSession.
+        - ``touched``: set of message ids modified by the new events,
+          or None when ``collect_touched`` is False. Contains the
+          sentinel ``"*"`` when an event rewrites the whole session
+          (compact.ended with a replacement message list) — callers
+          must then fall back to a full flush.
+        """
+        touched: Optional[Set[str]] = set() if collect_touched else None
+        cached = self._cache.get(session_id)
+        if cached is not None:
+            events = self.load_events(session_id, after_seq=cached.last_seq)
+            if touched is not None:
+                for event in events:
+                    self._collect_touched(event, touched)
+            for event in events:
+                self._apply(event, cached)
+            if events:
+                cached.last_seq = max(e.seq for e in events)
+            return cached, touched
+
+        # Cache miss — full rebuild. touched=None so the caller falls
+        # back to a full flush (all rows written, stale rows deleted).
+        state = self.project(session_id)
+        self._cache[session_id] = state
+        return state, None
+
+    def invalidate(self, session_id: str) -> None:
+        """Drop the cached projection for a session (session deleted).
+
+        The next project_incremental() for this session does a full
+        rebuild — correct because event_log is the source of truth.
+        """
+        self._cache.pop(session_id, None)
+
+    def _collect_touched(self, event: EventV2, touched: Set[str]) -> None:
+        """Record which message ids an event modifies (for delta flush).
+
+        Every handler resolves its target message via
+        ``data["message_id"]`` (or ``user_message_id`` for
+        message_received), so those keys enumerate the touched set.
+        Compact events with a full replacement list rewrite every
+        message — signalled with the ``"*"`` sentinel.
+        """
+        data = event.data
+        for key in ("message_id", "user_message_id"):
+            mid = data.get(key)
+            if mid:
+                touched.add(mid)
+        if event.type in (EventType.COMPACT, EventType.COMPACT_ENDED):
+            if isinstance(data.get("messages"), list):
+                touched.add("*")
+
+    @staticmethod
+    def _message_row(msg: ProjectedMessage) -> Dict[str, Any]:
+        """Serialize a single message to a messages-table row."""
+        return {
+            "id": msg.id,
+            "session_id": msg.session_id,
+            "role": msg.role,
+            "content": msg.content,
+            "message_type": msg.message_type,
+            "created_at": msg.created_at,
+            "seq": msg.seq,
+        }
+
+    @staticmethod
+    def _part_rows(msg: ProjectedMessage) -> List[Dict[str, Any]]:
+        """Serialize a single message's parts to message_parts rows."""
+        return [
+            {
+                "id": p.id,
+                "message_id": msg.id,
+                "session_id": msg.session_id,
+                "type": p.type,
+                "data_json": json.dumps(p.data, ensure_ascii=False),
+                "seq": p.seq,
+                "time_created": p.time_created,
+            }
+            for p in msg.parts_in_order()
+        ]
 
     # ── Public API ──────────────────────────────────────────────
 
@@ -251,7 +351,11 @@ class Projector:
 
     # ── Flush (B2) ──────────────────────────────────────────────
 
-    def flush(self, state: ProjectedSession) -> None:
+    def flush(
+        self,
+        state: ProjectedSession,
+        touched: Optional[Set[str]] = None,
+    ) -> None:
         """Atomically UPSERT the projected state to messages + message_parts.
 
         Idempotent: calling flush() twice with the same state produces
@@ -264,6 +368,14 @@ class Projector:
         - Deletes message_parts rows that no longer exist in the
           projection (handles part deletion edge cases)
 
+        Args:
+            touched: Optional set of message ids to write (delta
+                flush, see docs/projector-incremental.md). Only those
+                messages are UPSERTed and their parts rewritten.
+                ``None`` or a set containing the ``"*"`` sentinel
+                (whole-session rewrite, e.g. compact.ended) performs a
+                full flush.
+
         This is the B2 write path. In B2, service.py publishes events
         via EventBusV2 which writes to event_log, then calls flush()
         to materialize the state to messages + message_parts for the
@@ -272,101 +384,86 @@ class Projector:
         Eventually (B3+), the read path will use the projector
         directly and messages + message_parts can be removed.
         """
-        msg_rows = state.to_message_rows()
-        part_rows = state.to_part_rows()
-        part_ids = {r["id"] for r in part_rows}
+        full = touched is None or "*" in touched
+        msg_rows = state.to_message_rows() if full else None
+        part_rows = state.to_part_rows() if full else None
 
         conn = sqlite3.connect(str(self.db_path))
         try:
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("BEGIN")
 
-            # UPSERT messages
-            # Note: message.id is the table's PRIMARY KEY. Production
-            # message ids are UUIDs (unique per call), so INSERT OR REPLACE
-            # works correctly for the standard case. For tests with
-            # colliding ids across sessions, the previous code had a
-            # cross-session overwrite bug; tests should use unique ids
-            # per session to avoid this.
-            #
-            # metadata_json: the projection doesn't carry metadata, so a
-            # plain REPLACE would NULL out model/run_id/etc. Use ON
-            # CONFLICT DO UPDATE that preserves the existing metadata
-            # when the incoming row has none.
-            msg_ids = {row["id"] for row in msg_rows}
-            for row in msg_rows:
-                conn.execute(
-                    "INSERT INTO messages "
-                    "(id, session_id, role, content, created_at, "
-                    "message_type, seq, metadata_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
-                    "ON CONFLICT(id) DO UPDATE SET "
-                    "session_id=excluded.session_id, "
-                    "role=excluded.role, "
-                    "content=excluded.content, "
-                    "created_at=excluded.created_at, "
-                    "message_type=excluded.message_type, "
-                    "seq=excluded.seq, "
-                    "metadata_json=COALESCE(excluded.metadata_json, "
-                    "                      messages.metadata_json)",
-                    (
-                        row["id"],
-                        row["session_id"],
-                        row["role"],
-                        row["content"],
-                        row["created_at"],
-                        row["message_type"],
-                        row["seq"],
-                    ),
-                )
+            if full:
+                # ── Full flush: UPSERT everything ──────────────
+                # Note: message.id is the table's PRIMARY KEY.
+                # Production message ids are UUIDs (unique per call),
+                # so INSERT OR REPLACE works correctly for the
+                # standard case. For tests with colliding ids across
+                # sessions, the previous code had a cross-session
+                # overwrite bug; tests should use unique ids per
+                # session to avoid this.
+                #
+                # metadata_json: the projection doesn't carry
+                # metadata, so a plain REPLACE would NULL out
+                # model/run_id/etc. Use ON CONFLICT DO UPDATE that
+                # preserves the existing metadata when the incoming
+                # row has none.
+                msg_ids = {row["id"] for row in msg_rows}
+                for row in msg_rows:
+                    self._upsert_message(conn, row)
 
-            # B5: Delete messages that no longer exist in the projection
-            # (e.g., after compact.ended removed them). Without this,
-            # old messages linger in the DB and the invariant breaks.
-            if msg_ids:
-                placeholders = ",".join("?" * len(msg_ids))
-                conn.execute(
-                    f"DELETE FROM messages "
-                    f"WHERE session_id = ? AND id NOT IN ({placeholders})",
-                    (state.session_id, *msg_ids),
-                )
+                # B5: Delete messages that no longer exist in the
+                # projection (e.g., after compact.ended removed them).
+                # Without this, old messages linger in the DB and the
+                # invariant breaks.
+                if msg_ids:
+                    placeholders = ",".join("?" * len(msg_ids))
+                    conn.execute(
+                        f"DELETE FROM messages "
+                        f"WHERE session_id = ? AND id NOT IN ({placeholders})",
+                        (state.session_id, *msg_ids),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM messages WHERE session_id = ?",
+                        (state.session_id,),
+                    )
+
+                # UPSERT message_parts
+                for row in part_rows:
+                    self._insert_part(conn, row)
+
+                # Delete parts that no longer exist (session scope)
+                part_ids = {r["id"] for r in part_rows}
+                if part_ids:
+                    placeholders = ",".join("?" * len(part_ids))
+                    conn.execute(
+                        f"DELETE FROM message_parts "
+                        f"WHERE session_id = ? AND id NOT IN ({placeholders})",
+                        (state.session_id, *part_ids),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM message_parts WHERE session_id = ?",
+                        (state.session_id,),
+                    )
             else:
-                conn.execute(
-                    "DELETE FROM messages WHERE session_id = ?",
-                    (state.session_id,),
-                )
-
-            # UPSERT message_parts
-            for row in part_rows:
-                conn.execute(
-                    "INSERT OR REPLACE INTO message_parts "
-                    "(id, message_id, session_id, type, data_json, "
-                    "seq, time_created) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        row["id"],
-                        row["message_id"],
-                        row["session_id"],
-                        row["type"],
-                        row["data_json"],
-                        row["seq"],
-                        row["time_created"],
-                    ),
-                )
-
-            # Delete parts that no longer exist (for this session only)
-            if part_ids:
-                placeholders = ",".join("?" * len(part_ids))
-                conn.execute(
-                    f"DELETE FROM message_parts "
-                    f"WHERE session_id = ? AND id NOT IN ({placeholders})",
-                    (state.session_id, *part_ids),
-                )
-            else:
-                conn.execute(
-                    "DELETE FROM message_parts WHERE session_id = ?",
-                    (state.session_id,),
-                )
+                # ── Delta flush: only touched messages ──────────
+                # Each touched message is UPSERTed and its parts
+                # rewritten (DELETE + INSERT, idempotent). Messages
+                # are never deleted in the delta path — only compact
+                # events remove messages, and those signal "*".
+                for mid in sorted(touched):
+                    msg = state.messages.get(mid)
+                    if msg is None:
+                        continue
+                    self._upsert_message(conn, self._message_row(msg))
+                    conn.execute(
+                        "DELETE FROM message_parts WHERE message_id = ?",
+                        (mid,),
+                    )
+                    for row in self._part_rows(msg):
+                        self._insert_part(conn, row)
 
             conn.execute("COMMIT")
         except Exception:
@@ -377,6 +474,53 @@ class Projector:
             raise
         finally:
             conn.close()
+
+    @staticmethod
+    def _upsert_message(conn: sqlite3.Connection, row: Dict[str, Any]) -> None:
+        """UPSERT a single messages-table row (preserves metadata_json)."""
+        conn.execute(
+            "INSERT INTO messages "
+            "(id, session_id, role, content, created_at, "
+            "message_type, seq, metadata_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "session_id=excluded.session_id, "
+            "role=excluded.role, "
+            "content=excluded.content, "
+            "created_at=excluded.created_at, "
+            "message_type=excluded.message_type, "
+            "seq=excluded.seq, "
+            "metadata_json=COALESCE(excluded.metadata_json, "
+            "                      messages.metadata_json)",
+            (
+                row["id"],
+                row["session_id"],
+                row["role"],
+                row["content"],
+                row["created_at"],
+                row["message_type"],
+                row["seq"],
+            ),
+        )
+
+    @staticmethod
+    def _insert_part(conn: sqlite3.Connection, row: Dict[str, Any]) -> None:
+        """INSERT OR REPLACE a single message_parts row."""
+        conn.execute(
+            "INSERT OR REPLACE INTO message_parts "
+            "(id, message_id, session_id, type, data_json, "
+            "seq, time_created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                row["id"],
+                row["message_id"],
+                row["session_id"],
+                row["type"],
+                row["data_json"],
+                row["seq"],
+                row["time_created"],
+            ),
+        )
 
     def project_and_flush(self, session_id: str) -> ProjectedSession:
         """Convenience: project + flush in one call."""

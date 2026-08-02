@@ -23,7 +23,6 @@ from ..sse_buffer import sse_buffer
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 # ── Shared SessionService (singleton) ─────────────────────────────────────
 # Borrowed from vibe_trading: one service for the whole process, with an
@@ -843,38 +842,42 @@ async def send_sync(body: ChatMessage, request: Request):
     """Send a message synchronously (non-streaming).
 
     Waits for the full response. Use /send_async for streaming.
+
+    Aligned with send_async: ownership check + unified SessionService
+    (event-log persistence, FIFO queue, conversation-history context).
+    The reply is collected by waiting on the attempt instead of
+    streaming events over SSE.
     """
-    cfg = _build_llm_config()
-    if cfg is None or not cfg.api_key:
-        raise HTTPException(status_code=503, detail="LLM 未配置")
-
-    from strategy_research.core.agent.builtin_tools import build_default_registry
-    from strategy_research.core.agent.loop import AgentLoop
-
+    # Ownership check: only the session owner may post messages
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _conn = _get_db()
     try:
-        registry = build_default_registry()
-    except Exception:
-        registry = None
+        _fetch_session_owned(_conn, body.session_id, user_id)
+    finally:
+        _conn.close()
 
-    system_prompt = _get_system_prompt()
-
-    loop = AgentLoop(
-        config=cfg,
-        registry=registry,
-        workspace=None,
-        on_event=None,  # no streaming in sync mode
-        stream_mode=False,
-        max_iterations=1,
+    service = _get_session_service()
+    result = await service.send_message(
         session_id=body.session_id,
-        system_prompt=system_prompt,
-        allowed_tools=[],
-        compact_config=cfg.compact_config,
+        content=body.content,
     )
+    if result.get("error") == "queue_full":
+        raise HTTPException(status_code=429, detail=result)
 
-    result = await loop.arun(body.content)
+    attempt_id = result.get("attempt_id")
+    outcome = await service.wait_for_attempt(
+        body.session_id, attempt_id,
+    ) if attempt_id else None
+    if outcome is None:
+        raise HTTPException(
+            status_code=504, detail="LLM response timed out",
+        )
     return {
-        "message_id": str(uuid.uuid4()),
-        "reply": result.answer or "",
+        "message_id": result.get("message_id"),
+        "attempt_id": attempt_id,
+        "reply": outcome.get("summary", ""),
+        "status": outcome.get("status"),
     }
 
 

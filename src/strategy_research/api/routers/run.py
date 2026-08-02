@@ -10,6 +10,27 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+def _resolve_run_dir(workspace_path: str, strategy_name: str, run_name: str) -> Path:
+    """Resolve a run dir, containing it inside the workspace.
+
+    strategy_name / run_name come from query params and must not be able
+    to escape the workspace via ".." (path traversal). The run dir is
+    only read when it exists inside the workspace; otherwise a 404 is
+    raised.
+    """
+    workspace = Path(workspace_path).resolve()
+    if not workspace.is_dir():
+        raise HTTPException(status_code=404, detail=f"Workspace not found: {workspace}")
+    run_dir = (workspace / "strategies" / strategy_name / "runs" / run_name).resolve()
+    try:
+        run_dir.relative_to(workspace)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Invalid run path (outside workspace)",
+        )
+    return run_dir
+
+
 class RunStartRequest(BaseModel):
     workspace_path: str
     strategy_name: str
@@ -51,9 +72,7 @@ async def run_status(
 ):
     """获取 run 状态。"""
     try:
-        workspace = Path(workspace_path)
-        strategy_dir = workspace / "strategies" / strategy_name
-        run_dir = strategy_dir / "runs" / run_name
+        run_dir = _resolve_run_dir(workspace_path, strategy_name, run_name)
 
         if not run_dir.exists():
             raise HTTPException(status_code=404, detail=f"Run not found: {run_dir}")
@@ -81,9 +100,11 @@ async def run_list(
 ):
     """列出 runs。"""
     try:
-        workspace = Path(workspace_path)
-        strategy_dir = workspace / "strategies" / strategy_name
-        runs_dir = strategy_dir / "runs"
+        workspace = Path(workspace_path).resolve()
+        if not workspace.is_dir():
+            # Legacy behavior: missing workspace → empty run list
+            return {"status": "ok", "runs": []}
+        runs_dir = _resolve_run_dir(workspace_path, strategy_name, ".")
 
         if not runs_dir.exists():
             return {"status": "ok", "runs": []}
@@ -103,5 +124,7 @@ async def run_list(
                     break
 
         return {"status": "ok", "runs": runs}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

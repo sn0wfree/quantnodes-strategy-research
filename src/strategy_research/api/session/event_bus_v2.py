@@ -69,6 +69,10 @@ class EventBusV2:
         self._flush_to_messages = flush_to_messages
         # Lazy-import projector to avoid circular imports at startup
         self._projector = None
+        # Shared sqlite connection for event_log writes, guarded by
+        # self._lock (see docs/projector-incremental.md §3). Created
+        # lazily; recreated on OperationalError (db replaced/deleted).
+        self._conn = None
 
     def _get_projector(self):
         """Lazy-get the projector instance."""
@@ -76,6 +80,16 @@ class EventBusV2:
             from .projector import Projector
             self._projector = Projector(self.db_path)
         return self._projector
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Get the shared write connection (caller must hold the lock).
+
+        check_same_thread=False is safe here: all access happens under
+        self._lock, so only one thread touches the connection at a time.
+        """
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        return self._conn
 
     def publish(self, event: EventV2) -> None:
         """Publish to event_log AND forward to legacy EventBus.
@@ -156,7 +170,7 @@ class EventBusV2:
         if not events:
             return
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = self._get_conn()
             try:
                 conn.execute("PRAGMA foreign_keys=ON")
                 for event in events:
@@ -169,8 +183,11 @@ class EventBusV2:
                          row["type"], row["data_json"], row["time_created"]),
                     )
                 conn.commit()
-            finally:
-                conn.close()
+            except sqlite3.OperationalError:
+                # DB file replaced/deleted — reconnect once, then re-raise
+                # so the caller can log-and-continue as before.
+                self._drop_conn()
+                raise
 
         # Forward all events to SSE
         for event in events:
@@ -217,37 +234,64 @@ class EventBusV2:
                 event.id, exc,
             )
             return
+
+        def _insert() -> None:
+            """INSERT the event row + commit (uses the shared connection)."""
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute(
+                "INSERT INTO event_log (id, aggregate_id, seq, "
+                "type, data_json, time_created) VALUES "
+                "(?, ?, ?, ?, ?, ?)",
+                (row["id"], row["aggregate_id"], row["seq"],
+                 row["type"], row["data_json"], row["time_created"]),
+            )
+            conn.commit()
+
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            try:
-                conn.execute("PRAGMA foreign_keys=ON")
-                conn.execute(
-                    "INSERT INTO event_log (id, aggregate_id, seq, "
-                    "type, data_json, time_created) VALUES "
-                    "(?, ?, ?, ?, ?, ?)",
-                    (row["id"], row["aggregate_id"], row["seq"],
-                     row["type"], row["data_json"], row["time_created"]),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        except sqlite3.IntegrityError as exc:
-            # Likely a UNIQUE (aggregate_id, seq) violation — same seq reused
-            logger.error(
-                "EventBusV2: seq collision for aggregate=%s seq=%s: %s",
-                event.aggregate_id, event.seq, exc,
-            )
+            conn = self._get_conn()
         except sqlite3.OperationalError as exc:
-            # DB doesn't exist, no event_log table, FK violation, etc.
+            # Cannot even open the DB file (missing dir, permissions, …)
             logger.error(
-                "EventBusV2: DB error for event %s: %s",
-                event.id, exc,
+                "EventBusV2: DB error for event %s: %s", event.id, exc,
             )
-        except sqlite3.Error as exc:
-            logger.error(
-                "EventBusV2: persist failed for event %s: %s",
-                event.id, exc,
-            )
+            return
+        try:
+            _insert()
+        except sqlite3.OperationalError:
+            # Shared connection died (db replaced/deleted) — roll back
+            # any dangling transaction, reconnect once and retry.
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            self._drop_conn()
+            try:
+                conn = self._get_conn()
+                _insert()
+            except sqlite3.Error as exc:
+                logger.error(
+                    "EventBusV2: DB error for event %s: %s", event.id, exc,
+                )
+        except (sqlite3.IntegrityError, sqlite3.Error) as exc:
+            # Best-effort: log and continue (SSE forward still happens).
+            # Roll back the failed statement so the shared connection
+            # doesn't hold a dangling write transaction (which would
+            # lock the DB for other writers).
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            if isinstance(exc, sqlite3.IntegrityError):
+                # Likely a UNIQUE (aggregate_id, seq) violation
+                logger.error(
+                    "EventBusV2: seq collision for aggregate=%s seq=%s: %s",
+                    event.aggregate_id, event.seq, exc,
+                )
+            else:
+                logger.error(
+                    "EventBusV2: persist failed for event %s: %s",
+                    event.id, exc,
+                )
 
     def _forward(self, event: EventV2) -> SSEEvent:
         """Forward to legacy EventBus as SSEEvent.
@@ -278,10 +322,35 @@ class EventBusV2:
         with self._lock:
             return self.last_seq(session_id) + 1
 
+    def _drop_conn(self) -> None:
+        """Close + drop the shared connection (after OperationalError)."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                pass
+            self._conn = None
+
+    def invalidate(self, session_id: str) -> None:
+        """Drop the projector's cached projection for a session.
+
+        Called when a session is deleted, so the next flush rebuilds
+        from event_log instead of serving a stale in-memory state.
+        """
+        with self._lock:
+            if self._projector is not None:
+                self._projector.invalidate(session_id)
+
     def _flush_projection(self, session_id: str) -> None:
         """Flush event_log → messages + message_parts via projector.
 
-        Idempotent: projector.flush() uses INSERT OR REPLACE.
+        Incremental: replays only events after the last flushed seq
+        and writes only the touched messages (see
+        docs/projector-incremental.md). Falls back to a full flush
+        for whole-session rewrites (compact.ended with replacement
+        list) and on cache misses.
+
+        Idempotent: projector.flush() uses INSERT OR REPLACE / upserts.
 
         Serialized under the bus lock so two concurrent flushes of the
         same session cannot interleave (the projector's DELETE of
@@ -295,8 +364,10 @@ class EventBusV2:
         try:
             with self._lock:
                 proj = self._get_projector()
-                state = proj.project(session_id)
-                proj.flush(state)
+                state, touched = proj.project_incremental(
+                    session_id, collect_touched=True,
+                )
+                proj.flush(state, touched=touched)
         except Exception as exc:
             logger.error(
                 "EventBusV2: flush failed for session %s: %s",

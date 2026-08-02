@@ -48,15 +48,15 @@ class SSEEventBuffer:
 
         Notifies ALL registered listeners for the session (multicast).
         """
-        self._counter += 1
-        event_id = f"evt_{self._counter}"
-        sse_event = SSEEvent(
-            id=event_id,
-            event=event,
-            data=data,
-            session_id=session_id,
-        )
         with self._lock:
+            self._counter += 1
+            event_id = f"evt_{self._counter}"
+            sse_event = SSEEvent(
+                id=event_id,
+                event=event,
+                data=data,
+                session_id=session_id,
+            )
             self._buffer.append(sse_event)
         self._cleanup()
         # Notify ALL waiting SSE consumers for this session

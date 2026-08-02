@@ -308,6 +308,36 @@ class SessionService:
         event.set()
         return True
 
+    async def wait_for_attempt(
+        self,
+        session_id: str,
+        attempt_id: str,
+        timeout: float = 600.0,
+    ) -> Optional[dict[str, str]]:
+        """Wait for a background attempt to finish; return its outcome.
+
+        Polls the attempts table (the source of truth for status).
+        Used by the synchronous /api/chat/send path, which must block
+        until the per-session FIFO consumer has run the attempt.
+
+        Returns ``{"status", "summary", "error"}`` on completion, or
+        None when the timeout elapses while the attempt is still
+        pending/running (e.g. a long queue ahead of it).
+        """
+        terminal = ("completed", "failed", "cancelled")
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            attempt = self.store.get_attempt(session_id, attempt_id)
+            if attempt is not None and attempt.status in terminal:
+                return {
+                    "status": attempt.status,
+                    "summary": attempt.summary or "",
+                    "error": attempt.error or "",
+                }
+            if asyncio.get_event_loop().time() > deadline:
+                return None
+            await asyncio.sleep(0.25)
+
     async def _process_session_queue(self, session_id: str) -> None:
         """Consumer coroutine for a session's message queue.
 
