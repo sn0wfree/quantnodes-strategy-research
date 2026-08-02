@@ -1,5 +1,6 @@
 import { Pause, Play } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
+import { useSessionStore } from '../../stores/session'
 
 /**
  * Banner shown above the message list when the per-session queue is paused
@@ -9,14 +10,15 @@ import { useChatStore } from '../../stores/chat'
 export function QueuePauseBanner() {
   const resumeQueue = useChatStore((s) => s.resumeQueue)
   const queueLengths = useChatStore((s) => s.queueLengths)
-  // The banner doesn't have direct access to currentSessionId from props,
-  // but resumeQueue reads it from sessionStore internally.
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const handleResume = () => {
     void resumeQueue()
   }
-  // queueLengths is a Map; render the largest queued count we have across
-  // sessions if multiple are tracked. Single-session UI is the common case.
-  const pending = Math.max(0, ...Array.from(queueLengths.values()))
+  // Pending count is for THIS session only — max-across-sessions
+  // showed the wrong session's queue length (B12).
+  const pending = currentSessionId
+    ? queueLengths.get(currentSessionId) ?? 0
+    : 0
   return (
     <div
       className="flex items-center justify-between gap-3 border-b border-amber-700/40 bg-amber-900/20 px-4 py-2 text-xs text-amber-200"

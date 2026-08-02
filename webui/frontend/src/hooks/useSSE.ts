@@ -7,18 +7,31 @@ import { useToastStore } from '../stores/toast'
 import { useSSEStore } from '../stores/sse'
 import { useSessionStore } from '../stores/session'
 
-type SSEEventType =
-  | 'text.started' | 'text_delta' | 'text.ended'
-  | 'tool_call' | 'tool_result' | 'tool_progress'
-  | 'thinking_delta' | 'thinking_done' | 'thinking_start' | 'thinking_end'
-  | 'file_edit' | 'table' | 'chart' | 'image'
-  | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
-  | 'dag_update' | 'progress' | 'message_received' | 'error'
-  | 'session_meta_updated'
-  | 'goal_updated' | 'goal_evidence_added' | 'goal_completed'
-  | 'attempt.started' | 'queue_paused' | 'queue_state'
-  | 'llm_usage' | 'session_total_tokens' | 'compact'
-
+/**
+ * Subscribe to the session's SSE event stream (/api/chat/events).
+ *
+ * Contract with the backend (api/session/service.py + routers/chat.py):
+ * - One EventSource per session; the browser reconnects natively and
+ *   resends `Last-Event-ID`, and the backend replays buffered events
+ *   from that id (sse_buffer).
+ * - Events carry `{ event_type, message_id, session_id, ... }` where
+ *   `message_id` is the ATTEMPT's assistant message id (added by
+ *   service.event_callback to every event's data).
+ * - The streaming state machine is: `message_received` (user message
+ *   echo + queued assistant placeholder, `queue_status: queued` if
+ *   behind other attempts) → `attempt.started` (queue consumer picks
+ *   up the attempt; frontend switches `streamingMessageId`) →
+ *   `text.started` / `text_delta` / `text.ended` (+ tool/thinking
+ *   events) → `assistant_message` (final content) → `agent_done`
+ *   (streaming cleared). `attempt.completed` carries token usage.
+ * - Queue control: `queue_paused` (after an explicit cancel; UI shows
+ *   QueuePauseBanner until `resume_queue`), `queue_state` snapshots.
+ * - Token accounting: `session_total_tokens` is authoritative (sets
+ *   the cumulative); `llm_usage` deltas are only a fallback.
+ *
+ * State that must survive a reload (agents, DAG, goal panels) is
+ * intentionally NOT rebuilt here — see the TODO on the goal handlers.
+ */
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
 
@@ -30,9 +43,22 @@ export function useSSE(sessionId: string | null) {
   const setQueuePaused = useChatStore((s) => s.setQueuePaused)
   const setQueueLength = useChatStore((s) => s.setQueueLength)
   const setTokensUsed = useChatStore((s) => s.setTokensUsed)
+  const markTotalTokensSeen = useChatStore((s) => s.markTotalTokensSeen)
   const updateAgent = useAgentStore((s) => s.updateAgent)
   const updateNodeStatus = useWorkflowStore((s) => s.updateNodeStatus)
   const addToast = useToastStore((s) => s.addToast)
+
+  type SSEEventType =
+    | 'text.started' | 'text_delta' | 'text.ended'
+    | 'tool_call' | 'tool_result' | 'tool_progress'
+    | 'thinking_delta' | 'thinking_done' | 'thinking_start' | 'thinking_end'
+    | 'file_edit' | 'table' | 'chart' | 'image'
+    | 'agent_status' | 'agent_loop' | 'agent_done' | 'assistant_message'
+    | 'dag_update' | 'progress' | 'message_received' | 'error'
+    | 'session_meta_updated'
+    | 'goal_updated' | 'goal_evidence_added' | 'goal_completed'
+    | 'attempt.started' | 'queue_paused' | 'queue_state'
+    | 'llm_usage' | 'session_total_tokens' | 'compact'
 
   const handleEvent = useCallback(
     (e: MessageEvent) => {
@@ -100,6 +126,9 @@ export function useSSE(sessionId: string | null) {
           // Backend signals the text segment is finalized. Override the
           // text part's content with the authoritative final text (last
           // write wins, same as opencode Text.Ended).
+          // Guard: some protocol variants emit text.ended as a pure
+          // end-signal without the final text — never wipe the
+          // accumulated streaming content with an empty string (B4).
           const textId = data.text_id as string | undefined
           const finalText = (data.text || '') as string
           if (textId && messageId) {
@@ -107,7 +136,7 @@ export function useSSE(sessionId: string | null) {
               for (let i = msg.parts.length - 1; i >= 0; i--) {
                 const p = msg.parts[i]
                 if (p && p.type === 'text' && (p as TextPart).id === textId) {
-                  (p as TextPart).text = finalText
+                  if (finalText) (p as TextPart).text = finalText
                   return
                 }
               }
@@ -380,17 +409,21 @@ export function useSSE(sessionId: string | null) {
         case 'session_total_tokens': {
           // Backend authoritative cumulative for the current attempt.
           // Used by ContextUsageBar to show context window usage.
+          // Marks the session so later llm_usage deltas are not added
+          // on top (double counting — regression B2).
           const { total_tokens } = data as { total_tokens: number }
           if (sessionId && typeof total_tokens === 'number') {
             setTokensUsed(sessionId, total_tokens)
+            markTotalTokensSeen(sessionId)
           }
           break
         }
         case 'llm_usage': {
-          // Per-call usage delta. Backend accumulates into
-          // session_total_tokens and re-emits; we don't need to add
-          // here, but use it as a fallback in case session_total_tokens
-          // is dropped.
+          // Per-call usage delta. The backend accumulates these into
+          // session_total_tokens and re-emits it for every LLM call,
+          // so adding here would double-count (regression B2). Only
+          // fall back to deltas when the authoritative cumulative
+          // event was never seen for this session.
           const d = data as {
             input_tokens?: number
             output_tokens?: number
@@ -398,14 +431,16 @@ export function useSSE(sessionId: string | null) {
             completion_tokens?: number
             total_tokens?: number
           }
-          const inc =
-            d.total_tokens ??
-            (d.input_tokens ?? d.prompt_tokens ?? 0) +
-              (d.output_tokens ?? d.completion_tokens ?? 0)
-          if (sessionId && inc > 0) {
-            const current =
-              useChatStore.getState().tokensUsed.get(sessionId) ?? 0
-            setTokensUsed(sessionId, current + inc)
+          if (sessionId && !useChatStore.getState().totalTokensSeen.get(sessionId)) {
+            const inc =
+              d.total_tokens ??
+              (d.input_tokens ?? d.prompt_tokens ?? 0) +
+                (d.output_tokens ?? d.completion_tokens ?? 0)
+            if (inc > 0) {
+              const current =
+                useChatStore.getState().tokensUsed.get(sessionId) ?? 0
+              setTokensUsed(sessionId, current + inc)
+            }
           }
           break
         }
@@ -483,6 +518,12 @@ export function useSSE(sessionId: string | null) {
           break
         }
         case 'agent_status': {
+          // TODO(architecture): agent_*/dag_update handlers only UPDATE
+          // entries the store already has; nothing calls addAgent /
+          // setDAG with real data (setDAG is only invoked with []), so
+          // after a page reload the Agent list and DAG panels are
+          // empty until a new run starts. Planned fix: backfill on
+          // session load from the run's persisted state.
           const { agent_id, status, ...rest } = data as {
             agent_id: string
             status: string
@@ -518,6 +559,14 @@ export function useSSE(sessionId: string | null) {
           break
         }
         case 'goal_updated': {
+          // TODO(feature): dead chain end-to-end today. No backend
+          // emitter produces goal_* events (verified: zero
+          // `emit(...goal...)` calls in src/), so GoalTab/CriteriaList/
+          // GoalTimeline can only ever render empty states. Planned
+          // wiring: the goal service emits these events on
+          // start/evidence/complete (docs/goal-workflow-design.md), or
+          // the frontend polls /api/goal/status. The handlers below
+          // are kept ready for that event contract.
           const goalData = data as any
           if (goalData.goal_id) {
             useGoalStore.getState().setGoal({
@@ -588,6 +637,7 @@ export function useSSE(sessionId: string | null) {
       setStreamingText,
       appendStreamingText,
       setTokensUsed,
+      markTotalTokensSeen,
       updateAgent,
       updateNodeStatus,
       addToast,
@@ -633,6 +683,12 @@ export function useSSE(sessionId: string | null) {
       'text.started', 'text_delta', 'text.ended',
       'tool_call', 'tool_result', 'tool_progress',
       'thinking_start', 'thinking_delta', 'thinking_done', 'thinking_end',
+      // TODO(feature): file_edit/table/chart/image listeners are
+      // registered but have NO switch cases (silently dropped) and the
+      // backend never emits them (only the unused FILE_EDIT enum in
+      // api/session/event_v2.py). The blocks (FileEditBlock etc.) are
+      // reachable only via DB-loaded parts the backend never produces.
+      // Wire these once the block-part emission lands in service.py.
       'file_edit', 'table', 'chart', 'image',
       'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
       'dag_update', 'progress', 'message_received', 'error',
@@ -640,6 +696,7 @@ export function useSSE(sessionId: string | null) {
       'goal_updated', 'goal_evidence_added', 'goal_completed',
       'compact',
       'llm_usage', 'session_total_tokens',
+      'attempt.started', 'queue_paused', 'queue_state',
     ]
     eventTypes.forEach((type) => es.addEventListener(type, handleEvent))
 

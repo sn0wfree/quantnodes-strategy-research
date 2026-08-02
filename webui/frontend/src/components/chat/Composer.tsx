@@ -70,14 +70,21 @@ export function Composer() {
         setActiveAttempt(res.attempt_id)
       }
 
-      // Rename optimistic user message → backend's user_message_id
+      // Rename optimistic user message → backend's user_message_id.
+      // If the message_received SSE already delivered the backend
+      // message (with authoritative created_at/parts), keep THAT one —
+      // overwriting it with the local optimistic copy would clobber
+      // server data and can flip the user/assistant sort order (B9).
       const userMsgId = res.user_message_id || res.message_id
       if (userMsgId && userMsgId !== tempUserId) {
         useChatStore.setState((state) => {
           const local = state.messages.get(tempUserId)
-          if (local) {
+          if (local && !state.messages.has(userMsgId)) {
             state.messages.delete(tempUserId)
             state.messages.set(userMsgId, { ...local, id: userMsgId })
+          } else if (local && state.messages.has(userMsgId)) {
+            // Backend copy already present — drop the temp placeholder
+            state.messages.delete(tempUserId)
           }
         })
       }

@@ -28,6 +28,10 @@ interface WorkflowState {
   executionProgress: number
   setPresets: (presets: WorkflowPreset[]) => void
   setCurrentPreset: (id: string | null) => void
+  // TODO(feature): setPresets/setCurrentPreset have no callers — the
+  // workflow presets picker is unimplemented (RightPanel always shows
+  // "未命名工作流"). The state exists so the picker can be wired
+  // without touching the store.
   setDAG: (nodes: DAGNode[], edges: DAGEdge[]) => void
   updateNodeStatus: (id: string, status: DAGNode['status']) => void
   setExecutionProgress: (p: number) => void

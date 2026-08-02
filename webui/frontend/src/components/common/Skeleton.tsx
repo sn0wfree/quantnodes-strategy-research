@@ -3,6 +3,11 @@ interface SkeletonProps {
   variant?: 'rect' | 'circle' | 'text'
 }
 
+// TODO(feature): MessageSkeleton / AgentSkeleton are never imported.
+// Written for the initial loading states; the app now renders real
+// content immediately (store is populated from backend before paint),
+// so skeletons were never hooked up. Use when adding per-tab lazy
+// loading, or remove with that plan.
 export function Skeleton({ className = '', variant = 'rect' }: SkeletonProps) {
   const base = 'animate-pulse bg-slate-700/50'
   const variantClass = {

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Sparkles, ChevronRight, Copy, Check } from 'lucide-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { formatDuration } from '../../utils/time'
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
 
 interface ThinkingBlockProps {
   text: string
@@ -8,13 +10,6 @@ interface ThinkingBlockProps {
   streaming?: boolean
   startTime?: number
   endTime?: number
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const s = ms / 1000
-  if (s < 60) return `${s.toFixed(1)}s`
-  return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`
 }
 
 export function ThinkingBlock({
@@ -25,7 +20,7 @@ export function ThinkingBlock({
   endTime,
 }: ThinkingBlockProps) {
   const [isExpanded, setIsExpanded] = useState(!collapsed)
-  const [copied, setCopied] = useState(false)
+  const [copied, copy] = useCopyToClipboard()
   const [tickMs, setTickMs] = useState(0)
 
   // Sync expanded state with collapsed prop
@@ -57,9 +52,7 @@ export function ThinkingBlock({
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    copy(text)
   }
 
   return (

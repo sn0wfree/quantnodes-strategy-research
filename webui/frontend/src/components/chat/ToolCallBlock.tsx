@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import type { ToolCallPart } from '../../stores/chat'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { formatDuration } from '../../utils/time'
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
 
 interface ToolCallBlockProps {
   toolCall: ToolCallPart
@@ -52,11 +54,6 @@ const STATUS_CONFIG = {
   done: { icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/5' },
   error: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/5' },
 } as const
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}
 
 /** Extract a brief, single-line preview from JSON args. */
 function summarizeArgs(args: string | unknown): string {
@@ -151,7 +148,7 @@ function buildMarkdown(args: string | unknown, result: string | unknown | undefi
 
 export function ToolCallBlock({ toolCall, startTime, onRetry }: ToolCallBlockProps) {
   const [expanded, setExpanded] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, copy] = useCopyToClipboard()
   const [tickMs, setTickMs] = useState(0)
 
   useEffect(() => {
@@ -175,9 +172,7 @@ export function ToolCallBlock({ toolCall, startTime, onRetry }: ToolCallBlockPro
   const handleCopyAll = (e: React.MouseEvent) => {
     e.stopPropagation()
     const text = buildMarkdown(toolCall.arguments, toolCall.result)
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    copy(text)
   }
 
   const handleRetry = (e: React.MouseEvent) => {

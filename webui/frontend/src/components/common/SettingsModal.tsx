@@ -45,6 +45,7 @@ export function SettingsModal() {
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmMsg, setLlmMsg] = useState('')
   const [llmError, setLlmError] = useState('')
+  const [sysError, setSysError] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
 
   const [oldPassword, setOldPassword] = useState('')
@@ -58,10 +59,23 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (open) {
-      // Load system info
-      api.get<SystemInfo>('/system/info').then(setSystemInfo).catch(() => {})
-      // Load LLM config
-      api.get<LLMConfig>('/system/llm').then(setLlmConfig).catch(() => {})
+      // Load system info. Failures surface as an error banner instead
+      // of silently rendering empty selects (B5) — otherwise the user
+      // could save an LLM config over an unknown current state.
+      api
+        .get<SystemInfo>('/system/info')
+        .then((info) => {
+          setSystemInfo(info)
+          setSysError('')
+        })
+        .catch((err: any) => setSysError(err.message || '系统信息加载失败'))
+      api
+        .get<LLMConfig>('/system/llm')
+        .then((cfg) => {
+          setLlmConfig(cfg)
+          setLlmError('')
+        })
+        .catch((err: any) => setLlmError(err.message || 'LLM 配置加载失败'))
       // Reset password fields
       setOldPassword('')
       setNewPassword('')
@@ -69,7 +83,6 @@ export function SettingsModal() {
       setPwMsg('')
       setPwError('')
       setLlmMsg('')
-      setLlmError('')
       setApiKeyInput('')
     }
   }, [open])
@@ -100,13 +113,19 @@ export function SettingsModal() {
         api_key: apiKeyInput,  // 空串 → 不修改密钥（掩码值永不上传）
       })
       setLlmMsg('配置已保存')
-      // Reload config + system info
-      const cfg = await api.get<LLMConfig>('/system/llm')
-      setLlmConfig(cfg)
-      setApiKeyInput('')
-      const info = await api.get<SystemInfo>('/system/info')
-      setSystemInfo(info)
+      // Reload config + system info. A reload failure must NOT wipe
+      // the success message (B8) — surface it as an explicit warning.
+      try {
+        const cfg = await api.get<LLMConfig>('/system/llm')
+        setLlmConfig(cfg)
+        setApiKeyInput('')
+        const info = await api.get<SystemInfo>('/system/info')
+        setSystemInfo(info)
+      } catch (err: any) {
+        setLlmError(`已保存，但刷新失败：${err.message || '未知错误'}`)
+      }
     } catch (err: any) {
+      setLlmMsg('')
       setLlmError(err.message || '保存失败')
     } finally {
       setLlmLoading(false)
@@ -268,6 +287,9 @@ export function SettingsModal() {
                 )}
 
                 {llmError && <p className="text-xs text-red-400">{llmError}</p>}
+                {sysError && (
+                  <p className="text-xs text-red-400">⚠ {sysError}</p>
+                )}
                 {llmMsg && <p className="text-xs text-green-400">{llmMsg}</p>}
 
                 <button

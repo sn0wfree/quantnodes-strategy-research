@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { FileEdit, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
 import type { FileEditPart } from '../../stores/chat'
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
 
 interface FileEditBlockProps {
   fileEdit: FileEditPart
@@ -55,7 +56,7 @@ const LINE_STYLES = {
 
 export function FileEditBlock({ fileEdit }: FileEditBlockProps) {
   const [expanded, setExpanded] = useState(true)
-  const [copied, setCopied] = useState(false)
+  const [copied, copy] = useCopyToClipboard()
 
   const diffLines = computeDiff(fileEdit.old_content, fileEdit.new_content)
   const added = diffLines.filter((l) => l.type === 'add').length
@@ -70,9 +71,7 @@ export function FileEditBlock({ fileEdit }: FileEditBlockProps) {
     .join('\n')
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(allContent)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    copy(allContent)
   }
 
   return (

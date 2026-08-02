@@ -48,13 +48,20 @@ export const useAgentStore = create<AgentState>()((set) => ({
     set(() => {
       const map = new Map<string, Agent>()
       agents.forEach((a, i) => {
-        a.color = AGENT_COLORS[i % AGENT_COLORS.length]
-        map.set(a.id, a)
+        // Copy before assigning color: never mutate caller-owned
+        // objects (API responses) in place (B11).
+        map.set(a.id, { ...a, color: AGENT_COLORS[i % AGENT_COLORS.length] })
       })
       return { agents: map }
     }),
   updateAgent: (id, updater) =>
     set((state) => {
+      // TODO(architecture): silently no-ops on a missing id, and
+      // nothing backfills the agent list after a page reload — SSE
+      // only updates EXISTING entries and the replay buffer holds only
+      // recent events, so RightPanel's agent list stays empty until a
+      // new run starts. Fix: backfill from GET /api/session/... or a
+      // run-scoped agent endpoint on session load.
       const agent = state.agents.get(id)
       if (agent) updater(agent)
       return state
@@ -62,8 +69,10 @@ export const useAgentStore = create<AgentState>()((set) => ({
   addAgent: (agent) =>
     set((state) => {
       const idx = state.agents.size
-      agent.color = AGENT_COLORS[idx % AGENT_COLORS.length]
-      state.agents.set(agent.id, agent)
+      state.agents.set(
+        agent.id,
+        { ...agent, color: AGENT_COLORS[idx % AGENT_COLORS.length] },
+      )
       return state
     }),
 }))

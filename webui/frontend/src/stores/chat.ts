@@ -93,6 +93,14 @@ interface ChatState {
   queueLengths: Map<string, number>
   /** Per-session cumulative token usage (LLM total). Drives ContextUsageBar. */
   tokensUsed: Map<string, number>
+  /**
+   * Per-session flag: true once `session_total_tokens` has been seen.
+   * `session_total_tokens` is the backend-authoritative cumulative
+   * value; per-call `llm_usage` deltas must NOT be added on top of it
+   * (double counting). `llm_usage` only acts as a fallback for
+   * sessions that never saw the authoritative event.
+   */
+  totalTokensSeen: Map<string, boolean>
   /** Most recent compaction event (for CompactBanner). */
   lastCompaction: { layer: string; timestamp: number } | null
   setLastCompaction: (c: { layer: string; timestamp: number } | null) => void
@@ -108,6 +116,12 @@ interface ChatState {
   setQueuePaused: (sessionId: string, paused: boolean) => void
   setQueueLength: (sessionId: string, length: number) => void
   setTokensUsed: (sessionId: string, tokens: number) => void
+  markTotalTokensSeen: (sessionId: string) => void
+  /** Per-session flag: older messages exist beyond the loaded window. */
+  hasMore: Map<string, boolean>
+  setHasMore: (sessionId: string, more: boolean) => void
+  /** Load the next older page (before the earliest loaded message). */
+  loadMoreMessages: (sessionId: string) => Promise<void>
   loadMessages: (sessionId: string) => Promise<void>
   clearMessages: () => void
 }
@@ -126,6 +140,7 @@ export const useChatStore = create<ChatState>()(
     queuePaused: new Map(),
     queueLengths: new Map(),
     tokensUsed: new Map(),
+    totalTokensSeen: new Map(),
     lastCompaction: null,
     setLastCompaction: (c) => set({ lastCompaction: c }),
     setMessages: (messages) =>
@@ -194,6 +209,15 @@ export const useChatStore = create<ChatState>()(
       set((state) => {
         state.tokensUsed.set(sessionId, tokens)
       }),
+    markTotalTokensSeen: (sessionId) =>
+      set((state) => {
+        state.totalTokensSeen.set(sessionId, true)
+      }),
+    hasMore: new Map(),
+    setHasMore: (sessionId, more) =>
+      set((state) => {
+        state.hasMore.set(sessionId, more)
+      }),
     clearMessages: () =>
       set((state) => {
         state.messages.clear()
@@ -202,20 +226,45 @@ export const useChatStore = create<ChatState>()(
         state.activeAttemptId = null
         state.queuePaused.clear()
         state.queueLengths.clear()
+        state.tokensUsed.clear()
+        state.totalTokensSeen.clear()
+        state.hasMore.clear()
       }),
     loadMessages: async (sessionId: string) => {
       const seq = ++loadMessagesSeq
       try {
-        const data = await api.get<{ messages: Message[] }>(
+        const data = await api.get<{ messages: Message[]; has_more?: boolean }>(
           `/chat/session/${sessionId}/messages?limit=200`
         )
         if (seq !== loadMessagesSeq) return // stale response (session switched)
         set((state) => {
           state.messages.clear()
           data.messages.forEach((m) => state.messages.set(m.id, m))
+          state.hasMore.set(sessionId, !!data.has_more)
         })
       } catch (err) {
         console.error('loadMessages error:', err)
+      }
+    },
+    loadMoreMessages: async (sessionId: string) => {
+      const { messages } = useChatStore.getState()
+      // Find the earliest loaded message (oldest created_at) as cursor
+      let earliest: Message | null = null
+      for (const m of messages.values()) {
+        if (m.session_id !== sessionId) continue
+        if (!earliest || m.created_at < earliest.created_at) earliest = m
+      }
+      if (!earliest) return
+      try {
+        const data = await api.get<{ messages: Message[]; has_more?: boolean }>(
+          `/chat/session/${sessionId}/messages?limit=200&before=${earliest.created_at}`
+        )
+        set((state) => {
+          data.messages.forEach((m) => state.messages.set(m.id, m))
+          state.hasMore.set(sessionId, !!data.has_more)
+        })
+      } catch (err) {
+        console.error('loadMoreMessages error:', err)
       }
     },
   }))

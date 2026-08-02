@@ -2,6 +2,7 @@ import { Target } from 'lucide-react'
 import { CriteriaList } from './CriteriaList'
 import { GoalTimeline } from './GoalTimeline'
 import { EmptyState } from '../common/EmptyState'
+import { statusLabel } from '../../utils/status'
 
 interface Goal {
   id: string
@@ -60,7 +61,7 @@ export function GoalTab({ goal }: GoalTabProps) {
               }
             `}
           >
-            {goal.status === 'active' ? '进行中' : goal.status === 'completed' ? '已完成' : '失败'}
+            {statusLabel(goal.status)}
           </span>
         </div>
       </div>

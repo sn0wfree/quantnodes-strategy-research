@@ -682,4 +682,90 @@ describe('useSSE', () => {
       expect(msg!.parts[0]).toMatchObject({ type: 'text', text: 'new longer text' })
     })
   })
+
+  // ──────────── queue lifecycle events (B1 regression) ────────────
+
+  describe('queue lifecycle', () => {
+    let es: MockEventSource
+
+    beforeEach(() => {
+      renderHook(() => useSSE('sess-1'))
+      es = getCurrentES()
+    })
+
+    it('attempt.started switches the streaming message and clears paused', () => {
+      seedMessage('msg-q')
+      useChatStore.getState().setQueuePaused('sess-1', true)
+
+      act(() => {
+        es.emit('attempt.started', {
+          session_id: 'sess-1',
+          message_id: 'msg-q',
+        })
+      })
+
+      const s = useChatStore.getState()
+      expect(s.streamingMessageId).toBe('msg-q')
+      expect(s.queuePaused.get('sess-1')).toBe(false)
+    })
+
+    it('queue_paused sets the paused flag (queue stuck fix)', () => {
+      act(() => {
+        es.emit('queue_paused', { session_id: 'sess-1' })
+      })
+      expect(useChatStore.getState().queuePaused.get('sess-1')).toBe(true)
+    })
+
+    it('queue_state updates the queue length snapshot', () => {
+      act(() => {
+        es.emit('queue_state', { session_id: 'sess-1', queue_length: 3 })
+      })
+      expect(useChatStore.getState().queueLengths.get('sess-1')).toBe(3)
+    })
+  })
+
+  // ──────────── token usage accounting (B2 regression) ────────────
+
+  describe('token usage', () => {
+    let es: MockEventSource
+
+    beforeEach(() => {
+      renderHook(() => useSSE('sess-1'))
+      es = getCurrentES()
+    })
+
+    it('llm_usage accumulates when no session_total_tokens seen (fallback)', () => {
+      act(() => {
+        es.emit('llm_usage', { session_id: 'sess-1', total_tokens: 120 })
+      })
+      act(() => {
+        es.emit('llm_usage', { session_id: 'sess-1', total_tokens: 80 })
+      })
+      expect(useChatStore.getState().tokensUsed.get('sess-1')).toBe(200)
+    })
+
+    it('session_total_tokens is authoritative; later llm_usage must not double count', () => {
+      act(() => {
+        es.emit('llm_usage', { session_id: 'sess-1', total_tokens: 120 })
+      })
+      act(() => {
+        es.emit('session_total_tokens', { session_id: 'sess-1', total_tokens: 500 })
+      })
+      // llm_usage AFTER the authoritative event must be ignored
+      act(() => {
+        es.emit('llm_usage', { session_id: 'sess-1', total_tokens: 120 })
+      })
+      expect(useChatStore.getState().tokensUsed.get('sess-1')).toBe(500)
+    })
+
+    it('session_total_tokens overrides previously accumulated fallback', () => {
+      act(() => {
+        es.emit('llm_usage', { session_id: 'sess-1', total_tokens: 120 })
+      })
+      act(() => {
+        es.emit('session_total_tokens', { session_id: 'sess-1', total_tokens: 900 })
+      })
+      expect(useChatStore.getState().tokensUsed.get('sess-1')).toBe(900)
+    })
+  })
 })

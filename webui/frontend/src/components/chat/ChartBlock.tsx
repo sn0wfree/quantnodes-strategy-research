@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BarChart3, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import type { ChartPart } from '../../stores/chat'
@@ -84,15 +85,15 @@ function ChartRenderer({ chart }: { chart: ChartPart }) {
     case 'scatter':
       return (
         <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={data}>
+          <ScatterChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <Tooltip
               contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
             />
-            <Bar dataKey={yKey} fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-          </BarChart>
+            <Scatter dataKey={yKey} fill="#8b5cf6" />
+          </ScatterChart>
         </ResponsiveContainer>
       )
     default:

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import type { Agent, IterationDetail } from '../../stores/agents'
 import { formatTime } from '../../utils/time'
+import { statusLabel } from '../../utils/status'
 
 interface AgentItemProps {
   agent: Agent
@@ -13,12 +14,12 @@ interface AgentItemProps {
 }
 
 const STATUS_CONFIG = {
-  pending: { icon: Clock, color: 'text-slate-500', bg: 'bg-slate-500/10', label: '等待中' },
-  running: { icon: Zap, color: 'text-amber-400', bg: 'bg-amber-500/10', label: '运行中' },
-  completed: { icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10', label: '已完成' },
-  failed: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10', label: '失败' },
-  aborted: { icon: AlertCircle, color: 'text-orange-400', bg: 'bg-orange-500/10', label: '已中止' },
-}
+  pending: { icon: Clock, color: 'text-slate-500', bg: 'bg-slate-500/10' },
+  running: { icon: Zap, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+  completed: { icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+  failed: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10' },
+  aborted: { icon: AlertCircle, color: 'text-orange-400', bg: 'bg-orange-500/10' },
+} as const
 
 
 function IterationRow({ iteration }: { iteration: IterationDetail }) {
@@ -88,7 +89,7 @@ export function AgentItem({ agent, onSelect, isSelected }: AgentItemProps) {
             )}
           </div>
           <div className="flex items-center gap-2 text-[10px] text-slate-500">
-            <span className={config.color}>{config.label}</span>
+            <span className={config.color}>{statusLabel(agent.status)}</span>
             {agent.tool_calls_count > 0 && (
               <span>{agent.tool_calls_count} 次调用</span>
             )}

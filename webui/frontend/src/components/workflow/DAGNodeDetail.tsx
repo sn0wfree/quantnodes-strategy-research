@@ -1,5 +1,6 @@
 import { X, Bot, Clock, Wrench, FileText, Zap } from 'lucide-react'
 import type { DAGNodeData } from './DAGNode'
+import { statusBadgeClass, statusLabel } from '../../utils/status'
 
 interface DAGNodeDetailProps {
   node: DAGNodeData & { id: string }
@@ -92,21 +93,8 @@ function DetailSection({
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const config = {
-    pending: 'bg-slate-500/20 text-slate-400',
-    running: 'bg-blue-500/20 text-blue-400',
-    completed: 'bg-emerald-500/20 text-emerald-400',
-    failed: 'bg-red-500/20 text-red-400',
-    skipped: 'bg-slate-600/20 text-slate-500',
-  }[status] || 'bg-slate-500/20 text-slate-400'
-
-  const label = {
-    pending: '等待中',
-    running: '运行中',
-    completed: '已完成',
-    failed: '失败',
-    skipped: '已跳过',
-  }[status] || status
+  const config = statusBadgeClass(status)
+  const label = statusLabel(status)
 
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${config}`}>

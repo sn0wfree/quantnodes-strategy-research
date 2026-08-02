@@ -20,12 +20,17 @@ export function MessageList() {
   const streamingText = useChatStore((s) => s.streamingText)
   const chatLayout = useLayoutStore((s) => s.chatLayout)
   const queuePaused = useChatStore((s) => s.queuePaused)
+  const hasMore = useChatStore((s) => s.hasMore)
+  const loadMoreMessages = useChatStore((s) => s.loadMoreMessages)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   const messageList = Array.from(messages.values()).sort((a, b) => a.created_at - b.created_at)
   const isQueuePaused = currentSessionId
     ? queuePaused.get(currentSessionId) ?? false
+    : false
+  const showLoadMore = currentSessionId
+    ? hasMore.get(currentSessionId) ?? false
     : false
 
   useEffect(() => {
@@ -81,6 +86,20 @@ export function MessageList() {
         ref={virtuosoRef}
         data={messageList}
         totalCount={messageList.length}
+        components={{
+          Header: showLoadMore
+            ? () => (
+                <div className="flex justify-center py-2">
+                  <button
+                    onClick={() => currentSessionId && loadMoreMessages(currentSessionId)}
+                    className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200"
+                  >
+                    ↑ 加载更早消息
+                  </button>
+                </div>
+              )
+            : undefined,
+        }}
         itemContent={(_index, message) => {
           // Tool messages are persisted to DB for history reconstruction
           // (see _convert_messages_to_history in backend) but should NOT

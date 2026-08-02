@@ -3,7 +3,8 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Copy, Check, Hash } from 'lucide-react'
-import { useState, useCallback } from 'react'
+import { useCallback } from 'react'
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
 
 interface MarkdownRendererProps {
   content: string
@@ -27,13 +28,11 @@ function CodeBlock({
   children: string
   streaming?: boolean
 }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, copy] = useCopyToClipboard()
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(children)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [children])
+    copy(children)
+  }, [copy, children])
 
   return (
     <div className="group relative my-3 rounded-lg overflow-hidden border border-slate-700/50">
