@@ -83,6 +83,7 @@ function summarizeArgs(args: string | unknown): string {
 
 /** Smart result summary based on tool name. */
 function summarizeResult(toolName: string, result: string | unknown): string {
+  if (!toolName) return ''
   if (!result) return ''
   let parsed: unknown = result
   if (typeof result === 'string') {
