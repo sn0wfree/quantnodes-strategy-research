@@ -108,6 +108,37 @@ run_backtest(strategy_name=...) → 从 DuckDB 读  ← 行情不进 prompt
 
 - compact 兜底加强（Fix4）：Fix2+Fix3' 后风险足够低，缓办。
 - 失败 attempt 的 50 亿 metrics 畸变（疑似流式 usage 重复计）：独立问题。
+- `detect_market` 对纯数字代码（如 `510300`）误判为 FRED/macro：既有边界
+  问题，A 股代码正常带 `.SH/.SZ` 后缀可避免；记录待后续修。
+
+## 实现落地
+
+### 第一批（已合入）
+
+- `LLMConfig.max_iterations=50`（chat）、`agent_max_iterations=9999`，
+  从 llm.json 读取；`send_message` 默认 50；`send_async` 显式传
+  `cfg.max_iterations`。
+
+### 第二批
+
+- **Fix1**：`data_source/utils.py` 用绝对导入
+  `strategy_research.core.utils.market_detection`（原相对导入指向
+  不存在的 `strategy_research.utils`）。
+- **Fix3'**：
+  - `get_market_data`：fetch 后每码 `cache_put` 写 loader parquet，返回
+    `{cached: {code: cache_key}, summary: {code: {rows, first_close,
+    last_close, avg_volume}}, preview: {code: [5行]}}`，不含全量 data。
+  - 新增 `commit_market_data` 工具：按 cache_key 读 parquet →
+    `INSERT OR REPLACE INTO price_data`。
+  - CLI `import --source cache --codes A,B --cache-keys k1,k2 --strategy X`。
+  - `import_data` 保留（手动/外部数据），描述与错误提示更新为推荐
+    `get_market_data → commit_market_data`。
+
+### 测试
+
+`tests/test_market_data_cache_flow.py`（7 个）：摘要不含全量、preview 限
+5 行、parquet 落盘、commit 入库 DuckDB、key 不匹配报错、缺 key 报告
+missing、工具注册。
 
 ## 相关文件
 
