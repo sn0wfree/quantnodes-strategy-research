@@ -28,13 +28,23 @@ def _err(message: str, **extra: Any) -> str:
 
 
 class GetMarketDataTool(BaseTool):
-    """Fetch OHLCV market data using the loader fallback chain."""
+    """Fetch OHLCV market data and persist it into the workspace DuckDB.
+
+    Fetches via the loader fallback chain, optionally writes the full OHLCV
+    into the workspace DuckDB ``price_data`` table (so backtests / factor
+    tools can use it), and returns a compact summary + small preview — the
+    full rows never enter the LLM prompt (context-overflow fix, see
+    docs/context-overflow-fix.md).
+    """
 
     name = "get_market_data"
     description = (
-        "Fetch OHLCV market data for given codes using the data source fallback chain. "
-        "Auto-detects market type (A-share, US, HK, crypto, etc.) and selects the "
-        "best available loader."
+        "Fetch OHLCV market data for given codes using the data source fallback "
+        "chain. Auto-detects market type (A-share, US, HK, crypto, etc.) and "
+        "selects the best available loader. With persist=True (default), the "
+        "data is written into the workspace DuckDB and is immediately usable by "
+        "run_backtest / compute_factor / factor_*. Returns a compact summary + "
+        "small preview; the full rows are NOT returned to the prompt."
     )
     parameters = {
         "type": "object",
@@ -49,6 +59,17 @@ class GetMarketDataTool(BaseTool):
             "interval": {"type": "string", "description": "K-line interval (default '1D').", "default": "1D"},
             "source": {"type": "string", "description": "Optional data source override (e.g. 'tushare')."},
             "max_rows": {"type": "integer", "description": "Max rows per code (default 500).", "default": 500},
+            "persist": {
+                "type": "boolean",
+                "description": "Whether to write data into the workspace DuckDB (default True). "
+                "Set False to only inspect data without persisting.",
+                "default": True,
+            },
+            "strategy_name": {
+                "type": "string",
+                "description": "Strategy name for data partitioning (default 'default').",
+                "default": "default",
+            },
         },
         "required": ["codes", "start_date", "end_date"],
     }
@@ -87,6 +108,16 @@ class GetMarketDataTool(BaseTool):
         end_date = kwargs.get("end_date", "")
         interval = kwargs.get("interval", "1D")
         source = kwargs.get("source")
+        strategy_name = kwargs.get("strategy_name", "default") or "default"
+        persist_raw = kwargs.get("persist", True)
+        if isinstance(persist_raw, str):
+            persist = persist_raw.strip().lower() in ("1", "true", "yes", "y")
+        else:
+            try:
+                persist = bool(safe_get_param(kwargs, "persist", bool, default=True))
+            except TypeError:
+                persist = True
+        workspace = kwargs.get("workspace")
 
         if not codes:
             return err_actionable(
@@ -133,15 +164,9 @@ class GetMarketDataTool(BaseTool):
 
             data = loader.fetch(codes, start_date, end_date, interval=interval)
 
-            # Write full OHLCV to the loader parquet cache and return a
-            # compact summary — the full rows must NOT enter the LLM prompt
-            # (that was the context-overflow root cause; see
-            # docs/context-overflow-fix.md). A separate commit_market_data
-            # tool merges the cached parquet into DuckDB after the agent
-            # has evaluated the summary.
-            from ...data_source.cache import cache_put, make_cache_key
-
-            cached: dict[str, str] = {}
+            # Build compact summary + small preview. The full rows must NOT
+            # enter the LLM prompt (context-overflow root cause; see
+            # docs/context-overflow-fix.md).
             summary: dict[str, Any] = {}
             preview: dict[str, Any] = {}
             total_rows = 0
@@ -149,21 +174,12 @@ class GetMarketDataTool(BaseTool):
                 if df is None or df.empty:
                     summary[code] = {"rows": 0, "status": "empty"}
                     continue
-                key = make_cache_key(
-                    effective_source, code, interval, start_date, end_date
-                )
-                cache_put(key, df)
-                cached[code] = key
                 n_rows = len(df)
                 total_rows += n_rows
                 # Per-code summary (stats only, not the rows themselves)
                 close = df["close"] if "close" in df.columns else None
                 volume = df["volume"] if "volume" in df.columns else None
-                s = {
-                    "rows": n_rows,
-                    "status": "ok",
-                    "cache_key": key,
-                }
+                s = {"rows": n_rows, "status": "ok"}
                 if close is not None and not close.empty:
                     s["first_close"] = float(close.iloc[0])
                     s["last_close"] = float(close.iloc[-1])
@@ -187,10 +203,28 @@ class GetMarketDataTool(BaseTool):
                     preview_rows.append(rec)
                 preview[code] = preview_rows
 
+            persisted_rows = 0
+            if persist:
+                if not workspace:
+                    return err_actionable(
+                        "persist=True requires 'workspace' (auto-injected by AgentLoop)",
+                        expected="workspace root path, e.g. '/home/user/research'",
+                        fix="persist=True is the default; if you only need to inspect "
+                            "data, set persist=False instead",
+                        tool="get_market_data",
+                    )
+                from ...db import save_ohlcv_to_db
+
+                persisted_rows = save_ohlcv_to_db(
+                    Path(workspace), data, strategy_name=strategy_name
+                )
+
             return _ok({
-                "cached": cached,
                 "summary": summary,
                 "preview": preview,
+                "persisted": persist,
+                "strategy_name": strategy_name,
+                "persisted_rows": persisted_rows,
                 "meta": {
                     "codes": codes,
                     "start_date": start_date,
@@ -198,19 +232,7 @@ class GetMarketDataTool(BaseTool):
                     "interval": interval,
                     "source": effective_source,
                     "total_rows": total_rows,
-                    "cache_dir": str(Path.home() / ".quantnodes-research" / "loader_cache"),
-                    "note": (
-                        "行情已写入 loader parquet 缓存，未进入对话上下文。"
-                        "请先评估 summary/preview 的数据质量，然后调用 "
-                        "commit_market_data(codes=[...], cache_keys=[...], "
-                        "strategy_name=..., workspace=...) 将数据合并入 DuckDB "
-                        "供回测使用。"
-                    ),
                 },
-                "next_step": (
-                    f"commit_market_data(codes={codes}, cache_keys={list(cached.values())}, "
-                    "strategy_name='<strategy>', workspace=...) 将缓存行情合并入 DuckDB"
-                ),
             })
 
         except NoAvailableSourceError as exc:
@@ -372,9 +394,9 @@ class ImportDataTool(BaseTool):
     name = "import_data"
     description = (
         "Import OHLCV market data into the workspace DuckDB. "
-        "Note: get_market_data now writes data to the parquet cache "
-        "automatically — the recommended flow is "
-        "get_market_data → commit_market_data(cache_keys=...) → run_backtest. "
+        "Note: the recommended flow is get_market_data(codes=[...], "
+        "start_date=..., end_date=..., persist=True) which fetches AND "
+        "persists into DuckDB in one step. "
         "import_data is for manual/external data (e.g. pasted records or CSV)."
     )
     parameters = {
@@ -427,8 +449,8 @@ class ImportDataTool(BaseTool):
                 expected="dict[asset_code, list[record]] — output of get_market_data(data field)",
                 fix=(
                     "call get_market_data(codes=['600519.SH'], "
-                    "start_date='2023-01-01', end_date='2023-12-31') first, "
-                    "then call commit_market_data(cache_keys=[...]) to merge into DuckDB"
+                    "start_date='2023-01-01', end_date='2023-12-31', "
+                    "persist=True) to fetch and persist into DuckDB in one step"
                 ),
                 tool="import_data",
             )
@@ -439,8 +461,8 @@ class ImportDataTool(BaseTool):
                 expected="non-empty dict, e.g. {'600519.SH': [{'trade_date': '2023-12-11', 'close': 1544.555, ...}, ...]}",
                 fix=(
                     "call get_market_data(codes=['600519.SH'], "
-                    "start_date='2023-01-01', end_date='2023-12-31') first, "
-                    "then call commit_market_data(cache_keys=[...]) to merge into DuckDB"
+                    "start_date='2023-01-01', end_date='2023-12-31', "
+                    "persist=True) to fetch and persist into DuckDB in one step"
                 ),
                 tool="import_data",
             )
@@ -481,8 +503,8 @@ class ImportDataTool(BaseTool):
                             ),
                 fix=(
                     "call get_market_data(codes=['600519.SH'], "
-                    "start_date='2023-01-01', end_date='2023-12-31') first, "
-                    "then call commit_market_data(cache_keys=[...]) to merge into DuckDB"
+                    "start_date='2023-01-01', end_date='2023-12-31', "
+                    "persist=True) to fetch and persist into DuckDB in one step"
                 ),
                 tool="import_data",
             )
@@ -541,10 +563,6 @@ class ImportDataTool(BaseTool):
                 "n_codes": len(data),
                 "strategy_name": strategy_name,
                 "message": f"Imported {total_rows} rows from {len(data)} codes into ohlcv table",
-                "next_step": (
-                    f"run_backtest(strategy_name='{strategy_name}', workspace='{workspace}') "
-                    "或 factor_analysis(factor_code=..., workspace=...)"
-                ),
             })
 
         except Exception as exc:
@@ -558,185 +576,7 @@ class ImportDataTool(BaseTool):
             )
 
 
-# ── 5. CommitMarketDataTool ───────────────────────────────────────
-
-
-class CommitMarketDataTool(BaseTool):
-    """Merge cached market data (parquet) into the workspace DuckDB.
-
-    get_market_data writes OHLCV to the loader parquet cache and returns
-    a compact summary (never the full rows). After the agent evaluates
-    the summary, this tool reads the cached parquet by cache_key and
-    writes it into the DuckDB price_data table so backtests / factor
-    tools can use it. This keeps large market data out of the LLM prompt.
-    """
-
-    name = "commit_market_data"
-    description = (
-        "Merge previously cached OHLCV market data into the workspace "
-        "DuckDB. Call after get_market_data to persist the data for "
-        "backtest/factor analysis. Requires the cache_keys returned by "
-        "get_market_data."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "cache_keys": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Cache keys returned by get_market_data "
-                    "(meta.cached[code] / summary[code].cache_key)."
-                ),
-            },
-            "codes": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Asset codes (parallel to cache_keys).",
-            },
-            "strategy_name": {
-                "type": "string",
-                "description": "Strategy name for data partitioning (default 'default').",
-                "default": "default",
-            },
-        },
-        "required": ["workspace", "cache_keys", "codes"],
-    }
-    is_readonly = False
-    repeatable = True
-
-    def execute(self, **kwargs: Any) -> str:
-        workspace = kwargs.get("workspace")
-        if not workspace:
-            return err_actionable(
-                "missing required parameter 'workspace'",
-                expected="absolute path to workspace root, e.g. '/home/user/research'",
-                fix="set workspace='/path/to/your/workspace'",
-                tool="commit_market_data",
-            )
-
-        try:
-            cache_keys = safe_get_param(kwargs, "cache_keys", list)
-            codes = safe_get_param(kwargs, "codes", list)
-        except TypeError as exc:
-            return err_actionable(
-                f"cache_keys/codes parameter has wrong shape: {exc}",
-                received=kwargs.get("cache_keys"),
-                expected="list of cache keys from get_market_data",
-                fix="pass cache_keys=[...] and codes=[...] exactly as returned",
-                tool="commit_market_data",
-            )
-
-        if not cache_keys or not codes or len(cache_keys) != len(codes):
-            return err_actionable(
-                "cache_keys and codes must be non-empty and equal length",
-                received={"cache_keys": cache_keys, "codes": codes},
-                expected="one cache_key per code, e.g. cache_keys=['abc123'], codes=['600519.SH']",
-                fix="re-run get_market_data and copy the returned cached/cache_key values",
-                tool="commit_market_data",
-            )
-
-        strategy_name = kwargs.get("strategy_name", "default")
-
-        try:
-            from ...data_source.cache import _cache_root
-            import pandas as pd
-            from ...db import get_connection, init_db
-
-            ws = Path(workspace)
-            init_db(ws)
-            conn = get_connection(ws)
-            if conn is None:
-                return err_actionable(
-                    "failed to open DuckDB",
-                    received=str(workspace),
-                    expected="writable workspace path",
-                    fix="run `quantnodes-research init` first, or check workspace permissions",
-                    tool="commit_market_data",
-                )
-
-            cache_root = _cache_root()
-            total_rows = 0
-            committed = []
-            missing = []
-            for code, key in zip(codes, cache_keys):
-                path = cache_root / f"{key}.parquet"
-                if not path.exists():
-                    missing.append(code)
-                    continue
-                try:
-                    df = pd.read_parquet(path)
-                except Exception:  # noqa: BLE001
-                    logger.exception("commit: parquet read failed for %s", code)
-                    missing.append(code)
-                    continue
-                if df.empty:
-                    continue
-
-                # Normalize: index or 'date'/'trade_date' column
-                if "date" not in df.columns:
-                    if df.index is not None and getattr(df.index, "name", None) in (
-                        "date", "trade_date", "datetime",
-                    ):
-                        df = df.reset_index()
-                    elif isinstance(df.index, pd.DatetimeIndex):
-                        df = df.reset_index()
-                col_map = {}
-                for col in df.columns:
-                    cl = str(col).lower()
-                    if cl in ("trade_date", "tradedate", "datetime"):
-                        col_map[col] = "date"
-                    elif cl in ("code", "symbol", "ticker"):
-                        col_map[col] = "asset_code"
-                if col_map:
-                    df = df.rename(columns=col_map)
-                if "asset_code" not in df.columns:
-                    df["asset_code"] = code
-                if "date" not in df.columns:
-                    return err_actionable(
-                        f"cached parquet for {code} has no date column",
-                        received=list(df.columns),
-                        expected="parquet with date/trade_date + OHLCV columns",
-                        fix="re-fetch via get_market_data",
-                        tool="commit_market_data",
-                    )
-                for c in ("open", "high", "low", "close", "volume"):
-                    if c not in df.columns:
-                        df[c] = df["close"] if c != "volume" else 0.0
-                df["strategy_name"] = strategy_name
-                df = df[["strategy_name", "asset_code", "date",
-                         "open", "high", "low", "close", "volume"]]
-
-                conn.execute("""
-                    INSERT OR REPLACE INTO price_data
-                    (strategy_name, asset_code, date, open, high, low, close, volume)
-                    SELECT strategy_name, asset_code, date, open, high, low, close, volume
-                    FROM df
-                """)
-                total_rows += len(df)
-                committed.append({"code": code, "rows": len(df)})
-
-            conn.close()
-            return _ok({
-                "committed": committed,
-                "total_rows": total_rows,
-                "missing": missing,
-                "strategy_name": strategy_name,
-                "next_step": f"run_backtest(strategy_name='{strategy_name}', workspace='{workspace}')",
-                "message": f"Committed {total_rows} rows for {len(committed)} codes into price_data"
-                           + (f"; missing {len(missing)}: {missing}" if missing else ""),
-            })
-
-        except Exception as exc:
-            logger.exception("commit_market_data failed")
-            return err_actionable(
-                f"commit failed: {exc}",
-                received={"cache_keys": cache_keys, "codes": codes},
-                expected="valid cache keys from get_market_data + writable workspace",
-                fix="verify cache_keys are from get_market_data and workspace is writable",
-                tool="commit_market_data",
-            )
+# ── 5. register_data_tools ──────────────────────────────────────────
 
 
 def register_data_tools(registry: ToolRegistry) -> None:
@@ -746,6 +586,5 @@ def register_data_tools(registry: ToolRegistry) -> None:
         ListDataSourcesTool,
         SearchSymbolTool,
         ImportDataTool,
-        CommitMarketDataTool,
     ):
         registry.register(tool_cls())

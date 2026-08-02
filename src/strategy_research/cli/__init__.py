@@ -626,42 +626,9 @@ def cmd_import(args: argparse.Namespace) -> int:
             incremental=args.incremental,
         )
 
-    elif source == "cache":
-        # Merge previously cached parquet (from get_market_data) into DuckDB.
-        if not args.codes or not args.cache_keys:
-            print("❌ 请指定 --codes 与 --cache-keys 参数 (逗号分隔, 一一对应)")
-            print("   cache-keys 来自 get_market_data 返回的 cached/cache_key 字段")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        keys = [k.strip() for k in args.cache_keys.split(",")]
-        if len(codes) != len(keys):
-            print(f"❌ --codes ({len(codes)}) 与 --cache-keys ({len(keys)}) 数量不一致")
-            return 1
-        from strategy_research.core.agent.builtin_tools.data_tools import (
-            CommitMarketDataTool,
-        )
-        result = CommitMarketDataTool().execute(
-            workspace=str(path),
-            cache_keys=keys,
-            codes=codes,
-            strategy_name=strategy_name,
-        )
-        try:
-            parsed = json.loads(result)
-        except Exception:  # noqa: BLE001
-            print(result)
-            return 1
-        if parsed.get("status") == "ok":
-            committed = parsed.get("committed", [])
-            print(f"✓ 合并缓存: {len(committed)} 个资产, 共 {parsed.get('total_rows', 0)} 行")
-            success = True
-        else:
-            print(f"❌ 合并失败: {parsed.get('error', result)}")
-            success = False
-
     else:
         print(f"❌ 未知数据源: {source}")
-        print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto, cache")
+        print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
         return 1
 
     if success:

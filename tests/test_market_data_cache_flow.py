@@ -1,8 +1,10 @@
-"""Tests for the get_market_data → parquet cache → commit_market_data flow.
+"""Tests for the merged get_market_data flow (fetch + persist in one step).
 
 Covers the context-overflow fix (docs/context-overflow-fix.md):
-- get_market_data returns a compact summary + cache_keys (NOT full OHLCV).
-- commit_market_data merges cached parquet into the workspace DuckDB.
+- get_market_data returns a compact summary + preview (NOT full OHLCV).
+- persist=True (default) writes the fetched OHLCV into the workspace
+  DuckDB via save_ohlcv_to_db — no separate commit_market_data step.
+- commit_market_data tool is retired (get_market_data persists directly).
 """
 from __future__ import annotations
 
@@ -50,81 +52,60 @@ class _FakeLoader:
 
 
 @pytest.fixture
-def tools():
+def gmd():
     # Stub the loader registry + market detection so the tool finds the
     # fake loader without network.
     import strategy_research.core.data_source.registry as dsr
     from strategy_research.core.agent.builtin_tools.data_tools import (
-        CommitMarketDataTool,
         GetMarketDataTool,
     )
     dsr.LOADER_REGISTRY["fake"] = _FakeLoader
     dsr.detect_market = lambda code: "a_share"
-    return GetMarketDataTool(), CommitMarketDataTool()
+    return GetMarketDataTool()
 
 
-def _run_get(tool, codes, start="2023-01-01", end="2023-01-10", source="fake"):
-    raw = tool.execute(
-        codes=codes, start_date=start, end_date=end, source=source,
-    )
-    return json.loads(raw)
+def _run_get(tool, codes, start="2023-01-01", end="2023-01-10", source="fake",
+             **extra):
+    kwargs = dict(codes=codes, start_date=start, end_date=end, source=source)
+    kwargs.update(extra)
+    return json.loads(tool.execute(**kwargs))
 
 
 class TestGetMarketDataSummary:
-    def test_returns_summary_not_full_rows(self, tools):
-        gmd, _ = tools
-        result = _run_get(gmd, ["600519.SH", "000858.SZ"])
+    def test_returns_summary_not_full_rows(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH", "000858.SZ"], workspace=str(workspace))
         assert result["status"] == "ok"
         # Full data must NOT be present (context-overflow fix)
         assert "data" not in result
-        # cache_keys present per code
-        assert set(result["cached"].keys()) == {"600519.SH", "000858.SZ"}
-        for key in result["cached"].values():
-            assert len(key) == 16
+        # No legacy cache_key / cached plumbing in the agent interface
+        assert "cached" not in result
+        assert "cache_key" not in result.get("summary", {}).get("600519.SH", {})
+        assert "next_step" not in result
         # summary has stats, not rows
         s = result["summary"]["600519.SH"]
         assert s["rows"] == 10
+        assert s["status"] == "ok"
         assert "first_close" in s and "last_close" in s
         assert "avg_volume" in s
         # preview limited to 5 rows
         assert len(result["preview"]["600519.SH"]) == 5
-        # note points to commit_market_data
-        assert "commit_market_data" in result["meta"]["note"]
 
-    def test_empty_code_marks_summary_empty(self, tools):
-        gmd, _ = tools
-        raw = gmd.execute(
-            codes=["600519.SH"], start_date="2023-01-01",
-            end_date="2023-01-10", source="fake",
-        )
-        result = json.loads(raw)
+    def test_empty_code_marks_summary_empty(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH"], workspace=str(workspace))
         assert result["status"] == "ok"
 
-    def test_parquet_files_written_to_cache(self, tools, monkeypatch):
-        gmd, _ = tools
-        from strategy_research.core.data_source.cache import _cache_root
-        root = _cache_root()
-        _run_get(gmd, ["600519.SH"])
-        parquets = list(root.glob("*.parquet"))
-        assert len(parquets) == 1
+    def test_default_persist_true(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH"], workspace=str(workspace))
+        assert result["persisted"] is True
+        assert result["persisted_rows"] == 10
 
 
-class TestCommitMarketData:
-    def test_commit_merges_into_duckdb(self, tools, workspace):
-        gmd, cmt = tools
-        result = _run_get(gmd, ["600519.SH", "000858.SZ"])
-        cache_keys = [result["cached"]["600519.SH"], result["cached"]["000858.SZ"]]
-        codes = ["600519.SH", "000858.SZ"]
-
-        out = json.loads(cmt.execute(
-            workspace=str(workspace),
-            cache_keys=cache_keys,
-            codes=codes,
-            strategy_name="blue_chip",
-        ))
-        assert out["status"] == "ok"
-        assert out["total_rows"] == 20
-        assert len(out["committed"]) == 2
+class TestPersistToDuckDB:
+    def test_persist_writes_into_duckdb(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH", "000858.SZ"], workspace=str(workspace))
+        assert result["status"] == "ok"
+        assert result["persisted"] is True
+        assert result["persisted_rows"] == 20
 
         from strategy_research.core.db import get_connection, init_db
         init_db(workspace)
@@ -134,76 +115,54 @@ class TestCommitMarketData:
         ).fetchall()
         assert dict(rows) == {"600519.SH": 10, "000858.SZ": 10}
 
-    def test_commit_mismatched_keys_errors(self, tools, workspace):
-        _, cmt = tools
-        out = json.loads(cmt.execute(
-            workspace=str(workspace),
-            cache_keys=["a", "b", "c"],
-            codes=["600519.SH"],
-            strategy_name="x",
-        ))
-        assert out["status"] == "error"
-        assert "re-run get_market_data" in out["fix"]
+    def test_persist_strategy_partitioning(self, gmd, workspace):
+        _run_get(gmd, ["600519.SH"], workspace=str(workspace), strategy_name="blue_chip")
+        from strategy_research.core.db import get_connection, init_db
+        init_db(workspace)
+        conn = get_connection(workspace)
+        rows = conn.execute(
+            "SELECT DISTINCT strategy_name FROM price_data"
+        ).fetchall()
+        assert rows == [("blue_chip",)]
 
-    def test_commit_missing_key_reports_missing(self, tools, workspace):
-        _, cmt = tools
-        out = json.loads(cmt.execute(
-            workspace=str(workspace),
-            cache_keys=["deadbeef00000000"],
-            codes=["600519.SH"],
-            strategy_name="x",
-        ))
-        assert out["status"] == "ok"
-        assert out["missing"] == ["600519.SH"]
-        assert out["committed"] == []
+    def test_persist_false_does_not_write(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH"], workspace=str(workspace), persist=False)
+        assert result["persisted"] is False
+        assert result["persisted_rows"] == 0
+        assert result["status"] == "ok"
 
+    def test_persist_true_requires_workspace(self, gmd):
+        result = _run_get(gmd, ["600519.SH"])  # no workspace
+        assert result["status"] == "error"
+        assert "workspace" in result["error"]
+        assert "persist=False" in result["fix"]
 
-class TestCommitRegistered:
-    def test_commit_tool_in_default_registry(self):
-        from strategy_research.core.agent.builtin_tools import build_default_registry
-        reg = build_default_registry()
-        assert reg.get("commit_market_data") is not None
-        assert reg.get("get_market_data") is not None
-
-
-class TestCacheKeyDeterminism:
-    def test_cache_key_stable(self, tools):
-        from strategy_research.core.data_source.cache import make_cache_key
-        k1 = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
-        k2 = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
-        assert k1 == k2 == "0ca8e47f3cf1213e"
-
-    def test_cache_key_changes_with_params(self, tools):
-        from strategy_research.core.data_source.cache import make_cache_key
-        a = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
-        b = make_cache_key("fake", "600519.SH", "1D", "2023-02-01", "2023-01-10")
-        assert a != b
-
-    def test_cache_key_matches_get_output(self, tools):
-        """get_market_data returns the same key the loader cache uses."""
-        from strategy_research.core.data_source.cache import make_cache_key
-        gmd, _ = tools
-        result = _run_get(gmd, ["600519.SH"])
-        key = result["cached"]["600519.SH"]
-        expected = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
-        assert key == expected
+    def test_repeated_persist_is_idempotent(self, gmd, workspace):
+        """INSERT OR REPLACE → same rows, no duplication."""
+        _run_get(gmd, ["600519.SH"], workspace=str(workspace))
+        _run_get(gmd, ["600519.SH"], workspace=str(workspace))
+        from strategy_research.core.db import get_connection, init_db
+        init_db(workspace)
+        conn = get_connection(workspace)
+        n = conn.execute(
+            "SELECT COUNT(*) FROM price_data WHERE asset_code='600519.SH'"
+        ).fetchone()[0]
+        assert n == 10
 
 
 class TestGetMarketDataEdgeCases:
-    def test_summary_fields_complete(self, tools):
-        gmd, _ = tools
-        result = _run_get(gmd, ["600519.SH"])
+    def test_summary_fields_complete(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH"], workspace=str(workspace))
         s = result["summary"]["600519.SH"]
-        for field in ("rows", "status", "cache_key", "first_close", "last_close",
+        for field in ("rows", "status", "first_close", "last_close",
                       "close_min", "close_max", "avg_volume"):
             assert field in s, f"summary missing {field}"
 
-    def test_preview_bounded_to_5_rows(self, tools):
-        gmd, _ = tools
-        result = _run_get(gmd, ["600519.SH"])
+    def test_preview_bounded_to_5_rows(self, gmd, workspace):
+        result = _run_get(gmd, ["600519.SH"], workspace=str(workspace))
         assert len(result["preview"]["600519.SH"]) <= 5
 
-    def test_unavailable_source_errors(self, tools):
+    def test_unavailable_source_errors(self, gmd):
         """Explicit source that exists but is unavailable → actionable error."""
         import strategy_research.core.data_source.registry as dsr
 
@@ -212,7 +171,6 @@ class TestGetMarketDataEdgeCases:
             def is_available(self):
                 return False
         dsr.LOADER_REGISTRY["down"] = _Unavailable
-        gmd, _ = tools
         raw = gmd.execute(
             codes=["600519.SH"], start_date="2023-01-01",
             end_date="2023-01-10", source="down",
@@ -222,41 +180,9 @@ class TestGetMarketDataEdgeCases:
         assert "not available" in result["error"]
 
 
-class TestCommitMarketDataEdgeCases:
-    def test_repeated_commit_is_idempotent(self, tools, workspace):
-        """INSERT OR REPLACE → same rows, no duplication."""
-        gmd, cmt = tools
-        result = _run_get(gmd, ["600519.SH"])
-        key = result["cached"]["600519.SH"]
-
-        def _commit():
-            return json.loads(cmt.execute(
-                workspace=str(workspace), cache_keys=[key], codes=["600519.SH"],
-                strategy_name="blue_chip",
-            ))
-
-        first = _commit()
-        second = _commit()
-        assert first["total_rows"] == 10
-        assert second["total_rows"] == 10  # replace, not append
-
-        from strategy_research.core.db import get_connection, init_db
-        init_db(workspace)
-        conn = get_connection(workspace)
-        n = conn.execute(
-            "SELECT COUNT(*) FROM price_data WHERE asset_code='600519.SH'"
-        ).fetchone()[0]
-        assert n == 10
-
-    def test_missing_workspace_errors(self, tools):
-        _, cmt = tools
-        out = json.loads(cmt.execute(cache_keys=["k"], codes=["c"]))
-        assert out["status"] == "error"
-        assert "workspace" in out["fix"]
-
-    def test_empty_codes_errors(self, tools, workspace):
-        _, cmt = tools
-        out = json.loads(cmt.execute(
-            workspace=str(workspace), cache_keys=[], codes=[], strategy_name="x",
-        ))
-        assert out["status"] == "error"
+class TestCommitMarketDataRetired:
+    def test_commit_market_data_not_in_registry(self):
+        from strategy_research.core.agent.builtin_tools import build_default_registry
+        reg = build_default_registry()
+        assert reg.get("commit_market_data") is None
+        assert reg.get("get_market_data") is not None

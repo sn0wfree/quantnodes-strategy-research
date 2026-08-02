@@ -443,11 +443,6 @@ class RunBacktestTool(BaseTool):
             "strategy": strategy_name,
             "metrics": result.get("metrics", {}),
             "status": result.get("status", "pending"),
-            "next_step": (
-                f"list_history(strategy_name='{strategy_name}') 对比历史；"
-                f"drawdown_analysis(strategy_name='{strategy_name}') 看回撤；"
-                f"或 benchmark_comparison(strategy_name='{strategy_name}', benchmark_code='...')"
-            ),
         })
 
 
@@ -600,10 +595,6 @@ class ComputeFactorTool(BaseTool):
             "sample": sample,
             "first_date": str(series.index.min()) if len(series) else None,
             "last_date": str(series.index.max()) if len(series) else None,
-            "next_step": (
-                "factor_analysis(factor_code=..., asset=...) 计算 IC/IR；"
-                "或 factor_cross_sectional_analysis 跨资产验证"
-            ),
         })
 
 
@@ -891,10 +882,6 @@ class FactorAnalysisTool(BaseTool):
             "ic_mean": round(ic, 4) if pd.notna(ic) else None,
             "spearman_ic": round(ic_mean, 4),
             "n_observations": len(aligned),
-            "next_step": (
-                "factor_cross_sectional_analysis(factor_code=..., universe='all') "
-                "跨资产验证 IC；或直接 run_backtest 构建策略"
-            ),
         })
 
 
@@ -1357,10 +1344,6 @@ class FactorCrossSectionalAnalysis(BaseTool):
             "ic_spearman_mean": round(float(np.mean(spear_arr)), 4),
             "ic_spearman_std": round(float(np.std(spear_arr)), 4),
             "sample_dates": [str(d) for d in valid_dates[:5]],
-            "next_step": (
-                "factor_quintile_returns(factor_code=..., universe=...) 验证分组收益单调性；"
-                "factor_ic_decay(factor_code=..., horizons='1,5,10,20,60') 看 IC 衰减"
-            ),
         })
 
 
@@ -1508,10 +1491,6 @@ class FactorQuintileReturns(BaseTool):
             "holding_period": holding_period,
             "n_assets_used": len(factor_panel),
             **result,
-            "next_step": (
-                "factor_ic_decay(factor_code=..., horizons='1,5,10,20,60') 看 IC 衰减；"
-                "factor_turnover(factor_code=...) 看排名稳定性"
-            ),
         })
 
 
@@ -1652,10 +1631,6 @@ class FactorICDecay(BaseTool):
             "factor_code": factor_code,
             "n_assets": len(factor_panel),
             "ic_decay": results,
-            "next_step": (
-                "factor_turnover(factor_code=..., rebalance_freq=...) 看排名稳定性；"
-                "根据最佳 horizon 进入 run_backtest 构建策略"
-            ),
         })
 
 
@@ -1783,10 +1758,6 @@ class FactorTurnover(BaseTool):
             "median_turnover": round(float(np.median(arr)), 4),
             "std_turnover": round(float(np.std(arr)), 4),
             "avg_rank_stability": round(1.0 - float(np.mean(arr)), 4),
-            "next_step": (
-                "低换手(排名稳定)时用该因子进入 factor_cross_sectional_analysis 复核，"
-                "然后 run_backtest 构建策略"
-            ),
         })
 
 
