@@ -142,17 +142,6 @@ async def _run_agent_loop_background(
     once the service layer is stable (tests that mirror this logic:
     test_text_part_routing.py).
     """
-
-    This mirrors TUI's ChatSession._run_agent_loop() but pushes events
-    to sse_buffer instead of Textual widgets.
-
-    Test mode: when ``STRATEGY_RESEARCH_TEST_CHAT=1``, emits a scripted
-    sequence of SSE events instead of calling the real LLM. Used by
-    E2E tests to avoid network calls and ensure determinism.
-
-    Persistence: user message is inserted before the loop runs, assistant
-    message (with accumulated parts) is inserted after agent_done.
-    """
     import os
 
     # ── Persist user message + auto-title ────────────────────────────────
