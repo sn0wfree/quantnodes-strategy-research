@@ -55,6 +55,55 @@ interface SessionState {
   setSearchOpen: (open: boolean) => void
   runSearch: (query: string) => Promise<void>
   clearSearch: () => void
+  /** Backfill Agent / DAG / Goal panels from the backend snapshot. */
+  loadSessionState: (id: string) => Promise<void>
+}
+
+/** Backend response type for GET /chat/session/{id}/state (B13 backfill). */
+interface SessionStateResponse {
+  goal: {
+    goal_id: string
+    session_id: string
+    status: string
+    objective: string
+    progress_percent?: number
+    criteria?: Array<{
+      criterion_id: string
+      text: string
+      status: string
+      evidence_count?: number
+    }>
+    evidence_count?: number
+    recap?: string | null
+  } | null
+  workflow: {
+    name: string
+    nodes: Array<{ id: string; label?: string; type?: string; status?: string }>
+    edges: Array<{ id: string; source: string; target: string }>
+    progress: {
+      agents_completed?: number
+      agents_total?: number
+      current_layer?: number
+      total_layers?: number
+      paused?: boolean
+      status?: string
+    } | null
+    agent_statuses?: Record<string, string>
+  } | null
+  agents: Array<{
+    id: string
+    session_id: string
+    status: string
+    name: string
+    description?: string
+    created_at: number
+    updated_at: number
+    tool_calls_count?: number
+    compaction_count?: number
+    context_tokens?: number
+    context_tokens_limit?: number
+    iterations_detail?: Array<Record<string, unknown>>
+  }>
 }
 
 // Bump per runSearch call so stale search responses are dropped.
@@ -93,6 +142,106 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
+      /**
+       * Backfill the per-session Agent / DAG / Goal panels after a page
+       * reload (B13). The SSE stream only updates entries the store
+       * already has; once the user reloads the page, the Agent list,
+       * DAG nodes/edges, and current goal all go empty until the next
+       * run starts. This method calls the backend's
+       * ``GET /chat/session/{id}/state`` aggregator and seeds each
+       * store from the snapshot, so the RightPanel renders real state
+       * immediately instead of empty placeholders.
+       *
+       * Errors are logged + degrading to "no backfill" — the UI falls
+       * back to the empty state, which is the prior behavior, so a
+       * backend hiccup cannot regress switchSession.
+       */
+      loadSessionState: async (id: string) => {
+        try {
+          const data = await api.get<SessionStateResponse>(
+            `/chat/session/${id}/state`,
+          )
+          // Agent store
+          if (data.agents?.length) {
+            useAgentStore.getState().setAgents(data.agents as any)
+          } else {
+            useAgentStore.getState().setAgents([])
+          }
+          // Workflow store
+          if (data.workflow) {
+            const wf = data.workflow
+            useWorkflowStore.getState().setDAG(
+              (wf.nodes || []).map((n) => ({
+                id: n.id,
+                label: n.label ?? n.id,
+                type: n.type,
+                status: n.status,
+              })) as any,
+              (wf.edges || []).map((e) => ({
+                id: e.id,
+                source: e.source,
+                target: e.target,
+              })),
+            )
+            useWorkflowStore.getState().setPresets(
+              wf.name
+                ? [
+                    {
+                      id: wf.name,
+                      name: wf.name,
+                      description: '',
+                      created_at: Date.now() / 1000,
+                    },
+                  ]
+                : [],
+            )
+            useWorkflowStore.getState().setCurrentPreset(wf.name || null)
+            if (wf.progress && typeof wf.progress.agents_completed === 'number' &&
+                typeof wf.progress.agents_total === 'number' &&
+                wf.progress.agents_total > 0) {
+              useWorkflowStore.getState().setExecutionProgress(
+                Math.round(
+                  (wf.progress.agents_completed / wf.progress.agents_total) * 100,
+                ),
+              )
+            }
+          } else {
+            useWorkflowStore.getState().setDAG([], [])
+            useWorkflowStore.getState().setCurrentPreset(null)
+            useWorkflowStore.getState().setExecutionProgress(0)
+          }
+          // Goal store
+          if (data.goal) {
+            useGoalStore.getState().setGoal({
+              goal_id: data.goal.goal_id,
+              session_id: data.goal.session_id,
+              status: data.goal.status,
+              objective: data.goal.objective,
+              progress_percent: data.goal.progress_percent ?? 0,
+              criteria: (data.goal.criteria || []).map((c) => ({
+                criterion_id: c.criterion_id,
+                text: c.text,
+                status: c.status as any,
+                evidence_count: c.evidence_count ?? 0,
+              })),
+              evidence_count: data.goal.evidence_count ?? 0,
+              recap: data.goal.recap,
+            } as any)
+          } else {
+            useGoalStore.getState().clearGoal()
+          }
+        } catch (err) {
+          console.error('loadSessionState failed:', err)
+          // Fall back to empty panels rather than throwing — switchSession
+          // must never regress on a backend 500 here.
+          useAgentStore.getState().setAgents([])
+          useWorkflowStore.getState().setDAG([], [])
+          useWorkflowStore.getState().setCurrentPreset(null)
+          useWorkflowStore.getState().setExecutionProgress(0)
+          useGoalStore.getState().clearGoal()
+        }
+      },
+
       switchSession: async (id: string) => {
         const { openSessionIds, currentSessionId } = get()
         if (currentSessionId === id) return
@@ -109,11 +258,16 @@ export const useSessionStore = create<SessionState>()(
         chat.setStreamingMessage(null)
         chat.setStreamingText('')
         // Per-session panels: workflow DAG / agents / goal are session-
-        // scoped and must not bleed across sessions.
+        // scoped and must not bleed across sessions. Load the target
+        // session's persisted state in parallel (B13) so the panels
+        // render real data instead of empty placeholders after reload.
         useWorkflowStore.getState().setDAG([], [])
         useAgentStore.getState().setAgents([])
         useGoalStore.getState().clearGoal()
-        await chat.loadMessages(id)
+        await Promise.all([
+          chat.loadMessages(id),
+          get().loadSessionState(id),
+        ])
       },
 
       createNewSession: async (title = '新会话') => {

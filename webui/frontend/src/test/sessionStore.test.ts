@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useSessionStore } from '../stores/session'
 import type { Session, SearchHit } from '../stores/session'
+import { useAgentStore } from '../stores/agents'
+import { useWorkflowStore } from '../stores/workflow'
+import { useGoalStore } from '../stores/goal'
 
 const makeSession = (
   id: string,
@@ -191,5 +194,156 @@ describe('useSessionStore — async actions', () => {
     await useSessionStore.getState().runSearch('   ')
     expect(useSessionStore.getState().searchResults).toEqual([])
     expect(mockedApi.post).not.toHaveBeenCalled()
+  })
+})
+
+describe('useSessionStore — loadSessionState (B13 backfill)', () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      sessions: [],
+      openSessionIds: [],
+      currentSessionId: null,
+      searchResults: [],
+    })
+    vi.clearAllMocks()
+    // Fresh stores for each test
+    useAgentStore.setState({ agents: new Map() })
+    useWorkflowStore.setState({
+      dagNodes: [],
+      dagEdges: [],
+      presets: [],
+      currentPresetId: null,
+      executionProgress: 0,
+    })
+    useGoalStore.setState({ currentGoal: null })
+  })
+
+  it('seeds agent list from backend snapshot', async () => {
+    mockedApi.get.mockResolvedValueOnce({
+      agents: [
+        {
+          id: 'data_collector',
+          session_id: 's1',
+          status: 'completed',
+          name: 'data_collector',
+          created_at: 123,
+          updated_at: 123,
+        },
+        {
+          id: 'factor_analyst',
+          session_id: 's1',
+          status: 'running',
+          name: 'factor_analyst',
+          created_at: 123,
+          updated_at: 123,
+        },
+      ],
+      workflow: null,
+      goal: null,
+    })
+    await useSessionStore.getState().loadSessionState('s1')
+    const agents = useAgentStore.getState().agents
+    expect(agents.size).toBe(2)
+    expect(agents.get('data_collector')?.status).toBe('completed')
+    expect(agents.get('factor_analyst')?.status).toBe('running')
+    // color assignment must not mutate caller-owned objects (B11)
+    expect(agents.get('data_collector')?.color).toBeDefined()
+  })
+
+  it('seeds DAG nodes + edges + preset from workflow snapshot', async () => {
+    mockedApi.get.mockResolvedValueOnce({
+      agents: [],
+      workflow: {
+        name: 'factor_research',
+        nodes: [
+          { id: 'collector', label: 'collector', status: 'completed' },
+          { id: 'analyst', label: 'analyst', status: 'pending' },
+        ],
+        edges: [
+          { id: 'e1', source: 'collector', target: 'analyst' },
+        ],
+        progress: { agents_completed: 1, agents_total: 2 },
+      },
+      goal: null,
+    })
+    await useSessionStore.getState().loadSessionState('s1')
+    const wf = useWorkflowStore.getState()
+    expect(wf.dagNodes.length).toBe(2)
+    expect(wf.dagEdges.length).toBe(1)
+    expect(wf.dagEdges[0]).toEqual({ id: 'e1', source: 'collector', target: 'analyst' })
+    expect(wf.currentPresetId).toBe('factor_research')
+    expect(wf.executionProgress).toBe(50)
+  })
+
+  it('seeds goal from snapshot with criteria mapping', async () => {
+    mockedApi.get.mockResolvedValueOnce({
+      agents: [],
+      workflow: null,
+      goal: {
+        goal_id: 'goal_x',
+        session_id: 's1',
+        status: 'active',
+        objective: '研究动量因子',
+        progress_percent: 0,
+        criteria: [
+          { criterion_id: 'c1', text: '有足够数据', status: 'covered', evidence_count: 2 },
+          { criterion_id: 'c2', text: '显著性检验', status: 'pending', evidence_count: 0 },
+        ],
+        evidence_count: 2,
+      },
+    })
+    await useSessionStore.getState().loadSessionState('s1')
+    const goal = useGoalStore.getState().currentGoal
+    expect(goal).not.toBeNull()
+    expect(goal?.objective).toBe('研究动量因子')
+    expect(goal?.criteria).toHaveLength(2)
+    expect(goal?.criteria[0]).toMatchObject({
+      criterion_id: 'c1',
+      status: 'covered',
+      evidence_count: 2,
+    })
+  })
+
+  it('clears all panels when response is empty', async () => {
+    // Seed some stale state first
+    useAgentStore.setState({
+      agents: new Map([
+        ['stale', {
+          id: 'stale', session_id: 's1', status: 'running', name: 'stale',
+          created_at: 1, updated_at: 1, tool_calls_count: 0, compaction_count: 0,
+          context_tokens: 0, context_tokens_limit: 0, iterations_detail: [],
+        } as any],
+      ]),
+    })
+    useWorkflowStore.setState({
+      dagNodes: [{ id: 'n', label: 'n', status: 'pending' }],
+      dagEdges: [],
+      presets: [],
+      currentPresetId: 'old',
+      executionProgress: 33,
+    })
+    useGoalStore.setState({
+      currentGoal: {
+        goal_id: 'g', session_id: 's1', status: 'active', objective: 'x',
+        progress_percent: 0, criteria: [], evidence_count: 0,
+      } as any,
+    })
+    mockedApi.get.mockResolvedValueOnce({ agents: [], workflow: null, goal: null })
+    await useSessionStore.getState().loadSessionState('s1')
+    expect(useAgentStore.getState().agents.size).toBe(0)
+    expect(useWorkflowStore.getState().dagNodes).toEqual([])
+    expect(useWorkflowStore.getState().currentPresetId).toBeNull()
+    expect(useGoalStore.getState().currentGoal).toBeNull()
+  })
+
+  it('degrades gracefully when the API call fails', async () => {
+    useAgentStore.setState({ agents: new Map([['x', { id: 'x', name: 'x' } as any]]) })
+    useGoalStore.setState({ currentGoal: { goal_id: 'g' } as any })
+    mockedApi.get.mockRejectedValueOnce(new Error('backend down'))
+    await useSessionStore.getState().loadSessionState('s1')
+    // fallback: clears everything (prior behavior, no regress)
+    expect(useAgentStore.getState().agents.size).toBe(0)
+    expect(useWorkflowStore.getState().dagNodes).toEqual([])
+    expect(useGoalStore.getState().currentGoal).toBeNull()
   })
 })
