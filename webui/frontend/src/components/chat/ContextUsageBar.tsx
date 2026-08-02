@@ -47,7 +47,7 @@ export function ContextUsageBar() {
   const isFallback = modelInfo?.source === 'fallback' || modelInfo?.source === 'bundled'
 
   // Fallback: estimate tokens from loaded message characters when
-  // SSE hasn't pushed llm_usage yet (e.g. after page reload). This
+  // SSE hasn't pushed context_used yet (e.g. after page reload). This
   // avoids the bar showing 0.0% while many messages are actually
   // loaded. Skip tool messages whose content is already folded into
   // the assistant's tool_call parts.

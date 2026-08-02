@@ -1,42 +1,47 @@
 import type { SSEHandler } from './types'
 
 /**
- * session_total_tokens: backend authoritative cumulative for the
- * current attempt. Used by ContextUsageBar to show context window
- * usage. Marks the session so later llm_usage deltas are not added
- * on top (double counting — regression B2).
+ * session_total_tokens: backend authoritative figure for the current
+ * attempt. Carries both cumulative spend (total_tokens) and the current
+ * context-window occupancy (context_used = size of the prompt most
+ * recently sent to the model). ContextUsageBar needs the BOUNDED
+ * occupancy, not the cumulative spend — so we store context_used
+ * (falling back to total_tokens defensively). Marks the session so
+ * later llm_usage deltas are not applied on top (regression B2).
  */
 export const sessionTotalTokens: SSEHandler = (data, ctx) => {
   const { sessionId, setTokensUsed, markTotalTokensSeen } = ctx
-  const { total_tokens } = data as { total_tokens: number }
-  if (!sessionId || typeof total_tokens !== 'number') return
-  setTokensUsed(sessionId, total_tokens)
+  const { context_used, total_tokens } = data as {
+    context_used?: number
+    total_tokens?: number
+  }
+  if (!sessionId) return
+  const used = typeof context_used === 'number' ? context_used : total_tokens
+  if (typeof used !== 'number') return
+  setTokensUsed(sessionId, used)
   markTotalTokensSeen(sessionId)
 }
 
 /**
- * llm_usage: per-call usage delta. The backend accumulates these into
+ * llm_usage: per-call usage delta. The backend accumulates spend into
  * session_total_tokens and re-emits it for every LLM call, so adding
- * here would double-count (regression B2). Only fall back to deltas
- * when the authoritative cumulative event was never seen for this
- * session.
+ * here would double-count (regression B2). The current context
+ * occupancy is "the prompt size of the most recent call" — an overwrite,
+ * not an accumulate. Only act as a fallback when the authoritative
+ * session_total_tokens was never seen for this session.
  */
 export const llmUsage: SSEHandler = (data, ctx) => {
   const { sessionId, setTokensUsed, state } = ctx
   if (!sessionId || state.hasSeenTotalTokens(sessionId)) return
   const d = data as {
-    input_tokens?: number
-    output_tokens?: number
     prompt_tokens?: number
-    completion_tokens?: number
+    input_tokens?: number
     total_tokens?: number
   }
-  const inc =
-    d.total_tokens ??
-    (d.input_tokens ?? d.prompt_tokens ?? 0) +
-      (d.output_tokens ?? d.completion_tokens ?? 0)
-  if (inc > 0) {
-    setTokensUsed(sessionId, state.getTokensUsed(sessionId) + inc)
+  const used =
+    d.prompt_tokens ?? d.input_tokens ?? d.total_tokens
+  if (typeof used === 'number' && used > 0) {
+    setTokensUsed(sessionId, used)
   }
 }
 

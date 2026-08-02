@@ -70,10 +70,24 @@ describe('ContextUsageBar', () => {
   })
 
   it('formats large numbers with M suffix', () => {
-    setup({ sessionId: 's1', tokensUsed: 2_500_000, context: 1_000_000, source: 'fetched' })
+    setup({ sessionId: 's1', tokensUsed: 1_200_000, context: 2_000_000, source: 'fetched' })
     render(<ContextUsageBar />)
     const text = screen.getByTestId('context-usage-text')
-    expect(text.textContent).toMatch(/2\.5M \/ 1\.0M/)
+    expect(text.textContent).toMatch(/1\.2M \/ 2\.0M/)
+  })
+
+  it('reflects compaction: usage drops after context is compressed', () => {
+    const { rerender } = render(<ContextUsageBar />)
+    // large occupancy → 90% red
+    setup({ sessionId: 's1', tokensUsed: 90000, context: 100000, source: 'fetched' })
+    rerender(<ContextUsageBar />)
+    expect(screen.getByTestId('context-usage-text').textContent).toMatch(/90\.0%/)
+    expect(screen.getByTestId('context-progress-bar').className).toContain('bg-red-500')
+    // compaction shrank context → 30% green
+    setup({ sessionId: 's1', tokensUsed: 30000, context: 100000, source: 'fetched' })
+    rerender(<ContextUsageBar />)
+    expect(screen.getByTestId('context-usage-text').textContent).toMatch(/30\.0%/)
+    expect(screen.getByTestId('context-progress-bar').className).toContain('bg-emerald-500')
   })
 
   it('applies green color tier for low usage', () => {

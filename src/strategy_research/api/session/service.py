@@ -664,7 +664,7 @@ class SessionService:
         # Also accumulates llm_usage tokens into attempt-local metrics so
         # the frontend can show context usage progress.
         usage_lock = threading.Lock()
-        usage_state: dict[str, int] = {"input": 0, "output": 0}
+        usage_state: dict[str, int] = {"input": 0, "output": 0, "context_used": 0}
 
         def event_callback(event_type: str, data: dict[str, Any]) -> None:
             """AgentLoop on_event adapter for the B4 event-sourced path.
@@ -709,6 +709,19 @@ class SessionService:
                     )
                     usage_state["input"] += inc_in
                     usage_state["output"] += inc_out
+                    # context_used = the size of the prompt actually sent
+                    # to the model on the most recent LLM call. This is the
+                    # current context-window occupancy (bounded; drops after
+                    # compaction), unlike total_tokens which is cumulative
+                    # spend. Overwrite (not accumulate) — a fresh call
+                    # re-sends the whole context.
+                    prompt_used = int(
+                        data.get("prompt_tokens")
+                        or data.get("input_tokens")
+                        or 0
+                    )
+                    if prompt_used > 0:
+                        usage_state["context_used"] = prompt_used
                 total = usage_state["input"] + usage_state["output"]
                 # Emit a session_total_tokens event so the frontend
                 # has an authoritative figure (not the per-call delta).
@@ -719,6 +732,7 @@ class SessionService:
                         "input_tokens": usage_state["input"],
                         "output_tokens": usage_state["output"],
                         "total_tokens": total,
+                        "context_used": usage_state["context_used"],
                         "message_id": attempt.message_id,
                         "attempt_id": attempt.attempt_id,
                     },

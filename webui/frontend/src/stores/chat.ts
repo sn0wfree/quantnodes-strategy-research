@@ -91,14 +91,18 @@ interface ChatState {
   queuePaused: Map<string, boolean>
   /** Per-session current queue length snapshot. */
   queueLengths: Map<string, number>
-  /** Per-session cumulative token usage (LLM total). Drives ContextUsageBar. */
+  /**
+   * Per-session current context-window occupancy (bounded token count,
+   * from session_total_tokens.context_used). Drives ContextUsageBar.
+   * Reflects compaction: drops after the context is compressed.
+   */
   tokensUsed: Map<string, number>
   /**
    * Per-session flag: true once `session_total_tokens` has been seen.
-   * `session_total_tokens` is the backend-authoritative cumulative
-   * value; per-call `llm_usage` deltas must NOT be added on top of it
-   * (double counting). `llm_usage` only acts as a fallback for
-   * sessions that never saw the authoritative event.
+   * `session_total_tokens` is the backend-authoritative value; per-call
+   * `llm_usage` deltas must NOT be applied on top of it (double
+   * counting). `llm_usage` only acts as a fallback for sessions that
+   * never saw the authoritative event.
    */
   totalTokensSeen: Map<string, boolean>
   /** Most recent compaction event (for CompactBanner). */
