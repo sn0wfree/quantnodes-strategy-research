@@ -51,14 +51,13 @@ class _FakeLoader:
 
 @pytest.fixture
 def tools():
+    # Stub the loader registry + market detection so the tool finds the
+    # fake loader without network.
+    import strategy_research.core.data_source.registry as dsr
     from strategy_research.core.agent.builtin_tools.data_tools import (
         CommitMarketDataTool,
         GetMarketDataTool,
     )
-
-    # Stub the loader registry + market detection so the tool finds the
-    # fake loader without network.
-    import strategy_research.core.data_source.registry as dsr
     dsr.LOADER_REGISTRY["fake"] = _FakeLoader
     dsr.detect_market = lambda code: "a_share"
     return GetMarketDataTool(), CommitMarketDataTool()
@@ -165,3 +164,99 @@ class TestCommitRegistered:
         reg = build_default_registry()
         assert reg.get("commit_market_data") is not None
         assert reg.get("get_market_data") is not None
+
+
+class TestCacheKeyDeterminism:
+    def test_cache_key_stable(self, tools):
+        from strategy_research.core.data_source.cache import make_cache_key
+        k1 = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
+        k2 = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
+        assert k1 == k2 == "0ca8e47f3cf1213e"
+
+    def test_cache_key_changes_with_params(self, tools):
+        from strategy_research.core.data_source.cache import make_cache_key
+        a = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
+        b = make_cache_key("fake", "600519.SH", "1D", "2023-02-01", "2023-01-10")
+        assert a != b
+
+    def test_cache_key_matches_get_output(self, tools):
+        """get_market_data returns the same key the loader cache uses."""
+        from strategy_research.core.data_source.cache import make_cache_key
+        gmd, _ = tools
+        result = _run_get(gmd, ["600519.SH"])
+        key = result["cached"]["600519.SH"]
+        expected = make_cache_key("fake", "600519.SH", "1D", "2023-01-01", "2023-01-10")
+        assert key == expected
+
+
+class TestGetMarketDataEdgeCases:
+    def test_summary_fields_complete(self, tools):
+        gmd, _ = tools
+        result = _run_get(gmd, ["600519.SH"])
+        s = result["summary"]["600519.SH"]
+        for field in ("rows", "status", "cache_key", "first_close", "last_close",
+                      "close_min", "close_max", "avg_volume"):
+            assert field in s, f"summary missing {field}"
+
+    def test_preview_bounded_to_5_rows(self, tools):
+        gmd, _ = tools
+        result = _run_get(gmd, ["600519.SH"])
+        assert len(result["preview"]["600519.SH"]) <= 5
+
+    def test_unavailable_source_errors(self, tools):
+        """Explicit source that exists but is unavailable → actionable error."""
+        import strategy_research.core.data_source.registry as dsr
+
+        class _Unavailable:
+            name = "down"
+            def is_available(self):
+                return False
+        dsr.LOADER_REGISTRY["down"] = _Unavailable
+        gmd, _ = tools
+        raw = gmd.execute(
+            codes=["600519.SH"], start_date="2023-01-01",
+            end_date="2023-01-10", source="down",
+        )
+        result = json.loads(raw)
+        assert result["status"] == "error"
+        assert "not available" in result["error"]
+
+
+class TestCommitMarketDataEdgeCases:
+    def test_repeated_commit_is_idempotent(self, tools, workspace):
+        """INSERT OR REPLACE → same rows, no duplication."""
+        gmd, cmt = tools
+        result = _run_get(gmd, ["600519.SH"])
+        key = result["cached"]["600519.SH"]
+
+        def _commit():
+            return json.loads(cmt.execute(
+                workspace=str(workspace), cache_keys=[key], codes=["600519.SH"],
+                strategy_name="blue_chip",
+            ))
+
+        first = _commit()
+        second = _commit()
+        assert first["total_rows"] == 10
+        assert second["total_rows"] == 10  # replace, not append
+
+        from strategy_research.core.db import get_connection, init_db
+        init_db(workspace)
+        conn = get_connection(workspace)
+        n = conn.execute(
+            "SELECT COUNT(*) FROM price_data WHERE asset_code='600519.SH'"
+        ).fetchone()[0]
+        assert n == 10
+
+    def test_missing_workspace_errors(self, tools):
+        _, cmt = tools
+        out = json.loads(cmt.execute(cache_keys=["k"], codes=["c"]))
+        assert out["status"] == "error"
+        assert "workspace" in out["fix"]
+
+    def test_empty_codes_errors(self, tools, workspace):
+        _, cmt = tools
+        out = json.loads(cmt.execute(
+            workspace=str(workspace), cache_keys=[], codes=[], strategy_name="x",
+        ))
+        assert out["status"] == "error"

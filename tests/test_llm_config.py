@@ -82,6 +82,36 @@ class TestCodeDefaults:
         assert cfg.timeout_s == 60.0
         assert cfg.max_retries == 3
         assert cfg.stream is True
+        # Iteration budget defaults (chat bounded, agent high ceiling)
+        assert cfg.max_iterations == 50
+        assert cfg.agent_max_iterations == 9999
+
+
+class TestIterationBudget:
+    """max_iterations / agent_max_iterations from llm.json."""
+
+    def test_custom_values_from_json(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps({
+            "llm": {"max_iterations": 30, "agent_max_iterations": 5000},
+        }))
+        cfg = LLMConfig.load()
+        assert cfg.max_iterations == 30
+        assert cfg.agent_max_iterations == 5000
+
+    def test_partial_override_preserves_default(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps({"llm": {"max_iterations": 7}}))
+        cfg = LLMConfig.load()
+        assert cfg.max_iterations == 7
+        assert cfg.agent_max_iterations == 9999  # untouched default
+
+    def test_non_numeric_ignored(self, clear_env, fake_llm_json):
+        fake_llm_json.write_text(json.dumps({
+            "llm": {"max_iterations": "many", "agent_max_iterations": 123},
+        }))
+        cfg = LLMConfig.load()
+        # invalid int is dropped → default survives
+        assert cfg.max_iterations == 50
+        assert cfg.agent_max_iterations == 123
 
 
 # ── Bridge layer ─────────────────────────────────────────────────────

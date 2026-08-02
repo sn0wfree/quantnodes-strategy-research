@@ -257,13 +257,22 @@ class LLMConfig:
 
         Unknown keys are silently ignored (forward-compat with new fields).
         Tuple fields (stop) are reconstructed as tuple.
+        Int fields guard against non-int values (e.g. a mistyped
+        max_iterations in llm.json) by falling back to the current value.
         """
         valid_fields = {f.name for f in dataclasses.fields(self)}
+        field_types = {f.name: f.type for f in dataclasses.fields(self)}
         kwargs: dict[str, Any] = {}
         for key, value in data.items():
             if key in valid_fields and value is not None:
                 if key == "stop" and isinstance(value, list):
                     kwargs[key] = tuple(value)
+                elif field_types.get(key) == "int" and not isinstance(value, int):
+                    # Keep the current (default) value rather than injecting
+                    # a non-int that would break int-typed consumers.
+                    logger.debug(
+                        "llm.json %s=%r not an int; keeping default", key, value,
+                    )
                 else:
                     kwargs[key] = value
         if not kwargs:
