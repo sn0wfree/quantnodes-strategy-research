@@ -113,6 +113,10 @@ class SwarmRuntime:
         max_workers: int = 4,
     ) -> None:
         self._controller = controller
+        # TODO(architecture): grounding is stored but never read —
+        # future feature: ground agent outputs against a knowledge
+        # source (docs/validation-design / research grounding) before
+        # accepting them into the run result.
         self._grounding = grounding
         self._max_workers = max_workers
         self._active_runs: dict[str, bool] = {}
@@ -346,5 +350,5 @@ class SwarmRuntime:
                 upstream[uid] = r.output
         return upstream
 
-    
+
 

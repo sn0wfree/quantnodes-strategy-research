@@ -1,5 +1,14 @@
 """LLMConfig builder — fluent composition of LLMConfig (Phase 2.4).
 
+TODO(architecture): currently UNUSED in production — the 4-layer merge
+(CLI > env > llm.json/profiles > defaults) lives in ``config.py:
+LLMConfig.load()`` which superseded this builder. Kept because:
+  1. tests (test_llm_config_builder.py) lock the fluent layering contract
+  2. if a fluent/composable config API is ever wanted (plugin layers,
+     per-call overrides), the layering logic should be extracted from
+     ``config.load`` here rather than reimplemented.
+Do NOT delete without a decision on the fluent API's future.
+
 ``LLMConfig.load`` has accumulated 4 distinct sources (code defaults,
 bridge JSON, env vars, CLI overrides) with translation steps between
 each layer. The Builder pattern makes the layering explicit and lets
@@ -32,12 +41,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..config_loader import ConfigBuilder, load_layered_config
+from ..config_loader import ConfigBuilder
 from .config import (
-    ENV_API_KEY,
+    _DEFAULT_MAX_TOKENS,
     PROVIDER_DEFAULTS,
     QUANTNODES_LLM_JSON,
-    _DEFAULT_MAX_TOKENS,
     _load_bridge_dict,
     _resolve_bridge_path,
     load_api_key_from_env,
@@ -75,6 +83,7 @@ class LLMConfigBuilder:
         """
         if defaults is None:
             import dataclasses as _dc
+
             from .config import LLMConfig
             defaults = {f.name: getattr(LLMConfig(), f.name)
                         for f in _dc.fields(LLMConfig)}

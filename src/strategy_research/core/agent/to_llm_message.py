@@ -1,5 +1,14 @@
 """Unified LLM projection layer (opencode-aligned).
 
+TODO(architecture): module is currently NOT wired into production —
+``loop.py`` still uses its own inline projection instead of this
+module, despite docs/compaction-summary-fix.md designating it the
+single source of truth ("Use to_llm_message, drop [context summary]
+matching"). Future work (compaction Phase B wiring): have loop.py /
+service history builders call ``project_to_llm_message`` /
+``project_messages_to_llm`` and retire the inline projection in
+``core/agent/loop.py``. Kept alive by tests (test_to_llm_message.py).
+
 Single source of truth for "what the LLM sees" when given a list of
 DB messages. Replaces the inline projection logic in `loop.py` and
 provides a single function that handles all 4 message types.
@@ -20,15 +29,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from .compaction_message import (
-    CompactionMessage,
     MESSAGE_TYPE_ASSISTANT,
     MESSAGE_TYPE_COMPACTION,
     MESSAGE_TYPE_TOOL,
     MESSAGE_TYPE_USER,
     VALID_MESSAGE_TYPES,
+    CompactionMessage,
 )
 
 logger = logging.getLogger(__name__)

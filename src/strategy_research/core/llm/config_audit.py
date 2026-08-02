@@ -20,10 +20,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-import os
-import tempfile
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Final, Sequence
 
 from .config import (
     ENV_API_KEY,
@@ -94,20 +92,9 @@ def _read_llm_json(path: Path) -> dict[str, Any]:
 
 
 def _read_env(path: Path) -> dict[str, str]:
-    """Read .env into ``{KEY: value}`` dict (empty values kept as ``""``)."""
-    result: dict[str, str] = {}
-    if not path.exists():
-        return result
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            result[k.strip()] = v
-    except OSError:
-        pass
-    return result
+    """Read .env into ``{KEY: value}`` dict (shared impl; empty kept)."""
+    from ..utils.io_utils import read_dotenv
+    return read_dotenv(path)
 
 
 def _is_placeholder(value: str) -> bool:
@@ -120,6 +107,14 @@ def _is_placeholder(value: str) -> bool:
     if len(v) < 20 and v.startswith("sk-"):
         return True  # real keys are always > 50 chars
     return False
+
+
+# Canonical QuantNodes config locations (core-owned; api/cli/onboard
+# import from here rather than the reverse — previously this module
+# imported cli.onboard's private constants, forming a core↔cli cycle).
+_QUANTNODES_DIR: Final[Path] = Path.home() / ".quantnodes"
+DEFAULT_LLM_JSON_PATH: Final[Path] = _QUANTNODES_DIR / "llm.json"
+DEFAULT_DOTENV_PATH: Final[Path] = _QUANTNODES_DIR / ".env"
 
 
 def detect_issues(
@@ -135,12 +130,8 @@ def detect_issues(
     Returns:
         List of ``AuditIssue`` instances (may be empty if config is clean).
     """
-    from strategy_research.cli.onboard import (
-        _QUANTNODES_LLM_JSON_PATH as default_llm,
-        _QUANTNODES_DOTENV_PATH as default_env,
-    )
-    llm_path = llm_json_path or default_llm
-    env_p = env_path or default_env
+    llm_path = llm_json_path or DEFAULT_LLM_JSON_PATH
+    env_p = env_path or DEFAULT_DOTENV_PATH
 
     issues: list[AuditIssue] = []
 
@@ -247,50 +238,20 @@ def detect_issues(
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    """Atomic write JSON file with chmod 0600."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
-        os.replace(tmp_name, path)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
+    """Atomic write JSON file with chmod 0600 (shared impl)."""
+    from ..utils.io_utils import atomic_write_json
+    atomic_write_json(path, data)
 
 
 def _atomic_write_env(path: Path, lines: dict[str, str]) -> None:
-    """Atomic write .env file with chmod 0600.
+    """Atomic write .env file with chmod 0600 (shared impl).
 
     Args:
         lines: Ordered dict of key=value pairs. Empty-string values
                are written as ``KEY=`` (empty value, not omitted).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = "\n".join(f"{k}={v}" for k, v in lines.items()) + "\n"
-    fd, tmp_name = tempfile.mkstemp(prefix=".env.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_name, path)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
+    from ..utils.io_utils import atomic_write_env
+    atomic_write_env(path, lines)
 
 
 def fix_issues(
@@ -308,12 +269,8 @@ def fix_issues(
     Returns:
         Updated issues list (same objects, fix_summary filled for applied fixes).
     """
-    from strategy_research.cli.onboard import (
-        _QUANTNODES_LLM_JSON_PATH as default_llm,
-        _QUANTNODES_DOTENV_PATH as default_env,
-    )
-    llm_path = llm_json_path or default_llm
-    env_p = env_path or default_env
+    llm_path = llm_json_path or DEFAULT_LLM_JSON_PATH
+    env_p = env_path or DEFAULT_DOTENV_PATH
 
     llm_data = _read_llm_json(llm_path)
     llm = llm_data.get("llm", {})

@@ -117,24 +117,33 @@ def is_fred_series(code: str) -> bool:
 
 
 def detect_market(code: str) -> str:
-    """自动检测代码所属市场"""
-    if is_a_share(code):
+    """自动检测代码所属市场。
+
+    正则单一来源：``core/utils/market_detection.py``（引擎层标签）。
+    这里映射回 data_source 层标签（etf/index 细分、us/hk 简写、
+    macro），供 LOADER_REGISTRY 选择 loader。
+    """
+    from ...utils.market_detection import detect_market as _detect
+
+    market = _detect(code)
+    if market == "unknown":
+        # FRED 系列（如 DGS10, CPIAUCSL）——纯字母数字串但非股票代码。
+        # 先于默认值判定；含数字的串不会被 us_equity 吞掉。
+        if is_fred_series(code):
+            return "macro"
+        return "a_share"  # 默认
+    if market == "a_share":
         if is_etf(code):
             return "etf"
         if is_index(code):
             return "index"
         return "a_share"
-    if is_hk(code):
-        return "hk"
-    if is_us(code):
+    if market == "us_equity":
         return "us"
-    if is_forex(code):
-        return "forex"
-    if is_crypto(code):
-        return "crypto"
-    if is_fred_series(code):
-        return "macro"
-    return "a_share"  # 默认
+    if market == "hk_equity":
+        return "hk"
+    # crypto / forex / futures / fund / india_equity 标签两层一致
+    return market
 
 
 def normalize_code(code: str, source: str) -> str:

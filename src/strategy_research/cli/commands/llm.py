@@ -19,7 +19,6 @@ import argparse
 import json
 import os
 import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -90,45 +89,27 @@ def _active_profile(llm_json_path: Path | None = None) -> str | None:
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
-    existing: dict[str, str] = {}
-    if not path.exists():
-        return existing
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            existing[k.strip()] = v
-    except OSError:
-        pass
-    return existing
+    """Parse a .env file (shared impl)."""
+    from strategy_research.core.utils.io_utils import read_dotenv
+    return read_dotenv(path)
 
 
 def _write_dotenv(tokens: dict[str, str], *,
                   dotenv_path: Path | None = None) -> Path:
+    """Merge KEY=value lines into .env (atomic, 0600, shared impl)."""
+    from strategy_research.core.utils.io_utils import (
+        atomic_write_text,
+        read_dotenv,
+    )
+
     path = dotenv_path or DOTENV_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    merged = _read_dotenv(path)
+    merged = read_dotenv(path)
     for k, v in tokens.items():
         if v:
             merged[k] = v
     content = "\n".join(f"{k}={v}" for k, v in merged.items()) + "\n"
-    fd, tmp_name = tempfile.mkstemp(prefix=".env.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_name, path)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
+    atomic_write_text(path, content, mode=0o600)
     return path
 
 
@@ -137,25 +118,12 @@ def _write_dotenv(tokens: dict[str, str], *,
 
 def _atomic_write_llm_json(data: dict, *,
                            llm_json_path: Path | None = None) -> Path:
+    """Atomic pretty-JSON write with 0600 (shared impl)."""
+    from strategy_research.core.utils.io_utils import atomic_write_json
+
     path = llm_json_path or LLM_JSON_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=".llm.json.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
-        os.replace(tmp_name, path)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
-    return LLM_JSON_PATH
+    atomic_write_json(path, data)
+    return path
 
 
 def _backup_llm_json(llm_json_path: Path | None = None) -> Path | None:

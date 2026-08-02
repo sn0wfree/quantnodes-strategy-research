@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import List
@@ -60,25 +58,10 @@ class ScheduledResearchStore:
         }
         payload = json.dumps(data, ensure_ascii=False, indent=2)
 
-        # Atomic write: temp → fsync → replace
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(self._path.parent),
-            prefix=".scheduled_jobs-",
-            suffix=".tmp",
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(payload)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, str(self._path))
-        except Exception:
-            # Clean up temp file on failure
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        # Atomic write with fsync (shared impl) — job data must survive
+        # a crash, hence fsync before rename.
+        from ..utils.io_utils import atomic_write_text
+        atomic_write_text(self._path, payload, mode=0o600, fsync=True)
 
     def add(self, job: ScheduledResearchJob) -> None:
         """Add a single job."""

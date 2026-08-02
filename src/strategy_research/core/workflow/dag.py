@@ -82,6 +82,10 @@ def topological_layers(adj: dict[str, list[str]]) -> list[list[str]]:
 def find_downstream(adj: dict[str, list[str]], node: str) -> list[str]:
     """Find all downstream nodes that depend on ``node`` (BFS).
 
+    TODO(architecture): currently no production callers — utilities for
+    the planned DAG analytics / targeted re-run (recompute only the
+    downstream of a changed node). Keep for that feature.
+
     Convention: ``{node: [upstream_deps]}``.
 
     Returns a sorted list of all nodes reachable by following

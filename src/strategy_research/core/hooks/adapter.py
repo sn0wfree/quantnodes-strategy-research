@@ -1,5 +1,10 @@
 """Hook 适配器 — AgentHook 13 点 → UnifiedHook 完整映射。
 
+TODO(architecture): dormant with unified.py — see hooks/unified.py
+docstring. AgentHookAdapter would bridge AgentHook events into the
+mode-agnostic UnifiedHook surface once the hook integration (P5) lands;
+not exported from hooks/__init__ and unused today.
+
 Adapted from llmwikify apps/chat/agent/unified/hook_adapter.py (MIT License).
 Original: https://github.com/llmwikify/llmwikify
 

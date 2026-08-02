@@ -48,7 +48,6 @@ from strategy_research.cli.interactive.main import process_turn
 from strategy_research.cli.theme import captured_console
 from strategy_research.cli.tui.messages import SynthesizeInput, WriteTranscript
 
-
 # Standard ``cmd_quit`` sentinel. See ``cli/commands/slash_chat.py``.
 QUIT_RC: int = 2
 
@@ -217,7 +216,6 @@ class ChatSession:
         fails (e.g. missing role prompt). This unifies the event-driven
         flow for plain-text chat with the role-based autoresearch path.
         """
-        from strategy_research.cli.tui.app import ResearchApp
         from strategy_research.core.agent.loop import AgentLoop
 
         cfg = None
@@ -253,7 +251,7 @@ class ChatSession:
                 system_prompt = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
             except Exception:
                 system_prompt = ""
- 
+
         # Pass prior conversation turns as history context.
         # ctx.history ends with the current user message (appended by
         # process_turn); exclude it so the loop treats `task` as current.
@@ -271,6 +269,14 @@ class ChatSession:
             allowed_tools=None,  # all tools enabled
             compact_config=(cfg or self.llm_client.config).compact_config,
         )
+        # Ensure the core loop's legacy compaction persister is wired
+        # (TUI process has no API app; registers once, idempotent).
+        try:
+            from ...api.routers.web_session import persist_message
+            from ...core.agent.loop import register_compaction_persister
+            register_compaction_persister(persist_message)
+        except Exception:  # noqa: BLE001
+            pass
 
         # Inject user message into loop's internal state via _build_messages
         # mirror - we just call loop.arun(task) and let it build messages.

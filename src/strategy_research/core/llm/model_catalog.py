@@ -101,18 +101,14 @@ _REQUEST_TIMEOUT = 5.0
 
 
 # ── Provider name mapping (internal → models.dev) ────────────────────
+#
+# Single source of truth lives in core/llm/provider/__init__.py (it
+# also knows adapters added later, e.g. nvidia). This dict mirrors it
+# so `from .model_catalog import MODELS_DEV_ID` keeps working; keep it
+# as a sync alias rather than a second hand-maintained copy.
+from .provider import MODELS_DEV_ID  # noqa: F401  (re-export, see below)
 
-
-MODELS_DEV_ID: dict[str, str] = {
-    "minimax": "minimax-cn-coding-plan",
-    "minimax-cn": "minimax-cn",
-    "minimax-cn-coding-plan": "minimax-cn-coding-plan",
-    "minimax-coding-plan": "minimax-coding-plan",
-    "openai": "openai",
-    "deepseek": "deepseek",
-    "qwen": "alibaba",
-    "kimi": "moonshotai",
-}
+MODELS_DEV_ID: dict[str, str] = dict(MODELS_DEV_ID)
 
 
 def models_dev_id(provider: str) -> str:

@@ -537,6 +537,11 @@ def find_llm_config_path() -> Path:
 
 # ── Back-compat stubs (yaml/profile API removed in v0.5.0) ───────────
 #
+# TODO(architecture): retire these stubs once no external importers
+# remain. The profile system was re-added in v0.7 as llm.json
+# "profiles"/"active_profile" (see cli/commands/llm.py + config
+# profile resolution); these yaml-era helpers are unrelated no-ops.
+#
 # The wizard now writes ~/.quantnodes/llm.json (QuantNodes canonical
 # location). The legacy ~/.quantnodes-research/llm.yaml format is no
 # longer consumed. These helpers are kept as no-ops so that any third-

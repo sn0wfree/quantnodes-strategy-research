@@ -277,7 +277,6 @@ def save_goal_workflow(
         OSError: If the write fails.
     """
     import os
-    import tempfile
 
     try:
         import yaml
@@ -335,7 +334,7 @@ def save_goal_workflow(
 
     yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
-    # Atomic write
+    # Atomic write (shared impl)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -344,12 +343,11 @@ def save_goal_workflow(
         bak_path = path.with_suffix(path.suffix + ".bak")
         bak_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
 
-    # Write to temp file then rename
-    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    from ..utils.io_utils import atomic_write_text
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(yaml_str)
-        os.replace(tmp_path, str(path))
+        # mkstemp-created files are 0600; preserve that (workflow YAMLs
+        # can embed nothing secret today, but keep least privilege)
+        atomic_write_text(path, yaml_str, mode=0o600)
     except Exception:
         # Restore from backup on failure
         if backup and path.exists():

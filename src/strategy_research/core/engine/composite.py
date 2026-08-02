@@ -17,23 +17,16 @@ from .global_equity import GlobalEquityEngine
 
 
 def _detect_market_simple(symbol: str) -> str:
-    """简化版市场检测。"""
-    if "." in symbol:
-        suffix = symbol.split(".")[-1].upper()
-        if suffix in ("SZ", "SH", "BJ"):
-            return "a_share"
-        if suffix == "HK":
-            return "hk_equity"
-        if suffix in ("NS", "BO"):
-            return "india_equity"
-    if "-" in symbol or "/" in symbol:
-        return "crypto"
-    # Forex pairs: 6 alphabetic chars (e.g. EURUSD, GBPJPY)
-    if len(symbol) == 6 and symbol.isalpha():
-        return "forex"
-    if len(symbol) <= 5 and symbol.isalpha():
-        return "us_equity"
-    return "a_share"
+    """简化版市场检测（委托 utils/market_detection 单一正则源）。
+
+    Kept as a thin alias so existing callers/tests keep working; the
+    third duplicate regex implementation was retired. Default is
+    a_share for unknown codes (matches previous behavior).
+    """
+    from ..utils.market_detection import detect_market
+
+    market = detect_market(symbol)
+    return market if market != "unknown" else "a_share"
 
 
 class CompositeEngine(BaseEngine):

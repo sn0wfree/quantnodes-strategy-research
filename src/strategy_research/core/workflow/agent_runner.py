@@ -1,5 +1,16 @@
 """AgentRunner — pluggable agent execution for Goal Workflow.
 
+FIXME(architecture): module is effectively dormant — no production
+callers. The Goal Workflow executes agents via ``SwarmRuntime`` /
+WorkflowController instead. ``agent_runner`` / ``agent_runner_type``
+are still accepted (deprecated) kwargs in workflow.py for back-compat
+(see docs/phase-4-plan.md "agent_runner 弃用参数") and the goal to
+drop them. NOTE: ``AgentLoopRunner.run`` calls ``build_agent_loop``
+with ``llm_client=``/``tools=`` kwargs that don't match the current
+signature — it would TypeError if ever used; do NOT wire it up without
+fixing the call. Keep AgentRunnerFactory/Registry only if the plug-in
+runner abstraction is revived.
+
 Defines the AgentRunner Protocol and 3 default implementations:
   - StubAgentRunner: returns stub results (tests/CI)
   - SwarmWorkerRunner: uses WorkflowController.execute_agent
@@ -58,8 +69,8 @@ class SwarmWorkerRunner:
 
     def _get_controller(self) -> Any:
         if self._controller is None:
-            from .controller import ControllerConfig, WorkflowController
             from .agents import AgentRegistry
+            from .controller import ControllerConfig, WorkflowController
             cfg = ControllerConfig(timeout_seconds=60.0)
             self._controller = WorkflowController(
                 registry=AgentRegistry(), adj={}, config=cfg,

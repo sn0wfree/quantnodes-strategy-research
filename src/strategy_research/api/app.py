@@ -44,6 +44,12 @@ def create_app(
     # 设置 strategy_research 命名空间日志级别
     logging.getLogger("strategy_research").setLevel(logging.INFO)
     logger.info("[STARTUP] create_app called")
+
+    # Register the core loop's compaction persister (legacy fallback
+    # path) so core/agent/loop.py never imports the api layer.
+    from ..core.agent.loop import register_compaction_persister
+    from .routers.web_session import persist_message
+    register_compaction_persister(persist_message)
     # Resolve from environment if not explicitly provided (supports uvicorn --reload factory mode)
     if workspace_path is None:
         env = os.environ.get("SR_WORKSPACE_PATH")

@@ -15,7 +15,6 @@ Design notes:
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -31,7 +30,7 @@ CHARS_PER_TOKEN = 3.0
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    """Rough token count for messages list.
+    """Rough token count for messages list (shared impl).
 
     Args:
         messages: List of {"role": ..., "content": ..., ...} dicts.
@@ -39,20 +38,8 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     Returns:
         Estimated token count.
     """
-    total_chars = 0
-    for msg in messages:
-        content = msg.get("content") or ""
-        if isinstance(content, str):
-            total_chars += len(content)
-        # tool_calls arguments also count
-        for tc in msg.get("tool_calls") or []:
-            if isinstance(tc, dict):
-                fn = tc.get("function") or {}
-                total_chars += len(json.dumps(fn.get("arguments", "")))
-        # tool_call_id responses (content field for tool role)
-        if msg.get("role") == "tool":
-            total_chars += 100  # overhead for role
-    return max(1, int(total_chars / CHARS_PER_TOKEN))
+    from ..utils.token_utils import estimate_tokens as _shared
+    return _shared(messages)
 
 
 class ContextBuilder:

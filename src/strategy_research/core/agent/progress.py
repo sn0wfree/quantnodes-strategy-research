@@ -1,5 +1,14 @@
 """Progress emission channel for long-running tools.
 
+TODO(architecture): the structured-progress half of this module
+(``emit_progress`` / ``_set_emitter`` / ``ProgressEvent``) is currently
+UNUSED — the agent loop injects progress via
+``loop.py._progress_callback`` instead (worker threads → callback, no
+thread-local emitter). Keep for the planned unified progress channel:
+one emitter abstraction shared by AgentLoop (ReAct loop), TUI workers
+and the web SSE stream so tools report stage/current/total uniformly.
+Tests: test_progress.py.
+
 Two mechanisms:
   * Tool-level heartbeat: a background timer fires keepalive events every N
     seconds while a tool runs, so the UI never looks frozen. Driven by the

@@ -22,7 +22,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -199,25 +199,15 @@ class CompactConfig:
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], chars_per_token: float = 3.0) -> int:
-    """Rough token count for a list of messages."""
-    total_chars = 0
-    for msg in messages:
-        content = msg.get("content") or ""
-        if isinstance(content, str):
-            total_chars += len(content)
-        for tc in msg.get("tool_calls") or []:
-            if isinstance(tc, dict):
-                fn = tc.get("function") or {}
-                import json
-                total_chars += len(json.dumps(fn.get("arguments", "")))
-        if msg.get("role") == "tool":
-            total_chars += 100
-    return max(1, int(total_chars / chars_per_token))
+    """Rough token count for a list of messages (shared impl)."""
+    from ..utils.token_utils import estimate_tokens
+    return estimate_tokens(messages, chars_per_token=chars_per_token)
 
 
 def _estimate_single_tokens(text: str, chars_per_token: float = 3.0) -> int:
-    """Rough token count for a plain string."""
-    return max(1, int(len(text) / chars_per_token))
+    """Rough token count for a plain string (shared impl)."""
+    from ..utils.token_utils import estimate_tokens_text
+    return estimate_tokens_text(text, chars_per_token=chars_per_token)
 
 
 # ── Message serialization (opencode-style) ───────────────────────
@@ -586,8 +576,7 @@ def compact_messages(
     llm_client: Any | None = None,
     previous_summary: str | None = None,
     session_id: str | None = None,
-    on_compaction: "CompactionCallback | None" = None,
-) -> tuple[list[dict[str, Any]], list[str], str | None, str | None]:
+    on_compaction: "CompactionCallback | None" = None,) -> tuple[list[dict[str, Any]], list[str], str | None, str | None]:
     """Apply context compression if over threshold (opencode-aligned L4-only).
 
     opencode-aligned (Phase A):
@@ -617,6 +606,9 @@ def compact_messages(
         session_id: Session id (required for L4 to persist event).
         on_compaction: Optional callback invoked with the
             CompactionMessage after L4 generates it.
+            TODO(architecture): no callers pass this today — planned
+            hook point for streaming/persisting the generated
+            CompactionMessage to the caller's event channel.
 
     Returns:
         (compressed_messages, applied_layers, l4_summary_text, l4_recent_text)

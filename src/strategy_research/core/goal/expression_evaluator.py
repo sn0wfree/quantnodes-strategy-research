@@ -1,5 +1,14 @@
 """Expression DSL for workflow branch conditions (P3.7).
 
+TODO(architecture): parser/evaluator exist but are NOT wired into the
+Goal Workflow — ``BranchConfig.condition`` is parsed yet never
+evaluated (docs/phase-4-plan.md §5.4 "表达式 DSL 真求值"). Planned
+integration: ``GoalWorkflowHook.on_layer_complete`` evaluates
+``branch.condition`` against ``_layer_results`` and applies
+skip/retry/redirect actions; plus DSL enhancements (and/or/not,
+len/contains/min/max). Keep — this is an un-finished feature, not
+legacy.
+
 Evaluates expressions like:
   ``factor_analyst.output.sharpe < 0.3``
   ``risk_controller.output.verdict == "fail"``

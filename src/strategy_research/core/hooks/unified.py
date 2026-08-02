@@ -1,5 +1,14 @@
 """UnifiedHook — 统一 hook 接口.
 
+TODO(architecture): legacy pre-P5 unified-hook design — currently only
+exported for back-compat (hooks/__init__.py) with no production callers
+in this repo. The active hook system is hooks/composite.py +
+hooks/context.py (AgentHook/CompositeHook), which p5-execution-plan.md
+integrates into AgentLoop. Future: either retire UnifiedHook entirely
+or make it the mode-agnostic protocol that CompositeHook delegates to
+— decide when the AgentLoop hook integration lands. ``UnifiedContext =
+UnifiedContext`` below is a self-assignment no-op left from a refactor.
+
 Adapted from llmwikify kernel/agent/hook.py (MIT License).
 Original: https://github.com/llmwikify/llmwikify
 

@@ -10,11 +10,15 @@ import re
 # ─── 市场正则 ───
 
 _MARKET_PATTERNS: dict[str, re.Pattern] = {
-    "a_share": re.compile(r"^\d{6}\.(SZ|SH)$"),
+    "a_share": re.compile(r"^\d{6}\.(SZ|SH|BJ)$"),
     "hk_equity": re.compile(r"^\d{4,5}\.HK$"),
-    "crypto": re.compile(r"^[A-Z]+-USDT$|^[A-Z]+/USDT$"),
+    "crypto": re.compile(r"^[A-Z]+-USDT$|^[A-Z]+/USDT$|^[A-Z]+-[A-Z]{3}$"),
     "futures": re.compile(r"^[A-Z]+\d{4}\.(SHFE|DCE|ZCE|CZCE|GFEX)$"),
-    "forex": re.compile(r"^[A-Z]{3}/[A-Z]{3}$|^[A-Z]{6}\.FX$"),
+    "forex": re.compile(
+        r"^[A-Z]{3}/[A-Z]{3}$|^[A-Z]{6}\.FX$|"
+        r"^(EURUSD|GBPUSD|USDJPY|USDCNY|USDCNH|AUDUSD|USDCAD|NZDUSD|"
+        r"USDCHF|EURGBP|EURJPY|GBPJPY|EURCNY|XAUUSD|XAGUSD)$"
+    ),
     "india_equity": re.compile(r"^[A-Z]{1,12}\.(NS|BO)$"),
     "fund": re.compile(r"^\d{6}\.(OF|SZ_OF|SH_OF)$"),
     "us_equity": re.compile(r"^[A-Z]{1,5}$|^[A-Z]{1,4}\.[A-Z]{1,2}$"),

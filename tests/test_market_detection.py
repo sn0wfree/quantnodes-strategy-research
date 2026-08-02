@@ -48,6 +48,9 @@ class TestDetectMarket:
             ("GBP/USD", "forex"),
             ("EURUSD.FX", "forex"),
             ("USDCNY.FX", "forex"),
+            # Bare 6-char FX pair (composite engine convention)
+            ("EURUSD", "forex"),
+            ("USDCNY", "forex"),
             ("RELIANCE.NS", "india_equity"),
             ("TCS.BO", "india_equity"),
             ("INFY.NS", "india_equity"),
@@ -67,7 +70,6 @@ class TestDetectMarket:
             ("", "unknown"),
             ("000001", "unknown"),
             ("00000.SZ", "unknown"),
-            ("EURUSD", "unknown"),
         ],
     )
     def test_unknown_codes(self, code, expected):

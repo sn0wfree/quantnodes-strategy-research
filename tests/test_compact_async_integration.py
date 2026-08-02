@@ -8,6 +8,19 @@ import pytest
 from strategy_research.core.agent.compact import CompactConfig, compact_messages
 
 
+def _register_mock_persister(mock):
+    """Register a mock compaction persister and return cleanup."""
+    from strategy_research.core.agent.loop import register_compaction_persister
+    register_compaction_persister(mock)
+    return mock
+
+
+def _reset_persister():
+    from strategy_research.core.agent.loop import register_compaction_persister
+    register_compaction_persister(None)
+
+
+
 class TestCompactionMessageFormat:
     """Tests for compaction message persistence format.
 
@@ -32,10 +45,12 @@ class TestCompactionMessageFormat:
         loop._event_bus = None
         loop.client = MagicMock()
 
-        with patch(
-            "strategy_research.api.routers.web_session.persist_message",
-        ) as mock_persist:
+        mock_persist = MagicMock()
+        _register_mock_persister(mock_persist)
+        try:
             loop._persist_compaction_event("Summary text", "Recent text")
+        finally:
+            _reset_persister()
 
         mock_persist.assert_called_once()
         call_kwargs = mock_persist.call_args[1]
@@ -58,10 +73,12 @@ class TestCompactionMessageFormat:
         loop._event_bus = None
         loop.client = MagicMock()
 
-        with patch(
-            "strategy_research.api.routers.web_session.persist_message",
-        ) as mock_persist:
+        mock_persist = MagicMock()
+        _register_mock_persister(mock_persist)
+        try:
             loop._persist_compaction_event("", "Recent")
+        finally:
+            _reset_persister()
 
         mock_persist.assert_not_called()
 
@@ -80,10 +97,12 @@ class TestCompactionMessageFormat:
         loop._event_bus = None
         loop.client = MagicMock()
 
-        with patch(
-            "strategy_research.api.routers.web_session.persist_message",
-        ) as mock_persist:
+        mock_persist = MagicMock()
+        _register_mock_persister(mock_persist)
+        try:
             loop._persist_compaction_event("Summary", "Recent")
+        finally:
+            _reset_persister()
 
         mock_persist.assert_not_called()
 

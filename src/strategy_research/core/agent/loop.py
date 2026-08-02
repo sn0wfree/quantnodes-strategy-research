@@ -44,13 +44,29 @@ from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
-from .compact import CompactConfig, compact_messages, _estimate_tokens
+from .compact import CompactConfig, compact_messages
 from .context import ContextBuilder, estimate_tokens
 from .progress import HeartbeatTimer
 from .tools import ToolRegistry
 from .trace import TraceWriter
 
 logger = logging.getLogger(__name__)
+
+
+# ── Compaction persistence registration ─────────────────────────────
+#
+# The web/API layer owns the sqlite schema, so the core loop must not
+# import api.routers.web_session (layer inversion). Instead, process
+# entry points (api app, TUI) register their persist_message wrapper
+# here once at startup; the legacy fallback path below uses it.
+
+_compaction_persister: Any | None = None
+
+
+def register_compaction_persister(fn: Any) -> None:
+    """Register a ``persist_message``-compatible callback (see web_session)."""
+    global _compaction_persister
+    _compaction_persister = fn
 
 
 # ── Result dataclass ────────────────────────────────────────────────
@@ -246,8 +262,6 @@ class AgentLoop:
 
         Returns an LLMResponse-like object with content and tool_calls.
         """
-        from ..llm.parser import LLMResponse
-
         text_id = str(uuid.uuid4())
         self._emit("text.started", {"text_id": text_id})
         self._emit("thinking_start", {})
@@ -298,7 +312,7 @@ class AgentLoop:
 
                 if chunk.finish_reason:
                     break
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             self._emit("thinking_end", {})
             self._emit("text.ended", {"text_id": text_id, "text": full_content})
             raise
@@ -397,7 +411,7 @@ class AgentLoop:
 
                 if chunk.finish_reason:
                     break
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             self._emit("thinking_end", {})
             self._emit("text.ended", {"text_id": text_id, "text": full_content})
             raise
@@ -1317,23 +1331,29 @@ class AgentLoop:
                     comp.id, len(comp.summary), len(comp.recent),
                 )
             else:
-                # Legacy fallback: direct DB write. Used by tests
-                # and TUI/CLI paths that don't have an EventBusV2
-                # wired in. The webui path always provides event_bus.
-                from ...api.routers.web_session import persist_message
-
-                persist_message(
-                    session_id=comp.session_id,
-                    role="assistant",  # DB compat
-                    content=comp.summary,
-                    parts=comp.to_parts(),
-                    message_id=comp.id,
-                    message_type="compaction",
-                )
-                logger.info(
-                    "compaction event persisted (legacy): %s (summary=%d chars, recent=%d chars)",
-                    comp.id, len(comp.summary), len(comp.recent),
-                )
+                # Legacy fallback: direct DB write via the registered
+                # persister (registered by api/ and TUI entry points).
+                # Without a registration, compaction persistence is
+                # skipped with a warning instead of importing the API
+                # layer from core.
+                if _compaction_persister is None:
+                    logger.warning(
+                        "No compaction persister registered; skipping "
+                        "legacy DB write for %s", comp.id,
+                    )
+                else:
+                    _compaction_persister(
+                        session_id=comp.session_id,
+                        role="assistant",  # DB compat
+                        content=comp.summary,
+                        parts=comp.to_parts(),
+                        message_id=comp.id,
+                        message_type="compaction",
+                    )
+                    logger.info(
+                        "compaction event persisted (legacy): %s (summary=%d chars, recent=%d chars)",
+                        comp.id, len(comp.summary), len(comp.recent),
+                    )
         except Exception:
             # Critical: propagate with full traceback. The caller
             # (compact_messages path) will see the error and roll
