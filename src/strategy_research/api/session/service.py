@@ -667,6 +667,19 @@ class SessionService:
         usage_state: dict[str, int] = {"input": 0, "output": 0}
 
         def event_callback(event_type: str, data: dict[str, Any]) -> None:
+            """AgentLoop on_event adapter for the B4 event-sourced path.
+
+            Two jobs per event:
+            1. Accumulate the part protocol (text/tool/thinking) into
+               ``accumulated_parts`` for the assistant message body.
+            2. Forward the event onto EventBusV2 (event_log + SSE);
+               tool/usage data ride along in ``event.data`` so the
+               projector can merge them into the message parts.
+
+            Mirrors the legacy ``chat.py::_run_agent_loop_background``
+            on_event closure; keep both in sync until that path is
+            removed (see the TODO there).
+            """
             # Accumulate parts for persistence
             _accumulate_part(accumulated_parts, event_type, data)
 
@@ -788,6 +801,7 @@ class SessionService:
         full_text = "".join(reply_parts)
 
         def emit(event_type: str, data: dict[str, Any]) -> None:
+            """Publish an SSE event for this session (bus adapter)."""
             data = dict(data)
             data.setdefault("message_id", message_id)
             data.setdefault("attempt_id", attempt_id)

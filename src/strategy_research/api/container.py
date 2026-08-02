@@ -1,5 +1,14 @@
 """Lightweight DI container for the strategy-research API (Phase 3.2).
 
+TODO(architecture): planned-but-unwired. docs/architecture-review.md
+§3.2 claims "✅ Lightweight DI container", but ``create_app`` never
+calls ``attach_container`` and no router resolves services through it
+today — production wiring still uses the private factory in
+``routers/chat.py::_get_session_service``. This module is exercised
+only by tests. To activate: call ``attach_container`` in
+``api/app.py::create_app`` and switch routers to the dependency
+providers in :mod:`api.dependencies`.
+
 Before Phase 3.2, the FastAPI app and ``SessionService`` relied on:
 - Module-level singletons (``_event_bus = EventBus()``)
 - Implicit ordering of ``from X import Y`` (event_bus must be created

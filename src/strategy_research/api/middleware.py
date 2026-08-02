@@ -26,6 +26,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
     ]
 
     async def dispatch(self, request: Request, call_next):
+        """Authenticate API requests; public paths pass through.
+
+        Security-relevant order (keep it):
+        1. health/docs always public.
+        2. Static-file extension skip applies ONLY to non-``/api/``
+           paths — gating it to API paths would let any path-param
+           route be reached without auth by suffixing ``.json`` etc.
+        3. ``PUBLIC_PREFIXES`` pass through, tagging
+           ``request.state.user_id`` (token-derived, else "anonymous").
+           Note: ``/api/system/*`` mutations still require a token.
+        4. Any other non-API path is SPA/static → public.
+        5. Everything else: a valid signed token is required.
+        """
         path = request.url.path
 
         # Skip auth for health/docs

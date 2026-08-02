@@ -157,6 +157,14 @@ class EventBus:
     ) -> List[SSEEvent]:
         """Replay buffered session events for reconnect recovery.
 
+        TODO(architecture): legacy buffer superseded by
+        ``api/sse_buffer.py`` (the live ``/api/chat/events`` endpoint
+        replays from sse_buffer, not this per-session ring buffer).
+        Kept because EventBusV2 still publishes into it and tests
+        exercise replay semantics; the buffer contents are not consumed
+        by any production path. Remove together with the legacy
+        EventBus once the SSE path is fully event-sourced.
+
         Args:
             session_id: Session ID.
             last_event_id: Last event ID received by the client.

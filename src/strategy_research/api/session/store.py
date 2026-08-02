@@ -56,6 +56,15 @@ class SessionStore:
 
     # ── Message CRUD (delegates to existing persist_message) ───────────
 
+    # TODO(architecture): append_message / get_session_metadata /
+    # list_attempts are legacy direct-write paths with no production
+    # callers. The B4 event-sourcing change replaced direct writes with
+    # EventBusV2 emission + projector flush (and messages are read via
+    # the projector). get_session_metadata would crash if called — it
+    # imports the ASYNC router endpoint get_session and calls it
+    # synchronously. Remove when the transition window (docs/
+    # compaction-summary-fix.md B4) closes.
+
     def append_message(
         self,
         message: Message,

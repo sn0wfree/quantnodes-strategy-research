@@ -1455,6 +1455,11 @@ class AgentLoop:
                 session_id=self.session_id,
                 strategy_name=self.strategy_name,
                 initial_thesis=task,
+                # FIXME: hardcoded market. The unified market detection
+                # (core/utils/market_detection.py) was standardized in
+                # Phase 4-3; this call site should resolve the market
+                # from the detected asset universe instead of assuming
+                # A-shares.
                 market="a_share",
             )
             if hyp is not None:

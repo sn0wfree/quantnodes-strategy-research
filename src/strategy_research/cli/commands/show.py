@@ -122,18 +122,21 @@ def cmd_skill(*, console: Optional[Console] = None) -> int:
 
 # Slash-router entrypoints
 def run_show(ctx: Any = None, *args: str) -> int:
+    """Show the current agent/strategy context."""
     if not args:
         return cmd_skill()
     return cmd_show(args[0])
 
 
 def run_pine(ctx: Any = None, *args: str) -> int:
+    """Pine-level context dump (dev helper)."""
     if not args:
         return cmd_skill()
     return cmd_pine(args[0])
 
 
 def run_skill(ctx: Any = None, *args: str) -> int:
+    """Show available skill(s)."""
     return cmd_skill()
 
 

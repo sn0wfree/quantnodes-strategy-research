@@ -919,6 +919,15 @@ def update_message_content(
     content: str,
     parts: Optional[list[dict[str, Any]]] = None,
 ) -> None:
+    """Update a message's content (and optional parts).
+
+    FIXME(broken): no callers exist, and the ``parts is not None``
+    branch writes to ``parts_json`` — a column dropped by the
+    version-2 migration — so it would silently fail (caught + logged)
+    and leave ``content`` un-updated too. Do not wire anything to this
+    function until it is rewritten against the current
+    messages/message_parts schema (or event-sourced projection).
+    """
     """Update a message's content and optionally its parts."""
     try:
         conn = _get_db()

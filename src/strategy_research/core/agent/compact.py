@@ -139,8 +139,10 @@ class CompactConfig:
     # ── Phase A simplification toggle ─────────────────────────
     # When True (default), use opencode-aligned L4-only 2-step flow.
     # When False, fall back to legacy 3-layer (L1+L4+L3) flow.
-    # (Phase A: legacy code path removed; this flag is reserved for
-    # future use. Currently always True.)
+    # TODO(future): reserved for the L1 re-introduction; Phase A
+    # removed the legacy code path, so False currently selects a
+    # code path that no longer exists. Wire the flag back only when
+    # L1 compaction is re-added.
     simplified_to_l4_only: bool = True
 
     # ── Trigger ──────────────────────────────────────────────────

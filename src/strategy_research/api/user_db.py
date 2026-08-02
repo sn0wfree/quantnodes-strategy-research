@@ -95,6 +95,7 @@ class UserDB:
         return cur.rowcount > 0
 
     def get_user_by_username(self, username: str) -> Optional[dict]:
+        """Look up a user by username, or None."""
         conn = self._get_conn()
         row = conn.execute(
             "SELECT * FROM users WHERE username = ?", (username,)
@@ -102,6 +103,7 @@ class UserDB:
         return dict(row) if row else None
 
     def get_user_by_id(self, user_id: str) -> Optional[dict]:
+        """Look up a user by id, or None."""
         conn = self._get_conn()
         row = conn.execute(
             "SELECT * FROM users WHERE id = ?", (user_id,)
@@ -109,6 +111,7 @@ class UserDB:
         return dict(row) if row else None
 
     def user_count(self) -> int:
+        """Number of users in the store."""
         conn = self._get_conn()
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 

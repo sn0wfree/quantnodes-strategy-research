@@ -265,6 +265,7 @@ def _action_add_key(name: str) -> int:
     ),
 )
 def cmd_llm(args: argparse.Namespace) -> int:
+    """LLM config management: list profiles, switch active profile."""
     if args.list:
         return _action_list()
     if args.use:

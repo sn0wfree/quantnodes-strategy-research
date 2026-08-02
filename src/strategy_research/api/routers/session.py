@@ -1,4 +1,13 @@
-"""Session API router — /api/session/*"""
+"""Session API router — /api/session/*
+
+TODO(architecture): legacy router, kept alive alongside the
+event-sourced chat stack. Registered in app.py with no frontend
+callers found; it uses ``SessionDB`` against a different database than
+everything else (see docs/legacy-sessiondb-tech-debt.md for the
+retirement plan). The session-start/stop lifecycle now lives in
+``routers/chat.py`` + ``routers/web_session.py`` + the unified
+SessionService.
+"""
 
 from __future__ import annotations
 

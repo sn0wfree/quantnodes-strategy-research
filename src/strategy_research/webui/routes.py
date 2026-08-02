@@ -246,55 +246,20 @@ async def workflow_detail(request: Request, workflow_name: str):
 
 @router.get("/workflows/{workflow_name}/events")
 async def workflow_events_sse(request: Request, workflow_name: str, goal_id: str):
-    """SSE endpoint for workflow progress (proxies to API)."""
-    from ..api.routers.workflow import _active_runners
-    import asyncio
-    import json
+    """SSE endpoint for workflow progress (proxies to API).
+
+    Note: ``workflow_name`` is accepted for route symmetry but unused —
+    only ``goal_id`` identifies the runner.
+    """
+    from ..api.routers.workflow import _active_runners, workflow_event_stream
 
     entry = _active_runners.get(goal_id)
     if entry is None:
         return HTMLResponse(content="Workflow not found", status_code=404)
 
-    runner = entry["runner"]
-
-    async def event_generator():
-        queue: asyncio.Queue = asyncio.Queue()
-
-        class SSEObserver:
-            def on_event(self, event: str, data: dict):
-                try:
-                    queue.put_nowait((event, data))
-                except asyncio.QueueFull:
-                    pass
-
-        observer = SSEObserver()
-        runner.subscribe(observer)
-
-        try:
-            progress = runner.get_progress()
-            yield f"data: {json.dumps({'event': 'progress', 'data': progress})}\n\n"
-
-            while True:
-                try:
-                    event, data = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    payload = json.dumps({
-                        "event": event,
-                        "data": {k: str(v) for k, v in data.items()} if isinstance(data, dict) else str(data),
-                    })
-                    yield f"data: {payload}\n\n"
-                    if event in ("workflow_completed", "workflow_failed"):
-                        break
-                except asyncio.TimeoutError:
-                    progress = runner.get_progress()
-                    yield f"data: {json.dumps({'event': 'heartbeat', 'data': progress})}\n\n"
-                    if progress.get("hook_completed") or progress.get("status") in ("completed", "error"):
-                        break
-        finally:
-            runner.unsubscribe(observer)
-
     from starlette.responses import StreamingResponse
     return StreamingResponse(
-        event_generator(),
+        workflow_event_stream(entry["runner"]),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

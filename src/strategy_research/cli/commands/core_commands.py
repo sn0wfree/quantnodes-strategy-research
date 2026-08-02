@@ -60,6 +60,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     add=lambda p: p.add_argument("path", nargs="?", default=".", help="工作区路径"),
 )
 def cmd_status(args: argparse.Namespace) -> int:
+    """Show workspace/research status."""
     from strategy_research.cli import cmd_status as _impl
     return _impl(args)
 
@@ -77,6 +78,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_reproduce(args: argparse.Namespace) -> int:
+    """Reproduce a previous experiment run."""
     from strategy_research.cli import cmd_reproduce as _impl
     return _impl(args)
 
@@ -97,6 +99,7 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_run(args: argparse.Namespace) -> int:
+    """Run the research/backtest pipeline."""
     from strategy_research.cli import cmd_run as _impl
     return _impl(args)
 
@@ -116,6 +119,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_evaluate(args: argparse.Namespace) -> int:
+    """Evaluate a strategy's results."""
     from strategy_research.cli import cmd_evaluate as _impl
     return _impl(args)
 
@@ -129,6 +133,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     add=lambda p: p.add_argument("path", nargs="?", default=".", help="工作区路径"),
 )
 def cmd_preflight(args: argparse.Namespace) -> int:
+    """Pre-flight checks before running."""
     from strategy_research.cli import cmd_preflight as _impl
     return _impl(args)
 
@@ -147,6 +152,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate workspace or run outputs."""
     from strategy_research.cli import cmd_validate as _impl
     return _impl(args)
 
@@ -164,6 +170,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_list(args: argparse.Namespace) -> int:
+    """List strategies or runs in the workspace."""
     from strategy_research.cli import cmd_list as _impl
     return _impl(args)
 
@@ -196,6 +203,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_import(args: argparse.Namespace) -> int:
+    """Import data (OHLCV, factors, ...) into the workspace."""
     from strategy_research.cli import cmd_import as _impl
     return _impl(args)
 
@@ -226,5 +234,6 @@ def cmd_import(args: argparse.Namespace) -> int:
     ),
 )
 def cmd_autoresearch(args: argparse.Namespace) -> int:
+    """Run the autonomous research loop."""
     from strategy_research.cli.commands.autoresearch import cmd_autoresearch as _impl
     return _impl(args)

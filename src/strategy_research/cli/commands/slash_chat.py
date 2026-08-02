@@ -118,26 +118,32 @@ def cmd_shadow(ctx: Any = None, *args: str) -> int:
 
 # Slash router entrypoints
 def run_quit(ctx: Any = None, *args: str) -> int:
+    """Exit the interactive chat loop."""
     return cmd_quit()
 
 
 def run_clear(ctx: Any = None, *args: str) -> int:
+    """Clear the current conversation history."""
     return cmd_clear(ctx, *args)
 
 
 def run_model(ctx: Any = None, *args: str) -> int:
+    """Show or switch the active LLM model."""
     return cmd_model()
 
 
 def run_debug(ctx: Any = None, *args: str) -> int:
+    """Toggle debug output."""
     return cmd_debug(ctx, *args)
 
 
 def run_journal(ctx: Any = None, *args: str) -> int:
+    """Show the research journal."""
     return cmd_journal(ctx, *args)
 
 
 def run_shadow(ctx: Any = None, *args: str) -> int:
+    """Show shadow-mode status."""
     return cmd_shadow(ctx, *args)
 
 

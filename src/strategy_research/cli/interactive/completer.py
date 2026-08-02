@@ -25,6 +25,12 @@ class SlashCompleter(Completer):
         self._max = max_suggestions
 
     def get_completions(self, document, complete_event) -> Iterable[Completion]:  # noqa: ARG002
+        """Yield tab-completions for slash commands.
+
+        Completions are offered only when the line starts with ``/``
+        and contains no space yet (single-token commands). Returns
+        nothing for regular text.
+        """
         text = document.text_before_cursor
         if not text.startswith("/"):
             return

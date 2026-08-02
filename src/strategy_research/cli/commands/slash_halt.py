@@ -58,10 +58,12 @@ def cmd_resume(*, console: Optional[Console] = None) -> int:
 
 # Slash router entrypoints
 def run_halt(ctx: Any = None, *args: str) -> int:
+    """Halt the running agent loop."""
     return cmd_halt(reason=" ".join(args))
 
 
 def run_resume(ctx: Any = None, *args: str) -> int:
+    """Resume a halted agent loop."""
     return cmd_resume()
 
 

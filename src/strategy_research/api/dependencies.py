@@ -1,5 +1,17 @@
 """FastAPI dependency providers (Phase 3.1).
 
+TODO(architecture): planned-but-unwired. docs/architecture-review.md
+§3.1 claims "✅ FastAPI Depends providers", but zero routers use
+``Depends(...)`` from this module today — they call the private
+``routers/chat.py::_get_session_service`` factory instead. This module
+is exercised only by tests. To activate: swap router dependencies to
+these providers (``get_session_service``, ``get_event_bus_v2``, …) and
+remove the private factories. Note: ``get_event_bus_v2``'s per-instance
+``_sse_attached`` guard differs from the module-level bridge flag in
+``api/session/bridge.py`` — wiring both paths without care can leave a
+second EventBus marked "attached" but never bridged to sse_buffer
+(silent SSE loss).
+
 Before Phase 3.1, every router that needed a shared service called a
 private module-level ``_get_session_service()`` factory. This had two
 problems:

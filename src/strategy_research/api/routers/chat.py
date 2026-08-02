@@ -130,6 +130,19 @@ async def _run_agent_loop_background(
 ):
     """Run AgentLoop in background, pushing events to SSE buffer.
 
+    TODO(architecture): superseded legacy path. When send_async
+    migrated to the unified SessionService (docs/chat-service-design.md,
+    docs/chat-message-queue-design.md), this background runner and its
+    helpers (``_run_test_script``, ``_session_histories`` /
+    ``_get_or_create_history``) were replaced by
+    ``api/session/service.py`` — which now owns queueing, persistence,
+    and the part-accumulation protocol. No production caller remains;
+    the module-level ``_session_histories`` cache is a memory leak
+    waiting to happen for sessions that never hit the new path. Remove
+    once the service layer is stable (tests that mirror this logic:
+    test_text_part_routing.py).
+    """
+
     This mirrors TUI's ChatSession._run_agent_loop() but pushes events
     to sse_buffer instead of Textual widgets.
 

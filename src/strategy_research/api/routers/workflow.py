@@ -102,6 +102,58 @@ async def workflow_list():
     return {"status": "ok", "workflows": list_goal_workflows()}
 
 
+async def workflow_event_stream(runner):
+    """Async generator streaming workflow progress as SSE payloads.
+
+    Shared by the API SSE endpoint (/api/goal/workflow/{goal_id}/events)
+    and the WebUI proxy (/workflows/{name}/events). Emits the initial
+    progress snapshot, then forwards observer events with heartbeats
+    every 1s; terminates on workflow_completed / workflow_failed or a
+    terminal progress state.
+    """
+
+    import asyncio
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    class SSEObserver:
+        def on_event(self, event: str, data: dict):
+            try:
+                queue.put_nowait((event, data))
+            except asyncio.QueueFull:
+                pass
+
+    observer = SSEObserver()
+    runner.subscribe(observer)
+
+    try:
+        # Send initial state
+        progress = runner.get_progress()
+        yield f"data: {json.dumps({'event': 'progress', 'data': progress})}\n\n"
+
+        # Stream events until workflow completes
+        while True:
+            try:
+                event, data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                payload = json.dumps({
+                    "event": event,
+                    "data": {k: str(v) for k, v in data.items()} if isinstance(data, dict) else str(data),
+                })
+                yield f"data: {payload}\n\n"
+
+                if event in ("workflow_completed", "workflow_failed"):
+                    break
+            except asyncio.TimeoutError:
+                # Send heartbeat + progress
+                progress = runner.get_progress()
+                yield f"data: {json.dumps({'event': 'heartbeat', 'data': progress})}\n\n"
+
+                if progress.get("hook_completed") or progress.get("status") in ("completed", "error"):
+                    break
+    finally:
+        runner.unsubscribe(observer)
+
+
 @router.get("/events")
 async def workflow_events(goal_id: str):
     """SSE endpoint for workflow progress events."""
@@ -109,52 +161,8 @@ async def workflow_events(goal_id: str):
     if entry is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    runner = entry["runner"]
-
-    async def event_generator():
-        import asyncio
-
-        queue: asyncio.Queue = asyncio.Queue()
-
-        class SSEObserver:
-            def on_event(self, event: str, data: dict):
-                try:
-                    queue.put_nowait((event, data))
-                except asyncio.QueueFull:
-                    pass
-
-        observer = SSEObserver()
-        runner.subscribe(observer)
-
-        try:
-            # Send initial state
-            progress = runner.get_progress()
-            yield f"data: {json.dumps({'event': 'progress', 'data': progress})}\n\n"
-
-            # Stream events until workflow completes
-            while True:
-                try:
-                    event, data = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    payload = json.dumps({
-                        "event": event,
-                        "data": {k: str(v) for k, v in data.items()} if isinstance(data, dict) else str(data),
-                    })
-                    yield f"data: {payload}\n\n"
-
-                    if event in ("workflow_completed", "workflow_failed"):
-                        break
-                except asyncio.TimeoutError:
-                    # Send heartbeat + progress
-                    progress = runner.get_progress()
-                    yield f"data: {json.dumps({'event': 'heartbeat', 'data': progress})}\n\n"
-
-                    if progress.get("hook_completed") or progress.get("status") in ("completed", "error"):
-                        break
-        finally:
-            runner.unsubscribe(observer)
-
     return StreamingResponse(
-        event_generator(),
+        workflow_event_stream(entry["runner"]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
