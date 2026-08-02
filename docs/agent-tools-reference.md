@@ -448,3 +448,47 @@ read_document(path='/abs/path/paper.pdf')
 6. **`drawdown_analysis`/`benchmark_comparison` 依赖权益曲线文件名约定**：`equity.csv`/`equity_curve.csv`/`portfolio.csv`/`nav.csv`。
 7. **web 工具条件注册**：`web_search`/`read_document` 依赖包未装则不注册——`list_data_sources` 之外无直接前端指示。
 8. **`import_data` 已降级**：描述与错误提示均引导走 `get_market_data` → `commit_market_data` 主流程。
+
+---
+
+## 工具后续引导策略（next_step 取舍）
+
+> 本节记录业界调研结论与本项目的引导决策，供评审讨论。结论未定稿前，以本节为准同步工具行为。
+
+### 业界调研结论
+
+**Anthropic《Building Effective Agents》(2024-12)**：
+
+- 工具定义即 **ACI**（Agent-Computer Interface）——应投入与 HCI 同等的精力打磨；引导内容推荐放在 **tool description**（何时用、示例、边界、与其它工具的区分），而不是返回值。
+- **返回值应是干净的 ground truth 数据**；不建议夹带指令性文本。
+- 流程编排由 **workflow（预定义代码路径）或 system prompt** 承担，不由工具返回值承担。
+- 错误恢复给 retry hint（`fix` 字段）是普遍实践——本项目 `err_actionable` 的 `received/expected/fix` 即此范式。
+
+**业界横向对比**：
+
+| 系统 | 是否有"下一步"提示 | 形式 |
+|------|-------------------|------|
+| OpenAI Function Calling | ❌ 无 next_step 字段 | 引导在 function description + system prompt |
+| Anthropic Tool Use | ❌ 无 | description 里写 "use after X"；返回值纯净 |
+| LangChain / LangGraph | ❌ 无 | 流程用 agent/harness 编排 |
+| GitHub Copilot 等代码 agent | ❌ 工具不返回建议 | planner 单独决策 |
+| **API 分页/游标**（GitHub cursor 等） | ✅ 有 `next_cursor` | 唯一被业界认可的"返回值带下一步"范式——且**仅在状态依赖**时存在 |
+
+**核心结论**：业界主流不在返回值里做通用"下一步建议"。唯一例外是**契约式/状态依赖的必需下一步**——像 `get_market_data` → `commit_market_data`：数据已缓存但**不 commit 就无法用于回测**，LLM 无法从纯数据推断，必须显式告知。
+
+### 当前决策（评审中）
+
+| 工具输出中的 next_step | 决策 | 理由 |
+|------------------------|------|------|
+| `get_market_data` → `commit_market_data` | ✅ **保留** | 契约式必需下一步（对标业界 `next_cursor`）；与 `meta.note` 冗余待合并 |
+| `commit_market_data` → `run_backtest` | ❌ **移除** | 通用建议，非必需契约 |
+| `import_data` → `run_backtest`/`factor_analysis` | ❌ **移除** | 通用建议 |
+| `run_backtest` → `list_history`/`drawdown_analysis`/`benchmark_comparison` | ❌ **移除** | 通用建议；且跨角色不可达 |
+| `compute_factor` / `factor_analysis` / 因子四连 → 下一分析 | ❌ **移除** | 通用建议；研究顺序属工作流，应放 prompt/文档 |
+| 补 `write_file`/`web_search`/`list_skills`/goal 等 next_step | ❌ **不补** | 业界无此惯例 |
+
+### 待定项
+
+1. **`get_market_data` 的 `meta.note` 与 `next_step` 冗余**：二选一保留，或 note 精简为一句、next_step 保留结构化。
+2. **契约式引导是否同时写入 tool description**：业界 ACI 范式倾向 description 承担引导，返回值只留必要契约信号。
+3. **工作流引导归属**：数据流/因子研究顺序是否应固化到 `chat.md` / `SYSTEM_PROMPT_HEADER`（另立任务），而非散落在工具输出。
