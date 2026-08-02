@@ -123,13 +123,22 @@
 
 ---
 
-## 四、待定决策
+## 四、待定决策 → 已定
 
-1. **P0-1（接线分支 DSL）**：是否现在做？涉及运行期执行语义改动，需评估 skip/retry/redirect
-   在 swarm 层的落地方式。
-2. **P0-2（前端 goal 面板）**：后端发 SSE 事件（符合现有 metaHandlers 契约，但后端 goal 路径
-   目前无事件源），还是前端轮询 `/api/goal/status`（简单直接）？
-3. **范围**：只做 P0+P1，还是 P2 文档同步也一起？
+| 决策项 | 结论 |
+|--------|------|
+| 1. P0-1 接线分支 DSL | **做**。redirect 语义取 C：**暂不实现**，只上 skip + retry；redirect 在文档标注"未实现" |
+| 2. P0-2 前端 goal 面板 | **方案 B（轮询）**：扩展 `/api/goal/status` 返回完整快照（复用 `_build_goal_snapshot`）+ GoalTab 轮询。理由：单一真相源、覆盖三路径、B13 `/state` 已铺路；SSE 需三处发射源同步，死链复燃风险高 |
+| 3. 范围 | P0 + P1 + P2 文档同步全部做 |
+
+### 执行状态
+
+- [ ] P0-1 分支 DSL 接线：SwarmRuntime 每层后构建 layer_results → evaluate branches → skip/retry（redirect 未实现）；hook 填充 `_layer_results`（顺带修 checkpoint 空数据）
+- [ ] P1-2 `get_progress` 真实更新（hook 维护 current_layer / agents_completed / agent_statuses）
+- [ ] P1-3a 子工作流 hook 补 `runner=self`
+- [ ] P0-2 前端轮询：扩展 `/api/goal/status` + GoalTab 轮询
+- [ ] P1-1 修 `test_api_goal_router.py` auth fixture（HMAC-SHA256）
+- [ ] P2 文档同步：cookbook branches 标注已生效 + checkpoint 局限；design §5.4 标注已接线
 
 ---
 
