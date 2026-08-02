@@ -638,7 +638,7 @@ def save_weight_history(
             conn.close()
             return True
 
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows)  # noqa: F841 — referenced by DuckDB SQL below (FROM df)
         conn.execute("""
             INSERT OR REPLACE INTO weight_history
             (strategy_name, run, date, asset_code, weight)
@@ -700,7 +700,7 @@ def save_nav_history(
         return False
 
     try:
-        df = pd.DataFrame({
+        df = pd.DataFrame({  # noqa: F841 — referenced by DuckDB SQL below (FROM df)
             "strategy_name": strategy_name,
             "run": run,
             "date": nav.index,
