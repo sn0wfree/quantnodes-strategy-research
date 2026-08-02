@@ -186,11 +186,12 @@ def cmd_list(args: argparse.Namespace) -> int:
         p.add_argument("--strategy", "-s", required=True, help="策略名称"),
         p.add_argument(
             "--source", required=True,
-            choices=["csv", "parquet", "sample", "tushare", "ifind", "fred", "akshare", "auto"],
+            choices=["csv", "parquet", "sample", "tushare", "ifind", "fred", "akshare", "auto", "cache"],
             help="数据源",
         ),
         p.add_argument("--file", "-f", help="数据文件路径 (csv/parquet)"),
         p.add_argument("--codes", "-c", help="资产代码列表，逗号分隔 (API 数据源)"),
+        p.add_argument("--cache-keys", help="loader 缓存 key 列表，逗号分隔 (cache 数据源)"),
         p.add_argument("--start-date", default="2020-01-01", help="开始日期 (API 数据源)"),
         p.add_argument("--end-date", default="2025-12-31", help="结束日期 (API 数据源)"),
         p.add_argument("--incremental", action="store_true", default=True, help="增量更新 (默认开启)"),

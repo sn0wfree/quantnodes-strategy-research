@@ -421,11 +421,14 @@ class RunBacktestTool(BaseTool):
             if "数据为空" in err_msg or "empty" in err_msg.lower():
                 fix_msg = (
                     "data is empty. Workflow: 1) get_market_data(codes=[...], "
-                    "start_date='...', end_date='...') to fetch OHLCV; "
-                    "2) import_data(data=<result.data>) to persist in DuckDB; "
+                    "start_date='...', end_date='...') to fetch OHLCV (writes to "
+                    "parquet cache); 2) commit_market_data(cache_keys=[...], "
+                    "codes=[...], strategy_name=...) to merge into DuckDB; "
                     "3) run_backtest(strategy_name=...) again"
                 )
-                extra["workflow"] = ["get_market_data", "import_data", "run_backtest"]
+                extra["workflow"] = [
+                    "get_market_data", "commit_market_data", "run_backtest",
+                ]
             return err_actionable(
                 err_msg,
                 received=strategy_name,
@@ -528,7 +531,7 @@ class ComputeFactorTool(BaseTool):
                 "ohlcv table is empty",
                 fix=(
                     "1) get_market_data(codes=['600519.SH'], start_date='2023-01-01', end_date='2023-12-31'); "
-                    "2) import_data(data=<result.data>); "
+                    "2) commit_market_data(cache_keys=[...], codes=[...]); "
                     "3) compute_factor(...)"
                 ),
                 tool="compute_factor",

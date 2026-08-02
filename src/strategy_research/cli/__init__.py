@@ -10,6 +10,7 @@ all registered commands, then dispatches via ``registry.dispatch``.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -18,9 +19,15 @@ import yaml
 # Core commands: imports this side-effect to register them in the dispatcher.
 from .commands import core_commands  # noqa: F401  (registration side effect)
 from .commands import llm as _llm_cmd  # noqa: F401  (registration side effect)
-from .commands.registry import dispatch as _dispatch, wire_commands as _wire
-
 from .commands.autoresearch import _spawn_agent as _spawn_agent
+from .commands.registry import dispatch as _dispatch
+from .commands.registry import wire_commands as _wire
+from .commands.server import (
+    cmd_api_serve,
+    cmd_mcp_list_tools,
+    cmd_mcp_serve,
+    cmd_webui_serve,
+)
 from .commands.session import (
     cmd_session_delete,
     cmd_session_list,
@@ -34,12 +41,6 @@ from .commands.swarm import (
     cmd_swarm_inspect,
     cmd_swarm_list,
     cmd_swarm_run,
-)
-from .commands.server import (
-    cmd_api_serve,
-    cmd_mcp_list_tools,
-    cmd_mcp_serve,
-    cmd_webui_serve,
 )
 from .llm_config import _LLM_PARENT, _cmd_llm_list_profiles
 from .llm_config import _cli_overrides_from_args as _cli_overrides_from_args
@@ -57,17 +58,17 @@ def cmd_run_onboarding(args: argparse.Namespace) -> int:
     - 凭证 token → ``~/.quantnodes/.env``（chmod 0600）
     """
     from dotenv import load_dotenv
+    from rich.panel import Panel
     from rich.prompt import Confirm
     from rich.table import Table
-    from rich.panel import Panel
 
-    from strategy_research.cli.theme import get_console
     from strategy_research.cli.onboard import (
-        run_onboarding,
-        is_onboarded,
-        _QUANTNODES_LLM_JSON_PATH,
         _QUANTNODES_DOTENV_PATH,
+        _QUANTNODES_LLM_JSON_PATH,
+        is_onboarded,
+        run_onboarding,
     )
+    from strategy_research.cli.theme import get_console
 
     console = get_console()
 
@@ -625,9 +626,42 @@ def cmd_import(args: argparse.Namespace) -> int:
             incremental=args.incremental,
         )
 
+    elif source == "cache":
+        # Merge previously cached parquet (from get_market_data) into DuckDB.
+        if not args.codes or not args.cache_keys:
+            print("❌ 请指定 --codes 与 --cache-keys 参数 (逗号分隔, 一一对应)")
+            print("   cache-keys 来自 get_market_data 返回的 cached/cache_key 字段")
+            return 1
+        codes = [c.strip() for c in args.codes.split(",")]
+        keys = [k.strip() for k in args.cache_keys.split(",")]
+        if len(codes) != len(keys):
+            print(f"❌ --codes ({len(codes)}) 与 --cache-keys ({len(keys)}) 数量不一致")
+            return 1
+        from strategy_research.core.agent.builtin_tools.data_tools import (
+            CommitMarketDataTool,
+        )
+        result = CommitMarketDataTool().execute(
+            workspace=str(path),
+            cache_keys=keys,
+            codes=codes,
+            strategy_name=strategy_name,
+        )
+        try:
+            parsed = json.loads(result)
+        except Exception:  # noqa: BLE001
+            print(result)
+            return 1
+        if parsed.get("status") == "ok":
+            committed = parsed.get("committed", [])
+            print(f"✓ 合并缓存: {len(committed)} 个资产, 共 {parsed.get('total_rows', 0)} 行")
+            success = True
+        else:
+            print(f"❌ 合并失败: {parsed.get('error', result)}")
+            success = False
+
     else:
         print(f"❌ 未知数据源: {source}")
-        print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
+        print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto, cache")
         return 1
 
     if success:
