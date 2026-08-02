@@ -133,12 +133,12 @@
 
 ### 执行状态
 
-- [ ] P0-1 分支 DSL 接线：SwarmRuntime 每层后构建 layer_results → evaluate branches → skip/retry（redirect 未实现）；hook 填充 `_layer_results`（顺带修 checkpoint 空数据）
-- [ ] P1-2 `get_progress` 真实更新（hook 维护 current_layer / agents_completed / agent_statuses）
-- [ ] P1-3a 子工作流 hook 补 `runner=self`
-- [ ] P0-2 前端轮询：扩展 `/api/goal/status` + GoalTab 轮询
-- [ ] P1-1 修 `test_api_goal_router.py` auth fixture（HMAC-SHA256）
-- [ ] P2 文档同步：cookbook branches 标注已生效 + checkpoint 局限；design §5.4 标注已接线
+- [x] P0-1 分支 DSL 接线：SwarmRuntime 每层后构建 layer_results → evaluate branches → skip/retry（redirect 未实现）；hook 填充 `_layer_results`（顺带修 checkpoint 空数据）
+- [x] P1-2 `get_progress` 真实更新（hook 维护 current_layer / agents_completed / agent_statuses）
+- [x] P1-3a 子工作流 hook 补 `runner=self`
+- [x] P0-2 前端轮询：扩展 `/api/goal/status` + GoalTab 轮询
+- [x] P1-1 修 `test_api_goal_router.py` auth fixture（HMAC-SHA256）
+- [x] P2 文档同步：cookbook branches 标注已生效 + checkpoint 局限；design §5.4 标注已接线
 
 ---
 

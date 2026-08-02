@@ -165,7 +165,7 @@ CompletionStrategyFactory.register("my_mode", MyCompletion())
 
 ## Branch 条件 (v0.5.3 P1.4)
 
-YAML 中可以定义条件分支：
+YAML 中可以定义条件分支（**已接线生效**，P0-1）：
 
 ```yaml
 branches:
@@ -179,6 +179,25 @@ branches:
 - 比较：`<`, `<=`, `>`, `>=`, `==`, `!=`
 - 布尔逻辑：`and`, `or`, `not`
 - 字段访问：`agent_id.output.field`
+
+已实现的动作：
+- `skip`：条件命中时从后续层移除 target
+- `retry`：条件命中时 target 在下一层重跑一次
+
+> **未实现**：`redirect` 动作（改道）——解析被接受但不生效，属未来工作。
+
+> **字段解析**：`agent_id.output.field` 从该 agent 的 worker 输出 JSON 解析；
+> 若输出 `answer` 本身是 JSON，其键会合并到 `output` 下，因此
+> `risk_controller.output.max_drawdown` 可直接引用（无需 `answer.` 前缀）。
+
+## Checkpoint（P1.3）
+
+`/goal checkpoint save|list|resume|delete` 可保存/列出/恢复/删除运行状态。
+
+> **局限**：checkpoint 保存的是**状态快照**（status / current_layer /
+> evidence_count / agent_statuses / layer_results），用于恢复查看与重跑分析；
+> **不是真正的断点续跑**——`resume` 不会从中间层继续执行，仍需重新
+> `start()`（会创建新 goal）。完整断点续跑属未来工作。
 
 ## Troubleshooting
 

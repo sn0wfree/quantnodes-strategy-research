@@ -540,6 +540,10 @@ src/strategy_research/core/goal/templates.py
 - **单一 evidence criterion**：每个 agent 只能映射到 1 个 criterion
 - **无子 workflow**：不支持 workflow 嵌套
 
+> **更新（2026-08-02）**：分支条件 DSL 已接线（SwarmRuntime 每层后评估
+> `agent_id.output.field`，实现 skip/retry；redirect 未实现）；checkpoint
+> 保存真实 layer_results；`get_progress` 真实更新 current_layer/agent_statuses。
+
 ### 11.2 Phase 2 计划
 
 | 任务 | 优先级 |
@@ -548,7 +552,7 @@ src/strategy_research/core/goal/templates.py
 | [ ] GoalPanel 显示 workflow 进度（每个 agent 状态图标）| P1 |
 | [ ] slash_goal.py 加 `--workflow` 参数 | P2 |
 | [ ] session.py Ctrl+G 暂停 workflow | P2 |
-| [ ] 表达式求值（简单 DSL：`output.field < value`）| P3 |
+| [ ] 表达式求值（简单 DSL：`output.field < value`）— **已接线 (2026-08-02)** | P3 |
 | [ ] 4 个额外 preset（market_analysis / risk_assessment / strategy_review / portfolio_review）| P2 |
 | [ ] **重构 R1-R12**（详见 §13 设计模式 + §14 复用清单）| **P0** |
 
