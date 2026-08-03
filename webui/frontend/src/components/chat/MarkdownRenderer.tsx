@@ -3,13 +3,22 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Copy, Check, Hash } from 'lucide-react'
-import { useCallback } from 'react'
+import { memo, useCallback } from 'react'
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
 
 interface MarkdownRendererProps {
   content: string
   /** When true, skip Prism syntax highlighting (avoids per-char re-render cost). */
   streaming?: boolean
+  /**
+   * Opaque cache key (typically the content length for streaming
+   * cases). When two renders share the same `cacheKey` AND the same
+   * `streaming` flag, the component skips re-rendering entirely —
+   * the opencode-style stable-prefix optimisation: a tail-only diff
+   * (text appended at the end) with the same `content.length` for
+   * the stable section can reuse the prior AST / DOM.
+   */
+  cacheKey?: string | number
 }
 
 function slugify(text: string): string {
@@ -69,7 +78,7 @@ function CodeBlock({
   )
 }
 
-export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) {
+function MarkdownRendererInner({ content, streaming }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -211,3 +220,20 @@ export function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) 
     </ReactMarkdown>
   )
 }
+
+/**
+ * Memoised markdown renderer. Skips re-render when `cacheKey` and
+ * `streaming` are unchanged (the stable-prefix case — a prior render
+ * of the same content is reused verbatim). When `cacheKey` is omitted
+ * we fall back to comparing `content` (less efficient but safe).
+ */
+export const MarkdownRenderer = memo(
+  MarkdownRendererInner,
+  (prev, next) => {
+    if (prev.streaming !== next.streaming) return false
+    if (prev.cacheKey !== undefined && next.cacheKey !== undefined) {
+      return prev.cacheKey === next.cacheKey
+    }
+    return prev.content === next.content
+  },
+)

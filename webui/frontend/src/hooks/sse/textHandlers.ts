@@ -1,21 +1,18 @@
-import type { TextPart } from '../../stores/chat'
-import type { SSEHandler, SSEContext } from './types'
-
-function collapseLastThinking(messageId: string, updateMessage: SSEContext['updateMessage']) {
-  updateMessage(messageId, (msg) => {
-    const last = msg.parts[msg.parts.length - 1]
-    if (last && last.type === 'thinking') last.collapsed = true
-  })
-}
+import type { TextPart, ThinkingPart } from '../../stores/chat'
+import type { SSEHandler } from './types'
 
 /**
  * Text streaming events — opencode-style 3-step text protocol.
  *
- * `text.started` seeds a text part with a server-issued `text_id`,
- * `text_delta` appends to that exact part (hard-break if id missing),
- * `text.ended` overrides with the authoritative final text (last write
- * wins). `findLast-by-id` keeps text routing correct when text and
- * tool calls interleave across LLM iterations.
+ * `text.started` seeds a text part with a server-issued `text_id` and
+ * marks it `isStreaming: true`. `text_delta` appends to the matching
+ * part (hard-break if id missing) AND writes to the per-part preview
+ * buffer `partTextAccumDelta[text_id]` so the very first character is
+ * visible the instant it arrives. `text.ended` overrides with the
+ * authoritative final text and clears the streaming flag + buffer.
+ *
+ * `findLast-by-id` keeps text routing correct when text and tool calls
+ * interleave across LLM iterations.
  */
 export const textStarted: SSEHandler = (data, { updateMessage }) => {
   const textId = data.text_id as string | undefined
@@ -26,12 +23,16 @@ export const textStarted: SSEHandler = (data, { updateMessage }) => {
       (p) => p.type === 'text' && (p as TextPart).id === textId,
     )
     if (!existing) {
-      msg.parts.push({ type: 'text', id: textId, text: '' })
+      msg.parts.push({ type: 'text', id: textId, text: '', isStreaming: true })
+    } else {
+      // Re-mark on replay (e.g. late join after a reconnect).
+      ;(existing as TextPart).isStreaming = true
     }
   })
 }
 
-export const textDelta: SSEHandler = (data, { updateMessage, appendStreamingText }) => {
+export const textDelta: SSEHandler = (data, ctx) => {
+  const { updateMessage, appendStreamingText, accumulatePartText } = ctx
   const text = (data.text || data.delta) as string
   const textId = data.text_id as string | undefined
   const messageId = data.message_id as string | undefined
@@ -41,28 +42,36 @@ export const textDelta: SSEHandler = (data, { updateMessage, appendStreamingText
       // regressions where backend forgets to emit text.started first.
       console.warn('[useSSE] text_delta without text_id, dropping chunk')
     } else {
+      // 1) Persistent update (canonical text after stream ends)
       updateMessage(messageId, (msg) => {
         for (let i = msg.parts.length - 1; i >= 0; i--) {
           const p = msg.parts[i]
           if (p && p.type === 'text' && (p as TextPart).id === textId) {
             ;(p as TextPart).text += text
+            ;(p as TextPart).isStreaming = true
             return
           }
         }
         // Orphan: text.started hasn't arrived yet (replay / late
         // join). Push a new part with this id to keep the chunk.
-        msg.parts.push({ type: 'text', id: textId, text })
+        msg.parts.push({ type: 'text', id: textId, text, isStreaming: true })
       })
+      // 2) Per-part preview buffer (first-byte visibility; cleared on
+      //    text.ended). Modeled on opencode's part_text_accum_delta.
+      accumulatePartText(textId, text)
     }
   }
-  // Also update the global streaming text for the StreamingText component
+  // 3) Legacy global streaming text (kept for back-compat with any
+  //    consumer that still subscribes to it; AssistantMessage no
+  //    longer relies on it because each part carries its own state).
   appendStreamingText(text || '')
 }
 
-export const textEnded: SSEHandler = (data, { updateMessage }) => {
+export const textEnded: SSEHandler = (data, ctx) => {
   // Guard: some protocol variants emit text.ended as a pure
   // end-signal without the final text — never wipe the
   // accumulated streaming content with an empty string (B4).
+  const { updateMessage, clearPartAccum } = ctx
   const textId = data.text_id as string | undefined
   const finalText = (data.text || '') as string
   const messageId = data.message_id as string | undefined
@@ -72,43 +81,93 @@ export const textEnded: SSEHandler = (data, { updateMessage }) => {
       const p = msg.parts[i]
       if (p && p.type === 'text' && (p as TextPart).id === textId) {
         if (finalText) (p as TextPart).text = finalText
+        ;(p as TextPart).isStreaming = false
         return
       }
     }
   })
+  // Terminal state: drop the preview buffer so readPartText falls
+  // back to the persistent text (and so the buffer doesn't grow
+  // unbounded across LLM iterations).
+  clearPartAccum(textId)
 }
 
 /**
  * Thinking events — append thinking tokens to the last thinking part.
  *
- * `thinking_start` pushes a fresh collapsed thinking part; subsequent
- * `thinking_delta` events append tokens; `thinking_done` / `thinking_end`
- * mark the part collapsed (UI auto-folds once the answer stream lands).
+ * Mirrors the text protocol: `thinking_start` pushes a fresh
+ * `isStreaming: true` part; `thinking_delta` appends + writes to the
+ * preview buffer; `thinking_done` / `thinking_end` clear streaming
+ * and collapse the part (UI auto-folds once the answer stream lands).
  */
 export const thinkingStart: SSEHandler = (data, { updateMessage }) => {
   const messageId = data.message_id as string | undefined
   if (!messageId) return
   updateMessage(messageId, (msg) => {
-    msg.parts.push({ type: 'thinking', text: '', collapsed: true } as any)
+    msg.parts.push({
+      type: 'thinking',
+      text: '',
+      collapsed: true,
+      isStreaming: true,
+    } as ThinkingPart)
   })
 }
 
-export const thinkingDelta: SSEHandler = (data, { updateMessage }) => {
+export const thinkingDelta: SSEHandler = (data, ctx) => {
+  const { updateMessage, accumulatePartText } = ctx
   const delta = data.delta as string
   const messageId = data.message_id as string | undefined
   if (!delta || !messageId) return
+  let partId: string | null = null
   updateMessage(messageId, (msg) => {
-    const last = msg.parts[msg.parts.length - 1]
-    if (last && last.type === 'thinking') last.text += delta
+    for (let i = msg.parts.length - 1; i >= 0; i--) {
+      const p = msg.parts[i]
+      if (p && p.type === 'thinking') {
+        ;(p as ThinkingPart).text += delta
+        ;(p as ThinkingPart).isStreaming = true
+        partId = `think-${messageId}-${i}`
+        return
+      }
+    }
   })
+  if (partId) accumulatePartText(partId, delta)
 }
 
-export const thinkingDone: SSEHandler = (data, { updateMessage }) => {
+export const thinkingDone: SSEHandler = (data, ctx) => {
+  const { updateMessage, clearPartAccum } = ctx
   const messageId = data.message_id as string | undefined
-  if (messageId) collapseLastThinking(messageId, updateMessage)
+  if (!messageId) return
+  // Clear streaming flag + preview buffer for the matched thinking part.
+  let partId: string | null = null
+  updateMessage(messageId, (msg) => {
+    for (let i = msg.parts.length - 1; i >= 0; i--) {
+      const p = msg.parts[i]
+      if (p && p.type === 'thinking') {
+        ;(p as ThinkingPart).isStreaming = false
+        ;(p as ThinkingPart).collapsed = true
+        partId = `think-${messageId}-${i}`
+        return
+      }
+    }
+  })
+  if (partId) clearPartAccum(partId)
 }
 
-export const thinkingEnd: SSEHandler = (data, { updateMessage }) => {
+export const thinkingEnd: SSEHandler = (data, ctx) => {
+  const { updateMessage, clearPartAccum } = ctx
   const messageId = data.message_id as string | undefined
-  if (messageId) collapseLastThinking(messageId, updateMessage)
+  if (!messageId) return
+  let partId: string | null = null
+  updateMessage(messageId, (msg) => {
+    for (let i = msg.parts.length - 1; i >= 0; i--) {
+      const p = msg.parts[i]
+      if (p && p.type === 'thinking') {
+        ;(p as ThinkingPart).isStreaming = false
+        ;(p as ThinkingPart).collapsed = true
+        partId = `think-${messageId}-${i}`
+        return
+      }
+    }
+  })
+  if (partId) clearPartAccum(partId)
 }

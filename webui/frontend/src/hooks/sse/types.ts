@@ -82,9 +82,17 @@ export interface SSEContext {
   markTotalTokensSeen: (sessionId: string) => void
   setActiveAttempt: (id: string | null) => void
   setLastCompaction: (c: { layer: string; timestamp: number } | null) => void
+  // Per-part streaming preview buffer (opencode-style). text_delta
+  // and thinking_delta write into this so the first character of a
+  // part is visible the instant it arrives. Cleared on terminal
+  // events (text.ended / thinking_done / tool_result) by the same
+  // handler that closes the part.
+  accumulatePartText: (partId: string, delta: string) => void
+  clearPartAccum: (partId: string) => void
   // Read-through state helpers (snapshot reads of the chat store)
   state: {
     getMessage: (id: string) => Message | undefined
+    getMessages: () => IterableIterator<Message> | Message[]
     isQueuePaused: (sessionId: string) => boolean
     hasSeenTotalTokens: (sessionId: string) => boolean
     getTokensUsed: (sessionId: string) => number

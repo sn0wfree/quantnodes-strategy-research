@@ -1,4 +1,4 @@
-import type { TextPart } from '../../stores/chat'
+import type { TextPart, ToolCallPart } from '../../stores/chat'
 import type { SSEHandler } from './types'
 
 /**
@@ -22,7 +22,7 @@ export const toolCall: SSEHandler = (data, { updateMessage }) => {
   updateMessage(mid, (msg) => {
     const existing = msg.parts.find(
       (p) => p.type === 'tool_call' && p.id === id,
-    )
+    ) as ToolCallPart | undefined
     if (!existing) {
       msg.parts.push({
         type: 'tool_call',
@@ -30,7 +30,11 @@ export const toolCall: SSEHandler = (data, { updateMessage }) => {
         name,
         arguments: args,
         status: 'running',
+        isStreaming: true,
       })
+    } else {
+      // Re-mark on replay (defensive).
+      existing.isStreaming = true
     }
   })
 }
@@ -50,6 +54,7 @@ export const toolResult: SSEHandler = (data, { updateMessage }) => {
     if (tc && tc.type === 'tool_call') {
       tc.result = result
       tc.status = status as 'done' | 'error'
+      tc.isStreaming = false
     }
   })
 }

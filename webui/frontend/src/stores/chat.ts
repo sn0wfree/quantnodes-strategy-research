@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { enableMapSet } from 'immer'
 import { api } from '../api/client'
+import { shouldInsertSpaceBetween } from '../utils/mastraSmoothStream'
 import { useSessionStore } from './session'
 
 // Required for immer to handle Map/Set types in chat state
@@ -15,6 +16,8 @@ export interface TextPart {
   type: 'text'
   id: string
   text: string
+  /** True while the part is still receiving text_delta events. */
+  isStreaming?: boolean
 }
 
 export interface ToolCallPart {
@@ -25,12 +28,16 @@ export interface ToolCallPart {
   result?: string | unknown
   status: 'pending' | 'running' | 'done' | 'error'
   progress?: string[]
+  /** True while the tool is still being awaited (tool_call → tool_result). */
+  isStreaming?: boolean
 }
 
 export interface ThinkingPart {
   type: 'thinking'
   text: string
   collapsed?: boolean
+  /** True while the reasoning block is still receiving thinking_delta events. */
+  isStreaming?: boolean
 }
 
 export interface FileEditPart {
@@ -108,6 +115,25 @@ interface ChatState {
   /** Most recent compaction event (for CompactBanner). */
   lastCompaction: { layer: string; timestamp: number } | null
   setLastCompaction: (c: { layer: string; timestamp: number } | null) => void
+  /**
+   * Per-part streaming text preview buffer.
+   *
+   * Modeled after opencode's `part_text_accum_delta`: every text_delta
+   * / thinking_delta / tool.input_delta event lands here keyed by
+   * partId, on top of the persistent part.text update. `readPartText`
+   * prefers the accum buffer (so the first character of a new part
+   * becomes visible the instant it arrives) and falls back to the
+   * persistent text once the part is sealed (text.ended /
+   * thinking_end / tool_result).
+   *
+   * Cleared by `clearPartAccum` when the corresponding part transitions
+   * to a terminal state, and wholesale by `clearMessages` /
+   * `setMessages`.
+   */
+  partTextAccumDelta: Record<string, string>
+  accumulatePartText: (partId: string, delta: string) => void
+  clearPartAccum: (partId: string) => void
+  clearAllPartAccum: () => void
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
   updateMessage: (id: string, updater: (msg: Message) => void) => void
@@ -146,11 +172,38 @@ export const useChatStore = create<ChatState>()(
     tokensUsed: new Map(),
     totalTokensSeen: new Map(),
     lastCompaction: null,
+    partTextAccumDelta: {},
     setLastCompaction: (c) => set({ lastCompaction: c }),
+    accumulatePartText: (partId, delta) =>
+      set((state) => {
+        if (!delta) return
+        const prev = state.partTextAccumDelta[partId] ?? ''
+        // Chunk-boundary space recovery — see
+        // ``shouldInsertSpaceBetween`` in utils/mastraSmoothStream.
+        // DeepSeek-V4-Flash streams one BPE token per SSE chunk and
+        // drops the leading space of each. We re-insert one here so
+        // ``partTextAccumDelta`` carries the words the user expects
+        // to see. The persisted backend ``part.text`` is *not* touched
+        // — it stays raw.
+        state.partTextAccumDelta[partId] = shouldInsertSpaceBetween(prev, delta)
+          ? prev + ' ' + delta
+          : prev + delta
+      }),
+    clearPartAccum: (partId) =>
+      set((state) => {
+        if (partId in state.partTextAccumDelta) {
+          delete state.partTextAccumDelta[partId]
+        }
+      }),
+    clearAllPartAccum: () =>
+      set((state) => {
+        state.partTextAccumDelta = {}
+      }),
     setMessages: (messages) =>
       set((state) => {
         state.messages.clear()
         messages.forEach((m) => state.messages.set(m.id, m))
+        state.partTextAccumDelta = {}
       }),
     addMessage: (message) =>
       set((state) => {
@@ -233,6 +286,7 @@ export const useChatStore = create<ChatState>()(
         state.tokensUsed.clear()
         state.totalTokensSeen.clear()
         state.hasMore.clear()
+        state.partTextAccumDelta = {}
       }),
     loadMessages: async (sessionId: string) => {
       const seq = ++loadMessagesSeq
@@ -245,6 +299,9 @@ export const useChatStore = create<ChatState>()(
           state.messages.clear()
           data.messages.forEach((m) => state.messages.set(m.id, m))
           state.hasMore.set(sessionId, !!data.has_more)
+          // History load brings persisted parts back; any preview buffer
+          // from a previous live stream is now stale.
+          state.partTextAccumDelta = {}
         })
       } catch (err) {
         console.error('loadMessages error:', err)

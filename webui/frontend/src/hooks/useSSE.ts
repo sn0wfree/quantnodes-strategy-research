@@ -48,6 +48,8 @@ export function useSSE(sessionId: string | null) {
   const setStreamingMessage = useChatStore((s) => s.setStreamingMessage)
   const setStreamingText = useChatStore((s) => s.setStreamingText)
   const appendStreamingText = useChatStore((s) => s.appendStreamingText)
+  const accumulatePartText = useChatStore((s) => s.accumulatePartText)
+  const clearPartAccum = useChatStore((s) => s.clearPartAccum)
   const setQueuePaused = useChatStore((s) => s.setQueuePaused)
   const setQueueLength = useChatStore((s) => s.setQueueLength)
   const setTokensUsed = useChatStore((s) => s.setTokensUsed)
@@ -84,8 +86,11 @@ export function useSSE(sessionId: string | null) {
         markTotalTokensSeen,
         setActiveAttempt: (id) => useChatStore.getState().setActiveAttempt(id),
         setLastCompaction: (c) => useChatStore.getState().setLastCompaction(c),
+        accumulatePartText,
+        clearPartAccum,
         state: {
           getMessage: (id) => useChatStore.getState().messages.get(id),
+          getMessages: () => useChatStore.getState().messages.values(),
           isQueuePaused: (sid) => !!useChatStore.getState().queuePaused.get(sid),
           hasSeenTotalTokens: (sid) => !!useChatStore.getState().totalTokensSeen.get(sid),
           getTokensUsed: (sid) => useChatStore.getState().tokensUsed.get(sid) ?? 0,
@@ -114,6 +119,8 @@ export function useSSE(sessionId: string | null) {
       setStreamingMessage,
       setStreamingText,
       appendStreamingText,
+      accumulatePartText,
+      clearPartAccum,
       setQueuePaused,
       setQueueLength,
       setTokensUsed,

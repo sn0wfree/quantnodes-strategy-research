@@ -1,8 +1,13 @@
+import { useMemo } from 'react'
 import { Bot } from 'lucide-react'
 import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { useSystemStore } from '../../stores/system'
-import { getThinkingParser } from '../../utils/thinkingParsers'
+import {
+  splitTextIncremental,
+  shouldSplitInline,
+} from '../../utils/thinkingParsers/incremental'
+import { smoothBuffer } from '../../utils/mastraSmoothStream'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallGroup } from './ToolCallGroup'
@@ -13,10 +18,18 @@ import { ChartBlock } from './ChartBlock'
 import { ImageBlock } from './ImageBlock'
 import { StreamingText } from './StreamingText'
 import { formatTime } from '../../utils/time'
+import { useChatStore } from '../../stores/chat'
 
 interface AssistantMessageProps {
   message: Message
   isStreaming?: boolean
+  /**
+   * Kept for back-compat with MessageList's current call site — no
+   * longer used for rendering. Each part carries its own
+   * `isStreaming` flag (set by the SSE handlers), and the live tail
+   * of any text part is read from the per-part preview buffer
+   * (`partTextAccumDelta[part.id]`).
+   */
   streamingText?: string
   isQueued?: boolean
   layout: ChatLayout
@@ -52,52 +65,146 @@ function QueuedIndicator({
 }
 
 /**
- * Parse a text part using the active provider's thinking parser.
- * If thinking is extracted, return [thinking_part, text_part].
- * If no thinking or parser throws, return the original part.
+ * Read a part's current text, preferring the short-lived per-part
+ * streaming preview buffer (so the first byte of a new part is
+ * visible immediately) and falling back to the persistent text once
+ * the part has been sealed by text.ended / thinking_end / tool_result.
+ *
+ * Applies Mastra-style word-boundary buffering (`smoothBuffer`) so a
+ * half-arrived English word (e.g. ``'expl'``) isn't rendered with
+ * its leading space lost — the partial tail is held back until the
+ * next chunk completes the word.
+ *
+ * When ``isStreaming`` is false (the part has been sealed by
+ * text.ended / thinking_end / tool_result) we skip the smoothBuffer
+ * hold-back: at done, there's no next chunk coming, so the partial
+ * word must render verbatim.
+ *
+ * Modeled on opencode's `readPartText(accum, part)` + Mastra's
+ * `smoothStream` (Apache 2.0).
  */
-function expandTextPart(part: MessagePart, provider: string | null): MessagePart[] {
-  if (part.type !== 'text') return [part]
-  const text = part.text
-  if (!text) return [part]
-
-  const parser = getThinkingParser(provider)
-  let parsed: { thinking: string; content: string }
-  try {
-    parsed = parser(text)
-  } catch (err) {
-    // Fail-safe: silent + console.warn, keep original text
-    console.warn('[thinkingParsers] parse failed:', err)
-    return [part]
+function useReadPartText(): (
+  partId: string,
+  fallback: string,
+  isStreaming?: boolean,
+) => string {
+  const partTextAccumDelta = useChatStore((s) => s.partTextAccumDelta)
+  return (partId, fallback, isStreaming = true) => {
+    const raw = partTextAccumDelta[partId] ?? fallback ?? ''
+    return isStreaming ? smoothBuffer(raw).stable : raw
   }
-
-  if (!parsed.thinking) {
-    return [part]
-  }
-
-  const result: MessagePart[] = [
-    { type: 'thinking', text: parsed.thinking, collapsed: true },
-  ]
-  if (parsed.content) {
-    // Reuse the source text part's id so the derived text part has
-    // the same id (covers the persisted view + the live stream view).
-    result.push({
-      type: 'text',
-      id: part.id,
-      text: parsed.content,
-    })
-  }
-  return result
 }
 
-function PartRenderer({ part, isStreaming, onRetry }: { part: MessagePart; isStreaming: boolean; onRetry?: (tc: ToolCallPart) => void }) {
+/**
+ * Build the render-time list of parts from a message.
+ *
+ * For inline-thinking providers (e.g. minimax) the text part is split
+ * *incrementally* on every change — as soon as `<think>` lands a
+ * thinking part is mounted; as soon as `</think>` lands a text part
+ * is mounted. For providers that use a separate reasoning_content
+ * field (DeepSeek / Qwen / Kimi / OpenAI) the backend already emits
+ * a dedicated thinking part and no client-side split is needed.
+ *
+ * The `isStreaming` flag is preserved on the rendered parts so the
+ * renderer can pick the animated vs static path per part.
+ */
+function useRenderedParts(
+  parts: MessagePart[],
+  provider: string | null,
+  isStreaming: boolean | undefined,
+  readPartText: (partId: string, fallback: string) => string,
+): MessagePart[] {
+  return useMemo(() => {
+    const out: MessagePart[] = []
+    if (!shouldSplitInline(provider)) {
+      // Standard path — no client-side thinking extraction. Pass parts
+      // through; backend (or passthrough parser) has already split.
+      return parts
+    }
+    for (const part of parts) {
+      if (part.type !== 'text') {
+        out.push(part)
+        continue
+      }
+      // Inline-thinking provider: split on every render.
+      const text = readPartText(part.id, part.text)
+      const split = splitTextIncremental(text)
+      const thinkingText = split.thinkingBefore + (split.thinkingOpen ?? '')
+      if (thinkingText) {
+        // Force-expand while the tag is unclosed; collapse once closed
+        // (the opencode pattern — the part shows the user "what the
+        // model is currently thinking" until the reasoning block ends).
+        out.push({
+          type: 'thinking',
+          text: thinkingText,
+          collapsed: split.thinkingOpen === null && !isStreaming,
+          isStreaming: !!part.isStreaming,
+        })
+      }
+      if (split.contentAfter) {
+        out.push({
+          type: 'text',
+          id: part.id,
+          text: split.contentAfter,
+          isStreaming: !!part.isStreaming,
+        })
+      }
+    }
+    return out
+  }, [parts, provider, isStreaming, readPartText])
+}
+
+/**
+ * Per-part renderer. The streaming flag decides whether the
+ * animated component (StreamingText / ThinkingBlock streaming /
+ * ToolCallBlock running) or the static component is mounted.
+ *
+ * Note: `StreamingText` is *only* used here for a single text part —
+ * the prior design replaced the entire message body with a single
+ * StreamingText instance, which is what caused the "工具栏突然出现"
+ * bug (thinking / tool_call parts were only mounted after agent_done).
+ */
+function PartRenderer({
+  part,
+  isStreaming,
+  onRetry,
+  readPartText,
+}: {
+  part: MessagePart
+  isStreaming: boolean
+  onRetry?: (tc: ToolCallPart) => void
+  readPartText: (partId: string, fallback: string, isStreaming?: boolean) => string
+}) {
   switch (part.type) {
-    case 'text':
-      return <MarkdownRenderer content={part.text} />
-    case 'tool_call':
+    case 'text': {
+      // isStreaming=true: smoothBuffer holds back the partial last word
+      //                    so the leading space of the next chunk is
+      //                    never visible before the word completes.
+      // isStreaming=false (sealed): render verbatim so the final
+      //                    partial word still shows.
+      const liveText = readPartText(part.id, part.text, isStreaming)
+      if (isStreaming) {
+        return <StreamingText text={liveText} isDone={false} partId={part.id} />
+      }
+      return <MarkdownRenderer content={liveText} />
+    }
+    case 'tool_call': {
+      // While the tool is in flight we still render the block but the
+      // ToolCallBlock's status-driven UI (running spinner / done check)
+      // handles the visual. Streaming flag is informational; the block
+      // is visible from the very first `tool_call` event thanks to
+      // the opencode-style "every part decides its own visibility" rule.
       return <ToolCallBlock toolCall={part} onRetry={onRetry} />
-    case 'thinking':
-      return <ThinkingBlock text={part.text} collapsed={part.collapsed} streaming={isStreaming} />
+    }
+    case 'thinking': {
+      return (
+        <ThinkingBlock
+          text={part.text}
+          collapsed={part.collapsed}
+          streaming={isStreaming}
+        />
+      )
+    }
     case 'file_edit':
       return <FileEditBlock fileEdit={part} />
     case 'table':
@@ -114,30 +221,39 @@ function PartRenderer({ part, isStreaming, onRetry }: { part: MessagePart; isStr
 export function AssistantMessage({
   message,
   isStreaming,
-  streamingText,
   isQueued,
   layout,
 }: AssistantMessageProps) {
   const provider = useSystemStore((s) => s.llm.provider)
+  const readPartText = useReadPartText()
 
-  const groupedParts: Array<{ type: 'single'; part: MessagePart } | { type: 'tool_group'; calls: any[] }> = []
+  // Group consecutive tool_call parts into a single ToolCallGroup
+  // (matches the original design — same opencode-style "adjacent tool
+  // calls share one collapsible container" rule).
+  // Pass `isStreaming` so the splitter can force-expand thinking
+  // blocks while the attempt is active.
+  const renderedParts = useRenderedParts(
+    message.parts,
+    provider,
+    isStreaming,
+    readPartText,
+  )
+
+  const groupedParts: Array<
+    { type: 'single'; part: MessagePart } | { type: 'tool_group'; calls: any[] }
+  > = []
   let i = 0
-  while (i < message.parts.length) {
-    const part = message.parts[i]
+  while (i < renderedParts.length) {
+    const part = renderedParts[i]
     if (part.type === 'tool_call') {
       const calls: any[] = []
-      while (i < message.parts.length && message.parts[i].type === 'tool_call') {
-        calls.push(message.parts[i])
+      while (i < renderedParts.length && renderedParts[i].type === 'tool_call') {
+        calls.push(renderedParts[i])
         i++
       }
       groupedParts.push({ type: 'tool_group', calls })
     } else {
-      // Provider-aware thinking extraction: split text parts that contain
-      // inline thinking tags into [thinking, content] parts.
-      const expanded = expandTextPart(part, provider)
-      for (const p of expanded) {
-        groupedParts.push({ type: 'single', part: p })
-      }
+      groupedParts.push({ type: 'single', part })
       i++
     }
   }
@@ -170,29 +286,31 @@ export function AssistantMessage({
           queuePosition={message.metadata?.queue_position}
           queueLength={message.metadata?.queue_length}
         />
-      ) : isStreaming && streamingText !== undefined ? (
-        <StreamingText text={streamingText} isDone={false} />
       ) : (
+        // Stream-aware rendering: we always walk `groupedParts`, and
+        // each part's `isStreaming` flag decides whether to mount the
+        // animated or static variant. This is the core fix for the
+        // "工具栏突然出现" bug — thinking blocks and tool_call
+        // toolbars now appear the moment their first event lands,
+        // not at agent_done.
         groupedParts.map((item, idx) => {
           if (item.type === 'tool_group') {
-            return <ToolCallGroup key={idx} toolCalls={item.calls} />
+            return <ToolCallGroup key={`group-${idx}`} toolCalls={item.calls} />
           }
-
-          // Auto-collapse thinking when text content follows
-          if (item.type === 'single' && item.part.type === 'thinking') {
-            const nextItem = groupedParts[idx + 1]
-            const hasTextAfter = nextItem?.type === 'single' && nextItem.part.type === 'text'
-            return (
-              <ThinkingBlock
-                key={idx}
-                text={item.part.text}
-                collapsed={hasTextAfter || item.part.collapsed || isStreaming}
-                streaming={isStreaming}
-              />
-            )
-          }
-
-          return <PartRenderer key={idx} part={item.part} isStreaming={!!isStreaming} />
+          const part = item.part
+          // Only text / tool_call / thinking carry the per-part
+          // streaming flag. Static types (file_edit / table / chart
+          // / image) are not part of the live stream — they always
+          // render via the static PartRenderer branch.
+          const isPartStreaming = isStreamingFlagOf(part)
+          return (
+            <PartRenderer
+              key={partKeyFor(part, idx)}
+              part={part}
+              isStreaming={isPartStreaming}
+              readPartText={readPartText}
+            />
+          )
         })
       )}
     </div>
@@ -219,4 +337,33 @@ export function AssistantMessage({
       </div>
     </div>
   )
+}
+
+/** Stable React key per part — survives re-renders while the part
+ *  list mutates (append / close). Falls back to idx for parts that
+ *  don't have a stable id (file_edit, table, chart, image). */
+function partKeyFor(part: MessagePart, idx: number): string {
+  if (part.type === 'text') return `text-${part.id}`
+  if (part.type === 'tool_call') return `tc-${part.id}`
+  if (part.type === 'thinking') {
+    // thinking parts share the same conceptual id across renders
+    // (built from messageId + index in the textHandlers hooks), so
+    // a stable key would require extra state. Use idx here — the
+    // ThinkingBlock memoises on text + collapsed so re-mount is fine.
+    return `think-${idx}`
+  }
+  return `${part.type}-${idx}`
+}
+
+/** Type-narrowed `isStreaming` lookup. Only the streaming
+ *  part types (text / tool_call / thinking) carry the flag; static
+ *  types always render in their static (non-animated) variant. */
+function isStreamingFlagOf(part: MessagePart): boolean {
+  return (
+    part.type === 'text' ||
+    part.type === 'tool_call' ||
+    part.type === 'thinking'
+  )
+    ? !!part.isStreaming
+    : false
 }

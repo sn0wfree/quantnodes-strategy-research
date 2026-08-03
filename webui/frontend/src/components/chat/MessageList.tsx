@@ -17,7 +17,6 @@ import { formatTime } from '../../utils/time'
 export function MessageList() {
   const messages = useChatStore((s) => s.messages)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
-  const streamingText = useChatStore((s) => s.streamingText)
   const chatLayout = useLayoutStore((s) => s.chatLayout)
   const queuePaused = useChatStore((s) => s.queuePaused)
   const hasMore = useChatStore((s) => s.hasMore)
@@ -42,7 +41,7 @@ export function MessageList() {
         })
       }, 50)
     }
-  }, [messageList.length, streamingText])
+  }, [messageList.length])
 
   // Listen for global "focus chat" event (from sidebar chat icon)
   useEffect(() => {
@@ -173,7 +172,6 @@ export function MessageList() {
             <AssistantMessage
               message={message}
               isStreaming={isStreaming}
-              streamingText={isStreaming ? streamingText : undefined}
               isQueued={isQueued}
               layout={chatLayout}
             />

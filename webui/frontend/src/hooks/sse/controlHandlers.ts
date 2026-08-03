@@ -73,8 +73,28 @@ export const compact: SSEHandler = (data, ctx) => {
   })
 }
 
+/**
+ * Defensive cleanup: clear `isStreaming` on every part of every
+ * assistant message. The per-protocol handlers (text.ended /
+ * thinking_done / tool_result) normally do this, but on disconnect,
+ * cancel, or error the terminal event may never arrive — this keeps
+ * the UI from showing stuck `running` spinners or perpetually
+ * expanding thinking blocks.
+ */
+function clearAllStreamingParts(ctx: Parameters<SSEHandler>[1]): void {
+  for (const msg of ctx.state.getMessages()) {
+    if (msg.role !== 'assistant') continue
+    for (const part of msg.parts) {
+      if ((part as { isStreaming?: boolean }).isStreaming) {
+        ;(part as { isStreaming?: boolean }).isStreaming = false
+      }
+    }
+  }
+}
+
 /** agent_done: AgentLoop finished — clear streaming state. */
 export const agentDone: SSEHandler = (_data, ctx) => {
+  clearAllStreamingParts(ctx)
   ctx.setStreamingMessage(null)
   ctx.setActiveAttempt(null)
 }
@@ -83,6 +103,7 @@ export const agentDone: SSEHandler = (_data, ctx) => {
 export const errorEvent: SSEHandler = (data, ctx) => {
   const error = data.error as string
   if (error) ctx.addToast('error', error)
+  clearAllStreamingParts(ctx)
   ctx.setStreamingMessage(null)
   ctx.setActiveAttempt(null)
 }
