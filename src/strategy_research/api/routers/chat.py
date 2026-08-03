@@ -801,6 +801,18 @@ def _dispatch_study_command(content: str, session_id: str) -> str:
             return f"/study {subcmd} requires a study_id"
         return _study_control_cmd(subcmd, rest[0])
 
+    if subcmd in ("redirect", "directive"):
+        # /study redirect <study_id> "<directive content>"
+        if not rest:
+            return "/study redirect requires a study_id and quoted content"
+        target_study = rest[0]
+        # Re-join remaining tokens so multi-word directives work without
+        # having to escape every space.
+        directive_text = " ".join(rest[1:]).strip().strip('"\'')
+        if not directive_text:
+            return "/study redirect requires quoted content after study_id"
+        return _study_redirect_cmd(target_study, directive_text, session_id)
+
     # Else: unknown — show help. (Allows the user to say "/study foo bar".)
     return f"Unknown subcommand: {subcmd}\n" + _study_help()
 
@@ -817,6 +829,7 @@ def _study_help() -> str:
         "/study pause <study_id>\n"
         "/study resume <study_id>\n"
         "/study cancel <study_id>\n"
+        "/study redirect <study_id> \"<directive>\" — mid-exec redirect\n"
         "/study help     — this message"
     )
 
@@ -998,6 +1011,25 @@ def _study_control_cmd(action: str, study_id: str) -> str:
     if not fn(study_id):
         return f"Study {study_id} not found or not active — cannot {action}."
     return f"Study {study_id}: {action} requested."
+
+
+def _study_redirect_cmd(study_id: str, directive: str, session_id: str) -> str:
+    """Append a mid-execution directive to a study."""
+    from ...core.study import StudyStore
+    issued_by = f"chat:{session_id}"
+    try:
+        with StudyStore() as store:
+            d = store.add_directive(
+                study_id=study_id, content=directive,
+                issued_by=issued_by,
+            )
+    except ValueError as e:
+        return f"Cannot redirect: {e}"
+    return (
+        f"Directive recorded: {d.directive_id[:12]}...\n"
+        f"Will apply to the next research round.\n"
+        f"Content: {directive}"
+    )
 
 
 # ── /compact command handler ──────────────────────────────────────

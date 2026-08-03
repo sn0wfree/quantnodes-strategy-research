@@ -1375,6 +1375,7 @@ def run_research_round(
     behavior: str | None = None,
     inter_agent_sleep: float = 0.0,
     previous_summary: dict | None = None,
+    directives: str | None = None,
 ) -> dict:
     """Execute one autoresearch round and return a structured result.
 
@@ -1500,6 +1501,11 @@ def run_research_round(
         return out
 
     # ── Step 2: researcher ─────────────────────────────────────────
+    # Phase 2: if mid-execution directives were issued by the user, the
+    # executor passes them through; inject into current_state so the
+    # researcher agent sees them in its prompt.
+    if directives:
+        current_state = {**current_state, "user_directives": directives}
     researcher_output = _spawn("researcher", [])
     save_agent_record(
         run_dir, "researcher", 2, current_state, researcher_output,

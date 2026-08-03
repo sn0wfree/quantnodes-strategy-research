@@ -88,6 +88,11 @@ class StudyStartRequest(BaseModel):
     keep_recent: int = 10
 
 
+class DirectiveRequest(BaseModel):
+    content: str
+    issued_by: Optional[str] = None
+
+
 # ── POST /study/start ───────────────────────────────────────────────
 
 
@@ -277,3 +282,85 @@ async def study_cancel(study_id: str):
     if not sched.cancel(study_id):
         raise HTTPException(status_code=404, detail="study not active")
     return {"status": "ok", "study_id": study_id, "action": "cancelled"}
+
+
+# ── POST /study/{study_id}/directive (Phase 2: mid-exec interaction) ──
+
+
+@router.post("/{study_id}/directive")
+async def study_directive(study_id: str, req: DirectiveRequest):
+    """Inject a user-issued directive into the study's next round.
+
+    Persists to ``study_directives``; the executor's per-round loop
+    consumes it and emits ``study_directives_consumed`` once the
+    researcher agent has seen it.
+    """
+    from ...core.study import StudyStore
+    try:
+        with StudyStore() as store:
+            directive = store.add_directive(
+                study_id=study_id, content=req.content,
+                issued_by=req.issued_by,
+            )
+    except ValueError as exc:
+        detail = str(exc)
+        code = 400 if "content" in detail else 404
+        raise HTTPException(status_code=code, detail=detail)
+    # Best-effort emit so the chat panel reflects the directive.
+    sched = _get_study_scheduler()
+    if sched.session_service is not None and sched.session_service.event_bus is not None:
+        try:
+            sched.session_service.event_bus.emit(
+                "", "study_directive_added", {
+                    "study_id": study_id,
+                    "directive_id": directive.directive_id,
+                    "content": directive.content,
+                    "issued_by": directive.issued_by,
+                    "created_at": directive.created_at,
+                },
+            )
+        except Exception:
+            pass
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "directive_id": directive.directive_id,
+        "created_at": directive.created_at,
+    }
+
+
+@router.get("/{study_id}/directives")
+async def study_directives_list(study_id: str):
+    """List pending + consumed directives for a study (audit trail)."""
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="study not found")
+        # Pull all (pending + consumed). Direct access on store.conn —
+        # acceptable for the audit-only endpoint.
+        with store._lock:  # noqa: SLF001 — internal but stable
+            rows = store._conn.execute(  # noqa: SLF001
+                """
+                SELECT directive_id, content, issued_by, created_at, consumed_at
+                FROM study_directives
+                WHERE study_id = ?
+                ORDER BY created_at DESC
+                LIMIT 50
+                """,
+                (study_id,),
+            ).fetchall()
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "directives": [
+            {
+                "directive_id": r["directive_id"],
+                "content": r["content"],
+                "issued_by": r["issued_by"],
+                "created_at": r["created_at"],
+                "consumed_at": r["consumed_at"],
+            }
+            for r in rows
+        ],
+    }

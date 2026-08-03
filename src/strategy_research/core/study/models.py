@@ -98,6 +98,24 @@ class StudyRecord:
     completed_at: str | None = None
 
 
+@dataclass(frozen=True)
+class StudyDirective:
+    """User-issued research direction injected into the next round.
+
+    Phase 2 (mid-execution interaction): a directive is appended to
+    ``run_research_round``'s prompt context for the researcher agent at
+    the start of the next round. Once consumed, ``consumed_at`` is set
+    so the directive is not re-applied on later rounds.
+    """
+
+    directive_id: str
+    study_id: str
+    content: str
+    issued_by: str | None
+    created_at: str
+    consumed_at: str | None = None
+
+
 def default_metric_targets() -> list[dict]:
     """Return the default acceptance targets for a study.
 

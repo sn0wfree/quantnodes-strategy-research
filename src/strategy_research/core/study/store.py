@@ -25,6 +25,7 @@ from typing import Any, Callable, TypeVar
 from .models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,
+    StudyDirective,
     StudyRecord,
     StudyStatus,
 )
@@ -124,7 +125,7 @@ class StudyStore:
     # ── schema ───────────────────────────────────────────────────────
 
     def _init_db(self) -> None:
-        """Create the ``studies`` table + indexes if absent."""
+        """Create the ``studies`` + ``study_directives`` tables + indexes if absent."""
 
         with self._lock:
             self._conn.execute(
@@ -167,6 +168,24 @@ class StudyStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_studies_status "
                 "ON studies(execution_status)"
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS study_directives (
+                    directive_id TEXT PRIMARY KEY,
+                    study_id     TEXT NOT NULL,
+                    content      TEXT NOT NULL,
+                    issued_by    TEXT,
+                    created_at   TEXT NOT NULL,
+                    consumed_at  TEXT,
+                    FOREIGN KEY (study_id) REFERENCES studies(study_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_study_directives_study "
+                "ON study_directives(study_id, consumed_at)"
             )
 
     # ── writes ───────────────────────────────────────────────────────
@@ -434,10 +453,108 @@ class StudyStore:
                 (session_id,),
             ).fetchone()
             count = int(row[0]) if row else 0
+            # Directives are cascaded via FK ON DELETE CASCADE.
             self._conn.execute(
                 "DELETE FROM studies WHERE session_id = ?", (session_id,)
             )
         return count
+
+    # ── directives (Phase 2: mid-execution interaction) ─────────────
+
+    @_synchronized
+    def add_directive(
+        self,
+        study_id: str,
+        content: str,
+        *,
+        issued_by: str | None = None,
+    ) -> StudyDirective:
+        """Append a research directive to a study's pending queue.
+
+        The next round's researcher agent sees the directive in its prompt
+        context. ``issued_by`` is opaque (session user id, "api", etc.) for
+        audit purposes.
+        """
+        if not content.strip():
+            raise ValueError("directive content must not be empty")
+        # Validate the study exists; FK would catch it but a clean error is
+        # friendlier for the API/command surface.
+        study = self.get_study(study_id)
+        if study is None:
+            raise ValueError(f"study not found: {study_id}")
+
+        directive_id = _id("dir")
+        now = _now_iso()
+        with self._write_transaction():
+            self._conn.execute(
+                """
+                INSERT INTO study_directives (
+                    directive_id, study_id, content, issued_by,
+                    created_at, consumed_at
+                )
+                VALUES (?, ?, ?, ?, ?, NULL)
+                """,
+                (directive_id, study_id, content.strip(), issued_by, now),
+            )
+        return StudyDirective(
+            directive_id=directive_id,
+            study_id=study_id,
+            content=content.strip(),
+            issued_by=issued_by,
+            created_at=now,
+            consumed_at=None,
+        )
+
+    @_synchronized
+    def list_pending_directives(
+        self, study_id: str
+    ) -> list[StudyDirective]:
+        """Return all directives for the study not yet consumed."""
+        rows = self._conn.execute(
+            """
+            SELECT directive_id, study_id, content, issued_by, created_at,
+                   consumed_at
+            FROM study_directives
+            WHERE study_id = ? AND consumed_at IS NULL
+            ORDER BY created_at ASC
+            """,
+            (study_id,),
+        ).fetchall()
+        return [
+            StudyDirective(
+                directive_id=row["directive_id"],
+                study_id=row["study_id"],
+                content=row["content"],
+                issued_by=row["issued_by"],
+                created_at=row["created_at"],
+                consumed_at=row["consumed_at"],
+            )
+            for row in rows
+        ]
+
+    @_synchronized
+    def mark_directives_consumed(
+        self, study_id: str, directive_ids: list[str]
+    ) -> int:
+        """Mark ``directive_ids`` consumed. Returns count updated.
+
+        ``directive_ids`` must all belong to the same study. The executor
+        should pass only the ids it actually injected so any race-written
+        directives stay pending for the next round.
+        """
+        if not directive_ids:
+            return 0
+        now = _now_iso()
+        placeholders = ",".join("?" for _ in directive_ids)
+        with self._write_transaction():
+            cur = self._conn.execute(
+                f"UPDATE study_directives "
+                f"SET consumed_at = ? "
+                f"WHERE study_id = ? AND directive_id IN ({placeholders}) "
+                f"AND consumed_at IS NULL",
+                [now, study_id, *directive_ids],
+            )
+        return cur.rowcount
 
     # ── internals ────────────────────────────────────────────────────
 

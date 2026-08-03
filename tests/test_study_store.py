@@ -318,3 +318,81 @@ class TestStudyStoreValidation:
             store.create_study(session_id=session_id, goal_id=None, objective="x",
                                workspace_path="/w", strategy_name="s",
                                **{name: -1})
+
+
+# ── directives (Phase 2: mid-execution interaction) ────────────────
+
+
+class TestStudyDirectives:
+    def test_add_directive_returns_record(self, store, make_study):
+        study = make_study()
+        d = store.add_directive(
+            study.study_id, "改用动量因子", issued_by="user:abc",
+        )
+        assert d.study_id == study.study_id
+        assert d.content == "改用动量因子"
+        assert d.issued_by == "user:abc"
+        assert d.consumed_at is None
+        assert d.created_at
+
+    def test_pending_lists_unconsumed(self, store, make_study):
+        study = make_study()
+        a = store.add_directive(study.study_id, "first")
+        b = store.add_directive(study.study_id, "second")
+        pending = store.list_pending_directives(study.study_id)
+        assert [d.directive_id for d in pending] == [a.directive_id, b.directive_id]
+
+        store.mark_directives_consumed(study.study_id, [a.directive_id])
+        pending = store.list_pending_directives(study.study_id)
+        assert [d.directive_id for d in pending] == [b.directive_id]
+
+    def test_mark_consumed_returns_count(self, store, make_study):
+        study = make_study()
+        a = store.add_directive(study.study_id, "a")
+        b = store.add_directive(study.study_id, "b")
+        count = store.mark_directives_consumed(
+            study.study_id, [a.directive_id, b.directive_id],
+        )
+        assert count == 2
+
+    def test_mark_consumed_only_pending(self, store, make_study):
+        """A directive already consumed is not double-counted."""
+        study = make_study()
+        a = store.add_directive(study.study_id, "a")
+        store.mark_directives_consumed(study.study_id, [a.directive_id])
+        # Second call: same id, should be 0 (already consumed)
+        count = store.mark_directives_consumed(study.study_id, [a.directive_id])
+        assert count == 0
+
+    def test_mark_consumed_empty_list_noop(self, store, make_study):
+        assert store.mark_directives_consumed(make_study().study_id, []) == 0
+
+    def test_add_directive_empty_content_raises(self, store, make_study):
+        with pytest.raises(ValueError):
+            store.add_directive(make_study().study_id, "   ")
+
+    def test_add_directive_unknown_study_raises(self, store):
+        with pytest.raises(ValueError):
+            store.add_directive("no-such-study", "x")
+
+    def test_directive_cascade_on_study_delete(self, store, session_id):
+        """Deleting a study removes its directives via FK CASCADE."""
+        from strategy_research.core.study import StudyStore, StudyDirective
+        s = store.create_study(session_id=session_id, goal_id=None,
+                               objective="x", workspace_path="/w",
+                               strategy_name="strat")
+        store.add_directive(s.study_id, "directive-1")
+        # Direct count via internal conn
+        with store._lock:  # noqa: SLF001
+            rows = store._conn.execute(  # noqa: SLF001
+                "SELECT COUNT(*) FROM study_directives WHERE study_id = ?",
+                (s.study_id,),
+            ).fetchone()
+        assert int(rows[0]) == 1
+        store.delete_session_studies(session_id)
+        with store._lock:  # noqa: SLF001
+            rows = store._conn.execute(  # noqa: SLF001
+                "SELECT COUNT(*) FROM study_directives WHERE study_id = ?",
+                (s.study_id,),
+            ).fetchone()
+        assert int(rows[0]) == 0

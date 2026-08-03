@@ -115,6 +115,18 @@ def _setup_with_goal(store: StudyStore, goal_store: GoalStore, **overrides):
     return goal, study
 
 
+def _round_lambda(metrics, verdict="keep", stagnation=False):
+    """Build a 3-or-4-arg compatible fake round function.
+
+    Accepts the old ``(self, r, prev)`` signature as well as the new
+    ``(self, r, prev, directives_text)`` one.
+    """
+    def _fake(self, r, prev, directives_text=None):
+        return _make_round_result(metrics, round=r, verdict=verdict,
+                                 stagnation=stagnation)
+    return _fake
+
+
 # ── shutdown: TARGETS_MET ───────────────────────────────────────────
 
 
@@ -126,7 +138,7 @@ class TestExecutorShutdown:
         # Round always returns "good" metrics satisfying the target.
         calls = {"n": 0}
 
-        def fake_round(self, r, prev):
+        def fake_round(self, r, prev, directives_text=None):
             calls["n"] += 1
             return _make_round_result(
                 {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
@@ -174,8 +186,8 @@ class TestExecutorShutdown:
         monkeypatch.setattr(
             "strategy_research.core.study.executor.AutoresearchExecutor."
             "_run_one_round",
-            lambda self, r, prev: _make_round_result(
-                {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2}, round=r,
+            _round_lambda(
+                {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
                 verdict="discard",
             ),
         )
@@ -199,9 +211,7 @@ class TestExecutorShutdown:
         monkeypatch.setattr(
             "strategy_research.core.study.executor.AutoresearchExecutor."
             "_run_one_round",
-            lambda self, r, prev: _make_round_result(
-                {"calmar": 0.1}, round=r,
-            ),
+            _round_lambda({"calmar": 0.1}),
         )
         monkeypatch.setattr(
             "strategy_research.core.study.executor.AutoresearchExecutor."
@@ -221,7 +231,7 @@ class TestExecutorShutdown:
         control = ControlToken()
         called = {"n": 0}
 
-        def _round(self, r, prev):
+        def _round(self, r, prev, directives_text=None):
             called["n"] += 1
             if called["n"] == 1:
                 control.cancelled = True
@@ -258,7 +268,7 @@ class TestExecutorShutdown:
         rounds = {"n": 0}
         paused_flag = {"seen": False}
 
-        def _round(self, r, prev):
+        def _round(self, r, prev, directives_text=None):
             rounds["n"] += 1
             if rounds["n"] == 1:
                 control.paused = True
@@ -326,7 +336,7 @@ class TestExecutorHelpers:
         monkeypatch.setattr(
             "strategy_research.core.study.executor.AutoresearchExecutor."
             "_run_one_round",
-            lambda self, r, prev: _make_round_result(
+            lambda self, r, prev, directives_text=None: _make_round_result(
                 {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
             ),
         )
@@ -344,3 +354,84 @@ class TestExecutorHelpers:
         assert crit_ids <= ev_crit_ids, {
             "missing evidence for": crit_ids - ev_crit_ids, "evidence has": ev_crit_ids,
         }
+
+
+# ── Phase 2: directive injection ────────────────────────────────────
+
+
+class TestDirectiveInjection:
+    def test_pending_directive_passed_to_round(self, store, monkeypatch):
+        # Use a study without metric targets so the executor doesn't bail
+        # out after one round — it should run round 1, then round 2, etc.
+        from strategy_research.core.study import StudyStatus
+        study = store.create_study(
+            session_id="sess-st",
+            goal_id=None,
+            objective="研究动量",
+            workspace_path="/tmp/ws",
+            strategy_name="rot_alpha",
+            cooldown_base=0.01, cooldown_jitter=0.01, min_cooldown=0.01,
+            metric_targets=[],   # ← disable auto-completion
+            max_rounds=2,
+        )
+        captured: list = []
+
+        def _round(self, r, prev, directives_text=None):
+            captured.append(directives_text)
+            return _make_round_result(
+                {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2}, round=r,
+            )
+
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_run_one_round", _round,
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_round_cooldown", lambda self: 0.0,
+        )
+        # Round 1: no directive yet
+        # Round 2: directive added between rounds → consumed in round 2
+        # We simulate this by re-enqueuing after executor has read pending.
+        ex = AutoresearchExecutor(study, store, emitter=__import__(
+            "strategy_research.core.study.executor",
+            fromlist=["NullEmitter"],
+        ).NullEmitter())
+
+        # Pre-add directive → round 1 will see it
+        store.add_directive(study.study_id, "改用动量因子", issued_by="chat:test")
+        asyncio.run(ex.run())
+
+        # Round 1 captured the directive text; round 2 captured None
+        # (directive was marked consumed after round 1).
+        assert len(captured) == 2
+        assert "改用动量因子" in (captured[0] or "")
+        assert captured[1] is None
+        # All directives consumed
+        assert store.list_pending_directives(study.study_id) == []
+
+    def test_format_directives(self):
+        from dataclasses import dataclass
+        from strategy_research.core.study.executor import AutoresearchExecutor
+        @dataclass
+        class D:
+            content: str
+            created_at: str = "2026-08-04T10:00:00+00:00"
+        out = AutoresearchExecutor._format_directives(
+            [D("focus on volatility"), D("use small caps")]
+        )
+        assert "<user-directives>" in out
+        assert "</user-directives>" in out
+        assert "focus on volatility" in out
+        assert "use small caps" in out
+
+    def test_empty_directives_list_format(self):
+        """Empty input still wraps in user-directives block (no items)."""
+        from strategy_research.core.study.executor import AutoresearchExecutor
+        out = AutoresearchExecutor._format_directives([])
+        assert out.startswith("<user-directives>")
+        assert "no directives" not in out  # still a valid block
+        # The executors guard (`if pending_directives` before calling
+        # _format_directives) is what actually keeps an empty list out
+        # of the round's prompt — covered by the integration test
+        # (test_pending_directive_passed_to_round).

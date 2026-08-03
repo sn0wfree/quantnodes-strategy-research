@@ -91,7 +91,7 @@ def _setup(store, goal_store, **overrides):
 def _patch_round(monkeypatch, metrics=None, rounds_counter=None):
     """Stub AutoresearchExecutor._run_one_round + cooldown + summary load."""
 
-    def _round(self, r, prev):
+    def _round(self, r, prev, directives_text=None):
         if rounds_counter is not None:
             rounds_counter["n"] += 1
         m = metrics or {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1}

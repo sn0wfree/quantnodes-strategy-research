@@ -253,10 +253,33 @@ class AutoresearchExecutor:
 
             round_num += 1
             self._round_start_clock = time.perf_counter()
+            # Phase 2: mid-execution interaction — surface any
+            # user-issued directives in this round's prompt context.
+            pending_directives = self.study_store.list_pending_directives(
+                self.study.study_id,
+            )
+            directive_text = (
+                self._format_directives(pending_directives)
+                if pending_directives else None
+            )
             result = await asyncio.to_thread(
                 self._run_one_round, round_num, previous_summary,
+                directive_text,
             )
             previous_summary = result.get("summary") or previous_summary
+            # Mark directives consumed once the round has read them.
+            if pending_directives:
+                consumed = self.study_store.mark_directives_consumed(
+                    self.study.study_id,
+                    [d.directive_id for d in pending_directives],
+                )
+                if consumed:
+                    self._emit(self.study.session_id, "study_directives_consumed", {
+                        "study_id": sid,
+                        "round": round_num,
+                        "consumed_ids": [d.directive_id for d in pending_directives],
+                        "count": consumed,
+                    })
 
             # ── budget enforcement: time/turn ─────────────────────
             self._account_round_budget(result)
@@ -342,7 +365,12 @@ class AutoresearchExecutor:
 
     # ── per-round execution ────────────────────────────────────────
 
-    def _run_one_round(self, round_num: int, previous_summary) -> dict:
+    def _run_one_round(
+        self,
+        round_num: int,
+        previous_summary,
+        directives_text: str | None = None,
+    ) -> dict:
         """Blocking: invoke run_research_round. Runs via to_thread."""
 
         from strategy_research.core.autoresearch import run_research_round as _runner
@@ -358,7 +386,32 @@ class AutoresearchExecutor:
             lazy_detection_interval=self.study.lazy_detection_interval,
             keep_recent=self.study.keep_recent,
             previous_summary=previous_summary,
+            directives=directives_text,
         )
+
+    @staticmethod
+    def _format_directives(directives) -> str:
+        """Render the pending-directive list as a single prompt context
+        block that the researcher agent sees at the top of its prompt.
+
+        Format::
+
+            <user-directives>
+            The following directives were issued by the user while this
+            study was running. Honour them in this round's research plan:
+            - <content>
+            - <content>
+            </user-directives>
+        """
+        lines = ["<user-directives>",
+                 "The following directives were issued by the user while "
+                 "this study was running. Honour them in this round's "
+                 "research plan:"]
+        for d in directives:
+            content = d.content.replace("\n", " ").strip()
+            lines.append(f"- [{d.created_at}] {content}")
+        lines.append("</user-directives>")
+        return "\n".join(lines)
 
     # ── budget accounting ──────────────────────────────────────────
 

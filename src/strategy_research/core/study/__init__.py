@@ -18,6 +18,7 @@ from __future__ import annotations
 from .models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,
+    StudyDirective,
     StudyRecord,
     StudyStatus,
     default_metric_targets,
@@ -43,6 +44,7 @@ __all__ = [
     "MetricTarget",
     "NullEmitter",
     "ShutdownReason",
+    "StudyDirective",
     "StudyRecord",
     "StudyScheduler",
     "StudyStatus",
