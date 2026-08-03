@@ -390,6 +390,10 @@ class EventStore:
             "assistant_message",
             "compact",
             "compact.ended",
+            # Each LLM iteration boundary persists in-flight responses
+            # so a refresh during a long agent run still shows the
+            # completed iterations (not just finalized messages).
+            "iter_start",
         }
         return event_type in boundary_types
 

@@ -203,3 +203,28 @@ class TestFactory:
         EventStoreFactory.reset()
         e2 = EventStoreFactory.create(db_path=tmp_db)
         assert e1 is not e2
+
+
+# ── Projector flush boundary (P0) ──────────────────────────────────
+
+
+class TestShouldFlushBoundary:
+    async def test_should_flush_boundary_types(self, es) -> None:
+        for event_type in (
+            "message_received",
+            "assistant_message",
+            "compact",
+            "compact.ended",
+            "iter_start",
+        ):
+            assert es._should_flush(event_type), event_type
+
+    async def test_should_not_flush_streaming_deltas(self, es) -> None:
+        for event_type in (
+            "text_delta",
+            "thinking_delta",
+            "tool_progress",
+            "text.started",
+            "thinking_start",
+        ):
+            assert not es._should_flush(event_type), event_type
