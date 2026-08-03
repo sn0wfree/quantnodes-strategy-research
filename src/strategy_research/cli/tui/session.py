@@ -230,16 +230,26 @@ class ChatSession:
         mode = getattr(self.ctx, "interactive_mode", "chat")
         role = "researcher" if mode == "goal" else "chat"
 
-        # Pass prior conversation turns as history context.
-        # ctx.history ends with the current user message (appended by
-        # process_turn); exclude it so the loop treats `task` as current.
-        history = list(self.ctx.history[:-1]) if len(self.ctx.history) > 1 else None
+        # Phase 7+8: history via MemoryManager (shared SQLite at
+        # ~/.quantnodes/sessions.db). Falls back to self.ctx.history if
+        # MemoryManager cannot be constructed (e.g. SQLite driver missing).
+        session_id = getattr(self.ctx, "session_id", "cli")
+        try:
+            from strategy_research.core.agent.memory_manager import (
+                get_default_memory_manager,
+            )
+            mm = get_default_memory_manager()
+            full_history = await mm.get(session_id)
+            # ctx.history ends with the current user message; exclude it
+            history = full_history[:-1] if len(full_history) > 1 else None
+        except Exception:
+            history = list(self.ctx.history[:-1]) if len(self.ctx.history) > 1 else None
 
         from strategy_research.core.agent.chat_loop import build_chat_agent_loop
 
         loop = build_chat_agent_loop(
             config=cfg or self.llm_client.config,
-            session_id=getattr(self.ctx, "session_id", "cli"),
+            session_id=session_id,
             role=role,
             on_event=self.app.route_agent_event,
             workspace=None,
@@ -257,9 +267,14 @@ class ChatSession:
         # mirror - we just call loop.arun(task) and let it build messages.
         result = await loop.arun(task, history=history)
 
-        # Append assistant answer to ctx.history (preserve interactive ctx)
+        # Phase 7+8: persist via MemoryManager (shared SQLite with web)
         if result.answer:
-            self.ctx.history.append({"role": "assistant", "content": result.answer})
+            try:
+                await mm.append(session_id, "user", task)
+                await mm.append(session_id, "assistant", result.answer)
+            except Exception:
+                # Fallback: keep ctx.history in sync (legacy path)
+                self.ctx.history.append({"role": "assistant", "content": result.answer})
 
         # End streaming lifecycle (defensive close in case no
         # ``assistant_message`` event arrived).

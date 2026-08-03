@@ -25,7 +25,6 @@ from typing import Any, Optional
 
 from textual.app import App
 from textual.containers import Horizontal
-from textual.widgets import Header as TUIHeader
 
 from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.keybindings import TUI_BINDINGS
@@ -34,25 +33,21 @@ from strategy_research.cli.tui.messages import (
     WriteTranscript,
 )
 from strategy_research.cli.tui.session import ChatSession
-from strategy_research.cli.tui.workers.workflow_worker import (
-    WorkflowWorker,
-    WorkflowWorkerState,
-)
 from strategy_research.cli.tui.widgets import (
-    ActivityRail,
     Banner,
     ChatInput,
     CommandSidebar,
     GoalPanel,
     HintFooter,
-    Milestone,
     ModeBar,
     ResumeOrNewModal,
     StatusHeader,
     ThinkingSpinner,
-    TimelineEntry,
     ToolsRail,
     TranscriptView,
+)
+from strategy_research.cli.tui.workers.workflow_worker import (
+    WorkflowWorker,
 )
 
 # CSS_PATH is resolved relative to the file defining the App — Textual
@@ -378,8 +373,8 @@ class ResearchApp(App):
             # Markdown renders as garbled paragraph text.  We detect and
             # reformat it into a fenced ```json``` block before passing
             # to write_markdown.
-            from strategy_research.cli.tui.text_filters import extract_thinking_tags
             from strategy_research.cli.tui.content_formatter import reformat_body_content
+            from strategy_research.cli.tui.text_filters import extract_thinking_tags
             raw_content = data.get("content", "") or ""
             think_content, body_content = extract_thinking_tags(raw_content)
             try:
@@ -639,9 +634,11 @@ class ResearchApp(App):
     def action_show_help(self) -> None:
         """F1 — render the help table into the transcript."""
         try:
-            from strategy_research.cli.commands.help import render_help_table
-            from rich.console import Console as RichConsole
             import io
+
+            from rich.console import Console as RichConsole
+
+            from strategy_research.cli.commands.help import render_help_table
             buf = io.StringIO()
             render_help_table(console=RichConsole(file=buf, force_terminal=False))
             if buf.getvalue():
@@ -659,6 +656,19 @@ class ResearchApp(App):
         # Also wipe memory for the session so re-runs start clean.
         if self.session is not None:
             self.ctx.history = []
+            # Phase 7+8: also clear in MemoryManager (SQLite)
+            try:
+                import asyncio
+
+                from strategy_research.core.agent.memory_manager import (
+                    get_default_memory_manager,
+                )
+                mm = get_default_memory_manager()
+                asyncio.get_event_loop().run_until_complete(
+                    mm.clear(getattr(self.ctx, "session_id", ""))
+                )
+            except Exception:
+                pass
 
     def action_toggle_sidebar(self) -> None:
         """Ctrl+1 — toggle the Commands sidebar visibility."""
