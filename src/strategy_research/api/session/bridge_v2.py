@@ -17,21 +17,24 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_bridge_attached = False
-
-
 def attach_eventstore_to_sse(event_store) -> None:
-    """Attach EventStore → SSEEventBuffer bridge (idempotent).
+    """Attach EventStore → SSEEventBuffer bridge (idempotent per instance).
 
     After calling this, every ``EventStore.emit()`` will also push to the
     legacy SSEEventBuffer (``api.sse_buffer.sse_buffer``), so the existing
     ``/api/chat/events`` endpoint keeps working.
 
+    Idempotence is tracked per EventStore instance (attribute
+    ``_sse_bridge_attached``) — NOT via a module global — because the app
+    creates multiple EventStore instances (e.g. a module-level one at
+    import + one per SessionService via _get_session_service). A module
+    global would attach to only the first instance and leave the real
+    SessionService EventStore without an sse_pusher, breaking live SSE.
+
     Args:
-        event_store: EventStore instance (from ``get_default_event_store()``).
+        event_store: EventStore instance to attach the bridge to.
     """
-    global _bridge_attached
-    if _bridge_attached:
+    if getattr(event_store, "_sse_bridge_attached", False):
         return
 
     try:
@@ -62,7 +65,7 @@ def attach_eventstore_to_sse(event_store) -> None:
             logger.warning("SSEEventBuffer mirror failed: %s", exc)
 
     event_store._sse_pusher = wrapped_pusher
-    _bridge_attached = True
+    event_store._sse_bridge_attached = True
 
 
 __all__ = ["attach_eventstore_to_sse"]

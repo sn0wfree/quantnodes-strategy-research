@@ -401,7 +401,25 @@ class AgentLoop:
 
         tools = self.registry.get_definitions() or None
         try:
+            chunk_count = 0
             async for chunk in self.client.astream(messages, tools=tools):
+                chunk_count += 1
+                if chunk_count <= 3:
+                    logger.debug(
+                        "[DIAG] _astream_chat chunk#%d: delta_content=%.100r "
+                        "delta_thinking=%.100r finish_reason=%r tool_calls=%d usage=%r",
+                        chunk_count,
+                        chunk.delta_content[:100] if chunk.delta_content else "",
+                        chunk.delta_thinking[:100] if chunk.delta_thinking else "",
+                        chunk.finish_reason,
+                        len(chunk.delta_tool_calls),
+                        chunk.usage,
+                    )
+                if chunk.delta_thinking:
+                    self._emit("thinking_delta", {"delta": chunk.delta_thinking})
+                    # 让出 event loop，让前端逐字看到 thinking
+                    await asyncio.sleep(0)
+
                 if chunk.delta_content:
                     if full_content == "":
                         self._emit("thinking_done", {})
@@ -410,6 +428,10 @@ class AgentLoop:
                         "text": chunk.delta_content,
                         "text_id": text_id,
                     })
+                    # 强制让出 event loop，让 SSE _event_generator 有机会
+                    # 逐个 yield text_delta（避免 async for 连续处理多个
+                    # chunk 导致 _event_generator 批量 yield → "一段一段"）
+                    await asyncio.sleep(0)
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
@@ -433,7 +455,6 @@ class AgentLoop:
 
                 if chunk.usage:
                     usage = chunk.usage
-                    self._emit("llm_usage", chunk.usage)
 
                 if chunk.finish_reason:
                     break
@@ -444,6 +465,11 @@ class AgentLoop:
 
         self._emit("thinking_end", {})
         self._emit("text.ended", {"text_id": text_id, "text": full_content})
+        # llm_usage 只在 LLM call 结束时 emit 一次（而非每 chunk）。
+        # 每 chunk emit 会导致 event_callback 再 emit session_total_tokens，
+        # 3 倍事件洪流淹没 text_delta，且 input_tokens 会被错误累加。
+        if usage:
+            self._emit("llm_usage", usage)
 
         from ..llm.parser import parse_chat_response
         raw_response: dict[str, Any] = {
@@ -465,6 +491,13 @@ class AgentLoop:
         }
         if usage:
             raw_response["usage"] = usage
+
+        logger.debug(
+            "[DIAG] _astream_chat final: full_content=%.200r tool_calls=%d usage=%r",
+            full_content[:200] if full_content else "",
+            len(accumulated_tool_calls),
+            usage,
+        )
 
         return parse_chat_response(raw_response, provider_name=self.config.provider)
 

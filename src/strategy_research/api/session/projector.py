@@ -66,6 +66,12 @@ class ProjectedMessage:
     parts: Dict[str, ProjectedPart] = field(default_factory=dict)
     # attempt_id is for SSE correlation; not stored in messages table
     attempt_id: Optional[str] = None
+    # Tracks the currently open thinking block so ``thinking_delta``
+    # and ``thinking_end`` events (which arrive without their start's
+    # seq) know which part to append to / close. Reset to ``None`` on
+    # ``thinking_end``. Not persisted in the messages table — it's a
+    # projector-in-memory bookkeeping field only.
+    open_thinking_part_id: Optional[str] = None
 
     def parts_in_order(self) -> List[ProjectedPart]:
         """Return parts sorted by seq."""
@@ -190,12 +196,28 @@ class Projector:
             EventType.TOOL_CALL: self._on_tool_call,
             EventType.TOOL_RESULT: self._on_tool_result,
             EventType.TOOL_PROGRESS: self._on_tool_progress,
-            # Note: thinking events are absorbed but not stored as parts
-            # in B1; they're preserved in event_log for future use.
-            EventType.THINKING_START: lambda e, s: None,
-            EventType.THINKING_DELTA: lambda e, s: None,
-            EventType.THINKING_DONE: lambda e, s: None,
-            EventType.THINKING_END: lambda e, s: None,
+            # Thinking blocks: each ``thinking_start`` opens a new
+            # ProjectedPart (id = ``think_{event.seq}`` so concurrent
+            # thinking blocks in the same message don't collide),
+            # ``thinking_delta`` appends text, ``thinking_done`` /
+            # ``thinking_end`` are no-ops (the part is sealed by
+            # ``agent_done`` / DB reload; the frontend folds via
+            # ``collapsed`` on the part itself).
+            EventType.THINKING_START: self._on_thinking_start,
+            EventType.THINKING_DELTA: self._on_thinking_delta,
+            EventType.THINKING_DONE: self._on_thinking_done,
+            EventType.THINKING_END: self._on_thinking_end,
+            # Future-proof handlers for structured part events the
+            # backend doesn't emit yet (the only consumer today is
+            # tool_call). Wiring them up now means the next time a
+            # contributor adds ``emit("file_edit", ...)`` or similar
+            # to the AgentLoop, the projector already knows how to
+            # persist the part — no silent B1-style ``lambda: None``
+            # bug.
+            EventType.FILE_EDIT: self._on_file_edit,
+            EventType.TABLE: self._on_table,
+            EventType.CHART: self._on_chart,
+            EventType.IMAGE: self._on_image,
             # Compaction events create a compaction message (system)
             EventType.COMPACT: self._on_compact,
             EventType.COMPACT_ENDED: self._on_compact,
@@ -742,36 +764,43 @@ class Projector:
             return
         if tc_id in msg.parts:
             return
-        # Build tool_call data: opencode Part shape + preserve any
-        # LLM-API-style "function" sub-object if present.
+        # Build tool_call data in the frontend ToolCallPart shape
+        # (name/arguments/status) AND keep backend-compatible fields
+        # (tool/input/state) so _convert_messages_to_history still works.
         #
-        # Two input shapes are supported:
-        # 1. Flat: {tool, input} — used by service.py after event_callback
-        #    flattens
+        # Two input event shapes are supported:
+        # 1. Flat: {tool, name, id, arguments} — loop._emit("tool_call") shape
         # 2. Nested: {function: {name, arguments}} — LLM API style
-        #    (arguments may be a JSON string, not a dict)
         #
-        # Both shapes are preserved: the part's `tool` and `input`
-        # fields provide the opencode Part view, while `function`
-        # is preserved verbatim if it was in the event data.
+        # Frontend ToolCallPart reads: name, arguments, status, result, progress.
+        # If these are missing on DB reload, ToolCallBlock shows blank icons
+        # and undefined status → "tool call 标识消失". So we MUST populate them.
         data: Dict[str, Any] = {
             "type": "tool_call",
             "id": tc_id,
             "state": "call",
+            "status": "running",
         }
-        # Tool name resolution: prefer flat `tool`, fall back to function.name
+        # Tool name resolution: prefer flat `name` (loop.py emits both
+        # `tool` and `name`), fall back to `tool`, then function.name.
         function = event.data.get("function")
         if isinstance(function, dict):
             data["function"] = function
             data["tool"] = function.get("name", "")
+            data["name"] = event.data.get("name") or data["tool"]
         else:
             data["tool"] = event.data.get("tool", "")
-        # Input/arguments resolution: prefer flat `input`, fall back to arguments
-        if "input" in event.data:
-            data["input"] = event.data["input"]
-        elif "arguments" in event.data:
+            data["name"] = event.data.get("name") or data["tool"]
+        # Arguments resolution: prefer flat `arguments` (loop.py shape),
+        # fall back to `input`, then function.arguments.
+        if "arguments" in event.data:
+            data["arguments"] = event.data["arguments"]
             data["input"] = event.data["arguments"]
+        elif "input" in event.data:
+            data["arguments"] = event.data["input"]
+            data["input"] = event.data["input"]
         elif isinstance(function, dict) and "arguments" in function:
+            data["arguments"] = function["arguments"]
             data["input"] = function["arguments"]
 
         msg.parts[tc_id] = ProjectedPart(
@@ -816,6 +845,11 @@ class Projector:
         part.data["result"] = event.data.get("result", event.data.get("preview", ""))
         part.data["status"] = event.data.get("status", "done")
         part.data["state"] = "done"
+        # Ensure name/arguments survive (defensive for tool_result-first cases)
+        if "name" not in part.data:
+            part.data["name"] = event.data.get("name") or event.data.get("tool", "")
+        if "arguments" not in part.data:
+            part.data["arguments"] = event.data.get("arguments") or event.data.get("input", "")
 
     def _on_tool_progress(
         self, event: EventV2, state: ProjectedSession,
@@ -837,6 +871,202 @@ class Projector:
             "time": event.time_created,
         })
         part.data["progress"] = progress
+
+    # ── Thinking blocks (B7-fix: was lambda: None) ──────────────
+
+    def _on_thinking_start(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """Open a new thinking block.
+
+        The backend's ``thinking_start`` event has no ``thinking_id``
+        field (unlike ``text_id``) — each block is scoped to the
+        current message. We derive a stable part_id from
+        ``event.seq`` so concurrent thinking blocks in the same
+        message don't collide (verified: a single message can have
+        3+ thinking blocks when the LLM alternates between thinking
+        and tool calls). The part_id is recorded in
+        ``ProjectedMessage.open_thinking_part_id`` so subsequent
+        ``thinking_delta`` and ``thinking_end`` events know which
+        part to append to / close.
+        """
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = f"think_{event.seq}"
+        if part_id in msg.parts:
+            # Idempotent on replay: re-emission of the same start
+            # event must not create a duplicate part. The existing
+            # part's open state is restored so subsequent deltas
+            # still append to the right block.
+            msg.open_thinking_part_id = part_id
+            return
+        msg.parts[part_id] = ProjectedPart(
+            id=part_id,
+            type="thinking",
+            data={"type": "thinking", "text": "", "collapsed": True},
+            seq=len(msg.parts),
+            time_created=event.time_created,
+        )
+        msg.open_thinking_part_id = part_id
+
+    def _on_thinking_delta(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """Append the delta to the currently-open thinking block.
+
+        If no thinking block is open (the matching ``thinking_start``
+        was missed — e.g. event loss during reconnect / replay), we
+        lazy-create one keyed by ``event.seq`` so the text is not
+        lost. Mirrors the same fallback in ``_on_text_delta``.
+        """
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = msg.open_thinking_part_id
+        if part_id is None or part_id not in msg.parts:
+            # Lazy create — fall back to the seq-keyed id. This
+            # creates a separate part from the one the missing start
+            # would have opened. We set the new part as the open one
+            # so subsequent deltas and the eventual end land in the
+            # same part.
+            part_id = f"think_{event.seq}"
+            msg.parts[part_id] = ProjectedPart(
+                id=part_id,
+                type="thinking",
+                data={"type": "thinking", "text": "", "collapsed": True},
+                seq=len(msg.parts),
+                time_created=event.time_created,
+            )
+            msg.open_thinking_part_id = part_id
+        part = msg.parts[part_id]
+        part.data["text"] = part.data.get("text", "") + event.data.get("delta", "")
+
+    def _on_thinking_done(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """No-op: ``thinking_done`` is informational, the part is
+        already accumulated by ``thinking_delta``. We leave collapse
+        state as-is so the frontend can decide based on its own
+        streaming flags. The part remains "open" (in case more
+        deltas arrive) until ``thinking_end`` is seen.
+        """
+        return
+
+    def _on_thinking_end(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """Close the currently-open thinking block.
+
+        The thinking part is now sealed — subsequent ``thinking_delta``
+        events (which shouldn't happen, but might on a replay
+        boundary) will lazy-create a new part. The persisted part
+        keeps ``collapsed: True`` so DB reloads render folded.
+        """
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        # Only clear the open pointer if it's still set; a second
+        # ``thinking_end`` (replay) is then a true no-op.
+        if msg.open_thinking_part_id is not None:
+            msg.open_thinking_part_id = None
+
+    # ── Future-proof part handlers (B7-2: defense-in-depth) ──────
+    #
+    # The backend's AgentLoop does NOT currently emit file_edit /
+    # table / chart / image events (see docs/todo or
+    # webui/frontend/src/hooks/sse/types.ts:43-49 for the full
+    # design intent). Wiring them here is *insurance* — if a future
+    # contributor adds ``emit("file_edit", ...)`` to loop.py, the
+    # projector will already know how to persist the part instead of
+    # silently dropping it like the original thinking bug.
+
+    def _on_file_edit(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = event.data.get("id") or f"file_edit_{event.seq}"
+        if part_id in msg.parts:
+            return
+        msg.parts[part_id] = ProjectedPart(
+            id=part_id,
+            type="file_edit",
+            data={
+                "type": "file_edit",
+                "file_path": event.data.get("file_path", ""),
+                "old_content": event.data.get("old_content", ""),
+                "new_content": event.data.get("new_content", ""),
+            },
+            seq=len(msg.parts),
+            time_created=event.time_created,
+        )
+
+    def _on_table(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = event.data.get("id") or f"table_{event.seq}"
+        if part_id in msg.parts:
+            return
+        msg.parts[part_id] = ProjectedPart(
+            id=part_id,
+            type="table",
+            data={
+                "type": "table",
+                "headers": event.data.get("headers", []),
+                "rows": event.data.get("rows", []),
+                "caption": event.data.get("caption"),
+            },
+            seq=len(msg.parts),
+            time_created=event.time_created,
+        )
+
+    def _on_chart(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = event.data.get("id") or f"chart_{event.seq}"
+        if part_id in msg.parts:
+            return
+        msg.parts[part_id] = ProjectedPart(
+            id=part_id,
+            type="chart",
+            data={
+                "type": "chart",
+                "chart_type": event.data.get("chart_type", "bar"),
+                "data": event.data.get("data", []),
+                "title": event.data.get("title"),
+            },
+            seq=len(msg.parts),
+            time_created=event.time_created,
+        )
+
+    def _on_image(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = event.data.get("id") or f"image_{event.seq}"
+        if part_id in msg.parts:
+            return
+        msg.parts[part_id] = ProjectedPart(
+            id=part_id,
+            type="image",
+            data={
+                "type": "image",
+                "url": event.data.get("url", ""),
+                "alt": event.data.get("alt"),
+            },
+            seq=len(msg.parts),
+            time_created=event.time_created,
+        )
 
     def _on_compact(
         self, event: EventV2, state: ProjectedSession,

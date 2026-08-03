@@ -465,9 +465,22 @@ class OpenAICompatClient:
                         # Stream content
                         try:
                             async for line in response.aiter_lines():
+                                if not started and line.startswith("data: "):
+                                    logger.debug("[DIAG] astream first raw line: %.200s", line)
                                 chunk = parse_stream_chunk(line, self.config.provider)
                                 if chunk is not None:
                                     started = True
+                                    if not hasattr(chunk, '_diag_logged'):
+                                        logger.debug(
+                                            "[DIAG] astream chunk: delta_content=%.100r delta_thinking=%.100r "
+                                            "finish_reason=%r tool_calls=%d usage=%r",
+                                            chunk.delta_content[:100] if chunk.delta_content else "",
+                                            chunk.delta_thinking[:100] if chunk.delta_thinking else "",
+                                            chunk.finish_reason,
+                                            len(chunk.delta_tool_calls),
+                                            chunk.usage,
+                                        )
+                                        chunk._diag_logged = True  # type: ignore[attr-defined]
                                     yield chunk
                                     if chunk.finish_reason:
                                         return
