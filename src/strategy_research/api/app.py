@@ -68,15 +68,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         """Background tasks that run during the app's lifetime.
 
-        - Set EventBus loop for thread-safe event publishing
+        - Set EventStore for event publishing (via sse_pusher callback)
         - Schedule model catalog refresh 5s after startup so the user
           sees fresh metadata without blocking first response.
         """
-        # Set EventBus loop for thread-safe event publishing
-        from .routers.chat import _event_bus
-        loop = asyncio.get_event_loop()
-        _event_bus.set_loop(loop)
-        logger.info("[STARTUP] EventBus loop set for thread-safe events")
+        # EventStore uses sse_pusher callback — no set_loop needed
+        from .routers.chat import _event_store
+        logger.info("[STARTUP] EventStore ready for event publishing")
 
         task = asyncio.create_task(_refresh_model_catalog_async())
         try:
