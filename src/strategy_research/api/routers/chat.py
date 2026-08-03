@@ -12,24 +12,25 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..session.bridge import attach_eventbus_to_sse
-from ..session.event_bus_v2 import EventBusV2
-from ..session.events import EventBus
+from ..session.bridge_v2 import attach_eventstore_to_sse
 from ..session.service import SessionService
 from ..session.store import SessionStore
 from ..sse_buffer import sse_buffer
+from strategy_research.core.agent.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# ── Shared SessionService (singleton) ─────────────────────────────────────
-# Borrowed from vibe_trading: one service for the whole process, with an
-# EventBus that mirrors events to the legacy SSEEventBuffer for the existing
-# FastAPI SSE endpoint.
+# ── Shared EventStore + SessionService (singleton) ──────────────────────────
+# Replaced EventBus + EventBusV2 with EventStore (Phase 7+8).
+# EventStore handles all three sinks:
+#   1. event_log (SQLite, source of truth)
+#   2. SSE push (via sse_pusher callback → SSEEventBuffer)
+#   3. messages + message_parts (via Projector.flush, flush_to_messages=True)
 
-_event_bus = EventBus()
-attach_eventbus_to_sse(_event_bus)
+_event_store = EventStore()
+attach_eventstore_to_sse(_event_store)
 
 # True process-wide singleton. Recreating the service per request was a
 # real bug: queues/tasks/pause state live on the instance, so cancel,
@@ -41,15 +42,10 @@ _session_service_cache: dict[str, SessionService] = {}
 def _get_session_service() -> SessionService:
     """Return the process-wide singleton SessionService for the DB.
 
-    Uses EventBusV2 for triple-write:
+    Uses EventStore for triple-write:
     1. event_log (persistent source of truth)
-    2. legacy EventBus (SSE delivery)
-    3. messages + message_parts tables via Projector.flush() (B4)
-
-    In B4, messages + message_parts are materialized views — the
-    projector is the sole writer. service.py's direct writes remain
-    during the B4 transition window for safety, and will be removed
-    in a subsequent commit.
+    2. SSE push (via sse_pusher callback → SSEEventBuffer)
+    3. messages + message_parts tables via Projector.flush (flush_to_messages=True)
     """
     from .web_session import _get_db_path
 
@@ -57,53 +53,14 @@ def _get_session_service() -> SessionService:
     service = _session_service_cache.get(db_path)
     if service is None:
         store = SessionStore(db_path=db_path)
-        v2_bus = EventBusV2(_event_bus, db_path, flush_to_messages=True)
-        service = SessionService(store=store, event_bus=v2_bus)
+        es = EventStore(db_path=db_path, flush_to_messages=True)
+        attach_eventstore_to_sse(es)
+        service = SessionService(store=store, event_bus=es)
         _session_service_cache[db_path] = service
     return service
 
 
-# Per-session conversation history — Phase 7+8: MemoryManager primary,
-# emergency fallback only when MemoryManager is unavailable.
-#
-# The legacy ``_session_histories`` module-level dict (Phase 1 memory leak)
-# was the original primary cache, but was superseded by SQLite via
-# ``api/session/service.py`` + ``persist_message``. Phase 7+8 unified
-# everything under ``MemoryManager``. This dict now serves ONLY as the
-# last-resort fallback when ``MemoryManagerFactory`` cannot produce a
-# working instance (e.g. SQLite driver missing, db_path invalid).
-_emergency_session_histories: dict[str, list[dict[str, Any]]] = {}
-
-
-def _get_or_create_history(session_id: str) -> list[dict[str, Any]]:
-    """Get history. Phase 7+8: routes through ``MemoryManager`` first.
-
-    Returns an emergency in-memory list only when ``MemoryManager`` cannot
-    be constructed at all (a degraded-mode signal — health endpoint will
-    show ``mm_degraded=True``). Normal operation persists to SQLite.
-    """
-    try:
-        from strategy_research.core.agent.memory_manager import (
-            get_default_memory_manager,
-        )
-        mm = get_default_memory_manager()
-        if mm.is_degraded:
-            return _emergency_session_histories.setdefault(session_id, [])
-        # Run async helper synchronously (callers are in async context).
-        # The service.py path is the production async writer; this is a
-        # best-effort read for legacy ``_get_or_create_history`` callers.
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            # Can't await from sync; fall back to emergency buffer.
-            return _emergency_session_histories.setdefault(session_id, [])
-        except RuntimeError:
-            return _emergency_session_histories.setdefault(session_id, [])
-    except Exception as exc:
-        logger.warning(
-            "MemoryManager unavailable, using emergency buffer: %s", exc,
-        )
-        return _emergency_session_histories.setdefault(session_id, [])
+# ── LLM Config ────────────────────────────────────────────────────────
 
 
 def _build_llm_config():
@@ -305,15 +262,10 @@ async def _run_agent_loop_background(
             get_default_memory_manager,
         )
 
-        # Phase 7+8: history via MemoryManager (SQLite primary, emergency fallback)
-        try:
-            mm = get_default_memory_manager()
-            history = await mm.get(session_id)
-        except Exception as exc:
-            logger.warning(
-                "MemoryManager unavailable, using emergency buffer: %s", exc,
-            )
-            history = _emergency_session_histories.setdefault(session_id, [])
+        # Phase 7+8: history via MemoryManager (SQLite primary, InMemoryStore fallback)
+        # MemoryManager handles its own degradation (SQLite → InMemoryStore).
+        mm = get_default_memory_manager()
+        history = await mm.get(session_id) or []
 
         loop = build_chat_agent_loop(
             config=cfg,
@@ -329,16 +281,8 @@ async def _run_agent_loop_background(
 
         # Persist exchange (Phase 7+8: via MemoryManager)
         if result.answer:
-            try:
-                await mm.append(session_id, "user", task)
-                await mm.append(session_id, "assistant", result.answer)
-            except Exception as exc:
-                logger.warning(
-                    "MemoryManager append failed, using emergency buffer: %s", exc,
-                )
-                # Last-resort: emergency buffer still in-memory
-                history.append({"role": "user", "content": task})
-                history.append({"role": "assistant", "content": result.answer})
+            await mm.append(session_id, "user", task)
+            await mm.append(session_id, "assistant", result.answer)
 
         # Signal completion
         sse_buffer.push(
@@ -550,7 +494,7 @@ async def send_async(body: ChatMessage, request: Request):
 async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     """Handle /goal slash commands without going through AgentLoop.
 
-    B5: All persistence via EventBusV2 → projector.flush(). No direct
+    B5: All persistence via EventStore → projector.flush(). No direct
     persist_message / sse_buffer.push calls.
     """
     from ...core.goal import EvidenceInput, GoalStatus, GoalStore
@@ -568,7 +512,7 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     user_msg_id = str(uuid.uuid4())
     assistant_msg_id = str(uuid.uuid4())
 
-    # Get EventBusV2 (with flush_to_messages=True)
+    # Get EventStore (with flush_to_messages=True)
     service = _get_session_service()
     event_bus = service.event_bus
 
@@ -735,7 +679,7 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
     service = _get_session_service()
     cfg = _build_llm_config()
 
-    # B5: user message persisted via EventBusV2 → projector.flush()
+    # B5: user message persisted via EventStore → projector.flush()
     user_msg_id = str(uuid.uuid4())
 
     # Execute compaction
@@ -759,7 +703,7 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
         logger.exception("compact_history failed")
         response_text = f"❌ 压缩失败: {exc}"
 
-    # B5: assistant message persisted via EventBusV2 → projector.flush()
+    # B5: assistant message persisted via EventStore → projector.flush()
     assistant_msg_id = str(uuid.uuid4())
 
     # Emit SSE events (3-step text protocol) — also flushes to messages table

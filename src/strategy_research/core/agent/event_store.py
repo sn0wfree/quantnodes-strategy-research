@@ -78,6 +78,12 @@ class EventStore:
     Drop-in replacement for ``EventBus`` + ``EventBusV2``. The same SQLite
     DB (``~/.quantnodes/sessions.db``) holds both ``messages`` and
     ``event_log`` tables — single physical file, two logical tables.
+
+    When ``flush_to_messages=True``, every emit() also calls
+    Projector.flush() to update the ``messages`` + ``message_parts``
+    tables (materialized views). This is the safe default for the
+    web/API path — the projector flush is best-effort: if it fails,
+    the event_log still has all events (source of truth).
     """
 
     def __init__(
@@ -85,8 +91,12 @@ class EventStore:
         db_path: Path | None = None,
         cache_config: CacheConfig | None = None,
         sse_pusher: Callable[[str, EventV2], None] | None = None,
+        flush_to_messages: bool = False,
     ):
         self._db_path = resolve_db_path(db_path)
+        self._flush_to_messages = flush_to_messages
+        # Lazy projector (avoids circular import at startup)
+        self._projector = None
         cache_config = cache_config or CacheConfig.from_env()
 
         # 1. SQLite backend with auto-repair fallback
@@ -167,7 +177,9 @@ class EventStore:
         """Emit event: SQLite → cache → SSE push + live subscribers.
 
         Same signature as legacy EventBus.emit(). Auto-assigns monotonic
-        seq per session.
+        seq per session. When ``flush_to_messages=True``, also calls
+        Projector.flush() to update messages + message_parts tables
+        (best-effort — failures are logged and ignored).
         """
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             seq = self._next_seq(session_id)
@@ -196,6 +208,21 @@ class EventStore:
 
         # Live subscribers
         self._broadcast_live(session_id, event)
+
+        # Projector flush (best-effort: event_log is the source of truth)
+        if self._flush_to_messages and self._should_flush(event_type):
+            try:
+                proj = self._get_projector()
+                if proj is not None:
+                    state, touched = proj.project_incremental(
+                        session_id, collect_touched=True,
+                    )
+                    proj.flush(state, touched=touched)
+            except Exception as exc:
+                logger.warning(
+                    "Projector flush failed for session %s: %s",
+                    session_id, exc,
+                )
 
         return event
 
@@ -345,6 +372,27 @@ class EventStore:
             except asyncio.QueueFull:
                 logger.warning("Live queue full for session %s", session_id)
 
+    def _get_projector(self):
+        """Lazy-import Projector to avoid circular imports at startup."""
+        if self._projector is None and self._flush_to_messages:
+            try:
+                from strategy_research.api.session.projector import Projector
+                self._projector = Projector(self._db_path)
+            except Exception as exc:
+                logger.warning("Failed to create Projector: %s", exc)
+                return None
+        return self._projector
+
+    def _should_flush(self, event_type: str) -> bool:
+        """Determine if an event should trigger a projector flush."""
+        boundary_types = {
+            "message_received",
+            "assistant_message",
+            "compact",
+            "compact.ended",
+        }
+        return event_type in boundary_types
+
     def health_report(self) -> dict[str, Any]:
         return {
             "event_store": {
@@ -383,6 +431,7 @@ class EventStoreFactory:
         db_path: Path | None = None,
         cache_config: CacheConfig | None = None,
         sse_pusher: Callable[[str, EventV2], None] | None = None,
+        flush_to_messages: bool = False,
     ) -> EventStore:
         global _default_instance
         if _default_instance is None:
@@ -390,6 +439,7 @@ class EventStoreFactory:
                 db_path=db_path,
                 cache_config=cache_config,
                 sse_pusher=sse_pusher,
+                flush_to_messages=flush_to_messages,
             )
         return _default_instance
 

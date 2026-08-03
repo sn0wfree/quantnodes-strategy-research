@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from strategy_research.core.agent.compact import CompactConfig, compact_messages
+from strategy_research.core.agent.event_store import EventStore
 from strategy_research.core.llm import LLMConfig
 
-from .events import EventBus
 from .models import Attempt, AttemptStatus, Message
 from .store import SessionStore
 
@@ -62,13 +62,13 @@ class SessionService:
 
     Attributes:
         store: SQLite-backed SessionStore.
-        event_bus: SSE/EventBus for streaming events.
+        event_bus: EventStore for event_log + SSE + projector flush.
     """
 
     def __init__(
         self,
         store: SessionStore,
-        event_bus: EventBus,
+        event_bus: EventStore,
     ) -> None:
         self.store = store
         self.event_bus = event_bus
