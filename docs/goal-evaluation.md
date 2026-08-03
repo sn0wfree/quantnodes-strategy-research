@@ -138,6 +138,8 @@
 - [x] P1-3a 子工作流 hook 补 `runner=self`
 - [x] P0-2 前端轮询：扩展 `/api/goal/status` + GoalTab 轮询
 - [x] P1-1 修 `test_api_goal_router.py` auth fixture（HMAC-SHA256）
+- [x] **P1-2 get_progress 前端 agent_statuses 展示接通**：后端 workflow SSE 改命名事件（progress / dag_update）+ 前端 progress handler 同步 agent_statuses
+- [x] **P1-8 真断点续跑**：SwarmRuntime 支持 `pre_completed` + `start_layer`；`GoalWorkflowRunner.resume_and_continue()` 复用现有 goal_id 从 checkpoint 继续执行
 - [x] P2 文档同步：cookbook branches 标注已生效 + checkpoint 局限；design §5.4 标注已接线
 
 ---

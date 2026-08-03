@@ -190,14 +190,30 @@ branches:
 > 若输出 `answer` 本身是 JSON，其键会合并到 `output` 下，因此
 > `risk_controller.output.max_drawdown` 可直接引用（无需 `answer.` 前缀）。
 
-## Checkpoint（P1.3）
+## Checkpoint（P1.3 / P1.8）
 
 `/goal checkpoint save|list|resume|delete` 可保存/列出/恢复/删除运行状态。
 
-> **局限**：checkpoint 保存的是**状态快照**（status / current_layer /
-> evidence_count / agent_statuses / layer_results），用于恢复查看与重跑分析；
-> **不是真正的断点续跑**——`resume` 不会从中间层继续执行，仍需重新
-> `start()`（会创建新 goal）。完整断点续跑属未来工作。
+P1.8 已实现真断点续跑：
+
+- `runner.checkpoint()` 保存 **layer_results**（已执行 agent 的输出 JSON）
+- `GoalWorkflowRunner.resume_and_continue()` 从 checkpoint 恢复：
+  - 复用现有 goal_id（**不创建新 goal**，保留 evidence/progress）
+  - 跳过已执行层（`SwarmRuntime.pre_completed` + `start_layer`）
+  - 下游 agent 通过 `_gather_upstream` 看到恢复的输出
+- 适用场景：进程崩溃/重启后从断点继续；不需要重新执行上游 agent
+
+CLI 用法：
+
+```python
+from strategy_research.core.goal.workflow import GoalWorkflowRunner
+
+runner = GoalWorkflowRunner(config, session_id="s", goal_id="g")
+await runner.resume_and_continue()
+```
+
+> 限制：resume 必须找到对应 goal_id 的 checkpoint（`FileNotFoundError`
+> 若缺失）；checkpoint 文件不跨机器迁移。
 
 ## Troubleshooting
 
