@@ -443,3 +443,213 @@ class TestProgressTracking:
         progress = runner.get_progress()
         # 3 agents, 3 layers (a | b | c)
         assert progress["total_layers"] == 3
+
+
+# ── True resume from checkpoint (P1.8) ────────────────────────
+
+
+class TestResumeAndContinue:
+    """GoalWorkflowRunner.resume_and_continue: real resume from
+    a saved checkpoint, reusing the existing goal_id."""
+
+    def _setup_resume(self, tmp_path, monkeypatch):
+        """Build a runner with a saved checkpoint + stub controller.
+
+        Returns (runner, executed_agent_ids) where executed_agent_ids
+        records which agents SwarmRuntime actually executed (i.e.
+        excludes the pre-completed ones).
+        """
+        from strategy_research.core.goal.workflow import (
+            GoalAgentConfig, GoalWorkflowConfig, GoalWorkflowGoalConfig,
+        )
+        from strategy_research.core.swarm.runtime import SwarmRuntime
+        from strategy_research.core.workflow.controller import WorkflowController
+
+        executed: list[str] = []
+
+        class _StubController(WorkflowController):
+            def execute_agent(self, agent_call, task, workspace=None):
+                executed.append(agent_call.agent_name)
+                return '{"answer": "stub"}'
+
+        config = GoalWorkflowConfig(
+            name="wf",
+            description="",
+            agents=[
+                GoalAgentConfig(id="a", prompt_file=".prompts/a.md"),
+                GoalAgentConfig(id="b", prompt_file=".prompts/b.md"),
+                GoalAgentConfig(id="c", prompt_file=".prompts/c.md"),
+            ],
+            dag={"a": [], "b": ["a"], "c": ["a", "b"]},
+            goal=GoalWorkflowGoalConfig(default_criteria=["c1"]),
+        )
+
+        # Point checkpoint store at tmp_path so the test is hermetic
+        monkeypatch.setenv("STRATEGY_RESEARCH_CHECKPOINT_BASE_DIR", str(tmp_path))
+
+        runner = GoalWorkflowRunner(
+            config=config, session_id="s_resume",
+        )
+        runner._goal_id = "g_resume"
+
+        # Save a checkpoint: layer 0 ('a') completed, layer 1 about
+        # to execute next.
+        runner._state.current_layer = 1  # 1-based, hook convention
+        runner._state.evidence_count = 0
+        runner._state.agent_statuses = {"a": "success"}
+        from strategy_research.core.goal.workflow_hook import GoalWorkflowHook
+        hook = GoalWorkflowHook.__new__(GoalWorkflowHook)
+        hook._layer_results = {
+            "a": {"output": '{"answer": "pre-saved"}'},
+        }
+        hook._completed = False
+        hook._evidence_count = 0
+        runner._hook = hook
+        runner.checkpoint()
+
+        # Stub the SwarmRuntime.build_controller via runner._build_controller
+        runner._build_controller = lambda: _StubController(
+            registry=mock.MagicMock(), adj={}, config=mock.MagicMock(),
+        )
+
+        return runner, executed
+
+    def test_resume_loads_layer_results_and_skips_completed_layer(
+        self, tmp_path, monkeypatch
+    ):
+        import asyncio
+        from strategy_research.core.goal.store import GoalStore
+
+        runner, executed = self._setup_resume(tmp_path, monkeypatch)
+
+        # Need a real GoalStore so resume_and_continue can reload the
+        # goal's objective for prompts.
+        store = GoalStore()
+        # Seed a goal row so the store can find it.
+        store.replace_goal(
+            session_id="s_resume",
+            objective="resume me",
+            criteria=["c1"],
+            workflow_id="wf",
+        )
+        goal = store.get_current_goal("s_resume")
+        # Align goal_id with the runner's expectation
+        runner._goal_id = goal.goal_id
+        # Re-save checkpoint under the real goal_id
+        runner.checkpoint()
+
+        asyncio.run(runner.resume_and_continue())
+
+        # Layer 0 ('a') was pre-completed → must NOT be re-executed.
+        # Layers 1 + 2 ('b', 'c') execute normally.
+        assert "a" not in executed, f"pre-completed agent re-executed: {executed}"
+        assert "b" in executed
+        assert "c" in executed
+        # runner._goal_id reused (no new replace_goal)
+        assert runner._goal_id == goal.goal_id
+
+    def test_resume_raises_when_no_checkpoint(self, tmp_path, monkeypatch):
+        """Calling resume_and_continue without a checkpoint must raise."""
+        from strategy_research.core.goal.workflow import (
+            GoalAgentConfig, GoalWorkflowConfig, GoalWorkflowGoalConfig,
+        )
+        monkeypatch.setenv("STRATEGY_RESEARCH_CHECKPOINT_BASE_DIR", str(tmp_path))
+
+        config = GoalWorkflowConfig(
+            name="wf",
+            description="",
+            agents=[GoalAgentConfig(id="a", prompt_file=".prompts/a.md")],
+            dag={"a": []},
+            goal=GoalWorkflowGoalConfig(default_criteria=["c1"]),
+        )
+        runner = GoalWorkflowRunner(config=config, session_id="s_nope")
+        runner._goal_id = "g_nope"
+
+        import asyncio
+        with pytest.raises(FileNotFoundError):
+            asyncio.run(runner.resume_and_continue())
+
+
+# ── pre_completed seeding in SwarmRuntime (P1.8) ──────────────
+
+
+class TestSwarmRuntimePreCompleted:
+    """SwarmRuntime.execute(pre_completed=..., start_layer=...)
+    skips pre-completed agents and starts execution from start_layer."""
+
+    def test_pre_completed_skips_agents_and_starts_from_start_layer(self):
+        from strategy_research.core.swarm.runtime import (
+            AgentResult, SwarmPreset, SwarmRuntime,
+        )
+        from strategy_research.core.workflow.types import AgentCall
+
+        executed: list[str] = []
+
+        class _StubController:
+            def execute_agent(self, agent_call, task, workspace=None):
+                executed.append(agent_call.agent_name)
+                return '{"answer": "stub"}'
+
+        # Pretend agents 'a' (layer 0) and 'b' (layer 1) already ran
+        pre = {
+            "a": AgentResult(agent_id="a", status=AgentStatus.SUCCESS,
+                             output='{"answer": "pre-a"}'),
+            "b": AgentResult(agent_id="b", status=AgentStatus.SUCCESS,
+                             output='{"answer": "pre-b"}'),
+        }
+        preset = SwarmPreset(
+            name="wf",
+            agents=[
+                AgentCall(agent_name="a", prompt=".prompts/a.md", context={}),
+                AgentCall(agent_name="b", prompt=".prompts/b.md", context={}),
+                AgentCall(agent_name="c", prompt=".prompts/c.md", context={}),
+            ],
+            dag={"a": [], "b": ["a"], "c": ["a", "b"]},
+        )
+
+        runtime = SwarmRuntime(controller=_StubController())
+        result = runtime.execute(
+            preset, Path("/tmp"), "task", hooks=[],
+            pre_completed=pre, start_layer=2,
+        )
+
+        # Only 'c' (layer 2) executes; pre-completed agents are skipped
+        # but their results remain in result.agent_results.
+        assert executed == ["c"]
+        assert "a" in result.agent_results
+        assert "b" in result.agent_results
+        assert "c" in result.agent_results
+
+    def test_pre_completed_partial_layer_skips_only_completed(self):
+        """Within the current layer, only pre-completed agents are skipped."""
+        from strategy_research.core.swarm.runtime import (
+            AgentResult, SwarmPreset, SwarmRuntime,
+        )
+        from strategy_research.core.workflow.types import AgentCall
+
+        executed: list[str] = []
+
+        class _StubController:
+            def execute_agent(self, agent_call, task, workspace=None):
+                executed.append(agent_call.agent_name)
+                return '{"answer": "stub"}'
+
+        # Layer 0 has 'a', 'b'; 'a' is pre-completed.
+        pre = {"a": AgentResult(agent_id="a", status=AgentStatus.SUCCESS,
+                                 output='{"answer": "pre-a"}')}
+        preset = SwarmPreset(
+            name="wf",
+            agents=[
+                AgentCall(agent_name="a", prompt=".prompts/a.md", context={}),
+                AgentCall(agent_name="b", prompt=".prompts/b.md", context={}),
+            ],
+            dag={"a": [], "b": ["a"]},
+        )
+        runtime = SwarmRuntime(controller=_StubController())
+        result = runtime.execute(
+            preset, Path("/tmp"), "task", hooks=[],
+            pre_completed=pre, start_layer=0,
+        )
+        assert executed == ["b"]
+        assert "a" in result.agent_results
+        assert "b" in result.agent_results

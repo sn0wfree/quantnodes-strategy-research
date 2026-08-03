@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..swarm.runtime import AgentStatus  # P1.8: for resume_and_continue
+
 logger = logging.getLogger(__name__)
 
 
@@ -450,6 +452,141 @@ class GoalWorkflowRunner:
             self._state.error_message = str(exc)
             self._event_bus.emit("workflow_failed", error=str(exc))
             logger.error("Goal workflow failed: %s", exc)
+
+        return self._goal_id
+
+    async def resume_and_continue(self) -> str:
+        """Resume a previously checkpointed workflow from where it stopped.
+
+        Loads the latest checkpoint for ``self._goal_id`` (or the
+        ``goal_id`` passed via ``start(goal_id=...)`` — not currently
+        supported), seeds ``SwarmRuntime`` with the saved
+        ``layer_results`` as ``pre_completed``, and continues execution
+        from the next layer. The existing goal row is reused (no new
+        ``replace_goal`` call), so existing evidence and progress are
+        preserved.
+
+        Returns:
+            The goal_id on which the workflow is continuing.
+
+        Raises:
+            FileNotFoundError: No checkpoint exists for this goal.
+        """
+        from .checkpoint_store import CheckpointStore
+        from ..swarm.runtime import AgentResult, SwarmRuntime
+
+        cps = CheckpointStore()
+        cp_data = cps.load(self._session_id, self._goal_id)
+        if cp_data is None:
+            raise FileNotFoundError(
+                f"No checkpoint for session={self._session_id} goal={self._goal_id}"
+            )
+
+        layer_results_raw = cp_data.get("layer_results", {})
+        # Reconstruct AgentResult instances so the runtime + branches
+        # can reuse the captured outputs verbatim.
+        pre_completed: dict[str, AgentResult] = {}
+        for aid, payload in layer_results_raw.items():
+            if not isinstance(payload, dict):
+                continue
+            out = payload.get("output", payload)
+            # Accept either {"output": "..."} (already extracted by the
+            # hook) or a raw worker JSON payload — normalize to a string.
+            if isinstance(out, dict):
+                import json as _json
+                out_str = _json.dumps(out, ensure_ascii=False, default=str)
+            else:
+                out_str = str(out)
+            pre_completed[aid] = AgentResult(
+                agent_id=aid,
+                status=AgentStatus.SUCCESS,
+                output=out_str,
+            )
+
+        # Determine start_layer from saved state
+        state_data = cp_data.get("state", {})
+        # current_layer in state is 1-based (hook sets it to layer_idx+1).
+        # Use it directly to start from the next layer index.
+        prev_layer_1based = int(state_data.get("current_layer", 0) or 0)
+        start_layer = prev_layer_1based  # next layer to execute
+
+        # Rebuild the evidence-map and hook (same as start, but no
+        # replace_goal). The hook's _layer_results are pre-seeded so
+        # subsequent evidence_collection doesn't double-count.
+        from .workflow_hook import GoalWorkflowHook
+        from .completion_strategy import CompletionStrategyFactory
+
+        evidence_map: dict[str, int] = {
+            agent.id: agent.evidence_criterion
+            for agent in self._config.agents
+        }
+
+        self._hook = GoalWorkflowHook(
+            session_id=self._session_id,
+            goal_id=self._goal_id,
+            evidence_map=evidence_map,
+            store=self._store,
+            runner=self,
+            completion_strategy=CompletionStrategyFactory.get(
+                self._config.completion.mode,
+            ),
+            completion_mode=self._config.completion.mode,
+            workflow_name=self._config.name,
+            event_bus=self._event_bus,
+        )
+        # Seed the hook's _layer_results so on_layer_complete doesn't
+        # re-parse already-saved outputs.
+        self._hook._layer_results = layer_results_raw
+
+        # Restore snapshot state on the runner
+        self._state.status = "running"
+        self._state.current_layer = prev_layer_1based
+        self._state.evidence_count = int(state_data.get("evidence_count", 0) or 0)
+        self._state.agent_statuses = dict(state_data.get("agent_statuses", {}))
+
+        self._event_bus.emit("workflow_resumed", goal_id=self._goal_id)
+
+        # Convert config → SwarmPreset (same as start)
+        preset = self._config.to_swarm_preset()
+        controller = self._build_controller()
+        runtime = SwarmRuntime(controller=controller)
+
+        try:
+            # Need the original objective for prompts; reload from goal
+            if self._store is None:
+                from .store import GoalStore
+                self._store = GoalStore()
+            goal = self._store.get_goal(self._goal_id)
+            objective = goal.objective if goal else ""
+
+            result = await asyncio.to_thread(
+                runtime.execute,
+                preset,
+                self._workspace,
+                objective,
+                [self._hook],
+                pre_completed,
+                start_layer,
+            )
+
+            self._state.evidence_count = self._hook.evidence_count
+            if self._hook.completed:
+                self._state.status = "completed"
+            elif result.success:
+                self._state.status = "completed"
+            else:
+                self._state.status = "error"
+                self._state.error_message = "One or more agents failed after resume"
+
+            logger.info(
+                "Goal workflow resumed+finished: goal_id=%s status=%s evidence=%d",
+                self._goal_id, self._state.status, self._hook.evidence_count,
+            )
+        except Exception as exc:
+            self._state.status = "error"
+            self._state.error_message = str(exc)
+            self._event_bus.emit("workflow_failed", error=str(exc))
+            logger.error("Goal workflow resume failed: %s", exc)
 
         return self._goal_id
 

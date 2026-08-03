@@ -21,6 +21,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CHECKPOINT_DIR = Path.home() / ".quantnodes-research" / "checkpoints"
+_CHECKPOINT_DIR_ENV = "STRATEGY_RESEARCH_CHECKPOINT_BASE_DIR"
 _VERSION = "1.0"
 
 
@@ -29,11 +30,19 @@ class CheckpointStore:
 
     Args:
         base_dir: Root directory for checkpoints.
-                  Default: ~/.quantnodes-research/checkpoints/
+                  Default: ``$STRATEGY_RESEARCH_CHECKPOINT_BASE_DIR`` if set,
+                  else ``~/.quantnodes-research/checkpoints/``.
     """
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = base_dir or _DEFAULT_CHECKPOINT_DIR
+        import os
+        env_dir = os.environ.get(_CHECKPOINT_DIR_ENV)
+        if base_dir is not None:
+            self._base_dir = base_dir
+        elif env_dir:
+            self._base_dir = Path(env_dir)
+        else:
+            self._base_dir = _DEFAULT_CHECKPOINT_DIR
 
     def _checkpoint_dir(self, session_id: str, goal_id: str) -> Path:
         return self._base_dir / session_id / goal_id

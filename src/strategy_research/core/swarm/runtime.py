@@ -128,6 +128,8 @@ class SwarmRuntime:
         workspace: Path,
         task: str,
         hooks: list[SwarmHook] | None = None,
+        pre_completed: dict[str, AgentResult] | None = None,
+        start_layer: int = 0,
     ) -> SwarmResult:
         """Execute a swarm preset with optional lifecycle hooks.
 
@@ -137,6 +139,14 @@ class SwarmRuntime:
             task: The task prompt string.
             hooks: Optional list of SwarmHook instances to call
                    at each lifecycle point.
+            pre_completed: Optional dict of agent_id → AgentResult for
+                agents that already executed in a prior run. Their
+                outputs are loaded into ``result.agent_results`` before
+                the loop starts, so downstream layers see them via
+                ``_gather_upstream`` and skip re-execution.
+            start_layer: Index of the first layer to actually execute
+                (0-based). Earlier layers' agents should appear in
+                ``pre_completed``. Default 0 (start from first layer).
 
         Returns:
             SwarmResult with per-agent outputs and success flag.
@@ -146,6 +156,10 @@ class SwarmRuntime:
         hooks = hooks or []
 
         result = SwarmResult(run_id=run_id, preset_name=preset.name)
+        # Seed pre-completed agent outputs so downstream layers see them.
+        if pre_completed:
+            for aid, ar in pre_completed.items():
+                result.agent_results[aid] = ar
         t0 = time.perf_counter()
 
         try:
@@ -153,53 +167,26 @@ class SwarmRuntime:
             branches = preset.branches or []
 
             for layer_idx, layer in enumerate(layers):
+                if layer_idx < start_layer:
+                    # Pre-completed layer — skip execution but still
+                    # notify the hook so UI state stays consistent.
+                    self._emit(hooks, "on_layer_start", layer_idx, layer, {})
+                    self._emit(
+                        hooks, "on_layer_complete",
+                        layer_idx, layer,
+                        {aid: r for aid, r in result.agent_results.items()},
+                    )
+                    continue
+
                 if run_id not in self._active_runs:
                     break  # cancelled via cancel(run_id)
 
                 # ── Hook: on_layer_start
                 self._emit(hooks, "on_layer_start", layer_idx, layer, {})
 
-                layer_futures: dict[Any, str] = {}
-                with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-                    for agent_id in layer:
-                        agent_call = self._find_agent(preset.agents, agent_id)
-                        if agent_call is None:
-                            continue
-
-                        upstream = self._gather_upstream(
-                            agent_id, preset.dag, result.agent_results,
-                        )
-
-                        future = executor.submit(
-                            self._execute_agent,
-                            agent_call, workspace, task, upstream,
-                        )
-                        layer_futures[future] = agent_id
-
-                    for future in as_completed(layer_futures):
-                        agent_id = layer_futures[future]
-                        try:
-                            agent_result = future.result()
-                            result.agent_results[agent_id] = agent_result
-
-                            # ── Hook: on_agent_complete
-                            self._emit(
-                                hooks, "on_agent_complete",
-                                agent_id, agent_result, {},
-                            )
-
-                        except Exception as exc:  # noqa: BLE001
-                            result.agent_results[agent_id] = AgentResult(
-                                agent_id=agent_id,
-                                status=AgentStatus.FAILED,
-                                error=str(exc),
-                            )
-                            self._emit(
-                                hooks, "on_agent_complete",
-                                agent_id,
-                                result.agent_results[agent_id],
-                                {},
-                            )
+                self._execute_layer(
+                    layer, preset, workspace, task, result, hooks,
+                )
 
                 # ── Hook: on_layer_complete
                 self._emit(
@@ -343,6 +330,60 @@ class SwarmRuntime:
             if a.agent_name == agent_id:
                 return a
         return None
+
+    def _execute_layer(
+        self,
+        layer: list[str],
+        preset: SwarmPreset,
+        workspace: Path,
+        task: str,
+        result: SwarmResult,
+        hooks: list[SwarmHook] | None,
+    ) -> None:
+        """Run one layer's agents in parallel, collecting outputs."""
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            layer_futures_local: dict[Any, str] = {}
+            for agent_id in layer:
+                # Skip agents already completed in a prior run.
+                if agent_id in result.agent_results:
+                    continue
+                agent_call = self._find_agent(preset.agents, agent_id)
+                if agent_call is None:
+                    continue
+
+                upstream = self._gather_upstream(
+                    agent_id, preset.dag, result.agent_results,
+                )
+                future = executor.submit(
+                    self._execute_agent,
+                    agent_call, workspace, task, upstream,
+                )
+                layer_futures_local[future] = agent_id
+
+            for future in as_completed(layer_futures_local):
+                agent_id = layer_futures_local[future]
+                try:
+                    agent_result = future.result()
+                    result.agent_results[agent_id] = agent_result
+
+                    # ── Hook: on_agent_complete
+                    self._emit(
+                        hooks, "on_agent_complete",
+                        agent_id, agent_result, {},
+                    )
+
+                except Exception as exc:  # noqa: BLE001
+                    result.agent_results[agent_id] = AgentResult(
+                        agent_id=agent_id,
+                        status=AgentStatus.FAILED,
+                        error=str(exc),
+                    )
+                    self._emit(
+                        hooks, "on_agent_complete",
+                        agent_id,
+                        result.agent_results[agent_id],
+                        {},
+                    )
 
     def _gather_upstream(
         self,
