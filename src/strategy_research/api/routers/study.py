@@ -1,0 +1,279 @@
+"""Study API router — ``/api/study/*``.
+
+Exposes the study task system: create a study (which creates a goal
+ledger row + queues the autoresearch executor), inspect status, and
+pause / resume / cancel. See ``docs/study-longhorizon-plan.md``.
+
+The scheduler is lazily wired to ``SessionService`` so the chat/study
+mutex (``is_session_processing`` / ``mark_session_processing``) works
+out of the box.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+# ── scheduler cache (mirrors chat._session_service_cache pattern) ───
+
+
+_scheduler_cache: dict[str, "StudyScheduler"] = {}
+
+
+def _get_study_scheduler():
+    """Return the process-wide StudyScheduler for the current DB.
+
+    Builds it bound to the cached SessionService so the chat/study mutex
+    primitives cooperate. Idempotent per DB path.
+    """
+    from .chat import _get_session_service
+    from .web_session import _get_db_path
+    from ...core.study import StudyScheduler, StudyStore
+
+    db_path = _get_db_path()
+    sched = _scheduler_cache.get(db_path)
+    if sched is None:
+        store = StudyStore(db_path=db_path)
+        svc = _get_session_service()
+        sched = StudyScheduler(store, session_service=svc)
+        _scheduler_cache[db_path] = sched
+        logger.info("study scheduler instantiated for db=%s", db_path)
+    return sched
+
+
+def _warm_study_scheduler_for_backend(sched: "StudyScheduler") -> None:
+    """Back-door wiring for `_handle_study_command` + lifespan startup.
+
+    The chat slash command needs a scheduler bound to the FastAPI event
+    loop BEFORE the scheduler could lazily create its consumer tasks on
+    a previous, torn-down loop. Callers must invoke ``_get_study_scheduler``
+    again on a live loop to refresh locally, but startup warming ensures
+    the loop a single _consumer lives on matches the final loop.
+    """
+
+
+# ── request bodies ──────────────────────────────────────────────────
+
+
+class MetricTargetModel(BaseModel):
+    name: str
+    op: str = ">="
+    value: float
+
+
+class StudyStartRequest(BaseModel):
+    session_id: str
+    objective: str
+    workspace_path: str
+    strategy_name: str
+    metric_targets: Optional[list[MetricTargetModel]] = None
+    budget_token: Optional[int] = None
+    budget_turn: Optional[int] = None
+    budget_time_seconds: Optional[int] = None
+    cooldown_base: float = 30.0
+    cooldown_jitter: float = 10.0
+    min_cooldown: float = 1.0
+    max_rounds: Optional[int] = None
+    behavior: Optional[str] = None
+    lazy_detection_interval: int = 10
+    keep_recent: int = 10
+
+
+# ── POST /study/start ───────────────────────────────────────────────
+
+
+@router.post("/start")
+async def study_start(req: StudyStartRequest):
+    """Create a study + its goal ledger row + queue the executor.
+
+    Returns ``{study_id, goal_id, status:"queued"}``.
+    """
+    # Workspace validation — fail fast on bad config before persistence.
+    ws = Path(req.workspace_path)
+    if not ws.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"workspace_path does not exist: {req.workspace_path}",
+        )
+    strat_dir = ws / "strategies" / req.strategy_name
+    if not strat_dir.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"strategy directory does not exist: {strat_dir}",
+        )
+
+    try:
+        from ...core.goal import GoalStore
+        from ...core.goal.context import default_goal_criteria
+        from ...core.study import StudyStore, StudyStatus, default_metric_targets
+
+        goal_store = GoalStore()
+        goal = goal_store.replace_goal(
+            session_id=req.session_id,
+            objective=req.objective,
+            criteria=default_goal_criteria(),
+        )
+        targets = (
+            [t.model_dump() for t in req.metric_targets]
+            if req.metric_targets else default_metric_targets()
+        )
+        with StudyStore() as store:
+            study = store.create_study(
+                session_id=req.session_id,
+                goal_id=goal.goal_id,
+                objective=req.objective,
+                workspace_path=req.workspace_path,
+                strategy_name=req.strategy_name,
+                metric_targets=targets,
+                budget_token=req.budget_token,
+                budget_turn=req.budget_turn,
+                budget_time_seconds=req.budget_time_seconds,
+                cooldown_base=req.cooldown_base,
+                cooldown_jitter=req.cooldown_jitter,
+                min_cooldown=req.min_cooldown,
+                max_rounds=req.max_rounds,
+                behavior=req.behavior,
+            )
+        sched = _get_study_scheduler()
+        await sched.submit(study)
+        return {
+            "status": "ok",
+            "study_id": study.study_id,
+            "goal_id": study.goal_id,
+            "execution_status": StudyStatus.QUEUED.value,
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("study start failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── GET /study/status, /study/list ───────────────────────────────────
+
+
+@router.get("/list")
+async def study_list(
+    session_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+):
+    """List studies, optionally filtered by session/status."""
+    from ...core.study import StudyStore, StudyStatus
+    try:
+        status_enum = StudyStatus(status) if status else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"invalid status: {status}")
+    with StudyStore() as store:
+        rows = store.list_studies(session_id=session_id, status=status_enum, limit=limit)
+    def _shape(r):
+        return {
+            "study_id": r.study_id, "session_id": r.session_id,
+            "goal_id": r.goal_id, "objective": r.objective,
+            "strategy_name": r.strategy_name, "workspace_path": r.workspace_path,
+            "execution_status": r.execution_status.value,
+            "current_round": r.current_round,
+            "last_verdict": r.last_verdict,
+            "last_metrics": r.last_metrics,
+            "last_error": r.last_error,
+            "created_at": r.created_at, "updated_at": r.updated_at,
+            "completed_at": r.completed_at,
+        }
+    return {"status": "ok", "studies": [_shape(r) for r in rows]}
+
+
+@router.get("/status")
+async def study_status(
+    session_id: str = Query(...),
+    study_id: Optional[str] = None,
+):
+    """Return the active study (or one by id) for a session + its goal snapshot."""
+    from ...core.goal import GoalStore
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        if study_id:
+            study = store.get_study(study_id)
+        else:
+            study = store.get_active_study(session_id)
+        if study is None:
+            return {"status": "no_study", "session_id": session_id}
+        # Goal snapshot for criteria/progress/evidence_counts
+        goal_snapshot = None
+        if study.goal_id:
+            with GoalStore() as gs:
+                goal_snapshot = gs.get_goal_snapshot(study.goal_id)
+    return {
+        "status": "ok",
+        "study_id": study.study_id,
+        "goal_id": study.goal_id,
+        "execution_status": study.execution_status.value,
+        "current_round": study.current_round,
+        "objective": study.objective,
+        "workspace_path": study.workspace_path,
+        "strategy_name": study.strategy_name,
+        "metric_targets": study.metric_targets,
+        "last_metrics": study.last_metrics,
+        "last_verdict": study.last_verdict,
+        "last_error": study.last_error,
+        "heartbeat": study.heartbeat,
+        "created_at": study.created_at,
+        "updated_at": study.updated_at,
+        "completed_at": study.completed_at,
+        "goal_snapshot": _snapshot(goal_snapshot),
+    }
+
+
+def _snapshot(s: dict | None) -> dict | None:
+    if not s:
+        return None
+    g = s.get("goal", {}) or {}
+    return {
+        "goal_id": g.get("goal_id"),
+        "goal_status": g.get("status"),
+        "objective": g.get("objective"),
+        "progress_percent": g.get("progress_percent", 0),
+        "evidence_count": s.get("evidence_count", 0),
+        "criteria": [
+            {"criterion_id": c.get("criterion_id"), "text": c.get("text"),
+             "status": c.get("status"), "required": c.get("required", True)}
+            for c in s.get("criteria", []) or []
+        ],
+    }
+
+
+# ── POST /study/{study_id}/pause|resume|cancel ──────────────────────
+
+
+@router.post("/{study_id}/pause")
+async def study_pause(study_id: str):
+    sched = _get_study_scheduler()
+    if not sched.pause(study_id):
+        raise HTTPException(status_code=404, detail="study not active")
+    return {"status": "ok", "study_id": study_id, "action": "paused"}
+
+
+@router.post("/{study_id}/resume")
+async def study_resume(study_id: str):
+    sched = _get_study_scheduler()
+    if not sched.resume(study_id):
+        raise HTTPException(status_code=404, detail="study not found or not paused")
+    return {"status": "ok", "study_id": study_id, "action": "resumed"}
+
+
+@router.post("/{study_id}/cancel")
+async def study_cancel(study_id: str):
+    sched = _get_study_scheduler()
+    if not sched.cancel(study_id):
+        raise HTTPException(status_code=404, detail="study not active")
+    return {"status": "ok", "study_id": study_id, "action": "cancelled"}

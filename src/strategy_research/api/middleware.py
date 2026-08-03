@@ -20,6 +20,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PREFIXES = [
         "/api/auth/",
         "/api/chat/",
+        "/api/study/",   # study task system — bound to a chat session
         "/api/system/",
         "/api/admin/",  # Admin endpoints use X-Admin-Token header
         "/assets/",

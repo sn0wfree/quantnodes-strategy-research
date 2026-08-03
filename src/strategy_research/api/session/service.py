@@ -309,6 +309,30 @@ class SessionService:
         event.set()
         return True
 
+    def is_session_processing(self, session_id: str) -> bool:
+        """Return True while a chat attempt is in flight for the session.
+
+        Phase 1 study scheduler uses this to avoid running a study in the
+        same session an AgentLoop is already driving (they share the
+        session's LLM/agent slot). See docs/study-longhorizon-plan.md
+        §11 — the mutex between chat and study is cooperative.
+        """
+        return session_id in self._processing_sessions
+
+    def mark_session_processing(
+        self, session_id: str, *, processing: bool
+    ) -> None:
+        """Cooperatively add/remove the session from the processing set.
+
+        Study with a long-running executor needs to claim the session's
+        processing slot to block concurrent chat attempts. Phase 1 wraps
+        this by setting True before executor.run() and False after.
+        """
+        if processing:
+            self._processing_sessions.add(session_id)
+        else:
+            self._processing_sessions.discard(session_id)
+
     def list_active_attempts(self, session_id: str) -> list[dict[str, str]]:
         """Non-terminal attempts for a session, oldest first (reload recovery).
 

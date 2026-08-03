@@ -459,11 +459,15 @@ async def send_async(body: ChatMessage, request: Request):
     user_id = getattr(request.state, "user_id", "anonymous")
     _fetch_session_owned(_get_db(), body.session_id, user_id)
 
-    # ── /goal command intercept ────────────────────────────────────────
+# ── /goal command intercept ────────────────────────────────────────
     if body.content.strip().startswith("/goal"):
         return await _handle_goal_command(body)
 
-    # ── /compact command intercept ────────────────────────────────────
+    # ── /study command intercept (study task system) ───────────────────
+    if body.content.strip().startswith("/study"):
+        return await _handle_study_command(body)
+
+    # ── /compact command intercept ──────────────────────────────────────
     if body.content.strip() == "/compact":
         return await _handle_compact_command(body)
 
@@ -699,6 +703,301 @@ def _emit_goal_response(
     event_bus.emit(session_id, "agent_done", {
         "message_id": assistant_msg_id, "status": "success",
     })
+
+
+# ── /study command handler ──────────────────────────────────────────
+
+
+async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
+    """Handle ``/study`` slash commands (light wrapper around the API).
+
+    Supported:
+        ``/study start "objective" [--workspace W] [--strategy S]
+                       [--metric calmar>=0.5,sharpe>=0.3]
+                       [--budget-turn N] [--budget-time S]
+                       [--max-rounds N] [--behavior static|varying|improving]``
+        ``/study status``
+        ``/study list``
+        ``/study pause <study_id>``
+        ``/study resume <study_id>``
+        ``/study cancel <study_id>``
+        ``/study help``
+
+    Uses the same TXT-style response protocol as /goal handlers (text
+    started / delta / ended). State changes happen via the study router
+    helpers so the scheduler emits study_* events upstream too.
+    """
+    import shlex
+    import uuid
+
+    session_id = body.session_id
+    content = body.content.strip()
+
+    user_msg_id = str(uuid.uuid4())
+    assistant_msg_id = str(uuid.uuid4())
+    service = _get_session_service()
+    event_bus = service.event_bus
+
+    # Persist the user message before running the command (same triple as
+    # chat: EventStore → projector.flush → messages table).
+    event_bus.emit(session_id, "message_received", {
+        "message_id": user_msg_id,
+        "user_message_id": user_msg_id,
+        "assistant_message_id": assistant_msg_id,
+        "content": content,
+        "role": "user",
+    })
+
+    try:
+        response_text = _dispatch_study_command(content, session_id)
+    except Exception as exc:
+        logger.exception("study command failed")
+        response_text = f"Study command failed: {exc}"
+
+    # Flush any pending scheduler submits (created by ``/study start``)
+    # on this loop before the response round-trips to the user.
+    if _study_pending_submits:
+        from .study import _get_study_scheduler
+        sched = _get_study_scheduler()
+        for study in _study_pending_submits:
+            await sched.submit(study)
+        _study_pending_submits.clear()
+
+    _emit_goal_response(event_bus, session_id, assistant_msg_id, response_text)
+
+    return SendMessageResponse(
+        message_id=user_msg_id, user_message_id=user_msg_id,
+        assistant_message_id=assistant_msg_id,
+        event_id="", status="done",
+    )
+
+
+def _dispatch_study_command(content: str, session_id: str) -> str:
+    """Parse and run a /study subcommand. ``content`` is the raw user text."""
+
+    # Strip leading "/study"
+    body = content[len("/study"):].strip()
+    if not body:
+        return _study_help()
+
+    # Split into subcommand + rest (shlex to keep quoted objective intact).
+    try:
+        tokens = shlex.split(body)
+    except ValueError as exc:
+        return f"Parse error: {exc}"
+    subcmd = tokens[0].lower()
+    rest = tokens[1:]
+
+    if subcmd in ("help", "?"):
+        return _study_help()
+    if subcmd == "start":
+        return _study_start_cmd(rest, session_id)
+    if subcmd == "status":
+        return _study_status_cmd(session_id)
+    if subcmd == "list":
+        return _study_list_cmd(rest)
+    if subcmd in ("pause", "resume", "cancel"):
+        if not rest:
+            return f"/study {subcmd} requires a study_id"
+        return _study_control_cmd(subcmd, rest[0])
+
+    # Else: unknown — show help. (Allows the user to say "/study foo bar".)
+    return f"Unknown subcommand: {subcmd}\n" + _study_help()
+
+
+def _study_help() -> str:
+    return (
+        "/study start \"<objective>\" [--workspace W] [--strategy S]\n"
+        "            [--metric calmar>=0.5,sharpe>=0.3]\n"
+        "            [--budget-turn N] [--budget-time S] [--max-rounds N]\n"
+        "            [--behavior static|varying|improving]\n"
+        "  Create a study. The active session's goal ledger is created.\n"
+        "/study status   — current study for this session\n"
+        "/study list [status=queued|running|complete|cancelled]\n"
+        "/study pause <study_id>\n"
+        "/study resume <study_id>\n"
+        "/study cancel <study_id>\n"
+        "/study help     — this message"
+    )
+
+
+def _parse_study_flags(rest: list[str]) -> dict:
+    """Tokenize free-form ``--flag value`` style flags."""
+    flags = {
+        "workspace_path": None, "strategy_name": None,
+        "metric_targets": None,
+        "budget_turn": None, "budget_time_seconds": None, "max_rounds": None,
+        "behavior": None,
+    }
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok.startswith("--") and i + 1 < len(rest):
+            key, val = tok[2:], rest[i + 1]
+            if key in ("workspace", "workspace_path"):
+                flags["workspace_path"] = val
+            elif key in ("strategy", "strategy_name"):
+                flags["strategy_name"] = val
+            elif key == "metric":
+                flags["metric_targets"] = _parse_metric_targets(val)
+            elif key in ("budget-turn",):
+                try:
+                    flags["budget_turn"] = int(val)
+                except ValueError:
+                    pass
+            elif key in ("budget-time",):
+                try:
+                    flags["budget_time_seconds"] = int(val)
+                except ValueError:
+                    pass
+            elif key in ("max-rounds",):
+                try:
+                    flags["max_rounds"] = int(val)
+                except ValueError:
+                    pass
+            elif key == "behavior":
+                flags["behavior"] = val
+            i += 2
+        else:
+            i += 1
+    return flags
+
+
+def _parse_metric_targets(spec: str) -> list[dict] | None:
+    """Parse a comma-separated ``calmar>=0.5`` spec → list of target dicts."""
+    import re
+    targets: list[dict] = []
+    for chunk in spec.split(","):
+        m = re.match(r"\s*([A-Za-z_]+)\s*(>=|<=|>|<|==)\s*(-?\d+(\.\d+)?)\s*$", chunk)
+        if not m:
+            continue
+        targets.append({
+            "name": m.group(1), "op": m.group(2), "value": float(m.group(3)),
+        })
+    return targets or None
+
+
+def _default_workspace() -> str:
+    """Return the process-default workspace path for /study defaults."""
+    import os
+    return os.environ.get("SR_WORKSPACE_PATH") or str(
+        Path.home() / ".quantnodes-research"
+    )
+
+
+def _study_start_cmd(rest: list[str], session_id: str) -> str:
+    from ...core.study import StudyStore, StudyStatus, default_metric_targets
+
+    flags = _parse_study_flags(rest)
+    # Objective = remaining positional tail (everything not consumed by flags)
+    positional = [t for t in rest
+                  if not (t.startswith("--") or _is_flag_value(rest, t))]
+    objective = " ".join(positional).strip(' "\'') or "Research goal"
+    ws = flags["workspace_path"] or _default_workspace()
+    strategy = flags["strategy_name"]
+    if not strategy:
+        return (
+            "/study start requires --strategy <name>. "
+            "Use ``/study list strategies`` once we expose preset discovery."
+        )
+    targets = flags["metric_targets"] or default_metric_targets()
+
+    try:
+        from ...core.goal import GoalStore
+        from ...core.goal.context import default_goal_criteria
+        goal_store = GoalStore()
+        goal = goal_store.replace_goal(
+            session_id=session_id, objective=objective,
+            criteria=default_goal_criteria(),
+        )
+        with StudyStore() as store:
+            study = store.create_study(
+                session_id=session_id, goal_id=goal.goal_id,
+                objective=objective, workspace_path=ws, strategy_name=strategy,
+                metric_targets=targets,
+                budget_token=None, budget_turn=flags["budget_turn"],
+                budget_time_seconds=flags["budget_time_seconds"],
+                cooldown_base=30.0, cooldown_jitter=10.0, min_cooldown=1.0,
+                max_rounds=flags["max_rounds"], behavior=flags["behavior"],
+            )
+        # Persist study_id on the loop's payload; the caller
+        # (_handle_study_command) is async and schedules the submit
+        # coroutine itself via the "_study_pending_submits" hook below.
+        _study_pending_submits.append(study)
+    except ValueError as e:
+        return f"Cannot create study: {e}"
+    return (
+        f"Study created: {study.study_id[:12]}...\n"
+        f"Goal: {goal.goal_id[:12]}...\n"
+        f"Objective: {study.objective}\n"
+        f"Strategy: {study.strategy_name} @ {study.workspace_path}\n"
+        f"Targets: {targets}\n"
+        f"Status: {StudyStatus.QUEUED.value}"
+    )
+
+
+# Studies created by /study start need to be submitted to the scheduler on
+# the FastAPI event loop. _handle_study_command awaits these after the
+# dispatcher returns so the response text + the queued task both happen.
+_study_pending_submits: list = []
+
+
+def _is_flag_value(tokens, t) -> bool:
+    """Return True if ``t`` follows a ``--flag`` token in ``tokens``."""
+    i = tokens.index(t)
+    return i > 0 and tokens[i - 1].startswith("--")
+
+
+def _study_status_cmd(session_id: str) -> str:
+    from .study import _get_study_scheduler  # for access consistency
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        study = store.get_active_study(session_id)
+    if study is None:
+        return "No active study for this session. Use /study start ..."
+    return (
+        f"Study: {study.study_id[:12]}...\n"
+        f"Objective: {study.objective}\n"
+        f"Executor: {study.executor_type}\n"
+        f"Status: {study.execution_status.value}\n"
+        f"Round: {study.current_round}\n"
+        f"Last metrics: {study.last_metrics}\n"
+        f"Last verdict: {study.last_verdict}\n"
+        f"Last error: {study.last_error}"
+    )
+
+
+def _study_list_cmd(rest: list[str]) -> str:
+    from ...core.study import StudyStore, StudyStatus
+    status = None
+    for tok in rest:
+        if tok.startswith("status=") or tok.startswith("s="):
+            val = tok.split("=", 1)[1]
+            try:
+                status = StudyStatus(val)
+            except ValueError:
+                return f"Invalid status: {val}"
+    with StudyStore() as store:
+        rows = store.list_studies(status=status, limit=20)
+    if not rows:
+        return "No studies found."
+    out = [f"Found {len(rows)} study/studies (newest first):"]
+    for r in rows:
+        out.append(
+            f"- {r.study_id[:12]}... [{r.execution_status.value}] "
+            f"obj={r.objective[:40]} round={r.current_round}"
+        )
+    return "\n".join(out)
+
+
+def _study_control_cmd(action: str, study_id: str) -> str:
+    from .study import _get_study_scheduler
+    sched = _get_study_scheduler()
+    fn = {"pause": sched.pause, "resume": sched.resume,
+          "cancel": sched.cancel}[action]
+    if not fn(study_id):
+        return f"Study {study_id} not found or not active — cannot {action}."
+    return f"Study {study_id}: {action} requested."
 
 
 # ── /compact command handler ──────────────────────────────────────

@@ -5,6 +5,8 @@ Main Process = Orchestrator + Main Agent,串行 spawn 每个 Subagent via Task t
 from __future__ import annotations
 
 import json
+import os
+import random
 import re
 import time
 from datetime import datetime
@@ -894,3 +896,775 @@ def _load_all_agents(agents_dir: Path) -> dict[str, dict[str, Any]]:
         except (json.JSONDecodeError, OSError):
             pass
     return result
+
+
+# ── study/single-round extraction (2026-08-04) ──────────────────────
+
+
+def spawn_agent(
+    agent_name: str,
+    workspace_path: Path,
+    strategy_name: str,
+    current_state: dict,
+    previous_outputs: list,
+    *,
+    behavior: str | None = None,
+    max_iterations: int = 8,
+) -> str:
+    """Spawn a single agent (real LLM or stub) and return JSON text.
+
+    Extracted from ``cli/commands/autoresearch.py::_spawn_agent`` so that
+    the study executor can drive the same spawn logic. Behavior is
+    identical to the CLI helper:
+
+    - When ``should_use_real_llm()`` and no ``behavior`` override →
+      call ``run_agent_via_llm`` (AgentLoop with the role prompt).
+    - Otherwise → stub whose output pattern depends on ``behavior``
+      ('static' / 'varying' / 'improving'), driven by the
+      ``AUTORESEARCH_BEHAVIOR`` env var when no explicit override given.
+    """
+    from strategy_research.core.agent.role_factory import (
+        run_agent_via_llm,
+        should_use_real_llm,
+    )
+
+    use_real = behavior is None and should_use_real_llm()
+    if use_real:
+        try:
+            task_lines = [f"你是 {agent_name}. 你的工作目录: {workspace_path}"]
+            if current_state:
+                task_lines.append("当前状态:")
+                task_lines.append(
+                    json.dumps(current_state, ensure_ascii=False, default=str)
+                )
+            return run_agent_via_llm(
+                role=agent_name,
+                workspace_path=workspace_path,
+                strategy_name=strategy_name,
+                task="\n".join(task_lines),
+                previous_outputs=previous_outputs,
+                max_iterations=max_iterations,
+            )
+        except Exception as exc:
+            # 真 LLM 失败 → 退到 stub, 不让主循环崩
+            print(f"⚠️  AgentLoop.run() 失败 ({agent_name}): {exc}; 退到 stub")  # noqa: T201
+            # fall through to stub
+
+    effective_behavior = behavior or os.environ.get("AUTORESEARCH_BEHAVIOR", "static")
+    return _stub_agent_output(
+        agent_name, current_state, previous_outputs, effective_behavior
+    )
+
+
+def _stub_agent_output(
+    agent_name: str,
+    current_state: dict,
+    previous_outputs: list,
+    behavior: str,
+) -> str:
+    """Stub-spawn an agent's output (test / CI path).
+
+    Moved verbatim from ``cli/commands/autoresearch.py::_spawn_agent``
+    (the stub branch only) so the study executor and CLI share one
+    stub implementation.
+    """
+    round_num = current_state.get("total_runs", 0)
+
+    if agent_name == "researcher":
+        if behavior == "varying":
+            actions = ["search_external", "discover_local", "optimize_param", "remove_factor"]
+            directions = ["momentum", "volatility", "value", "quality", "size"]
+            idx = round_num % len(actions)
+            return json.dumps({
+                "action": actions[idx],
+                "hypothesis": f"第 {round_num + 1} 轮: 尝试 {directions[idx]} 因子 ({random.randint(1, 100)})",
+                "reason": f"基于上一轮结果探索 {directions[idx]} 维度",
+                "avoid_actions": ["discover_local"] if round_num > 2 else [],
+                "factor_direction": directions[idx],
+                "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                              "narrative_bias": "pass", "confirmation_bias": "pass",
+                              "recency_bias": "pass"},
+            })
+        elif behavior == "improving":
+            return json.dumps({
+                "action": "optimize_param",
+                "hypothesis": f"Round {round_num + 1}: 调整 top_n 参数",
+                "reason": "降低 top_n 增加集中度",
+                "avoid_actions": [],
+                "factor_direction": "momentum",
+                "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                              "narrative_bias": "pass", "confirmation_bias": "pass",
+                              "recency_bias": "pass"},
+            })
+        return json.dumps({
+            "action": "discover_local",
+            "hypothesis": "波动率因子可能有效",
+            "reason": "当前因子池缺少波动率维度",
+            "avoid_actions": [],
+            "factor_direction": "volatility",
+            "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                          "narrative_bias": "pass", "confirmation_bias": "pass",
+                          "recency_bias": "pass"}
+        })
+    elif agent_name == "data_quality":
+        return json.dumps({
+            "passed": True,
+            "warnings": ["NaN 比例 0.02%"],
+            "data_fingerprint": "abc123",
+            "nan_ratio": 0.0002,
+            "missing_days": 0,
+            "price_anomalies": []
+        })
+    elif agent_name == "factor_analyst":
+        if behavior == "varying":
+            factors_pool = [
+                [{"factor_name": "momentum_60d", "factor_code": "ts_return(close, 60)",
+                  "category": "momentum", "ic_mean": 0.045, "ir": 0.62, "overall_score": 0.68, "passed": True}],
+                [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
+                  "category": "momentum", "ic_mean": 0.052, "ir": 0.71, "overall_score": 0.75, "passed": True}],
+                [],
+                [{"factor_name": "reversal_10d", "factor_code": "-ts_return(close, 10)",
+                  "category": "reversal", "ic_mean": 0.038, "ir": 0.55, "overall_score": 0.62, "passed": True}],
+                [],
+                [{"factor_name": "momentum_120d", "factor_code": "ts_return(close, 120)",
+                  "category": "momentum", "ic_mean": 0.041, "ir": 0.58, "overall_score": 0.66, "passed": True}],
+            ]
+            candidates = factors_pool[round_num % len(factors_pool)]
+            return json.dumps({
+                "path_used": "local" if round_num % 2 == 0 else "alpha_zoo",
+                "candidates": candidates,
+                "rejected": [{"factor_name": f"bad_factor_{round_num}", "reason": "IC < 0.03"}],
+                "combination_method": "ic_weighted",
+                "recommendation": "建议集成新因子" if candidates else "无有效因子",
+            })
+        elif behavior == "improving":
+            if round_num >= 3:
+                return json.dumps({
+                    "path_used": "local",
+                    "candidates": [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
+                                    "category": "momentum", "ic_mean": 0.052, "ir": 0.71,
+                                    "overall_score": 0.75, "passed": True}],
+                    "rejected": [],
+                    "combination_method": "ic_weighted",
+                    "recommendation": "建议集成 vol_adj_mom",
+                })
+            else:
+                return json.dumps({
+                    "path_used": "local",
+                    "candidates": [],
+                    "rejected": [{"factor_name": "test", "reason": "IC too low"}],
+                    "combination_method": "ic_weighted",
+                    "recommendation": "无有效因子",
+                })
+        return json.dumps({
+            "path_used": "local",
+            "candidates": [],
+            "rejected": [
+                {"factor_name": "ts_std_20d", "reason": "IC 0.018 < 0.03"}
+            ],
+            "combination_method": "ic_weighted",
+            "recommendation": "无有效因子"
+        })
+    elif agent_name == "strategist":
+        if behavior == "improving" and round_num >= 3:
+            return json.dumps({
+                "action": "integrate",
+                "changes": [{"param": "FACTOR_EXPRS", "old": [], "new": ["vol_adj_mom"]}],
+                "reason": "集成 vol_adj_mom 因子",
+                "expected_impact": "Calmar 提升",
+            })
+        return json.dumps({
+            "action": "optimize",
+            "changes": [],
+            "reason": "无新因子,保持现有策略",
+            "expected_impact": "无变化"
+        })
+    elif agent_name == "portfolio_construction":
+        return json.dumps({
+            "method": "equal",
+            "weights": {},
+            "risk_contributions": {},
+            "diversification_ratio": 1.0,
+            "portfolio_vol": 0.15
+        })
+    elif agent_name == "risk_controller":
+        if behavior == "improving" and round_num >= 3:
+            return json.dumps({
+                "risk_passed": True,
+                "risk_rating": "Green",
+                "var_95": -0.018,
+                "cvar_95": -0.025,
+                "max_drawdown": -0.25,
+                "stress_results": {},
+                "tail_risk": {"kurtosis": 2.8, "skewness": -0.05}
+            })
+        return json.dumps({
+            "risk_passed": False,
+            "risk_rating": "Red",
+            "var_95": -0.021,
+            "cvar_95": -0.034,
+            "max_drawdown": -0.50,
+            "stress_results": {},
+            "tail_risk": {"kurtosis": 3.2, "skewness": -0.15}
+        })
+    elif agent_name == "attribution_analyst":
+        if behavior == "improving" and round_num >= 3:
+            return json.dumps({
+                "alpha": 0.005 + round_num * 0.001,
+                "beta_mkt": 0.85,
+                "beta_smb": 0.05,
+                "beta_hml": -0.02,
+                "beta_mom": 0.08,
+                "sector_allocation": 0.002,
+                "stock_selection": 0.003 + round_num * 0.001,
+                "interaction": 0.001,
+                "bull_capture": 1.05,
+                "bear_capture": 0.85,
+                "r_squared": 0.90
+            })
+        return json.dumps({
+            "alpha": -0.0039,
+            "beta_mkt": 0.92,
+            "beta_smb": 0.05,
+            "beta_hml": -0.02,
+            "beta_mom": 0.08,
+            "sector_allocation": 0.001,
+            "stock_selection": -0.005,
+            "interaction": 0.001,
+            "bull_capture": 0.95,
+            "bear_capture": 1.12,
+            "r_squared": 0.88
+        })
+    elif agent_name == "anti_overfit_analyst":
+        metrics = {}
+        if previous_outputs:
+            last = previous_outputs[-1]
+            if isinstance(last, dict):
+                metrics = last
+
+        try:
+            calmar = float(metrics.get("calmar", 0.0)) if metrics else 0.0
+        except (ValueError, TypeError):
+            calmar = 0.0
+        try:
+            sharpe = float(metrics.get("sharpe", 0.0)) if metrics else 0.0
+        except (ValueError, TypeError):
+            sharpe = 0.0
+        try:
+            max_dd = float(metrics.get("max_dd", 0.0)) if metrics else 0.0
+        except (ValueError, TypeError):
+            max_dd = 0.0
+
+        weights = {
+            "start_dependency": 0.20,
+            "parameter_perturbation": 0.20,
+            "rebalance_offset": 0.15,
+            "ablation": 0.15,
+            "bootstrap": 0.15,
+            "monte_carlo": 0.15,
+        }
+
+        try:
+            pass_threshold = float(os.environ.get("ANTI_OVERFIT_THRESHOLD", "0.5"))
+        except ValueError:
+            pass_threshold = 0.5
+
+        methods_passed = {
+            "start_dependency": calmar >= 0.3,
+            "rebalance_offset": abs(max_dd) <= 0.5,
+            "parameter_perturbation": calmar >= 0.4,
+            "ablation": calmar > 0.0,
+            "bootstrap": sharpe >= 0.5,
+            "monte_carlo": calmar >= 0.5 and sharpe >= 0.4,
+        }
+
+        weighted_score = sum(
+            weights[k] * (1 if v else 0)
+            for k, v in methods_passed.items()
+        )
+
+        if behavior == "improving" and round_num >= 4:
+            for k in methods_passed:
+                methods_passed[k] = True
+            weighted_score = 1.0
+            analysis = (
+                f"所有抗过拟合方法通过 "
+                f"(Calmar={calmar:.3f}, Sharpe={sharpe:.3f}, score={weighted_score:.2f})"
+            )
+        else:
+            if weighted_score >= pass_threshold:
+                analysis = (
+                    f"加权评分通过 "
+                    f"({weighted_score:.2f}, Calmar={calmar:.3f}, Sharpe={sharpe:.3f})"
+                )
+            else:
+                failed = [k for k, v in methods_passed.items() if not v]
+                analysis = (
+                    f"加权评分 {weighted_score:.2f} < {pass_threshold}, "
+                    f"失败: {', '.join(failed)}"
+                )
+
+        overfit_passed = weighted_score >= pass_threshold
+        verdict = "keep" if overfit_passed else "discard"
+
+        return json.dumps({
+            "verdict": verdict,
+            "overfit_passed": overfit_passed,
+            "weighted_score": round(weighted_score, 3),
+            "methods_passed": methods_passed,
+            "analysis": analysis,
+            "suggestions": [] if overfit_passed else ["调整因子参数", "增加训练数据"],
+        })
+    elif agent_name == "backtest_diagnostics":
+        return json.dumps({
+            "error_type": "none",
+            "severity": "info",
+            "symptom": "无异常",
+            "root_cause": "N/A",
+            "fix_suggestion": "N/A",
+            "confidence": 1.0
+        })
+    elif agent_name == "critic":
+        if behavior == "improving" and round_num >= 2:
+            approved = True
+        else:
+            approved = round_num >= 1
+        return json.dumps({
+            "approved": approved,
+            "risk_rating": "low" if approved else "high",
+            "concerns": [] if approved else ["过度拟合", "样本外未验证"],
+            "suggested_fixes": [] if approved else ["延长样本", "加入 walk-forward 验证"],
+            "confidence": 0.7 if approved else 0.4,
+            "review_dimensions": {
+                "risk": "pass" if approved else "fail",
+                "attribution": "pass",
+                "diagnostics": "pass" if approved else "fail",
+                "statistics": "pass",
+            },
+        })
+    else:
+        return json.dumps({"error": f"Unknown agent: {agent_name}"})
+
+
+# ── study single-round extraction ───────────────────────────────────
+
+
+def _study_append_evidence(
+    session_id: str,
+    run_name: str,
+    metrics: dict,
+    strategist_output: dict,
+) -> None:
+    """Append research evidence for a study session's active goal.
+
+    Mirrors ``cli/commands/autoresearch.py::_append_backtest_evidence``
+    but takes an explicit ``session_id`` (the CLI helper hard-codes
+    ``autoresearch-{strategy_name}``).
+    """
+    try:
+        from strategy_research.core.goal import (
+            EvidenceInput,
+            GoalStore,
+        )
+        store = GoalStore()
+        goal = store.get_current_goal(session_id)
+        if goal is None:
+            return
+        text = (
+            f"Backtest {run_name}: "
+            f"Calmar={metrics.get('calmar', 'N/A')} "
+            f"Sharpe={metrics.get('sharpe', 'N/A')} "
+            f"MaxDD={metrics.get('max_dd', 'N/A')}"
+        )
+        criteria = store.list_criteria(goal.goal_id)
+        criterion_id = criteria[0].criterion_id if criteria else None
+        store.append_evidence(
+            session_id=session_id,
+            goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id,
+            evidence=EvidenceInput(
+                text=text,
+                criterion_id=criterion_id,
+                evidence_type="backtest",
+                run_id=run_name,
+                source_provider="study",
+                source_type="backtest_run",
+                artifact_path=strategist_output.get("hypothesis", "")[:200],
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug(
+            "study append_evidence skipped: %s", exc,
+        )
+
+
+def _study_register_hypothesis(
+    session_id: str,
+    researcher_output: dict,
+    run_name: str,
+) -> None:
+    """Register the researcher's hypothesis and link it to the study goal."""
+    try:
+        from strategy_research.core.goal import GoalStore
+        from strategy_research.core.hypothesis import HypothesisRegistry
+
+        thesis = researcher_output.get("hypothesis", "")
+        if not thesis:
+            return
+
+        registry = HypothesisRegistry()
+        title = f"{run_name}: {thesis[:60]}"
+        existing = None
+        for h in registry.list():
+            if h.title == title:
+                existing = h
+                break
+        if existing is None:
+            hyp = registry.create(
+                title=title,
+                thesis=thesis[:200],
+                status="exploring",
+            )
+        else:
+            hyp = existing
+
+        goal_store = GoalStore()
+        goal = goal_store.get_current_goal(session_id)
+        if goal is not None and hyp.goal_id != goal.goal_id:
+            registry.link_goal(hyp.hypothesis_id, goal.goal_id)
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug(
+            "study register_hypothesis skipped: %s", exc,
+        )
+
+
+# ── study single-round: pure extraction of cmd_autoresearch's loop body ──
+#
+# This is the *headless* version of one autoresearch round: it does the
+# same Step1→Step6 work (read state → spawn 9 agents → backtest →
+# evaluation → decide → summary) but returns a structured ``RoundResult``
+# dict and does NOT print, sleep between agents, check stop conditions,
+# or apply inter-round cooldown. Those concerns live with the caller
+# (the study executor or the CLI loop). Reuses ``spawn_agent`` /
+# ``run_backtest_script`` / ``decide`` / the study evidence helpers so
+# there is a single source of truth for each step.
+#
+# Differences from the CLI loop body (intentional):
+#   - Every agent step uses ``get_cooldown_seconds`` to compute a delay
+#     and the caller decides whether to honour it. ``run_research_round``
+#     accepts ``inter_agent_sleep`` (default 0.0) and sleeps that fixed
+#     number of seconds between agents; this keeps the round self-contained
+#     without hard-coding cooldown jitter that the scheduler already owns.
+#   - ``session_id`` (study session) and ``acceptance_config`` (thresholds
+#     override from metric_targets) are explicit parameters.
+#   - ``behavior`` overrides the stub mode when an LLM key is absent.
+
+
+def run_research_round(
+    workspace_path: Path,
+    strategy_name: str,
+    round_num: int,
+    *,
+    session_id: str | None = None,
+    acceptance_config: Any = None,
+    max_retries: int = 3,
+    lazy_detection_interval: int = 10,
+    keep_recent: int = 10,
+    behavior: str | None = None,
+    inter_agent_sleep: float = 0.0,
+    previous_summary: dict | None = None,
+) -> dict:
+    """Execute one autoresearch round and return a structured result.
+
+    Args:
+        workspace_path: workspace root containing ``strategies/{name}/``.
+        strategy_name: the strategy directory under ``strategies/``.
+        round_num: 1-based round index for this call.
+        session_id: study/chat session id used to append goal evidence
+            and link the researcher hypothesis. When ``None``, no goal
+            evidence is appended (matches the legacy CLI semantics
+            before P3-D3 hooked the active-session goal).
+        acceptance_config: ``AcceptanceConfig`` override (e.g. from a
+            study's ``metric_targets``). When ``None`` the default
+            ``load_config`` is used. Passing a config avoids re-reading
+            the workspace ``acceptance.yaml`` each round when the study
+            already decided thresholds at creation time.
+        max_retries: agent spawn retry budget (passed to
+            ``retry_agent_spawn``).
+        lazy_detection_interval / keep_recent: lazy-detection tuning.
+            Detection only runs when
+            ``round_num % lazy_detection_interval == 0``.
+        behavior: stub mode override ('static'/'varying'/'improving').
+            ``None`` defers to ``should_use_real_llm()``.
+        inter_agent_sleep: seconds to ``time.sleep`` between agent
+            spawns (default 0.0 — the scheduler owns cooldown policy).
+        previous_summary: previous round's summary dict; passed to
+            ``generate_run_summary`` so it can compute
+            ``performance_change``. ``None`` on first round.
+
+    Returns:
+        ``RoundResult`` dict::
+
+            {
+              "round": round_num,
+              "run_name": "run_0007",
+              "run_dir": <Path>,
+              "metrics": {...},          # may be {} on backtest failure
+              "verdict": "keep"|"discard",
+              "decision": decision.to_dict(),
+              "agent_outputs": {...},    # 9 agents → output dict
+              "summary": {...},          # generate_run_summary result
+              "backtest_error": str|None,
+            }
+    """
+    # Local imports keep the module import graph light for callers that
+    # only need the helpers above.
+    from strategy_research.core.autoresearch import (
+        DEFAULT_KEEP_RECENT,
+        detect_lazy_behavior,
+        generate_run_summary,
+        read_agent_history,
+        read_current_state,
+        retry_agent_spawn,
+        save_agent_record,
+        save_laziness_report,
+        save_run_summary,
+        should_run_lazy_detection,
+    )
+    from strategy_research.core.backtest import run_backtest_script
+    from strategy_research.core.strategy_acceptance import (
+        AcceptanceConfig,
+        DEFAULT_CONFIG,
+        decide as make_decision,
+        load_config as load_acceptance_config,
+    )
+
+    path = Path(workspace_path).resolve()
+    strategy_dir = path / "strategies" / strategy_name
+
+    # ── Step 1: read state ──────────────────────────────────────────
+    current_state = read_current_state(path, strategy_name)
+
+    # ── run directory: round_num → run_NNNN (matches backtest naming) ──
+    runs_dir = strategy_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    existing_nums: list[int] = []
+    if runs_dir.exists():
+        for d in runs_dir.iterdir():
+            if d.is_dir() and d.name.startswith("run_"):
+                try:
+                    existing_nums.append(int(d.name.split("_")[1]))
+                except (ValueError, IndexError):
+                    pass
+    run_num_int = max(existing_nums, default=0) + 1
+    run_name = f"run_{run_num_int:04d}"
+    run_dir = runs_dir / run_name
+    run_dir.mkdir(exist_ok=True)
+    (run_dir / "agents").mkdir(exist_ok=True)
+
+    # ── Lazy detection (every Nth round) ────────────────────────────
+    # Pure sink: the report is written for inspection but does not steer
+    # the round itself.
+    if should_run_lazy_detection(round_num, lazy_detection_interval):
+        lazy_results = []
+        for agent_name in (
+            "researcher", "factor_analyst", "strategist", "anti_overfit_analyst",
+        ):
+            history = read_agent_history(
+                runs_dir, agent_name, threshold=10,
+                current_round=round_num, keep_recent=keep_recent,
+            )
+            if history:
+                lazy_result = detect_lazy_behavior(
+                    agent_name, history[-1].get("output", {}), history
+                )
+                lazy_results.append({"agent": agent_name, **lazy_result})
+        if lazy_results:
+            overall = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
+            save_laziness_report(run_dir, round_num, lazy_results, overall)
+
+    def _spawn(name: str, prevs: list) -> dict:
+        # retry_agent_spawn parses raw output internally and returns a dict.
+        out = retry_agent_spawn(
+            lambda: spawn_agent(
+                name, path, strategy_name, current_state, prevs,
+                behavior=behavior,
+            ),
+            name,
+            max_retries=max_retries,
+        )
+        if inter_agent_sleep:
+            time.sleep(inter_agent_sleep)
+        return out
+
+    # ── Step 2: researcher ─────────────────────────────────────────
+    researcher_output = _spawn("researcher", [])
+    save_agent_record(
+        run_dir, "researcher", 2, current_state, researcher_output,
+    )
+    if session_id:
+        _study_register_hypothesis(session_id, researcher_output, run_name)
+
+    # ── Step 3: execution agents (DQ → factor → strategist → portfolio) ─
+    data_quality_output = _spawn(
+        "data_quality", [researcher_output]
+    )
+    save_agent_record(
+        run_dir, "data_quality", 3,
+        {"researcher": researcher_output}, data_quality_output,
+    )
+
+    factor_analyst_output = _spawn(
+        "factor_analyst",
+        [researcher_output, data_quality_output],
+    )
+    save_agent_record(
+        run_dir, "factor_analyst", 3,
+        {"researcher": researcher_output, "data_quality": data_quality_output},
+        factor_analyst_output,
+    )
+
+    strategist_output = _spawn(
+        "strategist",
+        [researcher_output, data_quality_output, factor_analyst_output],
+    )
+    save_agent_record(
+        run_dir, "strategist", 3,
+        {"researcher": researcher_output, "factor_analyst": factor_analyst_output},
+        strategist_output,
+    )
+
+    portfolio_construction_output = _spawn("portfolio_construction", [strategist_output])
+    save_agent_record(
+        run_dir, "portfolio_construction", 3,
+        {"strategist": strategist_output}, portfolio_construction_output,
+    )
+
+    # ── Step 4: backtest ───────────────────────────────────────────
+    backtest_result = run_backtest_script(
+        workspace_path=path,
+        strategy_name=strategy_name,
+        action=strategist_output.get("action", "unknown"),
+        description=strategist_output.get("hypothesis", ""),
+        run_dir=run_dir,
+    )
+    backtest_error: str | None = None
+    if backtest_result.get("success"):
+        metrics = backtest_result.get("metrics", {})
+        if session_id:
+            _study_append_evidence(
+                session_id, run_name, metrics, strategist_output,
+            )
+    else:
+        backtest_error = backtest_result.get("error", "unknown")
+        metrics = {}
+
+    # ── Step 5: evaluation agents (risk → attribution → anti-overfit → diag) ─
+    risk_controller_output = _spawn("risk_controller", [metrics])
+    save_agent_record(
+        run_dir, "risk_controller", 5, {"metrics": metrics},
+        risk_controller_output,
+    )
+
+    attribution_analyst_output = _spawn(
+        "attribution_analyst", [metrics, risk_controller_output]
+    )
+    save_agent_record(
+        run_dir, "attribution_analyst", 5,
+        {"metrics": metrics, "risk_controller": risk_controller_output},
+        attribution_analyst_output,
+    )
+
+    anti_overfit_analyst_output = _spawn(
+        "anti_overfit_analyst",
+        [metrics, risk_controller_output, attribution_analyst_output],
+    )
+    save_agent_record(
+        run_dir, "anti_overfit_analyst", 5,
+        {"metrics": metrics, "risk_controller": risk_controller_output,
+         "attribution_analyst": attribution_analyst_output},
+        anti_overfit_analyst_output,
+    )
+
+    backtest_diagnostics_output = _spawn(
+        "backtest_diagnostics",
+        [backtest_result.get("run_log", ""), metrics],
+    )
+    save_agent_record(
+        run_dir, "backtest_diagnostics", 5,
+        {"run_log": backtest_result.get("run_log", ""), "metrics": metrics},
+        backtest_diagnostics_output,
+    )
+
+    # ── Step 6: decide ─────────────────────────────────────────────
+    aoa_llm_verdict = None
+    if isinstance(anti_overfit_analyst_output, dict):
+        aoa_llm_verdict = {
+            "passed": bool(anti_overfit_analyst_output.get("overfit_passed", False)),
+            "score": float(anti_overfit_analyst_output.get("overfit_score", 0.5) or 0.5),
+            "reason": anti_overfit_analyst_output.get("verdict_reason", ""),
+            "concerns": anti_overfit_analyst_output.get("methods_passed", []),
+            "source": "anti_overfit_analyst",
+        }
+
+    if acceptance_config is None:
+        acceptance_config = load_acceptance_config(
+            workspace_config=path / "acceptance.yaml",
+        )
+    decision = make_decision(
+        metrics=metrics,
+        llm_verdict=aoa_llm_verdict,
+        cfg=acceptance_config,
+        stagnation_count=int(
+            anti_overfit_analyst_output.get("stagnation_count", 0) or 0
+        ) if isinstance(anti_overfit_analyst_output, dict) else 0,
+    )
+    verdict = "keep" if decision.accept else "discard"
+
+    # Update results.tsv status (the backtest wrote a 'pending' row; flip
+    # it to the final keep/discard verdict on this run's line, matching
+    # the CLI's Step 6 in-place patch).
+    results_path = runs_dir / "results.tsv"
+    if results_path.exists():
+        content = results_path.read_text(encoding="utf-8")
+        lines = content.strip().split("\n")
+        for i in range(len(lines) - 1, 0, -1):
+            if lines[i].startswith(run_name + "\t") or lines[i].startswith(run_name + " "):
+                parts = lines[i].split("\t")
+                if len(parts) >= 12:
+                    parts[11] = verdict
+                    lines[i] = "\t".join(parts)
+                break
+        results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    agent_outputs = {
+        "researcher": researcher_output,
+        "data_quality": data_quality_output,
+        "factor_analyst": factor_analyst_output,
+        "strategist": strategist_output,
+        "portfolio_construction": portfolio_construction_output,
+        "risk_controller": risk_controller_output,
+        "attribution_analyst": attribution_analyst_output,
+        "anti_overfit_analyst": anti_overfit_analyst_output,
+        "backtest_diagnostics": backtest_diagnostics_output,
+    }
+
+    summary = generate_run_summary(
+        agent_outputs, metrics, verdict, round_num, previous_summary,
+    )
+    summary["acceptance_decision"] = decision.to_dict()
+    save_run_summary(run_dir, summary)
+
+    return {
+        "round": round_num,
+        "run_name": run_name,
+        "run_dir": run_dir,
+        "metrics": metrics,
+        "verdict": verdict,
+        "decision": decision.to_dict(),
+        "agent_outputs": agent_outputs,
+        "summary": summary,
+        "backtest_error": backtest_error,
+    }

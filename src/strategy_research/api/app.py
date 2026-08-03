@@ -140,7 +140,7 @@ def create_app(
     app.add_middleware(AuthMiddleware)
 
     # Register routers
-    from .routers import admin, auth, chat, goal, hypothesis, memory, run, session, validation, web_session, workflow
+    from .routers import admin, auth, chat, goal, hypothesis, memory, run, session, study, validation, web_session, workflow
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
@@ -149,6 +149,7 @@ def create_app(
 
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
     app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
+    app.include_router(study.router, prefix="/api/study", tags=["study"])
     app.include_router(hypothesis.router, prefix="/api/hypothesis", tags=["hypothesis"])
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
     app.include_router(session.router, prefix="/api/session", tags=["session"])
