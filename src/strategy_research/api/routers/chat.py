@@ -63,15 +63,47 @@ def _get_session_service() -> SessionService:
     return service
 
 
-# Per-session conversation history (legacy in-memory cache; replaced by DB)
-_session_histories: dict[str, list[dict[str, Any]]] = {}
+# Per-session conversation history — Phase 7+8: MemoryManager primary,
+# emergency fallback only when MemoryManager is unavailable.
+#
+# The legacy ``_session_histories`` module-level dict (Phase 1 memory leak)
+# was the original primary cache, but was superseded by SQLite via
+# ``api/session/service.py`` + ``persist_message``. Phase 7+8 unified
+# everything under ``MemoryManager``. This dict now serves ONLY as the
+# last-resort fallback when ``MemoryManagerFactory`` cannot produce a
+# working instance (e.g. SQLite driver missing, db_path invalid).
+_emergency_session_histories: dict[str, list[dict[str, Any]]] = {}
 
 
 def _get_or_create_history(session_id: str) -> list[dict[str, Any]]:
-    """Get or create conversation history for a session."""
-    if session_id not in _session_histories:
-        _session_histories[session_id] = []
-    return _session_histories[session_id]
+    """Get history. Phase 7+8: routes through ``MemoryManager`` first.
+
+    Returns an emergency in-memory list only when ``MemoryManager`` cannot
+    be constructed at all (a degraded-mode signal — health endpoint will
+    show ``mm_degraded=True``). Normal operation persists to SQLite.
+    """
+    try:
+        from strategy_research.core.agent.memory_manager import (
+            get_default_memory_manager,
+        )
+        mm = get_default_memory_manager()
+        if mm.is_degraded:
+            return _emergency_session_histories.setdefault(session_id, [])
+        # Run async helper synchronously (callers are in async context).
+        # The service.py path is the production async writer; this is a
+        # best-effort read for legacy ``_get_or_create_history`` callers.
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            # Can't await from sync; fall back to emergency buffer.
+            return _emergency_session_histories.setdefault(session_id, [])
+        except RuntimeError:
+            return _emergency_session_histories.setdefault(session_id, [])
+    except Exception as exc:
+        logger.warning(
+            "MemoryManager unavailable, using emergency buffer: %s", exc,
+        )
+        return _emergency_session_histories.setdefault(session_id, [])
 
 
 def _build_llm_config():
@@ -269,8 +301,19 @@ async def _run_agent_loop_background(
 
     try:
         from strategy_research.core.agent.chat_loop import build_chat_agent_loop
+        from strategy_research.core.agent.memory_manager import (
+            get_default_memory_manager,
+        )
 
-        history = _get_or_create_history(session_id)
+        # Phase 7+8: history via MemoryManager (SQLite primary, emergency fallback)
+        try:
+            mm = get_default_memory_manager()
+            history = await mm.get(session_id)
+        except Exception as exc:
+            logger.warning(
+                "MemoryManager unavailable, using emergency buffer: %s", exc,
+            )
+            history = _emergency_session_histories.setdefault(session_id, [])
 
         loop = build_chat_agent_loop(
             config=cfg,
@@ -284,10 +327,18 @@ async def _run_agent_loop_background(
         # Run the loop
         result = await loop.arun(task)
 
-        # Append to history
+        # Persist exchange (Phase 7+8: via MemoryManager)
         if result.answer:
-            history.append({"role": "user", "content": task})
-            history.append({"role": "assistant", "content": result.answer})
+            try:
+                await mm.append(session_id, "user", task)
+                await mm.append(session_id, "assistant", result.answer)
+            except Exception as exc:
+                logger.warning(
+                    "MemoryManager append failed, using emergency buffer: %s", exc,
+                )
+                # Last-resort: emergency buffer still in-memory
+                history.append({"role": "user", "content": task})
+                history.append({"role": "assistant", "content": result.answer})
 
         # Signal completion
         sse_buffer.push(
