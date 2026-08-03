@@ -18,7 +18,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from .models import Attempt, AttemptStatus, Message
 
@@ -325,6 +325,30 @@ class SessionStore:
                 "SELECT * FROM attempts WHERE session_id = ? "
                 "ORDER BY created_at DESC LIMIT ?",
                 (session_id, limit),
+            ).fetchall()
+            return [_row_to_attempt(r) for r in rows]
+
+    def list_attempts_by_status(
+        self,
+        session_id: str,
+        statuses: Sequence[str],
+    ) -> list[Attempt]:
+        """List Attempts in the given statuses, oldest first.
+
+        Used by the reload-recovery path: the endpoint rebuilds the
+        frontend streaming/queued state from the attempts table, with
+        in-memory guards applied by the caller (see
+        docs/streaming-reload-recovery.md).
+        """
+        if not statuses:
+            return []
+        placeholders = ",".join("?" * len(statuses))
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM attempts WHERE session_id = ? "
+                f"AND status IN ({placeholders}) "
+                "ORDER BY created_at ASC",
+                (session_id, *statuses),
             ).fetchall()
             return [_row_to_attempt(r) for r in rows]
 

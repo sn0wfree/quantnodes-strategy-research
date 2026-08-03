@@ -309,6 +309,54 @@ class SessionService:
         event.set()
         return True
 
+    def list_active_attempts(self, session_id: str) -> list[dict[str, str]]:
+        """Non-terminal attempts for a session, oldest first (reload recovery).
+
+        Powers ``GET /api/chat/attempts``: after a page reload the
+        frontend rebuilds its streaming/queued state from this list
+        (see docs/streaming-reload-recovery.md).
+
+        Guards (in-memory state is authoritative; the attempts table is
+        only a snapshot and survives restarts):
+        - ``running`` is reported only when the attempt's task is in
+          ``self._active_loops`` — a stale ``running`` row left behind
+          by a server restart is skipped.
+        - ``pending`` is reported only while the session still has a
+          live consumer queue (``self._session_queues``). The queue is
+          dropped once drained (``_process_session_queue``), so stale
+          pending rows from before a restart are skipped too.
+
+        Returns one dict per live attempt:
+        ``{"attempt_id", "message_id", "status", "prompt", "created_at"}``
+        with status normalized to ``running`` / ``queued`` for the
+        frontend.
+        """
+        attempts = self.store.list_attempts_by_status(
+            session_id,
+            [AttemptStatus.PENDING.value, AttemptStatus.RUNNING.value],
+        )
+        queue_alive = session_id in self._session_queues
+        out: list[dict[str, str]] = []
+        for attempt in attempts:
+            if attempt.status == AttemptStatus.RUNNING:
+                if attempt.attempt_id not in self._active_loops:
+                    continue
+                status = "running"
+            else:
+                if not queue_alive:
+                    continue
+                status = "queued"
+            out.append(
+                {
+                    "attempt_id": attempt.attempt_id,
+                    "message_id": attempt.message_id or "",
+                    "status": status,
+                    "prompt": attempt.prompt or "",
+                    "created_at": attempt.created_at or "",
+                }
+            )
+        return out
+
     async def wait_for_attempt(
         self,
         session_id: str,

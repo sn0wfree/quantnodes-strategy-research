@@ -153,6 +153,15 @@ interface ChatState {
   /** Load the next older page (before the earliest loaded message). */
   loadMoreMessages: (sessionId: string) => Promise<void>
   loadMessages: (sessionId: string) => Promise<void>
+  /**
+   * Reload recovery: rebuild streaming/queued state after a page
+   * reload from GET /api/chat/attempts (see
+   * docs/streaming-reload-recovery.md). Called at the end of
+   * loadMessages; SSE replay alone cannot restore it because
+   * `attempt.started` / `message_received` sit before the
+   * Last-Event-ID cursor.
+   */
+  fetchSessionAttempts: (sessionId: string) => Promise<void>
   clearMessages: () => void
 }
 
@@ -303,8 +312,76 @@ export const useChatStore = create<ChatState>()(
           // from a previous live stream is now stale.
           state.partTextAccumDelta = {}
         })
+        // Reload recovery: re-attach streaming/queued state for any
+        // in-flight attempt (see fetchSessionAttempts docstring).
+        await useChatStore.getState().fetchSessionAttempts(sessionId)
       } catch (err) {
         console.error('loadMessages error:', err)
+      }
+    },
+    fetchSessionAttempts: async (sessionId: string) => {
+      const seq = loadMessagesSeq
+      try {
+        const data = await api.get<{
+          attempts: {
+            attempt_id: string
+            message_id: string
+            status: 'running' | 'queued'
+            prompt: string
+            created_at: string
+          }[]
+        }>(`/chat/attempts?session_id=${sessionId}`)
+        if (seq !== loadMessagesSeq) return // stale response (session switched)
+        const attempts = data.attempts ?? []
+        set((state) => {
+          attempts.forEach((a, i) => {
+            const mid = a.message_id
+            if (!mid) return
+            const createdAt = a.created_at ? Date.parse(a.created_at) / 1000 : Date.now() / 1000
+            if (a.status === 'running') {
+              // The message may not be materialized yet (reload inside
+              // the first iteration, before the iter_start flush) —
+              // create a placeholder so the streaming indicator has a
+              // message to attach to. Later flush/SSE events take over.
+              if (!state.messages.has(mid)) {
+                state.messages.set(mid, {
+                  id: mid,
+                  session_id: sessionId,
+                  role: 'assistant',
+                  parts: [{ type: 'text', id: `seed-${mid}`, text: '' }],
+                  created_at: createdAt,
+                })
+              }
+              state.activeAttemptId = a.attempt_id
+              state.streamingMessageId = mid
+            } else {
+              // Queued: rebuild the in-memory placeholder (it is never
+              // persisted; projector only materializes user messages).
+              const meta = {
+                queue_status: 'queued' as const,
+                queue_position: i + 1,
+                queue_length: attempts.length,
+              }
+              const existing = state.messages.get(mid)
+              if (existing) {
+                existing.metadata = { ...(existing.metadata ?? {}), ...meta }
+              } else {
+                state.messages.set(mid, {
+                  id: mid,
+                  session_id: sessionId,
+                  role: 'assistant',
+                  parts: [{ type: 'text', id: `seed-${mid}`, text: '' }],
+                  created_at: createdAt,
+                  metadata: meta,
+                })
+              }
+            }
+          })
+        })
+      } catch (err) {
+        // Degrade gracefully: no streaming indicator (same as before
+        // this feature); live SSE events take over on the next delta.
+        console.error('fetchSessionAttempts error:', err)
       }
     },
     loadMoreMessages: async (sessionId: string) => {

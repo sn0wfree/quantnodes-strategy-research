@@ -904,6 +904,31 @@ async def chat_events(
     )
 
 
+@router.get("/attempts")
+async def list_active_attempts(
+    session_id: str = Query(...),
+    request: Request = None,
+):
+    """Non-terminal attempts for a session (reload recovery).
+
+    The frontend calls this after loading messages to rebuild its
+    streaming/queued state: a page reload loses ``streamingMessageId``
+    and the in-memory queued placeholders, and SSE replay cannot
+    recover ``attempt.started`` / ``message_received`` (they sit before
+    the Last-Event-ID cursor). See docs/streaming-reload-recovery.md.
+
+    Returns ``{"attempts": [...]}`` with each entry:
+    ``{attempt_id, message_id, status: "running"|"queued", prompt,
+    created_at}`` — oldest first. Zombie rows (server restart) are
+    filtered out by in-memory guards inside SessionService.
+    """
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _fetch_session_owned(_get_db(), session_id, user_id)
+    service = _get_session_service()
+    return {"attempts": service.list_active_attempts(session_id)}
+
+
 async def _event_generator(
     session_id: str,
     last_id: str,
