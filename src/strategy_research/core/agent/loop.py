@@ -44,6 +44,7 @@ from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
+from .circuit_breaker import RetryPolicy, ToolLoopCircuitBreaker
 from .compact import CompactConfig, compact_messages
 from .context import ContextBuilder, estimate_tokens
 from .progress import HeartbeatTimer
@@ -159,6 +160,8 @@ class AgentLoop:
         stream_mode: bool = True,
         compact_config: CompactConfig | None = None,
         event_bus: Any | None = None,
+        circuit_breaker: ToolLoopCircuitBreaker | None = None,
+        retry_policy: RetryPolicy | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -177,6 +180,8 @@ class AgentLoop:
         self._on_event = on_event
         self._stream_mode = stream_mode
         self._event_bus = event_bus
+        self._circuit_breaker = circuit_breaker
+        self._retry_policy = retry_policy or RetryPolicy()
         self.cc = compact_config or config.compact_config or CompactConfig()
         self._previous_summary: str | None = None
 
@@ -600,6 +605,33 @@ class AgentLoop:
             messages.append(tool_result_msg)
             result.messages.append(tool_result_msg)
 
+    def _breaker_open_messages(
+        self, tool_calls: list[ToolCall],
+    ) -> list[dict[str, Any]]:
+        """Return tool error messages when circuit breaker is OPEN.
+
+        Tells the LLM to try a different approach instead of repeating
+        the same failing tool calls.
+        """
+        state = self._circuit_breaker.to_dict() if self._circuit_breaker else {}
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps({
+                    "status": "error",
+                    "error": "circuit_breaker_open",
+                    "message": (
+                        f"Tool '{tc.name}' is temporarily unavailable "
+                        "(circuit breaker open). Please try a different "
+                        "approach or tool."
+                    ),
+                    "circuit_state": state,
+                }, ensure_ascii=False),
+            }
+            for tc in tool_calls
+        ]
+
     def _check_no_progress(
         self, tool_hashes: list[str], response: LLMResponse,
         result: LoopResult, iteration: int,
@@ -610,6 +642,8 @@ class AgentLoop:
             self._recent_hashes = self._recent_hashes[-self.no_progress_window:]
         if not self._detect_no_progress():
             return False
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.record_no_progress()
         result.finished_reason = "no_progress"
         result.answer = (
             response.content or
@@ -744,6 +778,12 @@ class AgentLoop:
                 self._fire_hooks("after_iteration", hook_ctx)
                 break
 
+            if self._circuit_breaker is not None and self._circuit_breaker.is_open():
+                tool_result_msgs = self._breaker_open_messages(response.tool_calls)
+                self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
+                self._fire_hooks("after_iteration", hook_ctx)
+                continue
+
             self._fire_hooks("before_execute_tools", hook_ctx)
             tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
             tool_hashes = self._collect_tool_hashes(response.tool_calls, tool_result_msgs)
@@ -841,6 +881,12 @@ class AgentLoop:
                 self._handle_stop(response, result, iteration)
                 await self._afire_hooks("after_iteration", hook_ctx)
                 break
+
+            if self._circuit_breaker is not None and self._circuit_breaker.is_open():
+                tool_result_msgs = self._breaker_open_messages(response.tool_calls)
+                self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
+                await self._afire_hooks("after_iteration", hook_ctx)
+                continue
 
             await self._afire_hooks("before_execute_tools", hook_ctx)
             tool_result_msgs = await self._aexecute_tool_batch(response.tool_calls, result)
@@ -957,6 +1003,13 @@ class AgentLoop:
         # Emit tool_result event
         is_error = isinstance(output, str) and output.startswith('{"status": "error"')
         status_str = "error" if is_error else "done"
+
+        # Update circuit breaker
+        if self._circuit_breaker is not None:
+            if is_error:
+                self._circuit_breaker.record_failure(tc.name)
+            else:
+                self._circuit_breaker.record_success(tc.name)
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
         self._emit("tool_result", {
             "tool": tc.name,
@@ -1128,6 +1181,14 @@ class AgentLoop:
 
         is_error = isinstance(output, str) and output.startswith('{"status": "error"')
         status_str = "error" if is_error else "done"
+
+        # Update circuit breaker
+        if self._circuit_breaker is not None:
+            if is_error:
+                self._circuit_breaker.record_failure(tc.name)
+            else:
+                self._circuit_breaker.record_success(tc.name)
+
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
         self._emit("tool_result", {
             "tool": tc.name,
