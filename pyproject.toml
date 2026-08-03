@@ -55,7 +55,6 @@ engine = [
     "QuantOPT>=0.1.1",
 ]
 webui = [
-    "jinja2>=3.1",
 ]
 webui-api = [
     "fastapi>=0.110",
