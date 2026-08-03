@@ -59,18 +59,23 @@ class SSEEventBuffer:
             )
             self._buffer.append(sse_event)
         self._cleanup()
-        # Notify ALL waiting SSE consumers for this session
-        # Use call_soon_threadsafe for thread-safe asyncio.Event.set()
+        # Notify ALL waiting SSE consumers for this session.
+        # 同 event loop 线程：直接 evt.set() 即时唤醒 wait()（避免
+        # call_soon_threadsafe 把 set 推到下一 tick，导致多个 push 合并
+        # 成一次唤醒、_event_generator 一次性 yield 一批事件 → 前端"一
+        # 下子全出现"）。跨线程（如 ThreadPool 里工具调 emit）：仍用
+        # call_soon_threadsafe 跨线程安全唤醒。
         for evt in self._session_events.get(session_id, set()):
             try:
                 try:
+                    asyncio.get_running_loop()
+                    evt.set()
+                except RuntimeError:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         loop.call_soon_threadsafe(evt.set)
                     else:
                         evt.set()
-                except RuntimeError:
-                    pass
             except Exception:
                 pass
         return event_id

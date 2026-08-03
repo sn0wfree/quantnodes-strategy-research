@@ -35,14 +35,18 @@ def create_app(
         static_dir: Static files directory (e.g. `webui/static/`). If exists, will be served at `/`.
         cors_origins: CORS allowed origins (default: `["*"]` for dev).
     """
-    # 配置应用日志级别 - 确保 info 级别日志可见
+    # 配置应用日志级别 - 确保 info 级别日志可见。
+    # SR_LOG_LEVEL=DEBUG 可开启 [DIAG] 诊断日志（流式 chunk、cfg、agent
+    # result 等），用于排查 SSE/LLM 链路问题；默认 INFO 不显。
+    log_level_name = os.environ.get("SR_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
     # 设置 strategy_research 命名空间日志级别
-    logging.getLogger("strategy_research").setLevel(logging.INFO)
+    logging.getLogger("strategy_research").setLevel(log_level)
     logger.info("[STARTUP] create_app called")
 
     # Register the core loop's compaction persister (legacy fallback
@@ -68,13 +72,18 @@ def create_app(
     async def lifespan(app: FastAPI):
         """Background tasks that run during the app's lifetime.
 
-        - Set EventStore for event publishing (via sse_pusher callback)
         - Schedule model catalog refresh 5s after startup so the user
           sees fresh metadata without blocking first response.
+
+        The SessionService + EventStore are created lazily on first
+        request via ``routers.chat._get_session_service`` (singleton
+        keyed by DB path), so there is no startup-time EventStore to
+        initialize here. The previous ``from .routers.chat import
+        _event_store`` referenced a dead module-level instance that
+        has been removed; the real EventStore is created per-DB inside
+        ``_get_session_service``.
         """
-        # EventStore uses sse_pusher callback — no set_loop needed
-        from .routers.chat import _event_store
-        logger.info("[STARTUP] EventStore ready for event publishing")
+        logger.info("[STARTUP] SessionService ready (lazy init on first request)")
 
         task = asyncio.create_task(_refresh_model_catalog_async())
         try:

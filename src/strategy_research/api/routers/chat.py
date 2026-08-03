@@ -12,7 +12,6 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..session.bridge_v2 import attach_eventstore_to_sse
 from ..session.service import SessionService
 from ..session.store import SessionStore
 from ..sse_buffer import sse_buffer
@@ -23,14 +22,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── Shared EventStore + SessionService (singleton) ──────────────────────────
-# Replaced EventBus + EventBusV2 with EventStore (Phase 7+8).
-# EventStore handles all three sinks:
-#   1. event_log (SQLite, source of truth)
-#   2. SSE push (via sse_pusher callback → SSEEventBuffer)
-#   3. messages + message_parts (via Projector.flush, flush_to_messages=True)
-
-_event_store = EventStore()
-attach_eventstore_to_sse(_event_store)
+# The EventStore is created per-DB-path inside _get_session_service()
+# (one per workspace). There is NO module-level EventStore instance —
+# the previous ``_event_store = EventStore()`` was a dead instance that
+# opened an empty ``~/.quantnodes/sessions.db`` and was never emitted
+# to, but it held a file descriptor and confused DB-path unification.
+# See core.agent.memory_manager.resolve_session_db_path for the unified
+# DB path resolution shared by EventStore and web_session.
 
 # True process-wide singleton. Recreating the service per request was a
 # real bug: queues/tasks/pause state live on the instance, so cancel,
@@ -48,6 +46,7 @@ def _get_session_service() -> SessionService:
     3. messages + message_parts tables via Projector.flush (flush_to_messages=True)
     """
     from .web_session import _get_db_path
+    from ..session.bridge_v2 import attach_eventstore_to_sse
 
     db_path = _get_db_path()
     service = _session_service_cache.get(db_path)

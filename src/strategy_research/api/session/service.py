@@ -445,6 +445,10 @@ class SessionService:
         # Build LLM config early — needed for compaction filter setting
         from ..routers.chat import _build_llm_config
         cfg = _build_llm_config()
+        logger.debug("[DIAG] cfg.model=%s cfg.provider=%s cfg.max_tokens=%s",
+                     cfg.model if cfg else "N/A",
+                     cfg.provider if cfg else "N/A",
+                     cfg.max_tokens if cfg else "N/A")
         self.store.update_attempt(attempt)
         # attempt.started carries message_id so the frontend can switch its
         # streamingMessageId from queued placeholder to actual stream.
@@ -760,6 +764,15 @@ class SessionService:
         except Exception as exc:
             logger.exception("AgentLoop.arun failed")
             return {"status": "failed", "reason": str(exc), "content": ""}
+
+        logger.debug(
+            "[DIAG] AgentLoop result: answer=%.200r finished_reason=%s error=%s iterations=%d tool_calls=%d",
+            loop_result.answer[:200] if loop_result.answer else "",
+            loop_result.finished_reason,
+            loop_result.error,
+            loop_result.iterations,
+            loop_result.tool_calls_made,
+        )
 
         return {
             "status": "success" if loop_result.answer else "empty",

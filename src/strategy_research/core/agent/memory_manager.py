@@ -50,20 +50,66 @@ Message = dict[str, Any]
 # ── Constants ────────────────────────────────────────────────────────
 
 
-DEFAULT_DB_PATH = Path.home() / ".quantnodes" / "sessions.db"
+# Unified session DB filename (dot-prefixed → hidden in file managers).
+# Lives in the workspace dir so EventStore, web_session, and SessionStore
+# all read/write the SAME file. Resolution order (see
+# ``resolve_session_db_path``):
+#   1. SR_SESSIONS_DB env (explicit override)
+#   2. <SR_WORKSPACE_PATH>/.quantnodes_strategy_research_session.db
+#   3. <cwd>/.quantnodes_strategy_research_session.db
+#   4. ~/.quantnodes/.quantnodes_strategy_research_session.db (fallback)
+SESSION_DB_FILENAME = ".quantnodes_strategy_research_session.db"
 WAL_BUSY_TIMEOUT_MS = 5_000
 AUTO_REPAIR_TIMEOUT_S = 30
 
+# Backward-compat alias (legacy code may still reference DEFAULT_DB_PATH).
+# Kept so existing imports don't break, but resolve_db_path now routes
+# through resolve_session_db_path which uses the new filename.
+DEFAULT_DB_PATH = Path.home() / ".quantnodes" / SESSION_DB_FILENAME
+
+
+def resolve_session_db_path() -> Path:
+    """Resolve the unified session DB path.
+
+    Priority:
+      1. ``SR_SESSIONS_DB`` env var (explicit absolute path override)
+      2. ``SR_WORKSPACE_PATH`` env var / ``<filename>``
+      3. current working dir / ``<filename>``
+      4. ``~/.quantnodes`` / ``<filename>`` (last-resort fallback)
+
+    The parent directory is created if missing. Returns an absolute Path.
+
+    This is the SINGLE source of truth for the session DB location —
+    both ``EventStore.resolve_db_path`` and
+    ``web_session._get_db_path`` route through here so they can never
+    diverge (the historical ``sessions.db`` vs
+    ``quantnodes_strategy_research_user.db`` split is gone).
+    """
+    # 1. Explicit override
+    env_explicit = os.environ.get("SR_SESSIONS_DB")
+    if env_explicit:
+        p = Path(env_explicit)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    # 2/3. Workspace-relative (SR_WORKSPACE_PATH or cwd)
+    workspace_env = os.environ.get("SR_WORKSPACE_PATH")
+    workspace = Path(workspace_env) if workspace_env else Path.cwd()
+    p = (workspace / SESSION_DB_FILENAME).resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 
 def resolve_db_path(override: Path | None = None) -> Path:
-    """Priority: override > SR_SESSIONS_DB env > ~/.quantnodes/sessions.db."""
+    """Resolve the session DB path (used by EventStore / MemoryManager).
+
+    Priority: explicit ``override`` arg > ``resolve_session_db_path()``
+    (which itself honors ``SR_SESSIONS_DB`` / ``SR_WORKSPACE_PATH`` /
+    cwd / ``~/.quantnodes`` fallback).
+    """
     if override is not None:
         return Path(override)
-    env_path = os.environ.get("SR_SESSIONS_DB")
-    if env_path:
-        return Path(env_path)
-    DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return DEFAULT_DB_PATH
+    return resolve_session_db_path()
 
 
 # ── SQLiteStore (source of truth) ───────────────────────────────────
@@ -776,4 +822,6 @@ __all__ = [
     "UnifiedMemoryManager",
     "get_default_memory_manager",
     "resolve_db_path",
+    "resolve_session_db_path",
+    "SESSION_DB_FILENAME",
 ]

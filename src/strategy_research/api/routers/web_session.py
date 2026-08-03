@@ -52,8 +52,16 @@ class SearchRequest(BaseModel):
 
 
 def _get_db_path() -> Path:
-    db_dir = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.home() / ".quantnodes")))
-    return db_dir / "quantnodes_strategy_research_user.db"
+    """Unified session DB path (delegates to resolve_session_db_path).
+
+    Both web_session and EventStore route through the same resolver so
+    they can never point at different files. See
+    ``core.agent.memory_manager.resolve_session_db_path`` for the
+    resolution order (SR_SESSIONS_DB > SR_WORKSPACE_PATH > cwd >
+    ~/.quantnodes fallback).
+    """
+    from ...core.agent.memory_manager import resolve_session_db_path
+    return resolve_session_db_path()
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
