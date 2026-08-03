@@ -95,7 +95,7 @@ class StructuredOutputParser:
         )
 
     def _layer1_strict(self, s: str) -> dict[str, Any] | None:
-        """Layer 1: Strict JSON parsing (with fence extraction)."""
+        """Layer 1: Strict JSON parsing (fence extraction + text stripping)."""
         # Try direct parse first
         result = self._try_parse_json(s)
         if result is not None:
@@ -105,6 +105,16 @@ class StructuredOutputParser:
         m = _JSON_FENCE_RE.search(s)
         if m:
             result = self._try_parse_json(m.group(1).strip())
+            if result is not None:
+                return result
+
+        # Strip surrounding non-JSON text: extract first `{` ... last `}`.
+        # LLMs sometimes prefix tool args with prose ("Output: ...") or
+        # wrap them with trailing text.
+        start = s.find("{")
+        end = s.rfind("}")
+        if 0 <= start < end:
+            result = self._try_parse_json(s[start:end + 1])
             if result is not None:
                 return result
 
