@@ -1,11 +1,16 @@
 """EventBusV2 — event publisher with 3 sinks (Level 3, B4 commit 1).
 
+.. deprecated::
+    Use ``EventStore`` (``strategy_research.core.agent.event_store``) instead.
+    EventBusV2 is kept for backward compatibility but no longer imported
+    by service.py or chat.py. Will be removed in a future release.
+
 This module sits between the producers (AgentLoop, service.py) and
 three sinks:
-  1. event_log table (persistence — the source of truth)
-  2. Legacy EventBus (live SSE delivery to connected clients)
-  3. Projector.flush() — materializes events to messages + message_parts
-     tables (B4: the only write path for those tables)
+   1. event_log table (persistence — the source of truth)
+   2. Legacy EventBus (live SSE delivery to connected clients)
+   3. Projector.flush() — materializes events to messages + message_parts
+      tables (B4: the only write path for those tables)
 
 In B4, service.py stops writing directly to messages/message_parts.
 Instead, it emits events via EventBusV2. EventBusV2 persists to
@@ -31,6 +36,7 @@ import sqlite3
 import threading
 import time
 import uuid
+import warnings
 from pathlib import Path
 from typing import List, Optional
 
@@ -42,6 +48,10 @@ logger = logging.getLogger(__name__)
 
 class EventBusV2:
     """Dual-write event publisher (event_log + EventBus).
+
+    .. deprecated::
+        Use ``EventStore`` (``strategy_research.core.agent.event_store``)
+        instead. This class is kept for backward compatibility.
 
     Attributes:
         event_bus: Legacy EventBus for SSE delivery. Unchanged.
@@ -55,14 +65,14 @@ class EventBusV2:
         flush_to_messages: bool = False,
     ) -> None:
         """
-        Args:
-            event_bus: Legacy EventBus for SSE delivery.
-            db_path: Path to SQLite DB (for event_log + messages tables).
-            flush_to_messages: If True, call Projector.flush() after
-                each publish to keep messages + message_parts tables
-                in sync. In B4 this becomes the sole write path for
-                those tables. Default False (B2/B3 backward compat).
+        .. deprecated::
+            Use ``EventStore`` instead. EventBusV2 is kept for backward
+            compatibility.
         """
+        warnings.warn(
+            "EventBusV2 is deprecated, use EventStore instead",
+            DeprecationWarning, stacklevel=2,
+        )
         self.event_bus = event_bus
         self.db_path = Path(db_path)
         self._lock = threading.Lock()

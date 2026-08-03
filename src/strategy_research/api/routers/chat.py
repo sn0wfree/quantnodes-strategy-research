@@ -97,164 +97,231 @@ class SendMessageResponse(BaseModel):
     attempt_id: Optional[str] = None
 
 
+# ── PartAccumulator (replaces inline on_event closure) ──────────────────────
+
+
+class _PartAccumulator:
+    """Accumulates LLM streaming parts and pushes events to SSE buffer.
+
+    Replaces the inline ``on_event`` closure in ``_run_agent_loop_background``
+    to reduce C901 complexity from 31 to <10.
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        message_id: str,
+    ) -> None:
+        self._session_id = session_id
+        self._message_id = message_id
+        self.parts: list[dict[str, Any]] = []
+
+    def handle(self, event_type: str, data: dict) -> None:
+        event_data = {**data, "message_id": self._message_id}
+        sse_buffer.push(
+            event_type,
+            json.dumps(event_data, ensure_ascii=False),
+            self._session_id,
+        )
+        self._route(event_type, event_data)
+
+    def _route(self, event_type: str, data: dict) -> None:
+        handler = {
+            "text.started": self._on_text_started,
+            "text_delta": self._on_text_delta,
+            "text.ended": self._on_text_ended,
+            "tool_call": self._on_tool_call,
+            "tool_result": self._on_tool_result,
+            "tool_progress": self._on_tool_progress,
+            "thinking_delta": self._on_thinking_delta,
+            "thinking_done": self._on_thinking_done,
+        }.get(event_type)
+        if handler is not None:
+            handler(data)
+
+    def _on_text_started(self, data: dict) -> None:
+        text_id = data.get("text_id")
+        if text_id and not any(
+            p.get("type") == "text" and p.get("id") == text_id
+            for p in reversed(self.parts)
+        ):
+            self.parts.append({"type": "text", "id": text_id, "text": ""})
+
+    def _on_text_delta(self, data: dict) -> None:
+        text_id = data.get("text_id")
+        text = data.get("text", "")
+        if not text_id:
+            return
+        for p in reversed(self.parts):
+            if p.get("type") == "text" and p.get("id") == text_id:
+                p["text"] += text
+                return
+        self.parts.append({"type": "text", "id": text_id, "text": text})
+
+    def _on_text_ended(self, data: dict) -> None:
+        text_id = data.get("text_id")
+        final_text = data.get("text", "")
+        if text_id:
+            for p in reversed(self.parts):
+                if p.get("type") == "text" and p.get("id") == text_id:
+                    p["text"] = final_text
+                    return
+
+    def _on_tool_call(self, data: dict) -> None:
+        self.parts.append({
+            "type": "tool_call",
+            "id": data.get("id"),
+            "name": data.get("name"),
+            "arguments": data.get("arguments"),
+        })
+
+    def _on_tool_result(self, data: dict) -> None:
+        for p in reversed(self.parts):
+            if p.get("type") == "tool_call" and p.get("id") == data.get("id"):
+                p["result"] = data.get("result")
+                p["status"] = data.get("status", "done")
+                return
+
+    def _on_tool_progress(self, data: dict) -> None:
+        for p in reversed(self.parts):
+            if p.get("type") == "tool_call" and p.get("id") == data.get("id"):
+                p["progress"] = data.get("steps", [])
+                return
+
+    def _on_thinking_delta(self, data: dict) -> None:
+        delta = data.get("delta", "")
+        if self.parts and self.parts[-1].get("type") == "thinking":
+            self.parts[-1]["text"] += delta
+        else:
+            self.parts.append({"type": "thinking", "text": delta})
+
+    def _on_thinking_done(self, data: dict) -> None:
+        if self.parts and self.parts[-1].get("type") == "thinking":
+            self.parts[-1]["status"] = "done"
+
+    @property
+    def assistant_content(self) -> str:
+        return "".join(
+            p.get("text", "") for p in self.parts if p.get("type") == "text"
+        )
+
+
+# ── Helpers for _run_agent_loop_background ──────────────────────────────
+
+
+def _persist_user_message(session_id: str, content: str) -> None:
+    """Persist user message to DB."""
+    from .web_session import persist_message
+    persist_message(session_id=session_id, role="user", content=content)
+
+
+def _auto_title_and_notify(session_id: str, task: str) -> None:
+    """Auto-title session and notify frontend via SSE."""
+    from .web_session import _get_db, auto_title_session
+    new_title = auto_title_session(session_id, task)
+    if not new_title:
+        return
+    try:
+        conn = _get_db()
+        row = conn.execute(
+            "SELECT message_count, starred, tags_json, archived "
+            "FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        meta_update = {
+            "session_id": session_id,
+            "title": new_title,
+            "message_count": row["message_count"] if row else 0,
+            "starred": bool(row["starred"]) if row else False,
+            "tags": json.loads(row["tags_json"]) if row and row["tags_json"] else [],
+            "archived": bool(row["archived"]) if row else False,
+        }
+        sse_buffer.push(
+            "session_meta_updated",
+            json.dumps(meta_update, ensure_ascii=False),
+            session_id,
+        )
+    except Exception as exc:
+        logger.warning("Failed to emit session_meta_updated: %s", exc)
+
+
+def _persist_assistant_message(
+    session_id: str,
+    content: str,
+    parts: list[dict[str, Any]],
+    message_id: str,
+    cfg: Any = None,
+) -> None:
+    """Persist assistant message to DB."""
+    from .web_session import persist_message
+    persist_message(
+        session_id=session_id, role="assistant", content=content,
+        parts=parts or None,
+        metadata={"model": getattr(cfg, "model", None)} if cfg else None,
+        message_id=message_id,
+    )
+
+
+async def _emit_config_error(session_id: str, message_id: str) -> None:
+    """Emit SSE error events when LLM is not configured."""
+    err_data = {"message_id": message_id, "error": "LLM 未配置。请设置 OPENAI_API_KEY 环境变量。"}
+    sse_buffer.push("error", json.dumps(err_data), session_id)
+    sse_buffer.push(
+        "agent_done",
+        json.dumps({"message_id": message_id, "status": "error"}),
+        session_id,
+    )
+
+
+def _emit_agent_done(session_id: str, message_id: str, answer: str | None) -> None:
+    """Emit agent_done SSE event."""
+    sse_buffer.push(
+        "agent_done",
+        json.dumps({
+            "message_id": message_id,
+            "status": "success" if answer else "empty",
+            "answer_length": len(answer) if answer else 0,
+        }),
+        session_id,
+    )
+
+
+async def _emit_agent_error(session_id: str, message_id: str, exc: Exception) -> None:
+    """Emit error + agent_done SSE events on AgentLoop failure."""
+    sse_buffer.push(
+        "error",
+        json.dumps({"message_id": message_id, "error": str(exc)}),
+        session_id,
+    )
+    sse_buffer.push(
+        "agent_done",
+        json.dumps({"message_id": message_id, "status": "error"}),
+        session_id,
+    )
+
+
 async def _run_agent_loop_background(
     session_id: str,
     message_id: str,
     task: str,
 ):
-    """Run AgentLoop in background, pushing events to SSE buffer.
-
-    TODO(architecture): superseded legacy path. When send_async
-    migrated to the unified SessionService (docs/chat-service-design.md,
-    docs/chat-message-queue-design.md), this background runner and its
-    helpers (``_run_test_script``, ``_session_histories`` /
-    ``_get_or_create_history``) were replaced by
-    ``api/session/service.py`` — which now owns queueing, persistence,
-    and the part-accumulation protocol. No production caller remains;
-    the module-level ``_session_histories`` cache is a memory leak
-    waiting to happen for sessions that never hit the new path. Remove
-    once the service layer is stable (tests that mirror this logic:
-    test_text_part_routing.py).
-    """
+    """Run AgentLoop in background, pushing events to SSE buffer."""
     import os
 
-    # ── Persist user message + auto-title ────────────────────────────────
-    from .web_session import _get_db, auto_title_session, persist_message
-    persist_message(
-        session_id=session_id,
-        role="user",
-        content=task,
-    )
-    new_title = auto_title_session(session_id, task)
-    if new_title:
-        # Notify frontend of the auto-title update via SSE
-        try:
-            conn = _get_db()
-            row = conn.execute(
-                "SELECT message_count, starred, tags_json, archived "
-                "FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            meta_update = {
-                "session_id": session_id,
-                "title": new_title,
-                "message_count": row["message_count"] if row else 0,
-                "starred": bool(row["starred"]) if row else False,
-                "tags": json.loads(row["tags_json"]) if row and row["tags_json"] else [],
-                "archived": bool(row["archived"]) if row else False,
-            }
-            sse_buffer.push(
-                "session_meta_updated",
-                json.dumps(meta_update, ensure_ascii=False),
-                session_id,
-            )
-        except Exception as exc:
-            logger.warning("Failed to emit session_meta_updated: %s", exc)
+    _persist_user_message(session_id, task)
+    _auto_title_and_notify(session_id, task)
 
-    # Accumulator for assistant parts (text + tool calls + thinking)
-    accumulated_parts: list[dict[str, Any]] = []
+    accumulator = _PartAccumulator(session_id, message_id)
 
     if os.environ.get("STRATEGY_RESEARCH_TEST_CHAT") == "1":
-        await _run_test_script(session_id, message_id, task, accumulated_parts)
-        # Persist assistant message after scripted run
-        assistant_content = "".join(
-            p.get("text", "") for p in accumulated_parts if p.get("type") == "text"
-        )
-        persist_message(
-            session_id=session_id,
-            role="assistant",
-            content=assistant_content,
-            parts=accumulated_parts or None,
-            metadata={"model": "test-script"},
-            message_id=message_id,
-        )
+        await _run_test_script(session_id, message_id, task, accumulator.parts)
+        _persist_assistant_message(session_id, accumulator.assistant_content, accumulator.parts, message_id)
         return
 
     cfg = _build_llm_config()
     if cfg is None or not cfg.api_key:
-        err_data = {"message_id": message_id, "error": "LLM 未配置。请设置 OPENAI_API_KEY 环境变量。"}
-        sse_buffer.push("error", json.dumps(err_data), session_id)
-        sse_buffer.push(
-            "agent_done",
-            json.dumps({"message_id": message_id, "status": "error"}),
-            session_id,
-        )
-        # Persist error message
-        persist_message(
-            session_id=session_id,
-            role="assistant",
-            content=err_data["error"],
-            parts=[{"type": "error", "message": err_data["error"]}],
-            message_id=message_id,
-        )
+        await _emit_config_error(session_id, message_id)
+        _persist_assistant_message(session_id, "LLM 未配置", [{"type": "error", "message": "LLM 未配置"}], message_id)
         return
-
-    # Build on_event callback that pushes to sse_buffer AND accumulates parts
-    def on_event(event_type: str, data: dict):
-        # Add message_id to every event for frontend correlation
-        event_data = {**data, "message_id": message_id}
-        sse_buffer.push(event_type, json.dumps(event_data, ensure_ascii=False), session_id)
-
-        # Accumulate for persistence (3-step text protocol with text_id)
-        if event_type == "text.started":
-            text_id = event_data.get("text_id")
-            if text_id:
-                # Idempotent: skip when a part with this id already exists.
-                for p in reversed(accumulated_parts):
-                    if p.get("type") == "text" and p.get("id") == text_id:
-                        break
-                else:
-                    accumulated_parts.append({"type": "text", "id": text_id, "text": ""})
-        elif event_type == "text_delta":
-            text_id = event_data.get("text_id")
-            text = event_data.get("text", "")
-            if not text_id:
-                logger.warning("text_delta without text_id, dropping chunk")
-                return
-            for p in reversed(accumulated_parts):
-                if p.get("type") == "text" and p.get("id") == text_id:
-                    p["text"] += text
-                    break
-            else:
-                # Orphan: push as new part (defensive against replay/ordering)
-                accumulated_parts.append({"type": "text", "id": text_id, "text": text})
-        elif event_type == "text.ended":
-            text_id = event_data.get("text_id")
-            final_text = event_data.get("text", "")
-            if text_id:
-                for p in reversed(accumulated_parts):
-                    if p.get("type") == "text" and p.get("id") == text_id:
-                        p["text"] = final_text
-                        break
-        elif event_type == "tool_call":
-            accumulated_parts.append({
-                "type": "tool_call",
-                "id": event_data.get("id"),
-                "name": event_data.get("name"),
-                "arguments": event_data.get("arguments"),
-            })
-        elif event_type == "tool_result":
-            # Attach result to last tool_call
-            for p in reversed(accumulated_parts):
-                if p.get("type") == "tool_call" and p.get("id") == event_data.get("id"):
-                    p["result"] = event_data.get("result")
-                    p["status"] = event_data.get("status", "done")
-                    break
-        elif event_type == "tool_progress":
-            # Attach progress steps to matching tool_call
-            steps = event_data.get("steps", [])
-            for p in reversed(accumulated_parts):
-                if p.get("type") == "tool_call" and p.get("id") == event_data.get("id"):
-                    p["progress"] = steps
-                    break
-        elif event_type == "thinking_delta":
-            delta = event_data.get("delta", "")
-            if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":
-                accumulated_parts[-1]["text"] += delta
-            else:
-                accumulated_parts.append({"type": "thinking", "text": delta})
-        elif event_type == "thinking_done":
-            if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":
-                accumulated_parts[-1]["status"] = "done"
 
     try:
         from strategy_research.core.agent.chat_loop import build_chat_agent_loop
@@ -262,8 +329,6 @@ async def _run_agent_loop_background(
             get_default_memory_manager,
         )
 
-        # Phase 7+8: history via MemoryManager (SQLite primary, InMemoryStore fallback)
-        # MemoryManager handles its own degradation (SQLite → InMemoryStore).
         mm = get_default_memory_manager()
         history = await mm.get(session_id) or []
 
@@ -271,63 +336,23 @@ async def _run_agent_loop_background(
             config=cfg,
             session_id=session_id,
             role="chat",
-            on_event=on_event,
-            workspace=None,  # web chat: no workspace concept yet
-            # allowed_tools=None (P2: unlock — web chat can now call tools)
+            on_event=accumulator.handle,
+            workspace=None,
         )
 
-        # Run the loop
         result = await loop.arun(task)
 
-        # Persist exchange (Phase 7+8: via MemoryManager)
         if result.answer:
             await mm.append(session_id, "user", task)
             await mm.append(session_id, "assistant", result.answer)
 
-        # Signal completion
-        sse_buffer.push(
-            "agent_done",
-            json.dumps({
-                "message_id": message_id,
-                "status": "success" if result.answer else "empty",
-                "answer_length": len(result.answer) if result.answer else 0,
-            }),
-            session_id,
-        )
-
-        # Persist assistant message (with all accumulated parts)
-        assistant_content = result.answer or "".join(
-            p.get("text", "") for p in accumulated_parts if p.get("type") == "text"
-        )
-        persist_message(
-            session_id=session_id,
-            role="assistant",
-            content=assistant_content,
-            parts=accumulated_parts or None,
-            metadata={"model": getattr(cfg, "model", None)} if cfg else None,
-            message_id=message_id,
-        )
+        _emit_agent_done(session_id, message_id, result.answer)
+        _persist_assistant_message(session_id, result.answer or accumulator.assistant_content, accumulator.parts, message_id, cfg)
 
     except Exception as exc:
         logger.error("AgentLoop failed for session %s: %s", session_id, exc, exc_info=True)
-        sse_buffer.push(
-            "error",
-            json.dumps({"message_id": message_id, "error": str(exc)}),
-            session_id,
-        )
-        sse_buffer.push(
-            "agent_done",
-            json.dumps({"message_id": message_id, "status": "error"}),
-            session_id,
-        )
-        # Persist error as assistant message
-        persist_message(
-            session_id=session_id,
-            role="assistant",
-            content=f"[error] {exc}",
-            parts=[{"type": "error", "message": str(exc)}],
-            message_id=message_id,
-        )
+        await _emit_agent_error(session_id, message_id, exc)
+        _persist_assistant_message(session_id, f"[error] {exc}", [{"type": "error", "message": str(exc)}], message_id)
 
 
 async def _run_test_script(
@@ -503,20 +528,16 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     session_id = body.session_id
     content = body.content.strip()
 
-    # Parse command
-    parts = content.split(None, 2)  # /goal <subcommand> [args]
+    parts = content.split(None, 2)
     subcmd = parts[1].lower() if len(parts) > 1 else "status"
     args = parts[2] if len(parts) > 2 else ""
 
-    # IDs for SSE correlation
     user_msg_id = str(uuid.uuid4())
     assistant_msg_id = str(uuid.uuid4())
 
-    # Get EventStore (with flush_to_messages=True)
     service = _get_session_service()
     event_bus = service.event_bus
 
-    # Emit message_received for user message — also flushes to messages table
     event_bus.emit(session_id, "message_received", {
         "message_id": user_msg_id,
         "user_message_id": user_msg_id,
@@ -525,140 +546,14 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
         "role": "user",
     })
 
-    # Execute goal command
-    response_text = ""
     try:
         with GoalStore() as store:
-            if subcmd == "start" or subcmd == "create":
-                objective = args or "Research goal"
-                goal = store.replace_goal(
-                    session_id=session_id,
-                    objective=objective,
-                    criteria=default_goal_criteria(),
-                )
-                response_text = (
-                    f"Goal created: {goal.goal_id[:12]}...\n"
-                    f"Objective: {goal.objective}\n"
-                    f"Status: {goal.status.value}"
-                )
-
-            elif subcmd == "status" or subcmd == "":
-                current = store.get_current_goal(session_id)
-                if current is None:
-                    response_text = "No active goal. Use /goal start <objective> to create one."
-                else:
-                    snapshot = store.get_current_snapshot(session_id)
-                    criteria = snapshot.get("criteria", []) if snapshot else []
-                    evidence_count = snapshot.get("evidence_count", 0) if snapshot else 0
-                    response_text = (
-                        f"Goal: {current.goal_id[:12]}...\n"
-                        f"Objective: {current.objective}\n"
-                        f"Status: {current.status.value}\n"
-                        f"Progress: {current.progress_percent:.0f}%\n"
-                        f"Criteria: {len(criteria)} | Evidence: {evidence_count}"
-                    )
-
-            elif subcmd == "evidence" or subcmd == "ev":
-                current = store.get_current_goal(session_id)
-                if current is None:
-                    response_text = "No active goal. Create one first with /goal start <objective>."
-                else:
-                    text = args or "No evidence text provided"
-                    evidence = EvidenceInput(text=text, source_type="chat")
-                    record = store.append_evidence(
-                        session_id=session_id,
-                        goal_id=current.goal_id,
-                        expected_goal_id=current.goal_id,
-                        evidence=evidence,
-                    )
-                    updated = store.get_current_goal(session_id)
-                    response_text = (
-                        f"Evidence added: {record.evidence_id[:12]}...\n"
-                        f"Progress: {updated.progress_percent:.0f}%"
-                    )
-
-            elif subcmd == "complete" or subcmd == "done":
-                current = store.get_current_goal(session_id)
-                if current is None:
-                    response_text = "No active goal to complete."
-                else:
-                    recap = args or None
-                    updated = store.complete_lite(
-                        session_id=session_id,
-                        goal_id=current.goal_id,
-                        expected_goal_id=current.goal_id,
-                        recap=recap,
-                    )
-                    response_text = (
-                        f"Goal completed: {updated.goal_id[:12]}...\n"
-                        f"Status: {updated.status.value}"
-                    )
-
-            elif subcmd == "cancel":
-                current = store.get_current_goal(session_id)
-                if current is None:
-                    response_text = "No active goal to cancel."
-                else:
-                    updated = store.update_status(
-                        session_id=session_id,
-                        goal_id=current.goal_id,
-                        expected_goal_id=current.goal_id,
-                        status=GoalStatus.CANCELLED,
-                        recap=args or None,
-                    )
-                    response_text = (
-                        f"Goal cancelled: {updated.goal_id[:12]}...\n"
-                        f"Status: {updated.status.value}"
-                    )
-
-            elif subcmd == "help":
-                response_text = (
-                    "/goal start <objective>  — create a new goal\n"
-                    "/goal status             — show current goal\n"
-                    "/goal evidence <text>    — add evidence\n"
-                    "/goal complete [recap]   — mark complete\n"
-                    "/goal cancel [recap]     — cancel goal\n"
-                    "/goal help               — this message"
-                )
-
-            else:
-                response_text = f"Unknown subcommand: {subcmd}. Use /goal help for usage."
-
+            response_text = _dispatch_goal_command(subcmd, args, session_id, store)
     except Exception as exc:
         logger.exception("goal command failed: %s", subcmd)
         response_text = f"Goal command failed: {exc}"
 
-    # Emit 3-step text protocol (text.started → text_delta → text.ended)
-    # so the frontend can route the text chunk to the correct text part.
-    # Also flushes the assistant message to the messages table.
-    goal_text_id = str(uuid.uuid4())
-    event_bus.emit(session_id, "text.started", {
-        "message_id": assistant_msg_id,
-        "text_id": goal_text_id,
-    })
-    event_bus.emit(session_id, "text_delta", {
-        "message_id": assistant_msg_id,
-        "text_id": goal_text_id,
-        "text": response_text,
-    })
-    event_bus.emit(session_id, "text.ended", {
-        "message_id": assistant_msg_id,
-        "text_id": goal_text_id,
-        "text": response_text,
-    })
-    # Final assistant_message event with content for message.content
-    event_bus.emit(session_id, "assistant_message", {
-        "message_id": assistant_msg_id,
-        "content": response_text,
-        "message_type": "assistant",
-        "metadata": {"model": "goal-handler"},
-    })
-
-    # Emit agent_done
-    event_bus.emit(session_id, "agent_done", {
-        "message_id": assistant_msg_id,
-        "status": "success",
-    })
+    _emit_goal_response(event_bus, session_id, assistant_msg_id, response_text)
 
     return SendMessageResponse(
         message_id=user_msg_id,
@@ -667,6 +562,144 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
         event_id="",
         status="done",
     )
+
+
+def _dispatch_goal_command(
+    subcmd: str, args: str, session_id: str, store: Any,
+) -> str:
+    """Dispatch goal subcommand to handler."""
+    handlers = {
+        "start": _goal_start,
+        "create": _goal_start,
+        "status": _goal_status,
+        "": _goal_status,
+        "evidence": _goal_evidence,
+        "ev": _goal_evidence,
+        "complete": _goal_complete,
+        "done": _goal_complete,
+        "cancel": _goal_cancel,
+        "help": _goal_help,
+    }
+    handler = handlers.get(subcmd)
+    if handler is None:
+        return f"Unknown subcommand: {subcmd}. Use /goal help for usage."
+    if handler is _goal_help:
+        return handler()
+    return handler(args, session_id, store)
+
+
+def _goal_start(args: str, session_id: str, store: Any) -> str:
+    from ...core.goal.context import default_goal_criteria
+    objective = args or "Research goal"
+    goal = store.replace_goal(
+        session_id=session_id, objective=objective,
+        criteria=default_goal_criteria(),
+    )
+    return (
+        f"Goal created: {goal.goal_id[:12]}...\n"
+        f"Objective: {goal.objective}\n"
+        f"Status: {goal.status.value}"
+    )
+
+
+def _goal_status(args: str, session_id: str, store: Any) -> str:
+    current = store.get_current_goal(session_id)
+    if current is None:
+        return "No active goal. Use /goal start <objective> to create one."
+    snapshot = store.get_current_snapshot(session_id)
+    criteria = snapshot.get("criteria", []) if snapshot else []
+    evidence_count = snapshot.get("evidence_count", 0) if snapshot else 0
+    return (
+        f"Goal: {current.goal_id[:12]}...\n"
+        f"Objective: {current.objective}\n"
+        f"Status: {current.status.value}\n"
+        f"Progress: {current.progress_percent:.0f}%\n"
+        f"Criteria: {len(criteria)} | Evidence: {evidence_count}"
+    )
+
+
+def _goal_evidence(args: str, session_id: str, store: Any) -> str:
+    from ...core.goal import EvidenceInput
+    current = store.get_current_goal(session_id)
+    if current is None:
+        return "No active goal. Create one first with /goal start <objective>."
+    text = args or "No evidence text provided"
+    evidence = EvidenceInput(text=text, source_type="chat")
+    record = store.append_evidence(
+        session_id=session_id, goal_id=current.goal_id,
+        expected_goal_id=current.goal_id, evidence=evidence,
+    )
+    updated = store.get_current_goal(session_id)
+    return (
+        f"Evidence added: {record.evidence_id[:12]}...\n"
+        f"Progress: {updated.progress_percent:.0f}%"
+    )
+
+
+def _goal_complete(args: str, session_id: str, store: Any) -> str:
+    current = store.get_current_goal(session_id)
+    if current is None:
+        return "No active goal to complete."
+    recap = args or None
+    updated = store.complete_lite(
+        session_id=session_id, goal_id=current.goal_id,
+        expected_goal_id=current.goal_id, recap=recap,
+    )
+    return (
+        f"Goal completed: {updated.goal_id[:12]}...\n"
+        f"Status: {updated.status.value}"
+    )
+
+
+def _goal_cancel(args: str, session_id: str, store: Any) -> str:
+    from ...core.goal import GoalStatus
+    current = store.get_current_goal(session_id)
+    if current is None:
+        return "No active goal to cancel."
+    recap = args or None
+    updated = store.update_status(
+        session_id=session_id, goal_id=current.goal_id,
+        expected_goal_id=current.goal_id,
+        status=GoalStatus.CANCELLED, recap=recap,
+    )
+    return (
+        f"Goal cancelled: {updated.goal_id[:12]}...\n"
+        f"Status: {updated.status.value}"
+    )
+
+
+def _goal_help() -> str:
+    return (
+        "/goal start <objective>  — create a new goal\n"
+        "/goal status             — show current goal\n"
+        "/goal evidence <text>    — add evidence\n"
+        "/goal complete [recap]   — mark complete\n"
+        "/goal cancel [recap]     — cancel goal\n"
+        "/goal help               — this message"
+    )
+
+
+def _emit_goal_response(
+    event_bus: Any, session_id: str, assistant_msg_id: str, response_text: str,
+) -> None:
+    """Emit goal response as 3-step text protocol."""
+    goal_text_id = str(uuid.uuid4())
+    event_bus.emit(session_id, "text.started", {
+        "message_id": assistant_msg_id, "text_id": goal_text_id,
+    })
+    event_bus.emit(session_id, "text_delta", {
+        "message_id": assistant_msg_id, "text_id": goal_text_id, "text": response_text,
+    })
+    event_bus.emit(session_id, "text.ended", {
+        "message_id": assistant_msg_id, "text_id": goal_text_id, "text": response_text,
+    })
+    event_bus.emit(session_id, "assistant_message", {
+        "message_id": assistant_msg_id, "content": response_text,
+        "message_type": "assistant", "metadata": {"model": "goal-handler"},
+    })
+    event_bus.emit(session_id, "agent_done", {
+        "message_id": assistant_msg_id, "status": "success",
+    })
 
 
 # ── /compact command handler ──────────────────────────────────────
@@ -852,91 +885,17 @@ async def chat_events(
     last_event_id_query: Optional[str] = Query(None, alias="Last-Event-ID"),
     request: Request = None,
 ):
-    """SSE event stream for a session.
-
-    Streams real-time events from AgentLoop (text_delta, tool_call, etc.)
-    Supports Last-Event-ID header for replay on reconnection.
-    (Query param supported as fallback for older clients.)
-    """
-    # Ownership check: only the session owner may subscribe
+    """SSE event stream for a session."""
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
     _fetch_session_owned(_get_db(), session_id, user_id)
     resolved_last_event_id = last_event_id or last_event_id_query or ""
     logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, resolved_last_event_id)
 
-    # Register for async notifications
     notification_event = sse_buffer.register_session(session_id)
 
-    async def event_generator():
-        logger.info("[SSE] generator started session=%s", session_id)
-        # Send SSE comment immediately so the browser's EventSource
-        # fires onopen without waiting for the first real event or
-        # the 15s heartbeat. Without this, a new session with empty
-        # buffer blocks 15s and the browser reports onerror → reconnect
-        # loop. Comment lines (: prefix) are ignored by EventSource
-        # but cause StreamingResponse to flush response headers.
-        yield ": connected\n\n"
-        # Tell the browser's native EventSource to reconnect after 3s
-        # if the connection drops. This replaces the old manual reconnect
-        # and enables proper Last-Event-ID based replay.
-        yield "retry: 3000\n\n"
-
-        last_id = resolved_last_event_id or ""
-        event_count = 0
-
-        try:
-            # Replay missed events first
-            if last_id:
-                missed = sse_buffer.replay_from(last_id, session_id)
-                for evt in missed:
-                    yield _format_sse(evt)
-                    last_id = evt.id
-                logger.debug("[SSE] replayed %d missed events session=%s", len(missed), session_id)
-
-            # Flush any events that arrived before we started listening
-            existing = sse_buffer.get_events_since(session_id, last_id)
-            for evt in existing:
-                yield _format_sse(evt)
-                last_id = evt.id
-            if existing:
-                logger.debug("[SSE] flushed %d existing events session=%s", len(existing), session_id)
-
-            # Stream new events
-            while True:
-                # Wait for new events (with timeout for heartbeat)
-                try:
-                    await asyncio.wait_for(notification_event.wait(), timeout=15.0)
-                except asyncio.TimeoutError:
-                    # Send heartbeat
-                    event_count += 1
-                    yield _heartbeat_sse(event_count)
-                    if event_count % 4 == 0:  # Log every 60s
-                        logger.debug("[SSE] heartbeat #%d session=%s", event_count, session_id)
-                    continue
-
-                # Clear the event and get new events
-                notification_event.clear()
-                new_events = sse_buffer.get_events_since(session_id, last_id)
-                for evt in new_events:
-                    yield _format_sse(evt)
-                    last_id = evt.id
-                    event_count += 1
-                    if evt.event:
-                        logger.debug("[SSE] event=%s session=%s id=%s", evt.event, session_id, evt.id)
-
-        except asyncio.CancelledError:
-            logger.info("[SSE] client disconnected session=%s reason=cancelled events=%d",
-                       session_id, event_count)
-        except Exception as exc:
-            logger.error("[SSE] generator error session=%s: %s", session_id, exc)
-            raise
-        finally:
-            sse_buffer.unregister_session(session_id, notification_event)
-            logger.info("[SSE] generator ended session=%s total_events=%d", session_id, event_count)
-
     return StreamingResponse(
-        event_generator(),
+        _event_generator(session_id, resolved_last_event_id, notification_event),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -944,6 +903,70 @@ async def chat_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def _event_generator(
+    session_id: str,
+    last_id: str,
+    notification_event: Any,
+):
+    """SSE event generator: replay missed events then stream live."""
+    logger.info("[SSE] generator started session=%s", session_id)
+    yield ": connected\n\n"
+    yield "retry: 3000\n\n"
+
+    event_count = 0
+    try:
+        last_id, event_count, replay_lines = await _replay_missed(last_id, session_id, event_count)
+        for line in replay_lines:
+            yield line
+        while True:
+            try:
+                await asyncio.wait_for(notification_event.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                event_count += 1
+                yield _heartbeat_sse(event_count)
+                if event_count % 4 == 0:
+                    logger.debug("[SSE] heartbeat #%d session=%s", event_count, session_id)
+                continue
+
+            notification_event.clear()
+            new_events = sse_buffer.get_events_since(session_id, last_id)
+            for evt in new_events:
+                yield _format_sse(evt)
+                last_id = evt.id
+                event_count += 1
+                if evt.event:
+                    logger.debug("[SSE] event=%s session=%s id=%s", evt.event, session_id, evt.id)
+    except asyncio.CancelledError:
+        logger.info("[SSE] client disconnected session=%s reason=cancelled events=%d", session_id, event_count)
+    except Exception as exc:
+        logger.error("[SSE] generator error session=%s: %s", session_id, exc)
+        raise
+    finally:
+        sse_buffer.unregister_session(session_id, notification_event)
+        logger.info("[SSE] generator ended session=%s total_events=%d", session_id, event_count)
+
+
+async def _replay_missed(
+    last_id: str, session_id: str, event_count: int,
+) -> tuple[str, int, list[str]]:
+    """Replay missed events from last_event_id, return (last_id, event_count, lines)."""
+    lines: list[str] = []
+    if last_id:
+        missed = sse_buffer.replay_from(last_id, session_id)
+        for evt in missed:
+            lines.append(_format_sse(evt))
+            last_id = evt.id
+        logger.debug("[SSE] replayed %d missed events session=%s", len(missed), session_id)
+
+    existing = sse_buffer.get_events_since(session_id, last_id)
+    for evt in existing:
+        lines.append(_format_sse(evt))
+        last_id = evt.id
+    if existing:
+        logger.debug("[SSE] flushed %d existing events session=%s", len(existing), session_id)
+    return last_id, event_count, lines
 
 
 def _format_sse(evt) -> str:

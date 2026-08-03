@@ -57,6 +57,11 @@ class SSEEvent:
 class EventBus:
     """Session-scoped event bus with subscribers and buffered events.
 
+    .. deprecated::
+        Use ``EventStore`` (``strategy_research.core.agent.event_store``)
+        instead. EventBus is kept for backward compatibility with the
+        SSE endpoint but will be removed in a future release.
+
     V5: Inject the asyncio event loop with ``set_loop()``, and use
     ``call_soon_threadsafe`` in ``publish()`` to preserve thread safety.
 
@@ -66,6 +71,9 @@ class EventBus:
 
     def __init__(self, max_buffer_size: int = 500) -> None:
         """Initialize the event bus.
+
+        .. deprecated::
+            Use ``EventStore`` instead.
 
         Args:
             max_buffer_size: Maximum number of buffered events per session.
