@@ -2,7 +2,7 @@
 
 Handles:
     - Standard {role, content} messages
-    - Tool calls (parsed with 3-stage JSON fallback)
+    - Tool calls (parsed with 4-layer degradation)
     - Streaming chunks (SSE deltas)
     - Usage accounting
     - Finish reasons (stop / tool_calls / length / content_filter)
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -169,72 +168,33 @@ def parse_chat_response(
     )
 
 
-# ── Tool argument parsing (3-stage fallback) ────────────────────────
+# ── Tool argument parsing (4-layer degradation) ──────────────────────
 
 
-_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?```", re.DOTALL)
+def parse_tool_arguments(
+    raw_args: str | Any,
+    schema: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Parse tool call arguments with 4-layer degradation.
 
-
-def parse_tool_arguments(raw_args: str | Any) -> dict[str, Any]:
-    """Parse tool call arguments with 3-stage fallback.
-
-    LLMs sometimes emit:
-        1. Valid JSON: '{"a": 1}'                  → standard parse
-        2. Markdown-fenced JSON: '```json\n{...}\n```' → extract + parse
-        3. Sloppy JSON with extra text: 'Output: {...}' → strip non-JSON chars + parse
+    Layers:
+        1. Strict JSON parse
+        2. Repair (trailing comma, single quotes, markdown fence)
+        3. Regex field extraction (requires schema)
+        4. Return {} (never raises)
 
     Args:
         raw_args: String from tool_call.function.arguments (or already-parsed dict).
+        schema: Optional field schema for Layer 3 regex extraction.
+                e.g. {"name": "string", "count": "number"}
 
     Returns:
-        Parsed dict. Returns {} if all stages fail (logged).
+        Parsed dict. Returns {} if all layers fail.
     """
-    if isinstance(raw_args, dict):
-        return dict(raw_args)
-    if not isinstance(raw_args, str):
-        return {}
+    from ..agent.structured_output import get_parser
 
-    s = raw_args.strip()
-    if not s:
-        return {}
-
-    # Stage 1: standard JSON
-    try:
-        result = json.loads(s)
-        if isinstance(result, dict):
-            return result
-        # Wrap non-dict in {"value": ...}
-        return {"value": result}
-    except json.JSONDecodeError:
-        pass
-
-    # Stage 2: extract markdown ```json ... ``` block
-    m = _JSON_FENCE_RE.search(s)
-    if m:
-        try:
-            result = json.loads(m.group(1).strip())
-            if isinstance(result, dict):
-                return result
-            return {"value": result}
-        except json.JSONDecodeError:
-            pass
-
-    # Stage 3: strip leading non-JSON chars and try once more
-    # Find first '{' and last '}'
-    start = s.find("{")
-    end = s.rfind("}")
-    if start >= 0 and end > start:
-        candidate = s[start : end + 1]
-        try:
-            result = json.loads(candidate)
-            if isinstance(result, dict):
-                return result
-            return {"value": result}
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("Failed to parse tool arguments: %r (truncated)", s[:80])
-    return {}
+    result = get_parser().parse(raw_args, schema)
+    return result.data or {}
 
 
 # ── SSE stream parsing ──────────────────────────────────────────────
