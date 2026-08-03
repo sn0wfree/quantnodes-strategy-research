@@ -80,18 +80,74 @@ class StreamChunk:
     usage: dict[str, int] | None = None  # only in final chunk (stream_options)
 
 
+@dataclass
+class ProcessedDelta:
+    """Pipeline result for a single streaming delta (text fields only).
+
+    Produced by ``_process_delta`` after Step 1 (``fix_delta``),
+    Step 2 (``sanitize_delta``) and Step 3 (``extract_thinking``).
+    tool_calls / finish_reason / usage never pass through provider
+    hooks — they are assembled directly from the raw payload.
+    """
+
+    content: str = ""
+    thinking: str = ""
+
+
+@dataclass
+class ProcessedMessage:
+    """Pipeline result for a non-streaming message (text fields only).
+
+    Produced by ``_process_message`` after Step 2 (``sanitize_message``)
+    and Step 3 (``extract_thinking_from_message``).
+    """
+
+    content: str = ""
+    reasoning_content: str = ""
+
+
 # ── Response parsing ────────────────────────────────────────────────
+
+
+def _resolve_adapter(adapter: Any) -> Any:
+    """Return the adapter, falling back to FallbackAdapter when None."""
+    if adapter is None:
+        from .provider import get_provider
+
+        return get_provider(None)
+    return adapter
+
+
+def _process_message(message: dict[str, Any], adapter: Any) -> ProcessedMessage:
+    """Pipeline Step 3-2 (message path): extract thinking → sanitize content.
+
+    Order matters: ``extract_thinking_from_message`` must read the
+    *raw* fields (MiniMax finds its ``<think>`` tags in the original
+    ``content``; DeepSeek strips DSML inside its own extract hook),
+    then ``sanitize_message`` removes the tags/markup from the content
+    actually delivered to the user.
+
+    Step 1 (``fix_delta``) is streaming-only and intentionally skipped
+    here — non-streaming responses carry complete text, no boundary
+    whitespace to repair.
+    """
+    adapter = _resolve_adapter(adapter)
+    reasoning = adapter.extract_thinking_from_message(message) or ""
+    stripped = adapter.sanitize_message(message)
+    content = stripped.get("content") or ""
+    return ProcessedMessage(content=content, reasoning_content=reasoning)
 
 
 def parse_chat_response(
     raw: dict[str, Any],
-    provider_name: str | None = None,
+    adapter: Any = None,
 ) -> LLMResponse:
     """Parse a complete Chat Completions response.
 
     Args:
         raw: The parsed JSON response dict.
-        provider_name: Provider name for thinking-token extraction. None = fallback.
+        adapter: ProviderAdapter for thinking extraction / sanitization.
+            None = FallbackAdapter (no provider-specific handling).
 
     Returns:
         LLMResponse with content, tool_calls, finish_reason, usage, reasoning_content.
@@ -118,18 +174,12 @@ def parse_chat_response(
     if not isinstance(message, dict):
         raise LLMMalformedResponseError("choice[0].message is not a dict")
 
-    content = message.get("content") or ""
     finish_reason = first.get("finish_reason") or "stop"
 
-    # Provider-specific thinking extraction from non-streaming message
-    reasoning_content = ""
-    if isinstance(message, dict):
-        from .provider import get_provider
-        adapter = get_provider(provider_name)
-        reasoning_content = adapter.extract_thinking_from_message(message) or ""
-        # Strip thinking tags from content (e.g. MiniMax <think> tags)
-        stripped = adapter.strip_thinking_from_message(message)
-        content = stripped.get("content", content) or ""
+    # Pipeline: sanitize → extract (thinking + <think> tag stripping)
+    processed = _process_message(message, adapter)
+    content = processed.content
+    reasoning_content = processed.reasoning_content
 
     # Parse tool_calls
     raw_tool_calls = message.get("tool_calls") or []
@@ -200,7 +250,7 @@ def parse_tool_arguments(
 # ── SSE stream parsing ──────────────────────────────────────────────
 
 
-def parse_stream_chunk(raw_line: str, provider_name: str | None = None) -> StreamChunk | None:
+def parse_stream_chunk(raw_line: str, adapter: Any = None) -> StreamChunk | None:
     """Parse one SSE line into a StreamChunk.
 
     Format (OpenAI):
@@ -209,9 +259,11 @@ def parse_stream_chunk(raw_line: str, provider_name: str | None = None) -> Strea
 
     Args:
         raw_line: SSE line string.
-        provider_name: Provider identifier (e.g. 'minimax', 'openai') used
-            to select the correct ProviderAdapter for thinking-token
-            extraction. When None, FallbackAdapter is used.
+        adapter: ProviderAdapter handling the per-chunk pipeline
+            (fix_delta → sanitize_delta → extract_thinking). None =
+            FallbackAdapter. Pass the *same* adapter instance across
+            the whole stream so Step 1's reserved stream-repair hook
+            can hold cross-chunk state.
 
     Returns None for empty lines or the [DONE] sentinel.
     """
@@ -232,17 +284,24 @@ def parse_stream_chunk(raw_line: str, provider_name: str | None = None) -> Strea
         logger.warning("malformed SSE payload: %r", payload_str[:80])
         return None
 
-    return _chunk_from_dict(payload, provider_name)
+    return _chunk_from_dict(payload, adapter)
 
 
 def _chunk_from_dict(
     payload: dict[str, Any],
-    provider_name: str | None = None,
+    adapter: Any = None,
 ) -> StreamChunk | None:
     """Convert a chunk payload dict to StreamChunk.
 
-    The provider_name selects which ProviderAdapter handles thinking-token
-    extraction. When None, fallback adapter is used (no extraction).
+    Runs the standardized 4-step pipeline on the delta:
+
+        Step 1: adapter.fix_delta          (reserved stream-repair hook)
+        Step 2: adapter.sanitize_delta     (DSML / <think> noise removal)
+        Step 3: adapter.extract_thinking   (reasoning_content extraction)
+        Step 4: assemble StreamChunk       (framework-only, no adapter)
+
+    ``tool_calls`` / ``finish_reason`` / ``usage`` never pass through
+    provider hooks — assembled directly.
     """
     if not isinstance(payload, dict):
         return None
@@ -262,50 +321,60 @@ def _chunk_from_dict(
         return None
 
     delta = first.get("delta") or {}
+    if not isinstance(delta, dict):
+        return StreamChunk(usage=usage_clean)
+
     finish_reason = first.get("finish_reason")
-
-    delta_content = delta.get("content") or ""
-
-    # Provider-specific thinking extraction
-    delta_thinking = ""
-    if isinstance(delta, dict):
-        from .provider import get_provider
-        adapter = get_provider(provider_name)
-        # 1. Strip DSML pseudo-tool-call leakage (DeepSeek-V4-Flash
-        #    path — default passthrough for other providers). Mutates
-        #    `delta` in place via the returned copy; downstream
-        #    extract_thinking / strip_thinking read the cleaned text.
-        delta = adapter.strip_dsml_from_delta(delta)
-        # 2. Extract reasoning tokens (thinking_delta payload).
-        delta_thinking = adapter.extract_thinking_from_delta(delta) or ""
-        # 3. For providers that embed thinking inside content (e.g.
-        #    MiniMax), strip the tags so delta_content only has the
-        #    actual response.
-        stripped = adapter.strip_thinking_from_delta(delta)
-        delta_content = stripped.get("content", delta_content) or ""
-
-    delta_tool_calls: list[dict[str, Any]] = []
     raw_dtc = delta.get("tool_calls")
+    delta_tool_calls: list[dict[str, Any]] = []
     if isinstance(raw_dtc, list):
         for dtc in raw_dtc:
             if isinstance(dtc, dict):
                 delta_tool_calls.append(dtc)
 
-    # DIAG: log first chunk payload to understand format (DEBUG level)
+    # Pipeline Steps 1-3 (text fields only)
+    processed = _process_delta(delta, adapter)
+
     logger.debug(
-        "[DIAG] _chunk_from_dict: delta_keys=%s content=%.100r reasoning_content=%.100r "
+        "[DIAG] _chunk_from_dict: content=%.100r reasoning=%.100r "
         "finish_reason=%s tool_calls=%d",
-        list(delta.keys()) if isinstance(delta, dict) else "N/A",
-        delta.get("content", "") if isinstance(delta, dict) else "",
-        delta.get("reasoning_content", "") if isinstance(delta, dict) else "",
+        processed.content[:100],
+        processed.thinking[:100],
         finish_reason,
-        len(raw_dtc) if isinstance(raw_dtc, list) else 0,
+        len(delta_tool_calls),
     )
 
     return StreamChunk(
-        delta_content=delta_content,
-        delta_thinking=delta_thinking,
+        delta_content=processed.content,
+        delta_thinking=processed.thinking,
         delta_tool_calls=delta_tool_calls,
         finish_reason=str(finish_reason) if finish_reason else None,
         usage=usage_clean,
     )
+
+
+def _process_delta(delta: dict[str, Any], adapter: Any = None) -> ProcessedDelta:
+    """Pipeline Steps 1, 3, 2 (streaming path).
+
+    Order is fixed by the framework:
+
+        1. fix_delta           — reserved stream-repair hook (no-op)
+        3. extract_thinking    — reasoning extraction from the *raw*
+                                 fields (MiniMax needs the original
+                                 ``<think>`` tags; DeepSeek strips DSML
+                                 inside its extract hook)
+        2. sanitize_delta      — remove tags/markup from the content
+                                 actually delivered to the user
+
+    Extract runs before sanitize: sanitize deletes markup (e.g. MiniMax
+    ``<think>``) that extraction relies on.
+    """
+    adapter = _resolve_adapter(adapter)
+    # Step 1: reserved stream-repair hook (default passthrough).
+    delta = adapter.fix_delta(delta)
+    # Step 3: extract reasoning tokens (reads raw reasoning_content).
+    thinking = adapter.extract_thinking_from_delta(delta) or ""
+    # Step 2: sanitize model noise out of the delivered text fields.
+    delta = adapter.sanitize_delta(delta)
+    content = delta.get("content") or ""
+    return ProcessedDelta(content=content, thinking=thinking)

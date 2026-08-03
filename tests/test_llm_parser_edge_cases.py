@@ -12,14 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from strategy_research.core.llm.errors import LLMMalformedResponseError
 from strategy_research.core.llm.parser import (
     LLMResponse,
-    StreamChunk,
     ToolCall,
     _chunk_from_dict,
     parse_chat_response,
     parse_stream_chunk,
     parse_tool_arguments,
 )
-
+from strategy_research.core.llm.provider.deepseek import DeepSeekAdapter
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -103,7 +102,7 @@ class TestParseChatResponseEdgeCases(unittest.TestCase):
 
     def test_reasoning_content_passthrough(self) -> None:
         raw = {"choices": [{"message": {"role": "assistant", "content": "answer", "reasoning_content": "thinking..."}, "finish_reason": "stop"}]}
-        r = parse_chat_response(raw, provider_name="deepseek")
+        r = parse_chat_response(raw, adapter=DeepSeekAdapter())
         self.assertEqual(r.reasoning_content, "thinking...")
 
 
@@ -208,7 +207,7 @@ class TestChunkFromDict(unittest.TestCase):
         self.assertEqual(ch.delta_content, "")
 
     def test_delta_thinking_via_provider(self) -> None:
-        ch = _chunk_from_dict({"choices": [{"delta": {"content": "answer", "reasoning_content": "think"}}]}, provider_name="deepseek")
+        ch = _chunk_from_dict({"choices": [{"delta": {"content": "answer", "reasoning_content": "think"}}]}, adapter=DeepSeekAdapter())
         self.assertEqual(ch.delta_content, "answer")
         self.assertEqual(ch.delta_thinking, "think")
 

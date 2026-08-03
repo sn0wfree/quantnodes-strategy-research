@@ -10,8 +10,8 @@ import httpx
 import pytest
 
 from strategy_research.core.llm import (
-    LLMConfig,
     LLMAuthError,
+    LLMConfig,
     LLMConfigError,
     LLMError,
     LLMMalformedResponseError,
@@ -19,17 +19,13 @@ from strategy_research.core.llm import (
     LLMServerError,
     LLMTimeoutError,
     OpenAICompatClient,
-    ToolCall,
 )
 from strategy_research.core.llm import openai_client as oc_mod
 from strategy_research.core.llm.parser import (
-    LLMResponse,
-    StreamChunk,
     parse_chat_response,
     parse_stream_chunk,
     parse_tool_arguments,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -49,7 +45,7 @@ def mock_client(handler) -> OpenAICompatClient:
     client = OpenAICompatClient(cfg)
     transport = httpx.MockTransport(handler)
 
-    def mock_request(payload, stream=False):
+    def mock_request(payload, stream=False, adapter=None):
         attempt = 0
         last_resp = None
         while attempt <= client.config.max_retries:
@@ -57,17 +53,17 @@ def mock_client(handler) -> OpenAICompatClient:
                 response = c.post(
                     client._chat_url(),
                     json=payload,
-                    headers=oc_mod._build_headers(client.config),
+                    headers=oc_mod._build_headers(client.config, adapter=oc_mod.get_provider(client.config.provider)),
                 )
             if response.status_code < 400:
                 return response
             if not oc_mod._is_retryable_status(response.status_code):
-                oc_mod._raise_for_status(response)
+                oc_mod._raise_for_status(response, adapter=oc_mod.get_provider(cfg.provider))
             time.sleep(oc_mod._backoff_delay(attempt, client.config.retry_backoff_s))
             attempt += 1
             last_resp = response
         if last_resp is not None:
-            oc_mod._raise_for_status(last_resp)
+            oc_mod._raise_for_status(last_resp, adapter=oc_mod.get_provider(client.config.provider))
         raise LLMError("exhausted")
 
     client._request_with_retry = mock_request
@@ -121,9 +117,9 @@ class TestBasicChat:
         cfg = LLMConfig(api_key="sk-x", base_url="https://api.deepseek.com/v1",
                         model="deepseek-chat")
         c = OpenAICompatClient(cfg)
-        c._request_with_retry = lambda p, stream=False: httpx.Client(
+        c._request_with_retry = lambda p, stream=False, adapter=None: httpx.Client(
             transport=httpx.MockTransport(h)
-        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config))
+        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config, adapter=oc_mod.get_provider(c.config.provider)))
         c.chat([{"role": "user", "content": "q"}])
         assert cap[0] == "https://api.deepseek.com/v1/chat/completions"
 
@@ -138,9 +134,9 @@ class TestBasicChat:
         cfg = LLMConfig(api_key="sk-x", base_url="https://api.example.com/v1/",
                         model="x")
         c = OpenAICompatClient(cfg)
-        c._request_with_retry = lambda p, stream=False: httpx.Client(
+        c._request_with_retry = lambda p, stream=False, adapter=None: httpx.Client(
             transport=httpx.MockTransport(h)
-        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config))
+        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config, adapter=oc_mod.get_provider(c.config.provider)))
         c.chat([{"role": "user", "content": "q"}])
         assert cap[0] == "https://api.example.com/v1/chat/completions"
 
@@ -282,9 +278,9 @@ class TestSamplingParams:
             })
         cfg = LLMConfig(api_key="sk", seed=42, temperature=0.0)
         c = OpenAICompatClient(cfg)
-        c._request_with_retry = lambda p, stream=False: httpx.Client(
+        c._request_with_retry = lambda p, stream=False, adapter=None: httpx.Client(
             transport=httpx.MockTransport(h)
-        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config))
+        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config, adapter=oc_mod.get_provider(c.config.provider)))
         c.chat([{"role": "user", "content": "q"}])
         assert cap[0]["seed"] == 42
 
@@ -298,9 +294,9 @@ class TestSamplingParams:
             })
         cfg = LLMConfig(api_key="sk", stop=("END",))
         c = OpenAICompatClient(cfg)
-        c._request_with_retry = lambda p, stream=False: httpx.Client(
+        c._request_with_retry = lambda p, stream=False, adapter=None: httpx.Client(
             transport=httpx.MockTransport(h)
-        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config))
+        ).post(c._chat_url(), json=p, headers=oc_mod._build_headers(c.config, adapter=oc_mod.get_provider(c.config.provider)))
         c.chat([{"role": "user", "content": "q"}])
         assert cap[0]["stop"] == ["END"]
 
@@ -440,9 +436,9 @@ class TestStreaming:
                     "POST",
                     cfg.base_url + "/chat/completions",
                     json={"model": cfg.model, "messages": messages, "stream": True},
-                    headers=oc_mod._build_headers(cfg),
+                    headers=oc_mod._build_headers(cfg, adapter=oc_mod.get_provider(cfg.provider)),
                 ) as response:
-                    oc_mod._raise_for_status(response)
+                    oc_mod._raise_for_status(response, adapter=oc_mod.get_provider(cfg.provider))
                     for line in response.iter_lines():
                         chunk = parse_stream_chunk(line)
                         if chunk is not None:

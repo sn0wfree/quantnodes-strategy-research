@@ -40,7 +40,8 @@ class MiniMaxAdapter(ProviderAdapter):
         content = delta.get("content", "")
         match = self.THINK_PATTERN.search(content)
         if match:
-            return self.normalize_thinking(match.group(1))
+            # BPE chunk boundary: keep leading spaces inside the tags.
+            return self.normalize_thinking(match.group(1), strip_edges=False)
         return None
 
     def extract_thinking_from_message(self, message: dict[str, Any]) -> str | None:
@@ -50,23 +51,23 @@ class MiniMaxAdapter(ProviderAdapter):
             return self.normalize_thinking(match.group(1))
         return None
 
-    def strip_thinking_from_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
+    def sanitize_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
         content = delta.get("content", "")
         if self.THINK_PATTERN.search(content):
-            cleaned = self.THINK_PATTERN.sub("", content).strip()
+            cleaned = self.THINK_PATTERN.sub("", content)
             out = dict(delta)
             out["content"] = cleaned
             return out
-        return delta
+        return dict(delta)
 
-    def strip_thinking_from_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    def sanitize_message(self, message: dict[str, Any]) -> dict[str, Any]:
         content = message.get("content", "")
         if self.THINK_PATTERN.search(content):
             cleaned = self.THINK_PATTERN.sub("", content).strip()
             out = dict(message)
             out["content"] = cleaned
             return out
-        return message
+        return dict(message)
 
     def handle_error(self, status: int, body: Any) -> Exception | None:
         # MiniMax uses 403 for quota exhaustion, and 429 can be either

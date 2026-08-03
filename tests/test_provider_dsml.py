@@ -174,17 +174,23 @@ class TestStripDsmlText:
 class TestSiliconFlowDsml:
     def test_reasoning_content_stripped(self):
         a = SiliconFlowAdapter()
-        out = a.strip_dsml_from_delta(
+        # reasoning_content DSML is cleaned inside extract_thinking_from_delta
+        # (pipeline Step 3), not sanitize_delta.
+        out = a.extract_thinking_from_delta(
             {"reasoning_content": "pre <tools>x</tools> post", "content": "x"}
         )
-        assert out["reasoning_content"] == "pre  post"
-        # `content` was a plain string, must also be cleaned if it
-        # somehow contains DSML — defensive.
-        assert out["content"] == "x"
+        assert "<tools>" not in out
+        assert out == "pre post"  # normalize compresses leftover double space
+        # sanitize_delta only touches the delivered `content` field.
+        out2 = a.sanitize_delta(
+            {"reasoning_content": "pre <tools>x</tools> post", "content": "x"}
+        )
+        assert out2["reasoning_content"] == "pre <tools>x</tools> post"
+        assert out2["content"] == "x"
 
     def test_content_stripped(self):
         a = SiliconFlowAdapter()
-        out = a.strip_dsml_from_delta(
+        out = a.sanitize_delta(
             {"content": "hello [DSML | tool_calls>x<] world"}
         )
         assert "[DSML" not in out["content"]
@@ -195,25 +201,30 @@ class TestSiliconFlowDsml:
         # Implementation contract: must NOT mutate the input delta.
         a = SiliconFlowAdapter()
         original = {"reasoning_content": "pre <tools>x</tools> post"}
-        a.strip_dsml_from_delta(original)
+        a.sanitize_delta(original)
         assert original["reasoning_content"] == "pre <tools>x</tools> post"
 
     def test_no_dsml_passthrough(self):
         a = SiliconFlowAdapter()
-        out = a.strip_dsml_from_delta({"reasoning_content": "clean text", "content": "also clean"})
+        out = a.sanitize_delta({"reasoning_content": "clean text", "content": "also clean"})
         assert out == {"reasoning_content": "clean text", "content": "also clean"}
 
     def test_message_level(self):
         a = SiliconFlowAdapter()
-        out = a.strip_dsml_from_message(
+        # reasoning_content DSML cleaned in extract_thinking_from_message.
+        out = a.extract_thinking_from_message(
             {"reasoning_content": "x <tools>y</tools> z", "content": "plain"}
         )
-        assert "<tools>" not in out["reasoning_content"]
-        assert out["content"] == "plain"
+        assert "<tools>" not in out
+        out2 = a.sanitize_message(
+            {"reasoning_content": "x <tools>y</tools> z", "content": "plain"}
+        )
+        assert out2["reasoning_content"] == "x <tools>y</tools> z"
+        assert out2["content"] == "plain"
 
     def test_non_string_fields_pass_through(self):
         a = SiliconFlowAdapter()
-        out = a.strip_dsml_from_delta({"tool_calls": [{"id": "x"}], "role": "assistant"})
+        out = a.sanitize_delta({"tool_calls": [{"id": "x"}], "role": "assistant"})
         # Non-text fields untouched, identity preserved.
         assert out["tool_calls"] == [{"id": "x"}]
         assert out["role"] == "assistant"
@@ -222,19 +233,19 @@ class TestSiliconFlowDsml:
 class TestDeepSeekDsml:
     def test_reasoning_content_stripped(self):
         a = DeepSeekAdapter()
-        out = a.strip_dsml_from_delta(
+        out = a.extract_thinking_from_delta(
             {"reasoning_content": "thinking <tools><invoke name=\"x\"/></tools> done"}
         )
-        assert "<tools>" not in out["reasoning_content"]
-        assert "thinking" in out["reasoning_content"]
-        assert "done" in out["reasoning_content"]
+        assert "<tools>" not in out
+        assert "thinking" in out
+        assert "done" in out
 
     def test_message_level(self):
         a = DeepSeekAdapter()
-        out = a.strip_dsml_from_message(
+        out = a.extract_thinking_from_message(
             {"reasoning_content": "a [DSML | tool_calls>inner<] b"}
         )
-        assert "[DSML" not in out["reasoning_content"]
+        assert "[DSML" not in out
 
 
 class TestNonDeepSeekProvidersAreNotAffected:
@@ -253,7 +264,7 @@ class TestNonDeepSeekProvidersAreNotAffected:
     def test_passthrough_on_plain_text(self, adapter_cls):
         a = adapter_cls()
         text = "I will use <some_tag> here"
-        out = a.strip_dsml_from_delta({"reasoning_content": text})
+        out = a.sanitize_delta({"reasoning_content": text})
         # Base default is a defensive copy — the field value is
         # preserved unchanged (not the same object, but equal).
         assert out["reasoning_content"] == text
@@ -265,7 +276,7 @@ class TestNonDeepSeekProvidersAreNotAffected:
         # default passthrough must not interfere with that.
         a = MiniMaxAdapter()
         text = "<think>plan</think>answer"
-        out = a.strip_dsml_from_delta({"reasoning_content": text})
+        out = a.sanitize_delta({"reasoning_content": text})
         # The DSML stripper (passthrough) leaves it alone — MiniMax's
         # own ``strip_thinking_from_delta`` is a separate hook.
         assert out["reasoning_content"] == text

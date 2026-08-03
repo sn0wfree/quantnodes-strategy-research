@@ -75,52 +75,55 @@ class ProviderAdapter(ABC):
         """
         ...
 
-    def strip_thinking_from_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
-        """Return a copy of delta with thinking tags/content removed.
+    def sanitize_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
+        """Clean model-noise out of a streaming delta's text fields.
 
-        Override for providers (e.g. MiniMax) that embed thinking tokens
-        inside content. Default: passthrough (thinking is in a separate field).
+        Consolidated single hook replacing the former
+        ``strip_thinking_from_delta`` / ``strip_dsml_from_delta``:
+        providers that embed pseudo-markup in text fields (MiniMax
+        ``<think>`` tags, DeepSeek DSML leakage) override this one
+        method. Default: passthrough.
+
+        NOTE for streaming overrides: keep chunk boundary whitespace —
+        the BPE tokenizer encodes a leading space *inside* the token
+        (``" me"``), and a per-chunk ``.strip()`` destroys it. Use
+        ``strip_edges=False`` on the underlying strippers (see
+        ``normalize_thinking``).
         """
         return dict(delta)
 
-    def strip_thinking_from_message(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Return a copy of message with thinking tags/content removed.
-
-        Override for providers (e.g. MiniMax) that embed thinking tokens
-        inside content. Default: passthrough.
-        """
+    def sanitize_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Message-level variant of :meth:`sanitize_delta`. Default: passthrough."""
         return dict(message)
 
-    def strip_dsml_from_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
-        """Strip leaked DSML pseudo-tool-call markup from a streaming delta.
+    def fix_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
+        """Reserved stream-repair hook, called as pipeline Step 1.
 
-        DeepSeek-V4-Flash (and similar reasoning models) sometimes emit
-        ``<tools><invoke name="X">...</invoke></tools>`` or
-        ``[DSML | tool_calls>...<]`` blocks inside ``reasoning_content``
-        / ``content`` to *express intent* to call a tool. The real tool
-        call travels through ``delta.tool_calls`` in a separate stream,
-        so these markup blocks in the text are pure noise for the user.
-
-        Default: passthrough. Override in providers that serve DeepSeek
-        reasoning models (see :class:`SiliconFlowAdapter`,
-        :class:`DeepSeekAdapter`).
+        Currently a no-op placeholder for cross-chunk boundary fixes
+        (e.g. re-inserting a space when the upstream tokenizer splits
+        between words). Implement statefully in an adapter when needed —
+        the adapter instance is per-request in the client, so per-stream
+        state is naturally isolated. Default: passthrough.
         """
         return dict(delta)
 
-    def strip_dsml_from_message(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Message-level variant. Default: passthrough."""
-        return dict(message)
-
-    def normalize_thinking(self, text: str) -> str:
+    def normalize_thinking(self, text: str, strip_edges: bool = True) -> str:
         """Normalize thinking content to plain text.
 
         Strips markdown code blocks, inline code, bold/italic, normalizes
         whitespace. Override for provider-specific normalization needs.
+
+        Args:
+            strip_edges: when True (message path) trim leading/trailing
+                whitespace; when False (streaming delta path) keep chunk
+                boundary whitespace so BPE leading spaces survive.
         """
         text = re.sub(r"```[\s\S]*?```", "", text)
         text = re.sub(r"`[^`]+`", "", text)
         text = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", text)
-        text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s+", " ", text)
+        if strip_edges:
+            text = text.strip()
         return text
 
     # ── HTTP Layer ────────────────────────────────────────────────

@@ -30,10 +30,16 @@ class OpenAIReasoningFieldAdapter(ProviderAdapter):
     """
 
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
-        """Extract thinking from ``reasoning_content`` field if present."""
+        """Extract thinking from ``reasoning_content`` field if present.
+
+        ``strip_edges=False`` is critical: DeepSeek-family streams one
+        BPE token per SSE chunk and encodes the leading space inside the
+        token (``" me"``). A per-chunk ``.strip()`` would delete that
+        space and concatenate words into ``Letmeexplore``.
+        """
         content = delta.get("reasoning_content")
         if content:
-            return self.normalize_thinking(content)
+            return self.normalize_thinking(content, strip_edges=False)
         return None
 
     def extract_thinking_from_message(self, message: dict[str, Any]) -> str | None:

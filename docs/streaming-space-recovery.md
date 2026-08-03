@@ -39,13 +39,17 @@ token **前导**（`" me"`、`" explore"`）。`extract_thinking_from_delta` →
 ```
 parse_stream_chunk(line, adapter=None) → _chunk_from_dict(payload, adapter)
     Step1: payload = adapter.fix_delta(payload)              # 预留兜底，默认 passthrough、无状态
-    Step2: payload = adapter.sanitize_delta(payload)         # 合并后的净化 hook
     Step3: thinking = adapter.extract_thinking_from_delta(payload)
+    Step2: payload = adapter.sanitize_delta(payload)         # 合并后的净化 hook
     Step4: ProcessedDelta → StreamChunk
 
-parse_chat_response(raw, adapter=None)                        # 非流式：无 Step1，Step2-4 用 message 变体
+parse_chat_response(raw, adapter=None)                        # 非流式：无 Step1，Step3-2 用 message 变体
 ```
 
+- **顺序（重要）**：extract 必须**先于** sanitize——sanitize 会删除 MiniMax
+  的 `<think>` 标签，extract 依赖原始标签；DeepSeek 的 DSML 清洗搬进
+  extract 内部（只清 `reasoning_content`），sanitize 只清最终交付的
+  `content` 字段
 - 中间结构 `ProcessedDelta` / `ProcessedMessage`：净化提取与组装解耦
 - **破坏性改造**：`provider_name` 参数 → `adapter` 注入（`adapter=None` 走
   FallbackAdapter），全库统一（client 3 处 + loop 2 处 + tests ~13 处）
@@ -76,9 +80,9 @@ parse_chat_response(raw, adapter=None)                        # 非流式：无 
 | `provider/base.py` | `normalize_thinking` 加 `strip_edges` 参数；删旧 strip 方法，换 `sanitize_delta/message`（默认 passthrough）；新增 `fix_delta`（默认 passthrough） |
 | `provider/_reasoning_field.py` | `extract_thinking_from_delta` → `normalize_thinking(content, strip_edges=False)` |
 | `provider/_dsml_patterns.py` | `strip_dsml_text(text, strip_edges=True)` |
-| `provider/siliconflow.py` / `deepseek.py` | `sanitize_delta/message`（内部 `strip_dsml_text(..., strip_edges=False)`） |
-| `provider/minimax.py` | `sanitize_delta/message`（`.strip()` 参数化，delta 不 strip） |
-| `parser.py` | `ProcessedDelta/ProcessedMessage`；`_process_delta/_process_message`；`parse_stream_chunk/parse_chat_response` 签名改 `adapter=` |
+| `provider/siliconflow.py` / `deepseek.py` | `extract_thinking_from_delta/message` override（内部 strip DSML + normalize）；`sanitize_delta/message` 只清 `content`（strip_edges=False/True） |
+| `provider/minimax.py` | `sanitize_delta/message`（`.strip()` 参数化，delta 不 strip）；extract 用 `strip_edges=False` |
+| `parser.py` | `ProcessedDelta/ProcessedMessage`；`_process_delta/_process_message`（extract → sanitize 顺序）；`parse_stream_chunk/parse_chat_response` 签名改 `adapter=` |
 | `openai_client.py` | per-request adapter；`parse_response` 门面；helpers 收 adapter 参数 |
 | `loop.py` | 2 处改 `self.client.parse_response(raw)` |
 

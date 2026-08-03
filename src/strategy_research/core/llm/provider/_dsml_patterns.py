@@ -57,7 +57,7 @@ _DSML_OPEN_RE = re.compile(
 )
 
 
-def strip_dsml_text(text: str) -> str:
+def strip_dsml_text(text: str, strip_edges: bool = True) -> str:
     """Strip DSML pseudo-tool-call markup from a single text fragment.
 
     Two-pass strategy:
@@ -72,6 +72,11 @@ def strip_dsml_text(text: str) -> str:
        we never leak a half-baked block to the user.
 
     Idempotent — running twice has no additional effect.
+
+    Args:
+        strip_edges: when True (message path) trim the result; when
+            False (streaming delta path) keep chunk boundary whitespace
+            so BPE leading spaces survive (see ``normalize_thinking``).
     """
     if not text:
         return text
@@ -83,4 +88,6 @@ def strip_dsml_text(text: str) -> str:
     m = _DSML_OPEN_RE.search(cleaned)
     if m:
         cleaned = cleaned[: m.start()]
-    return cleaned.strip()
+    if strip_edges:
+        cleaned = cleaned.strip()
+    return cleaned

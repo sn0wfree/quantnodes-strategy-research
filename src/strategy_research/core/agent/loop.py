@@ -347,7 +347,6 @@ class AgentLoop:
         self._emit("text.ended", {"text_id": text_id, "text": full_content})
 
         # Convert accumulated tool_calls to LLMResponse format
-        from ..llm.parser import parse_chat_response
         raw_response: dict[str, Any] = {
             "choices": [{
                 "message": {
@@ -368,7 +367,7 @@ class AgentLoop:
         if usage:
             raw_response["usage"] = usage
 
-        return parse_chat_response(raw_response, provider_name=self.config.provider)
+        return self.client.parse_response(raw_response)
 
     # ── Async helpers ─────────────────────────────
 
@@ -471,7 +470,6 @@ class AgentLoop:
         if usage:
             self._emit("llm_usage", usage)
 
-        from ..llm.parser import parse_chat_response
         raw_response: dict[str, Any] = {
             "choices": [{
                 "message": {
@@ -499,7 +497,7 @@ class AgentLoop:
             usage,
         )
 
-        return parse_chat_response(raw_response, provider_name=self.config.provider)
+        return self.client.parse_response(raw_response)
 
     def _build_hook_context(
         self, iteration: int, messages: list[dict[str, Any]],

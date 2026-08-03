@@ -123,7 +123,7 @@ class TestProviderDefaults:
         ) == "think"
         assert adapter.extract_thinking_from_delta(
             {"reasoning_content": " t2 "}
-        ) == "t2"
+        ) == " t2 "  # BPE chunk boundary space preserved (strip_edges=False)
 
 
 # ── default_context_tokens Tests ─────────────────────────────────
@@ -435,7 +435,7 @@ class TestStreamChunkWithProvider:
                 "delta": {"content": "<think>my plan</think>response text"}
             }]
         }
-        chunk = _chunk_from_dict(payload, provider_name="minimax")
+        chunk = _chunk_from_dict(payload, adapter=MiniMaxAdapter())
         assert chunk is not None
         assert chunk.delta_content == "response text"
         assert chunk.delta_thinking == "my plan"
@@ -451,7 +451,7 @@ class TestStreamChunkWithProvider:
                 }
             }]
         }
-        chunk = _chunk_from_dict(payload, provider_name="deepseek")
+        chunk = _chunk_from_dict(payload, adapter=DeepSeekAdapter())
         assert chunk is not None
         assert chunk.delta_content == "response"
         assert chunk.delta_thinking == "thinking"
@@ -491,7 +491,7 @@ class TestChatResponseWithProvider:
             }],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5}
         }
-        response = parse_chat_response(raw, provider_name="minimax")
+        response = parse_chat_response(raw, adapter=MiniMaxAdapter())
         assert response.content == "response"
         assert response.reasoning_content == "my plan"
 
@@ -508,7 +508,7 @@ class TestChatResponseWithProvider:
                 "finish_reason": "stop"
             }]
         }
-        response = parse_chat_response(raw, provider_name="deepseek")
+        response = parse_chat_response(raw, adapter=DeepSeekAdapter())
         assert response.content == "response"
         assert response.reasoning_content == "thinking"
 
@@ -615,7 +615,7 @@ class TestProviderNamePassThrough:
 
         # MiniMax sends <think> tags in content
         line = 'data: {"choices": [{"delta": {"content": "<think>plan</think>response"}}]}'
-        chunk = parse_stream_chunk(line, provider_name="minimax")
+        chunk = parse_stream_chunk(line, adapter=MiniMaxAdapter())
         assert chunk is not None
         assert chunk.delta_thinking == "plan"
         assert chunk.delta_content == "response"
@@ -636,7 +636,7 @@ class TestProviderNamePassThrough:
 
         # DeepSeek uses reasoning_content field
         line = 'data: {"choices": [{"delta": {"reasoning_content": "thinking", "content": "response"}}]}'
-        chunk = parse_stream_chunk(line, provider_name="deepseek")
+        chunk = parse_stream_chunk(line, adapter=DeepSeekAdapter())
         assert chunk is not None
         assert chunk.delta_thinking == "thinking"
         assert chunk.delta_content == "response"

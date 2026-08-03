@@ -6,7 +6,7 @@ QwQ-32B, GLM-Z1) emit thinking via ``reasoning_content``, so this
 adapter inherits OpenAIReasoningFieldAdapter. See
 docs/llm-provider-setup.md for onboarding params.
 
-Also overrides ``strip_dsml_from_delta`` / ``strip_dsml_from_message``
+Also overrides ``sanitize_delta`` / ``sanitize_message``
 to remove the DeepSeek-V4-Flash ``<tools>...</tools>`` /
 ``[DSML | ...<]`` pseudo-tool-call leakage that the model emits inside
 ``reasoning_content`` / ``content``. Real tool calls still travel
@@ -46,18 +46,32 @@ class SiliconFlowAdapter(OpenAIReasoningFieldAdapter):
 
     # ── DSML filter (DeepSeek-V4-Flash reasoning_content leakage) ──
 
-    def strip_dsml_from_delta(self, delta):
+    def extract_thinking_from_delta(self, delta):
+        content = delta.get("reasoning_content")
+        if content:
+            # Strip DSML leakage first — extract must read clean text.
+            return self.normalize_thinking(
+                strip_dsml_text(content, strip_edges=False),
+                strip_edges=False,
+            )
+        return None
+
+    def extract_thinking_from_message(self, message):
+        content = message.get("reasoning_content")
+        if content:
+            return self.normalize_thinking(strip_dsml_text(content))
+        return None
+
+    def sanitize_delta(self, delta):
         out = dict(delta)
-        for key in ("reasoning_content", "content"):
-            v = out.get(key)
-            if isinstance(v, str) and v:
-                out[key] = strip_dsml_text(v)
+        v = out.get("content")
+        if isinstance(v, str) and v:
+            out["content"] = strip_dsml_text(v, strip_edges=False)
         return out
 
-    def strip_dsml_from_message(self, message):
+    def sanitize_message(self, message):
         out = dict(message)
-        for key in ("reasoning_content", "content"):
-            v = out.get(key)
-            if isinstance(v, str) and v:
-                out[key] = strip_dsml_text(v)
+        v = out.get("content")
+        if isinstance(v, str) and v:
+            out["content"] = strip_dsml_text(v)
         return out

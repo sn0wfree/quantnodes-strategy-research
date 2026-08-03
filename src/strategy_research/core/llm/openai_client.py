@@ -40,6 +40,7 @@ from .errors import (
     LLMTimeoutError,
 )
 from .parser import LLMResponse, StreamChunk, parse_chat_response, parse_stream_chunk
+from .provider import get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -120,16 +121,13 @@ def _ensure_api_key(config: LLMConfig) -> str:
     return config.api_key
 
 
-def _build_headers(config: LLMConfig) -> dict[str, str]:
-    from .provider import get_provider
-
+def _build_headers(config: LLMConfig, adapter: Any) -> dict[str, str]:
     api_key = _ensure_api_key(config)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    adapter = get_provider(config.provider)
     headers.update(adapter.custom_headers(config))
     return headers
 
@@ -140,9 +138,9 @@ def _build_payload(
     tools: list[dict[str, Any]] | None,
     tool_choice: Any,
     overrides: dict[str, Any],
+    adapter: Any,
 ) -> dict[str, Any]:
     """Build OpenAI Chat Completions request body."""
-    from .provider import get_provider
 
     payload: dict[str, Any] = {
         "model": overrides.get("model") or config.model,
@@ -175,7 +173,6 @@ def _build_payload(
         payload["parallel_tool_calls"] = config.parallel_tool_calls
 
     # Provider-specific payload modifications
-    adapter = get_provider(config.provider)
     payload = adapter.custom_payload(payload, config)
 
     # Provider-specific stream_options
@@ -207,13 +204,12 @@ def _extract_error_code(body: Any) -> str:
     return ""
 
 
-def _raise_for_status(response: httpx.Response, provider_name: str = "auto") -> None:
+def _raise_for_status(response: httpx.Response, adapter: Any = None) -> None:
     """Map httpx status to LLM-specific exception.
 
     Provider-specific error semantics are delegated to the ProviderAdapter
-    (e.g. MiniMax uses 403 for quota, not auth failure).
+    (e.g. MiniMax uses 403 for quota, not auth failure). None = fallback.
     """
-    from .provider import get_provider
 
     status = response.status_code
     if status < 400:
@@ -224,7 +220,10 @@ def _raise_for_status(response: httpx.Response, provider_name: str = "auto") -> 
         body = {"raw": response.text[:500]}
 
     # Provider-specific error mapping (e.g. MiniMax 403-as-quota)
-    adapter = get_provider(provider_name)
+    if adapter is None:
+        from .provider import get_provider
+
+        adapter = get_provider(None)
     custom_exception = adapter.handle_error(status, body)
     if custom_exception is not None:
         raise custom_exception
@@ -278,6 +277,18 @@ class OpenAICompatClient:
 
     # ── Public API ─────────────────────────────────
 
+    def parse_response(self, raw: dict[str, Any]) -> LLMResponse:
+        """Parse a raw Chat Completions response through the provider adapter.
+
+        Unified facade — callers (e.g. AgentLoop) hand over the raw
+        payload they assembled instead of reaching into ``parser``
+        themselves. The adapter is resolved per call (no shared state
+        is needed on the message path).
+        """
+        from .parser import parse_chat_response
+
+        return parse_chat_response(raw, adapter=get_provider(self.config.provider))
+
     def chat(
         self,
         messages: list[dict[str, Any]],
@@ -287,17 +298,18 @@ class OpenAICompatClient:
         **overrides: Any,
     ) -> LLMResponse:
         """Synchronous chat completion with retry."""
-        payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
+        adapter = get_provider(self.config.provider)
+        payload = _build_payload(self.config, messages, tools, tool_choice, overrides, adapter)
         payload["stream"] = False
 
-        response = self._request_with_retry(payload, stream=False)
+        response = self._request_with_retry(payload, stream=False, adapter=adapter)
         try:
             raw = response.json()
         except json.JSONDecodeError as exc:
             raise LLMMalformedResponseError(
                 f"response is not JSON: {response.text[:200]}"
             ) from exc
-        return parse_chat_response(raw, provider_name=self.config.provider)
+        return parse_chat_response(raw, adapter=adapter)
 
     async def achat(
         self,
@@ -308,17 +320,18 @@ class OpenAICompatClient:
         **overrides: Any,
     ) -> LLMResponse:
         """Async chat completion with retry."""
-        payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
+        adapter = get_provider(self.config.provider)
+        payload = _build_payload(self.config, messages, tools, tool_choice, overrides, adapter)
         payload["stream"] = False
 
-        response = await self._arequest_with_retry(payload)
+        response = await self._arequest_with_retry(payload, adapter=adapter)
         try:
             raw = response.json()
         except json.JSONDecodeError as exc:
             raise LLMMalformedResponseError(
                 f"response is not JSON: {response.text[:200]}"
             ) from exc
-        return parse_chat_response(raw, provider_name=self.config.provider)
+        return parse_chat_response(raw, adapter=adapter)
 
     def stream(
         self,
@@ -334,12 +347,18 @@ class OpenAICompatClient:
         Retries only BEFORE the first chunk is yielded (HTTP errors,
         connection failures, timeouts before stream starts).
         Does NOT retry mid-stream (after first chunk yielded → LLMError).
+
+        The adapter is resolved once per request and passed through the
+        whole stream — its pipeline hooks (fix_delta / sanitize_delta /
+        extract_thinking) run on the same instance for every chunk, so
+        reserved cross-chunk state is naturally per-request isolated.
         """  # noqa: C901
-        payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
+        adapter = get_provider(self.config.provider)
+        payload = _build_payload(self.config, messages, tools, tool_choice, overrides, adapter)
         payload["stream"] = True
         # stream_options moved to ProviderAdapter.custom_stream_options()
 
-        headers = _build_headers(self.config)
+        headers = _build_headers(self.config, adapter)
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
@@ -355,7 +374,7 @@ class OpenAICompatClient:
                         # Retryable HTTP error before any content
                         if _is_retryable_status(response.status_code):
                             if attempt == self.config.max_retries - 1:
-                                _raise_for_status(response, self.config.provider)
+                                _raise_for_status(response, adapter)
                             delay = _compute_retry_delay(
                                 response, attempt, self.config.retry_backoff_s
                             )
@@ -367,11 +386,11 @@ class OpenAICompatClient:
                             continue
                         # Non-retryable error → raise immediately
                         if response.status_code >= 400:
-                            _raise_for_status(response, self.config.provider)
+                            _raise_for_status(response, adapter)
                         # Stream content
                         try:
                             for line in response.iter_lines():
-                                chunk = parse_stream_chunk(line, self.config.provider)
+                                chunk = parse_stream_chunk(line, adapter=adapter)
                                 if chunk is not None:
                                     started = True
                                     yield chunk
@@ -428,12 +447,15 @@ class OpenAICompatClient:
 
         Retries only BEFORE the first chunk is yielded.
         Does NOT retry mid-stream (after first chunk yielded → LLMError).
+
+        Same per-request adapter semantics as :meth:`stream`.
         """  # noqa: C901
-        payload = _build_payload(self.config, messages, tools, tool_choice, overrides)
+        adapter = get_provider(self.config.provider)
+        payload = _build_payload(self.config, messages, tools, tool_choice, overrides, adapter)
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
 
-        headers = _build_headers(self.config)
+        headers = _build_headers(self.config, adapter)
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
@@ -449,7 +471,7 @@ class OpenAICompatClient:
                         # Retryable HTTP error before any content
                         if _is_retryable_status(response.status_code):
                             if attempt == self.config.max_retries - 1:
-                                _raise_for_status(response, self.config.provider)
+                                _raise_for_status(response, adapter)
                             delay = _compute_retry_delay(
                                 response, attempt, self.config.retry_backoff_s
                             )
@@ -461,13 +483,13 @@ class OpenAICompatClient:
                             continue
                         # Non-retryable error → raise immediately
                         if response.status_code >= 400:
-                            _raise_for_status(response, self.config.provider)
+                            _raise_for_status(response, adapter)
                         # Stream content
                         try:
                             async for line in response.aiter_lines():
                                 if not started and line.startswith("data: "):
                                     logger.debug("[DIAG] astream first raw line: %.200s", line)
-                                chunk = parse_stream_chunk(line, self.config.provider)
+                                chunk = parse_stream_chunk(line, adapter=adapter)
                                 if chunk is not None:
                                     started = True
                                     if not hasattr(chunk, '_diag_logged'):
@@ -541,10 +563,10 @@ class OpenAICompatClient:
         return kwargs
 
     def _request_with_retry(
-        self, payload: dict[str, Any], *, stream: bool
+        self, payload: dict[str, Any], *, stream: bool, adapter: Any = None,
     ) -> httpx.Response:
         """Sync HTTP request with retry on transient failures (total attempts = max_retries)."""
-        headers = _build_headers(self.config)
+        headers = _build_headers(self.config, adapter)
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
@@ -558,10 +580,10 @@ class OpenAICompatClient:
                 last_response = response
                 # Non-retryable → raise immediately
                 if not _is_retryable_status(response.status_code):
-                    _raise_for_status(response, self.config.provider)  # raises
+                    _raise_for_status(response, adapter)  # raises
                 # Retryable but last attempt → raise final error
                 if attempt == self.config.max_retries - 1:
-                    _raise_for_status(response, self.config.provider)
+                    _raise_for_status(response, adapter)
                 # Retry
                 delay = _compute_retry_delay(
                     response, attempt, self.config.retry_backoff_s
@@ -588,14 +610,14 @@ class OpenAICompatClient:
 
         # Should not reach here
         if last_response is not None:
-            _raise_for_status(last_response, self.config.provider)
+            _raise_for_status(last_response, adapter)
         raise LLMError("max retries exhausted")
 
     async def _arequest_with_retry(
-        self, payload: dict[str, Any]
+        self, payload: dict[str, Any], adapter: Any = None,
     ) -> httpx.Response:
         """Async HTTP request with retry on transient failures (total attempts = max_retries)."""
-        headers = _build_headers(self.config)
+        headers = _build_headers(self.config, adapter)
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
@@ -608,9 +630,9 @@ class OpenAICompatClient:
                     return response
                 last_response = response
                 if not _is_retryable_status(response.status_code):
-                    _raise_for_status(response, self.config.provider)
+                    _raise_for_status(response, adapter)
                 if attempt == self.config.max_retries - 1:
-                    _raise_for_status(response, self.config.provider)
+                    _raise_for_status(response, adapter)
                 delay = _compute_retry_delay(
                     response, attempt, self.config.retry_backoff_s
                 )
