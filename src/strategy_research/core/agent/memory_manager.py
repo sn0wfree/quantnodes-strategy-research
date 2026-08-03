@@ -689,18 +689,25 @@ class UnifiedMemoryManager:
             )
 
         # Cache update (WRITE_THROUGH: cache reflects SQLite state)
+        # Important: re-read from backend (NOT cache) so cross-process writes
+        # are reflected. The cache is per-process; SQLite is the shared truth.
         if self._cache_config.write_policy == WritePolicyT.WRITE_THROUGH:
-            existing = self._cache.get(session_id) or []
-            existing.append({
-                "id": msg_id,
-                "session_id": session_id,
-                "role": role,
-                "content": content,
-                "created_at": time.time(),
-                "message_type": message_type,
-                **({"metadata": metadata} if metadata else {}),
-            })
-            self._cache.set(session_id, existing)
+            try:
+                fresh = self._backend.list_messages(session_id)
+                self._cache.set(session_id, fresh)
+            except Exception:
+                # Fallback: append to existing cache if backend read fails
+                existing = self._cache.get(session_id) or []
+                existing.append({
+                    "id": msg_id,
+                    "session_id": session_id,
+                    "role": role,
+                    "content": content,
+                    "created_at": time.time(),
+                    "message_type": message_type,
+                    **({"metadata": metadata} if metadata else {}),
+                })
+                self._cache.set(session_id, existing)
         return msg_id
 
     @property
