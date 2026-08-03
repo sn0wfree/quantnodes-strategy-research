@@ -822,10 +822,11 @@ def _study_help() -> str:
         "/study start \"<objective>\" [--workspace W] [--strategy S]\n"
         "            [--metric calmar>=0.5,sharpe>=0.3]\n"
         "            [--budget-turn N] [--budget-time S] [--max-rounds N]\n"
+        "            [--monitor-interval S]   (Phase 3: post-completion drift check)\n"
         "            [--behavior static|varying|improving]\n"
         "  Create a study. The active session's goal ledger is created.\n"
         "/study status   — current study for this session\n"
-        "/study list [status=queued|running|complete|cancelled]\n"
+        "/study list [status=queued|running|monitoring|complete|cancelled]\n"
         "/study pause <study_id>\n"
         "/study resume <study_id>\n"
         "/study cancel <study_id>\n"
@@ -840,7 +841,7 @@ def _parse_study_flags(rest: list[str]) -> dict:
         "workspace_path": None, "strategy_name": None,
         "metric_targets": None,
         "budget_turn": None, "budget_time_seconds": None, "max_rounds": None,
-        "behavior": None,
+        "behavior": None, "monitor_interval_seconds": None,
     }
     i = 0
     while i < len(rest):
@@ -866,6 +867,11 @@ def _parse_study_flags(rest: list[str]) -> dict:
             elif key in ("max-rounds",):
                 try:
                     flags["max_rounds"] = int(val)
+                except ValueError:
+                    pass
+            elif key in ("monitor-interval",):
+                try:
+                    flags["monitor_interval_seconds"] = int(val)
                 except ValueError:
                     pass
             elif key == "behavior":
@@ -932,6 +938,7 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
                 budget_time_seconds=flags["budget_time_seconds"],
                 cooldown_base=30.0, cooldown_jitter=10.0, min_cooldown=1.0,
                 max_rounds=flags["max_rounds"], behavior=flags["behavior"],
+                monitor_interval_seconds=flags["monitor_interval_seconds"],
             )
         # Persist study_id on the loop's payload; the caller
         # (_handle_study_command) is async and schedules the submit
@@ -968,6 +975,12 @@ def _study_status_cmd(session_id: str) -> str:
         study = store.get_active_study(session_id)
     if study is None:
         return "No active study for this session. Use /study start ..."
+    mon = (
+        f"Monitor interval: {study.monitor_interval_seconds}s "
+        f"last_check={study.last_monitor_check_at} "
+        f"drift_count={study.monitor_drift_count}\n"
+        if study.monitor_interval_seconds else ""
+    )
     return (
         f"Study: {study.study_id[:12]}...\n"
         f"Objective: {study.objective}\n"
@@ -976,7 +989,8 @@ def _study_status_cmd(session_id: str) -> str:
         f"Round: {study.current_round}\n"
         f"Last metrics: {study.last_metrics}\n"
         f"Last verdict: {study.last_verdict}\n"
-        f"Last error: {study.last_error}"
+        f"Last error: {study.last_error}\n"
+        f"{mon}"
     )
 
 

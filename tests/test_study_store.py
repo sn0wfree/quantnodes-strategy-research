@@ -396,3 +396,94 @@ class TestStudyDirectives:
                 (s.study_id,),
             ).fetchone()
         assert int(rows[0]) == 0
+
+
+# ── monitoring (Phase 3) ──────────────────────────────────────────────
+
+
+class TestStudyMonitoring:
+    def test_create_with_monitor_interval(self, store: StudyStore, session_id: str):
+        s = store.create_study(
+            session_id=session_id, goal_id=None, objective="x",
+            workspace_path="/w", strategy_name="s",
+            monitor_interval_seconds=600,
+        )
+        assert s.monitor_interval_seconds == 600
+        assert s.last_monitor_check_at is None
+        assert s.monitor_drift_count == 0
+
+    def test_nonpositive_monitor_interval_rejected(
+        self, store: StudyStore, session_id: str
+    ):
+        with pytest.raises(ValueError):
+            store.create_study(
+                session_id=session_id, goal_id=None, objective="x",
+                workspace_path="/w", strategy_name="s",
+                monitor_interval_seconds=-1,
+            )
+
+    def test_update_monitor_check_no_drift(
+        self, store: StudyStore, make_study
+    ):
+        s = make_study(monitor_interval_seconds=60)
+        before = store.get_study(s.study_id)
+        updated = store.update_monitor_check(
+            s.study_id, last_check_at="2026-08-04T10:00:00+00:00",
+            drift=False,
+        )
+        assert updated is not None
+        assert updated.last_monitor_check_at == "2026-08-04T10:00:00+00:00"
+        assert updated.monitor_drift_count == before.monitor_drift_count
+
+    def test_update_monitor_check_drift_increments(
+        self, store: StudyStore, make_study
+    ):
+        s = make_study(monitor_interval_seconds=60)
+        before = store.get_study(s.study_id)
+        updated = store.update_monitor_check(
+            s.study_id, last_check_at="2026-08-04T10:00:00+00:00",
+            drift=True,
+        )
+        assert updated.monitor_drift_count == before.monitor_drift_count + 1
+        # Second drift accumulates
+        updated2 = store.update_monitor_check(
+            s.study_id, last_check_at="2026-08-04T11:00:00+00:00",
+            drift=True,
+        )
+        assert updated2.monitor_drift_count == before.monitor_drift_count + 2
+
+    def test_list_due_for_monitor_check_filters(
+        self, store: StudyStore, session_id: str
+    ):
+        # Two studies with monitor_interval; one COMPLETE, one MONITORING.
+        a = store.create_study(
+            session_id=session_id, goal_id=None, objective="a",
+            workspace_path="/w", strategy_name="s",
+            monitor_interval_seconds=60,
+        )
+        b = store.create_study(
+            session_id=session_id, goal_id=None, objective="b",
+            workspace_path="/w", strategy_name="s",
+            monitor_interval_seconds=60,
+        )
+        c = store.create_study(
+            session_id=session_id, goal_id=None, objective="c",
+            workspace_path="/w", strategy_name="s",
+            # no monitor interval — should be excluded
+        )
+        store.update_execution_status(a.study_id, StudyStatus.COMPLETE)
+        store.update_execution_status(b.study_id, StudyStatus.MONITORING)
+        due = store.list_due_for_monitor_check()
+        due_ids = {s.study_id for s in due}
+        assert a.study_id in due_ids or b.study_id in due_ids  # only MONITORING
+        # Currently: only MONITORING rows are returned by list_due_for_monitor_check.
+        assert b.study_id in due_ids
+        assert a.study_id not in due_ids
+        assert c.study_id not in due_ids
+
+    def test_monitoring_status_in_active_set(self):
+        from strategy_research.core.study.models import (
+            ACTIVE_EXECUTION_STATUSES, StudyStatus,
+        )
+        assert StudyStatus.MONITORING in ACTIVE_EXECUTION_STATUSES
+        assert StudyStatus.NEEDS_REFRESH not in ACTIVE_EXECUTION_STATUSES

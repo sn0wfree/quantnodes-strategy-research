@@ -435,3 +435,136 @@ class TestDirectiveInjection:
         # _format_directives) is what actually keeps an empty list out
         # of the round's prompt — covered by the integration test
         # (test_pending_directive_passed_to_round).
+
+
+# ── Phase 3: monitoring loop ──────────────────────────────────────────
+
+
+class TestMonitoringLoop:
+    def test_complete_then_monitor_transitions_status(
+        self, store, goal_store, monkeypatch
+    ):
+        """A study with monitor_interval should land in MONITORING."""
+        # First round satisfies targets → COMPLETE → monitoring
+        # starts. After one successful monitor check we set the
+        # control token to bail out of the loop.
+        control = ControlToken()
+        def _round(self, r, prev, directives_text=None):
+            return _make_round_result(
+                {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
+            )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_run_one_round", _round,
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_round_cooldown", lambda self: 0.0,
+        )
+        checks = {"n": 0}
+        def _monitor_check(self):
+            checks["n"] += 1
+            from datetime import datetime, timezone
+            # After first check, request cancel so the loop exits cleanly.
+            control.cancelled = True
+            return {
+                "metrics": {"calmar": 0.6, "sharpe": 0.4, "max_dd": -0.1},
+                "verdict": "monitor",
+                "meets_targets": True,
+                "reason": "",
+                "now_iso": datetime.now(timezone.utc).isoformat(),
+            }
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_run_monitor_check", _monitor_check,
+        )
+        async def _fast_sleep(self, interval):
+            # skip the wait entirely
+            return None
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_monitor_sleep", _fast_sleep,
+        )
+
+        goal, study = _setup_with_goal(store, goal_store,
+            monitor_interval_seconds=60,
+        )
+        ex = AutoresearchExecutor(study, store, goal_store=goal_store,
+                                  control=control)
+        asyncio.run(ex.run())
+        assert checks["n"] >= 1
+        got = store.get_study(study.study_id)
+        # No drift detected → status remains MONITORING when cancelled.
+        assert got.execution_status in (
+            StudyStatus.MONITORING, StudyStatus.CANCELLED,
+        )
+
+    def test_drift_triggers_needs_refresh(
+        self, store, goal_store, monkeypatch
+    ):
+        """Monitor finds a regression → NEEDS_REFRESH."""
+        def _round(self, r, prev, directives_text=None):
+            return _make_round_result(
+                {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
+            )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_run_one_round", _round,
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_round_cooldown", lambda self: 0.0,
+        )
+        async def _fast_sleep(self, interval):
+            return None
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_monitor_sleep", _fast_sleep,
+        )
+
+        # Drift on first check — metrics too low to meet targets.
+        def _monitor_check(self):
+            from datetime import datetime, timezone
+            return {
+                "metrics": {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
+                "verdict": "monitor",
+                "meets_targets": False,
+                "reason": "calmar below threshold",
+                "now_iso": datetime.now(timezone.utc).isoformat(),
+            }
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_run_monitor_check", _monitor_check,
+        )
+
+        goal, study = _setup_with_goal(store, goal_store,
+            monitor_interval_seconds=60,
+        )
+        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
+        asyncio.run(ex.run())
+        got = store.get_study(study.study_id)
+        assert got.execution_status == StudyStatus.NEEDS_REFRESH
+        assert got.monitor_drift_count == 1
+
+    def test_no_monitor_when_interval_none(
+        self, store, goal_store, monkeypatch
+    ):
+        """No monitor_interval → study stays COMPLETE."""
+        def _round(self, r, prev, directives_text=None):
+            return _make_round_result(
+                {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
+            )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_run_one_round", _round,
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "_round_cooldown", lambda self: 0.0,
+        )
+
+        goal, study = _setup_with_goal(store, goal_store)  # no monitor_interval
+        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
+        asyncio.run(ex.run())
+        got = store.get_study(study.study_id)
+        assert got.execution_status == StudyStatus.COMPLETE

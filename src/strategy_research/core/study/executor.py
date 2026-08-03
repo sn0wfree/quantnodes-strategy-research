@@ -46,6 +46,8 @@ class ShutdownReason:
     CANCELLED = "cancelled"
     PAUSED = "paused"
     ERROR = "error"
+    MONITORING = "monitoring"        # Phase 3: exited, post-completion monitor active
+    DRIFT = "drift_detected"         # Phase 3: monitor found regression → NEEDS_REFRESH
 
 
 # ── metric target comparison ─────────────────────────────────────────
@@ -202,6 +204,13 @@ class AutoresearchExecutor:
         reason = ShutdownReason.ERROR
         try:
             reason = await self._run_loop()
+            # Phase 3: if monitoring is enabled + we exited cleanly,
+            # transition to MONITORING instead of staying COMPLETE.
+            if (reason == ShutdownReason.TARGETS_MET
+                    and self.study.monitor_interval_seconds):
+                await self._monitor_loop()
+                reason = ShutdownReason.MONITORING if self.control.cancelled is False \
+                    else reason
         except Exception as exc:
             logger.exception("study %s failed: %s", sid, exc)
             self.study_store.update_execution_status(
@@ -362,6 +371,119 @@ class AutoresearchExecutor:
             # ── inter-round cooldown (owned by executor since the CLI
             # did too) ───────────────────────────────────────────
             await asyncio.sleep(self._round_cooldown())
+
+    # ── Phase 3: post-completion monitoring ────────────────────────
+
+    async def _monitor_loop(self) -> None:
+        """Periodic validation after the study reached COMPLETE.
+
+        Runs ``_run_monitor_check`` every ``monitor_interval_seconds``.
+        A failing check (metric_targets no longer met by current
+        backtest metrics) increments ``monitor_drift_count`` and
+        transitions the study to ``NEEDS_REFRESH`` so the user knows
+        the goal's evidence is stale.
+        """
+        sid = self.study.study_id
+        interval = self.study.monitor_interval_seconds or 0
+        self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
+        self._emit(self.study.session_id, "study_monitoring_started", {
+            "study_id": sid,
+            "interval_seconds": interval,
+        })
+        while True:
+            if self.control.cancelled:
+                self._emit(self.study.session_id, "study_cancelled", {"study_id": sid})
+                return
+            if self.control.paused:
+                # Pause honour: wait until resumed.
+                self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
+                self._emit(self.study.session_id, "study_paused", {
+                    "study_id": sid, "round": self.study.current_round,
+                })
+                await self._wait_until_resumed()
+                self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
+                self._emit(self.study.session_id, "study_resumed", {
+                    "study_id": sid, "round": self.study.current_round,
+                })
+
+            await self._monitor_sleep(interval)
+            try:
+                check = await asyncio.to_thread(self._run_monitor_check)
+            except Exception as exc:
+                logger.warning("monitor check %s failed: %s", sid, exc)
+                self._emit(self.study.session_id, "study_monitor_check_failed", {
+                    "study_id": sid, "error": str(exc),
+                })
+                continue
+
+            now_iso = check["now_iso"]
+            drift = not check["meets_targets"]
+            self.study_store.update_monitor_check(
+                sid, last_check_at=now_iso, drift=drift,
+            )
+            self.study_store.update_last_metrics(
+                sid, check["metrics"] or {}, check.get("verdict", "monitor"),
+            )
+            self._emit(self.study.session_id, "study_monitor_check", {
+                "study_id": sid,
+                "metrics": check["metrics"],
+                "meets_targets": check["meets_targets"],
+                "drift": drift,
+                "drift_count": self.study.monitor_drift_count + (1 if drift else 0),
+            })
+            if drift:
+                # Drift detected → mark needs_refresh; user can requeue a
+                # new round to refresh evidence. We stop monitoring for
+                # now (Phase 3 keeps it simple: monitor exits on drift).
+                self.study_store.update_execution_status(
+                    sid, StudyStatus.NEEDS_REFRESH,
+                    last_error=f"monitor drift: {check['reason']}",
+                )
+                self._emit(self.study.session_id, "study_drift_detected", {
+                    "study_id": sid, "metrics": check["metrics"],
+                    "reason": check["reason"],
+                })
+                return
+
+    def _run_monitor_check(self) -> dict:
+        """Run a single monitor check: re-backtest the strategy, compare
+        metrics to ``metric_targets``, return a dict.
+
+        No LLM agent is invoked — only ``run_backtest_script`` plus a
+        cheap metrics comparison. ``now_iso`` is set to the wall clock
+        before the backtest runs so timing fields are honest.
+        """
+        from datetime import datetime, timezone
+        from strategy_research.core.backtest import run_backtest_script
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        result = run_backtest_script(
+            workspace_path=Path(self.study.workspace_path),
+            strategy_name=self.study.strategy_name,
+            action="monitor",
+            description="post-completion monitoring re-check",
+        )
+        if not result.get("success"):
+            # Treat as drift so we surface the issue.
+            return {
+                "metrics": {},
+                "verdict": "error",
+                "meets_targets": False,
+                "reason": f"backtest failed: {result.get('error', 'unknown')}",
+                "now_iso": now_iso,
+            }
+        metrics = result.get("metrics", {}) or {}
+        ok = self.study.metric_targets == [] or meets_metric_targets(
+            metrics, self.study.metric_targets,
+        )
+        reason = "" if ok else "metric_targets no longer met"
+        return {
+            "metrics": metrics,
+            "verdict": "monitor",
+            "meets_targets": ok,
+            "reason": reason,
+            "now_iso": now_iso,
+        }
 
     # ── per-round execution ────────────────────────────────────────
 
@@ -557,6 +679,10 @@ class AutoresearchExecutor:
             self.study.cooldown_jitter * 2,
             self.study.min_cooldown * 2,
         )
+
+    async def _monitor_sleep(self, interval: float) -> None:
+        """Sleep between monitor checks. Tests override this to skip the wait."""
+        await asyncio.sleep(interval)
 
     def _open_goal_store(self) -> Any:
         from strategy_research.core.goal import GoalStore

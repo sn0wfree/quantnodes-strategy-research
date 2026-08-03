@@ -157,7 +157,10 @@ class StudyStore:
                     heartbeat               TEXT,
                     created_at              TEXT NOT NULL,
                     updated_at              TEXT NOT NULL,
-                    completed_at            TEXT
+                    completed_at            TEXT,
+                    monitor_interval_seconds INTEGER,
+                    last_monitor_check_at   TEXT,
+                    monitor_drift_count     INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -211,12 +214,17 @@ class StudyStore:
         lazy_detection_interval: int = 10,
         keep_recent: int = 10,
         behavior: str | None = None,
+        monitor_interval_seconds: int | None = None,
     ) -> StudyRecord:
         """Insert a new study row (status=queued).
 
         Caller is responsible for creating the goal ledger row (via
         ``GoalStore.replace_goal``) and passing the returned
         ``goal_id`` here so the study links to it.
+
+        ``monitor_interval_seconds``: when set, after the study reaches
+        COMPLETE the executor transitions to MONITORING and re-checks
+        metric_targets every N seconds. None disables monitoring.
         """
 
         if not session_id.strip():
@@ -244,6 +252,7 @@ class StudyStore:
             ("budget_turn", budget_turn),
             ("budget_time_seconds", budget_time_seconds),
             ("max_rounds", max_rounds),
+            ("monitor_interval_seconds", monitor_interval_seconds),
         ):
             if value is not None and value <= 0:
                 raise ValueError(f"{name} must be positive when provided")
@@ -264,9 +273,11 @@ class StudyStore:
                     max_rounds, lazy_detection_interval, keep_recent,
                     behavior,
                     execution_status, current_round,
-                    heartbeat, created_at, updated_at
+                    heartbeat, created_at, updated_at,
+                    monitor_interval_seconds, last_monitor_check_at,
+                    monitor_drift_count
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
                 """,
                 (
                     study_id,
@@ -290,6 +301,7 @@ class StudyStore:
                     now,
                     now,
                     now,
+                    monitor_interval_seconds,
                 ),
             )
         row = self._conn.execute(
@@ -556,6 +568,70 @@ class StudyStore:
             )
         return cur.rowcount
 
+    # ── Phase 3: monitoring hooks ──────────────────────────────────
+
+    @_synchronized
+    def update_monitor_check(
+        self,
+        study_id: str,
+        *,
+        last_check_at: str,
+        drift: bool,
+    ) -> StudyRecord | None:
+        """Update the monitor-check timestamp + drift counter.
+
+        Called by the monitor loop after each periodic check.
+        """
+        with self._write_transaction():
+            if drift:
+                self._conn.execute(
+                    "UPDATE studies "
+                    "SET last_monitor_check_at = ?, "
+                    "    monitor_drift_count = monitor_drift_count + 1, "
+                    "    updated_at = ? "
+                    "WHERE study_id = ?",
+                    (last_check_at, last_check_at, study_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE studies "
+                    "SET last_monitor_check_at = ?, updated_at = ? "
+                    "WHERE study_id = ?",
+                    (last_check_at, last_check_at, study_id),
+                )
+        row = self._conn.execute(
+            "SELECT * FROM studies WHERE study_id = ?", (study_id,)
+        ).fetchone()
+        return self._study_from_row(row) if row else None
+
+    @_synchronized
+    def list_due_for_monitor_check(
+        self,
+        now_iso: str | None = None,
+        limit: int = 100,
+    ) -> list[StudyRecord]:
+        """List MONITORING studies whose ``last_monitor_check_at`` is older
+        than ``monitor_interval_seconds`` (or never checked).
+
+        Used by a background sweeper (Phase 3) — the executor currently
+        drives monitoring on its own after COMPLETE.
+        """
+        # Studies with monitor_interval_seconds IS NOT NULL AND
+        # (last_monitor_check_at IS NULL OR last_monitor_check_at <= ? - interval).
+        # SQLite has no datetime arithmetic helpers, so we approximate
+        # "due" by returning MONITORING studies and letting the executor
+        # gate on its own clock. This is cheap enough for Phase 3's
+        # small study count.
+        rows = self._conn.execute(
+            f"SELECT * FROM studies "
+            f"WHERE execution_status = 'monitoring' "
+            f"  AND monitor_interval_seconds IS NOT NULL "
+            f"ORDER BY last_monitor_check_at ASC, created_at ASC "
+            f"LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._study_from_row(row) for row in rows]
+
     # ── internals ────────────────────────────────────────────────────
 
     @contextmanager
@@ -615,4 +691,7 @@ class StudyStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],
+            monitor_interval_seconds=row["monitor_interval_seconds"],
+            last_monitor_check_at=row["last_monitor_check_at"],
+            monitor_drift_count=row["monitor_drift_count"] or 0,
         )

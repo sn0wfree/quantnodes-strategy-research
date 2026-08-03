@@ -86,6 +86,7 @@ class StudyStartRequest(BaseModel):
     behavior: Optional[str] = None
     lazy_detection_interval: int = 10
     keep_recent: int = 10
+    monitor_interval_seconds: Optional[int] = None
 
 
 class DirectiveRequest(BaseModel):
@@ -147,6 +148,7 @@ async def study_start(req: StudyStartRequest):
                 min_cooldown=req.min_cooldown,
                 max_rounds=req.max_rounds,
                 behavior=req.behavior,
+                monitor_interval_seconds=req.monitor_interval_seconds,
             )
         sched = _get_study_scheduler()
         await sched.submit(study)

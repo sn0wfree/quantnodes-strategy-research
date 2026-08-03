@@ -30,6 +30,8 @@ class StudyStatus(str, Enum):
     COMPLETE = "complete"
     CANCELLED = "cancelled"
     BUDGET_LIMITED = "budget_limited"
+    MONITORING = "monitoring"   # Phase 3: post-completion periodic checks
+    NEEDS_REFRESH = "needs_refresh"  # Phase 3: monitor drift detected
 
 
 # Execution statuses that count as "active" — a session may have at
@@ -39,6 +41,7 @@ ACTIVE_EXECUTION_STATUSES = frozenset(
         StudyStatus.QUEUED,
         StudyStatus.RUNNING,
         StudyStatus.PAUSED,
+        StudyStatus.MONITORING,
     }
 )
 
@@ -96,6 +99,10 @@ class StudyRecord:
     created_at: str = ""
     updated_at: str = ""
     completed_at: str | None = None
+    # ── Phase 3: post-completion monitoring ────────────────────────
+    monitor_interval_seconds: int | None = None  # None = no monitoring
+    last_monitor_check_at: str | None = None
+    monitor_drift_count: int = 0
 
 
 @dataclass(frozen=True)
