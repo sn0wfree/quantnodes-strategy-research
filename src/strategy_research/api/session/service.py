@@ -638,26 +638,19 @@ class SessionService:
                 accumulated_parts=accumulated_parts,
             )
 
-        from strategy_research.core.agent.builtin_tools import build_default_registry
-        from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.agent.chat_loop import build_chat_agent_loop
 
         # cfg is passed in by caller; just apply model override
         if cfg and model:
             cfg.model = model
 
-        # Build tool registry
-        try:
-            registry = build_default_registry()
-        except Exception:
-            registry = None
+        # Build AgentLoop (Phase 6: factory unifies the 3 chat-mode call sites).
+        # Caller-provided system_prompt wins (passed via system_prompt_override);
+        # otherwise factory renders chat.md with the real workspace path (P3).
+        workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
 
-        # Default system prompt: chat mode
-        if system_prompt is None:
-            from ...core.agent.prompt_builder import PromptBuilderFactory
-
-            system_prompt = PromptBuilderFactory.get("chat").build_system_prompt(
-                "chat", {"workspace": "", "tool_list": ""}
-            )
+        # Bootstrap workspace if incomplete
+        _bootstrap_workspace(workspace_path)
 
         # Event callback: forward AgentLoop events → EventBus.
         # Each event carries message_id so SSE clients can correlate.
@@ -744,24 +737,21 @@ class SessionService:
             data.setdefault("message_id", attempt.message_id)
             self.event_bus.emit(attempt.session_id, event_type, data)
 
-        # Build AgentLoop
+        # Build AgentLoop (Phase 6: via shared factory)
         workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
 
         # Bootstrap workspace if incomplete
         _bootstrap_workspace(workspace_path)
 
-        agent = AgentLoop(
+        agent = build_chat_agent_loop(
             config=cfg,
-            registry=registry,
-            workspace=workspace_path,
-            on_event=event_callback,
-            stream_mode=True,
-            max_iterations=max_iterations,
             session_id=attempt.session_id,
-            system_prompt=system_prompt,
-            allowed_tools=None,
-            compact_config=cfg.compact_config,
+            role="chat",
+            workspace=workspace_path,  # P3: real workspace path for {workspace}
+            on_event=event_callback,
             event_bus=self.event_bus,
+            max_iterations=max_iterations,
+            system_prompt_override=system_prompt,  # caller-provided wins
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).

@@ -268,31 +268,17 @@ async def _run_agent_loop_background(
                 accumulated_parts[-1]["status"] = "done"
 
     try:
-        from strategy_research.core.agent.builtin_tools import build_default_registry
-        from strategy_research.core.agent.loop import AgentLoop
-        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
+        from strategy_research.core.agent.chat_loop import build_chat_agent_loop
 
-        try:
-            registry = build_default_registry()
-        except Exception:
-            registry = None
-
-        system_prompt = PromptBuilderFactory.get("chat").build_system_prompt(
-            "chat", {"workspace": "", "tool_list": ""}
-        )
         history = _get_or_create_history(session_id)
 
-        loop = AgentLoop(
+        loop = build_chat_agent_loop(
             config=cfg,
-            registry=registry,
-            workspace=None,
-            on_event=on_event,
-            stream_mode=True,
-            max_iterations=1,  # chat: single pass
             session_id=session_id,
-            system_prompt=system_prompt,
-            allowed_tools=[],  # chat-only: no tools
-            compact_config=cfg.compact_config,
+            role="chat",
+            on_event=on_event,
+            workspace=None,  # web chat: no workspace concept yet
+            # allowed_tools=None (P2: unlock — web chat can now call tools)
         )
 
         # Run the loop

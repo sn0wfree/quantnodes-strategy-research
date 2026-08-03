@@ -38,46 +38,49 @@ class TestPhase5RemovedLegacyPaths:
 
 
 class TestPhase5CallSitesUseFactory:
-    """All 4 call sites should now route through ``PromptBuilderFactory``."""
+    """All 4 call sites should now route through the PromptBuilder layer.
+
+    Phase 5: each call site referenced ``PromptBuilderFactory`` directly.
+    Phase 6: the 3 chat-mode call sites were further unified via
+    ``build_chat_agent_loop`` (which itself calls ``PromptBuilderFactory``).
+    We accept either pattern as "routed through PromptBuilder".
+    """
+
+    def _assert_routed(self, src: str, file: str) -> None:
+        assert (
+            "PromptBuilderFactory" in src or "build_chat_agent_loop" in src
+        ), f"{file} should reference PromptBuilderFactory or build_chat_agent_loop"
 
     def test_chat_py_routes_through_factory(self):
-        """The AgentLoop block in chat.py should call PromptBuilderFactory."""
         from strategy_research.api.routers import chat
 
         src = open(chat.__file__, encoding="utf-8").read()
-        assert "PromptBuilderFactory" in src, (
-            "chat.py should reference PromptBuilderFactory after Phase 5"
-        )
+        self._assert_routed(src, "chat.py")
         assert "_get_system_prompt" not in src, (
             "chat.py should no longer reference _get_system_prompt"
         )
 
     def test_service_py_routes_through_factory(self):
-        """service.py should call PromptBuilderFactory, not chat._get_system_prompt."""
         from strategy_research.api.session import service
 
         src = open(service.__file__, encoding="utf-8").read()
-        assert "PromptBuilderFactory" in src
+        self._assert_routed(src, "service.py")
         assert "from ..routers.chat import _get_system_prompt" not in src
 
     def test_tui_session_routes_through_factory(self):
-        """tui/session.py should call PromptBuilderFactory for both modes."""
         from strategy_research.cli.tui import session as tui_session
 
         src = open(tui_session.__file__, encoding="utf-8").read()
-        assert "PromptBuilderFactory" in src
-        assert "_CHAT_PROMPT_PATH" not in src, (
-            "tui/session.py should no longer import _CHAT_PROMPT_PATH"
-        )
-        assert "_load_role_system_prompt" not in src, (
-            "tui/session.py should no longer import _load_role_system_prompt"
-        )
+        self._assert_routed(src, "tui/session.py")
+        assert "_CHAT_PROMPT_PATH" not in src
+        assert "_load_role_system_prompt" not in src
 
     def test_role_factory_routes_through_factory(self):
-        """role_factory.build_agent_loop should call PromptBuilderFactory."""
         from strategy_research.core.agent import role_factory
 
         src = open(role_factory.__file__, encoding="utf-8").read()
+        # role_factory uses PromptBuilderFactory directly (not the chat
+        # loop factory, since it's the goal/agent path, not chat).
         assert "PromptBuilderFactory" in src
         assert "def _load_role_system_prompt" not in src
         assert "def _prompts_dir" not in src

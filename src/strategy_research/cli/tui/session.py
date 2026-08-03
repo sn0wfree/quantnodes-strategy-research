@@ -216,7 +216,6 @@ class ChatSession:
         fails (e.g. missing role prompt). This unifies the event-driven
         flow for plain-text chat with the role-based autoresearch path.
         """
-        from strategy_research.core.agent.loop import AgentLoop
 
         cfg = None
         try:
@@ -225,45 +224,25 @@ class ChatSession:
         except Exception:
             pass
 
-        # Build a minimal registry (only what's needed for the chat path).
-        # The AgentLoop falls back gracefully if no tools are registered.
-        from strategy_research.core.agent.builtin_tools import build_default_registry
-        try:
-            registry = build_default_registry()
-        except Exception:
-            registry = None
-
         # Select system prompt based on interactive mode.
         # Chat mode → conversational prompt (natural language output).
         # Goal mode → researcher prompt (structured JSON output).
         mode = getattr(self.ctx, "interactive_mode", "chat")
-        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
-
-        if mode == "goal":
-            system_prompt = PromptBuilderFactory.get(
-                "researcher"
-            ).build_system_prompt("researcher", {})
-        else:
-            system_prompt = PromptBuilderFactory.get(
-                "chat"
-            ).build_system_prompt("chat", {"workspace": "", "tool_list": ""})
+        role = "researcher" if mode == "goal" else "chat"
 
         # Pass prior conversation turns as history context.
         # ctx.history ends with the current user message (appended by
         # process_turn); exclude it so the loop treats `task` as current.
         history = list(self.ctx.history[:-1]) if len(self.ctx.history) > 1 else None
 
-        loop = AgentLoop(
+        from strategy_research.core.agent.chat_loop import build_chat_agent_loop
+
+        loop = build_chat_agent_loop(
             config=cfg or self.llm_client.config,
-            registry=registry,
-            workspace=None,
-            on_event=self.app.route_agent_event,
-            stream_mode=True,   # plain-text chat: token-by-token stream
-            max_iterations=1,   # plain chat: single pass, no ReAct loop
             session_id=getattr(self.ctx, "session_id", "cli"),
-            system_prompt=system_prompt,
-            allowed_tools=None,  # all tools enabled
-            compact_config=(cfg or self.llm_client.config).compact_config,
+            role=role,
+            on_event=self.app.route_agent_event,
+            workspace=None,
         )
         # Ensure the core loop's legacy compaction persister is wired
         # (TUI process has no API app; registers once, idempotent).
