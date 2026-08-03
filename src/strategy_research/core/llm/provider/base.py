@@ -91,6 +91,26 @@ class ProviderAdapter(ABC):
         """
         return dict(message)
 
+    def strip_dsml_from_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
+        """Strip leaked DSML pseudo-tool-call markup from a streaming delta.
+
+        DeepSeek-V4-Flash (and similar reasoning models) sometimes emit
+        ``<tools><invoke name="X">...</invoke></tools>`` or
+        ``[DSML | tool_calls>...<]`` blocks inside ``reasoning_content``
+        / ``content`` to *express intent* to call a tool. The real tool
+        call travels through ``delta.tool_calls`` in a separate stream,
+        so these markup blocks in the text are pure noise for the user.
+
+        Default: passthrough. Override in providers that serve DeepSeek
+        reasoning models (see :class:`SiliconFlowAdapter`,
+        :class:`DeepSeekAdapter`).
+        """
+        return dict(delta)
+
+    def strip_dsml_from_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Message-level variant. Default: passthrough."""
+        return dict(message)
+
     def normalize_thinking(self, text: str) -> str:
         """Normalize thinking content to plain text.
 

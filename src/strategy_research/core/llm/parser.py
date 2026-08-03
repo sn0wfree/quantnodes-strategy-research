@@ -271,9 +271,16 @@ def _chunk_from_dict(
     if isinstance(delta, dict):
         from .provider import get_provider
         adapter = get_provider(provider_name)
+        # 1. Strip DSML pseudo-tool-call leakage (DeepSeek-V4-Flash
+        #    path — default passthrough for other providers). Mutates
+        #    `delta` in place via the returned copy; downstream
+        #    extract_thinking / strip_thinking read the cleaned text.
+        delta = adapter.strip_dsml_from_delta(delta)
+        # 2. Extract reasoning tokens (thinking_delta payload).
         delta_thinking = adapter.extract_thinking_from_delta(delta) or ""
-        # For providers that embed thinking inside content (e.g. MiniMax),
-        # strip the tags so delta_content only has the actual response.
+        # 3. For providers that embed thinking inside content (e.g.
+        #    MiniMax), strip the tags so delta_content only has the
+        #    actual response.
         stripped = adapter.strip_thinking_from_delta(delta)
         delta_content = stripped.get("content", delta_content) or ""
 
@@ -283,6 +290,17 @@ def _chunk_from_dict(
         for dtc in raw_dtc:
             if isinstance(dtc, dict):
                 delta_tool_calls.append(dtc)
+
+    # DIAG: log first chunk payload to understand format (DEBUG level)
+    logger.debug(
+        "[DIAG] _chunk_from_dict: delta_keys=%s content=%.100r reasoning_content=%.100r "
+        "finish_reason=%s tool_calls=%d",
+        list(delta.keys()) if isinstance(delta, dict) else "N/A",
+        delta.get("content", "") if isinstance(delta, dict) else "",
+        delta.get("reasoning_content", "") if isinstance(delta, dict) else "",
+        finish_reason,
+        len(raw_dtc) if isinstance(raw_dtc, list) else 0,
+    )
 
     return StreamChunk(
         delta_content=delta_content,
