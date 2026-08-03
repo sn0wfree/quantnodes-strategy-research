@@ -16,11 +16,18 @@ are pure UI noise.
 
 from __future__ import annotations
 
-from ._dsml_patterns import strip_dsml_text
+from ._dsml_patterns import StreamDsmlFixer, strip_dsml_text
 from ._reasoning_field import OpenAIReasoningFieldAdapter
 
 
 class SiliconFlowAdapter(OpenAIReasoningFieldAdapter):
+    def __init__(self) -> None:
+        # Per-field cross-chunk DSML state machines (fix_delta hook).
+        # The client creates a fresh adapter per request, so these
+        # stream states are naturally request-scoped.
+        self._reasoning_fixer = StreamDsmlFixer()
+        self._content_fixer = StreamDsmlFixer()
+
     @property
     def name(self) -> str:
         return "siliconflow"
@@ -45,6 +52,23 @@ class SiliconFlowAdapter(OpenAIReasoningFieldAdapter):
         return 131072
 
     # ── DSML filter (DeepSeek-V4-Flash reasoning_content leakage) ──
+
+    def fix_delta(self, delta):
+        """Pipeline Step 1: cross-chunk DSML block removal.
+
+        DeepSeek streams one BPE token per SSE chunk, so markup tags
+        arrive split across chunks and per-chunk regex (sanitize_delta)
+        can never match them. This stateful hook buffers partial
+        markers and drops whole blocks across chunk boundaries.
+        """
+        out = dict(delta)
+        v = out.get("reasoning_content")
+        if isinstance(v, str) and v:
+            out["reasoning_content"] = self._reasoning_fixer.fix(v)
+        v = out.get("content")
+        if isinstance(v, str) and v:
+            out["content"] = self._content_fixer.fix(v)
+        return out
 
     def extract_thinking_from_delta(self, delta):
         content = delta.get("reasoning_content")

@@ -289,8 +289,12 @@ class AgentLoop:
         Returns an LLMResponse-like object with content and tool_calls.
         """
         text_id = str(uuid.uuid4())
-        self._emit("text.started", {"text_id": text_id})
+        # thinking_start BEFORE text.started: both the frontend parts
+        # array and the projector persist parts in event order, so the
+        # thinking block must be created first to render above the text
+        # body (both live and after refresh).
         self._emit("thinking_start", {})
+        self._emit("text.started", {"text_id": text_id})
         full_content = ""
         accumulated_tool_calls: list[dict[str, Any]] = []
         usage: dict[str, int] | None = None
@@ -298,9 +302,15 @@ class AgentLoop:
         tools = self.registry.get_definitions() or None
         try:
             for chunk in self.client.stream(messages, tools=tools):
-                # Thinking tokens (extracted by provider adapter)
+                # Thinking tokens (extracted by provider adapter). The raw
+                # pre-cleanup text travels alongside so event_log keeps the
+                # model's original output (raw) while consumers read the
+                # cleaned delta.
                 if chunk.delta_thinking:
-                    self._emit("thinking_delta", {"delta": chunk.delta_thinking})
+                    self._emit("thinking_delta", {
+                        "delta": chunk.delta_thinking,
+                        "raw": chunk.raw_thinking,
+                    })
 
                 if chunk.delta_content:
                     if full_content == "" and chunk.delta_content:
@@ -310,6 +320,7 @@ class AgentLoop:
                     self._emit("text_delta", {
                         "text": chunk.delta_content,
                         "text_id": text_id,
+                        "raw": chunk.raw_content,
                     })
 
                 if chunk.delta_tool_calls:
@@ -392,8 +403,12 @@ class AgentLoop:
         when text and tool calls interleave.
         """
         text_id = str(uuid.uuid4())
-        self._emit("text.started", {"text_id": text_id})
+        # thinking_start BEFORE text.started: both the frontend parts
+        # array and the projector persist parts in event order, so the
+        # thinking block must be created first to render above the text
+        # body (both live and after refresh).
         self._emit("thinking_start", {})
+        self._emit("text.started", {"text_id": text_id})
         full_content = ""
         accumulated_tool_calls: list[dict[str, Any]] = []
         usage: dict[str, int] | None = None
@@ -415,7 +430,10 @@ class AgentLoop:
                         chunk.usage,
                     )
                 if chunk.delta_thinking:
-                    self._emit("thinking_delta", {"delta": chunk.delta_thinking})
+                    self._emit("thinking_delta", {
+                        "delta": chunk.delta_thinking,
+                        "raw": chunk.raw_thinking,
+                    })
                     # 让出 event loop，让前端逐字看到 thinking
                     await asyncio.sleep(0)
 
@@ -426,6 +444,7 @@ class AgentLoop:
                     self._emit("text_delta", {
                         "text": chunk.delta_content,
                         "text_id": text_id,
+                        "raw": chunk.raw_content,
                     })
                     # 强制让出 event loop，让 SSE _event_generator 有机会
                     # 逐个 yield text_delta（避免 async for 连续处理多个

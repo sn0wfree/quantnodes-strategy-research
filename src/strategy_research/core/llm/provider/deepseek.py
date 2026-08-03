@@ -12,11 +12,16 @@ through the structured ``delta.tool_calls`` path.
 
 from __future__ import annotations
 
-from ._dsml_patterns import strip_dsml_text
+from ._dsml_patterns import StreamDsmlFixer, strip_dsml_text
 from ._reasoning_field import OpenAIReasoningFieldAdapter
 
 
 class DeepSeekAdapter(OpenAIReasoningFieldAdapter):
+    def __init__(self) -> None:
+        # Per-field cross-chunk DSML state machines (fix_delta hook).
+        self._reasoning_fixer = StreamDsmlFixer()
+        self._content_fixer = StreamDsmlFixer()
+
     @property
     def name(self) -> str:
         return "deepseek"
@@ -30,6 +35,17 @@ class DeepSeekAdapter(OpenAIReasoningFieldAdapter):
         return "deepseek-chat"
 
     # ── DSML filter (DeepSeek reasoning_content leakage) ──
+
+    def fix_delta(self, delta):
+        """Pipeline Step 1: cross-chunk DSML block removal."""
+        out = dict(delta)
+        v = out.get("reasoning_content")
+        if isinstance(v, str) and v:
+            out["reasoning_content"] = self._reasoning_fixer.fix(v)
+        v = out.get("content")
+        if isinstance(v, str) and v:
+            out["content"] = self._content_fixer.fix(v)
+        return out
 
     def extract_thinking_from_delta(self, delta):
         content = delta.get("reasoning_content")

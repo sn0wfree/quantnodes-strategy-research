@@ -287,3 +287,43 @@ class TestThinkingEmpty:
         _, part_data = next(iter(parts.values()))
         assert part_data["text"] == ""
         assert part_data["collapsed"] is True
+
+
+# ── P1: thinking part must precede its text part ────────────────────
+
+
+class TestThinkingBeforeTextOrder:
+    """P1-fix: loop.py emits thinking_start BEFORE text.started so both
+    the projector (persisted seq) and the frontend parts array put the
+    thinking block ABOVE the text body — live and after refresh."""
+
+    def test_thinking_part_seq_below_text_part(self, db_path: Path) -> None:
+        mid = "msg_order"
+        events = [
+            # text.started / thinking_start arrive in the new order
+            # (thinking first) — same seq order as loop.py now emits.
+            _make_event(20, EventType.THINKING_START, mid),
+            _make_event(21, EventType.TEXT_STARTED, mid, text_id="t1"),
+            _make_event(22, EventType.THINKING_DELTA, mid, delta="thinking text"),
+            _make_event(23, EventType.THINKING_END, mid),
+            _make_event(24, EventType.TEXT_DELTA, mid, text="body text", text_id="t1"),
+            _make_event(25, EventType.TEXT_ENDED, mid, text="body text", text_id="t1"),
+        ]
+        proj = Projector(db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            for ev in events:
+                conn.execute(
+                    "INSERT INTO event_log (id, aggregate_id, seq, type, "
+                    "data_json, time_created) VALUES (?, ?, ?, ?, ?, ?)",
+                    (ev.id, ev.aggregate_id, ev.seq, ev.type,
+                     json.dumps(ev.data, ensure_ascii=False), ev.time_created),
+                )
+            conn.commit()
+        state = proj.project("sess_test")
+        msg = state.messages[mid]
+        parts = list(msg.parts_in_order())
+        assert len(parts) == 2, [p.type for p in parts]
+        assert parts[0].type == "thinking", [p.type for p in parts]
+        assert parts[1].type == "text", [p.type for p in parts]
+        assert parts[0].data["text"] == "thinking text"
+        assert parts[1].data["text"] == "body text"

@@ -402,12 +402,16 @@ class EventBusV2:
         - message_received: user message created
         - assistant_message: assistant message finalized
         - compact / compact.ended: compaction message created
+        - iter_start: each LLM iteration boundary — persists in-flight
+          responses so a refresh during a long agent run still shows
+          the completed iterations (not just finalized messages).
         """
         boundary_types = {
             "message_received",
             "assistant_message",
             "compact",
             "compact.ended",
+            "iter_start",
         }
         return event_type in boundary_types
 

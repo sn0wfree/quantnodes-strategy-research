@@ -15,12 +15,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
-from strategy_research.api.session.event_v2 import EventType, EventV2
+from strategy_research.api.session.event_v2 import EventV2
 from strategy_research.api.session.events import EventBus, SSEEvent
 
 
@@ -84,6 +83,11 @@ class TestEventBusV2ShouldFlush(unittest.TestCase):
 
     def test_should_flush_compact_ended(self) -> None:
         self.assertTrue(self.v2._should_flush("compact.ended"))
+
+    def test_should_flush_iter_start(self) -> None:
+        # Each LLM iteration boundary persists in-flight responses so a
+        # refresh mid-run still shows completed iterations.
+        self.assertTrue(self.v2._should_flush("iter_start"))
 
     def test_should_not_flush_text_delta(self) -> None:
         self.assertFalse(self.v2._should_flush("text_delta"))

@@ -285,6 +285,137 @@ class TestNonDeepSeekProvidersAreNotAffected:
 # ── Regex sanity (spot-check the compiled patterns directly) ────────
 
 
+class TestStreamDsmlFixer:
+    """Cross-chunk DSML state machine (fix_delta hook).
+
+    DeepSeek streams one BPE token per SSE chunk; markup tags arrive
+    split across chunks (``<`` + ``tool`` + ``_c`` + ``alls``), which
+    per-chunk regex can never match. The fixer buffers partial markers
+    and drops whole blocks across chunk boundaries.
+    """
+
+    @staticmethod
+    def _run(tokens: list[str]) -> str:
+        from strategy_research.core.llm.provider._dsml_patterns import (
+            StreamDsmlFixer,
+        )
+
+        fixer = StreamDsmlFixer()
+        return "".join(fixer.fix(t) for t in tokens)
+
+    def test_tokenized_full_block_dropped(self) -> None:
+        tokens = [
+            "<", "tool", "_c", "alls", "> ", "<", "inv", "oke", " name",
+            '="', "list", "_files", '"> ', "<", "parameter", " name",
+            '="', "works", "pace", '">', "/", "</", "invoke", "> ",
+            "</", "tool", "_calls", ">",
+        ]
+        assert self._run(tokens) == ""
+
+    def test_half_marker_not_swallowed(self) -> None:
+        # "<" + "the" is NOT a marker prefix (only "<"-leading markers
+        # buffer); "<the" must be emitted once it can't grow.
+        assert self._run(["<", "the", " tool is great"]) == "<the tool is great"
+        assert self._run(["use", " the", " <", "the", " tool"]) == "use the <the tool"
+
+    def test_nested_closes_do_not_exit(self) -> None:
+        tokens = [
+            "<", "tool_calls", ">", "<parameter", ">", "x", "</parameter>",
+            " ", "<", "/", "invoke", ">", " ", "<", "/", "tool", "_calls", ">",
+        ]
+        assert self._run(tokens) == ""
+
+    def test_recovery_after_close(self) -> None:
+        tokens = [
+            "<", "tool", "_calls", ">", "DROP", "</", "tool", "_calls",
+            ">", " Let", " me", " explore",
+        ]
+        assert self._run(tokens) == " Let me explore"
+
+    def test_single_chunk_self_closed_block(self) -> None:
+        assert self._run(["<tool_calls>x</tool_calls> rest"]) == " rest"
+        # Text before a block in the same chunk survives.
+        assert self._run(["pre text <tools>a</tools> post"]) == "pre text  post"
+
+    def test_unclosed_marker_drops_to_end(self) -> None:
+        # <|DSML| … < unclosed to stream end: trailing "<" held back,
+        # never leaked.
+        assert self._run(["a", "<|DSML|", "tool_calls", ">", "leak", "<"]) == "a"
+
+    def test_multiple_blocks_keep_middle_text(self) -> None:
+        assert self._run(
+            ["<tools>a</tools>", " mid ", "<tool>b</tool>"],
+        ) == " mid "
+
+    def test_plain_thinking_unaffected(self) -> None:
+        assert self._run(["Let", " me", " explore"]) == "Let me explore"
+
+    def test_non_dsml_tag_not_matched(self) -> None:
+        # <think> is a MiniMax concern, not DSML — never buffered/dropped.
+        assert self._run(["<t", "hink>", "x"]) == "<think>x"
+
+    def test_short_marker_wait_for_longer(self) -> None:
+        # "<tool" could grow into "<tool_calls" — must NOT open discard
+        # mode until confirmed.
+        assert self._run(["<", "tool", "ing guide"]) == "<tooling guide"
+
+    def test_adapter_fix_delta_per_field(self) -> None:
+        from strategy_research.core.llm.provider import DeepSeekAdapter
+
+        a = DeepSeekAdapter()
+        # reasoning_content with a tokenized block; content with plain text.
+        out = a.fix_delta({
+            "reasoning_content": "think <tool_calls>x</tool_calls> end",
+            "content": "answer",
+        })
+        assert out["reasoning_content"] == "think  end"
+        assert out["content"] == "answer"
+
+    def test_default_passthrough_for_other_providers(self) -> None:
+        from strategy_research.core.llm.provider import MiniMaxAdapter
+
+        a = MiniMaxAdapter()
+        delta = {"content": " x ", "reasoning_content": " y "}
+        assert a.fix_delta(delta) == delta
+
+
+class TestRawFieldsPersistOriginal:
+    """P3: StreamChunk carries raw (pre-cleanup) text for event_log."""
+
+    def test_raw_thinking_preserved(self) -> None:
+        from strategy_research.core.llm.parser import _chunk_from_dict
+        from strategy_research.core.llm.provider import DeepSeekAdapter
+
+        payload = {
+            "choices": [{
+                "delta": {
+                    "reasoning_content": "think <tools>x</tools> end",
+                    "content": "answer",
+                },
+            }],
+        }
+        chunk = _chunk_from_dict(payload, adapter=DeepSeekAdapter())
+        assert chunk is not None
+        # delta is cleaned; raw keeps the original model output.
+        assert "<tools>" not in chunk.delta_thinking
+        assert chunk.raw_thinking == "think <tools>x</tools> end"
+        assert chunk.raw_content == "answer"
+
+    def test_raw_equals_cleaned_when_no_markup(self) -> None:
+        from strategy_research.core.llm.parser import _chunk_from_dict
+        from strategy_research.core.llm.provider import DeepSeekAdapter
+
+        payload = {
+            "choices": [{"delta": {"reasoning_content": " me", "content": " x"}}],
+        }
+        chunk = _chunk_from_dict(payload, adapter=DeepSeekAdapter())
+        assert chunk is not None
+        assert chunk.raw_thinking == " me"
+        assert chunk.delta_thinking == " me"
+        assert chunk.raw_content == " x"
+        assert chunk.delta_content == " x"
+
+
 class TestCompiledPatterns:
     def test_block_re_matches_known_shapes(self):
         for text in [

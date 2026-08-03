@@ -97,13 +97,17 @@ class ProviderAdapter(ABC):
         return dict(message)
 
     def fix_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
-        """Reserved stream-repair hook, called as pipeline Step 1.
+        """Pipeline Step 1: stream-repair hook, runs on every chunk.
 
-        Currently a no-op placeholder for cross-chunk boundary fixes
-        (e.g. re-inserting a space when the upstream tokenizer splits
-        between words). Implement statefully in an adapter when needed —
-        the adapter instance is per-request in the client, so per-stream
-        state is naturally isolated. Default: passthrough.
+        Used by DeepSeek-family adapters for *cross-chunk* DSML block
+        removal: streaming splits markup tags across BPE tokens, so
+        per-chunk regex (``sanitize_delta``) can never match them. A
+        stateful fixer (see ``_dsml_patterns.StreamDsmlFixer``) buffers
+        partial markers and drops whole blocks across chunk boundaries.
+
+        State lives on the adapter instance, which the client creates
+        fresh per request — stream state is naturally request-scoped
+        (no reset protocol needed). Default: passthrough.
         """
         return dict(delta)
 

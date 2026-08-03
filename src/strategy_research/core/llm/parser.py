@@ -78,6 +78,11 @@ class StreamChunk:
     delta_tool_calls: list[dict[str, Any]] = field(default_factory=list)
     finish_reason: str | None = None
     usage: dict[str, int] | None = None  # only in final chunk (stream_options)
+    # Raw (pre-cleanup) text, captured before the pipeline's fix_delta /
+    # sanitize hooks. Persisted to event_log alongside the cleaned
+    # delta so the model's original output is always recoverable.
+    raw_content: str = ""
+    raw_thinking: str = ""
 
 
 @dataclass
@@ -85,13 +90,18 @@ class ProcessedDelta:
     """Pipeline result for a single streaming delta (text fields only).
 
     Produced by ``_process_delta`` after Step 1 (``fix_delta``),
-    Step 2 (``sanitize_delta``) and Step 3 (``extract_thinking``).
+    Step 3 (``extract_thinking``) and Step 2 (``sanitize_delta``).
     tool_calls / finish_reason / usage never pass through provider
     hooks — they are assembled directly from the raw payload.
+
+    ``raw_*`` fields carry the pre-cleanup field values (captured
+    before ``fix_delta``) so callers can persist the original output.
     """
 
     content: str = ""
     thinking: str = ""
+    raw_content: str = ""
+    raw_thinking: str = ""
 
 
 @dataclass
@@ -332,7 +342,7 @@ def _chunk_from_dict(
             if isinstance(dtc, dict):
                 delta_tool_calls.append(dtc)
 
-    # Pipeline Steps 1-3 (text fields only)
+    # Pipeline Steps 1, 3, 2 (text fields only)
     processed = _process_delta(delta, adapter)
 
     logger.debug(
@@ -347,6 +357,8 @@ def _chunk_from_dict(
     return StreamChunk(
         delta_content=processed.content,
         delta_thinking=processed.thinking,
+        raw_content=processed.raw_content,
+        raw_thinking=processed.raw_thinking,
         delta_tool_calls=delta_tool_calls,
         finish_reason=str(finish_reason) if finish_reason else None,
         usage=usage_clean,
@@ -368,8 +380,13 @@ def _process_delta(delta: dict[str, Any], adapter: Any = None) -> ProcessedDelta
 
     Extract runs before sanitize: sanitize deletes markup (e.g. MiniMax
     ``<think>``) that extraction relies on.
+
+    The pre-cleanup field values are captured *before* ``fix_delta`` so
+    callers can persist the model's original output (raw_* fields).
     """
     adapter = _resolve_adapter(adapter)
+    raw_content = delta.get("content") or ""
+    raw_thinking = delta.get("reasoning_content") or ""
     # Step 1: reserved stream-repair hook (default passthrough).
     delta = adapter.fix_delta(delta)
     # Step 3: extract reasoning tokens (reads raw reasoning_content).
@@ -377,4 +394,9 @@ def _process_delta(delta: dict[str, Any], adapter: Any = None) -> ProcessedDelta
     # Step 2: sanitize model noise out of the delivered text fields.
     delta = adapter.sanitize_delta(delta)
     content = delta.get("content") or ""
-    return ProcessedDelta(content=content, thinking=thinking)
+    return ProcessedDelta(
+        content=content,
+        thinking=thinking,
+        raw_content=raw_content,
+        raw_thinking=raw_thinking,
+    )
