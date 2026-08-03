@@ -1,17 +1,26 @@
-"""PromptBuilder — Phase 4 of the Chat Agent refactor.
+"""PromptBuilder — Phase 4/5 of the Chat Agent refactor.
 
-Unifies the three parallel system_prompt loading paths:
-- chat.py / cli/tui / session.py  (chat mode)
-- role_factory._load_role_system_prompt (Goal mode, 9 roles)
+Unifies four parallel ``system_prompt`` loading paths:
+- ``api/routers/chat.py:_get_system_prompt`` (web chat, removed in Phase 5)
+- ``api/session/service.py`` (chat service)
+- ``cli/tui/session.py`` (TUI chat/goal mode)
+- ``core/agent/role_factory._load_role_system_prompt`` (9 Goal roles)
 
-Design:
-- Strategy pattern: ChatPromptBuilder / ResearcherPromptBuilder / ...
-- Templates in core/agent/templates/*.md.j2 (Jinja2)
-- Implements the Phase 2 PromptBuilder Protocol:
-    build_system_prompt(role, context) -> str
-    build_messages(user_query, history, context) -> list[Message]
-    estimate_tokens(messages) -> int
-    validate(messages) -> ValidationResult
+Design (Phase 5):
+- Strategy pattern: ``ChatPromptBuilder`` / ``StaticFilePromptBuilder``
+- Templates live in ``src/strategy_research/templates/.prompts/*.md`` (the
+  actual asset location; Phase 4's ``core/agent/templates/*.md.j2`` was
+  removed because it duplicated existing ``.prompts/*.md`` files).
+- ``ChatPromptBuilder`` renders ``chat.md`` with ``str.format()`` to
+  preserve the existing Python-style placeholders (``{workspace}`` /
+  ``{tool_list}``); undeclared placeholders return the raw text (literal
+  behavior — matches what callers observed before Phase 4).
+- ``StaticFilePromptBuilder(role)`` returns ``<role>.md`` verbatim, no
+  rendering. Matches ``role_factory._load_role_system_prompt`` behavior
+  where ``{strategy_name}`` / ``{workspace}`` are literal text.
+- ``PromptBuilderFactory.get(unknown_role)`` returns ``_NullBuilder``
+  instead of raising — preserves the legacy "unknown role → empty
+  string → stub fallback" behavior that ``role_factory`` callers depend on.
 """
 from __future__ import annotations
 
@@ -27,14 +36,10 @@ logger = logging.getLogger(__name__)
 # ── Templates directory ─────────────────────────────────────────────────
 
 
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
-
-
-def _template_path(name: str) -> Path:
-    """Resolve a template name to a file under core/agent/templates/."""
-    if not name.endswith(".md.j2"):
-        name = f"{name}.md.j2"
-    return _TEMPLATES_DIR / name
+_PROMPTS_DIR = (
+    Path(__file__).parent.parent.parent / "templates" / ".prompts"
+)
+# Resolves to: src/strategy_research/templates/.prompts/
 
 
 # ── Validation ─────────────────────────────────────────────────────────
@@ -74,26 +79,6 @@ class PromptBuilder(Protocol):
     def validate(self, messages: list[Message]) -> ValidationResult: ...
 
 
-# ── Jinja2 helpers ─────────────────────────────────────────────────────
-
-
-def _get_jinja_env():  # type: ignore[no-untyped-def]
-    """Lazy jinja2 import + env (kept in try/except so tests can run without it)."""
-    try:
-        from jinja2 import Environment, FileSystemLoader, StrictUndefined
-
-        return Environment(
-            loader=FileSystemLoader(str(_TEMPLATES_DIR)),  # resolves at call time
-            autoescape=False,
-            undefined=StrictUndefined,
-            keep_trailing_newline=True,
-        )
-    except ImportError as exc:
-        raise RuntimeError(
-            "jinja2 is required for PromptBuilder but not installed"
-        ) from exc
-
-
 # ── Default token limit ────────────────────────────────────────────────
 
 
@@ -109,21 +94,48 @@ def _estimate_chars(messages: list[Message]) -> int:
 
 
 class ChatPromptBuilder:
-    """For conversational chat mode (natural language output)."""
+    """Loads ``chat.md`` and renders with plain ``str.replace()``.
 
-    TEMPLATE_NAME = "chat"
+    Variables in ``chat.md`` (4 total):
+        ``{workspace}``    — workspace root path
+        ``{tool_list}``    — comma-separated tool names
+        ``{name}``         — strategy name placeholder in path examples
+        ``{策略名}``       — Chinese equivalent of ``{name}``
+
+    Why ``str.replace()`` instead of ``str.format()``:
+        ``chat.md`` contains Python dict literals (``{"top_n": 10, ...}``)
+        that ``str.format()`` interprets as ``{key:format_spec}`` syntax and
+        raises ``KeyError``. ``str.replace()`` is a literal substring
+        replacement — no parsing — so it coexists with Python code samples.
+
+    Fallback: ``FALLBACK_PROMPT`` constant when ``chat.md`` is missing.
+    """
+
+    FALLBACK_PROMPT = (
+        "你是 QuantNodes-Research 的量化金融助手。"
+        "用自然语言回复，简洁直接。"
+    )
+
+    # (placeholder_in_text, context_key) pairs. Order matters when one
+    # placeholder is a prefix of another (none currently overlap).
+    _PLACEHOLDERS: tuple[tuple[str, str], ...] = (
+        ("{workspace}", "workspace"),
+        ("{tool_list}", "tool_list"),
+        ("{name}", "name"),
+        ("{策略名}", "策略名"),
+    )
 
     def __init__(self, token_limit: int = DEFAULT_TOKEN_LIMIT) -> None:
         self._token_limit = token_limit
-        self._template = _get_jinja_env().get_template(f"{self.TEMPLATE_NAME}.md.j2")
+        self._path = _PROMPTS_DIR / "chat.md"
 
     def build_system_prompt(self, role: str, context: dict[str, Any]) -> str:
-        return self._template.render(
-            role=role,
-            workspace=context.get("workspace", ""),
-            tool_list=context.get("tool_list", ""),
-            mode=context.get("mode", "chat"),
-        )
+        if not self._path.exists():
+            return self.FALLBACK_PROMPT
+        text = self._path.read_text(encoding="utf-8")
+        for placeholder, key in self._PLACEHOLDERS:
+            text = text.replace(placeholder, context.get(key, ""))
+        return text
 
     def build_messages(
         self,
@@ -153,21 +165,25 @@ class ChatPromptBuilder:
         return ValidationResult(ok=True)
 
 
-class ResearcherPromptBuilder:
-    """For the researcher role (Goal mode, structured JSON output)."""
+class StaticFilePromptBuilder:
+    """Loads ``<role>.md`` as-is (no rendering).
 
-    TEMPLATE_NAME = "researcher"
+    Used for the 9 roles in ``role_factory._ROLE_PROMPT_FILES``. Placeholders
+    like ``{strategy_name}`` / ``{workspace}`` are returned as literal text —
+    matches existing ``role_factory._load_role_system_prompt`` behavior where
+    ``_prompts_dir() / <role>.md`` is read with ``read_text()`` and never
+    formatted.
+    """
 
-    def __init__(self, token_limit: int = DEFAULT_TOKEN_LIMIT) -> None:
+    def __init__(self, role: str, token_limit: int = DEFAULT_TOKEN_LIMIT) -> None:
+        self._role = role
         self._token_limit = token_limit
-        self._template = _get_jinja_env().get_template(f"{self.TEMPLATE_NAME}.md.j2")
+        self._path = _PROMPTS_DIR / f"{role}.md"
 
     def build_system_prompt(self, role: str, context: dict[str, Any]) -> str:
-        return self._template.render(
-            goal_id=context.get("goal_id", ""),
-            criteria=context.get("criteria", []),
-            workspace_path=context.get("workspace_path", ""),
-        )
+        if not self._path.exists():
+            return ""
+        return self._path.read_text(encoding="utf-8")
 
     def build_messages(
         self,
@@ -175,7 +191,7 @@ class ResearcherPromptBuilder:
         history: list[Message],
         context: dict[str, Any],
     ) -> list[Message]:
-        system = self.build_system_prompt("researcher", context)
+        system = self.build_system_prompt(self._role, context)
         messages: list[Message] = [{"role": "system", "content": system}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_query})
@@ -194,34 +210,72 @@ class ResearcherPromptBuilder:
         return ValidationResult(ok=True)
 
 
+class _NullBuilder:
+    """Returned by ``PromptBuilderFactory.get(unknown_role)``.
+
+    Preserves the legacy ``role_factory._load_role_system_prompt`` behavior:
+    unknown role → empty string → stub fallback in ``build_agent_loop``.
+    """
+
+    def build_system_prompt(self, role: str, context: dict[str, Any]) -> str:
+        return ""
+
+    def build_messages(
+        self,
+        user_query: str,
+        history: list[Message],
+        context: dict[str, Any],
+    ) -> list[Message]:
+        return []
+
+    def estimate_tokens(self, messages: list[Message]) -> int:
+        return 0
+
+    def validate(self, messages: list[Message]) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+
 # ── Factory (strategy dispatch) ───────────────────────────────────────
 
 
 class PromptBuilderFactory:
-    """Switch by role / mode. Mirrors AgentRunnerFactory pattern."""
+    """Switch by role / mode. Mirrors ``AgentRunnerFactory`` pattern.
 
-    _BUILDERS: dict[str, type[PromptBuilder]] = {
-        "chat": ChatPromptBuilder,
-        "researcher": ResearcherPromptBuilder,
+    Unknown roles return ``_NullBuilder()`` (empty prompt) instead of
+    raising — preserves backward compatibility with callers that pass
+    arbitrary role names (e.g. ``role_factory.build_agent_loop``).
+    """
+
+    _BUILDERS: dict[str, PromptBuilder] = {
+        "chat": ChatPromptBuilder(),
+        "researcher": StaticFilePromptBuilder("researcher"),
+        "data_quality": StaticFilePromptBuilder("data_quality"),
+        "factor_analyst": StaticFilePromptBuilder("factor_analyst"),
+        "strategist": StaticFilePromptBuilder("strategist"),
+        "portfolio_construction": StaticFilePromptBuilder(
+            "portfolio_construction"
+        ),
+        "risk_controller": StaticFilePromptBuilder("risk_controller"),
+        "attribution_analyst": StaticFilePromptBuilder("attribution_analyst"),
+        "anti_overfit_analyst": StaticFilePromptBuilder("anti_overfit_analyst"),
+        "backtest_diagnostics": StaticFilePromptBuilder("backtest_diagnostics"),
+        "critic": StaticFilePromptBuilder("critic"),
     }
 
     @classmethod
     def get(cls, role: str) -> PromptBuilder:
         if role not in cls._BUILDERS:
-            raise ValueError(
-                f"Unknown role: {role!r}. "
-                f"Valid: {list(cls._BUILDERS.keys())}"
-            )
-        return cls._BUILDERS[role]()
+            return _NullBuilder()
+        return cls._BUILDERS[role]
 
     @classmethod
     def list_roles(cls) -> list[str]:
         return list(cls._BUILDERS.keys())
 
     @classmethod
-    def register(cls, role: str, builder_cls: type[PromptBuilder]) -> None:
-        """Register a new builder at runtime (mirrors AgentRunnerRegistry)."""
-        cls._BUILDERS[role] = builder_cls
+    def register(cls, role: str, builder: PromptBuilder) -> None:
+        """Register a new builder at runtime (mirrors ``AgentRunnerRegistry``)."""
+        cls._BUILDERS[role] = builder
 
 
 __all__ = [
@@ -229,6 +283,6 @@ __all__ = [
     "Message",
     "PromptBuilder",
     "PromptBuilderFactory",
-    "ResearcherPromptBuilder",
+    "StaticFilePromptBuilder",
     "ValidationResult",
 ]
