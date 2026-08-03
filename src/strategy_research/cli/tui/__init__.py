@@ -15,18 +15,9 @@ wiring + thin Textual-native widgets:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from strategy_research.cli.tui.app import ResearchApp
-
-# Path to the conversational system prompt for normal chat mode.
-# Goal mode uses ``role_factory._load_role_system_prompt("researcher")``
-# instead.
-_CHAT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "templates" / ".prompts" / "chat.md"
-)
 
 
 def run_tui(
@@ -43,4 +34,4 @@ def run_tui(
     return app.run() or 0
 
 
-__all__ = ["ResearchApp", "run_tui", "_CHAT_PROMPT_PATH"]
+__all__ = ["ResearchApp", "run_tui"]

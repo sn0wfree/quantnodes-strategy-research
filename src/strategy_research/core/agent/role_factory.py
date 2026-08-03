@@ -44,23 +44,6 @@ _ROLE_TOOL_WHITELIST = {
 }
 
 
-def _prompts_dir() -> Path:
-    """Path → templates/.prompts/."""
-    from ... import _TEMPLATES_DIR
-    return _TEMPLATES_DIR / ".prompts"
-
-
-def _load_role_system_prompt(role: str) -> str:
-    """加载 templates/.prompts/<role>.md 内容, 作为 AgentLoop.system_prompt."""
-    prompt_file = _ROLE_PROMPT_FILES.get(role)
-    if prompt_file is None:
-        return ""
-    path = _prompts_dir() / prompt_file
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8")
-
-
 def _get_tool_whitelist(role: str) -> list[str]:
     """返回 role 专属工具白名单. 未知角色返回最小集 (只读)."""
     return _ROLE_TOOL_WHITELIST.get(role, ["read_file"])
@@ -116,8 +99,9 @@ def build_agent_loop(
     from ...core.agent.builtin_tools import build_default_registry
     from ...core.agent.loop import AgentLoop
     from ...core.llm import LLMConfig
+    from .prompt_builder import PromptBuilderFactory
 
-    system_prompt = _load_role_system_prompt(role)
+    system_prompt = PromptBuilderFactory.get(role).build_system_prompt(role, {})
     if not system_prompt:
         return None
 

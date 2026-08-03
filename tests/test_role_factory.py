@@ -10,34 +10,34 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
 class TestRolePromptLoading:
-    """9 个 role 的 prompt 都能从 templates/.prompts/ 加载."""
+    """9 个 role 的 prompt 都能从 templates/.prompts/ 加载 (via PromptBuilderFactory)."""
 
     def test_all_10_roles_have_prompt_files(self):
-        from strategy_research.core.agent.role_factory import _load_role_system_prompt
+        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
         roles = ["researcher", "data_quality", "factor_analyst", "strategist",
                  "portfolio_construction", "risk_controller", "attribution_analyst",
                  "anti_overfit_analyst", "backtest_diagnostics", "critic"]
         for role in roles:
-            prompt = _load_role_system_prompt(role)
+            prompt = PromptBuilderFactory.get(role).build_system_prompt(role, {})
             assert len(prompt) > 50, f"{role} prompt is too short or missing"
             assert prompt.startswith("# Role:"), f"{role} prompt missing # Role: header"
 
     def test_unknown_role_returns_empty(self):
-        from strategy_research.core.agent.role_factory import _load_role_system_prompt
-        assert _load_role_system_prompt("nonexistent_role_xyz") == ""
+        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
+        assert PromptBuilderFactory.get("nonexistent_role_xyz").build_system_prompt(
+            "nonexistent_role_xyz", {}
+        ) == ""
 
     def test_prompt_files_match_templates(self):
         """9 个 prompt 文件名与 templates/.prompts/ 对应."""
-        from strategy_research.core.agent.role_factory import _ROLE_PROMPT_FILES
         from strategy_research import _TEMPLATES_DIR
+        from strategy_research.core.agent.role_factory import _ROLE_PROMPT_FILES
         prompts_dir = _TEMPLATES_DIR / ".prompts"
         for role, filename in _ROLE_PROMPT_FILES.items():
             assert (prompts_dir / filename).exists(), f"{filename} missing in {prompts_dir}"
@@ -110,8 +110,8 @@ class TestBuildAgentLoop:
     """build_agent_loop() 构造 AgentLoop 实例."""
 
     def test_returns_agent_loop_with_prompt(self, tmp_path):
-        from strategy_research.core.agent.role_factory import build_agent_loop
         from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.agent.role_factory import build_agent_loop
 
         loop = build_agent_loop(
             role="researcher",

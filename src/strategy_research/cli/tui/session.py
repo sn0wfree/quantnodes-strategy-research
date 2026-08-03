@@ -237,20 +237,16 @@ class ChatSession:
         # Chat mode → conversational prompt (natural language output).
         # Goal mode → researcher prompt (structured JSON output).
         mode = getattr(self.ctx, "interactive_mode", "chat")
+        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
+
         if mode == "goal":
-            try:
-                from strategy_research.core.agent.role_factory import (
-                    _load_role_system_prompt,
-                )
-                system_prompt = _load_role_system_prompt("researcher")
-            except Exception:
-                system_prompt = ""
+            system_prompt = PromptBuilderFactory.get(
+                "researcher"
+            ).build_system_prompt("researcher", {})
         else:
-            try:
-                from strategy_research.cli.tui import _CHAT_PROMPT_PATH
-                system_prompt = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
-            except Exception:
-                system_prompt = ""
+            system_prompt = PromptBuilderFactory.get(
+                "chat"
+            ).build_system_prompt("chat", {"workspace": "", "tool_list": ""})
 
         # Pass prior conversation turns as history context.
         # ctx.history ends with the current user message (appended by

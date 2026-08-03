@@ -653,12 +653,11 @@ class SessionService:
 
         # Default system prompt: chat mode
         if system_prompt is None:
-            try:
-                from ..routers.chat import _get_system_prompt
+            from ...core.agent.prompt_builder import PromptBuilderFactory
 
-                system_prompt = _get_system_prompt()
-            except Exception:
-                system_prompt = "你是 QuantNodes-Research 的量化金融助手。"
+            system_prompt = PromptBuilderFactory.get("chat").build_system_prompt(
+                "chat", {"workspace": "", "tool_list": ""}
+            )
 
         # Event callback: forward AgentLoop events → EventBus.
         # Each event carries message_id so SSE clients can correlate.

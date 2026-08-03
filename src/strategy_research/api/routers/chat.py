@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import uuid
-from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -91,20 +90,6 @@ def _build_llm_config():
     except Exception as exc:
         logger.warning("Failed to load LLMConfig: %s", exc)
         return None
-
-
-def _get_system_prompt() -> str:
-    """Load the chat system prompt."""
-    prompt_path = Path(__file__).parent.parent.parent.parent / "templates" / ".prompts" / "chat.md"
-    if prompt_path.exists():
-        return prompt_path.read_text(encoding="utf-8")
-    # Fallback: try absolute path
-    try:
-        from strategy_research.cli.tui import _CHAT_PROMPT_PATH
-        return _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
-    except Exception:
-        pass
-    return "你是 QuantNodes-Research 的量化金融助手。用自然语言回复，简洁直接。"
 
 
 class ChatMessage(BaseModel):
@@ -285,13 +270,16 @@ async def _run_agent_loop_background(
     try:
         from strategy_research.core.agent.builtin_tools import build_default_registry
         from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
 
         try:
             registry = build_default_registry()
         except Exception:
             registry = None
 
-        system_prompt = _get_system_prompt()
+        system_prompt = PromptBuilderFactory.get("chat").build_system_prompt(
+            "chat", {"workspace": "", "tool_list": ""}
+        )
         history = _get_or_create_history(session_id)
 
         loop = AgentLoop(
