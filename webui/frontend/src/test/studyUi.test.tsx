@@ -78,7 +78,7 @@ describe('StudyCreateForm', () => {
 
   it('shows validation error on empty objective', async () => {
     render(
-      <StudyCreateForm workspacePath="/w" strategyName="s" />
+      <StudyCreateForm sessionId="test-session" workspacePath="/w" strategyName="s" />
     )
     const btn = screen.getByText('启动 study')
     // Disabled by empty objective
@@ -90,7 +90,7 @@ describe('StudyCreateForm', () => {
       status: 'ok', study_id: 'new_id', goal_id: 'g', execution_status: 'queued',
     })
     render(
-      <StudyCreateForm workspacePath="/w" strategyName="s" onCreated={() => {}} />
+      <StudyCreateForm sessionId="test-session" workspacePath="/w" strategyName="s" onCreated={() => {}} />
     )
     fireEvent.change(
       screen.getByPlaceholderText(/研究 A 股动量因子/),
@@ -111,7 +111,7 @@ describe('StudyCreateForm', () => {
 
   it('surfaces api errors', async () => {
     vi.mocked(api.study.start).mockRejectedValue(new Error('bad workspace'))
-    render(<StudyCreateForm workspacePath="/w" strategyName="s" />)
+    render(<StudyCreateForm sessionId="test-session" workspacePath="/w" strategyName="s" />)
     fireEvent.change(
       screen.getByPlaceholderText(/研究 A 股动量因子/),
       { target: { value: '研究动量' } },

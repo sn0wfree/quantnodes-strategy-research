@@ -47,6 +47,7 @@ export function StudyTab({ sessionId, workspacePath, strategyName }: StudyTabPro
 
       {sessionId && (creating || !hasActiveStudy) && (
         <StudyCreateForm
+          sessionId={sessionId}
           workspacePath={workspacePath}
           strategyName={strategyName}
           onCreated={() => setCreating(false)}

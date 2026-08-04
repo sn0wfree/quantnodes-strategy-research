@@ -4,6 +4,7 @@ import { api, type MetricTarget } from '../../api/client'
 import { Plus, X } from 'lucide-react'
 
 interface Props {
+  sessionId: string
   workspacePath: string
   strategyName: string
   onCreated?: () => void
@@ -15,7 +16,7 @@ const DEFAULT_METRICS: MetricTarget[] = [
   { name: 'max_dd', op: '>=', value: -0.15 },
 ]
 
-export function StudyCreateForm({ workspacePath, strategyName, onCreated }: Props) {
+export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCreated }: Props) {
   const [objective, setObjective] = useState('')
   const [metrics, setMetrics] = useState<MetricTarget[]>(DEFAULT_METRICS)
   const [budgetTurn, setBudgetTurn] = useState<number | ''>('')
@@ -46,9 +47,6 @@ export function StudyCreateForm({ workspacePath, strategyName, onCreated }: Prop
     setBusy(true)
     setErrorGlobal('')
     try {
-      const sessionId = (window as unknown as { __sessionId?: string })
-        .__sessionId
-        ?? ''
       await api.study.start({
         session_id: sessionId,
         objective: objective.trim(),
