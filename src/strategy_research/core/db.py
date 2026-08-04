@@ -232,6 +232,13 @@ def save_ohlcv_to_db(
         if df is None or df.empty:
             continue
 
+        # Move date-like index to column so normalization can find it.
+        # Loaders (tencent, eastmoney, akshare, etc.) return DataFrames with
+        # trade_date as the index, not as a regular column.
+        idx_name = df.index.name
+        if idx_name and idx_name.lower() in ("trade_date", "tradedate", "datetime", "date"):
+            df = df.reset_index()
+
         # Normalize column names
         col_map = {}
         for col in df.columns:
