@@ -851,7 +851,6 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
     # Flush any pending workflow submits (created by ``/study start``)
     # on this loop before the response round-trips to the user.
     if _study_pending_submits:
-        from .chat import _get_session_service
         session_service = _get_session_service()
         for study, config, goal_id, objective, ws in _study_pending_submits:
             if config is None:
