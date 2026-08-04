@@ -492,7 +492,23 @@ async def study_pause(study_id: str):
 
 @router.post("/{study_id}/resume")
 async def study_resume(study_id: str):
+    """Resume a paused or interrupted study."""
     sched = _get_study_scheduler()
+
+    # Check current status to decide resume path
+    from ...core.study import StudyStore, StudyStatus
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+    if study is None:
+        raise HTTPException(status_code=404, detail="study not found")
+
+    if study.execution_status == StudyStatus.INTERRUPTED:
+        # Re-submit to scheduler
+        if not await sched.resume_interrupted(study_id):
+            raise HTTPException(status_code=400, detail="failed to resume interrupted study")
+        return {"status": "ok", "study_id": study_id, "action": "resumed_from_interrupted"}
+
+    # PAUSED: unpause existing runner
     if not sched.resume(study_id):
         raise HTTPException(status_code=404, detail="study not found or not paused")
     return {"status": "ok", "study_id": study_id, "action": "resumed"}

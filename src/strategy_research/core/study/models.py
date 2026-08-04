@@ -26,6 +26,7 @@ class StudyStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     PAUSED = "paused"
+    INTERRUPTED = "interrupted"  # Server restart killed running study; manual resume required
     ERROR = "error"
     COMPLETE = "complete"
     CANCELLED = "cancelled"
@@ -39,6 +40,7 @@ class StudyStatus(str, Enum):
 # most one study in any of these states (the scheduler enforces this).
 # NOTE: MONITORING is intentionally excluded — it's a passive background
 # check that doesn't occupy the session's processing slot.
+# INTERRUPTED is NOT active — it waits for manual user resume.
 ACTIVE_EXECUTION_STATUSES = frozenset(
     {
         StudyStatus.QUEUED,

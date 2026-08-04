@@ -74,9 +74,15 @@ class StudyScheduler:
         # Mark queued in store (defensive; create_study already sets it,
         # but if submit() is called on a recovered RUNNING study, we do
         # not downgrade it here — only fresh submits pass through).
-        if study.execution_status != StudyStatus.RUNNING:
+        # INTERRUPTED studies are reset to QUEUED so the runner picks them up.
+        if study.execution_status not in (StudyStatus.RUNNING, StudyStatus.INTERRUPTED):
             self.store.update_execution_status(
                 study.study_id, StudyStatus.QUEUED,
+            )
+        elif study.execution_status == StudyStatus.INTERRUPTED:
+            self.store.update_execution_status(
+                study.study_id, StudyStatus.QUEUED,
+                last_error=None,
             )
         self._emit_event(study.session_id, "study_queued", {
             "study_id": study.study_id, "session_id": study.session_id,
@@ -104,6 +110,21 @@ class StudyScheduler:
         tok.paused = False
         return True
 
+    async def resume_interrupted(self, study_id: str) -> bool:
+        """Resume an INTERRUPTED study by re-submitting it to the scheduler.
+
+        Unlike ``resume()`` which unpauses an active runner, this method
+        rebuilds the runner from the persisted study state and queues it
+        on the session's consumer loop.
+        """
+        study = self.store.get_study(study_id)
+        if study is None:
+            return False
+        if study.execution_status != StudyStatus.INTERRUPTED:
+            return False
+        await self.submit(study)
+        return True
+
     def cancel(self, study_id: str) -> bool:
         tok = self._control_tokens.get(study_id)
         if tok is None:
@@ -122,13 +143,13 @@ class StudyScheduler:
     # ── startup recovery ──────────────────────────────────────────
 
     async def recover_on_startup(self) -> list[StudyRecord]:
-        """Re-enqueue studies left queued/running from a previous run.
+        """Recover studies from a previous run.
 
-        Policy: RUNNING studies are reset to QUEUED and re-enqueued; the
-        executor seeds its ``round_num`` from the study's persisted
-        ``current_round`` so the autoresearch run numbering continues —
-        workers resume by reading ``runs/`` on disk. PAUSED studies stay
-        paused (the user can resume via /study resume).
+        Policy:
+        - RUNNING → INTERRUPTED (manual resume required; prevents auto-restart
+          loops when uvicorn reload kills the study due to file changes)
+        - PAUSED → stays PAUSED (user pause is respected)
+        - QUEUED → stays QUEUED but is re-submitted to the scheduler
         """
         # Memory guard: process-local state is empty at startup so there
         # is no false-positive "ghost" to filter (unlike chat attempts we
@@ -138,11 +159,21 @@ class StudyScheduler:
             if s.execution_status == StudyStatus.PAUSED:
                 continue  # respect user pause
             if s.execution_status == StudyStatus.RUNNING:
-                # A running study was lost on restart; requeue.
+                # Running study was killed by restart; mark as INTERRUPTED
+                # so user can manually resume. Do NOT auto-resubmit.
                 self.store.update_execution_status(
-                    s.study_id, StudyStatus.QUEUED,
-                    last_error="rescheduled after restart",
+                    s.study_id, StudyStatus.INTERRUPTED,
+                    last_error="interrupted by server restart",
                 )
+                self._emit_event(s.session_id, "study_interrupted", {
+                    "study_id": s.study_id,
+                    "session_id": s.session_id,
+                    "round": s.current_round,
+                    "reason": "interrupted by server restart",
+                })
+                recoverable.append(s)
+                continue
+            # QUEUED: re-enqueue so the consumer picks it up
             recoverable.append(s)
             await self.submit(s)
         if recoverable:

@@ -222,10 +222,14 @@ def test_recover_on_startup_reenqueues_running(store, goal_store, monkeypatch):
         recs = await sched.recover_on_startup()
         assert len(recs) == 1
         assert recs[0].study_id == study.study_id
-        # recovery resets running → queued before re-running.
+        # NEW policy: running → interrupted (manual resume required)
         s = store.get_study(study.study_id)
-        assert s.execution_status in (StudyStatus.QUEUED, StudyStatus.RUNNING,
-                                      StudyStatus.COMPLETE)
+        assert s.execution_status == StudyStatus.INTERRUPTED
+
+        # Resume manually
+        ok = await sched.resume_interrupted(study.study_id)
+        assert ok is True
+
         # Eventually completes.
         cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
         assert cur is not None and cur.execution_status == StudyStatus.COMPLETE

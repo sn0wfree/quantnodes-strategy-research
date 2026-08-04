@@ -61,6 +61,10 @@ export const studyResumed: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'running' })
 }
 
+export const studyInterrupted: SSEHandler = (data) => {
+  patch({ ...data, execution_status: 'interrupted' })
+}
+
 export const studyCancelled: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'cancelled' })
 }

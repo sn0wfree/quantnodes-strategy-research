@@ -42,6 +42,7 @@ export type SSEEventType =
   | 'study_budget_limited'
   | 'study_paused'
   | 'study_resumed'
+  | 'study_interrupted'
   | 'study_cancelled'
   | 'study_monitoring_started'
   | 'study_monitor_check'
@@ -68,7 +69,7 @@ export const EVENT_TYPES: SSEEventType[] = [
   // Study task system (StudyScheduler → EventStore → SSE)
   'study_queued', 'study_started', 'study_round',
   'study_completed', 'study_failed', 'study_budget_limited',
-  'study_paused', 'study_resumed', 'study_cancelled',
+  'study_paused', 'study_resumed', 'study_interrupted', 'study_cancelled',
   'study_monitoring_started', 'study_monitor_check',
   'study_drift_detected',
 ]

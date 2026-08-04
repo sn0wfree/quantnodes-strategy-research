@@ -16,6 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
   queued: '排队中',
   running: '运行中',
   paused: '已暂停',
+  interrupted: '已中断',
   error: '错误',
   complete: '已完成',
   cancelled: '已取消',
@@ -28,6 +29,7 @@ const STATUS_COLORS: Record<string, string> = {
   queued: 'bg-slate-700 text-slate-200',
   running: 'bg-sky-700 text-sky-100',
   paused: 'bg-amber-700 text-amber-100',
+  interrupted: 'bg-orange-700 text-orange-100',
   error: 'bg-rose-700 text-rose-100',
   complete: 'bg-emerald-700 text-emerald-100',
   cancelled: 'bg-slate-700 text-slate-300',
@@ -202,12 +204,20 @@ export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
         {status === 'paused' && (
           <button
             onClick={() => onAction('resume')}
-            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-xs hover:bg-amber-500"
+            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-xs hover:bg-emerald-500"
           >
             <Play className="h-3 w-3" /> 恢复
           </button>
         )}
-        {status !== 'complete' && status !== 'cancelled' && status !== 'error' && status !== 'needs_refresh' && (
+        {status === 'interrupted' && (
+          <button
+            onClick={() => onAction('resume')}
+            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-xs hover:bg-emerald-500"
+          >
+            <Play className="h-3 w-3" /> 继续运行
+          </button>
+        )}
+        {status !== 'complete' && status !== 'cancelled' && status !== 'error' && status !== 'needs_refresh' && status !== 'interrupted' && (
           <button
             onClick={() => onAction('cancel')}
             className="inline-flex items-center gap-1 rounded bg-rose-700 px-2 py-1 text-xs hover:bg-rose-600"
