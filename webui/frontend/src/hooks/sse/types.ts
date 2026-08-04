@@ -34,6 +34,18 @@ export type SSEEventType =
   | 'llm_usage'
   | 'session_total_tokens'
   | 'compact'
+  | 'study_queued'
+  | 'study_started'
+  | 'study_round'
+  | 'study_completed'
+  | 'study_failed'
+  | 'study_budget_limited'
+  | 'study_paused'
+  | 'study_resumed'
+  | 'study_cancelled'
+  | 'study_monitoring_started'
+  | 'study_monitor_check'
+  | 'study_drift_detected'
 
 export const EVENT_TYPES: SSEEventType[] = [
   'text.started', 'text_delta', 'text.ended',
@@ -53,6 +65,12 @@ export const EVENT_TYPES: SSEEventType[] = [
   'compact',
   'llm_usage', 'session_total_tokens',
   'attempt.started', 'queue_paused', 'queue_state',
+  // Study task system (StudyScheduler → EventStore → SSE)
+  'study_queued', 'study_started', 'study_round',
+  'study_completed', 'study_failed', 'study_budget_limited',
+  'study_paused', 'study_resumed', 'study_cancelled',
+  'study_monitoring_started', 'study_monitor_check',
+  'study_drift_detected',
 ]
 
 /**

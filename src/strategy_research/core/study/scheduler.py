@@ -201,10 +201,7 @@ class StudyScheduler:
 
         control = ControlToken()
         self._control_tokens[study_id] = control
-        emitter = (
-            self._make_emitter(study) if self._emitter_factory is not None
-            else NullEmitter()
-        )
+        emitter = self._make_emitter(study)
         executor = AutoresearchExecutor(
             study, self.store, control=control, emitter=emitter,
         )
@@ -232,10 +229,22 @@ class StudyScheduler:
                 )
 
     def _make_emitter(self, study: StudyRecord):
-        """Construct an emitter bound to the study's session event_bus."""
-        if self._emitter_factory is None:
-            return NullEmitter()
-        return self._emitter_factory(study.session_id)
+        """Construct an emitter bound to the study's session event_bus.
+
+        Resolution order:
+          1. explicit ``emitter_factory`` (tests / custom sinks)
+          2. the session's EventBus (real service) — forwards every
+             study_* event from the executor into the SSE stream so the
+             WebUI Study panel updates instantly
+          3. NullEmitter (no service wiring — e.g. unit tests)
+        """
+        if self._emitter_factory is not None:
+            return self._emitter_factory(study.session_id)
+        if self.session_service is not None and \
+                self.session_service.event_bus is not None:
+            return make_event_bus_emitter(study.session_id,
+                                          self.session_service.event_bus)
+        return NullEmitter()
 
     def _emit_event(self, session_id: str, event: str, data: dict) -> None:
         if self.session_service is None:

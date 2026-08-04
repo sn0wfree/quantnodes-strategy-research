@@ -24,6 +24,20 @@ import {
   goalCompleted,
   sessionMetaUpdated,
 } from './metaHandlers'
+import {
+  studyRound,
+  studyCompleted,
+  studyFailed,
+  studyBudgetLimited,
+  studyPaused,
+  studyResumed,
+  studyCancelled,
+  studyStarted,
+  studyQueued,
+  studyMonitoringStarted,
+  studyDriftDetected,
+  studyMonitorCheck,
+} from './studyHandlers'
 
 /**
  * Dispatch table mapping every registered SSE event type to its handler.
@@ -62,4 +76,17 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   goal_evidence_added: goalEvidenceAdded,
   goal_completed: goalCompleted,
   session_meta_updated: sessionMetaUpdated,
+  // Study task system (Phase 5 — StudyScheduler emits study_* via EventStore)
+  study_queued: studyQueued,
+  study_started: studyStarted,
+  study_round: studyRound,
+  study_completed: studyCompleted,
+  study_failed: studyFailed,
+  study_budget_limited: studyBudgetLimited,
+  study_paused: studyPaused,
+  study_resumed: studyResumed,
+  study_cancelled: studyCancelled,
+  study_monitoring_started: studyMonitoringStarted,
+  study_monitor_check: studyMonitorCheck,
+  study_drift_detected: studyDriftDetected,
 }
