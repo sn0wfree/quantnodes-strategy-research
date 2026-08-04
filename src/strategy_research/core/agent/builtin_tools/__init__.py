@@ -2127,6 +2127,134 @@ class BenchmarkComparison(BaseTool):
         })
 
 
+# ── DataCleanTool ──────────────────────────────────────────────────
+
+
+class DataCleanTool(BaseTool):
+    """数据清洗工具集"""
+
+    name = "clean_data"
+    description = (
+        "清洗 OHLCV 数据，支持去重、缺失值填充、异常值检测。"
+        "可通过 preset 快速执行常用清洗，或通过 params 自定义清洗参数。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "workspace": {"type": "string", "description": "工作区路径"},
+            "strategy_name": {
+                "type": "string",
+                "description": "策略名称",
+                "default": "default"
+            },
+            "preset": {
+                "type": "string",
+                "enum": ["quick", "standard", "thorough", "custom"],
+                "description": "预设清洗模式",
+                "default": "standard"
+            },
+            "params": {
+                "type": "object",
+                "description": "自定义清洗参数（preset=custom 时生效）"
+            },
+            "dry_run": {
+                "type": "boolean",
+                "description": "是否只生成报告不执行",
+                "default": True
+            }
+        },
+        "required": ["workspace"]
+    }
+    is_readonly = False
+    repeatable = True
+
+    def execute(self, **kwargs: Any) -> str:
+        try:
+            workspace = _workspace_from_kwargs(kwargs)
+        except ValueError as exc:
+            return _workspace_error(exc, tool="clean_data")
+
+        strategy_name = kwargs.get("strategy_name", "default")
+        preset = kwargs.get("preset", "standard")
+        params = kwargs.get("params")
+        dry_run = kwargs.get("dry_run", True)
+
+        # 验证 preset
+        from ...data_clean import PRESETS
+        if preset not in PRESETS:
+            return err_actionable(
+                f"invalid preset: {preset}",
+                received=preset,
+                expected="one of: quick, standard, thorough, custom",
+                fix="use a valid preset name",
+                tool="clean_data",
+            )
+
+        try:
+            from ...data_clean import clean_data
+
+            # 加载数据
+            from ...db import get_connection
+            conn = get_connection(workspace, read_only=True)
+            if conn is None:
+                return err_actionable(
+                    "failed to open DuckDB",
+                    tool="clean_data",
+                )
+
+            df = conn.execute(
+                "SELECT * FROM ohlcv WHERE strategy_name = ?",
+                [strategy_name]
+            ).fetch_df()
+
+            if df.empty:
+                conn.close()
+                return err_actionable(
+                    "ohlcv table is empty",
+                    received={"strategy_name": strategy_name},
+                    fix="use get_market_data to fetch data first",
+                    tool="clean_data",
+                )
+
+            # 执行清洗
+            result_df, report = clean_data(df, preset, params, dry_run)
+
+            # 如果不是 dry_run，保存结果
+            if not dry_run:
+                from ...db import save_ohlcv_to_db
+                # 清空旧数据
+                conn.execute(
+                    "DELETE FROM ohlcv WHERE strategy_name = ?",
+                    [strategy_name]
+                )
+                # 保存新数据
+                save_ohlcv_to_db(workspace, {strategy_name: result_df}, strategy_name)
+
+            conn.close()
+
+            return _ok({
+                "strategy_name": strategy_name,
+                "preset": preset,
+                "dry_run": dry_run,
+                "report": {
+                    "initial_rows": report.initial_rows,
+                    "final_rows": report.final_rows,
+                    "duplicates_removed": report.duplicates_removed,
+                    "missing_filled": report.missing_filled,
+                    "outliers_detected": report.outliers_detected,
+                    "params_applied": report.params_applied,
+                },
+                "message": report.message,
+            })
+
+        except Exception as exc:
+            logger.exception("clean_data failed")
+            return err_actionable(
+                f"clean_data failed: {exc}",
+                tool="clean_data",
+            )
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
@@ -2176,6 +2304,8 @@ def build_default_registry() -> ToolRegistry:
         register_goal_tools(r)
     except Exception:
         pass
+    # Data cleaning tools
+    r.register(DataCleanTool())
     return r
 
 
@@ -2198,6 +2328,7 @@ __all__ = [
     "StrategyCompare",
     "DrawdownAnalysis",
     "BenchmarkComparison",
+    "DataCleanTool",
     "CreateGoalTool",
     "AddEvidenceTool",
     "CompleteGoalTool",
