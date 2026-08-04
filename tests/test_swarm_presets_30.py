@@ -75,10 +75,10 @@ def all_presets():
 # ============================================================
 
 class TestPresetCount:
-    """总数从 6 → 36 (6 existing + 25 new + 5 goal presets)."""
+    """总数从 6 → 37 (6 existing + 25 new + 5 goal + 1 autoresearch presets)."""
 
-    def test_total_count_is_36(self, all_presets):
-        assert len(all_presets) == 36
+    def test_total_count_is_37(self, all_presets):
+        assert len(all_presets) == 37
 
     def test_all_25_new_presets_loaded(self, all_presets):
         names = {p.name for p in all_presets}

@@ -1,0 +1,128 @@
+name: goal_autoresearch_9agent
+description: >
+  9-agent 量化策略自动研究流水线 — 从研究假设到回测诊断的完整 DAG。
+  复用 autoresearch.py 的 9-agent 串行链，通过 Goal Workflow DAG 引擎执行。
+version: "1.0"
+
+goal:
+  default_criteria:
+    - "定义研究假设和策略方向"
+    - "验证数据质量和因子有效性"
+    - "集成策略并构建投资组合"
+    - "完成回测并评估风险收益"
+    - "诊断过拟合和回测异常"
+  risk_tier: research_general
+
+agents:
+  # ── Layer 0: 研究假设 ──
+  - id: researcher
+    prompt_file: .prompts/researcher.md
+    tools: [read_file, list_history, factor_analysis, web_search, read_url, get_market_data, search_symbol]
+    input_from: []
+    evidence_criterion: 0
+    timeout: 180
+    max_retries: 3
+
+  # ── Layer 1: 数据质量 ──
+  - id: data_quality
+    prompt_file: .prompts/data_quality.md
+    tools: [read_file, web_search, read_url, get_market_data, list_data_sources]
+    input_from: [researcher]
+    evidence_criterion: 1
+    timeout: 120
+    max_retries: 2
+
+  # ── Layer 2: 因子分析 ──
+  - id: factor_analyst
+    prompt_file: .prompts/factor_analyst.md
+    tools: [read_file, compute_factor, factor_analysis, get_market_data]
+    input_from: [researcher, data_quality]
+    evidence_criterion: 1
+    timeout: 180
+    max_retries: 3
+
+  # ── Layer 3: 策略集成 ──
+  - id: strategist
+    prompt_file: .prompts/strategist.md
+    tools: [read_file, write_file, run_backtest, git_diff, web_search, read_url, get_market_data]
+    input_from: [researcher, data_quality, factor_analyst]
+    evidence_criterion: 2
+    timeout: 240
+    max_retries: 3
+
+  # ── Layer 4: 投资组合构建 ──
+  - id: portfolio_construction
+    prompt_file: .prompts/portfolio_construction.md
+    tools: [read_file, get_market_data]
+    input_from: [strategist]
+    evidence_criterion: 2
+    timeout: 120
+    max_retries: 2
+
+  # ── Layer 5: 回测执行 ──
+  # 注意：此节点通过 hook 特殊处理（python_executor），不是 LLM agent
+  # SwarmRuntime 会尝试执行它，但 GoalWorkflowHook 会拦截并运行 backtest 脚本
+  - id: backtest
+    prompt_file: .prompts/backtest_diagnostics.md  # 占位，实际由 hook 处理
+    tools: [read_file, run_backtest, git_diff]
+    input_from: [portfolio_construction]
+    evidence_criterion: 2
+    timeout: 300
+    max_retries: 1
+
+  # ── Layer 6: 风险控制 ──
+  - id: risk_controller
+    prompt_file: .prompts/risk_controller.md
+    tools: [read_file, factor_analysis, get_market_data]
+    input_from: [backtest]
+    evidence_criterion: 3
+    timeout: 180
+    max_retries: 2
+
+  # ── Layer 7: 归因分析 ──
+  - id: attribution_analyst
+    prompt_file: .prompts/attribution_analyst.md
+    tools: [read_file, factor_analysis]
+    input_from: [backtest, risk_controller]
+    evidence_criterion: 3
+    timeout: 180
+    max_retries: 2
+
+  # ── Layer 8: 过拟合检测 ──
+  - id: anti_overfit_analyst
+    prompt_file: .prompts/anti_overfit_analyst.md
+    tools: [read_file, list_history, factor_analysis]
+    input_from: [backtest, risk_controller, attribution_analyst]
+    evidence_criterion: 4
+    timeout: 180
+    max_retries: 2
+
+  # ── Layer 9: 回测诊断 ──
+  - id: backtest_diagnostics
+    prompt_file: .prompts/backtest_diagnostics.md
+    tools: [read_file, run_backtest, git_diff]
+    input_from: [anti_overfit_analyst]
+    evidence_criterion: 4
+    timeout: 120
+    max_retries: 2
+
+# DAG 定义：每个节点的上游依赖
+# 格式: {node_id: [upstream_node_ids]}
+dag:
+  researcher: []
+  data_quality: [researcher]
+  factor_analyst: [researcher, data_quality]
+  strategist: [researcher, data_quality, factor_analyst]
+  portfolio_construction: [strategist]
+  backtest: [portfolio_construction]
+  risk_controller: [backtest]
+  attribution_analyst: [backtest, risk_controller]
+  anti_overfit_analyst: [backtest, risk_controller, attribution_analyst]
+  backtest_diagnostics: [anti_overfit_analyst]
+
+completion:
+  mode: auto
+  auto_audit: true
+  require_all_evidence: true
+  # metric_targets: 由调用方通过 GoalWorkflowConfig 设置
+  # monitor_interval_seconds: 由调用方设置
