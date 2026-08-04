@@ -81,19 +81,19 @@ def meets_metric_targets(metrics: dict[str, Any], targets: list[dict]) -> bool:
             v = float(value)
         except (TypeError, ValueError):
             return False
-        if op == ">=" and not (a >= v):
-            return False
-        elif op == "<=" and not (a <= v):
-            return False
-        elif op == ">" and not (a > v):
-            return False
-        elif op == "<" and not (a < v):
-            return False
-        elif op == "==" and not (a == v):
-            return False
+        if op == ">=":
+            if not (a >= v): return False
+        elif op == "<=":
+            if not (a <= v): return False
+        elif op == ">":
+            if not (a > v): return False
+        elif op == "<":
+            if not (a < v): return False
+        elif op == "==":
+            if not (a == v): return False
         else:
-            # unknown op already rejected above by the else branch
-            pass
+            # unknown operator — treat as not-met
+            return False
     return True
 
 

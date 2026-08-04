@@ -58,17 +58,22 @@ async def test_start_rejects_missing_workspace(_app_env):
 
 
 @pytest.mark.asyncio
-async def test_start_rejects_missing_strategy(_app_env):
-    app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
-        body = {
-            "session_id": "some", "objective": "x",
-            "workspace_path": str(_app_env), "strategy_name": "no_such_strategy",
-        }
-        r = await client.post("/api/study/start", json=body)
-        assert r.status_code == 400
-        assert "does not exist" in r.json()["detail"]
+async def test_start_auto_creates_strategy(_app_env):
+    """When strategy dir doesn't exist, it should be auto-created.
+    
+    Note: We can't fully test the start endpoint because it triggers the
+    scheduler in the background. Instead, test the auto-creation logic directly.
+    """
+    from pathlib import Path
+    from strategy_research.api.routers.study import _create_minimal_strategy
+
+    strat_dir = _app_env / "strategies" / "auto_created_strat"
+    assert not strat_dir.exists()
+    strat_dir.mkdir(parents=True)
+    _create_minimal_strategy(strat_dir, "auto_created_strat")
+    assert (strat_dir / "strategy.py").exists()
+    content = (strat_dir / "strategy.py").read_text()
+    assert "auto_created_strat" in content
 
 
 @pytest.mark.asyncio

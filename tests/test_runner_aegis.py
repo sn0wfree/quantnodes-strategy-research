@@ -106,7 +106,7 @@ class TestRunnerAEGIS:
         monkeypatch.setattr(AutoresearchRunner, "_round_cooldown", lambda self: 0.0)
         monkeypatch.setattr(AutoresearchRunner, "_maybe_load_previous_summary", lambda self, s: None)
 
-        reason = asyncio.get_event_loop().run_until_complete(runner.run())
+        reason = asyncio.run(runner.run())
         assert reason == ShutdownReason.TARGETS_MET
 
     def test_runner_stops_at_max_rounds(self, stores, study, monkeypatch):
@@ -136,7 +136,7 @@ class TestRunnerAEGIS:
         monkeypatch.setattr(AutoresearchRunner, "_round_cooldown", lambda self: 0.0)
         monkeypatch.setattr(AutoresearchRunner, "_maybe_load_previous_summary", lambda self, s: None)
 
-        reason = asyncio.get_event_loop().run_until_complete(runner.run())
+        reason = asyncio.run(runner.run())
         assert reason == ShutdownReason.MAX_ROUNDS
 
     def test_runner_early_stop(self, stores, study, monkeypatch):
@@ -168,7 +168,7 @@ class TestRunnerAEGIS:
         monkeypatch.setattr(AutoresearchRunner, "_round_cooldown", lambda self: 0.0)
         monkeypatch.setattr(AutoresearchRunner, "_maybe_load_previous_summary", lambda self, s: None)
 
-        reason = asyncio.get_event_loop().run_until_complete(runner.run())
+        reason = asyncio.run(runner.run())
         assert reason == ShutdownReason.EARLY_STOPPED
         assert call_count["n"] == 4  # 3 idle + 1 triggered
 
@@ -193,7 +193,7 @@ class TestRunnerAEGIS:
         monkeypatch.setattr(AutoresearchRunner, "_round_cooldown", lambda self: 0.0)
         monkeypatch.setattr(AutoresearchRunner, "_maybe_load_previous_summary", lambda self, s: None)
 
-        reason = asyncio.get_event_loop().run_until_complete(runner.run())
+        reason = asyncio.run(runner.run())
         assert reason == ShutdownReason.CANCELLED
 
     def test_runner_novelty_gate(self, stores, study, monkeypatch):
@@ -222,6 +222,6 @@ class TestRunnerAEGIS:
         monkeypatch.setattr(AutoresearchRunner, "_round_cooldown", lambda self: 0.0)
         monkeypatch.setattr(AutoresearchRunner, "_maybe_load_previous_summary", lambda self, s: None)
 
-        reason = asyncio.get_event_loop().run_until_complete(runner.run())
+        reason = asyncio.run(runner.run())
         assert reason == ShutdownReason.TARGETS_MET
         assert call_count["n"] == 2  # 1 aborted + 1 completed

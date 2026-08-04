@@ -8,6 +8,11 @@ import {
   studyFailed,
   studyPaused,
   studyResumed,
+  studyInterrupted,
+  studyCancelled,
+  studyStarted,
+  studyQueued,
+  studyBudgetLimited,
   studyMonitoringStarted,
   studyDriftDetected,
 } from '../hooks/sse/studyHandlers'
@@ -67,13 +72,18 @@ describe('study SSE handlers', () => {
     expect(cur?.last_error).toBe('stagnation')
   })
 
-  it('study_paused / resumed / monitoring / drift statuses', () => {
+  it('study_paused / resumed / interrupted / monitoring / drift statuses', () => {
     studyPaused({ study_id: 's1', round: 2 }, ctx())
     expect(useStudyStore.getState().current?.execution_status).toBe('paused')
 
     useStudyStore.getState().setCurrent({ status: 'ok', study_id: 's1' })
     studyResumed({ study_id: 's1', round: 2 }, ctx())
     expect(useStudyStore.getState().current?.execution_status).toBe('running')
+
+    useStudyStore.getState().setCurrent({ status: 'ok', study_id: 's1' })
+    studyInterrupted({ study_id: 's1', round: 3, reason: 'server restart' }, ctx())
+    expect(useStudyStore.getState().current?.execution_status).toBe('interrupted')
+    expect(useStudyStore.getState().current?.current_round).toBe(3)
 
     useStudyStore.getState().setCurrent({ status: 'ok', study_id: 's1' })
     studyMonitoringStarted({ study_id: 's1', interval_seconds: 3600 }, ctx())
@@ -83,5 +93,26 @@ describe('study SSE handlers', () => {
     studyDriftDetected({ study_id: 's1', metrics: { calmar: 0.2 } }, ctx())
     expect(useStudyStore.getState().current?.execution_status).toBe('needs_refresh')
     expect(useStudyStore.getState().current?.last_metrics).toEqual({ calmar: 0.2 })
+  })
+
+  it('study_cancelled sets cancelled status', () => {
+    studyCancelled({ study_id: 's1' }, ctx())
+    expect(useStudyStore.getState().current?.execution_status).toBe('cancelled')
+  })
+
+  it('study_started sets running status', () => {
+    studyStarted({ study_id: 's1', round: 1 }, ctx())
+    expect(useStudyStore.getState().current?.execution_status).toBe('running')
+    expect(useStudyStore.getState().current?.current_round).toBe(1)
+  })
+
+  it('study_queued sets queued status', () => {
+    studyQueued({ study_id: 's1', session_id: 'sess', objective: 'test' }, ctx())
+    expect(useStudyStore.getState().current?.execution_status).toBe('queued')
+  })
+
+  it('study_budget_limited sets budget_limited status', () => {
+    studyBudgetLimited({ study_id: 's1', used: 1000 }, ctx())
+    expect(useStudyStore.getState().current?.execution_status).toBe('budget_limited')
   })
 })
