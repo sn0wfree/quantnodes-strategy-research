@@ -33,6 +33,21 @@ def data_with_missing():
     })
 
 
+@pytest.fixture
+def daily_data():
+    """创建日线数据用于变频测试"""
+    dates = pd.date_range('2020-01-01', '2020-03-31', freq='D')
+    return pd.DataFrame({
+        'asset': ['A'] * len(dates),
+        'date': dates,
+        'open': range(100, 100 + len(dates)),
+        'high': range(101, 101 + len(dates)),
+        'low': range(99, 99 + len(dates)),
+        'close': range(100, 100 + len(dates)),
+        'volume': [1000] * len(dates),
+    })
+
+
 class TestPresets:
     """测试预设模式"""
 
@@ -41,35 +56,40 @@ class TestPresets:
         assert "quick" in PRESETS
         assert "standard" in PRESETS
         assert "thorough" in PRESETS
+        assert "resample" in PRESETS
         assert "custom" in PRESETS
 
-    def test_preset_has_description(self):
-        """测试预设模式有描述"""
+    def test_preset_has_steps(self):
+        """测试预设模式有步骤"""
         for preset_name, preset in PRESETS.items():
-            assert "description" in preset, f"{preset_name} missing description"
+            assert "steps" in preset, f"{preset_name} missing steps"
             assert "params" in preset, f"{preset_name} missing params"
 
-    def test_quick_preset_params(self):
-        """测试 quick 预设参数"""
-        params = PRESETS["quick"]["params"]
-        assert params["dedup_strategy"] == "first"
-        assert params["impute_method"] == "none"
-        assert params["outlier_method"] == "none"
+    def test_quick_preset_steps(self):
+        """测试 quick 预设步骤"""
+        steps = PRESETS["quick"]["steps"]
+        assert steps == ["dedup"]
 
-    def test_standard_preset_params(self):
-        """测试 standard 预设参数"""
-        params = PRESETS["standard"]["params"]
-        assert params["dedup_strategy"] == "first"
-        assert params["impute_method"] == "ffill"
-        assert params["outlier_method"] == "none"
+    def test_standard_preset_steps(self):
+        """测试 standard 预设步骤"""
+        steps = PRESETS["standard"]["steps"]
+        assert "dedup" in steps
+        assert "impute" in steps
 
-    def test_thorough_preset_params(self):
-        """测试 thorough 预设参数"""
-        params = PRESETS["thorough"]["params"]
-        assert params["dedup_strategy"] == "first"
-        assert params["impute_method"] == "ffill"
-        assert params["outlier_method"] == "iqr"
-        assert params["add_returns"] is True
+    def test_thorough_preset_steps(self):
+        """测试 thorough 预设步骤"""
+        steps = PRESETS["thorough"]["steps"]
+        assert "dedup" in steps
+        assert "impute" in steps
+        assert "outlier" in steps
+        assert "returns" in steps
+
+    def test_resample_preset_steps(self):
+        """测试 resample 预设步骤"""
+        steps = PRESETS["resample"]["steps"]
+        assert "resample" in steps
+        assert "dedup" in steps
+        assert "impute" in steps
 
 
 class TestCleanData:
@@ -80,33 +100,47 @@ class TestCleanData:
         result_df, report = clean_data(sample_data, preset="quick")
 
         assert report.duplicates_removed > 0
-        assert report.missing_filled == 0
-        assert report.outliers_detected == 0
+        assert "dedup" in report.steps_applied
 
     def test_clean_data_standard(self, sample_data):
         """测试 standard 模式"""
         result_df, report = clean_data(sample_data, preset="standard")
 
         assert report.duplicates_removed > 0
-        assert report.message.startswith("清洗完成")
+        assert "dedup" in report.steps_applied
+        assert "impute" in report.steps_applied
 
     def test_clean_data_thorough(self, sample_data):
         """测试 thorough 模式"""
         result_df, report = clean_data(sample_data, preset="thorough")
 
         assert report.duplicates_removed > 0
+        assert "returns" in report.steps_applied
         assert "return" in result_df.columns
 
-    def test_clean_data_custom(self, sample_data):
-        """测试 custom 模式"""
+    def test_clean_data_custom_steps(self, sample_data):
+        """测试自定义步骤"""
+        steps = ["dedup", "outlier"]
         params = {
-            "dedup_strategy": "last",
-            "impute_method": "ffill",
+            "dedup_strategy": "first",
+            "outlier_method": "iqr",
+            "outlier_threshold": 1.5,
+            "outlier_action": "flag",
         }
-        result_df, report = clean_data(sample_data, preset="custom", params=params)
+        result_df, report = clean_data(sample_data, preset="custom", steps=steps, params=params)
 
-        assert report.params_applied["dedup_strategy"] == "last"
-        assert report.params_applied["impute_method"] == "ffill"
+        assert "dedup" in report.steps_applied
+        assert "outlier" in report.steps_applied
+        assert "impute" not in report.steps_applied
+
+    def test_clean_data_override_steps(self, sample_data):
+        """测试覆盖预设步骤"""
+        # standard 预设包含 dedup 和 impute，但我们只想要 dedup
+        steps = ["dedup"]
+        result_df, report = clean_data(sample_data, preset="standard", steps=steps)
+
+        assert "dedup" in report.steps_applied
+        assert "impute" not in report.steps_applied
 
     def test_clean_data_dry_run(self, sample_data):
         """测试 dry_run 模式"""
@@ -130,6 +164,42 @@ class TestCleanData:
 
         # 自定义参数应该覆盖预设
         assert report.params_applied["dedup_strategy"] == "max_volume"
+
+
+class TestResample:
+    """测试变频功能"""
+
+    def test_resample_weekly(self, daily_data):
+        """测试周线变频"""
+        result_df, report = clean_data(daily_data, preset="resample")
+
+        assert report.resampled is True
+        assert report.target_freq == "W"
+        assert len(result_df) < len(daily_data)
+
+    def test_resample_monthly(self, daily_data):
+        """测试月线变频"""
+        params = {"resample_freq": "M"}
+        result_df, report = clean_data(daily_data, preset="custom", steps=["resample"], params=params)
+
+        assert report.resampled is True
+        assert report.target_freq == "M"
+
+    def test_resample_preserves_ohlcv(self, daily_data):
+        """测试变频保留 OHLCV 数据"""
+        result_df, report = clean_data(daily_data, preset="resample")
+
+        assert 'open' in result_df.columns
+        assert 'high' in result_df.columns
+        assert 'low' in result_df.columns
+        assert 'close' in result_df.columns
+
+    def test_resample_high_low(self, daily_data):
+        """测试变频使用 high/low 聚合"""
+        params = {"resample_freq": "W", "resample_method": "high"}
+        result_df, report = clean_data(daily_data, preset="custom", steps=["resample"], params=params)
+
+        assert report.resampled is True
 
 
 class TestDeduplication:
@@ -230,6 +300,7 @@ class TestCleaningReport:
         report = CleaningReport(
             initial_rows=100,
             final_rows=90,
+            steps_applied=["dedup", "impute"],
             duplicates_removed=10,
             missing_filled=5,
             outliers_detected=2,
@@ -238,6 +309,7 @@ class TestCleaningReport:
         )
         assert report.initial_rows == 100
         assert report.final_rows == 90
+        assert report.steps_applied == ["dedup", "impute"]
         assert report.duplicates_removed == 10
 
     def test_report_message(self, sample_data):

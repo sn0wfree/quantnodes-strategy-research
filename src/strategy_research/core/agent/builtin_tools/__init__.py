@@ -2135,8 +2135,8 @@ class DataCleanTool(BaseTool):
 
     name = "clean_data"
     description = (
-        "清洗 OHLCV 数据，支持去重、缺失值填充、异常值检测。"
-        "可通过 preset 快速执行常用清洗，或通过 params 自定义清洗参数。"
+        "清洗 OHLCV 数据，支持去重、缺失值填充、异常值检测、变频。"
+        "可通过 preset 快速执行常用清洗，或通过 steps + params 自定义清洗流程。"
     )
     parameters = {
         "type": "object",
@@ -2149,13 +2149,21 @@ class DataCleanTool(BaseTool):
             },
             "preset": {
                 "type": "string",
-                "enum": ["quick", "standard", "thorough", "custom"],
+                "enum": ["quick", "standard", "thorough", "resample", "custom"],
                 "description": "预设清洗模式",
                 "default": "standard"
             },
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["dedup", "impute", "outlier", "resample", "returns"]
+                },
+                "description": "清洗步骤列表（custom 模式或覆盖预设步骤）"
+            },
             "params": {
                 "type": "object",
-                "description": "自定义清洗参数（preset=custom 时生效）"
+                "description": "自定义清洗参数"
             },
             "dry_run": {
                 "type": "boolean",
@@ -2176,6 +2184,7 @@ class DataCleanTool(BaseTool):
 
         strategy_name = kwargs.get("strategy_name", "default")
         preset = kwargs.get("preset", "standard")
+        steps = kwargs.get("steps")
         params = kwargs.get("params")
         dry_run = kwargs.get("dry_run", True)
 
@@ -2185,7 +2194,7 @@ class DataCleanTool(BaseTool):
             return err_actionable(
                 f"invalid preset: {preset}",
                 received=preset,
-                expected="one of: quick, standard, thorough, custom",
+                expected="one of: quick, standard, thorough, resample, custom",
                 fix="use a valid preset name",
                 tool="clean_data",
             )
@@ -2217,7 +2226,7 @@ class DataCleanTool(BaseTool):
                 )
 
             # 执行清洗
-            result_df, report = clean_data(df, preset, params, dry_run)
+            result_df, report = clean_data(df, preset, steps, params, dry_run)
 
             # 如果不是 dry_run，保存结果
             if not dry_run:
@@ -2239,9 +2248,13 @@ class DataCleanTool(BaseTool):
                 "report": {
                     "initial_rows": report.initial_rows,
                     "final_rows": report.final_rows,
+                    "steps_applied": report.steps_applied,
                     "duplicates_removed": report.duplicates_removed,
                     "missing_filled": report.missing_filled,
                     "outliers_detected": report.outliers_detected,
+                    "resampled": report.resampled,
+                    "original_freq": report.original_freq,
+                    "target_freq": report.target_freq,
                     "params_applied": report.params_applied,
                 },
                 "message": report.message,
