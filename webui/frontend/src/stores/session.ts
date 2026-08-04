@@ -270,8 +270,15 @@ export const useSessionStore = create<SessionState>()(
         ])
       },
 
-      createNewSession: async (title = '新会话') => {
-        const session = await api.post<Session>('/chat/session', { title })
+      createNewSession: async (title?: string) => {
+        // Auto-generate title with timestamp if not provided
+        const autoTitle = title || `会话 ${new Date().toLocaleString('zh-CN', {
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`
+        const session = await api.post<Session>('/chat/session', { title: autoTitle })
         get().addSession(session)
         set((s) => ({
           openSessionIds: s.openSessionIds.includes(session.id)

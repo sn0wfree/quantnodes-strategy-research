@@ -41,11 +41,19 @@ export function SessionSidebar() {
     }
   }, [editingId])
 
+  // Test/debug session keywords to filter out
+  const TEST_KEYWORDS = ['test', 'verify', 'debug', 'diag', 'check', 'probe', 'quick']
+
+  const isTestSession = (title: string) => {
+    const lower = title.toLowerCase()
+    return TEST_KEYWORDS.some((kw) => lower.includes(kw))
+  }
+
   const filtered = useMemo(() => {
     let list = sessions
     if (filter === 'starred') list = list.filter((s) => s.starred && !s.archived)
     else if (filter === 'archived') list = list.filter((s) => s.archived)
-    else list = list.filter((s) => !s.archived)
+    else list = list.filter((s) => !s.archived && !isTestSession(s.title))
 
     if (search.trim()) {
       const q = search.toLowerCase()
