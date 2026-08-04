@@ -622,7 +622,7 @@ def _goal_start(args: str, session_id: str, store: Any) -> str:
             session_id=session_id, goal_id=goal.goal_id,
             objective=objective, workspace_path=_default_workspace(),
             strategy_name="manual", executor_type="manual",
-            metric_targets=[], max_rounds=0,
+            metric_targets=[],
         )
     return (
         f"Goal created: {goal.goal_id[:12]}...\n"

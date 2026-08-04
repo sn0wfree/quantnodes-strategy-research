@@ -55,6 +55,10 @@ class CompletionConfig:
     mode: str = "auto"  # auto | manual | lite
     auto_audit: bool = True
     require_all_evidence: bool = True
+    # Metric targets (Phase 1.3: migrated from Study)
+    metric_targets: list[dict] | None = None  # [{"name": "calmar", "op": ">=", "value": 0.5}]
+    # Monitor config (Phase 1.5: migrated from Study)
+    monitor_interval_seconds: int | None = None
 
 
 @dataclass
@@ -79,6 +83,10 @@ class GoalWorkflowConfig:
     dag: dict[str, list[str]] = field(default_factory=dict)
     completion: CompletionConfig = field(default_factory=CompletionConfig)
     branches: list[BranchConfig] = field(default_factory=list)
+    # Budget fields (Phase 1.2: migrated from Study)
+    budget_token: int | None = None
+    budget_turn: int | None = None
+    budget_time_seconds: float | None = None
 
     def to_swarm_preset(self) -> Any:
         """Convert to a SwarmPreset for use with SwarmRuntime (P3.3)."""
@@ -112,12 +120,17 @@ class GoalWorkflowConfig:
                 "mode": self.completion.mode,
                 "auto_audit": self.completion.auto_audit,
                 "require_all_evidence": self.completion.require_all_evidence,
+                "metric_targets": self.completion.metric_targets,
+                "monitor_interval_seconds": self.completion.monitor_interval_seconds,
             },
             branches=[
                 {"condition": b.condition, "action": b.action,
                  "target": b.target, "reason": b.reason}
                 for b in self.branches
             ],
+            budget_token=self.budget_token,
+            budget_turn=self.budget_turn,
+            budget_time_seconds=self.budget_time_seconds,
             version=self.version,
         )
 
@@ -261,6 +274,7 @@ class GoalWorkflowRunner:
         runner_kwargs: dict[str, Any] | None = None,
         use_validators: bool = True,
         workspace: Path | None = None,
+        session_service: Any = None,
     ) -> None:
         """Initialize the runner.
 
@@ -273,6 +287,7 @@ class GoalWorkflowRunner:
             runner_kwargs: [deprecated] Pass-through kwargs for controller.
             use_validators: Whether to register validators.
             workspace: Workspace path for prompt file resolution.
+            session_service: SessionService for cooperative mutex with chat.
         """
         # P1.6: Deprecation warnings for dead parameters (v0.5.3)
         if agent_runner is not None:
@@ -301,6 +316,7 @@ class GoalWorkflowRunner:
         self._event_bus = WorkflowEventBus()
         self._agent_runner_type = agent_runner_type
         self._runner_kwargs = runner_kwargs or {}
+        self._session_service = session_service
 
         self._state = GoalWorkflowState()
         self._goal_id: str = ""
@@ -374,6 +390,30 @@ class GoalWorkflowRunner:
         self._state.status = "running"
         self._state.start_time = time.time()
         self._event_bus.emit("workflow_start", workflow=self._config.name)
+
+        # 0. Session mutex: wait for chat to be idle, then claim slot
+        if self._session_service is not None:
+            while self._session_service.is_session_processing(self._session_id):
+                await asyncio.sleep(0.25)
+            self._session_service.mark_session_processing(self._session_id, True)
+
+        try:
+            return await self._start_inner(objective)
+        except Exception as exc:
+            self._state.status = "error"
+            self._state.error_message = str(exc)
+            self._event_bus.emit("workflow_failed", error=str(exc))
+            logger.error("Goal workflow failed: %s", exc)
+            return self._goal_id
+        finally:
+            # 0b. Release session slot
+            if self._session_service is not None:
+                self._session_service.mark_session_processing(self._session_id, False)
+
+    async def _start_inner(self, objective: str) -> str:
+        """Inner start logic (session slot already claimed)."""
+        from .context import default_goal_criteria
+        from .models import RiskTier
 
         # 1. Create the goal
         criteria = self._config.goal.default_criteria or default_goal_criteria()

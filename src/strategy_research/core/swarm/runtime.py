@@ -69,6 +69,10 @@ class SwarmPreset:
     completion: dict[str, Any] | None = None
     branches: list[dict[str, Any]] = field(default_factory=list)
     version: str = "1.0"
+    # Budget fields (Phase 1.2: migrated from Study)
+    budget_token: int | None = None
+    budget_turn: int | None = None
+    budget_time_seconds: float | None = None
 
 
 @dataclass
@@ -162,6 +166,10 @@ class SwarmRuntime:
                 result.agent_results[aid] = ar
         t0 = time.perf_counter()
 
+        # Phase 1.2: Budget tracking (migrated from Study)
+        budget_turns = 0
+        budget_time = 0.0
+
         try:
             layers = topological_layers(preset.dag)
             branches = preset.branches or []
@@ -181,12 +189,24 @@ class SwarmRuntime:
                 if run_id not in self._active_runs:
                     break  # cancelled via cancel(run_id)
 
+                # Phase 1.2: Check budget before layer
+                if self._budget_exceeded(preset, budget_turns, budget_time):
+                    logger.info("SwarmRuntime budget exceeded at layer %d", layer_idx)
+                    break
+
                 # ── Hook: on_layer_start
                 self._emit(hooks, "on_layer_start", layer_idx, layer, {})
 
                 self._execute_layer(
                     layer, preset, workspace, task, result, hooks,
                 )
+
+                # Phase 1.2: Accumulate budget from executed agents
+                for agent_id in layer:
+                    ar = result.agent_results.get(agent_id)
+                    if ar and ar.status == AgentStatus.SUCCESS:
+                        budget_turns += 1
+                budget_time = time.perf_counter() - t0
 
                 # ── Hook: on_layer_complete
                 self._emit(
@@ -228,6 +248,19 @@ class SwarmRuntime:
         """Cancel a running swarm."""
         if run_id in self._active_runs:
             del self._active_runs[run_id]
+            return True
+        return False
+
+    # ── Budget helpers (Phase 1.2) ────────────────────────────
+
+    @staticmethod
+    def _budget_exceeded(
+        preset: SwarmPreset, turns: int, elapsed_s: float,
+    ) -> bool:
+        """Check if any budget limit has been exceeded."""
+        if preset.budget_turn is not None and turns >= preset.budget_turn:
+            return True
+        if preset.budget_time_seconds is not None and elapsed_s >= preset.budget_time_seconds:
             return True
         return False
 

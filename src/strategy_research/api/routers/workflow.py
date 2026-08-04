@@ -51,11 +51,14 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
     try:
         from ...core.goal.workflow import GoalWorkflowRunner
         from ...core.goal.workflow_config import load_goal_workflow
+        from .chat import _get_session_service
 
         config = load_goal_workflow(req.workflow_name)
+        session_service = _get_session_service()
         runner = GoalWorkflowRunner(
             config=config,
             session_id=req.session_id,
+            session_service=session_service,
         )
 
         goal_id = await runner.start(req.objective)
