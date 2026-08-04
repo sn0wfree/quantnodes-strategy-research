@@ -443,17 +443,28 @@ GET  /api/study/list?session_id=&status=&limit=
 | Phase | 内容 | 状态 |
 |---|---|---|
 | 0 | 设计文档（本文档） | ✅ |
-| **1** | **后端最小闭环** | 本轮 |
-| 1.1 | autoresearch 单轮抽取 + CLI 回归 | |
-| 1.2 | core/study/{models,store}.py | |
-| 1.3 | core/study/executor.py | |
-| 1.4 | core/study/scheduler.py | |
-| 1.5 | 入口（chat.py /study + api/routers/study.py） | |
-| 1.6 | 测试 + e2e | |
-| 2 | 执行中交互（插话 / 重定向） | 后续 |
-| 3 | 监控与迭代（达标后 OOS 重验 / freshness 刷新） | 后续 |
-| 4 | 多 goal 并行 + 资源配额 | 后续 |
-| 5 | 前端全量（创建表单 / 指标曲线 / 控制 / 监控视图） | 后续 |
+| 1 | 后端最小闭环（store/executor/scheduler/入口/测试） | ✅ |
+| 1.1 | autoresearch 单轮抽取 + CLI 回归 | ✅ |
+| 1.2 | core/study/{models,store}.py | ✅ |
+| 1.3 | core/study/executor.py | ✅ |
+| 1.4 | core/study/scheduler.py | ✅ |
+| 1.5 | 入口（chat.py /study + api/routers/study.py） | ✅ |
+| 1.6 | 测试 + e2e | ✅ |
+| 2 | 执行中交互（directives 注入 / redirect 命令 / API） | ✅ |
+| 3 | 监控迭代（MONITORING / NEEDS_REFRESH / drift 检测） | ✅ |
+| 4 | 多 goal 并行 + 资源配额 | ⏸️ 暂缓 |
+| 5 | 前端全量（StudyTab / 创建表单 / 进度面板 / 控制 / SSE） | ✅ |
+
+### 提交记录
+
+| Commit | 内容 |
+|---|---|
+| `f7ce168` | 设计文档 |
+| `8ab5f44` | Phase 1 后端最小闭环（study 核心 + 单轮抽取 + 入口 + 测试） |
+| `b4cdc61` | Phase 2 执行中交互（study_directives 表 / redirect / 注入） |
+| `306ac0a` | Phase 3 监控迭代（MONITORING / NEEDS_REFRESH / drift） |
+| `35eec5a` | Phase 5 前端全量（StudyTab / 创建表单 / 进度视图） |
+| （SSE 接线）| 前端 study_* SSE handler + scheduler emitter 修复 |
 
 ## 13. 扩展点（为后续阶段预留）
 
