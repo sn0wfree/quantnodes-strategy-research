@@ -336,6 +336,10 @@ class GoalWorkflowRunner:
     def goal_id(self) -> str:
         return self._goal_id
 
+    def set_goal_id(self, goal_id: str) -> None:
+        """Set the goal_id to reuse an existing goal (skip goal creation in start)."""
+        self._goal_id = goal_id
+
     @property
     def event_bus(self) -> "WorkflowEventBus":
         return self._event_bus
@@ -503,20 +507,23 @@ class GoalWorkflowRunner:
         from .context import default_goal_criteria
         from .models import RiskTier
 
-        # 1. Create the goal
-        criteria = self._config.goal.default_criteria or default_goal_criteria()
-        risk_tier = RiskTier(self._config.goal.risk_tier)
-
-        goal = self._store.replace_goal(
-            session_id=self._session_id,
-            objective=objective,
-            criteria=criteria,
-            source="workflow",
-            protocol=self._config.name,
-            risk_tier=risk_tier,
-            workflow_id=self._config.name,  # P1.7: persist workflow_id
-        )
-        self._goal_id = goal.goal_id
+        # 1. Create the goal (or reuse existing if goal_id already set)
+        if self._goal_id:
+            # Reuse existing goal — skip replace_goal
+            goal = self._store.get_current_goal(self._session_id)
+        else:
+            criteria = self._config.goal.default_criteria or default_goal_criteria()
+            risk_tier = RiskTier(self._config.goal.risk_tier)
+            goal = self._store.replace_goal(
+                session_id=self._session_id,
+                objective=objective,
+                criteria=criteria,
+                source="workflow",
+                protocol=self._config.name,
+                risk_tier=risk_tier,
+                workflow_id=self._config.name,
+            )
+            self._goal_id = goal.goal_id
 
         # 2. Build evidence_map from agent configs
         evidence_map: dict[str, int] = {

@@ -11,6 +11,7 @@ out of the box.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -159,8 +160,95 @@ async def study_start(req: StudyStartRequest):
                 behavior=req.behavior,
                 monitor_interval_seconds=req.monitor_interval_seconds,
             )
-        sched = _get_study_scheduler()
-        await sched.submit(study)
+
+        # Phase 3: Start GoalWorkflowRunner instead of scheduler
+        from ...core.goal.workflow import (
+            GoalWorkflowConfig, GoalWorkflowGoalConfig, GoalAgentConfig,
+            CompletionConfig, GoalWorkflowRunner,
+        )
+        from .chat import _get_session_service
+
+        agent_configs = [
+            GoalAgentConfig(id="researcher", prompt_file=".prompts/researcher.md",
+                           tools=["read_file", "list_history", "factor_analysis", "web_search",
+                                  "read_url", "get_market_data", "search_symbol"],
+                           input_from=[], evidence_criterion=0, timeout=180, max_retries=3),
+            GoalAgentConfig(id="data_quality", prompt_file=".prompts/data_quality.md",
+                           tools=["read_file", "web_search", "read_url", "get_market_data",
+                                  "list_data_sources"],
+                           input_from=["researcher"], evidence_criterion=1, timeout=120, max_retries=2),
+            GoalAgentConfig(id="factor_analyst", prompt_file=".prompts/factor_analyst.md",
+                           tools=["read_file", "compute_factor", "factor_analysis", "get_market_data"],
+                           input_from=["researcher", "data_quality"], evidence_criterion=1,
+                           timeout=180, max_retries=3),
+            GoalAgentConfig(id="strategist", prompt_file=".prompts/strategist.md",
+                           tools=["read_file", "write_file", "run_backtest", "git_diff",
+                                  "web_search", "read_url", "get_market_data"],
+                           input_from=["researcher", "data_quality", "factor_analyst"],
+                           evidence_criterion=2, timeout=240, max_retries=3),
+            GoalAgentConfig(id="portfolio_construction", prompt_file=".prompts/portfolio_construction.md",
+                           tools=["read_file", "get_market_data"],
+                           input_from=["strategist"], evidence_criterion=2, timeout=120, max_retries=2),
+            GoalAgentConfig(id="backtest", prompt_file=".prompts/backtest_diagnostics.md",
+                           tools=["read_file", "run_backtest", "git_diff"],
+                           input_from=["portfolio_construction"], evidence_criterion=2,
+                           timeout=300, max_retries=1),
+            GoalAgentConfig(id="risk_controller", prompt_file=".prompts/risk_controller.md",
+                           tools=["read_file", "factor_analysis", "get_market_data"],
+                           input_from=["backtest"], evidence_criterion=3, timeout=180, max_retries=2),
+            GoalAgentConfig(id="attribution_analyst", prompt_file=".prompts/attribution_analyst.md",
+                           tools=["read_file", "factor_analysis"],
+                           input_from=["backtest", "risk_controller"], evidence_criterion=3,
+                           timeout=180, max_retries=2),
+            GoalAgentConfig(id="anti_overfit_analyst", prompt_file=".prompts/anti_overfit_analyst.md",
+                           tools=["read_file", "list_history", "factor_analysis"],
+                           input_from=["backtest", "risk_controller", "attribution_analyst"],
+                           evidence_criterion=4, timeout=180, max_retries=2),
+            GoalAgentConfig(id="backtest_diagnostics", prompt_file=".prompts/backtest_diagnostics.md",
+                           tools=["read_file", "run_backtest", "git_diff"],
+                           input_from=["anti_overfit_analyst"], evidence_criterion=4,
+                           timeout=120, max_retries=2),
+        ]
+
+        config = GoalWorkflowConfig(
+            name=f"autoresearch_{req.strategy_name}",
+            description=f"9-agent autoresearch: {req.objective}",
+            goal=GoalWorkflowGoalConfig(
+                default_criteria=default_goal_criteria(),
+                risk_tier="research_general",
+            ),
+            agents=agent_configs,
+            dag={
+                "researcher": [],
+                "data_quality": ["researcher"],
+                "factor_analyst": ["researcher", "data_quality"],
+                "strategist": ["researcher", "data_quality", "factor_analyst"],
+                "portfolio_construction": ["strategist"],
+                "backtest": ["portfolio_construction"],
+                "risk_controller": ["backtest"],
+                "attribution_analyst": ["backtest", "risk_controller"],
+                "anti_overfit_analyst": ["backtest", "risk_controller", "attribution_analyst"],
+                "backtest_diagnostics": ["anti_overfit_analyst"],
+            },
+            completion=CompletionConfig(
+                mode="auto",
+                metric_targets=targets,
+                monitor_interval_seconds=req.monitor_interval_seconds,
+            ),
+            budget_turn=req.budget_turn,
+            budget_time_seconds=req.budget_time_seconds,
+        )
+
+        session_service = _get_session_service()
+        runner = GoalWorkflowRunner(
+            config=config,
+            session_id=req.session_id,
+            session_service=session_service,
+            workspace=ws,
+        )
+        runner.set_goal_id(goal.goal_id)
+        # Start in background (non-blocking)
+        asyncio.create_task(runner.start(req.objective))
         return {
             "status": "ok",
             "study_id": study.study_id,
