@@ -156,6 +156,10 @@ def create_app(
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
 
+    # Strategy listing/checking
+    from .routers import strategy
+    app.include_router(strategy.router, prefix="/api/strategies", tags=["strategies"])
+
     # System info (settings modal)
     from .routers import system
     app.include_router(system.router, prefix="/api/system", tags=["system"])

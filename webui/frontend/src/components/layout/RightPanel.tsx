@@ -40,14 +40,13 @@ export function RightPanel() {
   // Poll goal status while the Goal tab is open (no backend goal_* SSE)
   useGoalPolling(tab === 'goal')
 
-  // Resolve workspace + strategy for Study creation form. Default to the
+  // Resolve workspace for Study creation form. Default to the
   // system workspace path, falling back to the current preset's workspace_path.
   const systemWorkspacePath = useSystemStore((s) => s.workspacePath)
   const workspacePath =
     systemWorkspacePath
     || (currentPreset as unknown as { workspace_path?: string })?.workspace_path
     || ''
-  const strategyName = currentPreset?.name ?? ''
 
   if (!visible) return null
 
@@ -111,7 +110,6 @@ export function RightPanel() {
           <StudyTab
             sessionId={sessionId}
             workspacePath={workspacePath}
-            strategyName={strategyName}
           />
         </Tabs.Content>
         <Tabs.Content value="agent" className="flex-1 overflow-y-auto p-4">

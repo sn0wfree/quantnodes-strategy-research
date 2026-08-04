@@ -10,11 +10,9 @@ interface StudyTabProps {
   sessionId: string | undefined
   /** Path to the workspace (passed to the create form). */
   workspacePath: string
-  /** Currently selected strategy (assumed to exist in the workspace). */
-  strategyName: string
 }
 
-export function StudyTab({ sessionId, workspacePath, strategyName }: StudyTabProps) {
+export function StudyTab({ sessionId, workspacePath }: StudyTabProps) {
   const current = useStudyStore((s) => s.current)
   const setCurrent = useStudyStore((s) => s.setCurrent)
   const [creating, setCreating] = useState(false)
@@ -49,7 +47,6 @@ export function StudyTab({ sessionId, workspacePath, strategyName }: StudyTabPro
         <StudyCreateForm
           sessionId={sessionId}
           workspacePath={workspacePath}
-          strategyName={strategyName}
           onCreated={() => setCreating(false)}
         />
       )}

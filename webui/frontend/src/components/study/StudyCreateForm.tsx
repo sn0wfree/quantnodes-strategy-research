@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useStudyStore } from '../../stores/study'
+import { useAuthStore } from '../../stores/auth'
 import { api, type MetricTarget } from '../../api/client'
 import { Plus, X } from 'lucide-react'
+import { StrategyNameInput } from './StrategyNameInput'
 
 interface Props {
   sessionId: string
   workspacePath: string
-  strategyName: string
   onCreated?: () => void
 }
 
@@ -16,8 +17,9 @@ const DEFAULT_METRICS: MetricTarget[] = [
   { name: 'max_dd', op: '>=', value: -0.15 },
 ]
 
-export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCreated }: Props) {
+export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) {
   const [objective, setObjective] = useState('')
+  const [strategyName, setStrategyName] = useState('')
   const [metrics, setMetrics] = useState<MetricTarget[]>(DEFAULT_METRICS)
   const [budgetTurn, setBudgetTurn] = useState<number | ''>('')
   const [maxRounds, setMaxRounds] = useState<number | ''>('')
@@ -29,6 +31,9 @@ export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCrea
   const busy = useStudyStore((s) => s.busy)
   const setBusy = useStudyStore((s) => s.setBusy)
   const setErrorGlobal = useStudyStore((s) => s.setError)
+  const user = useAuthStore((s) => s.user)
+
+  const userId = user?.username ?? 'user'
 
   const updateMetric = (i: number, patch: Partial<MetricTarget>) => {
     setMetrics((prev) =>
@@ -41,6 +46,10 @@ export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCrea
     setError('')
     if (!objective.trim()) {
       setError('Objective is required.')
+      return
+    }
+    if (!strategyName.trim()) {
+      setError('Strategy name is required.')
       return
     }
     setSubmitting(true)
@@ -59,6 +68,7 @@ export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCrea
         behavior: behavior || undefined,
       })
       setObjective('')
+      setStrategyName('')
       onCreated?.()
     } catch (err) {
       setError((err as Error).message || 'Study start failed')
@@ -82,6 +92,14 @@ export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCrea
           className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
         />
       </div>
+
+      <StrategyNameInput
+        objective={objective}
+        userId={userId}
+        sessionId={sessionId}
+        value={strategyName}
+        onChange={setStrategyName}
+      />
 
       <div>
         <label className="block text-xs font-medium text-slate-300 mb-1">
@@ -209,7 +227,7 @@ export function StudyCreateForm({ sessionId, workspacePath, strategyName, onCrea
 
       <button
         type="submit"
-        disabled={submitting || busy || !objective.trim()}
+        disabled={submitting || busy || !objective.trim() || !strategyName.trim()}
         className="w-full rounded bg-sky-600 px-3 py-1.5 text-sm font-medium hover:bg-sky-500 disabled:opacity-50"
       >
         {submitting ? '启动中…' : '启动 study'}
