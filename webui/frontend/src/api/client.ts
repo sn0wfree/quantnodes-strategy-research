@@ -197,6 +197,9 @@ class APIClient {
         content,
         issued_by: issuedBy,
       }),
+
+    summary: (studyId: string) =>
+      this.get<StudySummaryResponse>(`/study/${studyId}/summary`),
   }
 }
 
@@ -297,6 +300,71 @@ export interface StudyDirectiveResponse {
   study_id: string
   directive_id: string
   created_at: string
+}
+
+// ── Study Summary types ─────────────────────────────────────────────
+
+export interface StudyRoundSummary {
+  round_num: number
+  run_name: string
+  metrics: Record<string, number> | null
+  verdict: string | null
+  created_at: string
+  factor_failures?: FactorFailure[]
+}
+
+export interface LeverScoreSummary {
+  lever: string
+  precision_mean: number
+  attempts: number
+  accepted: number
+  reverted: number
+}
+
+export interface FactorFailure {
+  factor_name: string
+  factor_code: string
+  error: string
+  available_columns?: string[]
+  suggested_fix?: string
+}
+
+export interface StudySummaryResponse {
+  status: string
+  study_id: string
+  execution_status: string
+  current_round: number
+  max_rounds?: number
+  objective: string
+  last_metrics?: Record<string, number> | null
+  last_verdict?: string | null
+  recent_rounds: StudyRoundSummary[]
+  scoreboard: LeverScoreSummary[]
+  goal_snapshot?: {
+    goal_id?: string
+    goal_status?: string
+    objective?: string
+    progress_percent?: number
+    evidence_count?: number
+    criteria?: Array<{
+      criterion_id: string
+      text: string
+      status: string
+      required: boolean
+    }>
+  } | null
+}
+
+// ── Flow types ─────────────────────────────────────────────────────
+
+export type NodeStatus = 'pending' | 'running' | 'done'
+
+export interface FlowNodeData {
+  id: string
+  label: string
+  status: NodeStatus
+  started_at?: string
+  duration_ms?: number
 }
 
 function qs(params: Record<string, string | number | undefined>): string {

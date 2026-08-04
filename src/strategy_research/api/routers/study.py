@@ -380,6 +380,92 @@ def _snapshot(s: dict | None) -> dict | None:
     }
 
 
+# ── GET /study/{study_id}/summary ──────────────────────────────────
+
+
+@router.get("/{study_id}/summary")
+async def study_summary(study_id: str):
+    """Return study summary with recent rounds, scoreboard, and goal snapshot."""
+    from ...core.goal import GoalStore
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="study not found")
+
+        # Recent rounds (last 5)
+        recent_rounds = store.list_rounds(study_id, limit=5)
+
+        # Goal snapshot
+        goal_snapshot = None
+        if study.goal_id:
+            with GoalStore() as gs:
+                goal_snapshot = gs.get_goal_snapshot(study.goal_id)
+
+                # Journal entries (last 10)
+                journal_entries = gs.list_journal_entries(study.goal_id, limit=10)
+
+                # Scoreboard from journal
+                scoreboard = _build_scoreboard(journal_entries)
+        else:
+            journal_entries = []
+            scoreboard = []
+
+    return {
+        "status": "ok",
+        "study_id": study.study_id,
+        "execution_status": study.execution_status.value,
+        "current_round": study.current_round,
+        "max_rounds": study.max_rounds,
+        "objective": study.objective,
+        "last_metrics": study.last_metrics,
+        "last_verdict": study.last_verdict,
+        "recent_rounds": [
+            {
+                "round_num": r.round_num,
+                "run_name": r.run_name,
+                "metrics": r.metrics,
+                "verdict": r.verdict,
+                "created_at": r.created_at,
+            }
+            for r in recent_rounds
+        ],
+        "scoreboard": scoreboard,
+        "goal_snapshot": _snapshot(goal_snapshot),
+    }
+
+
+def _build_scoreboard(journal_entries: list) -> list[dict]:
+    """Build lever scoreboard from journal entries."""
+    from collections import defaultdict
+    lever_stats: dict[str, dict] = defaultdict(lambda: {"attempts": 0, "accepted": 0, "reverted": 0})
+
+    for entry in journal_entries:
+        # Handle both JournalEntry objects and dicts
+        levers = getattr(entry, "levers", None) or (entry.get("levers", []) if isinstance(entry, dict) else [])
+        outcome = getattr(entry, "gating_outcome", "") or (entry.get("gating_outcome", "") if isinstance(entry, dict) else "")
+        for lever in levers:
+            lever_stats[lever]["attempts"] += 1
+            if outcome == "accepted":
+                lever_stats[lever]["accepted"] += 1
+            elif outcome == "reverted":
+                lever_stats[lever]["reverted"] += 1
+
+    scoreboard = []
+    for lever, stats in sorted(lever_stats.items(), key=lambda x: -x[1]["attempts"]):
+        attempts = stats["attempts"]
+        accepted = stats["accepted"]
+        precision = accepted / attempts if attempts > 0 else 0.0
+        scoreboard.append({
+            "lever": lever,
+            "precision_mean": round(precision, 2),
+            "attempts": attempts,
+            "accepted": accepted,
+            "reverted": stats["reverted"],
+        })
+    return scoreboard
+
+
 # ── POST /study/{study_id}/pause|resume|cancel ──────────────────────
 
 
