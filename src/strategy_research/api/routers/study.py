@@ -24,6 +24,20 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _create_minimal_strategy(strat_dir: Path, strategy_name: str) -> None:
+    """Create minimal strategy.py for new study."""
+    strategy_py = strat_dir / "strategy.py"
+    if not strategy_py.exists():
+        strategy_py.write_text(
+            f'"""Auto-generated strategy: {strategy_name}"""\n'
+            f"# This file will be overwritten by the autoresearch agent.\n\n"
+            f"PARAMS = {{}}\n"
+            f"FACTOR_EXPRS = []\n"
+            f"FACTOR_WEIGHT_METHOD = \"equal\"\n",
+            encoding="utf-8",
+        )
+
+
 # ── scheduler cache (mirrors chat._session_service_cache pattern) ───
 
 
@@ -123,10 +137,9 @@ async def study_start(req: StudyStartRequest):
         )
     strat_dir = ws / "strategies" / req.strategy_name
     if not strat_dir.exists():
-        raise HTTPException(
-            status_code=400,
-            detail=f"strategy directory does not exist: {strat_dir}",
-        )
+        # Auto-create strategy directory with minimal strategy.py
+        strat_dir.mkdir(parents=True, exist_ok=True)
+        _create_minimal_strategy(strat_dir, req.strategy_name)
 
     try:
         from ...core.goal import GoalStore
