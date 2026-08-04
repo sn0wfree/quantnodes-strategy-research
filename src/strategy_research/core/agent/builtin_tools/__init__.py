@@ -1288,6 +1288,9 @@ class FactorCrossSectionalAnalysis(BaseTool):
                 continue
             try:
                 fv = compute_factor(factor_code, adf)
+                # Deduplicate index to avoid reindex errors
+                if hasattr(fv, 'index') and fv.index.duplicated().any():
+                    fv = fv[~fv.index.duplicated(keep='first')]
                 factor_panel[asset_code] = fv
             except Exception:
                 continue
@@ -1436,6 +1439,9 @@ class FactorQuintileReturns(BaseTool):
                 continue
             try:
                 fv = compute_factor(factor_code, adf)
+                # Deduplicate index to avoid reindex errors
+                if hasattr(fv, 'index') and fv.index.duplicated().any():
+                    fv = fv[~fv.index.duplicated(keep='first')]
                 factor_panel[asset_code] = fv
             except Exception:
                 continue
@@ -1582,6 +1588,9 @@ class FactorICDecay(BaseTool):
                 continue
             try:
                 fv = compute_factor(factor_code, adf)
+                # Deduplicate index to avoid reindex errors
+                if hasattr(fv, 'index') and fv.index.duplicated().any():
+                    fv = fv[~fv.index.duplicated(keep='first')]
                 factor_panel[asset_code] = fv
             except Exception:
                 continue
@@ -1718,6 +1727,9 @@ class FactorTurnover(BaseTool):
                 continue
             try:
                 fv = compute_factor(factor_code, adf)
+                # Deduplicate index to avoid reindex errors
+                if hasattr(fv, 'index') and fv.index.duplicated().any():
+                    fv = fv[~fv.index.duplicated(keep='first')]
                 factor_panel[asset_code] = fv
             except Exception:
                 continue

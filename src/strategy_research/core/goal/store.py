@@ -1138,6 +1138,8 @@ class GoalStore:
         return digest == expected_hash.lower().removeprefix("sha256:")
 
     def _require_criterion(self, goal_id: str, criterion_id: str) -> GoalCriterion:
+        # Normalize criterion_id: remove leading colon if present
+        criterion_id = criterion_id.lstrip(':')
         row = self._conn.execute(
             """
             SELECT * FROM goal_criteria
