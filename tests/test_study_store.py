@@ -139,16 +139,15 @@ class TestStudyStoreCRUD:
     ):
         assert store.get_active_study(session_id) is None
 
-    def test_get_active_study_oldest_first(self, store: StudyStore, session_id: str):
+    def test_get_active_study_returns_newest(self, store: StudyStore, session_id: str):
         a = store.create_study(session_id=session_id, goal_id="g",
                                objective="a", workspace_path="/w", strategy_name="s")
         b = store.create_study(session_id=session_id, goal_id="g",
                                objective="b", workspace_path="/w", strategy_name="s")
-        # both queued; active should be oldest
-        assert store.get_active_study(session_id).study_id == a.study_id
-        # complete first; second still queued → now active
-        store.update_execution_status(a.study_id, StudyStatus.COMPLETE)
+        # create_study supersedes old active studies for the same session
+        # so a is cancelled, b is the only active study
         assert store.get_active_study(session_id).study_id == b.study_id
+        assert store.get_study(a.study_id).execution_status == StudyStatus.CANCELLED
         store.update_execution_status(b.study_id, StudyStatus.CANCELLED)
         assert store.get_active_study(session_id) is None
 
@@ -161,10 +160,14 @@ class TestStudyStoreCRUD:
         assert len(store.list_studies(session_id="se2")) == 1
         assert len(store.list_studies()) == 2
 
-    def test_list_filters_status(self, make_study, store: StudyStore, session_id: str):
-        a = make_study()
+    def test_list_filters_status(self, store: StudyStore):
+        # Create studies in different sessions (supersede only affects same session)
+        a = store.create_study(session_id="s1", goal_id=None, objective="a",
+                               workspace_path="/w", strategy_name="s")
         store.update_execution_status(a.study_id, StudyStatus.RUNNING)
-        make_study()  # queued
+        b = store.create_study(session_id="s2", goal_id=None, objective="b",
+                               workspace_path="/w", strategy_name="s")
+        # b is queued (default)
         assert len(store.list_studies(status=StudyStatus.RUNNING)) == 1
         assert len(store.list_studies(status=StudyStatus.QUEUED)) == 1
         assert len(store.list_studies(status=StudyStatus.COMPLETE)) == 0
@@ -485,5 +488,6 @@ class TestStudyMonitoring:
         from strategy_research.core.study.models import (
             ACTIVE_EXECUTION_STATUSES, StudyStatus,
         )
-        assert StudyStatus.MONITORING in ACTIVE_EXECUTION_STATUSES
+        # MONITORING is intentionally excluded — it's a passive background check
+        assert StudyStatus.MONITORING not in ACTIVE_EXECUTION_STATUSES
         assert StudyStatus.NEEDS_REFRESH not in ACTIVE_EXECUTION_STATUSES

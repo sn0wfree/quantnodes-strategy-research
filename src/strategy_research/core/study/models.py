@@ -36,12 +36,13 @@ class StudyStatus(str, Enum):
 
 # Execution statuses that count as "active" — a session may have at
 # most one study in any of these states (the scheduler enforces this).
+# NOTE: MONITORING is intentionally excluded — it's a passive background
+# check that doesn't occupy the session's processing slot.
 ACTIVE_EXECUTION_STATUSES = frozenset(
     {
         StudyStatus.QUEUED,
         StudyStatus.RUNNING,
         StudyStatus.PAUSED,
-        StudyStatus.MONITORING,
     }
 )
 

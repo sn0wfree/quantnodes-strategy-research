@@ -27,6 +27,13 @@ from .store import StudyStore
 logger = logging.getLogger(__name__)
 
 
+def _dlog(module: str, msg: str, *args) -> None:
+    """Dual-output log: logger + stderr so both file and terminal see it."""
+    msg_fmt = msg % args if args else msg
+    logger.info("[STUDY:%s] %s", module, msg_fmt)
+    print(f"[STUDY:{module}] {msg_fmt}", flush=True)  # noqa: T201
+
+
 class StudyScheduler:
     """Per-session serial scheduler for study executors.
 
@@ -62,7 +69,8 @@ class StudyScheduler:
 
     async def submit(self, study: StudyRecord) -> None:
         """Enqueue a study for execution on its session."""
-
+        _dlog("sched", "submit study=%s session=%s status=%s",
+              study.study_id, study.session_id, study.execution_status.value)
         # Mark queued in store (defensive; create_study already sets it,
         # but if submit() is called on a recovered RUNNING study, we do
         # not downgrade it here — only fresh submits pass through).
@@ -173,6 +181,7 @@ class StudyScheduler:
     async def _session_loop(self, session_id: str) -> None:
         """Drain the session's study queue one at a time."""
         q = self._session_queues.get(session_id)
+        logger.info("study session_loop start session=%s", session_id)
         while not self._shutdown and q is not None:
             try:
                 study_id = await q.get()
@@ -180,15 +189,25 @@ class StudyScheduler:
                 break
             if study_id is None:
                 break
+            logger.info("study session_loop got study=%s", study_id)
             await self._run_one_study(study_id)
         # queue drained — drop it (next submit recreates)
         self._session_queues.pop(session_id, None)
+        logger.info("study session_loop exit session=%s", session_id)
 
     async def _run_one_study(self, study_id: str) -> None:
+        _dlog("sched", "_run_one_study start study=%s", study_id)
         study = self.store.get_study(study_id)
         if study is None:
+            _dlog("sched", "_run_one_study: study not found %s", study_id)
             return
         # Cooperative mutex with chat: if chat is mid-loop, wait for it.
+        if self.session_service is not None:
+            logger.info(
+                "study waiting-for-chat session=%s processing=%s",
+                study.session_id,
+                self.session_service.is_session_processing(study.session_id),
+            )
         while self.session_service is not None and \
                 self.session_service.is_session_processing(study.session_id):
             await asyncio.sleep(0.25)
@@ -206,6 +225,7 @@ class StudyScheduler:
             study, self.store, control=control, emitter=emitter,
         )
         self._active_executors[study_id] = executor
+        _dlog("sched", "marking RUNNING study=%s", study_id)
         self.store.update_execution_status(
             study_id, StudyStatus.RUNNING,
         )
@@ -215,8 +235,10 @@ class StudyScheduler:
 
         task = asyncio.create_task(executor.run())
         self._active_tasks[study_id] = task
+        _dlog("sched", "executor task created study=%s", study_id)
         try:
             await task
+            _dlog("sched", "executor task finished study=%s", study_id)
         except asyncio.CancelledError:
             control.cancelled = True
         finally:

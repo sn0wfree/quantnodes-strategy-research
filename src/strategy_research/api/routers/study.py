@@ -30,16 +30,22 @@ _scheduler_cache: dict[str, "StudyScheduler"] = {}
 
 
 def _get_study_scheduler():
-    """Return the process-wide StudyScheduler for the current DB.
+    """Return the process-wide StudyScheduler for the study/goal DB.
 
     Builds it bound to the cached SessionService so the chat/study mutex
     primitives cooperate. Idempotent per DB path.
+
+    IMPORTANT: the store must use the SAME database as every study
+    creation site (``StudyStore()`` — the default goals.db path).
+    Using ``_get_db_path()`` here (the session/EventStore DB) made the
+    scheduler read from a different SQLite file than the one where
+    ``/study start`` wrote the row — the consumer loop then saw no
+    study and silently exited.
     """
     from .chat import _get_session_service
-    from .web_session import _get_db_path
     from ...core.study import StudyScheduler, StudyStore
 
-    db_path = _get_db_path()
+    db_path = str(StudyStore().db_path)
     sched = _scheduler_cache.get(db_path)
     if sched is None:
         store = StudyStore(db_path=db_path)
@@ -103,6 +109,9 @@ async def study_start(req: StudyStartRequest):
 
     Returns ``{study_id, goal_id, status:"queued"}``.
     """
+    print(f"[STUDY:api] POST /study/start session={req.session_id} "
+          f"strategy={req.strategy_name} objective={req.objective[:40]}",
+          flush=True)
     # Workspace validation — fail fast on bad config before persistence.
     ws = Path(req.workspace_path)
     if not ws.exists():
@@ -206,6 +215,8 @@ async def study_status(
     study_id: Optional[str] = None,
 ):
     """Return the active study (or one by id) for a session + its goal snapshot."""
+    print(f"[STUDY:api] GET /study/status session={session_id} study_id={study_id}",
+          flush=True)
     from ...core.goal import GoalStore
     from ...core.study import StudyStore
     with StudyStore() as store:

@@ -444,10 +444,7 @@ class TestMonitoringLoop:
     def test_complete_then_monitor_transitions_status(
         self, store, goal_store, monkeypatch
     ):
-        """A study with monitor_interval should land in MONITORING."""
-        # First round satisfies targets → COMPLETE → monitoring
-        # starts. After one successful monitor check we set the
-        # control token to bail out of the loop.
+        """A study with monitor_interval should launch monitor background task."""
         control = ControlToken()
         def _round(self, r, prev, directives_text=None):
             return _make_round_result(
@@ -491,7 +488,15 @@ class TestMonitoringLoop:
         )
         ex = AutoresearchExecutor(study, store, goal_store=goal_store,
                                   control=control)
-        asyncio.run(ex.run())
+
+        async def _run_and_wait():
+            reason = await ex.run()
+            assert reason == ShutdownReason.MONITORING
+            # Wait for the background monitor task to complete
+            if ex._monitor_task is not None:
+                await ex._monitor_task
+
+        asyncio.run(_run_and_wait())
         assert checks["n"] >= 1
         got = store.get_study(study.study_id)
         # No drift detected → status remains MONITORING when cancelled.
@@ -541,7 +546,15 @@ class TestMonitoringLoop:
             monitor_interval_seconds=60,
         )
         ex = AutoresearchExecutor(study, store, goal_store=goal_store)
-        asyncio.run(ex.run())
+
+        async def _run_and_wait():
+            reason = await ex.run()
+            assert reason == ShutdownReason.MONITORING
+            # Wait for the background monitor task to complete
+            if ex._monitor_task is not None:
+                await ex._monitor_task
+
+        asyncio.run(_run_and_wait())
         got = store.get_study(study.study_id)
         assert got.execution_status == StudyStatus.NEEDS_REFRESH
         assert got.monitor_drift_count == 1

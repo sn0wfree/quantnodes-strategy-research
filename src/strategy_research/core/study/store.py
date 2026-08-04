@@ -32,6 +32,13 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _dlog(module: str, msg: str, *args) -> None:
+    """Dual-output log: logger + stderr so both file and terminal see it."""
+    msg_fmt = msg % args if args else msg
+    logger.info("[STUDY:%s] %s", module, msg_fmt)
+    print(f"[STUDY:{module}] {msg_fmt}", flush=True)  # noqa: T201
+
 # Reuse the goal ledger DB by default so studies live next to the goals
 # they are bound to; override via the same env var.
 _DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "goals.db"
@@ -235,11 +242,11 @@ class StudyStore:
             raise ValueError("workspace_path must not be empty")
         if not strategy_name.strip():
             raise ValueError("strategy_name must not be empty")
-        if executor_type not in ("autoresearch", "workflow"):
-            raise ValueError(
-                f"Unknown executor_type: {executor_type!r} "
-                "(expected 'autoresearch' or 'workflow')"
-            )
+        if executor_type not in ("autoresearch", "workflow", "manual"):
+                raise ValueError(
+                    f"Unknown executor_type: {executor_type!r} "
+                    f"(expected 'autoresearch', 'workflow', or 'manual')"
+                )
         for name, value in (
             ("cooldown_base", cooldown_base),
             ("cooldown_jitter", cooldown_jitter),
@@ -261,7 +268,19 @@ class StudyStore:
         now = _now_iso()
         targets_json = _json_dumps(metric_targets or [])
 
+        _dlog("store", "create_study id=%s session=%s goal=%s strategy=%s executor=%s",
+              study_id, session_id, goal_id, strategy_name, executor_type)
         with self._write_transaction():
+            # Cancel any existing active studies for this session so only
+            # one is "current" (mirrors GoalStore.replace_goal's supersede).
+            placeholders = ",".join("?" for _ in ACTIVE_EXECUTION_STATUSES)
+            active_vals = [s.value for s in ACTIVE_EXECUTION_STATUSES]
+            self._conn.execute(
+                f"UPDATE studies SET execution_status=?, completed_at=?, updated_at=? "
+                f"WHERE session_id=? AND execution_status IN ({placeholders})",
+                [StudyStatus.CANCELLED.value,
+                 now, now, session_id, *active_vals],
+            )
             self._conn.execute(
                 """
                 INSERT INTO studies (
@@ -325,6 +344,11 @@ class StudyStore:
         Sets ``completed_at`` for terminal statuses; returns the updated
         record (or ``None`` when the study no longer exists).
         """
+
+        _dlog("store", "update_status study=%s → %s error=%s metrics=%s",
+              study_id, status.value,
+              (last_error or "")[:60],
+              "present" if last_metrics else "None")
 
         now = _now_iso()
         terminals = {
@@ -409,7 +433,7 @@ class StudyStore:
         row = self._conn.execute(
             f"SELECT * FROM studies WHERE session_id = ? "
             f"AND execution_status IN ({placeholders}) "
-            f"ORDER BY created_at ASC LIMIT 1",
+            f"ORDER BY created_at DESC LIMIT 1",
             (session_id, *statuses),
         ).fetchone()
         return self._study_from_row(row) if row else None

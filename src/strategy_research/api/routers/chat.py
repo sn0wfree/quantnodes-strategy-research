@@ -592,16 +592,44 @@ def _dispatch_goal_command(
 
 
 def _goal_start(args: str, session_id: str, store: Any) -> str:
+    """Create a goal + study (manual executor_type, no auto-submit).
+
+    /goal start = /study start without automatic execution.
+    The study record is created for tracking but not submitted to the scheduler.
+    """
     from ...core.goal.context import default_goal_criteria
+    from ...core.study import StudyStore
+
     objective = args or "Research goal"
+
+    # Check for active study first
+    with StudyStore() as study_store:
+        active = study_store.get_active_study(session_id)
+        if active is not None:
+            return (
+                f"Session already has an active study: {active.study_id[:12]}...\n"
+                f"Status: {active.execution_status.value}\n"
+                f"Cancel it first with /study cancel or wait for it to complete."
+            )
+
     goal = store.replace_goal(
         session_id=session_id, objective=objective,
         criteria=default_goal_criteria(),
     )
+    # Create a study record (manual executor, not submitted to scheduler)
+    with StudyStore() as study_store:
+        study = study_store.create_study(
+            session_id=session_id, goal_id=goal.goal_id,
+            objective=objective, workspace_path=_default_workspace(),
+            strategy_name="manual", executor_type="manual",
+            metric_targets=[], max_rounds=0,
+        )
     return (
         f"Goal created: {goal.goal_id[:12]}...\n"
+        f"Study created: {study.study_id[:12]}...\n"
         f"Objective: {goal.objective}\n"
-        f"Status: {goal.status.value}"
+        f"Status: {goal.status.value} (manual mode, no auto-execution)\n"
+        f"Use /goal evidence <text> to add evidence manually."
     )
 
 
@@ -753,6 +781,7 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
     except Exception as exc:
         logger.exception("study command failed")
         response_text = f"Study command failed: {exc}"
+    print(f"[STUDY:chat] command response: {response_text[:100]}", flush=True)
 
     # Flush any pending scheduler submits (created by ``/study start``)
     # on this loop before the response round-trips to the user.
@@ -774,6 +803,8 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
 
 def _dispatch_study_command(content: str, session_id: str) -> str:
     """Parse and run a /study subcommand. ``content`` is the raw user text."""
+
+    import shlex
 
     # Strip leading "/study"
     body = content[len("/study"):].strip()
@@ -906,6 +937,16 @@ def _default_workspace() -> str:
 
 def _study_start_cmd(rest: list[str], session_id: str) -> str:
     from ...core.study import StudyStore, StudyStatus, default_metric_targets
+
+    # Check for active study first (one task per session)
+    with StudyStore() as _chk:
+        active = _chk.get_active_study(session_id)
+        if active is not None:
+            return (
+                f"Session already has an active study: {active.study_id[:12]}...\n"
+                f"Status: {active.execution_status.value}\n"
+                f"Cancel it first with /study cancel or wait for it to complete."
+            )
 
     flags = _parse_study_flags(rest)
     # Objective = remaining positional tail (everything not consumed by flags)

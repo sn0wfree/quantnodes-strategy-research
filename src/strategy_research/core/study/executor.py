@@ -32,6 +32,13 @@ from .store import StudyStore
 logger = logging.getLogger(__name__)
 
 
+def _dlog(module: str, msg: str, *args) -> None:
+    """Dual-output log: logger + stderr so both file and terminal see it."""
+    msg_fmt = msg % args if args else msg
+    logger.info("[STUDY:%s] %s", module, msg_fmt)
+    print(f"[STUDY:{module}] {msg_fmt}", flush=True)  # noqa: T201
+
+
 # ── shutdown reasons ────────────────────────────────────────────────
 
 
@@ -186,6 +193,8 @@ class AutoresearchExecutor:
         self._acceptance_config = acceptance_config_from_targets(
             study.metric_targets,
         )
+        # Background monitor task (if launched)
+        self._monitor_task: asyncio.Task | None = None
 
     # ── public entrypoint ───────────────────────────────────────────
 
@@ -198,20 +207,27 @@ class AutoresearchExecutor:
 
         sid = self.study.study_id
         session = self.study.session_id
+        _dlog("executor", "run() starting study=%s session=%s status=%s max_rounds=%s metric_targets=%s",
+              sid, session, self.study.execution_status.value,
+              self.study.max_rounds, self.study.metric_targets)
         self._emit(session, "study_started", {
             "study_id": sid, "round": self.study.current_round,
         })
         reason = ShutdownReason.ERROR
         try:
             reason = await self._run_loop()
+            _dlog("executor", "run_loop completed: study=%s reason=%s", sid, reason)
             # Phase 3: if monitoring is enabled + we exited cleanly,
-            # transition to MONITORING instead of staying COMPLETE.
+            # launch the monitor loop as a background task so it doesn't
+            # block the session's processing slot.
             if (reason == ShutdownReason.TARGETS_MET
                     and self.study.monitor_interval_seconds):
-                await self._monitor_loop()
-                reason = ShutdownReason.MONITORING if self.control.cancelled is False \
-                    else reason
+                _dlog("executor", "launching monitor background task: study=%s interval=%ss",
+                      sid, self.study.monitor_interval_seconds)
+                self._monitor_task = asyncio.create_task(self._monitor_background())
+                reason = ShutdownReason.MONITORING
         except Exception as exc:
+            _dlog("executor", "run() FAILED: study=%s error=%s", sid, exc)
             logger.exception("study %s failed: %s", sid, exc)
             self.study_store.update_execution_status(
                 sid, StudyStatus.ERROR, last_error=f"{exc}"[:500]
@@ -226,6 +242,7 @@ class AutoresearchExecutor:
                     self._goal_store.close()
                 except Exception:
                     pass
+            _dlog("executor", "run() EXIT study=%s reason=%s", sid, reason)
             self._emit(session, "study_executor_stopped", {
                 "study_id": sid, "reason": reason,
             })
@@ -235,6 +252,7 @@ class AutoresearchExecutor:
 
     async def _run_loop(self) -> str:
         sid = self.study.study_id
+        _dlog("loop", "entering _run_loop study=%s", sid)
         # Use a local round counter seeded from the persisted row so a
         # resumed study continues numbering.
         round_num = self.study.current_round
@@ -244,11 +262,13 @@ class AutoresearchExecutor:
 
         while True:
             if self.control.cancelled:
+                _dlog("loop", "cancelled before round study=%s", sid)
                 self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
                 self._emit(self.study.session_id, "study_cancelled", {"study_id": sid})
                 return ShutdownReason.CANCELLED
             # A pause suspends the executor until cleared.
             if self.control.paused:
+                _dlog("loop", "paused study=%s", sid)
                 self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
                 self._emit(self.study.session_id, "study_paused", {
                     "study_id": sid, "round": round_num,
@@ -256,6 +276,7 @@ class AutoresearchExecutor:
                 await self._wait_until_resumed()
                 # resumed → mark running again
                 self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+                _dlog("loop", "resumed study=%s", sid)
                 self._emit(self.study.session_id, "study_resumed", {
                     "study_id": sid, "round": round_num,
                 })
@@ -271,6 +292,8 @@ class AutoresearchExecutor:
                 self._format_directives(pending_directives)
                 if pending_directives else None
             )
+            _dlog("loop", "round %d start study=%s directives=%d",
+                  round_num, sid, len(pending_directives))
             result = await asyncio.to_thread(
                 self._run_one_round, round_num, previous_summary,
                 directive_text,
@@ -297,6 +320,8 @@ class AutoresearchExecutor:
             metrics = result.get("metrics", {}) or {}
             verdict = result.get("verdict", "discard")
             self.study_store.update_last_metrics(sid, metrics, verdict)
+            _dlog("loop", "round %d done: calmar=%s sharpe=%s verdict=%s",
+                  round_num, metrics.get("calmar"), metrics.get("sharpe"), verdict)
             self._emit(self.study.session_id, "study_round", {
                 "study_id": sid,
                 "round": round_num,
@@ -311,6 +336,7 @@ class AutoresearchExecutor:
             if self.study.metric_targets and meets_metric_targets(
                 metrics, self.study.metric_targets
             ):
+                _dlog("loop", "TARGETS MET study=%s calmar=%s", sid, metrics.get("calmar"))
                 self._complete_goal(result)
                 self._mark_terminal(
                     StudyStatus.COMPLETE,
@@ -326,6 +352,7 @@ class AutoresearchExecutor:
 
             # 2) budget exceeded
             if self._budget_exceeded():
+                _dlog("loop", "BUDGET EXCEEDED study=%s", sid)
                 self._mark_terminal(
                     StudyStatus.BUDGET_LIMITED,
                     last_metrics=metrics,
@@ -340,6 +367,7 @@ class AutoresearchExecutor:
             # 3) stagnation
             decision = result.get("decision") or {}
             if decision.get("stagnation_triggered"):
+                _dlog("loop", "STAGNATION study=%s", sid)
                 self._mark_terminal(
                     StudyStatus.ERROR,
                     last_metrics=metrics,
@@ -355,6 +383,7 @@ class AutoresearchExecutor:
 
             # 4) max_rounds
             if self.study.max_rounds is not None and round_num >= self.study.max_rounds:
+                _dlog("loop", "MAX_ROUNDS reached study=%s rounds=%d", sid, round_num)
                 self._mark_terminal(
                     StudyStatus.ERROR,
                     last_metrics=metrics,
@@ -368,9 +397,10 @@ class AutoresearchExecutor:
                 })
                 return ShutdownReason.MAX_ROUNDS
 
-            # ── inter-round cooldown (owned by executor since the CLI
-            # did too) ───────────────────────────────────────────
-            await asyncio.sleep(self._round_cooldown())
+            # ── inter-round cooldown ───────────────────────────
+            cooldown = self._round_cooldown()
+            _dlog("loop", "cooldown %.1fs before round %d", cooldown, round_num + 1)
+            await asyncio.sleep(cooldown)
 
     # ── Phase 3: post-completion monitoring ────────────────────────
 
@@ -445,6 +475,22 @@ class AutoresearchExecutor:
                 })
                 return
 
+    async def _monitor_background(self) -> None:
+        """Wrapper for _monitor_loop that runs as a background task.
+
+        Catches exceptions so the background task doesn't silently die.
+        The session processing slot has already been released by the
+        scheduler before this task is launched.
+        """
+        sid = self.study.study_id
+        try:
+            await self._monitor_loop()
+        except Exception as exc:
+            logger.warning("monitor background task %s failed: %s", sid, exc)
+            self._emit(self.study.session_id, "study_monitor_check_failed", {
+                "study_id": sid, "error": str(exc),
+            })
+
     def _run_monitor_check(self) -> dict:
         """Run a single monitor check: re-backtest the strategy, compare
         metrics to ``metric_targets``, return a dict.
@@ -494,10 +540,13 @@ class AutoresearchExecutor:
         directives_text: str | None = None,
     ) -> dict:
         """Blocking: invoke run_research_round. Runs via to_thread."""
+        _dlog("executor", "_run_one_round START round=%d study=%s directives=%s",
+              round_num, self.study.study_id,
+              "yes" if directives_text else "no")
 
         from strategy_research.core.autoresearch import run_research_round as _runner
 
-        return _runner(
+        result = _runner(
             Path(self.study.workspace_path),
             self.study.strategy_name,
             round_num,
@@ -510,6 +559,12 @@ class AutoresearchExecutor:
             previous_summary=previous_summary,
             directives=directives_text,
         )
+        _dlog("executor", "_run_one_round DONE round=%d calmar=%s sharpe=%s verdict=%s",
+              round_num,
+              result.get("metrics", {}).get("calmar"),
+              result.get("metrics", {}).get("sharpe"),
+              result.get("verdict"))
+        return result
 
     @staticmethod
     def _format_directives(directives) -> str:
