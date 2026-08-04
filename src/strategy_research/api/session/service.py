@@ -1297,11 +1297,10 @@ class SessionService:
             history_with_groups.append((entry, group_id))
             emitted_assistant_idxs.add(i)
 
-            # Immediately follow with all matching tool messages in
-            # their original (created_at) order. Tools may have been
-            # seen earlier in the iteration (chronologically before
-            # the assistant's final text) — that's fine, we pair them
-            # here using tc_to_tool_idx.
+            # Immediately follow with tool results for each tool_call.
+            # Two sources (in priority order):
+            #   1. Separate role="tool" messages (if they exist in DB)
+            #   2. Embedded result in assistant's _parts (projector pattern)
             if role == "assistant" and entry.get("tool_calls"):
                 seen_tc_ids: set[str] = set()
                 for tc in entry["tool_calls"]:
@@ -1309,21 +1308,43 @@ class SessionService:
                     if tc_id in seen_tc_ids:
                         continue
                     seen_tc_ids.add(tc_id)
+
+                    tool_content = ""
+                    source_found = False
+
+                    # Source 1: try separate tool message (legacy/compat)
                     tool_msg_idx = tc_to_tool_idx.get(tc_id)
-                    if tool_msg_idx is None or tool_msg_idx in emitted_tool_msg_idxs:
-                        continue
-                    tool_msg = messages[tool_msg_idx]
-                    tool_content = (
-                        tool_msg.content if hasattr(tool_msg, "content")
-                        else tool_msg.get("content", "")
-                    )
+                    if tool_msg_idx is not None and tool_msg_idx not in emitted_tool_msg_idxs:
+                        tool_msg = messages[tool_msg_idx]
+                        tool_content = (
+                            tool_msg.content if hasattr(tool_msg, "content")
+                            else tool_msg.get("content", "")
+                        )
+                        emitted_tool_msg_idxs.add(tool_msg_idx)
+                        source_found = True
+
+                    # Source 2: extract from assistant's _parts (projector pattern)
+                    if not source_found:
+                        for p in parts:
+                            if not isinstance(p, dict) or p.get("type") != "tool_call":
+                                continue
+                            p_id = p.get("id") or p.get("call_id")
+                            if p_id == tc_id:
+                                tool_content = p.get("result", "")
+                                if not tool_content and p.get("status") == "error":
+                                    error_msg = p.get("error", "tool execution failed")
+                                    tool_content = json.dumps(
+                                        {"status": "error", "error": error_msg},
+                                        ensure_ascii=False,
+                                    )
+                                break
+
                     tool_entry = {
                         "role": "tool",
                         "tool_call_id": tc_id,
                         "content": tool_content or "",
                     }
                     history_with_groups.append((tool_entry, group_id))
-                    emitted_tool_msg_idxs.add(tool_msg_idx)
 
         # ── Trim by character budget from newest → oldest, preserving
         #    assistant-tool group integrity. ──
