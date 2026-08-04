@@ -125,6 +125,23 @@ async def workflow_resume(goal_id: str):
     return {"status": "ok", "resumed": True}
 
 
+class WorkflowDirectiveRequest(BaseModel):
+    content: str
+
+
+@router.post("/directive")
+async def workflow_directive(goal_id: str, req: WorkflowDirectiveRequest):
+    """Add a user directive to a running workflow."""
+    _prune_runners()
+    entry = _active_runners.get(goal_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    runner = entry["runner"]
+    runner.add_directive(req.content)
+    return {"status": "ok", "directive_added": True}
+
+
 @router.get("/list")
 async def workflow_list():
     """List available workflow presets."""

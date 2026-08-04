@@ -105,6 +105,19 @@ class GoalWorkflowHook:
             runner_state.current_layer = layer_idx + 1
             for aid in agents:
                 runner_state.set_agent_status(aid, "running")
+
+        # Phase 1.4: consume and inject directives
+        if self._runner is not None:
+            consume_fn = getattr(self._runner, "consume_directives", None)
+            if consume_fn is not None:
+                directive_text = consume_fn()
+                if directive_text:
+                    context["user_directives"] = directive_text
+                    logger.info(
+                        "GoalWorkflowHook: injected directives into layer %d context",
+                        layer_idx,
+                    )
+
         if self._event_bus:
             self._event_bus.emit("layer_start", layer=layer_idx, agents=agents)
 

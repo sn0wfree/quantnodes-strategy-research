@@ -317,6 +317,8 @@ class GoalWorkflowRunner:
         self._agent_runner_type = agent_runner_type
         self._runner_kwargs = runner_kwargs or {}
         self._session_service = session_service
+        # Phase 1.4: directive store for mid-execution user commands
+        self._directives: list[dict] = []
 
         self._state = GoalWorkflowState()
         self._goal_id: str = ""
@@ -341,6 +343,29 @@ class GoalWorkflowRunner:
 
     def unsubscribe(self, observer: Any) -> None:
         self._event_bus.unsubscribe(observer)
+
+    # ── Directive API (Phase 1.4) ──────────────────────────────
+
+    def add_directive(self, content: str) -> None:
+        """Add a user directive to be injected into the next layer's agents."""
+        from datetime import datetime, timezone
+        self._directives.append({
+            "content": content,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info("Directive added to workflow %s: %s", self._goal_id, content[:50])
+
+    def consume_directives(self) -> str | None:
+        """Consume all pending directives and return them as a single string.
+
+        Returns None if no directives are pending.
+        """
+        if not self._directives:
+            return None
+        text = "\n".join(d["content"] for d in self._directives)
+        self._directives.clear()
+        logger.info("Directives consumed for workflow %s", self._goal_id)
+        return text
 
     def get_progress(self) -> dict[str, Any]:
         """Return current workflow progress for UI display."""
