@@ -932,11 +932,12 @@ class SessionService:
     def _extract_summary(messages: list[dict[str, Any]]) -> str:
         """Extract summary content from compressed messages.
 
-        Supports two storage formats:
+        Supports three storage formats:
         1. New: message_type='compaction' with parts_json containing summary
         2. Legacy: content field starts with [context summary] prefix
+        3. Legacy: content starts with ## Anchored Summary or ## Objective
 
-        The legacy format check is for backward compatibility with old data.
+        The legacy format checks are for backward compatibility with old data.
         """
         parts = []
         for m in messages:
@@ -963,6 +964,9 @@ class SessionService:
             # Legacy format: content starts with [context summary]
             elif content.startswith("[context summary]"):
                 parts.append(content[len("[context summary]"):].strip())
+            # Legacy format: content starts with ## Anchored Summary or ## Objective
+            elif content.startswith("## Anchored Summary") or content.startswith("## Objective"):
+                parts.append(content)
         return "\n\n".join(parts)
 
     @staticmethod

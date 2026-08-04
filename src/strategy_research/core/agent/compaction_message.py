@@ -117,6 +117,8 @@ class CompactionMessage:
                 summary = content[len("[context summary]"):].strip()
             elif content.startswith("## Anchored Summary"):
                 summary = content  # Anchored format keeps everything
+            elif content.startswith("## Objective") or "## Important Details" in content:
+                summary = content  # Current LLM output format
 
         # Metadata
         meta: dict = {}
