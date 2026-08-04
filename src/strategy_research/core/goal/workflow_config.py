@@ -76,6 +76,8 @@ def load_goal_workflow(
             timeout=agent_data.get("timeout", 120),
             max_retries=agent_data.get("max_retries", 3),
             condition=agent_data.get("condition"),
+            executor_type=agent_data.get("executor_type", "llm"),
+            python_function=agent_data.get("python_function"),
         )
         agents.append(agent)
 

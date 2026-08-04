@@ -297,6 +297,14 @@ class SwarmRuntime:
 
     # ── Agent execution ────────────────────────────────────────
 
+    # Registry for python_executor functions: agent_name → callable
+    _python_executors: dict[str, callable] = {}
+
+    @classmethod
+    def register_python_executor(cls, name: str, fn: callable) -> None:
+        """Register a Python function to be called for python_executor agents."""
+        cls._python_executors[name] = fn
+
     def _execute_agent(
         self,
         agent_call: AgentCall,
@@ -304,17 +312,38 @@ class SwarmRuntime:
         task: str,
         upstream: dict[str, str],
     ) -> AgentResult:
-        """Execute a single agent."""
+        """Execute a single agent.
+
+        Supports three executor types:
+        - "llm" (default): calls LLM via WorkflowController
+        - "python_executor": calls a registered Python function
+        - "evaluator": calls the decide() function for keep/discard
+        """
         t0 = time.perf_counter()
+        ctx = agent_call.context if hasattr(agent_call, "context") else {}
+        executor_type = ctx.get("executor_type", "llm")
 
         try:
+            # ── python_executor: run a registered Python function ──
+            if executor_type == "python_executor":
+                return self._execute_python_executor(
+                    agent_call, workspace, upstream, ctx, t0,
+                )
+
+            # ── evaluator: run decide() function ──
+            if executor_type == "evaluator":
+                return self._execute_evaluator(
+                    agent_call, workspace, upstream, ctx, t0,
+                )
+
+            # ── LLM agent (default) ──
             # P1.5: Use PromptBuilder for structured prompt construction
             from ..workflow.prompt import PromptBuilder
             builder = PromptBuilder()
             full_task = builder.build_prompt(
                 agent_name=agent_call.agent_name,
                 base_prompt=task,
-                context=agent_call.context if hasattr(agent_call, "context") else None,
+                context=ctx,
                 upstream_outputs=upstream if upstream else None,
             )
 
@@ -349,6 +378,103 @@ class SwarmRuntime:
             )
 
         except Exception as exc:  # noqa: BLE001
+            return AgentResult(
+                agent_id=agent_call.agent_name,
+                status=AgentStatus.ERROR,
+                error=str(exc),
+                elapsed_s=round(time.perf_counter() - t0, 2),
+            )
+
+    def _execute_python_executor(
+        self,
+        agent_call: AgentCall,
+        workspace: Path,
+        upstream: dict[str, str],
+        ctx: dict,
+        t0: float,
+    ) -> AgentResult:
+        """Execute a python_executor agent by calling a registered function."""
+        import json
+
+        fn_name = ctx.get("python_function", agent_call.agent_name)
+        fn = self._python_executors.get(fn_name)
+        if fn is None:
+            return AgentResult(
+                agent_id=agent_call.agent_name,
+                status=AgentStatus.ERROR,
+                error=f"No python_executor registered for '{fn_name}'",
+                elapsed_s=round(time.perf_counter() - t0, 2),
+            )
+
+        # Build kwargs from context and upstream
+        kwargs = {
+            "workspace_path": workspace,
+            "upstream": upstream,
+        }
+        # Pass extra kwargs from context
+        for key in ("strategy_name", "action", "description", "run_dir", "timeout"):
+            if key in ctx:
+                kwargs[key] = ctx[key]
+
+        try:
+            result = fn(**kwargs)
+            output = json.dumps(result, ensure_ascii=False, default=str) if isinstance(result, dict) else str(result)
+            return AgentResult(
+                agent_id=agent_call.agent_name,
+                status=AgentStatus.SUCCESS,
+                output=output,
+                elapsed_s=round(time.perf_counter() - t0, 2),
+            )
+        except Exception as exc:
+            return AgentResult(
+                agent_id=agent_call.agent_name,
+                status=AgentStatus.ERROR,
+                error=str(exc),
+                elapsed_s=round(time.perf_counter() - t0, 2),
+            )
+
+    def _execute_evaluator(
+        self,
+        agent_call: AgentCall,
+        workspace: Path,
+        upstream: dict[str, str],
+        ctx: dict,
+        t0: float,
+    ) -> AgentResult:
+        """Execute an evaluator agent (e.g. decide() for keep/discard)."""
+        import json
+
+        fn_name = ctx.get("python_function", "decide")
+        fn = self._python_executors.get(fn_name)
+        if fn is None:
+            return AgentResult(
+                agent_id=agent_call.agent_name,
+                status=AgentStatus.ERROR,
+                error=f"No evaluator registered for '{fn_name}'",
+                elapsed_s=round(time.perf_counter() - t0, 2),
+            )
+
+        # Extract metrics from upstream results
+        metrics = {}
+        for aid, result_str in upstream.items():
+            if isinstance(result_str, str):
+                try:
+                    parsed = json.loads(result_str)
+                    if isinstance(parsed, dict) and "metrics" in parsed:
+                        metrics = parsed["metrics"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        try:
+            result = fn(metrics=metrics, **{k: v for k, v in ctx.items() if k not in ("executor_type", "python_function")})
+            output = json.dumps(result, ensure_ascii=False, default=str) if isinstance(result, dict) else str(result)
+            return AgentResult(
+                agent_id=agent_call.agent_name,
+                status=AgentStatus.SUCCESS,
+                output=output,
+                elapsed_s=round(time.perf_counter() - t0, 2),
+            )
+        except Exception as exc:
             return AgentResult(
                 agent_id=agent_call.agent_name,
                 status=AgentStatus.ERROR,
@@ -564,4 +690,51 @@ class SwarmRuntime:
             )
 
 
+# ── Register built-in python executors ────────────────────────────
+
+
+def _register_builtin_executors() -> None:
+    """Register built-in python_executor functions for backtest and decide."""
+    try:
+        from ..backtest import run_backtest_script
+
+        def _backtest_executor(workspace_path, upstream=None, **kwargs):
+            """Run backtest script and return metrics."""
+            strategy_name = kwargs.get("strategy_name", "default")
+            action = kwargs.get("action", "unknown")
+            description = kwargs.get("description", "")
+            result = run_backtest_script(
+                workspace_path=workspace_path,
+                strategy_name=strategy_name,
+                action=action,
+                description=description,
+            )
+            return result
+
+        SwarmRuntime.register_python_executor("run_backtest_script", _backtest_executor)
+    except ImportError:
+        logger.debug("backtest module not available, python_executor not registered")
+
+    try:
+        from ..strategy_acceptance import decide as _decide_fn
+
+        def _decide_executor(metrics=None, **kwargs):
+            """Run decide() for keep/discard decision."""
+            llm_verdict = kwargs.get("llm_verdict")
+            cfg = kwargs.get("cfg")
+            stagnation_count = kwargs.get("stagnation_count", 0)
+            return _decide_fn(
+                metrics=metrics or {},
+                llm_verdict=llm_verdict,
+                cfg=cfg,
+                stagnation_count=stagnation_count,
+            )
+
+        SwarmRuntime.register_python_executor("decide", _decide_executor)
+    except ImportError:
+        logger.debug("strategy_acceptance module not available, evaluator not registered")
+
+
+# Auto-register on module import
+_register_builtin_executors()
 

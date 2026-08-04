@@ -46,6 +46,9 @@ class GoalAgentConfig:
     timeout: int = 120
     max_retries: int = 3
     condition: str | None = None
+    # Phase: support python_executor and evaluator types
+    executor_type: str = "llm"  # llm | python_executor | evaluator
+    python_function: str | None = None
 
 
 @dataclass
@@ -104,6 +107,8 @@ class GoalWorkflowConfig:
                     "evidence_criterion": agent.evidence_criterion,
                     "timeout": agent.timeout,
                     "max_retries": agent.max_retries,
+                    "executor_type": agent.executor_type,
+                    "python_function": agent.python_function,
                 },
             ))
 

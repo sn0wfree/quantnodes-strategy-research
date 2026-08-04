@@ -190,9 +190,9 @@ async def study_start(req: StudyStartRequest):
                            tools=["read_file", "get_market_data"],
                            input_from=["strategist"], evidence_criterion=2, timeout=120, max_retries=2),
             GoalAgentConfig(id="backtest", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=["read_file", "run_backtest", "git_diff"],
-                           input_from=["portfolio_construction"], evidence_criterion=2,
-                           timeout=300, max_retries=1),
+                           tools=[], input_from=["portfolio_construction"], evidence_criterion=2,
+                           timeout=300, max_retries=1, executor_type="python_executor",
+                           python_function="run_backtest_script"),
             GoalAgentConfig(id="risk_controller", prompt_file=".prompts/risk_controller.md",
                            tools=["read_file", "factor_analysis", "get_market_data"],
                            input_from=["backtest"], evidence_criterion=3, timeout=180, max_retries=2),
@@ -208,6 +208,10 @@ async def study_start(req: StudyStartRequest):
                            tools=["read_file", "run_backtest", "git_diff"],
                            input_from=["anti_overfit_analyst"], evidence_criterion=4,
                            timeout=120, max_retries=2),
+            GoalAgentConfig(id="decide", prompt_file=".prompts/backtest_diagnostics.md",
+                           tools=[], input_from=["backtest", "anti_overfit_analyst", "backtest_diagnostics"],
+                           evidence_criterion=4, timeout=60, max_retries=1,
+                           executor_type="evaluator", python_function="decide"),
         ]
 
         config = GoalWorkflowConfig(
@@ -229,6 +233,7 @@ async def study_start(req: StudyStartRequest):
                 "attribution_analyst": ["backtest", "risk_controller"],
                 "anti_overfit_analyst": ["backtest", "risk_controller", "attribution_analyst"],
                 "backtest_diagnostics": ["anti_overfit_analyst"],
+                "decide": ["backtest", "anti_overfit_analyst", "backtest_diagnostics"],
             },
             completion=CompletionConfig(
                 mode="auto",
