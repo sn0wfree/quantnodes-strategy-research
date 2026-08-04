@@ -319,6 +319,8 @@ class GoalWorkflowRunner:
         self._session_service = session_service
         # Phase 1.4: directive store for mid-execution user commands
         self._directives: list[dict] = []
+        # Phase 1.5: background monitor task
+        self._monitor_task: asyncio.Task | None = None
 
         self._state = GoalWorkflowState()
         self._goal_id: str = ""
@@ -366,6 +368,67 @@ class GoalWorkflowRunner:
         self._directives.clear()
         logger.info("Directives consumed for workflow %s", self._goal_id)
         return text
+
+    # ── Monitor mode (Phase 1.5) ──────────────────────────────
+
+    def launch_monitor(self) -> None:
+        """Launch background monitor task if monitor_interval is configured."""
+        interval = self._config.completion.monitor_interval_seconds
+        if interval and interval > 0:
+            self._monitor_task = asyncio.create_task(self._monitor_background())
+            logger.info("Monitor launched for workflow %s (interval=%ds)",
+                        self._goal_id, interval)
+
+    async def _monitor_background(self) -> None:
+        """Periodic re-backtest after goal completion to detect drift."""
+        interval = self._config.completion.monitor_interval_seconds or 60
+        metric_targets = self._config.completion.metric_targets
+        if not metric_targets:
+            return
+
+        strategy_name = None
+        for agent in self._config.agents:
+            if "backtest" in agent.id.lower():
+                strategy_name = agent.id
+                break
+
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                from ...core.study.executor import meets_metric_targets
+                metrics = await asyncio.to_thread(
+                    self._run_monitor_check, strategy_name,
+                )
+                if metrics and not meets_metric_targets(metrics, metric_targets):
+                    logger.info("Monitor drift detected for workflow %s", self._goal_id)
+                    self._state.status = "needs_refresh"
+                    self._event_bus.emit("workflow_drift_detected", {
+                        "goal_id": self._goal_id,
+                        "metrics": metrics,
+                    })
+                    return
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.warning("Monitor check failed for %s: %s", self._goal_id, exc)
+
+    def _run_monitor_check(self, strategy_name: str | None = None) -> dict[str, float] | None:
+        """Run a single monitor check: re-backtest and return metrics."""
+        # Simplified: try to import and run backtest if available
+        try:
+            from ...core.backtest import run_backtest_script
+            from pathlib import Path
+            result = run_backtest_script(
+                workspace_path=self._workspace,
+                strategy_name=strategy_name or "default",
+                action="monitor",
+                description="workflow monitor check",
+            )
+            if result.get("success"):
+                return result.get("metrics", {})
+        except Exception as exc:
+            logger.debug("Monitor backtest failed: %s", exc)
+        return None
 
     def get_progress(self) -> dict[str, Any]:
         """Return current workflow progress for UI display."""
@@ -507,6 +570,10 @@ class GoalWorkflowRunner:
             else:
                 self._state.status = "error"
                 self._state.error_message = "One or more agents failed"
+
+            # Phase 1.5: Launch monitor if configured
+            if self._state.status == "completed":
+                self.launch_monitor()
 
             logger.info(
                 "Goal workflow finished: goal_id=%s status=%s evidence=%d",
