@@ -127,7 +127,12 @@ function useRenderedParts(
         continue
       }
       // Inline-thinking provider: split on every render.
-      const text = readPartText(part.id, part.text)
+      // When not streaming, read raw text without smoothBuffer to
+      // avoid truncating non-Latin text (e.g. Chinese) that doesn't
+      // end on a word boundary.
+      const text = isStreaming
+        ? readPartText(part.id, part.text)
+        : (part.text ?? '')
       const split = splitTextIncremental(text)
       const thinkingText = split.thinkingBefore + (split.thinkingOpen ?? '')
       if (thinkingText) {
