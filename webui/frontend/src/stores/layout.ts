@@ -5,14 +5,21 @@ export type WorkMode = 'chat' | 'monitor' | 'focus'
 export type ChatLayout = 'bubble' | 'flat'
 
 const CHAT_LAYOUT_KEY = 'sr-chat-layout'
+const SIDEBAR_KEY = 'sr-sidebar-open'
 
 function loadInitialLayout(): ChatLayout {
   if (typeof window === 'undefined') return 'bubble'
   return localStorage.getItem(CHAT_LAYOUT_KEY) === 'flat' ? 'flat' : 'bubble'
 }
 
+function loadInitialSidebar(): boolean {
+  if (typeof window === 'undefined') return true
+  return localStorage.getItem(SIDEBAR_KEY) !== 'false'
+}
+
 interface LayoutState {
   navWidth: number
+  sidebarOpen: boolean
   rightPanelVisible: boolean
   rightPanelTab: RightPanelTab
   workMode: WorkMode
@@ -20,6 +27,8 @@ interface LayoutState {
   settingsOpen: boolean
   chatLayout: ChatLayout
   setNavWidth: (w: number) => void
+  toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
   toggleRightPanel: () => void
   setRightPanelTab: (tab: RightPanelTab) => void
   setWorkMode: (mode: WorkMode) => void
@@ -30,6 +39,7 @@ interface LayoutState {
 
 export const useLayoutStore = create<LayoutState>()((set) => ({
   navWidth: 64,
+  sidebarOpen: loadInitialSidebar(),
   rightPanelVisible: true,
   rightPanelTab: 'dag',
   workMode: 'monitor',
@@ -37,6 +47,20 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   settingsOpen: false,
   chatLayout: loadInitialLayout(),
   setNavWidth: (w) => set({ navWidth: w }),
+  toggleSidebar: () =>
+    set((s) => {
+      const next = !s.sidebarOpen
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(SIDEBAR_KEY, String(next))
+      }
+      return { sidebarOpen: next }
+    }),
+  setSidebarOpen: (open) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(SIDEBAR_KEY, String(open))
+    }
+    set({ sidebarOpen: open })
+  },
   toggleRightPanel: () => set((s) => ({ rightPanelVisible: !s.rightPanelVisible })),
   setRightPanelTab: (tab) => set({ rightPanelTab: tab, rightPanelVisible: true }),
   setWorkMode: (mode) =>

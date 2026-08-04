@@ -14,6 +14,8 @@ const NAV_ITEMS: {
 
 export function IconNav() {
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
+  const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
 
@@ -27,10 +29,8 @@ export function IconNav() {
       setSettingsOpen(true)
       return
     }
-    // 'chat' — focus composer & scroll to bottom
-    const textarea = document.querySelector<HTMLTextAreaElement>('textarea')
-    textarea?.focus()
-    window.dispatchEvent(new CustomEvent('sr:focus-chat'))
+    // 'chat' — toggle sidebar
+    toggleSidebar()
   }
 
   return (
@@ -44,11 +44,13 @@ export function IconNav() {
             onClick={() => handleClick(item.action)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors
               ${isChat
-                ? 'bg-primary-600/20 text-primary-400'
+                ? sidebarOpen
+                  ? 'bg-primary-600/30 text-primary-300'
+                  : 'bg-primary-600/20 text-primary-400'
                 : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
               }
             `}
-            title={item.action === 'chat' ? '聊天' : item.action === 'settings' ? '设置' : '登出'}
+            title={item.action === 'chat' ? (sidebarOpen ? '收起侧边栏' : '展开侧边栏') : item.action === 'settings' ? '设置' : '登出'}
           >
             <Icon className="h-5 w-5" />
           </button>
