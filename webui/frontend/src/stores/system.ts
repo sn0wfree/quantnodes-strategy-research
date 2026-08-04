@@ -30,6 +30,7 @@ export interface ModelInfo {
 }
 
 interface SystemState {
+  workspacePath: string
   llm: LLMInfo
   modelInfo: ModelInfo | null
   fetchSystemInfo: () => Promise<void>
@@ -43,13 +44,17 @@ const initialLLM: LLMInfo = {
 }
 
 export const useSystemStore = create<SystemState>((set) => ({
+  workspacePath: '',
   llm: initialLLM,
   modelInfo: null,
   fetchSystemInfo: async () => {
     try {
-      const data = await api.get<{ llm: LLMInfo; model_info: ModelInfo | null }>(
+      const data = await api.get<{ workspace_path?: string; llm: LLMInfo; model_info: ModelInfo | null }>(
         '/system/info'
       )
+      if (data?.workspace_path) {
+        set({ workspacePath: data.workspace_path })
+      }
       const llm = data?.llm
       if (llm) {
         set({

@@ -4,6 +4,7 @@ import { useWorkflowStore } from '../../stores/workflow'
 import { useGoalStore } from '../../stores/goal'
 import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { useSessionStore } from '../../stores/session'
+import { useSystemStore } from '../../stores/system'
 import { Workflow, Target, Bot, BookOpen } from 'lucide-react'
 import { AgentList } from '../agent/AgentList'
 import { GoalTab } from '../goal/GoalTab'
@@ -40,11 +41,12 @@ export function RightPanel() {
   useGoalPolling(tab === 'goal')
 
   // Resolve workspace + strategy for Study creation form. Default to the
-  // currently active preset's workspace_path / name when available so the
-  // form is functional out-of-the-box.
+  // system workspace path, falling back to the current preset's workspace_path.
+  const systemWorkspacePath = useSystemStore((s) => s.workspacePath)
   const workspacePath =
-    (currentPreset as unknown as { workspace_path?: string })?.workspace_path
-    ?? ''
+    systemWorkspacePath
+    || (currentPreset as unknown as { workspace_path?: string })?.workspace_path
+    || ''
   const strategyName = currentPreset?.name ?? ''
 
   if (!visible) return null
