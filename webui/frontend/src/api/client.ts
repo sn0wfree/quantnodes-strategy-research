@@ -172,6 +172,140 @@ class APIClient {
         summary: recap,
       }),
   }
+
+  // ── Study API (Phase 5) ──────────────────────────────────────────────
+
+  study = {
+    start: (body: StudyStartRequest) =>
+      this.post<StudyStartResponse>('/study/start', body),
+
+    status: (sessionId: string, studyId?: string) =>
+      this.get<StudyStatusResponse>(
+        `/study/status?session_id=${sessionId}` +
+          (studyId ? `&study_id=${studyId}` : '')
+      ),
+
+    list: (params: { session_id?: string; status?: string; limit?: number } = {}) =>
+      this.get<StudyListResponse>('/study/list' + qs(params)),
+
+    pause: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/pause`),
+    resume: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume`),
+    cancel: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/cancel`),
+
+    directive: (studyId: string, content: string, issuedBy?: string) =>
+      this.post<StudyDirectiveResponse>(`/study/${studyId}/directive`, {
+        content,
+        issued_by: issuedBy,
+      }),
+  }
+}
+
+// ── Study API types ──────────────────────────────────────────────────
+
+export interface MetricTarget {
+  name: string
+  op: '>=' | '<=' | '>' | '<' | '=='
+  value: number
+}
+
+export interface StudyStartRequest {
+  session_id: string
+  objective: string
+  workspace_path: string
+  strategy_name: string
+  metric_targets?: MetricTarget[]
+  budget_token?: number
+  budget_turn?: number
+  budget_time_seconds?: number
+  cooldown_base?: number
+  cooldown_jitter?: number
+  min_cooldown?: number
+  max_rounds?: number
+  behavior?: string
+  monitor_interval_seconds?: number
+}
+
+export interface StudyStartResponse {
+  status: string
+  study_id: string
+  goal_id?: string
+  execution_status: string
+}
+
+export interface StudyStatusResponse {
+  status: string
+  study_id?: string
+  goal_id?: string
+  execution_status?: string
+  current_round?: number
+  objective?: string
+  workspace_path?: string
+  strategy_name?: string
+  metric_targets?: MetricTarget[]
+  last_metrics?: Record<string, number> | null
+  last_verdict?: string | null
+  last_error?: string | null
+  heartbeat?: string
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
+  goal_snapshot?: {
+    goal_id?: string
+    goal_status?: string
+    objective?: string
+    progress_percent?: number
+    evidence_count?: number
+    criteria?: Array<{
+      criterion_id: string
+      text: string
+      status: string
+      required: boolean
+    }>
+  } | null
+}
+
+export interface StudyListResponse {
+  status: string
+  studies: StudySummary[]
+}
+
+export interface StudySummary {
+  study_id: string
+  session_id: string
+  goal_id?: string
+  objective: string
+  strategy_name: string
+  workspace_path: string
+  execution_status: string
+  current_round: number
+  last_verdict?: string | null
+  last_metrics?: Record<string, number> | null
+  last_error?: string | null
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
+}
+
+export interface StudyControlResponse {
+  status: string
+  study_id: string
+  action: string
+}
+
+export interface StudyDirectiveResponse {
+  status: string
+  study_id: string
+  directive_id: string
+  created_at: string
+}
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const entries: string[] = []
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue
+    entries.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+  }
+  return entries.length ? `?${entries.join('&')}` : ''
 }
 
 export const api = new APIClient()

@@ -4,6 +4,7 @@ import { useCommandPaletteStore } from '../../stores/commandPalette'
 import {
   Search, MessageSquare, Target, Workflow, Bot, Plus,
   Settings, Eye, EyeOff, RefreshCw, ArrowRight, Layers,
+  BookOpen,
 } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useSessionStore } from '../../stores/session'
@@ -74,6 +75,16 @@ export function CommandPalette() {
       shortcut: '⌘B',
       action: () => { setRightPanelTab('agent'); setOpen(false) },
       keywords: ['agent', '智能体'],
+    },
+    {
+      id: 'view-study',
+      label: '显示 Study 面板',
+      description: '切换右主区到 Study（goal + autoresearch 任务系统）',
+      category: 'view',
+      icon: BookOpen,
+      shortcut: '⌘Y',
+      action: () => { setRightPanelTab('study'); setOpen(false) },
+      keywords: ['study', '研究', 'autoresearch'],
     },
     {
       id: 'view-toggle',

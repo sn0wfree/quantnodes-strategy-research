@@ -3,14 +3,17 @@ import { useLayoutStore } from '../../stores/layout'
 import { useWorkflowStore } from '../../stores/workflow'
 import { useGoalStore } from '../../stores/goal'
 import { useGoalPolling } from '../../hooks/useGoalPolling'
-import { Workflow, Target, Bot } from 'lucide-react'
+import { useSessionStore } from '../../stores/session'
+import { Workflow, Target, Bot, BookOpen } from 'lucide-react'
 import { AgentList } from '../agent/AgentList'
 import { GoalTab } from '../goal/GoalTab'
 import { WorkflowDAG } from '../workflow/WorkflowDAG'
+import { StudyTab } from '../study/StudyTab'
 
 const TABS = [
   { value: 'dag', label: 'DAG', icon: Workflow },
   { value: 'goal', label: 'Goal', icon: Target },
+  { value: 'study', label: 'Study', icon: BookOpen },
   { value: 'agent', label: 'Agent', icon: Bot },
 ] as const
 
@@ -30,8 +33,19 @@ export function RightPanel() {
   // Goal state
   const currentGoal = useGoalStore((s) => s.currentGoal)
 
+  // Study / Session
+  const sessionId = useSessionStore((s) => s.currentSessionId ?? undefined)
+
   // Poll goal status while the Goal tab is open (no backend goal_* SSE)
   useGoalPolling(tab === 'goal')
+
+  // Resolve workspace + strategy for Study creation form. Default to the
+  // currently active preset's workspace_path / name when available so the
+  // form is functional out-of-the-box.
+  const workspacePath =
+    (currentPreset as unknown as { workspace_path?: string })?.workspace_path
+    ?? ''
+  const strategyName = currentPreset?.name ?? ''
 
   if (!visible) return null
 
@@ -90,6 +104,13 @@ export function RightPanel() {
         </Tabs.Content>
         <Tabs.Content value="goal" className="flex-1 overflow-y-auto p-4">
           <GoalTab goal={goalTabGoal} />
+        </Tabs.Content>
+        <Tabs.Content value="study" className="flex-1 overflow-y-auto p-4">
+          <StudyTab
+            sessionId={sessionId}
+            workspacePath={workspacePath}
+            strategyName={strategyName}
+          />
         </Tabs.Content>
         <Tabs.Content value="agent" className="flex-1 overflow-y-auto p-4">
           <AgentList />
