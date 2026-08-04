@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 
 from .base import validate_date_range
+from .file_cache import file_cache
 from .registry import register
 from .utils import get_token, load_tokens
 
@@ -113,6 +114,7 @@ class IFindLoader:
         resp.raise_for_status()
         return {"ok": True, "data": data}
 
+    @file_cache(enable_cache=True, granularity='d')
     def fetch(
         self,
         codes: list[str],

@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from .base import validate_date_range
+from .file_cache import file_cache
 from .registry import register
 from .utils import is_a_share, is_crypto, is_etf, is_forex, is_hk, is_index, is_us
 
@@ -32,6 +33,7 @@ class AKShareLoader:
         except ImportError:
             return False
 
+    @file_cache(enable_cache=True, granularity='d')
     def fetch(
         self,
         codes: list[str],

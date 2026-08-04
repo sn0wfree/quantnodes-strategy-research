@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 
 from .base import validate_date_range
+from .file_cache import file_cache
 from .registry import register
 from .utils import get_token, load_tokens
 
@@ -118,6 +119,7 @@ class FredLoader:
         except Exception:
             return False
 
+    @file_cache(enable_cache=True, granularity='d')
     def fetch(
         self,
         codes: list[str],

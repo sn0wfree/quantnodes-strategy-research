@@ -13,6 +13,7 @@ from typing import Optional
 import pandas as pd
 
 from .base import validate_date_range
+from .file_cache import file_cache
 from .registry import register
 from .utils import is_a_share
 
@@ -30,6 +31,7 @@ class TencentLoader:
     def is_available(self) -> bool:
         return True
 
+    @file_cache(enable_cache=True, granularity='d')
     def fetch(
         self,
         codes: list[str],

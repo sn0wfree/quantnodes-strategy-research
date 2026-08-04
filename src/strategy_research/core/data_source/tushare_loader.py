@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from .base import validate_date_range
+from .file_cache import file_cache
 from .registry import register
 from .utils import get_token, is_etf, is_hk, is_index, load_tokens
 
@@ -48,6 +49,7 @@ class TushareLoader:
             self._api = ts.pro_api(self.token)
         return self._api
 
+    @file_cache(enable_cache=True, granularity='d')
     def fetch(
         self,
         codes: list[str],

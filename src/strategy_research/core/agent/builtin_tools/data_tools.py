@@ -70,6 +70,11 @@ class GetMarketDataTool(BaseTool):
                 "description": "Strategy name for data partitioning (default 'default').",
                 "default": "default",
             },
+            "force_refresh": {
+                "type": "boolean",
+                "description": "Skip cache, always fetch fresh data from network (default False).",
+                "default": False,
+            },
         },
         "required": ["codes", "start_date", "end_date"],
     }
@@ -119,6 +124,13 @@ class GetMarketDataTool(BaseTool):
                 persist = True
         workspace = kwargs.get("workspace")
 
+        # Cache control: force_refresh bypasses file cache
+        force_refresh_raw = kwargs.get("force_refresh", False)
+        if isinstance(force_refresh_raw, str):
+            force_refresh = force_refresh_raw.strip().lower() in ("1", "true", "yes", "y")
+        else:
+            force_refresh = bool(force_refresh_raw)
+
         if not codes:
             return err_actionable(
                 "codes is required and must be non-empty",
@@ -162,7 +174,8 @@ class GetMarketDataTool(BaseTool):
                 loader = resolve_loader(market)
                 effective_source = loader.name
 
-            data = loader.fetch(codes, start_date, end_date, interval=interval)
+            data = loader.fetch(codes, start_date, end_date, interval=interval,
+                               force_refresh=force_refresh)
 
             # Build compact summary + small preview. The full rows must NOT
             # enter the LLM prompt (context-overflow root cause; see

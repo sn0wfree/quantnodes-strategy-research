@@ -635,6 +635,7 @@ class MCPServer:
             interval: str = "1D",
             source: str | None = None,
             max_rows: int = 500,
+            force_refresh: bool = False,
             **kwargs: Any,
         ) -> str:
             from ..data_source.base import validate_date_range
@@ -665,7 +666,8 @@ class MCPServer:
                     loader = resolve_loader(market)
                     effective_source = loader.name
 
-                data = loader.fetch(codes, start_date, end_date, interval=interval)
+                data = loader.fetch(codes, start_date, end_date, interval=interval,
+                                   force_refresh=force_refresh)
 
                 result_data = {}
                 total_rows = 0
