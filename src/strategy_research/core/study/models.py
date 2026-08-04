@@ -32,6 +32,7 @@ class StudyStatus(str, Enum):
     BUDGET_LIMITED = "budget_limited"
     MONITORING = "monitoring"   # Phase 3: post-completion periodic checks
     NEEDS_REFRESH = "needs_refresh"  # Phase 3: monitor drift detected
+    EARLY_STOPPED = "early_stopped"  # AEGIS: 3+ idle rounds without improvement
 
 
 # Execution statuses that count as "active" — a session may have at
@@ -104,6 +105,28 @@ class StudyRecord:
     monitor_interval_seconds: int | None = None  # None = no monitoring
     last_monitor_check_at: str | None = None
     monitor_drift_count: int = 0
+
+
+@dataclass(frozen=True)
+class StudyRoundRecord:
+    """A single round record in a study's execution history.
+
+    Persisted in the ``study_rounds`` table. Tracks per-round metrics,
+    verdict, evidence, and configuration changes for AEGIS attribution.
+    """
+
+    round_id: str
+    study_id: str
+    goal_id: str | None
+    session_id: str
+    round_num: int
+    run_name: str
+    metrics: dict = field(default_factory=dict)
+    verdict: str = "discard"
+    evidence_ids: list[str] = field(default_factory=list)
+    config_changes: dict | None = None
+    agent_output: str | None = None
+    created_at: str = ""
 
 
 @dataclass(frozen=True)

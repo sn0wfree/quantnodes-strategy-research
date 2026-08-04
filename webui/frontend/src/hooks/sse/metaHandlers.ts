@@ -1,18 +1,17 @@
 import type { SSEHandler } from './types'
 
 /**
- * Goal events — TODO(feature): dead chain end-to-end today. No backend
- * emitter produces goal_* events (verified: zero `emit(...goal...)`
- * calls in src/), so GoalTab/CriteriaList/GoalTimeline can only ever
- * render empty states. Planned wiring: the goal service emits these
- * events on start/evidence/complete
- * (docs/goal-workflow-design.md), or the frontend polls
- * /api/goal/status. The handlers below are kept ready for that event
- * contract.
+ * Goal SSE handlers — wired to backend goal_* events emitted from
+ * service.py (_maybe_emit_goal_event) and chat.py (_emit_goal_sse_event).
+ *
+ * goalUpdated also triggers loadSessionState to sync the workflow store
+ * (DAG panel) when the workflow is empty, so the right panel reflects
+ * the goal immediately after creation.
  */
 export const goalUpdated: SSEHandler = (data, { setGoal }) => {
   const goalData = data as any
   if (!goalData.goal_id) return
+
   setGoal({
     goal_id: goalData.goal_id,
     session_id: goalData.session_id || '',
@@ -22,6 +21,10 @@ export const goalUpdated: SSEHandler = (data, { setGoal }) => {
     criteria: goalData.criteria || [],
     evidence_count: goalData.evidence_count || 0,
   })
+
+  // Trigger loadSessionState to sync workflow store (DAG panel).
+  // Only when workflow is empty to avoid overwriting an active workflow.
+  _maybeSyncWorkflow(goalData.session_id)
 }
 
 export const goalEvidenceAdded: SSEHandler = (data, { updateGoal }) => {
@@ -63,4 +66,36 @@ export const sessionMetaUpdated: SSEHandler = (data, { patchSessionMeta }) => {
   if (tags !== undefined) patch.tags = tags
   if (archived !== undefined) patch.archived = archived
   patchSessionMeta(session_id, patch)
+}
+
+// ── Internal helpers ─────────────────────────────────────────────
+
+let _syncInFlight = false
+
+/**
+ * Trigger loadSessionState to populate the workflow store (DAG panel)
+ * when it's currently empty.  Called after goal_updated events so the
+ * right panel shows the DAG alongside the goal immediately.
+ *
+ * Debounced: if a sync is already in flight, skip.
+ */
+function _maybeSyncWorkflow(sessionId: string | null | undefined) {
+  if (!sessionId || _syncInFlight) return
+
+  // Lazy imports to avoid circular deps (these are zustand singletons)
+  import('../../stores/workflow').then(({ useWorkflowStore }) => {
+    const wfState = useWorkflowStore.getState()
+    if (wfState.dagNodes.length > 0) return  // workflow already populated
+
+    _syncInFlight = true
+    import('../../stores/session').then(({ useSessionStore }) => {
+      useSessionStore
+        .getState()
+        .loadSessionState(sessionId)
+        .catch(() => {})
+        .finally(() => {
+          _syncInFlight = false
+        })
+    }).catch(() => { _syncInFlight = false })
+  }).catch(() => {})
 }

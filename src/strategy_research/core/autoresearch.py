@@ -246,20 +246,32 @@ def retry_agent_spawn(
     Returns:
         解析后的字典
     """
+    last_raw = ""
     for attempt in range(max_retries):
         try:
             raw_output = spawn_fn()
+            last_raw = raw_output
             parsed = parse_agent_output(raw_output)
 
             # 检查是否解析成功
             if "error" not in parsed:
                 return parsed
 
-            # 解析失败,记录警告
+            # 解析失败 — 返回错误信息而非全量重启
             print(f"[autoresearch] {agent_name} 解析失败 (attempt {attempt + 1}/{max_retries}): {parsed.get('error')}")
+            if attempt == max_retries - 1:
+                return {
+                    "error": "parse_failed",
+                    "agent": agent_name,
+                    "raw_output": last_raw[:500],
+                    "hint": "Output must be valid JSON matching the required schema. "
+                            "Fix the output format and try again.",
+                }
 
         except Exception as e:
             print(f"[autoresearch] {agent_name} 执行异常 (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                return {"error": "execution_failed", "agent": agent_name, "detail": str(e)}
 
         # 等待后重试
         if attempt < max_retries - 1:
@@ -1661,6 +1673,12 @@ def run_research_round(
         agent_outputs, metrics, verdict, round_num, previous_summary,
     )
     summary["acceptance_decision"] = decision.to_dict()
+
+    # 注入因子失败信息供下一轮参考
+    factor_failures = backtest_result.get("factor_failures", [])
+    if factor_failures:
+        summary["factor_failures"] = factor_failures
+
     save_run_summary(run_dir, summary)
 
     return {
@@ -1673,4 +1691,270 @@ def run_research_round(
         "agent_outputs": agent_outputs,
         "summary": summary,
         "backtest_error": backtest_error,
+    }
+
+
+# ============================================================
+# Phase Functions — split from run_research_round for AEGIS
+# ============================================================
+#
+# These three functions split the monolithic run_research_round into
+# independent phases so the AutoresearchRunner can inject AEGIS logic
+# (novelty gate, journal, attribution) between phases.
+#
+# Phase 1: researcher + lazy detection + hypothesis registration
+# Phase 2: data_quality → factor_analyst → strategist → portfolio → backtest
+# Phase 3: risk_controller → attribution_analyst → anti_overfit → decide
+#
+# run_research_round is kept as-is for backward compat; it is NOT
+# refactored to call these (yet).  The runner uses them directly.
+
+
+def _create_run_dir(workspace_path: Path, strategy_name: str) -> tuple[Path, str, Path]:
+    """Create the run directory for a round. Returns (runs_dir, run_name, run_dir)."""
+    strategy_dir = workspace_path / "strategies" / strategy_name
+    runs_dir = strategy_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    existing_nums: list[int] = []
+    if runs_dir.exists():
+        for d in runs_dir.iterdir():
+            if d.is_dir() and d.name.startswith("run_"):
+                try:
+                    existing_nums.append(int(d.name.split("_")[1]))
+                except (ValueError, IndexError):
+                    pass
+    run_num_int = max(existing_nums, default=0) + 1
+    run_name = f"run_{run_num_int:04d}"
+    run_dir = runs_dir / run_name
+    run_dir.mkdir(exist_ok=True)
+    (run_dir / "agents").mkdir(exist_ok=True)
+    return runs_dir, run_name, run_dir
+
+
+def _make_spawn_fn(
+    path: Path,
+    strategy_name: str,
+    current_state: dict,
+    behavior: str | None = None,
+    max_retries: int = 3,
+    inter_agent_sleep: float = 0.0,
+):
+    """Create the _spawn closure for agent execution."""
+    def _spawn(name: str, prevs: list) -> dict:
+        out = retry_agent_spawn(
+            lambda: spawn_agent(
+                name, path, strategy_name, current_state, prevs,
+                behavior=behavior,
+            ),
+            name,
+            max_retries=max_retries,
+        )
+        if inter_agent_sleep:
+            time.sleep(inter_agent_sleep)
+        return out
+    return _spawn
+
+
+def run_researcher_phase(
+    workspace_path: Path | str,
+    strategy_name: str,
+    current_state: dict,
+    run_dir: Path,
+    *,
+    session_id: str | None = None,
+    run_name: str = "",
+    behavior: str | None = None,
+    max_retries: int = 3,
+    directives: str | None = None,
+    lazy_detection_interval: int = 10,
+    keep_recent: int = 10,
+    round_num: int = 1,
+) -> dict:
+    """Phase 1: run researcher agent + lazy detection + hypothesis registration.
+
+    Returns::
+
+        {"researcher_output": dict}
+    """
+    from strategy_research.core.autoresearch import (
+        detect_lazy_behavior,
+        read_agent_history,
+        save_agent_record,
+        save_laziness_report,
+        should_run_lazy_detection,
+    )
+
+    path = Path(workspace_path).resolve()
+    strategy_dir = path / "strategies" / strategy_name
+    runs_dir = strategy_dir / "runs"
+
+    # Lazy detection
+    if should_run_lazy_detection(round_num, lazy_detection_interval):
+        lazy_results = []
+        for agent_name in ("researcher", "factor_analyst", "strategist", "anti_overfit_analyst"):
+            history = read_agent_history(
+                runs_dir, agent_name, threshold=10,
+                current_round=round_num, keep_recent=keep_recent,
+            )
+            if history:
+                lazy_result = detect_lazy_behavior(
+                    agent_name, history[-1].get("output", {}), history
+                )
+                lazy_results.append({"agent": agent_name, **lazy_result})
+        if lazy_results:
+            overall = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
+            save_laziness_report(run_dir, round_num, lazy_results, overall)
+
+    # Spawn researcher
+    state = {**current_state}
+    if directives:
+        state = {**state, "user_directives": directives}
+
+    spawn = _make_spawn_fn(path, strategy_name, state, behavior, max_retries)
+    researcher_output = spawn("researcher", [])
+    save_agent_record(run_dir, "researcher", 2, state, researcher_output)
+
+    if session_id:
+        _study_register_hypothesis(session_id, researcher_output, run_name)
+
+    return {"researcher_output": researcher_output}
+
+
+def run_execution_phase(
+    workspace_path: Path | str,
+    strategy_name: str,
+    current_state: dict,
+    researcher_output: dict,
+    run_dir: Path,
+    *,
+    session_id: str | None = None,
+    run_name: str = "",
+    behavior: str | None = None,
+    max_retries: int = 3,
+    inter_agent_sleep: float = 0.0,
+) -> dict:
+    """Phase 2: data_quality → factor_analyst → strategist → portfolio → backtest.
+
+    Returns::
+
+        {data_quality_output, factor_analyst_output, strategist_output,
+         portfolio_construction_output, backtest_result, metrics, backtest_error}
+    """
+    from strategy_research.core.autoresearch import save_agent_record
+    from strategy_research.core.backtest import run_backtest_script
+
+    path = Path(workspace_path).resolve()
+    spawn = _make_spawn_fn(path, strategy_name, current_state, behavior, max_retries, inter_agent_sleep)
+
+    dq = spawn("data_quality", [researcher_output])
+    save_agent_record(run_dir, "data_quality", 3, {"researcher": researcher_output}, dq)
+
+    fa = spawn("factor_analyst", [researcher_output, dq])
+    save_agent_record(run_dir, "factor_analyst", 3, {"researcher": researcher_output, "data_quality": dq}, fa)
+
+    strat = spawn("strategist", [researcher_output, dq, fa])
+    save_agent_record(run_dir, "strategist", 3, {"researcher": researcher_output, "factor_analyst": fa}, strat)
+
+    pc = spawn("portfolio_construction", [strat])
+    save_agent_record(run_dir, "portfolio_construction", 3, {"strategist": strat}, pc)
+
+    backtest_result = run_backtest_script(
+        workspace_path=path,
+        strategy_name=strategy_name,
+        action=strat.get("action", "unknown"),
+        description=strat.get("hypothesis", ""),
+        run_dir=run_dir,
+    )
+
+    backtest_error: str | None = None
+    metrics: dict = {}
+    if backtest_result.get("success"):
+        metrics = backtest_result.get("metrics", {})
+        if session_id:
+            _study_append_evidence(session_id, run_name, metrics, strat)
+    else:
+        backtest_error = backtest_result.get("error", "unknown")
+
+    return {
+        "data_quality_output": dq,
+        "factor_analyst_output": fa,
+        "strategist_output": strat,
+        "portfolio_construction_output": pc,
+        "backtest_result": backtest_result,
+        "metrics": metrics,
+        "backtest_error": backtest_error,
+    }
+
+
+def run_evaluation_phase(
+    workspace_path: Path | str,
+    strategy_name: str,
+    backtest_result: dict,
+    metrics: dict,
+    run_dir: Path,
+    *,
+    behavior: str | None = None,
+    max_retries: int = 3,
+    acceptance_config=None,
+) -> dict:
+    """Phase 3: risk_controller → attribution_analyst → anti_overfit → backtest_diag → decide.
+
+    Returns::
+
+        {risk_controller_output, attribution_analyst_output,
+         anti_overfit_analyst_output, backtest_diagnostics_output,
+         decision, verdict, aoa_llm_verdict}
+    """
+    from strategy_research.core.autoresearch import save_agent_record
+    from strategy_research.core.strategy_acceptance import (
+        decide as make_decision,
+        load_config as load_acceptance_config,
+    )
+
+    path = Path(workspace_path).resolve()
+    spawn = _make_spawn_fn(path, strategy_name, {}, behavior, max_retries)
+
+    risk = spawn("risk_controller", [metrics])
+    save_agent_record(run_dir, "risk_controller", 5, {"metrics": metrics}, risk)
+
+    attr = spawn("attribution_analyst", [metrics, risk])
+    save_agent_record(run_dir, "attribution_analyst", 5, {"metrics": metrics, "risk_controller": risk}, attr)
+
+    aoa = spawn("anti_overfit_analyst", [metrics, risk, attr])
+    save_agent_record(run_dir, "anti_overfit_analyst", 5, {"metrics": metrics, "risk_controller": risk, "attribution_analyst": attr}, aoa)
+
+    diag = spawn("backtest_diagnostics", [backtest_result.get("run_log", ""), metrics])
+    save_agent_record(run_dir, "backtest_diagnostics", 5, {"run_log": backtest_result.get("run_log", ""), "metrics": metrics}, diag)
+
+    # Decide
+    aoa_llm_verdict = None
+    if isinstance(aoa, dict):
+        aoa_llm_verdict = {
+            "passed": bool(aoa.get("overfit_passed", False)),
+            "score": float(aoa.get("overfit_score", 0.5) or 0.5),
+            "reason": aoa.get("verdict_reason", ""),
+            "concerns": aoa.get("methods_passed", []),
+            "source": "anti_overfit_analyst",
+        }
+
+    if acceptance_config is None:
+        acceptance_config = load_acceptance_config(
+            workspace_config=path / "acceptance.yaml",
+        )
+    decision = make_decision(
+        metrics=metrics,
+        llm_verdict=aoa_llm_verdict,
+        cfg=acceptance_config,
+        stagnation_count=int(aoa.get("stagnation_count", 0) or 0) if isinstance(aoa, dict) else 0,
+    )
+    verdict = "keep" if decision.accept else "discard"
+
+    return {
+        "risk_controller_output": risk,
+        "attribution_analyst_output": attr,
+        "anti_overfit_analyst_output": aoa,
+        "backtest_diagnostics_output": diag,
+        "decision": decision,
+        "verdict": verdict,
+        "aoa_llm_verdict": aoa_llm_verdict,
     }

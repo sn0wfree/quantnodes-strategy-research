@@ -93,6 +93,8 @@ def compute_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str,
 
     Returns:
         dict: {factor_name: DataFrame} 每个因子的值 (index=date, columns=assets)
+
+    Note: factor_failures 属性包含计算失败的因子信息 (设置在返回的 dict 上)
     """
     if not factor_exprs:
         return {}
@@ -100,12 +102,13 @@ def compute_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str,
     # 导入因子计算模块
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-        from strategy_research.core.compute_factor import compute_factor
+        from strategy_research.core.compute_factor import compute_factor, FactorComputeError
     except ImportError:
         print("⚠️  无法导入 compute_factor，使用简单因子")
         return _compute_simple_factors(prices, factor_exprs)
 
     factors = {}
+    factor_failures = []
     for expr in factor_exprs:
         name = expr.get("factor_name", "unknown")
         code = expr.get("factor_code", "")
@@ -126,10 +129,46 @@ def compute_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str,
 
             if factor_values:
                 factors[name] = pd.DataFrame(factor_values)
+            else:
+                factor_failures.append({
+                    "factor_name": name,
+                    "factor_code": code,
+                    "error": "factor produced no non-null values",
+                })
+        except FactorComputeError as e:
+            factor_failures.append({
+                "factor_name": name,
+                "factor_code": code,
+                "error": str(e),
+            })
+            print(f"⚠️  因子 {name} ({code}) 计算失败: {e.reason}")
         except Exception as e:
-            print(f"⚠️  因子 {name} 计算失败: {e}")
+            factor_failures.append({
+                "factor_name": name,
+                "factor_code": code,
+                "error": str(e),
+            })
+            print(f"⚠️  因子 {name} ({code}) 计算失败: {e}")
 
+    factors.factor_failures = factor_failures
+    if factor_failures:
+        import json as _json
+        try:
+            out_path = Path.cwd() / "factor_failures.json"
+            out_path.write_text(_json.dumps(factor_failures, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
     return factors
+
+
+def _persist_factor_failures(strategy_dir: str | Path, failures: list[dict]) -> None:
+    """将因子失败信息写入 JSON 文件供 backtest 读取。"""
+    import json
+    out_path = Path(strategy_dir) / "factor_failures.json"
+    try:
+        out_path.write_text(json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _compute_simple_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str, pd.DataFrame]:

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ...backtest import run_backtest_from_yaml
-from ...compute_factor import compute_factor
+from ...compute_factor import compute_factor, FactorComputeError
 from ..sandbox import (
     PathValidationError,
     PathWhitelist,
@@ -559,11 +559,23 @@ class ComputeFactorTool(BaseTool):
 
         # Build single-asset wide DataFrame (date index, ohlcv columns)
         asset_df = prices_df[prices_df["asset"] == asset].copy()
+        asset_df = asset_df.drop_duplicates(subset=["date"], keep="last")
         asset_df = asset_df.set_index("date")[["open", "high", "low", "close", "volume"]]
         asset_df = asset_df.sort_index()
 
         try:
             series = compute_factor(factor_code, asset_df, factor_name=factor_name)
+        except FactorComputeError as exc:
+            return err_actionable(
+                str(exc),
+                received=factor_code,
+                fix=(
+                    f"Use only available columns: {exc.available_columns}. "
+                    f"Sample valid expressions: ts_return(close, 20), ts_std(close, 20), "
+                    f"ts_mean(close, 60)"
+                ),
+                tool="compute_factor",
+            )
         except Exception as exc:                    # noqa: BLE001
             logger.exception("compute_factor failed")
             return err_actionable(
@@ -855,11 +867,17 @@ class FactorAnalysisTool(BaseTool):
             return err_actionable(f"asset '{asset}' not found", tool="factor_analysis")
 
         asset_df = prices_df[prices_df["asset"] == asset].copy()
+        asset_df = asset_df.drop_duplicates(subset=["date"], keep="last")
         asset_df = asset_df.set_index("date")[["close"]]
         asset_df = asset_df.sort_index()
 
         try:
             factor_series = compute_factor(factor_code, asset_df)
+        except FactorComputeError as exc:
+            return err_actionable(
+                str(exc),
+                tool="factor_analysis",
+            )
         except Exception as exc:  # noqa: BLE001
             return err_actionable(f"compute failed: {exc}", tool="factor_analysis")
 
@@ -1283,7 +1301,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
         import pandas as pd
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
             if len(adf) < 20:
                 continue
             try:
@@ -1301,7 +1319,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
         # Build forward return panel
         ret_panel = {}
         for asset_code in factor_panel:
-            adf = df[df["asset"] == asset_code].set_index("date")[["close"]].sort_index()
+            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["close"]].sort_index()
             ret_panel[asset_code] = adf["close"].pct_change(forward_days).shift(-forward_days)
 
         # Compute daily cross-sectional IC
@@ -1434,7 +1452,7 @@ class FactorQuintileReturns(BaseTool):
         # Compute factor per asset
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
             if len(adf) < 20:
                 continue
             try:
@@ -1449,7 +1467,7 @@ class FactorQuintileReturns(BaseTool):
         # Forward return panel
         ret_panel = {}
         for asset_code in factor_panel:
-            adf = df[df["asset"] == asset_code].set_index("date")[["close"]].sort_index()
+            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["close"]].sort_index()
             ret_panel[asset_code] = adf["close"].pct_change(holding_period).shift(-holding_period)
 
         factor_df = pd.DataFrame(factor_panel)
@@ -1583,7 +1601,7 @@ class FactorICDecay(BaseTool):
         # Compute factor per asset
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
             if len(adf) < 20:
                 continue
             try:
@@ -1605,7 +1623,7 @@ class FactorICDecay(BaseTool):
         for h in horizons:
             ret_panel = {}
             for asset_code in factor_panel:
-                adf = df[df["asset"] == asset_code].set_index("date")[["close"]].sort_index()
+                adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["close"]].sort_index()
                 ret_panel[asset_code] = adf["close"].pct_change(h).shift(-h)
 
             ret_df = pd.DataFrame(ret_panel)
@@ -1722,7 +1740,7 @@ class FactorTurnover(BaseTool):
         # Compute factor per asset
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
             if len(adf) < 20:
                 continue
             try:

@@ -556,6 +556,9 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
         logger.exception("goal command failed: %s", subcmd)
         response_text = f"Goal command failed: {exc}"
 
+    # Emit goal SSE events so the frontend GoalTab updates in real-time
+    _emit_goal_sse_event(event_bus, session_id, subcmd)
+
     _emit_goal_response(event_bus, session_id, assistant_msg_id, response_text)
 
     return SendMessageResponse(
@@ -710,6 +713,68 @@ def _goal_help() -> str:
     )
 
 
+def _emit_goal_sse_event(event_bus: Any, session_id: str, subcmd: str) -> None:
+    """Emit goal SSE events after /goal command execution.
+
+    Reads the current goal snapshot from GoalStore and emits the
+    corresponding ``goal_updated`` / ``goal_evidence_added`` /
+    ``goal_completed`` SSE event so the frontend GoalTab updates
+    immediately without waiting for the next poll cycle.
+    """
+    from ...core.goal import GoalStore
+
+    # Only emit for mutation commands
+    if subcmd not in ("start", "create", "evidence", "ev", "complete", "done"):
+        return
+
+    try:
+        with GoalStore() as store:
+            goal = store.get_current_goal(session_id)
+            if goal is None:
+                return
+            snapshot = store.get_current_snapshot(session_id)
+    except Exception:
+        logger.debug("failed to read goal for SSE emit", exc_info=True)
+        return
+
+    criteria_list = []
+    evidence_count = 0
+    if snapshot:
+        criteria_list = [
+            {
+                "criterion_id": c.get("criterion_id"),
+                "text": c.get("text"),
+                "status": c.get("status"),
+                "evidence_count": c.get("evidence_count", 0),
+            }
+            for c in snapshot.get("criteria", [])
+        ]
+        evidence_count = snapshot.get("evidence_count", 0)
+
+    if subcmd in ("start", "create"):
+        event_bus.emit(session_id, "goal_updated", {
+            "goal_id": goal.goal_id,
+            "session_id": session_id,
+            "status": goal.status.value,
+            "objective": goal.objective,
+            "progress_percent": goal.progress_percent,
+            "criteria": criteria_list,
+            "evidence_count": evidence_count,
+        })
+    elif subcmd in ("evidence", "ev"):
+        event_bus.emit(session_id, "goal_evidence_added", {
+            "goal_id": goal.goal_id,
+            "progress_percent": goal.progress_percent,
+            "evidence_count": evidence_count,
+        })
+    elif subcmd in ("complete", "done"):
+        event_bus.emit(session_id, "goal_completed", {
+            "goal_id": goal.goal_id,
+            "status": goal.status.value,
+            "recap": goal.recap,
+        })
+
+
 def _emit_goal_response(
     event_bus: Any, session_id: str, assistant_msg_id: str, response_text: str,
 ) -> None:
@@ -789,9 +854,15 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
         from .chat import _get_session_service
         session_service = _get_session_service()
         for study, config, goal_id, objective, ws in _study_pending_submits:
-            await _start_workflow_runner(
-                config, session_id, goal_id, objective, ws, session_service,
-            )
+            if config is None:
+                # AEGIS: autoresearch → scheduler
+                sched = _get_study_scheduler()
+                import asyncio as _asyncio
+                _asyncio.create_task(sched.submit(study))
+            else:
+                await _start_workflow_runner(
+                    config, session_id, goal_id, objective, ws, session_service,
+                )
         _study_pending_submits.clear()
 
     _emit_goal_response(event_bus, session_id, assistant_msg_id, response_text)
@@ -872,7 +943,7 @@ def _parse_study_flags(rest: list[str]) -> dict:
     """Tokenize free-form ``--flag value`` style flags."""
     flags = {
         "workspace_path": None, "strategy_name": None,
-        "metric_targets": None,
+        "metric_targets": None, "executor_type": "autoresearch",
         "budget_turn": None, "budget_time_seconds": None, "max_rounds": None,
         "behavior": None, "monitor_interval_seconds": None,
     }
@@ -909,6 +980,9 @@ def _parse_study_flags(rest: list[str]) -> dict:
                     pass
             elif key == "behavior":
                 flags["behavior"] = val
+            elif key in ("executor", "executor_type"):
+                if val in ("autoresearch", "workflow"):
+                    flags["executor_type"] = val
             i += 2
         else:
             i += 1
@@ -1069,7 +1143,12 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
         )
 
         # Queue for async submission by _handle_study_command
-        _study_pending_submits.append((study, config, goal.goal_id, objective, ws))
+        if flags["executor_type"] == "autoresearch":
+            # AEGIS: autoresearch → scheduler → AutoresearchRunner (round-based)
+            _study_pending_submits.append((study, None, goal.goal_id, objective, ws))
+        else:
+            # workflow → GoalWorkflowRunner (single DAG)
+            _study_pending_submits.append((study, config, goal.goal_id, objective, ws))
 
     except ValueError as e:
         return f"Cannot create study: {e}"

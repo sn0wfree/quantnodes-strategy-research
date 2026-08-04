@@ -197,6 +197,30 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_study_directives_study "
                 "ON study_directives(study_id, consumed_at)"
             )
+            # AEGIS: study_rounds — per-round history for attribution/journal
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS study_rounds (
+                    round_id            TEXT PRIMARY KEY,
+                    study_id            TEXT NOT NULL,
+                    goal_id             TEXT,
+                    session_id          TEXT NOT NULL,
+                    round_num           INTEGER NOT NULL,
+                    run_name            TEXT NOT NULL,
+                    metrics_json        TEXT NOT NULL DEFAULT '{}',
+                    verdict             TEXT NOT NULL,
+                    evidence_ids_json   TEXT NOT NULL DEFAULT '[]',
+                    config_changes_json TEXT,
+                    agent_output        TEXT,
+                    created_at          TEXT NOT NULL,
+                    FOREIGN KEY (study_id) REFERENCES studies(study_id) ON DELETE CASCADE
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_study_rounds_study "
+                "ON study_rounds(study_id, round_num)"
+            )
 
     # ── writes ───────────────────────────────────────────────────────
 
@@ -655,6 +679,96 @@ class StudyStore:
             (limit,),
         ).fetchall()
         return [self._study_from_row(row) for row in rows]
+
+    # ── AEGIS: study_rounds CRUD ──────────────────────────────────────
+
+    @_synchronized
+    def append_round(
+        self,
+        study_id: str,
+        round_num: int,
+        run_name: str,
+        metrics: dict | None = None,
+        verdict: str = "discard",
+        evidence_ids: list[str] | None = None,
+        config_changes: dict | None = None,
+        agent_output: str | None = None,
+    ) -> "StudyRoundRecord":
+        """Append a round record to ``study_rounds``."""
+        from .models import StudyRoundRecord
+        now = _now_iso()
+        round_id = _id("round")
+        row = self._conn.execute(
+            "SELECT goal_id, session_id FROM studies WHERE study_id = ?",
+            (study_id,),
+        ).fetchone()
+        goal_id = row["goal_id"] if row else None
+        session_id = row["session_id"] if row else ""
+        with self._write_transaction():
+            self._conn.execute(
+                """
+                INSERT INTO study_rounds (
+                    round_id, study_id, goal_id, session_id, round_num,
+                    run_name, metrics_json, verdict, evidence_ids_json,
+                    config_changes_json, agent_output, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    round_id, study_id, goal_id, session_id, round_num,
+                    run_name, _json_dumps(metrics or {}), verdict,
+                    _json_dumps(evidence_ids or []),
+                    _json_dumps(config_changes) if config_changes else None,
+                    agent_output, now,
+                ),
+            )
+        return StudyRoundRecord(
+            round_id=round_id, study_id=study_id, goal_id=goal_id,
+            session_id=session_id, round_num=round_num, run_name=run_name,
+            metrics=metrics or {}, verdict=verdict,
+            evidence_ids=evidence_ids or [], config_changes=config_changes,
+            agent_output=agent_output, created_at=now,
+        )
+
+    @_synchronized
+    def list_rounds(
+        self, study_id: str, limit: int = 50
+    ) -> list["StudyRoundRecord"]:
+        """Return round history for a study, newest first."""
+        from .models import StudyRoundRecord
+        rows = self._conn.execute(
+            "SELECT * FROM study_rounds WHERE study_id = ? "
+            "ORDER BY round_num DESC LIMIT ?",
+            (study_id, limit),
+        ).fetchall()
+        return [self._round_from_row(r) for r in rows]
+
+    @_synchronized
+    def get_round(
+        self, study_id: str, round_num: int
+    ) -> "StudyRoundRecord | None":
+        """Return a specific round record."""
+        row = self._conn.execute(
+            "SELECT * FROM study_rounds WHERE study_id = ? AND round_num = ?",
+            (study_id, round_num),
+        ).fetchone()
+        return self._round_from_row(row) if row else None
+
+    def _round_from_row(self, row: sqlite3.Row) -> "StudyRoundRecord":
+        from .models import StudyRoundRecord
+        return StudyRoundRecord(
+            round_id=row["round_id"],
+            study_id=row["study_id"],
+            goal_id=row["goal_id"],
+            session_id=row["session_id"],
+            round_num=row["round_num"],
+            run_name=row["run_name"],
+            metrics=_json_loads(row["metrics_json"], {}),
+            verdict=row["verdict"],
+            evidence_ids=_json_loads(row["evidence_ids_json"], []),
+            config_changes=_json_loads(row["config_changes_json"], None),
+            agent_output=row["agent_output"],
+            created_at=row["created_at"],
+        )
 
     # ── internals ────────────────────────────────────────────────────
 

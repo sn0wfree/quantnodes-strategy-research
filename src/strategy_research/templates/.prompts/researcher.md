@@ -42,6 +42,7 @@
   "action": "search_external | discover_local | optimize_param | remove_factor",
   "hypothesis": "一句话描述假设",
   "reason": "决策依据",
+  "predicted_affected": ["calmar", "sharpe"],
   "avoid_actions": ["已失败的 action 列表"],
   "factor_direction": "目标因子类型",
   "bias_check": {
@@ -59,3 +60,6 @@
 - 避免重复已失败的实验 (Research Momentum)
 - 记录推理过程到 reason 字段
 - 每个结论至少引用一个反对证据
+- predicted_affected: 声明本轮假设预期会改善的指标 (calmar/sharpe/max_dd 等)
+- 参考 <journal-history> 中的跨轮次记忆,避免重复已失败的假设
+- 参考 <lever-scoreboard> 中的杠杆评分,优先使用 posterior 较高的杠杆类型

@@ -115,6 +115,21 @@ def _safe_run_id(raw: str | None) -> Path | None:
     return candidate.resolve()
 
 
+def _label_similarity(a: str, b: str) -> float:
+    """Simple Jaccard similarity over character n-grams (trigrams)."""
+    if not a or not b:
+        return 0.0
+    a_low, b_low = a.lower(), b.lower()
+    if a_low == b_low:
+        return 1.0
+    def _trigrams(s: str) -> set[str]:
+        return {s[i:i+3] for i in range(len(s) - 2)}
+    tri_a, tri_b = _trigrams(a_low), _trigrams(b_low)
+    if not tri_a or not tri_b:
+        return 0.0
+    return len(tri_a & tri_b) / len(tri_a | tri_b)
+
+
 F = TypeVar("F", bound=Callable)
 
 
@@ -289,6 +304,25 @@ class GoalStore:
                     result TEXT NOT NULL,
                     rows_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY(goal_id) REFERENCES goals(goal_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS goal_journal (
+                    entry_id                TEXT PRIMARY KEY,
+                    goal_id                 TEXT NOT NULL,
+                    session_id              TEXT NOT NULL,
+                    round_num               INTEGER NOT NULL,
+                    hypothesis_id           TEXT NOT NULL,
+                    label                   TEXT NOT NULL,
+                    levers_json             TEXT NOT NULL DEFAULT '[]',
+                    predicted_affected_json TEXT NOT NULL DEFAULT '[]',
+                    gating_outcome          TEXT NOT NULL DEFAULT 'pending',
+                    gating_attribution_json TEXT NOT NULL DEFAULT '{}',
+                    changeset_json          TEXT,
+                    retry_rationale         TEXT,
+                    archived_reason         TEXT,
+                    created_at              TEXT NOT NULL,
+                    updated_at              TEXT NOT NULL,
                     FOREIGN KEY(goal_id) REFERENCES goals(goal_id)
                 );
                 """
@@ -1369,6 +1403,227 @@ class GoalStore:
             chain.append(parent)
             current_id = parent.goal_id
         return chain
+
+    # ── AEGIS: goal_journal CRUD ──────────────────────────────────────
+
+    @_synchronized
+    def append_journal_entry(
+        self,
+        goal_id: str,
+        session_id: str,
+        round_num: int,
+        hypothesis_id: str,
+        label: str,
+        levers: list[str] | None = None,
+        predicted_affected: list[str] | None = None,
+        changeset: dict | None = None,
+        retry_rationale: str | None = None,
+    ) -> "JournalEntry":
+        """Append a journal entry for a round's hypothesis."""
+        from .models import JournalEntry
+        now = _now_iso()
+        entry_id = _id("journal")
+        with self._write_transaction():
+            self._conn.execute(
+                """
+                INSERT INTO goal_journal (
+                    entry_id, goal_id, session_id, round_num,
+                    hypothesis_id, label, levers_json,
+                    predicted_affected_json, gating_outcome,
+                    gating_attribution_json, changeset_json,
+                    retry_rationale, archived_reason,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', '{}', ?, ?, NULL, ?, ?)
+                """,
+                (
+                    entry_id, goal_id, session_id, round_num,
+                    hypothesis_id, label, _json_dumps(levers or []),
+                    _json_dumps(predicted_affected or []),
+                    _json_dumps(changeset) if changeset else None,
+                    retry_rationale, now, now,
+                ),
+            )
+        return JournalEntry(
+            entry_id=entry_id, goal_id=goal_id, session_id=session_id,
+            round_num=round_num, hypothesis_id=hypothesis_id, label=label,
+            levers=levers or [], predicted_affected=predicted_affected or [],
+            gating_outcome="pending", changeset=changeset,
+            retry_rationale=retry_rationale, created_at=now, updated_at=now,
+        )
+
+    @_synchronized
+    def fill_journal_attribution(
+        self,
+        goal_id: str,
+        session_id: str,
+        round_num: int,
+        outcome: str,
+        attribution: dict,
+    ) -> bool:
+        """Update the latest journal entry for a round with attribution result."""
+        now = _now_iso()
+        with self._write_transaction():
+            cur = self._conn.execute(
+                """
+                UPDATE goal_journal
+                SET gating_outcome = ?, gating_attribution_json = ?, updated_at = ?
+                WHERE goal_id = ? AND session_id = ? AND round_num = ?
+                  AND gating_outcome = 'pending'
+                """,
+                (outcome, _json_dumps(attribution), now,
+                 goal_id, session_id, round_num),
+            )
+        return cur.rowcount > 0
+
+    @_synchronized
+    def list_journal_entries(
+        self, goal_id: str, limit: int = 50
+    ) -> list["JournalEntry"]:
+        """Return journal entries for a goal, newest first."""
+        from .models import JournalEntry
+        rows = self._conn.execute(
+            "SELECT * FROM goal_journal WHERE goal_id = ? "
+            "ORDER BY round_num DESC, created_at DESC LIMIT ?",
+            (goal_id, limit),
+        ).fetchall()
+        return [self._journal_from_row(r) for r in rows]
+
+    @_synchronized
+    def get_latest_journal_entry(
+        self, goal_id: str
+    ) -> "JournalEntry | None":
+        """Return the most recent journal entry for a goal."""
+        row = self._conn.execute(
+            "SELECT * FROM goal_journal WHERE goal_id = ? "
+            "ORDER BY round_num DESC, created_at DESC LIMIT 1",
+            (goal_id,),
+        ).fetchone()
+        return self._journal_from_row(row) if row else None
+
+    @_synchronized
+    def check_novelty(
+        self,
+        goal_id: str,
+        hypothesis_id: str,
+        levers: list[str],
+        predicted_affected: list[str],
+    ) -> tuple[bool, str | None]:
+        """Check if a hypothesis is novel enough to proceed.
+
+        Returns (is_novel, reason). Blocks if:
+        1. Exact hypothesis_id duplicate
+        2. Signature duplicate (same levers + predicted_affected, needs retry_rationale)
+        3. Label similarity > 0.85
+        """
+        entries = self.list_journal_entries(goal_id, limit=50)
+        for entry in entries:
+            if entry.hypothesis_id == hypothesis_id:
+                return False, f"duplicate hypothesis_id: {hypothesis_id}"
+            if (set(entry.levers) == set(levers)
+                    and set(entry.predicted_affected) == set(predicted_affected)):
+                if entry.gating_outcome == "reverted":
+                    return False, (
+                        f"signature duplicate (reverted): "
+                        f"levers={levers}, tasks={predicted_affected}"
+                    )
+            # Label similarity > 0.85
+            if entry.label and hypothesis_id:
+                if _label_similarity(entry.label, hypothesis_id) > 0.85:
+                    return False, f"similar label: {entry.label[:40]}"
+        return True, None
+
+    @_synchronized
+    def check_regression(
+        self,
+        goal_id: str,
+        attribution: dict[str, str],
+    ) -> tuple[bool, list[str]]:
+        """Check if attribution reveals any regression of previously-solved tasks.
+
+        Returns (passes, regressed_tasks). If any predicted task regressed,
+        the round is soft-flagged (not hard-rejected per user decision).
+        """
+        regressed = [
+            tid for tid, outcome in attribution.items()
+            if outcome == "regressed"
+        ]
+        return len(regressed) == 0, regressed
+
+    @_synchronized
+    def archive_rejected_edit(
+        self,
+        goal_id: str,
+        round_num: int,
+        hypothesis_id: str,
+        reason: str,
+        detail: str,
+    ) -> bool:
+        """Archive a rejected edit by setting archived_reason on the latest entry."""
+        now = _now_iso()
+        with self._write_transaction():
+            cur = self._conn.execute(
+                """
+                UPDATE goal_journal
+                SET archived_reason = ?, updated_at = ?
+                WHERE goal_id = ? AND round_num = ? AND hypothesis_id = ?
+                  AND archived_reason IS NULL
+                """,
+                (f"{reason}: {detail}", now, goal_id, round_num, hypothesis_id),
+            )
+        return cur.rowcount > 0
+
+    @_synchronized
+    def build_journal_context(
+        self,
+        goal_id: str,
+        current_round: int,
+        recent_window: int = 5,
+    ) -> str:
+        """Build a Markdown context string from recent journal entries.
+
+        Injected into the researcher prompt so the LLM sees what has
+        been tried and what worked/failed.
+        """
+        entries = self.list_journal_entries(goal_id, limit=recent_window)
+        if not entries:
+            return ""
+        lines = ["<journal-history>", "跨轮次进化记忆（最近实验）："]
+        for e in entries:
+            outcome_tag = f"[{e.gating_outcome}]" if e.gating_outcome != "pending" else ""
+            regressed = [
+                tid for tid, out in (e.gating_attribution or {}).items()
+                if out == "regressed"
+            ]
+            regressed_tag = f" ⚠回归: {','.join(regressed)}" if regressed else ""
+            lines.append(
+                f"  R{e.round_num} {outcome_tag} "
+                f"hypothesis: {e.label[:60]}; "
+                f"levers: {','.join(e.levers)}; "
+                f"tasks: {','.join(e.predicted_affected)}"
+                f"{regressed_tag}"
+            )
+        lines.append("</journal-history>")
+        return "\n".join(lines)
+
+    def _journal_from_row(self, row: sqlite3.Row) -> "JournalEntry":
+        from .models import JournalEntry
+        return JournalEntry(
+            entry_id=row["entry_id"],
+            goal_id=row["goal_id"],
+            session_id=row["session_id"],
+            round_num=row["round_num"],
+            hypothesis_id=row["hypothesis_id"],
+            label=row["label"],
+            levers=list(_json_loads(row["levers_json"], [])),
+            predicted_affected=list(_json_loads(row["predicted_affected_json"], [])),
+            gating_outcome=row["gating_outcome"],
+            gating_attribution=dict(_json_loads(row["gating_attribution_json"], {})),
+            changeset=_json_loads(row["changeset_json"], None),
+            retry_rationale=row["retry_rationale"],
+            archived_reason=row["archived_reason"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     @staticmethod
     def _goal_from_row(row: sqlite3.Row) -> GoalRecord:

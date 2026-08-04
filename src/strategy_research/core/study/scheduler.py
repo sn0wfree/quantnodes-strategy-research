@@ -20,7 +20,7 @@ import asyncio
 import logging
 from typing import Any
 
-from .executor import AutoresearchExecutor, ControlToken, NullEmitter
+from .runner import AutoresearchRunner, ControlToken, NullEmitter
 from .models import StudyRecord, StudyStatus
 from .store import StudyStore
 
@@ -57,7 +57,7 @@ class StudyScheduler:
         # If None we use a NullEmitter per study.
         self._emitter_factory = emitter_factory
         # Active state
-        self._active_executors: dict[str, AutoresearchExecutor] = {}
+        self._active_executors: dict[str, AutoresearchRunner] = {}
         self._control_tokens: dict[str, ControlToken] = {}
         self._active_tasks: dict[str, asyncio.Task] = {}
         # Per-session queue + consumer
@@ -221,7 +221,7 @@ class StudyScheduler:
         control = ControlToken()
         self._control_tokens[study_id] = control
         emitter = self._make_emitter(study)
-        executor = AutoresearchExecutor(
+        executor = AutoresearchRunner(
             study, self.store, control=control, emitter=emitter,
         )
         self._active_executors[study_id] = executor

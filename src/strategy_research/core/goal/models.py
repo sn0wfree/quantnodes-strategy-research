@@ -164,3 +164,28 @@ class AuditRow:
     result: str
     evidence_ids: list[str]
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class JournalEntry:
+    """AEGIS Journal entry — tracks hypothesis, levers, and outcome per round.
+
+    Persisted in ``goal_journal`` table. Each round's evolution attempt
+    is recorded here for cross-round memory, attribution, and novelty checking.
+    """
+
+    entry_id: str
+    goal_id: str
+    session_id: str
+    round_num: int
+    hypothesis_id: str
+    label: str
+    levers: list[str] = field(default_factory=list)
+    predicted_affected: list[str] = field(default_factory=list)
+    gating_outcome: str = "pending"  # accepted | reverted | noop | pending
+    gating_attribution: dict = field(default_factory=dict)
+    changeset: dict | None = None
+    retry_rationale: str | None = None
+    archived_reason: str | None = None  # novelty | regression | lever-fatigue
+    created_at: str = ""
+    updated_at: str = ""

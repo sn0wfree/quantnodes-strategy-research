@@ -266,6 +266,25 @@ def run_backtest_script(
 
     success, output = run_strategy(strategy_dir, timeout)
 
+    # 读取因子失败信息
+    factor_failures = []
+    factor_failures_path = run_dir / "factor_failures.json"
+    if factor_failures_path.exists():
+        try:
+            import json
+            factor_failures = json.loads(factor_failures_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    # 也检查 strategy_dir（策略脚本运行时写入）
+    strategy_failures_path = strategy_dir / "factor_failures.json"
+    if strategy_failures_path.exists():
+        try:
+            import json
+            factor_failures = json.loads(strategy_failures_path.read_text(encoding="utf-8"))
+            strategy_failures_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     with open(run_dir / "run.log", "w", encoding="utf-8") as f:
         f.write(output)
 
@@ -329,6 +348,7 @@ def run_backtest_script(
         "run": run_name,
         "metrics": metrics,
         "error": "" if success else output,
+        "factor_failures": factor_failures,
     }
 
 

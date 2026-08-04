@@ -26,6 +26,7 @@ from .models import (
     GoalCriterion,
     GoalRecord,
     GoalStatus,
+    JournalEntry,
     RiskTier,
     StaleGoalError,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "GoalWorkflowGoalConfig",
     "GoalWorkflowRunner",
     "GoalWorkflowState",
+    "JournalEntry",
     "LiteCompleteStrategy",
     "LoggerObserver",
     "ManualCompleteStrategy",

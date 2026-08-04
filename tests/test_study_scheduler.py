@@ -25,6 +25,7 @@ from strategy_research.core.study import (
     StudyScheduler, StudyStatus, StudyStore,
 )
 from strategy_research.core.study import executor as executor_mod
+from strategy_research.core.study import runner as runner_mod
 
 
 @pytest.fixture(autouse=True)
@@ -110,13 +111,13 @@ def _patch_round(monkeypatch, metrics=None, rounds_counter=None):
             "backtest_error": None,
         }
 
-    monkeypatch.setattr(executor_mod.AutoresearchExecutor, "_run_one_round", _round)
+    monkeypatch.setattr(runner_mod.AutoresearchRunner, "_run_one_round", _round)
     monkeypatch.setattr(
-        executor_mod.AutoresearchExecutor, "_round_cooldown",
+        runner_mod.AutoresearchRunner, "_round_cooldown",
         lambda self: 0.0,
     )
     monkeypatch.setattr(
-        executor_mod.AutoresearchExecutor, "_maybe_load_previous_summary",
+        runner_mod.AutoresearchRunner, "_maybe_load_previous_summary",
         lambda self, study: None,
     )
 

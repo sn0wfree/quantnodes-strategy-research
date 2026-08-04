@@ -120,6 +120,13 @@ read_file(workspace="{workspace}", path="templates/.skills/factor-research.md")
 
 该文件的"算子参考"章节包含完整的算子列表。**完整算子列表以文档为准。**
 
+## Goal 系统
+
+create_goal / add_evidence / complete_goal 是用于显式研究目标管理的工具。
+- **简单请求**（分析因子、创建策略、回测等）直接执行，**不要**调用 create_goal
+- **只有**用户明确说"启动研究目标"或使用 /goal 命令时才创建 goal
+- 日常分析和回测任务使用 get_market_data / factor_* / write_file / run_backtest 等工具直接完成
+
 ## 工作流程
 
 ### 基础流程（快速启动）

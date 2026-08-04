@@ -76,7 +76,8 @@
     {"param": "top_n", "old": 10, "new": 20}
   ],
   "reason": "操作原因",
-  "expected_impact": "预期影响"
+  "expected_impact": "预期影响",
+  "predicted_affected": ["calmar", "sharpe"]
 }
 
 ## 规则

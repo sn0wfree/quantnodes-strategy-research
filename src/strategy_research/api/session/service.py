@@ -735,6 +735,57 @@ class SessionService:
         usage_lock = threading.Lock()
         usage_state: dict[str, int] = {"input": 0, "output": 0, "context_used": 0}
 
+        def _maybe_emit_goal_event(
+            event_bus: Any, session_id: str, data: dict[str, Any]
+        ) -> None:
+            """Detect goal tool results and emit goal SSE events.
+
+            When create_goal / add_evidence / complete_goal tools execute,
+            their JSON results carry goal state.  This helper parses the
+            result and emits the corresponding ``goal_updated`` /
+            ``goal_evidence_added`` / ``goal_completed`` SSE event so the
+            frontend GoalTab / CriteriaList update in real-time.
+            """
+            import json as _json
+
+            tool_name = data.get("name", "")
+            if tool_name not in ("create_goal", "add_evidence", "complete_goal"):
+                return
+
+            result_raw = data.get("result", "")
+            try:
+                result = (
+                    _json.loads(result_raw)
+                    if isinstance(result_raw, str)
+                    else result_raw
+                )
+            except (_json.JSONDecodeError, TypeError, ValueError):
+                return
+
+            if not isinstance(result, dict) or result.get("status") != "ok":
+                return
+
+            if tool_name == "create_goal":
+                event_bus.emit(session_id, "goal_updated", {
+                    "goal_id": result.get("goal_id", ""),
+                    "session_id": session_id,
+                    "status": result.get("goal_status", "active"),
+                    "objective": result.get("objective", ""),
+                    "progress_percent": result.get("progress_percent", 0),
+                })
+            elif tool_name == "add_evidence":
+                event_bus.emit(session_id, "goal_evidence_added", {
+                    "goal_id": result.get("goal_id", ""),
+                    "evidence_id": result.get("evidence_id", ""),
+                    "progress_percent": result.get("progress_percent", 0),
+                })
+            elif tool_name == "complete_goal":
+                event_bus.emit(session_id, "goal_completed", {
+                    "goal_id": result.get("goal_id", ""),
+                    "status": result.get("goal_status", "complete"),
+                    "recap": result.get("recap", ""),
+                })
+
         def event_callback(event_type: str, data: dict[str, Any]) -> None:
             """AgentLoop on_event adapter for the B4 event-sourced path.
 
@@ -811,6 +862,13 @@ class SessionService:
             data = dict(data)
             data.setdefault("attempt_id", attempt.attempt_id)
             data.setdefault("message_id", attempt.message_id)
+
+            # Detect goal tool results → emit goal SSE events for frontend
+            if event_type == "tool_result":
+                _maybe_emit_goal_event(
+                    self.event_bus, attempt.session_id, data
+                )
+
             self.event_bus.emit(attempt.session_id, event_type, data)
 
         # Build AgentLoop (Phase 6: via shared factory)

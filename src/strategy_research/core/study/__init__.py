@@ -20,6 +20,7 @@ from .models import (
     MetricTarget,
     StudyDirective,
     StudyRecord,
+    StudyRoundRecord,
     StudyStatus,
     default_metric_targets,
 )
@@ -33,11 +34,16 @@ from .executor import (
     acceptance_config_from_targets,
     meets_metric_targets,
 )
+from .runner import AutoresearchRunner
 from .scheduler import StudyScheduler, make_event_bus_emitter
+
+# Backward-compat: AutoresearchExecutor points to the new runner
+AutoresearchExecutor = AutoresearchRunner
 
 __all__ = [
     "ACTIVE_EXECUTION_STATUSES",
     "AutoresearchExecutor",
+    "AutoresearchRunner",
     "ControlToken",
     "EmitterProtocol",
     "EventEmitter",
@@ -46,6 +52,7 @@ __all__ = [
     "ShutdownReason",
     "StudyDirective",
     "StudyRecord",
+    "StudyRoundRecord",
     "StudyScheduler",
     "StudyStatus",
     "StudyStore",

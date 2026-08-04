@@ -23,6 +23,29 @@
   - qlib158: ~158 个 ML 因子
   - classical: Fama-French + Carhart
 
+## 因子表达式约束
+
+### 可用列 (backtest 上下文)
+- `close` — 收盘价（**唯一可用列**）
+- ⚠️ backtest 的 prepare.py 只传 close 列，**不能使用** volume, returns, open, high, low 等列
+- 如果需要 volume 等数据，请用 read_file 读取 DuckDB 然后用 factor_analysis 工具
+
+### 可用算子 (常用列表)
+时序: ts_return, ts_std, ts_mean, ts_sum, ts_max, ts_min, ts_corr, ts_rank,
+      ts_skew, ts_kurt, ts_median, ts_var, ts_argmax, ts_argmin, ts_cov
+截面: rank, zscore, safe_div
+数学: abs, log, sign, power
+
+### 验证步骤 (必须执行)
+1. **先用 compute_factor 工具验证表达式**，确认返回 non-null 值
+2. 表达式格式示例:
+   - `ts_return(close, 20)` — 20日收益率
+   - `ts_std(close, 20)` — 20日波动率
+   - `ts_mean(close, 60)` — 60日均值
+   - `rank(ts_return(close, 20))` — 截面排名
+   - `ts_return(close, 20) / ts_std(close, 20)` — 夏普比因子
+3. **不要使用** volume, returns, open 等不存在的列名
+
 ## 验证流程 (先单后批)
 
 ### Step 1: 生成候选因子
@@ -85,3 +108,4 @@
 - 通过条件: IC > 0.03, IR > 0.5
 - 已验证因子用缓存,不重复计算
 - IC 衰减检查: IC_5d >= 30% * IC_1d
+- **必须先用 compute_factor 工具验证表达式，确认 non-null 值后再提交**

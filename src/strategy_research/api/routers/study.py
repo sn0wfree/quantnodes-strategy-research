@@ -82,6 +82,7 @@ class StudyStartRequest(BaseModel):
     objective: str
     workspace_path: str
     strategy_name: str
+    executor_type: str = "autoresearch"  # "autoresearch" (default, round-based) or "workflow" (DAG)
     metric_targets: Optional[list[MetricTargetModel]] = None
     budget_token: Optional[int] = None
     budget_turn: Optional[int] = None
@@ -162,13 +163,29 @@ async def study_start(req: StudyStartRequest):
             )
 
         # Phase 3: Start GoalWorkflowRunner instead of scheduler
-        from ...core.goal.workflow import (
-            GoalWorkflowConfig, GoalWorkflowGoalConfig, GoalAgentConfig,
-            CompletionConfig, GoalWorkflowRunner,
-        )
-        from .chat import _get_session_service
+        # AEGIS: executor_type="autoresearch" uses AutoresearchRunner (round-based)
+        # executor_type="workflow" uses GoalWorkflowRunner (single DAG)
+        if req.executor_type == "autoresearch":
+            # Use scheduler → AutoresearchRunner (AEGIS-powered round loop)
+            sched = _get_study_scheduler()
+            import asyncio
+            asyncio.create_task(sched.submit(study))
+            return {
+                "status": "ok",
+                "study_id": study.study_id,
+                "goal_id": study.goal_id,
+                "execution_status": StudyStatus.QUEUED.value,
+                "executor_type": "autoresearch",
+            }
+        else:
+            # Original GoalWorkflowRunner path (single DAG execution)
+            from ...core.goal.workflow import (
+                GoalWorkflowConfig, GoalWorkflowGoalConfig, GoalAgentConfig,
+                CompletionConfig, GoalWorkflowRunner,
+            )
+            from .chat import _get_session_service
 
-        agent_configs = [
+            agent_configs = [
             GoalAgentConfig(id="researcher", prompt_file=".prompts/researcher.md",
                            tools=["read_file", "list_history", "factor_analysis", "web_search",
                                   "read_url", "get_market_data", "search_symbol"],

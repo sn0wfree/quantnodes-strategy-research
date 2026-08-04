@@ -10,6 +10,34 @@ import re
 import numpy as np
 import pandas as pd
 
+
+# ============================================================
+# 结构化错误
+# ============================================================
+
+
+class FactorComputeError(Exception):
+    """结构化因子计算错误，包含可操作信息。"""
+
+    def __init__(
+        self,
+        factor_code: str,
+        reason: str,
+        available_columns: list[str] | None = None,
+        available_operators: list[str] | None = None,
+    ):
+        self.factor_code = factor_code
+        self.reason = reason
+        self.available_columns = available_columns or []
+        self.available_operators = available_operators or []
+        msg = (
+            f"Factor '{factor_code}' failed: {reason}\n"
+            f"Available columns: {self.available_columns}\n"
+            f"Available operators (sample): {self.available_operators[:20]}"
+        )
+        super().__init__(msg)
+
+
 # ============================================================
 # 时序算子 (per-asset)
 # ============================================================
@@ -1197,20 +1225,27 @@ def compute_factor(
 
     Args:
         factor_code: 因子表达式，如 "ts_return(close, 20)"
-        prices: 价格数据 (index=date, columns=assets)
+        prices: 价格数据 (index=date, columns=assets 或 OHLCV)
         factor_name: 因子名称 (可选)
 
     Returns:
         pd.Series: 因子值
+
+    Raises:
+        FactorComputeError: 因子计算失败，包含可操作错误信息
     """
     try:
         result = evaluate_expression(factor_code, prices)
-        if factor_name:
-            result.name = factor_name
-        return result
-    except Exception as e:
-        print(f"⚠️  因子计算失败 ({factor_code}): {e}")
-        return pd.Series(dtype=float)
+    except ValueError as e:
+        raise FactorComputeError(
+            factor_code=factor_code,
+            reason=str(e),
+            available_columns=list(prices.columns) if hasattr(prices, 'columns') else [],
+            available_operators=list(OPERATORS.keys()),
+        ) from e
+    if factor_name:
+        result.name = factor_name
+    return result
 
 
 def compute_factors_batch(
@@ -1227,11 +1262,15 @@ def compute_factors_batch(
         pd.DataFrame: 因子值 (columns=factor_names)
     """
     results = {}
+    errors = []
     for expr in factor_exprs:
         name = expr.get("factor_name", "unknown")
         code = expr.get("factor_code", "")
         if code:
-            results[name] = compute_factor(code, prices, name)
+            try:
+                results[name] = compute_factor(code, prices, name)
+            except FactorComputeError as exc:
+                errors.append({"factor_name": name, "factor_code": code, "error": str(exc)})
 
     return pd.DataFrame(results)
 
