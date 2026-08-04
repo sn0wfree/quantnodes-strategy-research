@@ -452,6 +452,7 @@ class GoalWorkflowRunner:
             completion_mode=self._config.completion.mode,
             workflow_name=self._config.name,
             event_bus=self._event_bus,
+            metric_targets=self._config.completion.metric_targets,
         )
 
         # 4. Convert config → SwarmPreset
@@ -573,6 +574,7 @@ class GoalWorkflowRunner:
             completion_mode=self._config.completion.mode,
             workflow_name=self._config.name,
             event_bus=self._event_bus,
+            metric_targets=self._config.completion.metric_targets,
         )
         # Seed the hook's _layer_results so on_layer_complete doesn't
         # re-parse already-saved outputs.
@@ -694,6 +696,7 @@ class GoalWorkflowRunner:
             completion_mode=self._config.completion.mode,
             workflow_name=self._config.name,
             event_bus=self._event_bus,
+            metric_targets=self._config.completion.metric_targets,
         )
 
         preset = self._config.to_swarm_preset()

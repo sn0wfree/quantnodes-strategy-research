@@ -58,6 +58,7 @@ class GoalWorkflowHook:
         completion_mode: str = "auto",
         workflow_name: str = "",
         event_bus: Any = None,
+        metric_targets: list[dict] | None = None,
     ) -> None:
         self._session_id = session_id
         self._goal_id = goal_id
@@ -73,6 +74,8 @@ class GoalWorkflowHook:
         self._completed = False
         self._evidence_count = 0
         self._layer_results: dict[str, Any] = {}  # P1.3: saved/restored on checkpoint
+        # Phase 1.3: metric targets for quantitative goal completion
+        self._metric_targets = metric_targets
 
     @property
     def name(self) -> str:
@@ -163,6 +166,17 @@ class GoalWorkflowHook:
                 self._layer_results[aid] = {"output": self._parse_output(res)}
             except Exception:  # noqa: BLE001
                 logger.warning("Failed to capture layer result for %s", aid)
+
+        # Phase 1.3: Check metric targets if configured
+        if self._metric_targets and not self._completed:
+            metrics = self._extract_metrics(results)
+            if metrics and self._meets_metric_targets(metrics, self._metric_targets):
+                logger.info(
+                    "GoalWorkflowHook: metric targets met after layer %d, "
+                    "triggering auto-complete (metrics=%s)", layer_idx, metrics,
+                )
+                self._auto_complete()
+                return
 
         # Check if all criteria are covered
         if self._check_all_criteria_covered():
@@ -323,6 +337,69 @@ class GoalWorkflowHook:
             logger.error("Auto-completion failed: %s", exc)
             if self._event_bus:
                 self._event_bus.emit("workflow_failed", error=str(exc))
+
+    # ── Metric target helpers (Phase 1.3) ──────────────────────
+
+    @staticmethod
+    def _extract_metrics(results: dict[str, Any]) -> dict[str, float]:
+        """Extract numeric metrics from agent outputs.
+
+        Looks for common metric keys (calmar, sharpe, max_dd, etc.)
+        in the agent result dicts/objects.
+        """
+        import json
+        metrics: dict[str, float] = {}
+        metric_keys = {"calmar", "sharpe", "max_dd", "ann_return", "ann_vol",
+                       "sortino", "win_rate", "trades", "turnover"}
+        for aid, res in results.items():
+            raw = None
+            if hasattr(res, "output"):
+                raw = res.output
+            elif isinstance(res, dict):
+                raw = res.get("output", res.get("answer", ""))
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if isinstance(raw, dict):
+                for key in metric_keys:
+                    if key in raw and key not in metrics:
+                        try:
+                            metrics[key] = float(raw[key])
+                        except (ValueError, TypeError):
+                            pass
+        return metrics
+
+    @staticmethod
+    def _meets_metric_targets(
+        metrics: dict[str, float], targets: list[dict],
+    ) -> bool:
+        """Check if metrics satisfy all targets.
+
+        Each target is {"name": str, "op": str, "value": float}.
+        """
+        ops = {
+            ">=": lambda a, b: a >= b,
+            "<=": lambda a, b: a <= b,
+            ">": lambda a, b: a > b,
+            "<": lambda a, b: a < b,
+            "==": lambda a, b: a == b,
+        }
+        for t in targets:
+            name = t.get("name", "")
+            op_str = t.get("op", ">=")
+            value = t.get("value", 0)
+            metric_val = metrics.get(name)
+            if metric_val is None:
+                return False
+            op_fn = ops.get(op_str)
+            if op_fn is None:
+                logger.warning("Unknown operator %s in metric target", op_str)
+                return False
+            if not op_fn(metric_val, value):
+                return False
+        return True
 
 
 __all__ = ["GoalWorkflowHook"]
