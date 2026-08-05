@@ -68,3 +68,4 @@ webui/frontend/dist/
 webui/static/
 *.db
 .quantnodes_strategy_research_session.db*
+coverage/

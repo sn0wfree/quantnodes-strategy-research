@@ -413,3 +413,86 @@ async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
         r = await client.get("/api/study/list?limit=2")
         assert r.status_code == 200
         assert len(r.json()["studies"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_start_autoresearch_returns_study_id(_app_env, monkeypatch):
+    """autoresearch 路径：mock scheduler.submit，期望返回 study_id + goal_id + queued。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from strategy_research.api.routers import study as study_router
+
+    sched = MagicMock()
+    sched.submit = AsyncMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    body = {
+        "session_id": "sess-1", "objective": "Sharpe > 1.5",
+        "workspace_path": str(_app_env), "strategy_name": "demo_strategy",
+        "executor_type": "autoresearch", "max_rounds": 3,
+    }
+    async with _api_client() as client:
+        r = await client.post("/api/study/start", json=body)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["status"] == "ok"
+        assert data["execution_status"] == "queued"
+        assert data["executor_type"] == "autoresearch"
+        assert data["study_id"].startswith("study_")
+        assert data["goal_id"].startswith("goal_")
+        sched.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_invalid_objective_returns_400(_app_env, monkeypatch):
+    """空 objective → GoalStore ValueError → 400。"""
+    from unittest.mock import MagicMock
+
+    from strategy_research.api.routers import study as study_router
+
+    sched = MagicMock()
+    sched.submit = MagicMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    body = {
+        "session_id": "sess-1", "objective": "",
+        "workspace_path": str(_app_env), "strategy_name": "demo_strategy",
+        "executor_type": "autoresearch", "max_rounds": 3,
+    }
+    async with _api_client() as client:
+        r = await client.post("/api/study/start", json=body)
+        assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_start_internal_error_returns_500(_app_env, monkeypatch):
+    """GoalStore 抛非 HTTP 异常 → 500。"""
+    from unittest.mock import MagicMock, patch
+
+    from strategy_research.api.routers import study as study_router
+
+    sched = MagicMock()
+    sched.submit = MagicMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    body = {
+        "session_id": "sess-1", "objective": "obj",
+        "workspace_path": str(_app_env), "strategy_name": "demo_strategy",
+        "executor_type": "autoresearch", "max_rounds": 3,
+    }
+    with patch(
+        "strategy_research.core.goal.GoalStore.replace_goal",
+        side_effect=RuntimeError("simulated"),
+    ):
+        async with _api_client() as client:
+            r = await client.post("/api/study/start", json=body)
+            assert r.status_code == 500

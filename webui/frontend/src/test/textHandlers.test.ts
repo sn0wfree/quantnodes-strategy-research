@@ -1,0 +1,207 @@
+// hooks/sse/textHandlers — covers the text and thinking streaming
+// protocol end-to-end against a minimal in-memory chat store.
+
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  textStarted,
+  textDelta,
+  textEnded,
+  thinkingStart,
+  thinkingDelta,
+  thinkingDone,
+  thinkingEnd,
+} from '../hooks/sse/textHandlers'
+import { useChatStore } from '../stores/chat'
+import type { SSEContext } from '../hooks/sse/types'
+
+function ctx(overrides: Partial<SSEContext> = {}): SSEContext {
+  const store = useChatStore.getState()
+  return {
+    sessionId: 'sess-1',
+    state: {
+      hasSeenTotalTokens: (sid) =>
+        useChatStore.getState().totalTokensSeen.get(sid) === true,
+      getMessages: () => Array.from(store.messages.values()),
+      getMessage: (id) => store.messages.get(id),
+      isQueuePaused: () => false,
+      getTokensUsed: () => 0,
+    },
+    setMessages: store.setMessages,
+    addMessage: store.addMessage,
+    updateMessage: store.updateMessage,
+    setStreamingMessage: store.setStreamingMessage,
+    setStreamingText: store.setStreamingText,
+    appendStreamingText: store.appendStreamingText,
+    setActiveAttempt: store.setActiveAttempt,
+    cancelAttempt: async () => {},
+    resumeQueue: async () => {},
+    setQueuePaused: () => {},
+    setQueueLength: () => {},
+    setTokensUsed: () => {},
+    markTotalTokensSeen: () => {},
+    setHasMore: () => {},
+    loadMoreMessages: async () => {},
+    loadMessages: async () => {},
+    fetchSessionAttempts: async () => {},
+    clearMessages: store.clearMessages,
+    accumulatePartText: store.accumulatePartText,
+    clearPartAccum: store.clearPartAccum,
+    clearAllPartAccum: store.clearAllPartAccum,
+    updateAgent: () => {},
+    setLastCompaction: () => {},
+    addToast: () => {},
+    ...overrides,
+  } as SSEContext
+}
+
+function seedAssistant(msgId: string): void {
+  useChatStore.setState((s) => {
+    const m = new Map(s.messages)
+    m.set(msgId, {
+      id: msgId,
+      session_id: 'sess-1',
+      role: 'assistant',
+      parts: [],
+      created_at: 0,
+    } as never)
+    return { messages: m }
+  })
+}
+
+function getMessage(id: string) {
+  return useChatStore.getState().messages.get(id)!
+}
+
+beforeEach(() => {
+  useChatStore.setState({
+    messages: new Map(),
+    streamingMessageId: null,
+    streamingText: '',
+    partTextAccumDelta: {},
+  })
+})
+
+describe('textHandlers — text protocol', () => {
+  it('text.started seeds a streaming text part', () => {
+    seedAssistant('m1')
+    textStarted({ text_id: 't-1', message_id: 'm1' }, ctx())
+    const msg = getMessage('m1')
+    expect(msg.parts).toEqual([
+      { type: 'text', id: 't-1', text: '', isStreaming: true },
+    ])
+  })
+
+  it('text.started re-marks an existing part as streaming (replay)', () => {
+    seedAssistant('m1')
+    textStarted({ text_id: 't-1', message_id: 'm1' }, ctx())
+    textStarted({ text_id: 't-1', message_id: 'm1' }, ctx())
+    const msg = getMessage('m1')
+    expect(msg.parts).toHaveLength(1)
+    expect((msg.parts[0] as { isStreaming?: boolean }).isStreaming).toBe(true)
+  })
+
+  it('text.delta appends to the matching text part and the preview buffer', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    textStarted({ text_id: 't-1', message_id: 'm1' }, c)
+    textDelta({ text_id: 't-1', message_id: 'm1', delta: 'hi' }, c)
+    textDelta({ text_id: 't-1', message_id: 'm1', delta: ' there' }, c)
+    const msg = getMessage('m1')
+    expect((msg.parts[0] as { text: string }).text).toBe('hi there')
+    // Preview buffer holds the latest delta.
+    expect(useChatStore.getState().partTextAccumDelta['t-1']).toBe('hi there')
+  })
+
+  it('text.delta without text_id is dropped silently (protocol error guard)', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    textDelta({ message_id: 'm1', delta: 'orphan' }, c)
+    expect(getMessage('m1').parts).toEqual([])
+  })
+
+  it('text.ended overrides with the authoritative final text and clears streaming', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    textStarted({ text_id: 't-1', message_id: 'm1' }, c)
+    textDelta({ text_id: 't-1', message_id: 'm1', delta: 'draft' }, c)
+    textEnded({ text_id: 't-1', message_id: 'm1', text: 'FINAL' }, c)
+    const msg = getMessage('m1')
+    expect((msg.parts[0] as { text: string }).text).toBe('FINAL')
+    expect((msg.parts[0] as { isStreaming?: boolean }).isStreaming).toBe(false)
+    expect(useChatStore.getState().partTextAccumDelta['t-1']).toBeUndefined()
+  })
+
+  it('text.ended with empty finalText preserves the streamed text (regression B4)', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    textStarted({ text_id: 't-1', message_id: 'm1' }, c)
+    textDelta({ text_id: 't-1', message_id: 'm1', delta: 'streamed' }, c)
+    // No final text — only the end signal.
+    textEnded({ text_id: 't-1', message_id: 'm1' }, c)
+    const msg = getMessage('m1')
+    expect((msg.parts[0] as { text: string }).text).toBe('streamed')
+  })
+})
+
+describe('textHandlers — thinking protocol', () => {
+  it('thinking_start pushes a fresh collapsed streaming thinking part', () => {
+    seedAssistant('m1')
+    thinkingStart({ message_id: 'm1' }, ctx())
+    const msg = getMessage('m1')
+    expect(msg.parts).toHaveLength(1)
+    const p = msg.parts[0] as { type: string; text: string; collapsed: boolean; isStreaming: boolean }
+    expect(p.type).toBe('thinking')
+    expect(p.collapsed).toBe(true)
+    expect(p.isStreaming).toBe(true)
+  })
+
+  it('thinking_delta appends to the last thinking part', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    thinkingStart({ message_id: 'm1' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'reasoning ' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'step' }, c)
+    const msg = getMessage('m1')
+    expect((msg.parts[0] as { text: string }).text).toBe('reasoning step')
+  })
+
+  it('thinking_done clears streaming, collapses the part, and clears preview buffer', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    thinkingStart({ message_id: 'm1' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'thought' }, c)
+    thinkingDone({ message_id: 'm1' }, c)
+    const msg = getMessage('m1')
+    const p = msg.parts[0] as { isStreaming: boolean; collapsed: boolean }
+    expect(p.isStreaming).toBe(false)
+    expect(p.collapsed).toBe(true)
+    // The preview buffer for this part was cleared.
+    const partId = 'think-m1-0'
+    expect(useChatStore.getState().partTextAccumDelta[partId]).toBeUndefined()
+  })
+
+  it('thinking_end is equivalent to thinking_done', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    thinkingStart({ message_id: 'm1' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'reasoning' }, c)
+    thinkingEnd({ message_id: 'm1' }, c)
+    const msg = getMessage('m1')
+    const p = msg.parts[0] as { isStreaming: boolean; collapsed: boolean }
+    expect(p.isStreaming).toBe(false)
+    expect(p.collapsed).toBe(true)
+  })
+
+  it('thinking_start without message_id is a no-op', () => {
+    useChatStore.setState((s) => {
+      const m = new Map(s.messages)
+      m.set('m1', {
+        id: 'm1', session_id: 'sess-1', role: 'assistant',
+        parts: [], created_at: 0,
+      })
+      return { messages: m }
+    })
+    thinkingStart({}, ctx())
+    expect(getMessage('m1').parts).toEqual([])
+  })
+})
