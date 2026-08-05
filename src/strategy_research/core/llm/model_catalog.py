@@ -525,8 +525,13 @@ class ModelCatalog:
                 self._memory_cache[cache_key] = final
                 return final
 
-        # Refresh failed: serve cached (even if stale) or fall back
-        return self.get_info(provider, model, user_config=user_config)
+        # Refresh failed: serve cached (even if stale) or fall back.
+        # Deliberately resolve WITHOUT user_config here: if a previous
+        # LLMConfig.load() synthesized model_context_tokens from a
+        # provider default, echoing it back would freeze that value and
+        # mask the real catalog data. Genuine user overrides still win
+        # because every call site applies them via get_info(user_config=...).
+        return self.get_info(provider, model)
 
     async def refresh_all_async(self, providers: list[str]) -> int:
         """Refresh a list of (provider, model) pairs concurrently.

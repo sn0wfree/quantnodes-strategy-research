@@ -70,10 +70,13 @@ def test_get_info_finds_kimi_via_moonshotai_alias():
 
 
 def test_get_info_uses_default_fallback_for_unknown_provider():
+    from strategy_research.core.llm.model_catalog import _load_default_fallback
+
+    fallback = _load_default_fallback()
     info = ModelCatalog().get_info("weird-llm", "X-1")
     assert info.source == "fallback"
-    assert info.context_tokens == 8192
-    assert info.max_output_tokens == 4096
+    assert info.context_tokens == int(fallback.get("context_tokens", 8192))
+    assert info.max_output_tokens == int(fallback.get("max_output_tokens", 4096))
     assert info.supports_vision is False
     assert info.supports_tools is True
     assert info.provider == "weird-llm"
@@ -329,8 +332,15 @@ def test_refresh_async_merges_user_overrides_on_top_of_fetched(tmp_path):
     assert info.supports_tools is True
 
 
-def test_refresh_async_failure_falls_back_to_user_config():
-    """When fetch fails, user_config still serves the request."""
+def test_refresh_async_failure_serves_real_data_not_synthesized_override():
+    """When fetch fails, do NOT echo a user_config override back.
+
+    A synthesized model_context_tokens (e.g. produced by
+    LLMConfig's provider-default fallback) must not mask the real
+    catalog data — otherwise the value locks in a feedback loop.
+    Genuine overrides still win at the call site via
+    get_info(user_config=...).
+    """
     from unittest.mock import patch
     from strategy_research.core.llm.config import LLMConfig
 
@@ -350,4 +360,20 @@ def test_refresh_async_failure_falls_back_to_user_config():
             )
 
     info = asyncio.run(run())
-    assert info.context_tokens == 750_000  # user config preserved
+    # Real bundled data wins; the synthesized override is not echoed.
+    assert info.context_tokens == 128_000
+    assert info.source == "bundled"
+
+    # The caller can still apply its override explicitly.
+    async def run_with_override():
+        catalog = ModelCatalog()
+        with patch.object(catalog, "_fetch_toml", return_value=None):
+            await catalog.refresh_async(
+                "openai", "gpt-4o-mini", user_config=cfg
+            )
+            return catalog.get_info(
+                "openai", "gpt-4o-mini", user_config=cfg
+            )
+
+    info2 = asyncio.run(run_with_override())
+    assert info2.context_tokens == 750_000

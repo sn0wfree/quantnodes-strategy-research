@@ -470,11 +470,14 @@ def _catalog_window(
     data for this model. Callers then use the adapter default or stay
     conservative.
 
-    Heuristic: cached entries that carry the exact placeholder defaults
+    Heuristic: entries that carry the exact placeholder defaults
     (8192 context / 4096 output) are treated as "unknown model" —
     models.dev returns no entry for such models, and refresh_async
-    persists the placeholder as ``fetched`` (the stored ``source``
-    field is unreliable).
+    persists the placeholder as ``fetched``. The ``source`` field is
+    unreliable (a real fetch, a user-config override, and a bundled
+    hit all produce different sources), so we trust the VALUE only:
+    any context window that is not the placeholder is real data,
+    regardless of where it came from.
     """
     if not model:
         return None
@@ -483,8 +486,6 @@ def _catalog_window(
 
         info = get_model_info(provider, model)
     except Exception:
-        return None
-    if info.source not in ("bundled", "cached"):
         return None
     if output:
         value = info.max_output_tokens
