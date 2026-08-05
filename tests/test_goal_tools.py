@@ -156,6 +156,68 @@ class TestGoalTools:
         assert data["status"] == "error"
         assert "no active goal" in data["error"]
 
+    def test_add_evidence_auto_attaches_to_required_criteria(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        goal = store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["Criterion 1", "Criterion 2"],
+        )
+        criteria = store.list_criteria(goal.goal_id)
+        assert len(criteria) == 2
+        tool = AddEvidenceTool()
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = tool.execute(
+                ctx=ToolContext(session_id="test-session"),
+                text="IC mean = 0.06, IR = 0.5",
+            )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        attached = data.get("auto_attached_to") or []
+        assert set(attached) == {c.criterion_id for c in criteria}
+        evidence = store.list_evidence(goal.goal_id)
+        assert len(evidence) == 2
+        assert {ev.criterion_id for ev in evidence} == set(attached)
+
+    def test_add_evidence_auto_attach_enables_complete(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["Criterion 1", "Criterion 2"],
+        )
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = AddEvidenceTool().execute(
+                ctx=ToolContext(session_id="test-session"),
+                text="All observations collected",
+            )
+            assert json.loads(result)["status"] == "ok"
+            result = CompleteGoalTool().execute(
+                ctx=ToolContext(session_id="test-session"),
+                recap="Done",
+            )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        assert data["goal_status"] == "complete"
+
+    def test_complete_goal_missing_evidence_fix_hint(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["Criterion 1"],
+        )
+        tool = CompleteGoalTool()
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = tool.execute(
+                ctx=ToolContext(session_id="test-session"),
+            )
+        data = json.loads(result)
+        assert data["status"] == "error"
+        assert "lacks evidence" in data["error"]
+        assert "add_evidence" in data["fix"]
+        assert "Criterion 1" in data["fix"]
+
     def test_get_goal_status_tool(self, workspace, tmp_goal_db):
         store, db_path = tmp_goal_db
         store.replace_goal(

@@ -40,6 +40,21 @@ def _get_store():
     return GoalStore()
 
 
+def _missing_required_criteria(store, goal_id: str) -> list[str]:
+    """Return 'text (criterion_id)' for required criteria without evidence."""
+    try:
+        criteria = store.list_criteria(goal_id)
+        evidence = store.list_evidence(goal_id)
+        covered = {ev.criterion_id for ev in evidence if ev.criterion_id}
+        return [
+            f"{c.text} ({c.criterion_id})"
+            for c in criteria
+            if c.required and c.criterion_id not in covered
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _get_session_id(kwargs: dict[str, Any]) -> str:
     """Extract session_id from kwargs (injected by AgentLoop)."""
     sid = kwargs.get("session_id")
@@ -150,16 +165,19 @@ class AddEvidenceTool(BaseTool):
     """为当前目标添加证据条目。
 
     # ── 工具说明书 ──────────────────────────────────────────────
-    # 版本: 1.1.0
-    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    # 版本: 1.2.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板); v1.2.0 无
+    # criterion_id 时自动挂载到全部 required criteria (E2E 修复)
     #
     # ## 用途
     # 向当前会话的 active goal 追加证据条目 (指标/观测/结论), 可关联
     # criterion 推动进度百分比; 证据累积完成后用 complete_goal 收尾。
+    # 未指定 criterion_id 时自动挂载到全部 required criteria (一条
+    # 证据同时覆盖所有完成标准), 返回 auto_attached_to 列表。
     #
     # ## 参数
     # - text: 证据文本 (必填, 非空)
-    # - criterion_id: 关联的完成标准 id (可选)
+    # - criterion_id: 关联的完成标准 id (可选; 缺省自动挂全部 required)
     # - source_type: 证据来源类型 (默认 evidence)
     # - run_id: 关联的回测 run id (可选)
     #
@@ -169,7 +187,8 @@ class AddEvidenceTool(BaseTool):
     #
     # ## 边界
     # 写 goals.db (effects=db); 需要会话已有 active goal; session_id
-    # 由框架注入, 无会话回退 default。
+    # 由框架注入, 无会话回退 default。自动挂载仅在 goal 存在 required
+    # criteria 时发生; 无 criteria 的目标按无关联证据追加。
     #
     # ## 错误处理范式
     # - text 缺失 → error + expected/fix
@@ -223,18 +242,48 @@ class AddEvidenceTool(BaseTool):
                 source_type=source_type,
                 run_id=run_id,
             )
-            record = store.append_evidence(
-                session_id=session_id,
-                goal_id=current.goal_id,
-                expected_goal_id=current.goal_id,
-                evidence=evidence,
-            )
+            auto_attached_to: list[str] = []
+            if criterion_id is None:
+                required = [
+                    c for c in store.list_criteria(current.goal_id)
+                    if c.required
+                ]
+                if required:
+                    for c in required:
+                        store.append_evidence(
+                            session_id=session_id,
+                            goal_id=current.goal_id,
+                            expected_goal_id=current.goal_id,
+                            evidence=EvidenceInput(
+                                text=text,
+                                criterion_id=c.criterion_id,
+                                source_type=source_type,
+                                run_id=run_id,
+                            ),
+                        )
+                        auto_attached_to.append(c.criterion_id)
+                    record = None
+                else:
+                    record = store.append_evidence(
+                        session_id=session_id,
+                        goal_id=current.goal_id,
+                        expected_goal_id=current.goal_id,
+                        evidence=evidence,
+                    )
+            else:
+                record = store.append_evidence(
+                    session_id=session_id,
+                    goal_id=current.goal_id,
+                    expected_goal_id=current.goal_id,
+                    evidence=evidence,
+                )
 
             # Re-fetch to get updated progress
             updated = store.get_current_goal(session_id)
             return _ok({
-                "evidence_id": record.evidence_id,
+                "evidence_id": record.evidence_id if record else auto_attached_to[0],
                 "goal_id": current.goal_id,
+                "auto_attached_to": auto_attached_to or None,
                 "progress_percent": updated.progress_percent if updated else 0,
             })
         except Exception as exc:
@@ -254,8 +303,9 @@ class CompleteGoalTool(BaseTool):
     """完成当前目标并附上总结。
 
     # ── 工具说明书 ──────────────────────────────────────────────
-    # 版本: 1.1.0
-    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    # 版本: 1.2.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板); v1.2.0 缺证据
+    # 失败时 fix 定向列出缺失 criterion (E2E 修复)
     #
     # ## 用途
     # 将当前会话的 active goal 标记为完成 (lite 模式), 可附 recap
@@ -273,7 +323,8 @@ class CompleteGoalTool(BaseTool):
     #
     # ## 错误处理范式
     # - 无 active goal → error + fix (先 create_goal)
-    # - 必填 criterion 缺证据 → 完成被拒 (补齐证据后重试)
+    # - 必填 criterion 缺证据 → 完成被拒, fix 列出缺失 criterion 并
+    #   指引 add_evidence(criterion_id=...) 补齐后重试
     # - 存储异常 → error, 检查目标是否已完成
     # - 幂等性: 已完成的目标重复调用会报错
     #
@@ -317,6 +368,19 @@ class CompleteGoalTool(BaseTool):
             })
         except Exception as exc:
             logger.exception("complete_goal failed")
+            msg = str(exc)
+            if "lacks evidence" in msg:
+                missing = _missing_required_criteria(store, current.goal_id)
+                fix = (
+                    f"required criteria lack evidence: {missing or 'n/a'}; "
+                    "call add_evidence(criterion_id=..., text=...) for each "
+                    "missing criterion, then retry complete_goal"
+                )
+                return err_actionable(
+                    f"complete_goal failed: {msg}",
+                    fix=fix,
+                    tool="complete_goal",
+                )
             return err_actionable(
                 f"complete_goal failed: {exc}",
                 fix="check the error detail; the goal may have already been completed",
