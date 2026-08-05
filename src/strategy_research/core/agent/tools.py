@@ -11,8 +11,11 @@ import copy
 import inspect
 import json
 import logging
+import types
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union, get_args, get_origin, get_type_hints
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,76 @@ _EFFECT_LABELS = {
 # 此处先排除以免误入必填)。
 _INJECTED_PARAMS = {"self", "ctx", "workspace", "session_id", "_progress_callback"}
 
+# transient 错误: loop 对工具调用自动重试; 业务/容错失败不重试。
+TRANSIENT_TOOL_ERRORS = (
+    ValueError, TypeError, KeyError, ConnectionError, TimeoutError,
+    OSError, IOError,
+)
+
+
+@dataclass
+class ToolContext:
+    """显式运行上下文 (paradigm v2): 由 AgentLoop 构造并注入。
+
+    LLM 不可见 (不在 schema 中); 工具经 execute 的 ``ctx`` 参数接收。
+    """
+
+    workspace: Optional[Path] = None
+    session_id: Optional[str] = None
+    emit_progress: Optional[Callable[[dict], None]] = None
+
+
+class ToolError(Exception):
+    """业务/容错失败: 确定性错误, 不重试, 由框架转 err_actionable 结构。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        received: Any = None,
+        expected: str = "",
+        fix: str = "",
+        tool: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.message = str(message)
+        self.received = received
+        self.expected = expected
+        self.fix = fix
+        self.tool = tool
+
+    def to_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"status": "error", "error": self.message}
+        if self.received is not None:
+            payload["received"] = _truncate_payload(self.received)
+        if self.expected:
+            payload["expected"] = self.expected
+        if self.fix:
+            payload["fix"] = self.fix
+        if self.tool:
+            payload["tool"] = self.tool
+        return payload
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_payload(), ensure_ascii=False, default=str)
+
+
+def _truncate_payload(value: Any, max_len: int = 200) -> Any:
+    """Truncate error payloads keeping structure (same semantics as
+    builtin_tools.utils.truncate)."""
+    if isinstance(value, str):
+        if len(value) > max_len:
+            return value[:max_len] + f"... (truncated, total {len(value)} chars)"
+        return value
+    if isinstance(value, dict):
+        return {k: _truncate_payload(v, max_len) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        items = [_truncate_payload(v, max_len) for v in value[:5]]
+        if len(value) > 5:
+            items.append(f"... (total {len(value)} items)")
+        return items
+    return value
+
 
 def _doc_first_line(tool_cls: type) -> str:
     """docstring 首行 = 简略版用途一句话 (与详细版同源)。"""
@@ -49,23 +122,31 @@ def _required_params(tool: BaseTool) -> List[str]:
     """execute 显式签名中无默认值的参数; **kwargs 存量工具回退 parameters.required。"""
     try:
         sig = inspect.signature(tool.execute)
-    except (TypeError, ValueError):
-        return list(tool.parameters.get("required", []))
-    if any(
+    except (TypeError, ValueError, AttributeError):
+        sig = None
+    if sig is None or any(
         p.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
         for p in sig.parameters.values()
     ):
-        return list(tool.parameters.get("required", []))
+        try:
+            return list(tool.parameters.get("required", []))
+        except (AttributeError, TypeError):
+            return []
     required = [
         name for name, p in sig.parameters.items()
         if name not in _INJECTED_PARAMS and p.default is p.empty
     ]
-    return required or list(tool.parameters.get("required", []))
+    if required:
+        return required
+    try:
+        return list(tool.parameters.get("required", []))
+    except (AttributeError, TypeError):
+        return []
 
 
 def _effects_label(tool: BaseTool) -> str:
     """effects 短标; 未声明时按 is_readonly 派生。"""
-    if tool.effects:
+    if getattr(tool, "effects", None):
         labels = [_EFFECT_LABELS[e] for e in sorted(tool.effects) if e in _EFFECT_LABELS]
         if labels:
             return ",".join(labels)
@@ -76,11 +157,107 @@ def _build_tool_brief(tool: BaseTool) -> str:
     """注册时生成简略版目录条目。"""
     summary = _doc_first_line(type(tool))
     required = _required_params(tool)
-    parts = [f"- {tool.name}[{tool.category}]: {summary}"]
+    category = getattr(tool, "category", "other") or "other"
+    parts = [f"- {tool.name}[{category}]: {summary}"]
     if required:
         parts.append(f"必填: {', '.join(required)}")
     parts.append(f"副作用: {_effects_label(tool)}")
     return "；".join(parts)
+
+
+def _coerce_param_value(name: str, value: Any, annotation: Any) -> Any:
+    """类型驱动容错: LLM 常见参数形状错误的统一矫正。
+
+    - list[X]  ← str (JSON 字符串) → json.loads
+    - list[X]  ← dict 单键包裹 ({"item": [...]}) → 解包
+    - dict     ← str (JSON 字符串) → json.loads
+    - int/float/bool ← str → 强转
+    仅在声明类型与收到类型不匹配时触发; 失败抛 ToolError (结构化)。
+    """
+    if value is None:
+        return value
+    origin = get_origin(annotation)
+    # Optional[X] / X | None → 取非 None 分支
+    if origin is Union or origin is types.UnionType:
+        non_none = [a for a in get_args(annotation) if a is not type(None)]
+        if len(non_none) == 1:
+            annotation = non_none[0]
+            origin = get_origin(annotation)
+    if origin is list:
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ToolError(
+                    f"invalid value for '{name}': not a valid JSON list",
+                    received=value,
+                    expected=f"list e.g. {_list_example(annotation)} or JSON string",
+                    fix=f"pass a list for '{name}'",
+                )
+            if isinstance(parsed, list):
+                return parsed
+        if isinstance(value, dict) and len(value) == 1:
+            inner = next(iter(value.values()))
+            if isinstance(inner, list):
+                return inner
+        return value
+    if origin is dict:
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ToolError(
+                    f"invalid value for '{name}': not a valid JSON object",
+                    received=value,
+                    expected="object (JSON string or dict)",
+                    fix=f"pass an object for '{name}'",
+                )
+            if isinstance(parsed, dict):
+                return parsed
+        return value
+    if annotation is int:
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                raise ToolError(
+                    f"invalid value for '{name}': expected an integer",
+                    received=value,
+                    expected="integer",
+                )
+        return value
+    if annotation is float:
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                raise ToolError(
+                    f"invalid value for '{name}': expected a number",
+                    received=value,
+                    expected="number",
+                )
+        return value
+    if annotation is bool:
+        if isinstance(value, str):
+            lowered = value.lower()
+            if lowered in ("true", "1"):
+                return True
+            if lowered in ("false", "0"):
+                return False
+            raise ToolError(
+                f"invalid value for '{name}': expected true/false",
+                received=value,
+                expected="boolean (true/false)",
+            )
+        return value
+    return value
+
+
+def _list_example(annotation: Any) -> str:
+    inner = get_args(annotation)
+    if inner:
+        return f"[{inner[0].__name__ if hasattr(inner[0], '__name__') else inner[0]}]"
+    return "[...]"
 
 
 def make_strict_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,12 +339,16 @@ class BaseTool(ABC):
     description: str = ""
     parameters: Dict[str, Any] = {}
     repeatable: bool = False
-    is_readonly: bool = True
     strict: bool = False
     # ── paradigm v2 ─────────────────────────────────────────────
     category: str = "other"       # 领域分类: 文件/回测/因子/行情/分析/技能/Web/Goal/Shell
     effects: frozenset[str] = frozenset()  # {EFFECT_DB, EFFECT_FS, EFFECT_NET}
     brief: str = ""               # 注册时由 ToolRegistry 自动填充
+
+    @property
+    def is_readonly(self) -> bool:
+        """readonly 由 effects 派生 (v2); 子类声明的 is_readonly 类属性优先。"""
+        return not self.effects
 
     @classmethod
     def check_available(cls) -> bool:
@@ -180,7 +361,68 @@ class BaseTool(ABC):
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> str:
-        """Execute the tool and return a JSON string."""
+        """Execute the tool and return a JSON string.
+
+        v2: 显式签名 + 注解 (``def execute(self, ctx, strategy_name: str)``)
+        提供类型/默认值单源; ctx 由框架注入 (ToolContext)。
+        """
+
+    # ── v2 统一入口: 容错 → execute → 意外异常结构化兜底 ─────────
+
+    def invoke(self, kwargs: Dict[str, Any]) -> str:
+        """Framework entry point: coerce params, run execute, catch surprises.
+
+        - 容错失败 (ToolError) → 确定性错误 JSON (不重试)
+        - transient 异常 → re-raise (loop 负责重试)
+        - 其他意外异常 → 结构化 err JSON (带 tool 名, 消灭无结构输出)
+        """
+        try:
+            cleaned = self._coerce_params(kwargs)
+            return self.execute(**cleaned)
+        except ToolError as exc:
+            return exc.to_json()
+        except TRANSIENT_TOOL_ERRORS:
+            raise
+        except Exception as exc:                    # noqa: BLE001
+            logger.exception("tool %s raised", self.name)
+            return json.dumps({
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+                "tool": self.name,
+            }, ensure_ascii=False)
+
+    def _coerce_params(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """框架统一容错: 按 execute 显式签名注解, 仅在类型不匹配时触发。
+
+        **kwargs 存量工具 (无注解) 原样返回 — P3 迁移后自动获得容错。
+        """
+        try:
+            sig = inspect.signature(self.execute)
+            # 注解可能是字符串 (from __future__ import annotations)
+            hints = get_type_hints(self.execute)
+        except (TypeError, ValueError, NameError):
+            return dict(kwargs)
+        if any(
+            p.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+            for p in sig.parameters.values()
+        ):
+            return dict(kwargs)
+        out = dict(kwargs)
+        # 显式签名工具: 以签名为白名单 — 注入参数 (workspace/session_id/
+        # _progress_callback) 由 ctx 承载, 不再透传 (P3 迁移后存量工具的
+        # 注入依赖随之移除); ctx 保留。
+        sig_names = set(sig.parameters)
+        for key in list(out):
+            if key not in sig_names and key != "ctx":
+                out.pop(key, None)
+        for name, p in sig.parameters.items():
+            if name in _INJECTED_PARAMS or name not in out:
+                continue
+            annotation = hints.get(name, p.annotation)
+            if annotation is p.empty or annotation is Any:
+                continue
+            out[name] = _coerce_param_value(name, out[name], annotation)
+        return out
 
     def to_openai_schema(self) -> Dict[str, Any]:
         """Convert to OpenAI function calling format.
@@ -229,12 +471,16 @@ class ToolRegistry:
         return [t.to_openai_schema() for t in self._tools.values()]
 
     def execute(self, name: str, params: Dict[str, Any]) -> str:
-        """Execute a tool and guarantee a valid JSON return value."""
+        """Execute a tool and guarantee a valid JSON return value.
+
+        v2: routes through tool.invoke() so coercion + error fallback
+        apply uniformly (composite tools get the same guarantees).
+        """
         tool = self._tools.get(name)
         if not tool:
             return json.dumps({"status": "error", "error": f"Tool '{name}' not found"}, ensure_ascii=False)
         try:
-            return tool.execute(**params)
+            return tool.invoke(dict(params))
         except Exception as exc:
             logger.exception("Tool %s failed", name)
             return json.dumps({

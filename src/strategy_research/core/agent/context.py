@@ -169,9 +169,20 @@ class ContextBuilder:
         (name, category, one-line purpose, required params, side effects);
         full details are fetched on demand via the tool_help tool.
         """
-        tools = self.registry.all_tools()
+        try:
+            tools = self.registry.all_tools()
+        except AttributeError:
+            # Legacy registry (e.g. test fakes) without all_tools()
+            tools = []
         if not tools:
-            return "(no tools available)"
+            definitions = self.registry.get_definitions()
+            if not definitions:
+                return "(no tools available)"
+            lines = []
+            for t in definitions:
+                fn = t.get("function", {})
+                lines.append(f"- {fn.get('name', '?')}: {fn.get('description', '')[:120]}")
+            return "\n".join(lines)
         lines = []
         for tool in tools:
             if tool.brief:

@@ -105,7 +105,7 @@ class TestToolEventPayload:
 
         # Register a fake tool so tool_call is emitted
         fake_tool = mock.MagicMock()
-        fake_tool.execute = mock.MagicMock(return_value="ok")
+        fake_tool.invoke = mock.MagicMock(return_value="ok")
         loop.registry.get = mock.MagicMock(return_value=fake_tool)
 
         loop.run("do something")
@@ -149,7 +149,7 @@ class TestToolEventPayload:
 
         # Fake tool that returns plain text
         fake_tool = mock.MagicMock()
-        fake_tool.execute = mock.MagicMock(return_value="output preview text")
+        fake_tool.invoke = mock.MagicMock(return_value="output preview text")
         loop.registry.get = mock.MagicMock(return_value=fake_tool)
 
         loop.run("do something")
@@ -191,7 +191,7 @@ class TestToolEventPayload:
 
         fake_tool = mock.MagicMock()
         # Tool returns a JSON error string starting with the marker
-        fake_tool.execute = mock.MagicMock(
+        fake_tool.invoke = mock.MagicMock(
             return_value='{"status": "error", "error": "boom"}'
         )
         loop.registry.get = mock.MagicMock(return_value=fake_tool)
@@ -344,7 +344,7 @@ class TestBackwardCompat:
         loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
 
         fake_tool = mock.MagicMock()
-        fake_tool.execute = mock.MagicMock(return_value="ok")
+        fake_tool.invoke = mock.MagicMock(return_value="ok")
         loop.registry.get = mock.MagicMock(return_value=fake_tool)
 
         loop.run("hi")
@@ -379,7 +379,7 @@ class TestBackwardCompat:
         loop.client = mock.MagicMock()
         loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
         fake_tool = mock.MagicMock()
-        fake_tool.execute = mock.MagicMock(return_value="ok")
+        fake_tool.invoke = mock.MagicMock(return_value="ok")
         loop.registry.get = mock.MagicMock(return_value=fake_tool)
 
         loop.run("hi")

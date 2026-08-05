@@ -74,7 +74,7 @@
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P1 | 说明书基础设施：模板规范 + 注册时解析器（简略版）+ `tool_help` 工具 | **实施中** |
-| P2 | BaseTool 骨架 v2：ToolContext / 框架统一容错层 / 错误兜底 / effects；loop 注入单点化（sync/async 合一） | 待实施 |
+| P2 | BaseTool 骨架 v2：ToolContext / 框架统一容错层 / 错误兜底 / effects；loop 注入单点化（sync/async 合一） | **已完成** |
 | P3 | 33 个存量工具迁移（一次性切换，无旧 `parameters` dict 回退）：docstring 说明书填写、删手写解析与样板、effects 声明 | 待实施 |
 | P4 | 分层注册重构 + 组合库：核心显式清单 + 能力组 + 组合库加载器 + 组合执行器 | 待实施 |
 | P5 | 契约测试（注册表↔`__all__`↔说明书↔docs 一致性；fix_msg 与说明书同源断言）+ 文档同步 | 待实施 |

@@ -49,7 +49,7 @@ from .circuit_breaker import RetryPolicy, ToolLoopCircuitBreaker
 from .compact import CompactConfig, compact_messages
 from .context import ContextBuilder, estimate_tokens
 from .progress import HeartbeatTimer
-from .tools import ToolRegistry
+from .tools import ToolContext, ToolRegistry, TRANSIENT_TOOL_ERRORS
 from .trace import TraceWriter
 
 logger = logging.getLogger(__name__)
@@ -57,12 +57,10 @@ logger = logging.getLogger(__name__)
 
 # ── Tool-level auto-retry (transient errors only) ───────────────────
 # Shared by sync (_execute_tool_call) and async (_aexecute_tool_call).
+# Transient error types live in tools.py (single source, used by
+# BaseTool.invoke to re-raise them to this retry loop).
 _TOOL_MAX_RETRIES = 2
 _TOOL_RETRY_DELAY = 2.0
-_TRANSIENT_TOOL_ERRORS = (
-    ValueError, TypeError, KeyError, ConnectionError, TimeoutError,
-    OSError, IOError,
-)
 
 
 # ── Cached GoalStore (goal-snapshot injection) ─────────────────────
@@ -1076,15 +1074,23 @@ class AgentLoop:
             })
         kwargs["_progress_callback"] = _progress_callback
 
+        # v2: explicit ToolContext (workspace/session_id kwargs stay for
+        # legacy tools until P3 migration removes them)
+        kwargs["ctx"] = ToolContext(
+            workspace=self.workspace,
+            session_id=self.session_id,
+            emit_progress=_progress_callback,
+        )
+
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors ──────────────
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
             try:
-                output = tool.execute(**kwargs)
+                output = tool.invoke(kwargs)
                 last_exc = None
                 break
-            except _TRANSIENT_TOOL_ERRORS as exc:
+            except TRANSIENT_TOOL_ERRORS as exc:
                 last_exc = exc
                 logger.warning("tool %s raised %s (attempt %d/%d): %s",
                                tc.name, type(exc).__name__, _attempt + 1,
@@ -1276,15 +1282,28 @@ class AgentLoop:
         if "session_id" not in kwargs and self.session_id is not None:
             kwargs["session_id"] = self.session_id
 
+        def _progress_callback(steps: list[str]) -> None:
+            self._emit("tool_progress", {
+                "id": tc.id,
+                "steps": steps,
+            })
+        kwargs["_progress_callback"] = _progress_callback
+
+        kwargs["ctx"] = ToolContext(
+            workspace=self.workspace,
+            session_id=self.session_id,
+            emit_progress=_progress_callback,
+        )
+
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors (sync parity) ─
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
             try:
-                output = await asyncio.to_thread(tool.execute, **kwargs)
+                output = await asyncio.to_thread(tool.invoke, kwargs)
                 last_exc = None
                 break
-            except _TRANSIENT_TOOL_ERRORS as exc:
+            except TRANSIENT_TOOL_ERRORS as exc:
                 last_exc = exc
                 logger.warning("tool %s raised %s (attempt %d/%d): %s",
                                tc.name, type(exc).__name__, _attempt + 1,
