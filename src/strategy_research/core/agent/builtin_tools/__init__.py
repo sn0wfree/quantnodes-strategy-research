@@ -718,41 +718,61 @@ class ComputeFactorTool(BaseTool):
 
 
 class GitDiffTool(BaseTool):
-    """Show git diff of the workspace."""
+    """查看工作区 git 差异（默认未暂存；支持 staged/提交对比/路径过滤）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+    #
+    # ## 用途
+    # 查看 workspace 的 git diff。默认未暂存改动; staged=true 看暂存;
+    # ref1/ref2 对比两个提交。
+    #
+    # ## 参数
+    # - staged: 只看暂存改动 (默认 false)
+    # - ref1/ref2: 提交对比 (需同时给)
+    # - pathspec: 限定路径 (不能以 '-' 开头, 防参数注入)
+    # - max_lines: 返回最大行数 (默认 200)
+    #
+    # ## 示例
+    # {"pathspec": "strategies/momentum_20d/"}
+    #
+    # ## 边界
+    # 只读工具; 要求 workspace 是 git 仓库; 超时 30s。
+    #
+    # ## 错误处理范式
+    # - 非 git 仓库 → error + fix (git init)
+    # - 超时 → fix 用 pathspec 缩小范围
+    # - 均可安全重试
+    #
+    # ## 相关工具
+    # read_file: 看具体文件; write_file: 修改后 diff
+    # ─────────────────────────────────────────────
+    """
 
     name = "git_diff"
     description = (
-        "Show git diff for the workspace. By default shows unstaged changes; "
-        "set staged=true for staged-only, or pass ref1/ref2 to compare specific commits."
+        "查看 workspace git diff (默认未暂存; staged/ref 对比/pathspec 可选)。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "staged": {"type": "boolean", "description": "Show staged changes only."},
-            "ref1": {"type": "string", "description": "First ref for comparison."},
-            "ref2": {"type": "string", "description": "Second ref for comparison."},
-            "pathspec": {"type": "string", "description": "Limit diff to this path."},
-            "max_lines": {"type": "integer", "description": "Max diff lines to return (default 200)."},
-        },
-        "required": ["workspace"],
-    }
     repeatable = True
+    category = "文件"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="git_diff")
-
-        staged = bool(kwargs.get("staged", False))
-        ref1 = kwargs.get("ref1")
-        ref2 = kwargs.get("ref2")
-        pathspec = kwargs.get("pathspec")
-        try:
-            max_lines = safe_get_param(kwargs, "max_lines", int, default=200)
-        except TypeError:
-            max_lines = 200
+    def execute(
+        self,
+        ctx: ToolContext,
+        staged: bool = False,
+        ref1: str | None = None,
+        ref2: str | None = None,
+        pathspec: str | None = None,
+        max_lines: int = 200,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="git_diff",
+            )
+        workspace = ctx.workspace
 
         cmd = ["git", "diff", "--no-color"]
         if staged:
@@ -793,12 +813,6 @@ class GitDiffTool(BaseTool):
                 fix="install git or check PATH",
                 tool="git_diff",
             )
-        except Exception as exc:                    # noqa: BLE001
-            return err_actionable(
-                f"git diff failed: {exc}",
-                fix="check workspace is a git repo with `git status`",
-                tool="git_diff",
-            )
 
         if result.returncode != 0:
             return err_actionable(
@@ -825,35 +839,55 @@ class GitDiffTool(BaseTool):
 
 
 class ListHistoryTool(BaseTool):
-    """List past runs from results.tsv and runs/ directory."""
+    """列出历史回测记录（results.tsv，可按策略过滤，最新在前）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+    #
+    # ## 用途
+    # 查看过去的回测运行记录: 从 strategies/<name>/runs/results.tsv 读取
+    # 摘要行 (含关键指标)。不指定 strategy_name 时找第一个 results.tsv。
+    #
+    # ## 参数
+    # - strategy_name: 按策略过滤 (可选)
+    # - limit: 最大返回行数 (默认 20)
+    #
+    # ## 示例
+    # {"strategy_name": "momentum_20d"}
+    #
+    # ## 边界
+    # 只读工具; 无 results.tsv 时返回空 runs + message。
+    #
+    # ## 错误处理范式
+    # - 读取失败 → error + fix 检查权限
+    # - 无记录不是错误 (返回空列表)
+    #
+    # ## 相关工具
+    # run_backtest: 产生记录; drawdown_analysis: 深度分析
+    # ─────────────────────────────────────────────
+    """
 
     name = "list_history"
     description = (
-        "List past backtest runs. Reads results.tsv and runs/ directory. "
-        "Optionally filter by strategy_name. Returns summary rows with key metrics."
+        "列出历史回测记录 (results.tsv); strategy_name 过滤, limit 限量。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "strategy_name": {"type": "string", "description": "Filter by strategy name."},
-            "limit": {"type": "integer", "description": "Max rows to return (default 20)."},
-        },
-        "required": ["workspace"],
-    }
     repeatable = True
+    category = "回测"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="list_history")
-
-        strategy_name = kwargs.get("strategy_name")
-        try:
-            limit = safe_get_param(kwargs, "limit", int, default=20)
-        except TypeError:
-            limit = 20
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_name: str | None = None,
+        limit: int = 20,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="list_history",
+            )
+        workspace = ctx.workspace
 
         results_path: Path | None = None
         if strategy_name:

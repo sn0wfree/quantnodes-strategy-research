@@ -592,7 +592,7 @@ class TestGitDiffTool:
         self._git_init(workspace)
         (workspace / "new.txt").write_text("hello")
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert "diff" in result
         # new.txt is untracked; may or may not show in diff depending on git version
@@ -604,14 +604,14 @@ class TestGitDiffTool:
         subprocess.run(["git", "add", "new.txt"], cwd=str(workspace),
                        capture_output=True, check=True)
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace, staged=True))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace), staged=True))
         assert result["status"] == "ok"
         assert "+hello" in result["diff"]
 
     def test_empty_diff(self, workspace: Path):
         self._git_init(workspace)
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert result["diff"] == ""
 
@@ -622,7 +622,7 @@ class TestGitDiffTool:
         subprocess.run(["git", "commit", "-m", "v1"], cwd=str(workspace), capture_output=True)
         (workspace / "a.txt").write_text("v2")
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert "-v1" in result["diff"]
         assert "+v2" in result["diff"]
@@ -637,7 +637,7 @@ class TestGitDiffTool:
         (workspace / "unwanted.txt").write_text("v2")
         tool = GitDiffTool()
         result = parse_result(tool.execute(
-            workspace=workspace, pathspec="wanted.txt",
+            ctx=ToolContext(workspace=workspace), pathspec="wanted.txt",
         ))
         assert result["status"] == "ok"
         assert "wanted" in result["diff"]
@@ -648,7 +648,7 @@ class TestGitDiffTool:
         (workspace / "wanted.txt").write_text("x")
         tool = GitDiffTool()
         result = parse_result(tool.execute(
-            workspace=workspace, pathspec="--upload-pack=evil",
+            ctx=ToolContext(workspace=workspace), pathspec="--upload-pack=evil",
         ))
         assert result["status"] == "error"
 
@@ -659,14 +659,14 @@ class TestGitDiffTool:
         subprocess.run(["git", "commit", "-m", "init"], cwd=str(workspace), capture_output=True)
         (workspace / "big.txt").write_text("\n".join(f"line{i}-changed" for i in range(500)))
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace, max_lines=10))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace), max_lines=10))
         assert result["status"] == "ok"
         assert result["truncated"] is True
         assert result["total_lines"] > 10
 
     def test_no_git_repo(self, workspace: Path):
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         # No repo → git diff returns error code 128 → tool reports error
         assert result["status"] == "error"
 
@@ -677,7 +677,7 @@ class TestGitDiffTool:
         subprocess.run(["git", "commit", "-m", "v1"], cwd=str(workspace), capture_output=True)
         (workspace / "a.txt").write_text("v2")
         tool = GitDiffTool()
-        result = parse_result(tool.execute(workspace=workspace, ref1="HEAD"))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace), ref1="HEAD"))
         assert result["status"] == "ok"
         assert "-v1" in result["diff"]
         assert "+v2" in result["diff"]
@@ -689,7 +689,7 @@ class TestGitDiffTool:
 class TestListHistoryTool:
     def test_no_results_tsv(self, workspace: Path):
         tool = ListHistoryTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert result["runs"] == []
 
@@ -703,7 +703,7 @@ class TestListHistoryTool:
         )
         tool = ListHistoryTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="foo",
+            ctx=ToolContext(workspace=workspace), strategy_name="foo",
         ))
         assert result["status"] == "ok"
         assert result["n_rows"] == 2
@@ -720,7 +720,7 @@ class TestListHistoryTool:
         tsv.write_text("\n".join(lines) + "\n")
         tool = ListHistoryTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="foo", limit=5,
+            ctx=ToolContext(workspace=workspace), strategy_name="foo", limit=5,
         ))
         assert result["status"] == "ok"
         assert result["n_rows"] == 5
@@ -731,7 +731,7 @@ class TestListHistoryTool:
         tsv = workspace / "strategies" / "bar" / "runs" / "results.tsv"
         tsv.write_text("run\tcalmar\nrun_0001\t0.4\n")
         tool = ListHistoryTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert "bar" in result["source"]
 
@@ -741,14 +741,14 @@ class TestListHistoryTool:
         tsv.write_text("run\tcalmar\n")  # header only
         tool = ListHistoryTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="foo",
+            ctx=ToolContext(workspace=workspace), strategy_name="foo",
         ))
         assert result["status"] == "ok"
         assert result["runs"] == []
 
     def test_missing_workspace(self):
         tool = ListHistoryTool()
-        result = parse_result(tool.execute())
+        result = parse_result(tool.execute(ctx=ToolContext()))
         assert result["status"] == "error"
 
 
