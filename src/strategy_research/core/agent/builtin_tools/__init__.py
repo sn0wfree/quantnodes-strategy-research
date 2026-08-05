@@ -2543,7 +2543,9 @@ class BenchmarkComparison(BaseTool):
 
         # Compute metrics
         excess_ret = strat_ret - bench_ret
-        beta = float(np.cov(strat_ret, bench_ret)[0, 1] / np.var(bench_ret)) if np.var(bench_ret) > 0 else None
+        bench_var = float(np.var(bench_ret))
+        beta = (float(np.cov(strat_ret, bench_ret, ddof=0)[0, 1] / bench_var)
+                if bench_var > 0 else None)
         alpha_ann = float((np.mean(strat_ret) - beta * np.mean(bench_ret)) * 252) if beta is not None else None
         tracking_error = float(np.std(excess_ret) * np.sqrt(252))
         info_ratio = float(np.mean(excess_ret) * 252 / tracking_error) if tracking_error > 0 else None
