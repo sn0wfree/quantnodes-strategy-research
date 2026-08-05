@@ -482,10 +482,15 @@ async def send_async(body: ChatMessage, request: Request):
         _max_iter = _cfg.max_iterations
     except Exception:
         _max_iter = 50
+    # Shell tools are opt-in: off by default. Set SR_ALLOW_SHELL_TOOLS=1
+    # in the server environment to enable run_command for the agent.
+    import os
+    _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
         max_iterations=_max_iter,
+        allow_shell_tools=_allow_shell,
     )
 
     # Queue-full guard: SessionService returns {"error": "queue_full", ...}
@@ -1420,9 +1425,12 @@ async def send_sync(body: ChatMessage, request: Request):
     _fetch_session_owned(_get_db(), body.session_id, user_id)
 
     service = _get_session_service()
+    import os
+    _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
+        allow_shell_tools=_allow_shell,
     )
     if result.get("error") == "queue_full":
         raise HTTPException(status_code=429, detail=result)

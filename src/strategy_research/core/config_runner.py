@@ -340,7 +340,7 @@ class FactorStrategy:
         date: pd.Timestamp,
     ) -> dict[str, float]:
         """自定义风控."""
-        from .backtest_utils import apply_max_weight, normalize_weights
+        from .utils.backtest_utils import apply_max_weight, normalize_weights
 
         max_weight = self.params.get("max_weight", 0.25)
         weights = apply_max_weight(weights, max_weight)

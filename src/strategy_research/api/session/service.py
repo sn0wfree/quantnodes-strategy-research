@@ -886,6 +886,7 @@ class SessionService:
             event_bus=self.event_bus,
             max_iterations=max_iterations,
             system_prompt_override=system_prompt,  # caller-provided wins
+            allow_shell_tools=allow_shell_tools,
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).

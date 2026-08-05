@@ -2337,6 +2337,12 @@ def build_default_registry() -> ToolRegistry:
         pass
     # Data cleaning tools
     r.register(DataCleanTool())
+    # Shell tools (opt-in, gated by allow_shell_tools)
+    try:
+        from .shell_tools import register_shell_tools
+        register_shell_tools(r)
+    except Exception:
+        pass
     return r
 
 

@@ -35,6 +35,7 @@ def build_chat_agent_loop(
     system_prompt_override: str | None = None,
     registry: Any = None,
     compact_config: Any | None = None,
+    allow_shell_tools: bool = False,
 ) -> AgentLoop:
     """Construct a chat-mode ``AgentLoop``.
 
@@ -51,6 +52,10 @@ def build_chat_agent_loop(
     - ``system_prompt`` is rendered via ``PromptBuilderFactory.get(role)``
       with ``extra_context`` (e.g. ``{"workspace": ..., "tool_list": ...}``)
       unless ``system_prompt_override`` is provided
+    - ``allow_shell_tools`` (default ``False``): opt-in to include
+      ``run_command`` in the registry. When ``False``, the shell tool is
+      removed from the default registry before the agent is built so the
+      LLM never sees it as an available option.
 
     P2 (``allowed_tools`` unlock):
         ``allowed_tools`` defaults to ``None`` (= all tools). Previously
@@ -73,6 +78,11 @@ def build_chat_agent_loop(
             registry = build_default_registry()
         except Exception:
             registry = None
+
+    # Gate shell tools: remove from registry when not allowed
+    if registry is not None and not allow_shell_tools:
+        for shell_tool_name in ("run_command",):
+            registry._tools.pop(shell_tool_name, None)
 
     # System prompt via PromptBuilderFactory (P3: pass real workspace/tool_list)
     if system_prompt_override is not None:
