@@ -1,14 +1,86 @@
-"""BaseTool + ToolRegistry: tool infrastructure."""
+"""BaseTool + ToolRegistry: tool infrastructure.
+
+Paradigm v2: every tool carries a machine-collected brief (注册时从
+docstring 首行 + execute 签名 + effects 生成) and a full docstring
+(详细版说明书, 经 tool_help 按需读取). See docs/agent-tools-reference.md.
+"""
 
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── 副作用声明 (paradigm v2) ────────────────────────────────────────
+# effects 集合声明工具会写什么: db / fs / net。readonly 过滤在 P3 迁移
+# 后由 effects 派生; 迁移前保持 is_readonly 类属性。
+EFFECT_DB = "db"
+EFFECT_FS = "fs"
+EFFECT_NET = "net"
+
+_EFFECT_LABELS = {
+    EFFECT_DB: "写DB",
+    EFFECT_FS: "写FS",
+    EFFECT_NET: "网络",
+}
+
+# 注入参数: 不出现在 LLM schema / 必填列表 (ToolContext 化后在 P2 落地,
+# 此处先排除以免误入必填)。
+_INJECTED_PARAMS = {"self", "ctx", "workspace", "session_id", "_progress_callback"}
+
+
+def _doc_first_line(tool_cls: type) -> str:
+    """docstring 首行 = 简略版用途一句话 (与详细版同源)。"""
+    doc = inspect.getdoc(tool_cls)
+    if doc:
+        line = doc.strip().splitlines()[0].strip()
+        if line:
+            return line[:80]
+    return ""
+
+
+def _required_params(tool: BaseTool) -> List[str]:
+    """execute 显式签名中无默认值的参数; **kwargs 存量工具回退 parameters.required。"""
+    try:
+        sig = inspect.signature(tool.execute)
+    except (TypeError, ValueError):
+        return list(tool.parameters.get("required", []))
+    if any(
+        p.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+        for p in sig.parameters.values()
+    ):
+        return list(tool.parameters.get("required", []))
+    required = [
+        name for name, p in sig.parameters.items()
+        if name not in _INJECTED_PARAMS and p.default is p.empty
+    ]
+    return required or list(tool.parameters.get("required", []))
+
+
+def _effects_label(tool: BaseTool) -> str:
+    """effects 短标; 未声明时按 is_readonly 派生。"""
+    if tool.effects:
+        labels = [_EFFECT_LABELS[e] for e in sorted(tool.effects) if e in _EFFECT_LABELS]
+        if labels:
+            return ",".join(labels)
+    return "只读" if getattr(tool, "is_readonly", True) else "写"
+
+
+def _build_tool_brief(tool: BaseTool) -> str:
+    """注册时生成简略版目录条目。"""
+    summary = _doc_first_line(type(tool))
+    required = _required_params(tool)
+    parts = [f"- {tool.name}[{tool.category}]: {summary}"]
+    if required:
+        parts.append(f"必填: {', '.join(required)}")
+    parts.append(f"副作用: {_effects_label(tool)}")
+    return "；".join(parts)
 
 
 def make_strict_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -92,6 +164,10 @@ class BaseTool(ABC):
     repeatable: bool = False
     is_readonly: bool = True
     strict: bool = False
+    # ── paradigm v2 ─────────────────────────────────────────────
+    category: str = "other"       # 领域分类: 文件/回测/因子/行情/分析/技能/Web/Goal/Shell
+    effects: frozenset[str] = frozenset()  # {EFFECT_DB, EFFECT_FS, EFFECT_NET}
+    brief: str = ""               # 注册时由 ToolRegistry 自动填充
 
     @classmethod
     def check_available(cls) -> bool:
@@ -136,12 +212,17 @@ class ToolRegistry:
         self._tools: Dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool) -> None:
-        """Register a tool."""
+        """Register a tool (collects its brief at registration time)."""
         self._tools[tool.name] = tool
+        tool.brief = _build_tool_brief(tool)
 
     def get(self, name: str) -> Optional[BaseTool]:
         """Retrieve a tool by name."""
         return self._tools.get(name)
+
+    def all_tools(self) -> List[BaseTool]:
+        """All registered tools (stable order)."""
+        return list(self._tools.values())
 
     def get_definitions(self) -> List[Dict[str, Any]]:
         """Return all tools in OpenAI function calling format."""

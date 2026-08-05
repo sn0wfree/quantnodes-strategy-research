@@ -163,24 +163,21 @@ class ContextBuilder:
     # ── Internal helpers ──────────────────────────
 
     def _format_tool_list(self) -> str:
-        """Format tool list for system prompt."""
-        tools = self.registry.get_definitions()
+        """Format tool list for system prompt (paradigm v2 briefs).
+
+        Each tool's registration-time brief is a single lightweight line
+        (name, category, one-line purpose, required params, side effects);
+        full details are fetched on demand via the tool_help tool.
+        """
+        tools = self.registry.all_tools()
         if not tools:
             return "(no tools available)"
         lines = []
-        for t in tools:
-            fn = t.get("function", {})
-            name = fn.get("name", "?")
-            desc = fn.get("description", "")
-            params = fn.get("parameters", {}).get("properties", {})
-            param_strs = []
-            for pname, pinfo in params.items():
-                if isinstance(pinfo, dict):
-                    ptype = pinfo.get("type", "?")
-                    pdesc = pinfo.get("description", "")
-                    param_strs.append(f"{pname}:{ptype} ({pdesc})" if pdesc else f"{pname}:{ptype}")
-            params_str = ", ".join(param_strs) if param_strs else "no params"
-            lines.append(f"- {name}({params_str}): {desc[:120]}")
+        for tool in tools:
+            if tool.brief:
+                lines.append(tool.brief)
+            else:
+                lines.append(f"- {tool.name}: {tool.description[:120]}")
         return "\n".join(lines)
 
     def _format_memory_snapshot(self) -> str:
