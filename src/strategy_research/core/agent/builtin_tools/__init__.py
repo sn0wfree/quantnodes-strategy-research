@@ -33,7 +33,7 @@ from ..sandbox import (
     PathWhitelist,
     validate_python_source,
 )
-from ..tools import BaseTool, ToolRegistry
+from ..tools import BaseTool, ToolContext, ToolRegistry
 from .utils import err_actionable, safe_get_param, try_unwrap_list, try_unwrap_dict
 
 logger = logging.getLogger(__name__)
@@ -79,33 +79,62 @@ def _workspace_error(exc: ValueError, *, tool: str) -> str:
 
 
 class ReadFileTool(BaseTool):
-    """Read a file from the workspace (read-only)."""
+    """读取工作区文件内容（只读，可限制行数）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext; schema 自动派生)
+    #
+    # ## 用途
+    # 读取工作区内文件内容, 支持 limit/offset 分片。路径相对 workspace,
+    # 必须位于允许的读取根目录 (strategies/templates/memory/logs/data/docs/.)。
+    #
+    # ## 参数
+    # - path: 相对 workspace 的文件路径 (必填)
+    # - limit: 返回的最大行数 (可选)
+    # - offset: 起始行偏移, 0 起 (可选)
+    #
+    # ## 示例
+    # {"path": "strategies/momentum_20d/strategy.py"}
+    #
+    # ## 边界
+    # 只读工具; 白名单外路径/绝对路径/.. 会被拒绝; 二进制/非 UTF-8 文件报错。
+    #
+    # ## 错误处理范式
+    # - 缺 path → error + expected 示例
+    # - 白名单外 → error + fix 提示允许根目录
+    # - 文件不存在/是目录 → error + fix 用 list_files 确认
+    # - 非 UTF-8 → 提示用 read_document 或跳过
+    # - 所有失败均可安全重试
+    #
+    # ## 相关工具
+    # list_files: 浏览目录; write_file: 写入
+    # ─────────────────────────────────────────────
+    """
 
     name = "read_file"
     description = (
-        "Read a file from the workspace. Returns file contents (with optional "
-        "line limit). Path is relative to workspace and must be under an allowed "
-        "read root (strategies/templates/memory/logs/data/docs/.)."
+        "读取工作区内文件内容 (行数限制可选); 路径相对 workspace, "
+        "限允许根目录 (strategies/templates/memory/logs/data/docs/.)。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "path": {"type": "string", "description": "File path relative to workspace."},
-            "limit": {"type": "integer", "description": "Max number of lines to return."},
-            "offset": {"type": "integer", "description": "Line offset to start reading (0-indexed)."},
-        },
-        "required": ["workspace", "path"],
-    }
     repeatable = True
+    category = "文件"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="read_file")
+    def execute(
+        self,
+        ctx: ToolContext,
+        path: str,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="read_file",
+            )
+        workspace = ctx.workspace
 
-        path = kwargs.get("path")
         if not isinstance(path, str) or not path:
             return err_actionable(
                 "missing or invalid 'path'",
@@ -114,14 +143,6 @@ class ReadFileTool(BaseTool):
                 fix="pass path='strategies/<name>/strategy.py' or 'templates/strategy.py'",
                 tool="read_file",
             )
-        try:
-            limit = safe_get_param(kwargs, "limit", int) if kwargs.get("limit") is not None else None
-        except TypeError:
-            limit = None
-        try:
-            offset = safe_get_param(kwargs, "offset", int, default=0)
-        except TypeError:
-            offset = 0
 
         wl = PathWhitelist(workspace=workspace)
         try:
@@ -186,33 +207,58 @@ class ReadFileTool(BaseTool):
 
 
 class ListFilesTool(BaseTool):
-    """List files and directories in the workspace."""
+    """列出工作区目录内容（文件/子目录，支持 glob）。 
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+    #
+    # ## 用途
+    # 浏览工作区目录结构: 文件与子目录清单 (含大小)。读文件前先用它探索。
+    #
+    # ## 参数
+    # - path: 目录路径, 相对 workspace (默认 '.')
+    # - pattern: glob 过滤 (可选, 如 '*.py' / 'strategies/*')
+    #
+    # ## 示例
+    # {"path": "strategies"}
+    #
+    # ## 边界
+    # 只读工具; 仅限 workspace 内目录; 文件路径会报错 (用 read_file)。
+    #
+    # ## 错误处理范式
+    # - 路径不存在 → error + fix 提示顶层结构
+    # - 目标是文件 → error + fix 用 read_file
+    # - 均可安全重试
+    #
+    # ## 相关工具
+    # read_file: 读文件内容; write_file: 写入
+    # ─────────────────────────────────────────────
+    """
 
     name = "list_files"
     description = (
-        "List files and subdirectories in a workspace directory. "
-        "Use this to explore the workspace structure before reading files. "
-        "Path is relative to workspace root."
+        "列出工作区目录内容 (文件/子目录, 含大小); path 相对 workspace, "
+        "可用 glob pattern 过滤。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "path": {"type": "string", "description": "Directory path relative to workspace (default: root).", "default": "."},
-            "pattern": {"type": "string", "description": "Glob pattern filter (e.g. '*.py', 'strategies/*')."},
-        },
-        "required": ["workspace"],
-    }
     repeatable = True
+    category = "文件"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="list_files")
+    def execute(
+        self,
+        ctx: ToolContext,
+        path: str = ".",
+        pattern: str | None = None,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="list_files",
+            )
+        workspace = ctx.workspace
 
-        rel_path = kwargs.get("path", ".") or "."
-        pattern = kwargs.get("pattern")
+        rel_path = path or "."
 
         target = (workspace / rel_path).resolve()
         if not target.exists():
@@ -231,33 +277,26 @@ class ListFilesTool(BaseTool):
                 tool="list_files",
             )
 
-        try:
-            entries = []
-            if pattern:
-                for p in sorted(target.glob(pattern)):
-                    entries.append({
-                        "name": p.name,
-                        "type": "dir" if p.is_dir() else "file",
-                        "size": p.stat().st_size if p.is_file() else None,
-                    })
-            else:
-                for p in sorted(target.iterdir()):
-                    entries.append({
-                        "name": p.name,
-                        "type": "dir" if p.is_dir() else "file",
-                        "size": p.stat().st_size if p.is_file() else None,
-                    })
-            return _ok({
-                "path": str(target),
-                "entries": entries,
-                "count": len(entries),
-            })
-        except Exception as exc:
-            return err_actionable(
-                f"list failed: {exc}",
-                fix="check filesystem permissions",
-                tool="list_files",
-            )
+        entries = []
+        if pattern:
+            for p in sorted(target.glob(pattern)):
+                entries.append({
+                    "name": p.name,
+                    "type": "dir" if p.is_dir() else "file",
+                    "size": p.stat().st_size if p.is_file() else None,
+                })
+        else:
+            for p in sorted(target.iterdir()):
+                entries.append({
+                    "name": p.name,
+                    "type": "dir" if p.is_dir() else "file",
+                    "size": p.stat().st_size if p.is_file() else None,
+                })
+        return _ok({
+            "path": str(target),
+            "entries": entries,
+            "count": len(entries),
+        })
 
 
 # ── 2. WriteFileTool ────────────────────────────────────────────────

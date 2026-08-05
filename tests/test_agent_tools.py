@@ -21,7 +21,7 @@ from strategy_research.core.agent.builtin_tools import (
     WriteFileTool,
     build_default_registry,
 )
-from strategy_research.core.agent.tools import ToolRegistry
+from strategy_research.core.agent.tools import ToolContext, ToolRegistry
 
 
 # ── Shared fixture ───────────────────────────────────────────────────
@@ -89,7 +89,7 @@ class TestListFilesTool:
 
     def test_list_root(self, workspace):
         tool = ListFilesTool()
-        result = parse_result(tool.execute(workspace=str(workspace)))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert result["count"] >= 4
         names = [e["name"] for e in result["entries"]]
@@ -100,7 +100,7 @@ class TestListFilesTool:
     def test_list_subdirectory(self, workspace):
         tool = ListFilesTool()
         result = parse_result(tool.execute(
-            workspace=str(workspace), path="strategies"
+            ctx=ToolContext(workspace=workspace), path="strategies"
         ))
         assert result["status"] == "ok"
         assert result["count"] == 0  # empty dir
@@ -110,7 +110,7 @@ class TestListFilesTool:
         (workspace / "b.py").write_text("y")
         tool = ListFilesTool()
         result = parse_result(tool.execute(
-            workspace=str(workspace), pattern="*.md"
+            ctx=ToolContext(workspace=workspace), pattern="*.md"
         ))
         assert result["status"] == "ok"
         names = [e["name"] for e in result["entries"]]
@@ -121,7 +121,7 @@ class TestListFilesTool:
     def test_entry_types_and_sizes(self, workspace):
         tool = ListFilesTool()
         result = parse_result(tool.execute(
-            workspace=str(workspace), path="."
+            ctx=ToolContext(workspace=workspace), path="."
         ))
         by_name = {e["name"]: e for e in result["entries"]}
         assert by_name["strategies"]["type"] == "dir"
@@ -131,7 +131,7 @@ class TestListFilesTool:
     def test_path_not_found(self, workspace):
         tool = ListFilesTool()
         result = parse_result(tool.execute(
-            workspace=str(workspace), path="nope"
+            ctx=ToolContext(workspace=workspace), path="nope"
         ))
         assert result["status"] == "error"
         assert "not found" in result["error"]
@@ -139,14 +139,14 @@ class TestListFilesTool:
     def test_path_is_file(self, workspace):
         tool = ListFilesTool()
         result = parse_result(tool.execute(
-            workspace=str(workspace), path="README.md"
+            ctx=ToolContext(workspace=workspace), path="README.md"
         ))
         assert result["status"] == "error"
         assert "not a directory" in result["error"]
 
     def test_missing_workspace(self):
         tool = ListFilesTool()
-        result = parse_result(tool.execute(path="."))
+        result = parse_result(tool.execute(ctx=ToolContext()))
         assert result["status"] == "error"
         assert "workspace" in result["error"]
 
@@ -165,7 +165,7 @@ class TestReadFileTool:
         (workspace / "README.md").write_text("hello\nworld\n")
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="README.md",
+            ctx=ToolContext(workspace=workspace), path="README.md",
         ))
         assert result["status"] == "ok"
         assert result["content"] == "hello\nworld"
@@ -175,7 +175,7 @@ class TestReadFileTool:
         (workspace / "data" / "x.txt").write_text("\n".join(f"line{i}" for i in range(10)))
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="data/x.txt", limit=3,
+            ctx=ToolContext(workspace=workspace), path="data/x.txt", limit=3,
         ))
         assert result["status"] == "ok"
         assert result["content"] == "line0\nline1\nline2"
@@ -184,7 +184,7 @@ class TestReadFileTool:
         (workspace / "data" / "x.txt").write_text("\n".join(f"line{i}" for i in range(10)))
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="data/x.txt", offset=7, limit=2,
+            ctx=ToolContext(workspace=workspace), path="data/x.txt", offset=7, limit=2,
         ))
         assert result["status"] == "ok"
         assert result["content"] == "line7\nline8"
@@ -192,7 +192,7 @@ class TestReadFileTool:
     def test_read_nonexistent(self, workspace: Path):
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="data/nonexistent.txt",
+            ctx=ToolContext(workspace=workspace), path="data/nonexistent.txt",
         ))
         assert result["status"] == "error"
         assert "not found" in result["error"]
@@ -200,32 +200,35 @@ class TestReadFileTool:
     def test_read_outside_whitelist(self, workspace: Path):
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="../../../etc/passwd",
+            ctx=ToolContext(workspace=workspace), path="../../../etc/passwd",
         ))
         assert result["status"] == "error"
 
     def test_read_absolute_path_blocked(self, workspace: Path):
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="/etc/passwd",
+            ctx=ToolContext(workspace=workspace), path="/etc/passwd",
         ))
         assert result["status"] == "error"
 
     def test_read_missing_workspace(self):
         tool = ReadFileTool()
-        result = parse_result(tool.execute(path="x"))
+        result = parse_result(tool.execute(ctx=ToolContext(), path="x"))
         assert result["status"] == "error"
         assert "workspace" in result["error"]
 
     def test_read_missing_path(self, workspace: Path):
         tool = ReadFileTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(
+            ctx=ToolContext(workspace=workspace), path="",
+        ))
         assert result["status"] == "error"
+        assert "path" in result["error"]
 
     def test_read_directory_as_file(self, workspace: Path):
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="strategies",
+            ctx=ToolContext(workspace=workspace), path="strategies",
         ))
         assert result["status"] == "error"
         assert "not a regular file" in result["error"]
@@ -235,7 +238,7 @@ class TestReadFileTool:
         (workspace / "data" / "x.bin").write_bytes(b"\xff\xfe\xfd\xfc")
         tool = ReadFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="data/x.bin",
+            ctx=ToolContext(workspace=workspace), path="data/x.bin",
         ))
         assert result["status"] == "error"
         assert "UTF-8" in result["error"]
@@ -760,7 +763,7 @@ class TestIntegration:
         (workspace / "memory" / "notes.md").write_text("integration test\n")
         r = build_default_registry()
         result = json.loads(r.execute("read_file", {
-            "workspace": workspace, "path": "memory/notes.md",
+            "ctx": ToolContext(workspace=workspace), "path": "memory/notes.md",
         }))
         assert result["status"] == "ok"
         assert "integration test" in result["content"]
@@ -778,8 +781,9 @@ class TestIntegration:
             assert tool is not None
             assert tool.name == name
             assert isinstance(tool.description, str) and tool.description
-            assert tool.parameters.get("type") == "object"
-            assert "properties" in tool.parameters
+            schema = tool.to_openai_schema()["function"]["parameters"]
+            assert schema.get("type") == "object"
+            assert "properties" in schema
 
     def test_kwargs_injection_workspace(self, workspace: Path):
         """All tools should accept 'workspace' kwarg and respect it."""
@@ -788,6 +792,6 @@ class TestIntegration:
 
         # ReadFile
         result = json.loads(r.execute("read_file", {
-            "workspace": workspace, "path": "README.md",
+            "ctx": ToolContext(workspace=workspace), "path": "README.md",
         }))
         assert "ws-specific content" in result["content"]

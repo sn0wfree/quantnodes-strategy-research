@@ -260,6 +260,67 @@ def _list_example(annotation: Any) -> str:
     return "[...]"
 
 
+def _schema_from_signature(tool: BaseTool) -> Optional[Dict[str, Any]]:
+    """显式签名 → JSON Schema (paradigm v2 单源)。
+
+    - ctx/注入参数不进 schema
+    - 注解: str/int/float/bool/list[X]/dict/X|None (单非 None 分支)
+    - 无默认值参数 → required
+    - **kwargs 存量工具或无可用注解 → None (回退手写 parameters)
+    """
+    try:
+        sig = inspect.signature(tool.execute)
+        hints = get_type_hints(tool.execute)
+    except (TypeError, ValueError, NameError, AttributeError):
+        return None
+    if any(
+        p.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+        for p in sig.parameters.values()
+    ):
+        return None
+    properties: Dict[str, Any] = {}
+    required: List[str] = []
+    for name, p in sig.parameters.items():
+        if name in _INJECTED_PARAMS:
+            continue
+        annotation = hints.get(name, p.annotation)
+        if annotation is p.empty or annotation is Any:
+            continue
+        js = _annotation_to_json_schema(annotation)
+        if js is None:
+            continue
+        properties[name] = js
+        if p.default is p.empty:
+            required.append(name)
+    if not properties:
+        return None
+    return {"type": "object", "properties": properties, "required": required}
+
+
+def _annotation_to_json_schema(annotation: Any) -> Optional[Dict[str, Any]]:
+    origin = get_origin(annotation)
+    if origin is Union or origin is types.UnionType:
+        non_none = [a for a in get_args(annotation) if a is not type(None)]
+        if len(non_none) == 1:
+            return _annotation_to_json_schema(non_none[0])
+        return None
+    if origin is list:
+        inner = get_args(annotation)
+        item = _annotation_to_json_schema(inner[0]) if inner else {}
+        return {"type": "array", "items": item or {}}
+    if origin is dict:
+        return {"type": "object"}
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    return None
+
+
 def make_strict_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively inject OpenAI strict-mode requirements.
 
@@ -427,11 +488,17 @@ class BaseTool(ABC):
     def to_openai_schema(self) -> Dict[str, Any]:
         """Convert to OpenAI function calling format.
 
+        v2: parameters derive from the execute signature (annotations +
+        defaults) when available; legacy **kwargs tools fall back to the
+        hand-written `parameters` dict until migrated.
+
         When ``strict=True``, the schema is rewritten to comply with
         OpenAI's structured outputs requirements and a ``strict`` flag
         is added so the provider enforces it server-side.
         """
-        params = self.parameters or {"type": "object", "properties": {}, "required": []}
+        params = _schema_from_signature(self)
+        if params is None:
+            params = self.parameters or {"type": "object", "properties": {}, "required": []}
         if self.strict:
             params = make_strict_schema(params)
         fn_def: Dict[str, Any] = {
