@@ -42,6 +42,8 @@ import { EVENT_TYPES, HANDLERS, type SSEContext, type SSEEventType } from './sse
  */
 export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
+  const isFirstConnect = useRef(true)
+  const prevSessionId = useRef<string | null>(null)
 
   const addMessage = useChatStore((s) => s.addMessage)
   const updateMessage = useChatStore((s) => s.updateMessage)
@@ -136,6 +138,11 @@ export function useSSE(sessionId: string | null) {
     if (sourceRef.current) {
       sourceRef.current.close()
     }
+    // Reset first-connect flag when session changes
+    if (prevSessionId.current !== sessionId) {
+      isFirstConnect.current = true
+      prevSessionId.current = sessionId
+    }
 
     useSSEStore.getState().setStatus('connecting')
 
@@ -151,15 +158,32 @@ export function useSSE(sessionId: string | null) {
 
     es.onopen = () => {
       useSSEStore.getState().setStatus('connected')
+      if (isFirstConnect.current) {
+        isFirstConnect.current = false
+      } else {
+        // Reconnect: clean stale streaming state that may be stuck
+        const chat = useChatStore.getState()
+        if (chat.streamingMessageId) {
+          chat.setStreamingMessage(null)
+          chat.setActiveAttempt(null)
+        }
+        console.debug('[SSE] reconnected — cleared stale streaming state')
+      }
     }
 
     es.onerror = (e) => {
       // Let the browser's native EventSource reconnect automatically —
       // it sends the Last-Event-ID header so missed events are replayed.
-      // We only update status; no manual close/setTimeout reconnect.
       const target = e.currentTarget as EventSource | null
       if (target) {
         console.debug('[SSE] onerror readyState=%s', target.readyState)
+        if (target.readyState === EventSource.CLOSED) {
+          // Permanent disconnect — browser won't auto-reconnect.
+          // Create a new EventSource after a short delay.
+          console.warn('[SSE] EventSource CLOSED, reconnecting in 1s...')
+          setTimeout(() => connect(), 1000)
+          return
+        }
       } else {
         console.debug('[SSE] onerror')
       }

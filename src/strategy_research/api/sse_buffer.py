@@ -81,7 +81,11 @@ class SSEEventBuffer:
         return event_id
 
     def replay_from(self, event_id: str, session_id: str) -> list[SSEEvent]:
-        """Replay all events after the given event ID for a session."""
+        """Replay all events after the given event ID for a session.
+
+        If the event_id is not found (evicted by TTL/capacity), falls back
+        to returning the most recent events for the session.
+        """
         with self._lock:
             events = []
             found = False
@@ -92,6 +96,10 @@ class SSEEventBuffer:
                     events.append(e)
                 elif e.id == event_id:
                     found = True
+            if not found:
+                # event_id was evicted — return recent events instead
+                all_session = [e for e in self._buffer if e.session_id == session_id]
+                return all_session[-200:]
             return events
 
     def get_events_since(self, session_id: str, last_id: str = "") -> list[SSEEvent]:
@@ -99,6 +107,7 @@ class SSEEventBuffer:
 
         If last_id is empty, returns recent events for the session
         (capped at 200 to avoid excessive first-connect replay).
+        If last_id is not found (evicted), falls back to recent events.
         """
         with self._lock:
             if not last_id:
@@ -114,6 +123,10 @@ class SSEEventBuffer:
                     events.append(e)
                 elif e.id == last_id:
                     found = True
+            if not found:
+                # last_id was evicted — fall back to recent events
+                all_session = [e for e in self._buffer if e.session_id == session_id]
+                return all_session[-200:]
             return events
 
     def register_session(self, session_id: str) -> asyncio.Event:
