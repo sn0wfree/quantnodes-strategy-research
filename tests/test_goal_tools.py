@@ -248,6 +248,89 @@ class TestGoalTools:
         assert data["status"] == "ok"
         assert data["has_goal"] is False
 
+    def test_add_evidence_single_criterion_auto_attach(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        goal = store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["Only criterion"],
+        )
+        tool = AddEvidenceTool()
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = tool.execute(
+                ctx=ToolContext(session_id="test-session"),
+                text="Free-form note",
+            )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        criteria = store.list_criteria(goal.goal_id)
+        assert data["auto_attached_to"] == [criteria[0].criterion_id]
+        evidence = store.list_evidence(goal.goal_id)
+        assert len(evidence) == 1
+        assert evidence[0].criterion_id == criteria[0].criterion_id
+
+    def test_add_evidence_explicit_criterion_id_no_auto(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        goal = store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["C1", "C2"],
+        )
+        criteria = store.list_criteria(goal.goal_id)
+        target = criteria[0].criterion_id
+        tool = AddEvidenceTool()
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = tool.execute(
+                ctx=ToolContext(session_id="test-session"),
+                text="Only for C1",
+                criterion_id=target,
+            )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        assert data.get("auto_attached_to") is None
+        evidence = store.list_evidence(goal.goal_id)
+        assert len(evidence) == 1
+        assert evidence[0].criterion_id == target
+
+    def test_get_goal_status_progress_after_auto_attach(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["C1", "C2"],
+        )
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = AddEvidenceTool().execute(
+                ctx=ToolContext(session_id="test-session"),
+                text="Covers all",
+            )
+        data = json.loads(result)
+        assert data["progress_percent"] == 100.0
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = GetGoalStatusTool().execute(
+                ctx=ToolContext(session_id="test-session"),
+            )
+        data = json.loads(result)
+        assert data["progress_percent"] == 100.0
+
+    def test_add_evidence_unknown_criterion_id_error(self, workspace, tmp_goal_db):
+        store, db_path = tmp_goal_db
+        store.replace_goal(
+            session_id="test-session",
+            objective="Test goal",
+            criteria=["C1"],
+        )
+        tool = AddEvidenceTool()
+        with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
+            result = tool.execute(
+                ctx=ToolContext(session_id="test-session"),
+                text="Bad criterion",
+                criterion_id="crit_nonexistent",
+            )
+        data = json.loads(result)
+        assert data["status"] == "error"
+        assert "criterion" in data["error"].lower()
+
     def test_list_goals_tool(self, workspace, tmp_goal_db):
         store, db_path = tmp_goal_db
         store.replace_goal(

@@ -1141,6 +1141,8 @@ class AgentLoop:
             "type": "tool_result",
             "tool": tc.name,
             "call_id": tc.id,
+            "status": status_str,
+            "iteration": getattr(self, "_current_iter", 0),
             "elapsed_ms": elapsed_ms,
             "output_preview": output_preview,
         })
@@ -1353,6 +1355,8 @@ class AgentLoop:
             "type": "tool_result",
             "tool": tc.name,
             "call_id": tc.id,
+            "status": status_str,
+            "iteration": getattr(self, "_current_iter", 0),
             "elapsed_ms": elapsed_ms,
             "output_preview": output_preview,
         })
