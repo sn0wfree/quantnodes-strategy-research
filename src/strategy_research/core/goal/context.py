@@ -81,15 +81,26 @@ def goal_progress_tuple(snapshot: dict[str, Any]) -> tuple[int, int]:
 
 
 def goal_needs_continuation(snapshot: dict[str, Any]) -> bool:
-    """Return whether the runtime should keep working on this goal."""
+    """Return whether the runtime should keep working on this goal.
+
+    Returns True only when the goal status is continuable AND at
+    least one required criterion remains uncovered.  When there are
+    no criteria, or all required criteria are already covered, there
+    is nothing left for the runtime to drive, so it should stop and
+    let the LLM finish normally.
+    """
     goal = snapshot.get("goal") or {}
     status = str(goal.get("status") or "").lower()
     if status not in CONTINUABLE_GOAL_STATUSES:
         return False
     criteria = snapshot.get("criteria") or []
     if not criteria:
-        return True
-    return True
+        return False
+    open_required = [
+        c for c in criteria
+        if c.get("required", True) and not criterion_is_covered(snapshot, c)
+    ]
+    return bool(open_required)
 
 
 def format_goal_continuation_prompt(snapshot: dict[str, Any], previous_answer: str = "") -> str:

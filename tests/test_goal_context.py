@@ -229,20 +229,54 @@ class TestGoalProgress:
 
 
 class TestGoalNeedsContinuation:
-    def test_active_needs_continuation(self):
-        snap = _make_snapshot(status="active")
+    def test_active_with_open_criterion_needs_continuation(self):
+        snap = _make_snapshot(
+            status="active",
+            criteria=[
+                {"criterion_id": "c1", "text": "open", "status": "pending", "required": True},
+            ],
+        )
         assert goal_needs_continuation(snap) is True
 
+    def test_active_with_empty_criteria_does_not_continue(self):
+        """Empty criteria → nothing to drive → False (regression fix)."""
+        snap = _make_snapshot(status="active")
+        assert goal_needs_continuation(snap) is False
+
+    def test_active_with_all_covered_does_not_continue(self):
+        snap = _make_snapshot(
+            status="active",
+            criteria=[
+                {"criterion_id": "c1", "text": "done", "status": "covered", "required": True},
+            ],
+        )
+        assert goal_needs_continuation(snap) is False
+
     def test_complete_does_not_need(self):
-        snap = _make_snapshot(status="complete")
+        snap = _make_snapshot(
+            status="complete",
+            criteria=[
+                {"criterion_id": "c1", "text": "t", "status": "pending", "required": True},
+            ],
+        )
         assert goal_needs_continuation(snap) is False
 
     def test_cancelled_does_not_need(self):
-        snap = _make_snapshot(status="cancelled")
+        snap = _make_snapshot(
+            status="cancelled",
+            criteria=[
+                {"criterion_id": "c1", "text": "t", "status": "pending", "required": True},
+            ],
+        )
         assert goal_needs_continuation(snap) is False
 
     def test_paused_does_not_need(self):
-        snap = _make_snapshot(status="paused")
+        snap = _make_snapshot(
+            status="paused",
+            criteria=[
+                {"criterion_id": "c1", "text": "t", "status": "pending", "required": True},
+            ],
+        )
         assert goal_needs_continuation(snap) is False
 
 
