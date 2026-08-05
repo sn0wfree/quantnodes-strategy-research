@@ -53,7 +53,6 @@ class TestAllToolsStructuredErrors:
         ("factor_analysis", {"factor_code": "x"}),
         ("list_skills", {}),
         ("load_skill", {"name": "x"}),
-        ("options_pricing", {}),
         ("factor_cross_sectional_analysis", {"factor_code": "x"}),
         ("factor_quintile_returns", {"factor_code": "x"}),
         ("factor_ic_decay", {"factor_code": "x"}),
@@ -142,19 +141,20 @@ class TestToolErrorStructure:
     def test_get_market_data_empty_codes(self, registry, workspace):
         """get_market_data with no codes → actionable error."""
         tool = registry.get("get_market_data")
-        result = json.loads(tool.execute(
-            workspace=str(workspace), codes=[], start_date="2023-01-01", end_date="2023-12-31"
-        ))
+        result = json.loads(tool.invoke({
+            "ctx": ToolContext(workspace=workspace), "codes": [],
+            "start_date": "2023-01-01", "end_date": "2023-12-31",
+        }))
         assert result["status"] == "error"
         assert "codes" in result["error"]
 
     def test_import_data_dict_wrapped(self, registry, workspace):
         """import_data with dict-wrapped list → auto-unwrap."""
         tool = registry.get("import_data")
-        result = json.loads(tool.execute(
-            workspace=str(workspace),
-            data={"600519.SH": {"item": [{"trade_date": "2023-12-11", "close": 100}]}},
-        ))
+        result = json.loads(tool.invoke({
+            "ctx": ToolContext(workspace=workspace),
+            "data": {"600519.SH": {"item": [{"trade_date": "2023-12-11", "close": 100}]}},
+        }))
         # Even if DuckDB fails on missing init, the unwrap or schema should be ok
         # The error should NOT be "no date column" anymore
         err = result.get("error", "")
@@ -171,9 +171,9 @@ class TestUnwrapInRealTools:
         """The LLM shape {"item": [...]} is unwrapped before column check."""
         from strategy_research.core.agent.builtin_tools.data_tools import ImportDataTool
         tool = ImportDataTool()
-        result = json.loads(tool.execute(
-            workspace=str(workspace),
-            data={"A": {"item": [{"trade_date": "2023-12-11", "close": 100}]}},
-        ))
+        result = json.loads(tool.invoke({
+            "ctx": ToolContext(workspace=workspace),
+            "data": {"A": {"item": [{"trade_date": "2023-12-11", "close": 100}]}},
+        }))
         # No "no date column" error
         assert "no date column" not in result.get("error", "")

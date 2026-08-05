@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..tools import BaseTool, ToolRegistry
-from .utils import err_actionable, safe_get_param, try_unwrap_list
+from ..tools import BaseTool, EFFECT_DB, EFFECT_FS, EFFECT_NET, ToolContext, ToolRegistry
+from .utils import err_actionable, try_unwrap_dict, try_unwrap_list
 
 logger = logging.getLogger(__name__)
 
@@ -28,60 +28,68 @@ def _err(message: str, **extra: Any) -> str:
 
 
 class GetMarketDataTool(BaseTool):
-    """Fetch OHLCV market data and persist it into the workspace DuckDB.
+    """获取 OHLCV 行情并持久化到工作区 DuckDB（一步完成）。
 
-    Fetches via the loader fallback chain, optionally writes the full OHLCV
-    into the workspace DuckDB ``price_data`` table (so backtests / factor
-    tools can use it), and returns a compact summary + small preview — the
-    full rows never enter the LLM prompt (context-overflow fix, see
-    docs/context-overflow-fix.md).
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext; 副作用改 effects)
+    #
+    # ## 用途
+    # 按 fallback 链获取 OHLCV 行情, persist=True (默认) 直接写入
+    # DuckDB price_data (回测/因子立即可用), 返回摘要+预览;
+    # 全量数据不进 LLM prompt (context 安全)。
+    #
+    # ## 参数
+    # - codes: 资产代码列表 (必填, 如 ['600519.SH','000858.SZ'])
+    # - start_date/end_date: ISO 日期 (必填)
+    # - interval: K 线周期 (默认 '1D')
+    # - source: 数据源覆盖 (可选)
+    # - max_rows: 每代码最大行数 (默认 500)
+    # - persist: 是否入库 (默认 True; False 只查看)
+    # - strategy_name: 数据分区名 (默认 'default')
+    # - force_refresh: 跳过缓存强制网络取数 (默认 False)
+    #
+    # ## 示例
+    # {"codes": ["600519.SH"], "start_date": "2023-01-01", "end_date": "2023-12-31"}
+    #
+    # ## 边界
+    # 写工具 (effects: db + net); 幂等 (INSERT OR REPLACE);
+    # 纯数字代码会误判为 FRED/macro, A 股务必带后缀。
+    #
+    # ## 错误处理范式
+    # - 缺 codes/日期 → error + expected 示例
+    # - 日期范围非法 → error + 校验说明
+    # - 指定 source 不可用 → error + 可用源列表
+    # - 网络失败 → error (transient, 可重试)
+    # - persist=True 幂等, 重试安全
+    #
+    # ## 相关工具
+    # run_backtest/compute_factor/factor_*: 数据消费方
+    # ─────────────────────────────────────────────
     """
 
     name = "get_market_data"
     description = (
-        "Fetch OHLCV market data for given codes using the data source fallback "
-        "chain. Auto-detects market type (A-share, US, HK, crypto, etc.) and "
-        "selects the best available loader. With persist=True (default), the "
-        "data is written into the workspace DuckDB and is immediately usable by "
-        "run_backtest / compute_factor / factor_*. Returns a compact summary + "
-        "small preview; the full rows are NOT returned to the prompt."
+        "获取 OHLCV 行情, persist=True (默认) 一步写入 DuckDB; 返回摘要+预览, "
+        "全量数据不进 prompt。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "codes": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of asset codes (e.g. ['000001.SZ', '600519.SH']).",
-            },
-            "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)."},
-            "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)."},
-            "interval": {"type": "string", "description": "K-line interval (default '1D').", "default": "1D"},
-            "source": {"type": "string", "description": "Optional data source override (e.g. 'tushare')."},
-            "max_rows": {"type": "integer", "description": "Max rows per code (default 500).", "default": 500},
-            "persist": {
-                "type": "boolean",
-                "description": "Whether to write data into the workspace DuckDB (default True). "
-                "Set False to only inspect data without persisting.",
-                "default": True,
-            },
-            "strategy_name": {
-                "type": "string",
-                "description": "Strategy name for data partitioning (default 'default').",
-                "default": "default",
-            },
-            "force_refresh": {
-                "type": "boolean",
-                "description": "Skip cache, always fetch fresh data from network (default False).",
-                "default": False,
-            },
-        },
-        "required": ["codes", "start_date", "end_date"],
-    }
-    is_readonly = False
     repeatable = True
+    category = "行情"
+    effects = frozenset({EFFECT_DB, EFFECT_NET})
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        codes: list[str],
+        start_date: str,
+        end_date: str,
+        interval: str = "1D",
+        source: str | None = None,
+        max_rows: int = 500,
+        persist: bool = True,
+        strategy_name: str = "default",
+        force_refresh: bool = False,
+    ) -> str:
         from ...data_source.base import validate_date_range
         from ...data_source.registry import (
             LOADER_REGISTRY,
@@ -90,46 +98,29 @@ class GetMarketDataTool(BaseTool):
         )
         from ...data_source.utils import detect_market
 
-        # Defensive reads: LLM may stringify codes as JSON, or pass them
-        # as a single string "A,B,C", or wrap them in a dict.
-        try:
-            codes = safe_get_param(kwargs, "codes", list)
-        except TypeError as exc:
-            # Fall back: maybe the LLM passed "A,B,C" as a single string
-            raw_codes = kwargs.get("codes")
-            if isinstance(raw_codes, str):
-                codes = [c.strip() for c in raw_codes.split(",") if c.strip()]
-            else:
-                return err_actionable(
-                    f"codes parameter has wrong shape: {exc}",
-                    received=raw_codes,
-                    expected="list[str] of asset codes, e.g. ['000001.SZ', '600519.SH']",
-                    fix="pass codes as a JSON array string OR a list, e.g. "
-                        "codes=['000001.SZ', '600519.SH']",
-                    tool="get_market_data",
-                )
+        # Defensive reads: framework coercion handles JSON-string lists and
+        # single-key wrapping; "A,B,C" comma strings are split here.
+        raw_codes = codes
+        if isinstance(raw_codes, str):
+            codes = [c.strip() for c in raw_codes.split(",") if c.strip()]
+        elif not isinstance(raw_codes, list):
+            return err_actionable(
+                f"codes parameter has wrong shape: {type(raw_codes).__name__}",
+                received=raw_codes,
+                expected="list[str] of asset codes, e.g. ['000001.SZ', '600519.SH']",
+                fix="pass codes as a JSON array string OR a list, e.g. "
+                    "codes=['000001.SZ', '600519.SH']",
+                tool="get_market_data",
+            )
 
-        start_date = kwargs.get("start_date", "")
-        end_date = kwargs.get("end_date", "")
-        interval = kwargs.get("interval", "1D")
-        source = kwargs.get("source")
-        strategy_name = kwargs.get("strategy_name", "default") or "default"
-        persist_raw = kwargs.get("persist", True)
-        if isinstance(persist_raw, str):
-            persist = persist_raw.strip().lower() in ("1", "true", "yes", "y")
-        else:
-            try:
-                persist = bool(safe_get_param(kwargs, "persist", bool, default=True))
-            except TypeError:
-                persist = True
-        workspace = kwargs.get("workspace")
-
-        # Cache control: force_refresh bypasses file cache
-        force_refresh_raw = kwargs.get("force_refresh", False)
-        if isinstance(force_refresh_raw, str):
-            force_refresh = force_refresh_raw.strip().lower() in ("1", "true", "yes", "y")
-        else:
-            force_refresh = bool(force_refresh_raw)
+        strategy_name = strategy_name or "default"
+        workspace = ctx.workspace
+        if persist and workspace is None:
+            return err_actionable(
+                "missing workspace context (required when persist=True)",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="get_market_data",
+            )
 
         if not codes:
             return err_actionable(
@@ -251,7 +242,7 @@ class GetMarketDataTool(BaseTool):
         except NoAvailableSourceError as exc:
             return err_actionable(
                 f"no available data source: {exc}",
-                received=kwargs.get("codes"),
+                received=codes,
                 expected="list of asset codes with a registered data source",
                 fix="use list_data_sources() to see what's available, or check your network",
                 tool="get_market_data",
@@ -271,20 +262,42 @@ class GetMarketDataTool(BaseTool):
 
 
 class ListDataSourcesTool(BaseTool):
-    """List available data sources and their status."""
+    """列出可用数据源及其状态。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名)
+    #
+    # ## 用途
+    # 列出全部注册数据源: 可用性/适用市场/是否需要 API key。
+    # 取数前先查可用源, 或排障时确认数据源状态。
+    #
+    # ## 参数
+    # 无
+    #
+    # ## 示例
+    # {}
+    #
+    # ## 边界
+    # 只读工具; 不访问网络。
+    #
+    # ## 错误处理范式
+    # 无输入参数, 极少失败; 失败均可安全重试。
+    #
+    # ## 相关工具
+    # get_market_data: 用可用源取数
+    # ─────────────────────────────────────────────
+    """
 
     name = "list_data_sources"
-    description = (
-        "List all registered data sources, showing which are available "
-        "and which require API keys."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {},
-    }
+    description = "列出已注册数据源及可用性/市场/API key 要求。"
     repeatable = True
+    category = "行情"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+    ) -> str:
         from ...data_source.registry import LOADER_REGISTRY, _ensure_registered
 
         _ensure_registered()
@@ -316,31 +329,50 @@ class ListDataSourcesTool(BaseTool):
 
 
 class SearchSymbolTool(BaseTool):
-    """Search for stock/fund symbols by name or code."""
+    """按名称/代码搜索证券代码（A 股主）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名)
+    #
+    # ## 用途
+    # 按名称或代码模糊搜索证券 (A 股主, 经 akshare spot 数据)。
+    #
+    # ## 参数
+    # - query: 查询词 (必填, 名称或代码)
+    # - market: 市场过滤 (默认 'a_share')
+    # - limit: 最大结果数 (默认 10)
+    #
+    # ## 示例
+    # {"query": "茅台"}
+    #
+    # ## 边界
+    # 只读工具; 依赖 akshare 与网络; 无匹配返回空列表 (非错误)。
+    #
+    # ## 错误处理范式
+    # - 缺 query → error + expected 示例
+    # - akshare 未装 → fix 安装
+    # - 网络失败 → error + fix 换查询词/检查网络
+    #
+    # ## 相关工具
+    # get_market_data: 搜到的代码直接取数
+    # ─────────────────────────────────────────────
+    """
 
     name = "search_symbol"
-    description = (
-        "Search for stock or fund symbols by name or code. "
-        "Primarily supports A-share market via akshare."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query (name or code)."},
-            "market": {"type": "string", "description": "Market filter (default 'a_share').", "default": "a_share"},
-            "limit": {"type": "integer", "description": "Max results (default 10).", "default": 10},
-        },
-        "required": ["query"],
-    }
+    description = "按名称/代码模糊搜索证券代码 (A 股主, akshare)。"
     repeatable = True
+    category = "行情"
 
-    def execute(self, **kwargs: Any) -> str:
-        query = kwargs.get("query", "")
-        market = kwargs.get("market", "a_share")
-        try:
-            limit = safe_get_param(kwargs, "limit", int, default=10)
-        except TypeError:
-            limit = 10
+    def execute(
+        self,
+        ctx: ToolContext,
+        query: str,
+        market: str = "a_share",
+        limit: int = 10,
+    ) -> str:
+        query = query or ""
+        market = market or "a_share"
 
         if not query:
             return err_actionable(
@@ -402,71 +434,62 @@ class SearchSymbolTool(BaseTool):
 
 
 class ImportDataTool(BaseTool):
-    """Import OHLCV data into the workspace DuckDB for factor analysis."""
+    """手动导入 OHLCV 数据到 DuckDB（非推荐主流程）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+    #
+    # ## 用途
+    # 手动/外部 OHLCV 数据导入 DuckDB。主流程是
+    # get_market_data(persist=True); 本工具仅用于粘贴外部数据/CSV。
+    #
+    # ## 参数
+    # - data: {asset_code: [记录列表]} (必填)
+    # - strategy_name: 数据分区名 (默认 'default')
+    #
+    # ## 示例
+    # {"data": {"600519.SH": [{"trade_date": "2023-12-11", "close": 1544.5}]}}
+    #
+    # ## 边界
+    # 写工具 (effects: db); 支持 LLM 错误包裹 (JSON 字符串/单键 dict) 容错。
+    #
+    # ## 错误处理范式
+    # - 缺 data → error + expected 结构示例
+    # - 数据形状错误 → error + fix 提示用 get_market_data
+    # - 均可安全重试 (INSERT OR REPLACE 幂等)
+    #
+    # ## 相关工具
+    # get_market_data: 推荐主流程
+    # ─────────────────────────────────────────────
+    """
 
     name = "import_data"
-    description = (
-        "Import OHLCV market data into the workspace DuckDB. "
-        "Note: the recommended flow is get_market_data(codes=[...], "
-        "start_date=..., end_date=..., persist=True) which fetches AND "
-        "persists into DuckDB in one step. "
-        "import_data is for manual/external data (e.g. pasted records or CSV)."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "data": {
-                "type": "object",
-                "description": (
-                    "OHLCV data dict from get_market_data. "
-                    "Format: {asset_code: [records]}. Each record has "
-                    "'trade_date' (or 'date') + OHLCV fields. "
-                    "Example: {'600519.SH': [{'trade_date': '2023-12-11', "
-                    "'close': 1544.555, 'open': 1536.555, 'high': 1550.555, "
-                    "'low': 1503.555, 'volume': 36831.0}, ...]}"
-                ),
-                "additionalProperties": {
-                    "type": "array",
-                    "items": {"type": "object"},
-                },
-            },
-            "strategy_name": {
-                "type": "string",
-                "description": "Strategy name for data partitioning (default: 'default').",
-                "default": "default",
-            },
-        },
-        "required": ["workspace", "data"],
-    }
-    is_readonly = False
+    description = "手动导入 OHLCV 数据到 DuckDB (非推荐主流程; 主流程 get_market_data)。"
     repeatable = True
+    category = "行情"
+    effects = frozenset({EFFECT_DB})
 
-    def execute(self, **kwargs: Any) -> str:
-        workspace = kwargs.get("workspace")
+    def execute(
+        self,
+        ctx: ToolContext,
+        data: dict[str, Any],
+        strategy_name: str = "default",
+    ) -> str:
+        workspace = ctx.workspace
         if not workspace:
             return err_actionable(
-                "missing required parameter 'workspace'",
-                expected="absolute path to workspace root, e.g. '/home/user/research'",
-                fix="set workspace='/path/to/your/workspace'",
+                "missing workspace context",
+                expected="workspace path (AgentLoop 注入)",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
                 tool="import_data",
             )
 
-        # Defensive read: data may be stringified JSON, or wrapped in a dict.
-        try:
-            data = safe_get_param(kwargs, "data", dict)
-        except TypeError as exc:
-            return err_actionable(
-                f"data parameter has wrong shape: {exc}",
-                received=kwargs.get("data"),
-                expected="dict[asset_code, list[record]] — output of get_market_data(data field)",
-                fix=(
-                    "call get_market_data(codes=['600519.SH'], "
-                    "start_date='2023-01-01', end_date='2023-12-31', "
-                    "persist=True) to fetch and persist into DuckDB in one step"
-                ),
-                tool="import_data",
-            )
+        # Defensive read: framework coercion handles JSON-string dicts;
+        # single-key wrapping ("data": {...}) is unwrapped here.
+        raw_data = data
+        unwrapped = try_unwrap_dict(raw_data) if isinstance(raw_data, dict) else None
+        data = unwrapped if unwrapped is not None else raw_data
 
         if not data:
             return err_actionable(
@@ -480,7 +503,7 @@ class ImportDataTool(BaseTool):
                 tool="import_data",
             )
 
-        strategy_name = kwargs.get("strategy_name", "default")
+        strategy_name = strategy_name or "default"
 
         try:
             from pathlib import Path
@@ -582,7 +605,7 @@ class ImportDataTool(BaseTool):
             logger.exception("import_data failed")
             return err_actionable(
                 f"import failed: {exc}",
-                received=str(kwargs.get("data"))[:200],
+                received=str(data)[:200],
                 expected="dict[asset_code, list[record]] from get_market_data",
                 fix="verify data shape and workspace is writable",
                 tool="import_data",

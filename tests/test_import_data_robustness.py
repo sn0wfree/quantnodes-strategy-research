@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from strategy_research.core.agent.builtin_tools.data_tools import ImportDataTool
+from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.db import init_db
 
 
@@ -46,7 +47,7 @@ def _records(code: str = "600519.SH", n: int = 2) -> list[dict]:
 def _execute(workspace: Path, data) -> dict:
     """Run import_data and return parsed result."""
     tool = ImportDataTool()
-    return json.loads(tool.execute(workspace=str(workspace), data=data))
+    return json.loads(tool.execute(ctx=ToolContext(workspace=workspace), data=data))
 
 
 # ── 1. Backward compat — standard shape still works ─────────────
@@ -201,27 +202,17 @@ class TestImportDataActionableError:
 
 
 class TestImportDataSchema:
-    def test_schema_declares_array(self):
-        """Schema declares data[code] should be an array."""
-        params = ImportDataTool.parameters
-        data_schema = params["properties"]["data"]
-        assert data_schema["type"] == "object"
-        ap = data_schema["additionalProperties"]
-        assert ap["type"] == "array"
-        assert ap["items"]["type"] == "object"
+    def test_schema_derived_from_signature(self):
+        """v2: schema derives from the execute signature."""
+        schema = ImportDataTool().to_openai_schema()["function"]["parameters"]
+        props = schema["properties"]
+        assert props["data"]["type"] == "object"
+        assert props["strategy_name"]["type"] == "string"
+        # 注入参数 (workspace) 已从 schema 剥离 (ToolContext)
+        assert "workspace" not in props
 
-    def test_schema_has_descriptive_description(self):
-        """Schema description gives a concrete example."""
-        params = ImportDataTool.parameters
-        desc = params["properties"]["data"]["description"]
-        # Description should give enough info for the LLM to format correctly
-        assert "asset_code" in desc or "code" in desc
-        assert "trade_date" in desc or "date" in desc
-        # Includes an example
-        assert "600519.SH" in desc
-
-    def test_required_includes_workspace_and_data(self):
-        """Both workspace and data are required."""
-        required = ImportDataTool.parameters["required"]
-        assert "workspace" in required
+    def test_required_from_signature(self):
+        """必填参数由签名无默认值参数派生。"""
+        required = ImportDataTool().to_openai_schema()["function"]["parameters"]["required"]
         assert "data" in required
+        assert "strategy_name" not in required

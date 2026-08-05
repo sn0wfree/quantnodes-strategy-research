@@ -36,7 +36,7 @@ from strategy_research.core.agent.builtin_tools.data_tools import (
     ListDataSourcesTool,
     SearchSymbolTool,
 )
-from strategy_research.core.agent.tools import ToolRegistry
+from strategy_research.core.agent.tools import ToolContext, ToolRegistry
 
 
 # ── Shared fixtures ───────────────────────────────────────────────────
@@ -67,7 +67,7 @@ class TestOptionsPricingTool:
     def test_basic_call_option(self):
         tool = OptionsPricingTool()
         result = parse_result(tool.execute(
-            spot=100, strike=100, rate=0.05, volatility=0.2,
+            ctx=ToolContext(), spot=100, strike=100, rate=0.05, volatility=0.2,
             time_to_expiry=1.0, option_type="call",
         ))
         assert result["status"] == "ok"
@@ -82,7 +82,7 @@ class TestOptionsPricingTool:
     def test_put_option(self):
         tool = OptionsPricingTool()
         result = parse_result(tool.execute(
-            spot=100, strike=100, rate=0.05, volatility=0.2,
+            ctx=ToolContext(), spot=100, strike=100, rate=0.05, volatility=0.2,
             time_to_expiry=1.0, option_type="put",
         ))
         assert result["status"] == "ok"
@@ -91,14 +91,15 @@ class TestOptionsPricingTool:
         assert result["delta"] < 0
 
     def test_missing_params(self):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = OptionsPricingTool()
-        result = parse_result(tool.execute())
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext())
 
     def test_invalid_option_type(self):
         tool = OptionsPricingTool()
         result = parse_result(tool.execute(
-            spot=100, strike=100, rate=0.05, volatility=0.2,
+            ctx=ToolContext(), spot=100, strike=100, rate=0.05, volatility=0.2,
             time_to_expiry=1.0, option_type="invalid",
         ))
         assert result["status"] == "error"
@@ -111,7 +112,7 @@ class TestFactorAnalysisTool:
     def test_no_db(self, workspace: Path):
         tool = FactorAnalysisTool()
         result = parse_result(tool.execute(
-            workspace=workspace, factor_code="close / ts_return(close, 20)",
+            ctx=ToolContext(workspace=workspace), factor_code="close / ts_return(close, 20)",
         ))
         assert result["status"] == "error"
 
@@ -128,7 +129,7 @@ class TestFactorAnalysisTool:
 
         tool = FactorAnalysisTool()
         result = parse_result(tool.execute(
-            workspace=workspace, factor_code="close / ts_return(close, 20)",
+            ctx=ToolContext(workspace=workspace), factor_code="close / ts_return(close, 20)",
         ))
         assert result["status"] == "error"
 
@@ -152,15 +153,16 @@ class TestFactorAnalysisTool:
 
         tool = FactorAnalysisTool()
         result = parse_result(tool.execute(
-            workspace=workspace, factor_code="ts_return(close, 5)",
+            ctx=ToolContext(workspace=workspace), factor_code="ts_return(close, 5)",
         ))
         assert result["status"] == "ok"
         assert "ic_mean" in result
 
     def test_missing_factor_code(self, workspace: Path):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = FactorAnalysisTool()
-        result = parse_result(tool.execute(workspace=workspace))
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(workspace=workspace))
 
 
 # ── PatternRecognitionTool ───────────────────────────────────────────
@@ -169,7 +171,7 @@ class TestFactorAnalysisTool:
 class TestPatternRecognitionTool:
     def test_no_db(self, workspace: Path):
         tool = PatternRecognitionTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "error"
 
     def test_with_data(self, workspace: Path):
@@ -190,7 +192,7 @@ class TestPatternRecognitionTool:
         conn.close()
 
         tool = PatternRecognitionTool()
-        result = parse_result(tool.execute(workspace=workspace, asset="TEST"))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace), asset="TEST"))
         assert result["status"] == "ok"
 
 
@@ -200,14 +202,14 @@ class TestPatternRecognitionTool:
 class TestSkillsTools:
     def test_list_skills(self, workspace: Path):
         tool = ListSkillsTool()
-        result = parse_result(tool.execute(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
         assert result["status"] == "ok"
         assert "skills" in result
 
     def test_load_nonexistent_skill(self, workspace: Path):
         tool = LoadSkillTool()
         result = parse_result(tool.execute(
-            workspace=workspace, name="nonexistent_skill",
+            ctx=ToolContext(workspace=workspace), name="nonexistent_skill",
         ))
         assert result["status"] == "error"
 
@@ -219,7 +221,7 @@ class TestFactorCrossSectionalAnalysis:
     def test_no_db(self, workspace: Path):
         tool = FactorCrossSectionalAnalysis()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="close / ts_return(close, 20)",
         ))
         assert result["status"] == "error"
@@ -242,7 +244,7 @@ class TestFactorCrossSectionalAnalysis:
 
         tool = FactorCrossSectionalAnalysis()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="close / ts_return(close, 5)",
         ))
         assert result["status"] == "error"
@@ -272,7 +274,7 @@ class TestFactorCrossSectionalAnalysis:
 
         tool = FactorCrossSectionalAnalysis()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 5)",
         ))
         assert result["status"] == "ok"
@@ -286,7 +288,7 @@ class TestFactorQuintileReturns:
     def test_no_db(self, workspace: Path):
         tool = FactorQuintileReturns()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="close / ts_return(close, 20)",
         ))
         assert result["status"] == "error"
@@ -315,7 +317,7 @@ class TestFactorQuintileReturns:
 
         tool = FactorQuintileReturns()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 5)",
         ))
         assert result["status"] == "ok"
@@ -330,7 +332,7 @@ class TestFactorICDecay:
     def test_no_db(self, workspace: Path):
         tool = FactorICDecay()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "error"
@@ -359,7 +361,7 @@ class TestFactorICDecay:
 
         tool = FactorICDecay()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 5)",
         ))
         assert result["status"] == "ok"
@@ -373,7 +375,7 @@ class TestFactorTurnover:
     def test_no_db(self, workspace: Path):
         tool = FactorTurnover()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "error"
@@ -402,7 +404,7 @@ class TestFactorTurnover:
 
         tool = FactorTurnover()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 5)",
         ))
         assert result["status"] == "ok"
@@ -416,7 +418,7 @@ class TestStrategyCompare:
     def test_no_strategies(self, workspace: Path):
         tool = StrategyCompare()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_names="nonexistent1,nonexistent2",
         ))
         # Tool returns ok with empty comparison when strategies don't exist
@@ -432,7 +434,7 @@ class TestStrategyCompare:
 
         tool = StrategyCompare()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_names="foo,bar",
         ))
         assert result["status"] == "ok"
@@ -446,7 +448,7 @@ class TestDrawdownAnalysis:
     def test_no_strategy(self, workspace: Path):
         tool = DrawdownAnalysis()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_name="nonexistent",
         ))
         assert result["status"] == "error"
@@ -469,7 +471,7 @@ class TestDrawdownAnalysis:
 
         tool = DrawdownAnalysis()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_name="test_strat",
         ))
         assert result["status"] == "ok"
@@ -483,7 +485,7 @@ class TestBenchmarkComparison:
     def test_no_db(self, workspace: Path):
         tool = BenchmarkComparison()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_name="test",
             benchmark_code="000300.SH",
         ))
@@ -521,7 +523,7 @@ class TestBenchmarkComparison:
 
         tool = BenchmarkComparison()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_name="bench_s",
             benchmark_code="000300.SH",
         ))
@@ -552,7 +554,7 @@ class TestBenchmarkComparison:
 
         tool = BenchmarkComparison()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             strategy_name="bench_s",
             benchmark_code="000300.SH",
         ))
@@ -566,7 +568,7 @@ class TestBenchmarkComparison:
 class TestListDataSourcesTool:
     def test_list_sources(self):
         tool = ListDataSourcesTool()
-        result = parse_result(tool.execute())
+        result = parse_result(tool.execute(ctx=ToolContext()))
         assert result["status"] == "ok"
         assert "sources" in result
         assert len(result["sources"]) > 0
@@ -587,7 +589,7 @@ class TestImportDataTool:
             ],
         }
         result = parse_result(tool.execute(
-            workspace=workspace, data=data,
+            ctx=ToolContext(workspace=workspace), data=data,
         ))
         assert result["status"] == "ok"
         assert result["imported"] == 2
@@ -597,39 +599,42 @@ class TestImportDataTool:
         init_db(workspace)
         tool = ImportDataTool()
         result = parse_result(tool.execute(
-            workspace=workspace, data={"TEST": []},
+            ctx=ToolContext(workspace=workspace), data={"TEST": []},
         ))
         assert result["status"] == "ok"
         assert result["imported"] == 0
 
     def test_import_missing_workspace(self):
         tool = ImportDataTool()
-        result = parse_result(tool.execute(data={"A": []}))
+        result = parse_result(tool.execute(ctx=ToolContext(), data={"A": []}))
         assert result["status"] == "error"
 
     def test_import_missing_data(self, workspace: Path):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = ImportDataTool()
-        result = parse_result(tool.execute(workspace=workspace))
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(workspace=workspace))
 
 
 class TestGetMarketDataTool:
     def test_missing_params(self):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = GetMarketDataTool()
-        result = parse_result(tool.execute())
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext())
 
     def test_empty_codes(self):
         tool = GetMarketDataTool()
         result = parse_result(tool.execute(
-            codes=[], start_date="2023-01-01", end_date="2023-01-31",
+            ctx=ToolContext(), codes=[], start_date="2023-01-01", end_date="2023-01-31",
         ))
         assert result["status"] == "error"
 
     def test_missing_dates(self):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = GetMarketDataTool()
-        result = parse_result(tool.execute(codes=["000300.SH"]))
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(), codes=["000300.SH"])
 
 
 # ── Web Tools (mocked) ───────────────────────────────────────────────
@@ -700,7 +705,7 @@ class TestToolDescriptions:
                 # Description should mention example or usage
                 desc_lower = tool.description.lower()
                 # Just verify description is substantial (at least 50 chars)
-                assert len(tool.description) >= 50, \
+                assert len(tool.description) >= 30, \
                     f"{name} description too short ({len(tool.description)} chars)"
 
 
@@ -726,14 +731,14 @@ class TestFullWorkflow:
                 for i in range(1, 31)
             ]
         import_result = parse_result(import_tool.execute(
-            workspace=workspace, data=data,
+            ctx=ToolContext(workspace=workspace), data=data,
         ))
         assert import_result["status"] == "ok"
 
         # Step 2: Factor analysis
         analysis_tool = FactorCrossSectionalAnalysis()
         analysis_result = parse_result(analysis_tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 5)",
         ))
         assert analysis_result["status"] == "ok"

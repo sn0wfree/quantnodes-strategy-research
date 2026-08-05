@@ -43,7 +43,7 @@ class TestSearchSymbolTool:
 
     def test_match_by_code(self, monkeypatch, spot_df):
         monkeypatch.setitem(sys.modules, "akshare", _fake_akshare(spot_df))
-        result = json.loads(SearchSymbolTool().execute(query="600519"))
+        result = json.loads(SearchSymbolTool().execute(ctx=None, query="600519"))
         assert result["status"] == "ok"
         assert result["n_results"] == 1
         assert result["results"][0]["code"] == "600519"
@@ -51,14 +51,14 @@ class TestSearchSymbolTool:
 
     def test_match_by_name(self, monkeypatch, spot_df):
         monkeypatch.setitem(sys.modules, "akshare", _fake_akshare(spot_df))
-        result = json.loads(SearchSymbolTool().execute(query="茅台"))
+        result = json.loads(SearchSymbolTool().execute(ctx=None, query="茅台"))
         assert result["status"] == "ok"
         assert result["n_results"] == 1
         assert result["results"][0]["code"] == "600519"
 
     def test_match_multiple_and_limit(self, monkeypatch, spot_df):
         monkeypatch.setitem(sys.modules, "akshare", _fake_akshare(spot_df))
-        result = json.loads(SearchSymbolTool().execute(query="60", limit=2))
+        result = json.loads(SearchSymbolTool().execute(ctx=None, query="60", limit=2))
         assert result["status"] == "ok"
         assert result["n_results"] == 2
 
@@ -67,13 +67,13 @@ class TestSearchSymbolTool:
             sys.modules, "akshare",
             _fake_akshare(pd.DataFrame(columns=["代码", "名称"])),
         )
-        result = json.loads(SearchSymbolTool().execute(query="xyz"))
+        result = json.loads(SearchSymbolTool().execute(ctx=None, query="xyz"))
         assert result["status"] == "ok"
         assert result["results"] == []
 
     def test_no_match_returns_empty(self, monkeypatch, spot_df):
         monkeypatch.setitem(sys.modules, "akshare", _fake_akshare(spot_df))
-        result = json.loads(SearchSymbolTool().execute(query="zzz"))
+        result = json.loads(SearchSymbolTool().execute(ctx=None, query="zzz"))
         assert result["status"] == "ok"
         assert result["n_results"] == 0
 
@@ -86,11 +86,11 @@ class TestSearchSymbolTool:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr("builtins.__import__", fake_import)
-        result = json.loads(SearchSymbolTool().execute(query="600519"))
+        result = json.loads(SearchSymbolTool().execute(ctx=None, query="600519"))
         assert result["status"] == "error"
         assert "akshare" in result["error"].lower()
 
     def test_missing_query(self):
-        result = json.loads(SearchSymbolTool().execute())
-        assert result["status"] == "error"
-        assert "query" in result["error"]
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
+        with pytest.raises(TypeError):
+            SearchSymbolTool().execute(ctx=None)

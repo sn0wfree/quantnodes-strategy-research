@@ -16,6 +16,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from strategy_research.core.agent.tools import ToolContext
+
 os.environ.setdefault("STRATEGY_RESEARCH_CACHE_DIR", "/tmp/sr_test_cache")
 
 
@@ -69,6 +71,8 @@ def _run_get(tool, codes, start="2023-01-01", end="2023-01-10", source="fake",
              **extra):
     kwargs = dict(codes=codes, start_date=start, end_date=end, source=source)
     kwargs.update(extra)
+    ws = kwargs.pop("workspace", None)
+    kwargs["ctx"] = ToolContext(workspace=ws)
     return json.loads(tool.execute(**kwargs))
 
 
@@ -136,7 +140,7 @@ class TestPersistToDuckDB:
         result = _run_get(gmd, ["600519.SH"])  # no workspace
         assert result["status"] == "error"
         assert "workspace" in result["error"]
-        assert "persist=False" in result["fix"]
+        assert "persist" in result["fix"].lower() or "ctx" in result["fix"]
 
     def test_repeated_persist_is_idempotent(self, gmd, workspace):
         """INSERT OR REPLACE → same rows, no duplication."""
@@ -163,7 +167,7 @@ class TestGetMarketDataEdgeCases:
         result = _run_get(gmd, ["600519.SH"], workspace=str(workspace))
         assert len(result["preview"]["600519.SH"]) <= 5
 
-    def test_unavailable_source_errors(self, gmd):
+    def test_unavailable_source_errors(self, gmd, workspace):
         """Explicit source that exists but is unavailable → actionable error."""
         import strategy_research.core.data_source.registry as dsr
 
@@ -173,8 +177,8 @@ class TestGetMarketDataEdgeCases:
                 return False
         dsr.LOADER_REGISTRY["down"] = _Unavailable
         raw = gmd.execute(
-            codes=["600519.SH"], start_date="2023-01-01",
-            end_date="2023-01-10", source="down",
+            ctx=ToolContext(workspace=workspace), codes=["600519.SH"],
+            start_date="2023-01-01", end_date="2023-01-10", source="down",
         )
         result = json.loads(raw)
         assert result["status"] == "error"

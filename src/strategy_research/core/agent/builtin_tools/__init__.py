@@ -958,36 +958,63 @@ class ListHistoryTool(BaseTool):
 
 
 class FactorAnalysisTool(BaseTool):
-    """Analyze factor IC/IR statistics."""
+    """分析因子 IC/IR 统计（单资产）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+    #
+    # ## 用途
+    # 对因子表达式做 IC/IR 分析: 计算 IC mean、spearman IC、观测数。
+    # 需要 workspace DuckDB 有价格数据。
+    #
+    # ## 参数
+    # - factor_code: 因子表达式 (必填)
+    # - asset: 资产代码 (默认第一个可用)
+    # - forward_days: 前向收益天数 (默认 5)
+    #
+    # ## 示例
+    # {"factor_code": "ts_return(close, 20)"}
+    #
+    # ## 边界
+    # 只读工具; 观测数 < 10 时返回 insufficient data 错误。
+    #
+    # ## 错误处理范式
+    # - 无 DB/空表 → error + workflow 提示
+    # - asset 不存在 → error + expected 可用资产
+    # - 数据不足 → error + 需要 >= 10 行
+    # - 均可安全重试
+    #
+    # ## 相关工具
+    # compute_factor: 单因子计算; factor_quintile_returns 等: 深入分析
+    # ─────────────────────────────────────────────
+    """
 
     name = "factor_analysis"
     description = (
-        "Run factor IC/IR analysis on a factor expression. Computes IC mean, "
-        "IC std, IR, IC>0 ratio, and returns statistical summary."
+        "对因子表达式做 IC/IR 分析 (IC mean / spearman IC / 观测数)。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "factor_code": {"type": "string", "description": "Factor expression."},
-            "asset": {"type": "string", "description": "Asset code (default: first)."},
-            "forward_days": {"type": "integer", "description": "Forward return days (default 5)."},
-        },
-        "required": ["workspace", "factor_code"],
-    }
     repeatable = True
+    category = "因子"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="factor_analysis")
+    def execute(
+        self,
+        ctx: ToolContext,
+        factor_code: str,
+        asset: str | None = None,
+        forward_days: int = 5,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="factor_analysis",
+            )
+        workspace = ctx.workspace
 
-        factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
             return err_actionable("missing or invalid 'factor_code'", tool="factor_analysis")
-        asset = kwargs.get("asset")
-        forward_days = int(kwargs.get("forward_days", 5))
+        forward_days = int(forward_days)
 
         try:
             from ...db import get_connection
@@ -1055,32 +1082,23 @@ class FactorAnalysisTool(BaseTool):
 
 
 class PatternRecognitionTool(BaseTool):
-    """Detect common chart patterns in price data."""
+    """识别价格形态（头肩/双顶底/趋势线/支撑阻力）。"""
 
     name = "pattern_recognition"
-    description = (
-        "Detect common chart patterns (head-shoulders, double-top/bottom, "
-        "trend lines, support/resistance) in price data."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "asset": {"type": "string", "description": "Asset code."},
-            "lookback": {"type": "integer", "description": "Days to look back (default 60)."},
-        },
-        "required": ["workspace"],
-    }
+    description = "识别常见图表形态 (头肩顶底/双顶底/趋势线/支撑阻力); 需要 DuckDB 价格数据。"
     repeatable = True
+    category = "分析"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="pattern_recognition")
-
-        asset = kwargs.get("asset")
-        lookback = int(kwargs.get("lookback", 60))
+    def execute(
+        self,
+        ctx: ToolContext,
+        asset: str | None = None,
+        lookback: int = 60,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="pattern_recognition")
+        workspace = ctx.workspace
+        lookback = int(lookback)
 
         try:
             from ...db import get_connection
@@ -1154,30 +1172,21 @@ class PatternRecognitionTool(BaseTool):
 
 
 class ListSkillsTool(BaseTool):
-    """List available skills (name + one-line description)."""
+    """列出可用技能（名称 + 一句话描述）。"""
 
     name = "list_skills"
-    description = (
-        "List all available methodology skills. Returns skill names, categories, "
-        "and one-line descriptions. Use load_skill to get full content."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "category": {"type": "string", "description": "Filter by category."},
-        },
-        "required": ["workspace"],
-    }
+    description = "列出全部方法技能: 名称/类别/一句话描述; load_skill 获取全文。"
     repeatable = True
+    category = "技能"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="list_skills")
-
-        category = kwargs.get("category")
+    def execute(
+        self,
+        ctx: ToolContext,
+        category: str | None = None,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="list_skills")
+        workspace = ctx.workspace
 
         try:
             from ...skills import SkillRegistry
@@ -1219,31 +1228,21 @@ class ListSkillsTool(BaseTool):
 
 
 class LoadSkillTool(BaseTool):
-    """Load full skill content by name."""
+    """按名称加载技能全文。"""
 
     name = "load_skill"
-    description = (
-        "Load a skill's full content by name. Returns the complete markdown "
-        "documentation including API contracts, workflows, and examples."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "name": {"type": "string", "description": "Skill name to load."},
-        },
-        "required": ["workspace", "name"],
-    }
+    description = "按名称加载技能完整 markdown 文档 (含 API 契约/工作流/示例)。"
     repeatable = True
-    strict = True  # Simple shape, all required → safe for strict mode
+    category = "技能"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="load_skill")
-
-        name = kwargs.get("name")
+    def execute(
+        self,
+        ctx: ToolContext,
+        name: str,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="load_skill")
+        workspace = ctx.workspace
         if not isinstance(name, str) or not name:
             return err_actionable("missing or invalid 'name'", tool="load_skill")
 
@@ -1283,37 +1282,30 @@ class LoadSkillTool(BaseTool):
 
 
 class OptionsPricingTool(BaseTool):
-    """Black-Scholes options pricing with Greeks."""
+    """Black-Scholes 期权定价与 Greeks。"""
 
     name = "options_pricing"
-    description = (
-        "Compute Black-Scholes option price and Greeks (delta, gamma, theta, vega, rho)."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "spot": {"type": "number", "description": "Current spot price."},
-            "strike": {"type": "number", "description": "Strike price."},
-            "rate": {"type": "number", "description": "Risk-free rate (annualized, e.g. 0.05)."},
-            "volatility": {"type": "number", "description": "Volatility (annualized, e.g. 0.2)."},
-            "time_to_expiry": {"type": "number", "description": "Time to expiry in years (e.g. 0.5)."},
-            "option_type": {"type": "string", "description": "'call' or 'put'."},
-        },
-        "required": ["spot", "strike", "rate", "volatility", "time_to_expiry", "option_type"],
-    }
+    description = "计算 Black-Scholes 期权价格与 Greeks (delta/gamma/theta/vega/rho)。"
     repeatable = True
     strict = True  # Simple shape — OpenAI strict mode applies cleanly
+    category = "分析"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            spot = float(kwargs["spot"])
-            strike = float(kwargs["strike"])
-            rate = float(kwargs["rate"])
-            vol = float(kwargs["volatility"])
-            T = float(kwargs["time_to_expiry"])
-            option_type = kwargs.get("option_type", "call").lower()
-        except (KeyError, ValueError, TypeError) as exc:
-            return err_actionable(f"invalid parameters: {exc}", tool="options_pricing")
+    def execute(
+        self,
+        ctx: ToolContext,
+        spot: float,
+        strike: float,
+        rate: float,
+        volatility: float,
+        time_to_expiry: float,
+        option_type: str = "call",
+    ) -> str:
+        spot = float(spot)
+        strike = float(strike)
+        rate = float(rate)
+        vol = float(volatility)
+        T = float(time_to_expiry)
+        option_type = option_type.lower()
 
         if option_type not in ("call", "put"):
             return err_actionable("option_type must be 'call' or 'put'", tool="options_pricing")
@@ -1364,46 +1356,32 @@ class OptionsPricingTool(BaseTool):
 
 
 class FactorCrossSectionalAnalysis(BaseTool):
-    """Cross-sectional IC analysis across a universe of assets."""
+    """截面 IC 分析（全资产池，Pearson/Spearman）。"""
 
     name = "factor_cross_sectional_analysis"
-    description = (
-        "Compute cross-sectional IC (Pearson and Spearman) of a factor expression "
-        "across a universe of assets. Returns IC mean, IC std, IR, IC>0 ratio, "
-        "and a time series of daily IC values."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "factor_code": {"type": "string", "description": "Factor expression (e.g. 'ts_mean(close, 20) / ts_mean(close, 60) - 1')."},
-            "universe": {
-                "type": "string",
-                "description": "Asset universe. Comma-separated codes, or 'all' for all assets (default: 'all').",
-            },
-            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
-            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
-            "forward_days": {"type": "integer", "description": "Forward return horizon in days (default 5)."},
-        },
-        "required": ["workspace", "factor_code"],
-    }
+    description = "对资产池计算因子表达式的截面 IC (Pearson/Spearman): IC mean/std/IR/IC>0 比例, 含日度 IC 序列。"
     repeatable = True
+    category = "因子"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        factor_code: str,
+        universe: str = "all",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        forward_days: int = 5,
+    ) -> str:
         import numpy as np
 
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="factor_cross_sectional_analysis")
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="factor_cross_sectional_analysis")
+        workspace = ctx.workspace
 
-        factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
             return err_actionable("missing or invalid 'factor_code'", tool="factor_cross_sectional_analysis")
-        universe_str = kwargs.get("universe", "all")
-        start_date = kwargs.get("start_date")
-        end_date = kwargs.get("end_date")
-        forward_days = int(kwargs.get("forward_days", 5))
+        universe_str = universe
+        forward_days = int(forward_days)
 
         try:
             from ...db import get_connection
@@ -1524,45 +1502,34 @@ class FactorCrossSectionalAnalysis(BaseTool):
 
 
 class FactorQuintileReturns(BaseTool):
-    """Quintile portfolio return analysis."""
+    """因子分层组合收益分析（quintile 分组）。"""
 
     name = "factor_quintile_returns"
-    description = (
-        "Split a universe of assets into N groups by factor value, compute "
-        "average forward return per group. Returns quintile returns and "
-        "long-short spread."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "factor_code": {"type": "string", "description": "Factor expression."},
-            "universe": {"type": "string", "description": "Comma-separated asset codes or 'all' (default 'all')."},
-            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
-            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
-            "n_groups": {"type": "integer", "description": "Number of quintile groups (default 5)."},
-            "holding_period": {"type": "integer", "description": "Holding period in days (default 5)."},
-        },
-        "required": ["workspace", "factor_code"],
-    }
+    description = "把资产池按因子值分 N 组, 计算各组的平均前向收益与多空价差。"
     repeatable = True
+    category = "因子"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        factor_code: str,
+        universe: str = "all",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_groups: int = 5,
+        holding_period: int = 5,
+    ) -> str:
         import numpy as np
 
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="factor_quintile_returns")
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="factor_quintile_returns")
+        workspace = ctx.workspace
 
-        factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
             return err_actionable("missing or invalid 'factor_code'", tool="factor_quintile_returns")
-        universe_str = kwargs.get("universe", "all")
-        start_date = kwargs.get("start_date")
-        end_date = kwargs.get("end_date")
-        n_groups = int(kwargs.get("n_groups", 5))
-        holding_period = int(kwargs.get("holding_period", 5))
+        universe_str = universe
+        n_groups = int(n_groups)
+        holding_period = int(holding_period)
 
         try:
             from ...db import get_connection
@@ -1678,46 +1645,32 @@ class FactorQuintileReturns(BaseTool):
 
 
 class FactorICDecay(BaseTool):
-    """IC decay curve across multiple forward horizons."""
+    """因子 IC 衰减曲线（多前向周期）。"""
 
     name = "factor_ic_decay"
-    description = (
-        "Compute cross-sectional IC at multiple forward return horizons "
-        "(e.g. 1, 5, 10, 20, 60 days) to measure how quickly factor "
-        "predictive power decays."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "factor_code": {"type": "string", "description": "Factor expression."},
-            "universe": {"type": "string", "description": "Comma-separated asset codes or 'all' (default 'all')."},
-            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
-            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
-            "horizons": {
-                "type": "string",
-                "description": "Comma-separated forward return horizons in days (default '1,5,10,20,60').",
-            },
-        },
-        "required": ["workspace", "factor_code"],
-    }
+    description = "计算因子在多个前向收益周期 (如 1,5,10,20,60 天) 的截面 IC, 衡量预测力衰减速度。"
     repeatable = True
+    category = "因子"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        factor_code: str,
+        universe: str = "all",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        horizons: str = "1,5,10,20,60",
+    ) -> str:
         import numpy as np
 
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="factor_ic_decay")
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="factor_ic_decay")
+        workspace = ctx.workspace
 
-        factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
             return err_actionable("missing or invalid 'factor_code'", tool="factor_ic_decay")
-        universe_str = kwargs.get("universe", "all")
-        start_date = kwargs.get("start_date")
-        end_date = kwargs.get("end_date")
-        horizons_str = kwargs.get("horizons", "1,5,10,20,60")
+        universe_str = universe
+        horizons_str = horizons
         horizons = [int(h.strip()) for h in horizons_str.split(",")]
 
         try:
@@ -1825,43 +1778,32 @@ class FactorICDecay(BaseTool):
 
 
 class FactorTurnover(BaseTool):
-    """Factor ranking turnover analysis."""
+    """因子排名换手率分析（排名稳定性）。"""
 
     name = "factor_turnover"
-    description = (
-        "Measure how quickly factor rankings change over time. Computes "
-        "average rank correlation between consecutive rebalancing periods. "
-        "Low turnover = stable factor, high turnover = noisy factor."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "factor_code": {"type": "string", "description": "Factor expression."},
-            "universe": {"type": "string", "description": "Comma-separated asset codes or 'all' (default 'all')."},
-            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
-            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
-            "rebalance_freq": {"type": "integer", "description": "Rebalancing frequency in days (default 5)."},
-        },
-        "required": ["workspace", "factor_code"],
-    }
+    description = "衡量因子排名随时间的变化: 相邻调仓期的平均秩相关; 低换手 = 因子稳定。"
     repeatable = True
+    category = "因子"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        factor_code: str,
+        universe: str = "all",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        rebalance_freq: int = 5,
+    ) -> str:
         import numpy as np
 
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="factor_turnover")
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="factor_turnover")
+        workspace = ctx.workspace
 
-        factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
             return err_actionable("missing or invalid 'factor_code'", tool="factor_turnover")
-        universe_str = kwargs.get("universe", "all")
-        start_date = kwargs.get("start_date")
-        end_date = kwargs.get("end_date")
-        rebalance_freq = int(kwargs.get("rebalance_freq", 5))
+        universe_str = universe
+        rebalance_freq = int(rebalance_freq)
 
         try:
             from ...db import get_connection
@@ -1957,41 +1899,27 @@ class FactorTurnover(BaseTool):
 
 
 class StrategyCompare(BaseTool):
-    """Compare metrics across multiple strategies."""
+    """多策略指标横向对比。"""
 
     name = "strategy_compare"
-    description = (
-        "Compare backtest metrics across multiple strategies side by side. "
-        "Reads results.tsv from each strategy's runs/ directory."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "strategy_names": {
-                "type": "string",
-                "description": "Comma-separated strategy names to compare.",
-            },
-            "metrics": {
-                "type": "string",
-                "description": "Comma-separated metric keys (default: 'sharpe,ann_return,max_dd,calmar,turnover,win_rate').",
-            },
-        },
-        "required": ["workspace", "strategy_names"],
-    }
+    description = "对比多个策略的回测指标 (读各策略 runs/results.tsv), 指标列可指定。"
     repeatable = True
+    category = "回测"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="strategy_compare")
-
-        strategy_names_str = kwargs.get("strategy_names", "")
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_names: str,
+        metrics: str = "sharpe,ann_return,max_dd,calmar,turnover,win_rate",
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="strategy_compare")
+        workspace = ctx.workspace
+        strategy_names_str = strategy_names
         if not strategy_names_str:
             return err_actionable("missing 'strategy_names'", tool="strategy_compare")
         strategy_names = [s.strip() for s in strategy_names_str.split(",")]
-        metrics_str = kwargs.get("metrics", "sharpe,ann_return,max_dd,calmar,turnover,win_rate")
+        metrics_str = metrics
         metrics_keys = [m.strip() for m in metrics_str.split(",")]
 
         results = []
@@ -2039,37 +1967,27 @@ class StrategyCompare(BaseTool):
 
 
 class DrawdownAnalysis(BaseTool):
-    """Detailed drawdown analysis for a strategy."""
+    """策略回撤深度分析（最大回撤/回撤期列表）。"""
 
     name = "drawdown_analysis"
-    description = (
-        "Analyze drawdown periods for a strategy. Reads the equity curve "
-        "from the latest backtest run and returns top N drawdown periods "
-        "with start date, end date, recovery date, and depth."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "strategy_name": {"type": "string", "description": "Strategy name."},
-            "top_n": {"type": "integer", "description": "Number of top drawdown periods to return (default 5)."},
-        },
-        "required": ["workspace", "strategy_name"],
-    }
+    description = "分析策略回撤期: 从最近 run 的权益曲线计算最大回撤与 Top N 回撤区间。"
     repeatable = True
+    category = "回测"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_name: str,
+        top_n: int = 5,
+    ) -> str:
         import numpy as np
 
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="drawdown_analysis")
-
-        strategy_name = kwargs.get("strategy_name", "")
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="drawdown_analysis")
+        workspace = ctx.workspace
         if not strategy_name:
             return err_actionable("missing 'strategy_name'", tool="drawdown_analysis")
-        top_n = int(kwargs.get("top_n", 5))
+        top_n = int(top_n)
 
         # Find latest run
         runs_dir = workspace / "strategies" / strategy_name / "runs"
@@ -2181,39 +2099,26 @@ class DrawdownAnalysis(BaseTool):
 
 
 class BenchmarkComparison(BaseTool):
-    """Strategy vs benchmark performance comparison."""
+    """策略 vs 基准表现对比（alpha/beta/IR）。"""
 
     name = "benchmark_comparison"
-    description = (
-        "Compare a strategy's performance against a benchmark. Computes "
-        "alpha, beta, tracking error, information ratio, and relative drawdown."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "strategy_name": {"type": "string", "description": "Strategy name."},
-            "benchmark_code": {"type": "string", "description": "Benchmark asset code (e.g. '000300.SH')."},
-            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
-            "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
-        },
-        "required": ["workspace", "strategy_name", "benchmark_code"],
-    }
+    description = "对比策略与基准: alpha/beta/tracking error/information ratio/相对回撤。"
     repeatable = True
+    category = "回测"
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_name: str,
+        benchmark_code: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> str:
         import numpy as np
 
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="benchmark_comparison")
-
-        strategy_name = kwargs.get("strategy_name", "")
-        benchmark_code = kwargs.get("benchmark_code", "")
-        start_date = kwargs.get("start_date")
-        end_date = kwargs.get("end_date")
-
+        if ctx.workspace is None:
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="benchmark_comparison")
+        workspace = ctx.workspace
         if not strategy_name:
             return err_actionable("missing 'strategy_name'", tool="benchmark_comparison")
         if not benchmark_code:
