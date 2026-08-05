@@ -558,10 +558,9 @@ class ComputeFactorTool(BaseTool):
             )
 
         # Build single-asset wide DataFrame (date index, ohlcv columns)
-        asset_df = prices_df[prices_df["asset"] == asset].copy()
-        asset_df = asset_df.drop_duplicates(subset=["date"], keep="last")
-        asset_df = asset_df.set_index("date")[["open", "high", "low", "close", "volume"]]
-        asset_df = asset_df.sort_index()
+        from ...tools.data_transforms import long_to_single_asset_wide
+
+        asset_df = long_to_single_asset_wide(prices_df, asset=asset, value_cols="ohlcv")
 
         try:
             series = compute_factor(factor_code, asset_df, factor_name=factor_name)
@@ -1299,9 +1298,11 @@ class FactorCrossSectionalAnalysis(BaseTool):
 
         # Compute factor per asset and build date×asset panel
         import pandas as pd
+        from ...tools.data_transforms import long_to_single_asset_wide
+
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
             if len(adf) < 20:
                 continue
             try:
@@ -1317,9 +1318,11 @@ class FactorCrossSectionalAnalysis(BaseTool):
             return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_cross_sectional_analysis")
 
         # Build forward return panel
+        from ...tools.data_transforms import long_to_single_asset_wide
+
         ret_panel = {}
         for asset_code in factor_panel:
-            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["close"]].sort_index()
+            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
             ret_panel[asset_code] = adf["close"].pct_change(forward_days).shift(-forward_days)
 
         # Compute daily cross-sectional IC
@@ -1450,9 +1453,11 @@ class FactorQuintileReturns(BaseTool):
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
         # Compute factor per asset
+        from ...tools.data_transforms import long_to_single_asset_wide
+
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
             if len(adf) < 20:
                 continue
             try:
@@ -1465,9 +1470,11 @@ class FactorQuintileReturns(BaseTool):
                 continue
 
         # Forward return panel
+        from ...tools.data_transforms import long_to_single_asset_wide
+
         ret_panel = {}
         for asset_code in factor_panel:
-            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["close"]].sort_index()
+            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
             ret_panel[asset_code] = adf["close"].pct_change(holding_period).shift(-holding_period)
 
         factor_df = pd.DataFrame(factor_panel)
@@ -1599,9 +1606,11 @@ class FactorICDecay(BaseTool):
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
         # Compute factor per asset
+        from ...tools.data_transforms import long_to_single_asset_wide
+
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
             if len(adf) < 20:
                 continue
             try:
@@ -1621,9 +1630,11 @@ class FactorICDecay(BaseTool):
         # Compute IC at each horizon
         results = []
         for h in horizons:
+            from ...tools.data_transforms import long_to_single_asset_wide
+
             ret_panel = {}
             for asset_code in factor_panel:
-                adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["close"]].sort_index()
+                adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
                 ret_panel[asset_code] = adf["close"].pct_change(h).shift(-h)
 
             ret_df = pd.DataFrame(ret_panel)
@@ -1738,9 +1749,11 @@ class FactorTurnover(BaseTool):
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
         # Compute factor per asset
+        from ...tools.data_transforms import long_to_single_asset_wide
+
         factor_panel = {}
         for asset_code in assets:
-            adf = df[df["asset"] == asset_code].drop_duplicates(subset=["date"], keep="last").set_index("date")[["open", "high", "low", "close", "volume"]].sort_index()
+            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
             if len(adf) < 20:
                 continue
             try:
@@ -2207,7 +2220,7 @@ class DataCleanTool(BaseTool):
         dry_run = kwargs.get("dry_run", True)
 
         # 验证 preset
-        from ...data_clean import PRESETS
+        from ...tools.data_clean import PRESETS
         if preset not in PRESETS:
             return err_actionable(
                 f"invalid preset: {preset}",
@@ -2218,7 +2231,7 @@ class DataCleanTool(BaseTool):
             )
 
         try:
-            from ...data_clean import clean_data
+            from ...tools.data_clean import clean_data
 
             # 加载数据
             from ...db import get_connection
