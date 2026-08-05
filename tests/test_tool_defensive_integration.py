@@ -128,9 +128,10 @@ class TestToolErrorStructure:
     def test_compute_factor_empty_ohlcv_hint(self, registry, workspace):
         """compute_factor on empty workspace → workflow hint."""
         tool = registry.get("compute_factor")
-        result = json.loads(tool.execute(
-            workspace=str(workspace), factor_code="close - close.shift(1)"
-        ))
+        result = json.loads(tool.invoke({
+            "ctx": ToolContext(workspace=workspace),
+            "factor_code": "close - close.shift(1)",
+        }))
         assert result["status"] == "error"
         # The fix field (or error msg) should mention import_data
         err = result.get("error", "")
