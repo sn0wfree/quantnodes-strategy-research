@@ -61,23 +61,47 @@
 - docstring 约定节：`版本:` / `变更:` / `## 用途` / `## 参数` / `## 示例` / `## 边界` / `## 错误处理范式` / `## 相关工具`
 - `tool_help` 返回 docstring **原文**（markdown，无解析层）；组合工具说明书两版从组合配置（steps + 映射符号）生成
 
-### 组合工具细节
+### 组合工具细节（已落地，`core/agent/combo.py`）
 
-- **配置**：workspace `tools/combo/<name>.yml`：`name + description + steps: [{tool, params_map}]`，参数映射用简单符号（如 `step2.param = step1.result.code`）
-- **执行**：`registry.execute` 工具级调用子工具（复用已注册执行路径，对 agent 无新增抽象层）；同一 `ToolContext` 传递
-- **中间结果**：正常路径**不进上下文**；默认返回 `{status: ok, result: <最后一步关键输出>}`，配置可声明 `with_summary` 返回步骤摘要；报错时**完整错误透传** + 失败步骤/工具定位
-- **副作用**：父工具 effects = 子工具配置并集；嵌套深度 = 1（组合不组合组合工具）
-- **沉淀闭环**：被动学习挖掘 → 规则初筛 + 组合提案 + 人工确认 → 写入组合库；高频复用的组合可"提升"为手写工具固化进显式清单
+- **配置**：workspace `tools/combo/<name>.yml`：
+  ```yaml
+  name: read_two
+  description: 读取两个文件并返回第二个的内容
+  category: 文件
+  steps:
+    - tool: read_file
+      params:
+        path: input.path1        # 组合工具输入参数
+    - tool: read_file
+      params:
+        path: step1.result.path  # 前一步 JSON 结果的字段路径
+  with_summary: false            # true 时返回步骤摘要
+  ```
+- **参数映射符号**：`input.<path>`（组合输入，点路径）/ `step<N>.result.<path>`（前一步结果字段）/ 其他字面量
+- **加载**：`build_default_registry(workspace=<ws>)` 自动扫描 `tools/combo/*.yml` 注册；非法配置跳过并告警
+- **执行**：`registry` 工具级调用子工具（`invoke`：容错 + 错误兜底同普通工具）；同一 `ToolContext` 传递
+- **中间结果**：正常路径**不进上下文**；默认返回 `{status: ok, ...最后一步输出}`；`with_summary: true` 附加 `combo_summary`；报错时**完整错误透传** + `combo_step`/`combo_tool` 定位
+- **副作用**：父工具 effects = 子工具配置并集；嵌套深度 = 1（组合引用组合被拒绝）
+- **说明书**：生成动态 docstring（用途/步骤/参数/边界/错误处理范式/相关工具），`tool_help` 与简略版 brief 同机制
+- **沉淀闭环**：被动学习挖掘 → 规则初筛 + 组合提案 + 人工确认 → 写入组合库（P6 立项后落地）；高频复用的组合可"提升"为手写工具固化进显式清单
+
+### 契约测试（P5 落地，`tests/test_tool_contract.py`）
+
+注册表 ↔ 说明书 ↔ 副作用 ↔ schema 一致性由测试守护：
+- name 唯一、brief 完整、category 已声明、docstring 首行 = 简略版用途（同源）
+- 写工具 effects 非空（9 个 write 工具逐一断言）、只读工具 effects 为空、effects 枚举合法
+- 注入参数（workspace 等）不出现在 schema；必填参数与签名无默认值参数一致（strict 工具除外）
+- 引导同源：run_backtest/compute_factor 说明书与代码 fix 的 workflow 一致，`commit_market_data` 全库零残留
 
 ### 实施计划
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| P1 | 说明书基础设施：模板规范 + 注册时解析器（简略版）+ `tool_help` 工具 | **实施中** |
+| P1 | 说明书基础设施：模板规范 + 注册时解析器（简略版）+ `tool_help` 工具 | **已完成** |
 | P2 | BaseTool 骨架 v2：ToolContext / 框架统一容错层 / 错误兜底 / effects；loop 注入单点化（sync/async 合一） | **已完成** |
-| P3 | 33 个存量工具迁移（一次性切换，无旧 `parameters` dict 回退）：docstring 说明书填写、删手写解析与样板、effects 声明 | 待实施 |
-| P4 | 分层注册重构 + 组合库：核心显式清单 + 能力组 + 组合库加载器 + 组合执行器 | 待实施 |
-| P5 | 契约测试（注册表↔`__all__`↔说明书↔docs 一致性；fix_msg 与说明书同源断言）+ 文档同步 | 待实施 |
+| P3 | 33 个存量工具迁移（一次性切换，无旧 `parameters` dict 回退）：docstring 说明书填写、删手写解析与样板、effects 声明 | **已完成** |
+| P4 | 分层注册重构 + 组合库：核心显式清单 + 能力组 + 组合库加载器 + 组合执行器 | **已完成** |
+| P5 | 契约测试（注册表↔说明书↔effects↔schema 一致性；fix_msg 与说明书同源断言）+ 文档同步 | **已完成** |
 | P6 | 被动学习：挖掘器（双源双粒度共现）+ 评估器（规则初筛 + 提案 + 人工确认）+ 沉淀（组合库 + 回馈统计） | 后置立项 |
 
 ### 对本文档其余部分的衔接
