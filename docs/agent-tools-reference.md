@@ -99,11 +99,12 @@
 
 **验证**（P1-P5 完成后全量回归）：工具/loop/chat/workflow/role 相关 26 个测试文件
 477 passed、4 skipped；契约测试 20 例、组合库 18 例常驻守护。
+说明书 8 节完整性已纳入契约（全部 34 个注册工具，`test_spec_sections_complete`）。
 
 **遗留事项**：
 - **P6 被动学习**（后置立项，规划详见 [docs/passive-learning-proposal.md](passive-learning-proposal.md)）：trace.jsonl + event_log 双源、双粒度（同 turn 合作性 / 跨 turn 流程性）共现挖掘 → 规则初筛 + 组合提案 + 人工确认 → 写入组合库；框架已就绪（组合库/加载器/契约测试），缺挖掘器 + 产线 trace 接线（当前 `trace_dir` 无人传）
 - **pre-existing 失败**：`test_assistant_message_event.py` 5 例（loop compact 溢出检测对 mock config 的 `overflow_ratio` 比较抛 TypeError）；`test_b3_read_path_consistency` 的 limit 语义已修；`test_role_factory` 偶发 LLM 超时（环境相关，单跑绿）
-- **说明书完整性**：goal/web/shell 工具说明书为简版章节，后续迭代补全（契约测试只强制 docstring 首行与 brief 同源）
+- **说明书已全量补全**：goal/analysis/skills 等 17 个简版工具说明书已补全为 8 节模板（版本 1.1.0），契约测试强制全部注册工具 8 节完整
 
 ### 实施计划
 
@@ -118,31 +119,37 @@
 
 ### 对本文档其余部分的衔接
 
-- **通用约定**（下方）：P2/P3 落地后更新——`workspace`/`session_id` 从 schema 剥离、副作用改为 effects 声明
-- **各工具条目**（§1-§8）：P3 迁移完成后按说明书模板重写；迁移完成前本节保持现行参考
+- **通用约定**（下方）：已随 v2 落地更新——`workspace`/`session_id` 从 schema 剥离（经 ToolContext 注入）、副作用改为 effects 声明、错误范式分两档（ToolError 结构化 / 框架兜底）
+- **各工具条目**（§1-§8）：已按说明书模板重写（与源码 docstring 同源；契约测试守护 docstring 首行 = brief 同源）
 - **工具后续引导策略（next_step 取舍）**：由维度 6"三层面引导"继承并演进——返回值仍保持纯净（`next_step` 不回归），引导迁入说明书与运行时 fix
 
 ---
 
 ## 总览
 
-| 类别 | 工具 | 副作用 | 白名单角色 |
+| 类别 | 工具 | 副作用（effects 声明） | 白名单角色 |
 |------|------|--------|-----------|
-| 文件/代码 | `read_file` `list_files` `write_file` `git_diff` | write_file 写文件 | 多角色 |
-| 回测 | `run_backtest` `list_history` `strategy_compare` `drawdown_analysis` `benchmark_comparison` | run_backtest 写 runs/ | strategist / backtest_diagnostics |
+| 文件/代码 | `read_file` `list_files` `write_file` `git_diff` | write_file: 写FS；其余只读 | 多角色 |
+| 回测 | `run_backtest` `list_history` `strategy_compare` `drawdown_analysis` `benchmark_comparison` | run_backtest: 写DB,写FS；其余只读 | strategist / backtest_diagnostics |
 | 因子 | `compute_factor` `factor_analysis` `factor_cross_sectional_analysis` `factor_quintile_returns` `factor_ic_decay` `factor_turnover` | 只读 | factor_analyst / researcher |
-| 行情数据 | `get_market_data` `import_data` `list_data_sources` `search_symbol` | get_market_data(persist=True) / import 写 DuckDB | researcher / data_quality / strategist |
+| 行情数据 | `get_market_data` `import_data` `list_data_sources` `search_symbol` | get_market_data: 写DB,网络；import_data: 写DB；其余只读 | researcher / data_quality / strategist |
 | 其他分析 | `options_pricing` `pattern_recognition` | 只读 | — |
-| 技能 | `list_skills` `load_skill` | 只读 | 通用 |
-| Web | `web_search` `read_url` `read_document` | 只读(需依赖) | researcher / strategist |
-| Goal | `create_goal` `add_evidence` `complete_goal` `get_goal_status` `list_goals` | 写 goals.db | 通用 |
+| 技能 | `list_skills` `load_skill` `tool_help` | 只读 | 通用 |
+| Web | `web_search` `read_url` `read_document` | 网络访问（effects: 网络），只读语义 | researcher / strategist |
+| Goal | `create_goal` `add_evidence` `complete_goal` `get_goal_status` `list_goals` | 写DB（goals.db；create/add_evidence/complete） | 通用 |
 
-**通用约定：**
+**通用约定（v2）：**
 
-- 所有工具返回 JSON 字符串。成功：`{"status": "ok", ...}`；失败：`{"status": "error", "error", "received", "expected", "fix", "tool"}`。
-- `workspace` 与 `session_id` 由 AgentLoop 自动注入，LLM 无需（也不应猜测）传值——但 schema 中仍列出。
-- 有副作用的工具（`is_readonly=False`）：`write_file` `run_backtest` `get_market_data` `import_data` `create_goal` `add_evidence` `complete_goal`。
-- 依赖检测：`web_search`/`read_document` 依赖对应 Python 包，缺失时被排除注册。
+- **调用约定**：`execute(ctx: ToolContext, 显式参数)`——参数名/类型/默认值由签名与注解单源承担；schema 由注册时从签名派生。
+- **注入参数**：`workspace`/`session_id` 由框架经 ToolContext 注入（loop 统一接线），**不出现在 schema**，LLM 无需（也不应）传值；显式调用时 `ctx=None` 兼容部分工具。
+- **副作用**：写工具在类上声明 `effects`（`db`=写数据库 / `fs`=写文件系统 / `net`=网络访问）；`is_readonly` 由 effects 派生。写工具清单（9 个）：`write_file` `run_backtest` `get_market_data` `import_data` `clean_data` `create_goal` `add_evidence` `complete_goal` `run_command`。
+- **错误范式**（两档）：
+  - 业务/容错失败抛 `ToolError` → 结构化 `{"status": "error", "error", [received/expected/fix/tool]}`（received/expected/fix 可选，按场景填充）；
+  - 意外异常由框架兜底 → `{"status": "error", "error": "<类型>: <信息>", "tool": <名>}`，并记日志；
+  - 网络/临时性错误（`TRANSIENT_TOOL_ERRORS`）由 loop 自动重试。
+- **框架容错**：`_coerce_params` 按签名注解在类型不匹配时强转（JSON 字符串 list/dict、单键包裹、int/float/bool 转义）；缺必填参数 → TypeError 由框架拦截并重试/兜底。
+- **依赖检测**：`web_search`/`read_document` 依赖对应 Python 包，缺失时被排除注册。
+- **组合工具**：workspace `tools/combo/*.yml` 自动加载注册（见"组合工具细节"）。
 
 ---
 
@@ -150,44 +157,98 @@
 
 ### read_file
 
-- **用途**：读取 workspace 内文件（只读）。
-- **输入**：`workspace`(自动)、`path`(必填，相对路径)、`limit`(行数上限，可选)、`offset`(起始行，可选)。
-- **允许读取根**：`strategies/` `templates/` `memory/` `logs/` `data/` `docs/` `.`。
-- **预期输出**：`{path, content, total_lines, returned_lines}`。
-- **前置条件**：文件存在于允许根目录内，UTF-8 编码。
-- **注意事项**：
-  - 读取目录会报 "not a regular file"——用 `list_files` 列目录。
-  - 非 UTF-8（二进制/PDF）会报错——用 `read_document` 读 PDF。
-  - 不要 `read_file` 读 `data.duckdb`（二进制）。
-- **后续引导**：成功后 agent 已获得文件内容，可直接判断下一步（修改 / 运行 / 参考）。
+- **类别**: 文件 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext; schema 自动派生)
+- **用途**：
+  读取工作区内文件内容, 支持 limit/offset 分片。路径相对 workspace,
+  必须位于允许的读取根目录 (strategies/templates/memory/logs/data/docs/.)。
+- **参数**：
+  - path: 相对 workspace 的文件路径 (必填)
+  - limit: 返回的最大行数 (可选)
+  - offset: 起始行偏移, 0 起 (可选)
+- **示例**：
+  {"path": "strategies/momentum_20d/strategy.py"}
+- **边界**：
+  只读工具; 白名单外路径/绝对路径/.. 会被拒绝; 二进制/非 UTF-8 文件报错。
+- **错误处理范式**：
+  - 缺 path → error + expected 示例
+  - 白名单外 → error + fix 提示允许根目录
+  - 文件不存在/是目录 → error + fix 用 list_files 确认
+  - 非 UTF-8 → 提示用 read_document 或跳过
+  - 所有失败均可安全重试
+- **相关工具**：
+  list_files: 浏览目录; write_file: 写入
 
 ### list_files
 
-- **用途**：列出 workspace 目录/文件结构。
-- **输入**：`workspace`(自动)、`path`(可选，默认 `.`)、`pattern`(glob 过滤，可选)。
-- **预期输出**：`{path, entries: [{name, type, size}], count}`。
-- **前置条件**：路径存在且为目录。
-- **注意事项**：`path` 不存在报错并给出 `fix`。
-- **后续引导**：探索 workspace 的第一步——任何行动前建议先 `list_files` 确认结构。
+- **类别**: 文件 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+- **用途**：
+  浏览工作区目录结构: 文件与子目录清单 (含大小)。读文件前先用它探索。
+- **参数**：
+  - path: 目录路径, 相对 workspace (默认 '.')
+  - pattern: glob 过滤 (可选, 如 '*.py' / 'strategies/*')
+- **示例**：
+  {"path": "strategies"}
+- **边界**：
+  只读工具; 仅限 workspace 内目录; 文件路径会报错 (用 read_file)。
+- **错误处理范式**：
+  - 路径不存在 → error + fix 提示顶层结构
+  - 目标是文件 → error + fix 用 read_file
+  - 均可安全重试
+- **相关工具**：
+  read_file: 读文件内容; write_file: 写入
 
 ### write_file
 
-- **用途**：写文件（受沙箱 + AST 校验保护）。
-- **输入**：`workspace`(自动)、`path`(必填，相对路径)、`content`(必填)。
-- **允许写入根**：`strategies/` `templates/` `memory/` `logs/`。
-- **预期输出**：`{path, bytes_written}`。
-- **注意事项**：
-  - `.py` 文件经 AST 校验；含 `exec`/`eval`/被禁 import/dunder 访问会被拒绝。
-  - 写路径超出允许根会报错。
-- **后续引导**：写入策略文件后建议 `run_backtest(strategy_name=...)`。
+- **类别**: 文件 ｜ **副作用**: 写FS
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext; 副作用改 effects)
+- **用途**：
+  写入文件内容到工作区。路径限允许写根目录
+  (strategies/templates/memory/logs); .py 文件做 AST 校验,
+  危险代码 (exec/eval、受限 import、dunder 访问) 会被拒绝。
+- **参数**：
+  - path: 相对 workspace 的文件路径 (必填, 限写白名单)
+  - content: 文件内容 (必填, 字符串)
+- **示例**：
+  {"path": "strategies/momentum_20d/strategy.py", "content": "..."}
+- **边界**：
+  写工具 (effects=fs); 自动创建父目录; 覆盖已有文件。
+- **错误处理范式**：
+  - 缺 path/content → error + expected 示例
+  - AST 校验失败 → error 含具体危险代码说明
+  - 白名单外 → error + fix 允许根目录
+  - 写入失败 → error + fix 检查权限
+  - 幂等: 重跑覆盖同一路径, 安全
+- **相关工具**：
+  read_file: 读回校验; list_files: 浏览
 
 ### git_diff
 
-- **用途**：查看 workspace 的 git 差异。
-- **输入**：`workspace`(自动)、`staged`(仅暂存，可选)、`ref1`/`ref2`(对比提交，可选)、`pathspec`(限定路径，可选)、`max_lines`(默认 200)。
-- **预期输出**：`{diff, total_lines, truncated, staged}`。
-- **注意事项**：`pathspec` 不能以 `-` 开头（防注入）；非 git 仓库会报错；大 diff 会截断（用 pathspec 缩小）。
-- **后续引导**：常用于策略改动评审。
+- **类别**: 文件 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+- **用途**：
+  查看 workspace 的 git diff。默认未暂存改动; staged=true 看暂存;
+  ref1/ref2 对比两个提交。
+- **参数**：
+  - staged: 只看暂存改动 (默认 false)
+  - ref1/ref2: 提交对比 (需同时给)
+  - pathspec: 限定路径 (不能以 '-' 开头, 防参数注入)
+  - max_lines: 返回最大行数 (默认 200)
+- **示例**：
+  {"pathspec": "strategies/momentum_20d/"}
+- **边界**：
+  只读工具; 要求 workspace 是 git 仓库; 超时 30s。
+- **错误处理范式**：
+  - 非 git 仓库 → error + fix (git init)
+  - 超时 → fix 用 pathspec 缩小范围
+  - 均可安全重试
+- **相关工具**：
+  read_file: 看具体文件; write_file: 修改后 diff
 
 ---
 
@@ -195,50 +256,132 @@
 
 ### run_backtest
 
-- **用途**：运行回测，读取 `strategies/<name>/config.yaml`，产出 runs/。
-- **输入**：`workspace`(自动)、`strategy_name`(必填)、`action`(默认 "agent")、`description`(可选)、`yaml_path`(覆盖配置，可选)。
-- **预期输出**：`{run, strategy, metrics, status}`。
-- **前置条件**：`strategies/<name>/config.yaml` 存在且合法；所需行情已入 DuckDB（`data.source: auto+duckdb` 或 `duckdb`）。
-- **注意事项**：
-  - 数据为空时错误响应自带 `workflow` 提示：`get_market_data(persist=True)` → `run_backtest`。
-  - `auto+duckdb`：DuckDB 缓存 + 在线刷新；`duckdb`：仅本地（需先导入）。
-- **后续引导**：成功后用 `list_history` 对比历史，`drawdown_analysis` 看回撤，`benchmark_comparison` 对照基准。
+- **类别**: 回测 ｜ **副作用**: 写DB, 写FS
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext; effects 声明)
+- **用途**：
+  读取 strategies/<name>/config.yaml 运行回测, 产出新 run 写入
+  runs/<name>/ 与 DuckDB。策略配置就绪且数据已入库后验证表现。
+  数据未入库时先 get_market_data; 只看历史结果用 list_history。
+- **参数**：
+  - strategy_name: 策略目录名 (必填, strategies/<name>/config.yaml 须存在)
+  - action: 运行标注 (审计用, 默认 'agent')
+  - description: 可选描述
+  - yaml_path: 覆盖默认 config 路径 (相对 workspace)
+- **示例**：
+  {"strategy_name": "momentum_20d"}
+- **边界**：
+  写工具 (effects: db + fs); 前置: price_data 已有该策略数据;
+  同策略重复运行产生新 run, 不覆盖旧 run。
+- **错误处理范式**：
+  - 缺 strategy_name → error + expected 示例
+  - 策略目录不存在 → fix 提示 list_files 查看 strategies/
+  - 数据为空 / 无 DB → fix 给 workflow: get_market_data(persist=True) → 重跑
+  - 配置 YAML 非法 → fix 指向 config.yaml 检查
+  - 所有失败均可安全重试 (无部分写入遗留)
+- **相关工具**：
+  get_market_data: 数据前置; list_history/drawdown_analysis/
+  benchmark_comparison: 结果消费
 
 ### list_history
 
-- **用途**：列出历史回测结果（读 `results.tsv`）。
-- **输入**：`workspace`(自动)、`strategy_name`(过滤，可选)、`limit`(默认 20)。
-- **预期输出**：`{source, n_rows, runs: [row...]}`；无结果时 `runs: []`（非错误）。
-- **前置条件**：`strategies/<name>/runs/results.tsv` 存在。
-- **注意事项**：未指定 strategy 时只扫第一个含 results.tsv 的策略目录。
-- **后续引导**：用数据判断是否保留/回滚/继续实验。
+- **类别**: 回测 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+- **用途**：
+  查看过去的回测运行记录: 从 strategies/<name>/runs/results.tsv 读取
+  摘要行 (含关键指标)。不指定 strategy_name 时找第一个 results.tsv。
+- **参数**：
+  - strategy_name: 按策略过滤 (可选)
+  - limit: 最大返回行数 (默认 20)
+- **示例**：
+  {"strategy_name": "momentum_20d"}
+- **边界**：
+  只读工具; 无 results.tsv 时返回空 runs + message。
+- **错误处理范式**：
+  - 读取失败 → error + fix 检查权限
+  - 无记录不是错误 (返回空列表)
+- **相关工具**：
+  run_backtest: 产生记录; drawdown_analysis: 深度分析
 
 ### strategy_compare
 
-- **用途**：多策略指标并排对比（读各策略最新 results.tsv 行）。
-- **输入**：`workspace`(自动)、`strategy_names`(必填，逗号分隔)、`metrics`(默认 `sharpe,ann_return,max_dd,calmar,turnover,win_rate`)。
-- **预期输出**：`{strategies, metrics, comparison: [{strategy, ...metric, run_name}]}`。
-- **前置条件**：各策略 `runs/results.tsv` 存在且非空。
-- **注意事项**：缺失的策略在 comparison 里带 `error` 字段，不整体失败。
-- **后续引导**：对比后选优策略深入分析或回滚劣者。
+- **类别**: 回测 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  读取多个策略 runs/results.tsv 的最新一行, 按指定指标列横向对比,
+  用于回测结果选优。缺失结果文件的策略带 error 字段, 不整体失败。
+- **参数**：
+  - strategy_names: 逗号分隔的策略名列表 (必填)
+  - metrics: 逗号分隔的指标列 (默认
+  sharpe,ann_return,max_dd,calmar,turnover,win_rate)
+- **示例**：
+  {"strategy_names": "mom_20d,mom_60d", "metrics": "sharpe,ann_return,max_dd"}
+- **边界**：
+  只读工具; 需要 workspace; 各策略须已跑过回测 (results.tsv 存在);
+  指标列不存在时该列为 null; 数值转浮点失败时保留原值。
+- **错误处理范式**：
+  - strategy_names 缺失 → error
+  - 单策略 results.tsv 缺失/读取失败/无记录 → 该策略行带 error
+  (非整体失败)
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: run_backtest; 后续: drawdown_analysis / benchmark_comparison
 
 ### drawdown_analysis
 
-- **用途**：分析最新一次回测的权益曲线回撤。
-- **输入**：`workspace`(自动)、`strategy_name`(必填)、`top_n`(默认 5)。
-- **预期输出**：`{strategy, run, equity_length, max_drawdown, current_drawdown, n_drawdown_periods, top_drawdowns}`。
-- **前置条件**：最新 run 目录含 `equity.csv`/`equity_curve.csv`/`portfolio.csv`/`nav.csv` 之一，或 run.log 含 equity 数值。
-- **注意事项**：找不到权益曲线时报错；权益点 < 10 报错。
-- **后续引导**：依据回撤深度/恢复时长决定是否调整风控参数。
+- **类别**: 回测 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  从最新 run 的权益曲线计算回撤序列: 最大回撤、当前回撤、回撤期
+  数量与按深度排序的 Top N 回撤区间 (含开始/谷底/恢复索引与时长)。
+  依据回撤深度与恢复时长判断风控参数是否需要调整。
+- **参数**：
+  - strategy_name: 策略名 (必填)
+  - top_n: 返回的回撤区间数量 (默认 5)
+- **示例**：
+  {"strategy_name": "mom_20d", "top_n": 10}
+- **边界**：
+  只读工具; 需要 workspace; 最新 run 须含权益曲线
+  (equity.csv/equity_curve.csv/portfolio.csv/nav.csv 之一, 或
+  run.log 含 equity= 数值); 权益点 < 10 报错; 仍在回撤中的区间
+  recovery_idx 为 null。
+- **错误处理范式**：
+  - runs 目录不存在/无 run → error
+  - 找不到权益曲线或点 < 10 → error, 检查 run 输出
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: run_backtest; 后续: benchmark_comparison / strategy_compare
 
 ### benchmark_comparison
 
-- **用途**：策略 vs 基准的 alpha/beta/跟踪误差/信息比率。
-- **输入**：`workspace`(自动)、`strategy_name`(必填)、`benchmark_code`(必填，如 `000300.SH`)、`start_date`/`end_date`(可选)。
-- **预期输出**：`{strategy, benchmark, n_periods, alpha_annualized, beta, tracking_error, information_ratio, max_relative_drawdown, ...}`。
-- **前置条件**：策略有最新权益曲线；基准代码已在 DuckDB `ohlcv` 中。
-- **注意事项**：基准查询用字符串拼接 `asset = '{benchmark_code}'`——仅接受已知代码。
-- **后续引导**：alpha 显著且 IR 高 → 可保留；否则审视因子暴露。
+- **类别**: 回测 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  对比策略最新 run 的权益曲线与基准 (DuckDB ohlcv 中的指数/标的)
+  的日收益: 年化 alpha、beta、跟踪误差、信息比率、最大相对回撤与
+  双方年化收益。用于判断策略是否相对基准有超额。
+- **参数**：
+  - strategy_name: 策略名 (必填)
+  - benchmark_code: 基准代码 (必填, 如 000300.SH, 须已在 ohlcv)
+  - start_date/end_date: 基准数据时间窗 (可选, ISO 日期)
+- **示例**：
+  {"strategy_name": "mom_20d", "benchmark_code": "000300.SH"}
+- **边界**：
+  只读工具; 需要 workspace; 策略须有最新权益曲线 (≥10 点);
+  基准代码须已入库; 两者按尾部对齐取较短长度; 基准查询用字符串
+  拼接 asset 值 — 仅传已知代码。
+- **错误处理范式**：
+  - 策略/基准缺参 → error + expected
+  - 基准未入库/无数据 → error, 先 get_market_data(benchmark_code)
+  - 权益曲线缺失 → error
+  - beta 分母为零时 beta/alpha 为 null (非失败)
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: run_backtest + get_market_data; 同类: drawdown_analysis
 
 ---
 
@@ -249,56 +392,170 @@
 
 ### compute_factor
 
-- **用途**：单资产计算因子表达式，返回序列样本。
-- **输入**：`workspace`(自动)、`factor_code`(必填，如 `ts_mean(close, 20)/ts_mean(close,60)-1`)、`asset`(可选，默认第一个)、`factor_name`(可选)、`n_samples`(默认 5)。
-- **预期输出**：`{factor_name, factor_code, asset, n_total, n_non_null, sample, first_date, last_date}`。
-- **注意事项**：
-  - 需单资产宽表；数据来自 DuckDB `ohlcv`，按 asset 过滤后 `set_index('date')`。
-  - 指定 asset 不存在时报错并列出可用资产前 10。
-  - 因子算子语法以 `templates/.skills/factor-research.md` 为准——**不要猜测算子**。
-- **后续引导**：`factor_analysis` 算 IC/IR，或 `factor_cross_sectional_analysis` 跨资产验证。
+- **类别**: 因子 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+- **用途**：
+  在单资产宽表 (close/open/high/low/volume) 上计算因子表达式
+  (如 'ts_mean(close, 20) / ts_mean(close, 60) - 1'), 返回结果采样。
+- **参数**：
+  - factor_code: 因子表达式 (必填)
+  - asset: 资产代码 (默认第一个可用资产)
+  - factor_name: 因子名 (可选, 用于展示)
+  - n_samples: 采样数 (默认 5)
+- **示例**：
+  {"factor_code": "ts_return(close, 20)"}
+- **边界**：
+  只读工具; 读取 workspace DuckDB 的 ohlcv 视图 (price_data);
+  数据为空会给 workflow 提示。
+- **错误处理范式**：
+  - 缺 factor_code → error + expected 示例
+  - 无 DB/空表 → error + fix: get_market_data → compute_factor
+  - asset 不存在 → error + expected 可用资产列表
+  - 表达式错误 → error + available_columns 与示例表达式
+  - 均可安全重试
+- **相关工具**：
+  get_market_data: 数据前置; factor_analysis/factor_quintile_returns 等: 后续分析
 
 ### factor_analysis
 
-- **用途**：单资产因子 IC/IR 统计。
-- **输入**：`workspace`(自动)、`factor_code`(必填)、`asset`(可选)、`forward_days`(默认 5)。
-- **预期输出**：`{factor_code, asset, forward_days, ic_mean, spearman_ic, n_observations}`。
-- **注意事项**：对齐后样本 < 10 报错 "insufficient data"。
-- **后续引导**：跨资产验证或直接构建策略。
+- **类别**: 因子 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+- **用途**：
+  对因子表达式做 IC/IR 分析: 计算 IC mean、spearman IC、观测数。
+  需要 workspace DuckDB 有价格数据。
+- **参数**：
+  - factor_code: 因子表达式 (必填)
+  - asset: 资产代码 (默认第一个可用)
+  - forward_days: 前向收益天数 (默认 5)
+- **示例**：
+  {"factor_code": "ts_return(close, 20)"}
+- **边界**：
+  只读工具; 观测数 < 10 时返回 insufficient data 错误。
+- **错误处理范式**：
+  - 无 DB/空表 → error + workflow 提示
+  - asset 不存在 → error + expected 可用资产
+  - 数据不足 → error + 需要 >= 10 行
+  - 均可安全重试
+- **相关工具**：
+  compute_factor: 单因子计算; factor_quintile_returns 等: 深入分析
 
 ### factor_cross_sectional_analysis
 
-- **用途**：跨资产截面 IC（Pearson + Spearman）、IR、IC>0 比例。
-- **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(逗号分隔代码或 `all`，默认 `all`)、`start_date`/`end_date`(可选)、`forward_days`(默认 5)。
-- **预期输出**：`{factor_code, n_assets, n_dates, forward_days, ic_pearson_mean, ic_pearson_std, ir, ic_pearson_gt0_ratio, ic_spearman_mean, ic_spearman_std, sample_dates}`。
-- **注意事项**：
-  - **需 ≥3 资产**，因子计算成功也需 ≥3，有效 IC 观测 ≥5。
-  - `universe` 中不存在的代码会报错。
-- **后续引导**：`factor_quintile_returns` 看分组单调性，`factor_ic_decay` 看衰减。
+- **类别**: 因子 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  对资产池计算因子表达式的逐日截面 IC (Pearson + Spearman), 汇总
+  IC 均值/标准差/IR/IC>0 比例, 并附前 5 个样本日期。验证因子在
+  横截面上是否有区分度。单资产验证用 factor_analysis。
+- **参数**：
+  - factor_code: 因子表达式 (必填, 语法见 .skills/factor-research.md)
+  - universe: 逗号分隔代码或 all (默认 all)
+  - start_date/end_date: 数据时间窗 (可选, ISO 日期)
+  - forward_days: 前向收益窗口天数 (默认 5)
+- **示例**：
+  {"factor_code": "ts_mean(close,20)/ts_mean(close,60)-1",
+  "universe": "600519.SH,000858.SZ,000001.SZ"}
+- **边界**：
+  只读工具; 需要 DuckDB ohlcv 数据; 需 ≥3 资产且 ≥3 个因子计算
+  成功; 有效 IC 观测 ≥5; 样本 < 20 根 K 线的资产被跳过。
+- **错误处理范式**：
+  - universe 含不存在代码 → error + 缺失列表
+  - 资产数/因子成功数 < 3 → error, 需先入库更多资产
+  - IC 观测 < 5 → error "too few valid IC observations"
+  - ohlcv 为空/库不可用 → error, 先 get_market_data(persist=True)
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: get_market_data; 后续: factor_quintile_returns / factor_ic_decay;
+  同类: factor_analysis (单资产)
 
 ### factor_quintile_returns
 
-- **用途**：按因子值分组（默认 5 组）的平均前向收益 + 多空价差。
-- **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(默认 `all`)、`start_date`/`end_date`(可选)、`n_groups`(默认 5)、`holding_period`(默认 5)。
-- **预期输出**：`{factor_code, n_groups, holding_period, n_assets_used, Q1..Qn_mean_return, long_short_spread}`。
-- **注意事项**：需 `n_groups*2` 资产下限。
-- **后续引导**：看 Q1→Qn 单调性与价差符号；`factor_ic_decay`/`factor_turnover` 深入。
+- **类别**: 因子 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  把资产池按因子值逐日分为 N 组 (默认 5 组), 计算各组的平均前向
+  收益 (holding_period 天) 与多空价差 (Qn - Q1), 检验因子分组
+  单调性。
+- **参数**：
+  - factor_code: 因子表达式 (必填)
+  - universe: 逗号分隔代码或 all (默认 all)
+  - start_date/end_date: 数据时间窗 (可选)
+  - n_groups: 分组数 (默认 5)
+  - holding_period: 前向收益持有天数 (默认 5)
+- **示例**：
+  {"factor_code": "ts_rank(close,20)", "n_groups": 5, "holding_period": 5}
+- **边界**：
+  只读工具; 需要 DuckDB ohlcv; 资产数须 ≥ n_groups*2; 样本 < 20 根
+  或因子计算失败的资产被跳过; 某日有效资产不足则跳过该日。
+- **错误处理范式**：
+  - 资产不足 n_groups*2 → error + 所需/实有数量
+  - ohlcv 为空 → error, 先入库
+  - 某组无观测 → 该组 mean_return 为 null (非整体失败)
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: get_market_data; 后续: factor_ic_decay / factor_turnover;
+  同类: factor_cross_sectional_analysis
 
 ### factor_ic_decay
 
-- **用途**：多前向窗口（默认 1,5,10,20,60 天）的 IC 衰减曲线。
-- **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(默认 `all`)、`start_date`/`end_date`(可选)、`horizons`(逗号分隔，默认 `1,5,10,20,60`)。
-- **预期输出**：`{factor_code, n_assets, ic_decay: [{horizon, ic_mean, ic_std, ir, n_periods}]}`。
-- **注意事项**：需 ≥3 资产因子计算成功。
-- **后续引导**：根据最佳 horizon 进入策略构建。
+- **类别**: 因子 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  计算因子在多个前向收益周期 (默认 1,5,10,20,60 天) 的逐日截面
+  Spearman IC 均值/标准差/IR, 观察预测力随周期的衰减速度,
+  用于选择因子最佳持有周期。
+- **参数**：
+  - factor_code: 因子表达式 (必填)
+  - universe: 逗号分隔代码或 all (默认 all)
+  - start_date/end_date: 数据时间窗 (可选)
+  - horizons: 逗号分隔的前向周期列表 (默认 1,5,10,20,60)
+- **示例**：
+  {"factor_code": "ts_mean(close,20)/ts_mean(close,60)-1",
+  "horizons": "5,10,20"}
+- **边界**：
+  只读工具; 需要 DuckDB ohlcv; 因子计算成功资产须 ≥3; 单日截面
+  有效资产 < 3 则跳过该日。
+- **错误处理范式**：
+  - 因子成功资产 < 3 → error
+  - 某 horizon 无有效观测 → 该周期 ic_mean 等为 null (非整体失败)
+  - ohlcv 为空 → error, 先入库
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: get_market_data; 后续: 按最佳 horizon 构建策略;
+  同类: factor_cross_sectional_analysis / factor_turnover
 
 ### factor_turnover
 
-- **用途**：因子排名稳定性（低换手 = 稳定因子）。
-- **输入**：`workspace`(自动)、`factor_code`(必填)、`universe`(默认 `all`)、`start_date`/`end_date`(可选)、`rebalance_freq`(默认 5)。
-- **预期输出**：`{factor_code, n_assets, n_periods, rebalance_freq_days, avg_turnover, median_turnover, std_turnover, avg_rank_stability}`。
-- **注意事项**：需 ≥3 资产；采样期 < 2 报错。
-- **后续引导**：低换手因子适合实盘；进截面复核 + 回测。
+- **类别**: 因子 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  按 rebalance_freq 天间隔采样因子值, 计算相邻采样日资产排名的
+  Spearman 相关, 换手率 = 1 - 秩相关; 输出平均/中位换手与排名
+  稳定度 (1 - 平均换手)。低换手因子排名稳定, 更适合实盘。
+- **参数**：
+  - factor_code: 因子表达式 (必填)
+  - universe: 逗号分隔代码或 all (默认 all)
+  - start_date/end_date: 数据时间窗 (可选)
+  - rebalance_freq: 采样间隔天数 (默认 5)
+- **示例**：
+  {"factor_code": "ts_mean(close,20)/ts_mean(close,60)-1",
+  "rebalance_freq": 10}
+- **边界**：
+  只读工具; 需要 DuckDB ohlcv; 因子成功资产须 ≥3; 采样期 < 2 报错;
+  相邻采样日公共资产 < 3 的间隔被跳过。
+- **错误处理范式**：
+  - 采样期 < 2 → error "not enough rebalancing periods"
+  - 无有效换手观测 → error "no valid turnover observations"
+  - 因子成功资产 < 3 → error
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: get_market_data; 同类: factor_ic_decay / factor_quintile_returns
 
 ---
 
@@ -306,47 +563,98 @@
 
 ### get_market_data
 
-- **用途**：按 fallback 链获取 OHLCV 行情，**写入 workspace DuckDB 并返回摘要**（全量数据不进 prompt）。已与 `commit_market_data` 合并——fetch + persist 一步完成。
-- **输入**：`codes`(必填，list[str] 或 "A,B,C" 字符串或 JSON 字符串)、`start_date`/`end_date`(必填，ISO 日期)、`interval`(默认 `1D`)、`source`(可选覆盖)、`max_rows`(默认 500)、`persist`(默认 True，写 DuckDB)、`strategy_name`(默认 `default`)、`workspace`(自动注入，persist=True 时必需)。
-- **预期输出**：`{summary: {code: {rows, status, first_close, last_close, close_min, close_max, avg_volume}}, preview: {code: [前5行]}, persisted: bool, strategy_name, persisted_rows, meta: {codes, start_date, end_date, interval, source, total_rows}}`。
-- **前置条件**：至少一个数据源可用（`list_data_sources` 可查）；网络可用；persist=True 需 workspace（AgentLoop 自动注入）。
-- **注意事项**：
-  - **上下文安全设计**：全量行情直接写 DuckDB，**不进入 LLM prompt**；返回值仅含 summary+preview。这是 context 溢出修复的核心（见 `docs/context-overflow-fix.md`）。
-  - `source` 指定且不可用 → 报错；不指定 → `detect_market` 自动选源。
-  - **纯数字代码（如 `510300`）会被误判为 FRED/macro**；A 股代码务必带后缀 `600519.SH`/`000858.SZ`。
-  - `codes` 形状错误时容错：支持 list / 逗号分隔字符串 / JSON 字符串 / 单键 dict 包裹。
-  - `persist=True`（默认）写入 `price_data`（`ohlcv` 视图可见），`run_backtest`/`compute_factor`/`factor_*` 立即可用。`persist=False` 仅查看不写库。
-  - **幂等**：`INSERT OR REPLACE` 按 (strategy_name, asset_code, date) 覆盖，重复获取不重复插入。
-- **后续引导**：无需额外步骤——persist=True 已入库，可直接 `run_backtest` 或因子分析。
+- **类别**: 行情 ｜ **副作用**: 写DB, 网络
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext; 副作用改 effects)
+- **用途**：
+  按 fallback 链获取 OHLCV 行情, persist=True (默认) 直接写入
+  DuckDB price_data (回测/因子立即可用), 返回摘要+预览;
+  全量数据不进 LLM prompt (context 安全)。
+- **参数**：
+  - codes: 资产代码列表 (必填, 如 ['600519.SH','000858.SZ'])
+  - start_date/end_date: ISO 日期 (必填)
+  - interval: K 线周期 (默认 '1D')
+  - source: 数据源覆盖 (可选)
+  - max_rows: 每代码最大行数 (默认 500)
+  - persist: 是否入库 (默认 True; False 只查看)
+  - strategy_name: 数据分区名 (默认 'default')
+  - force_refresh: 跳过缓存强制网络取数 (默认 False)
+- **示例**：
+  {"codes": ["600519.SH"], "start_date": "2023-01-01", "end_date": "2023-12-31"}
+- **边界**：
+  写工具 (effects: db + net); 幂等 (INSERT OR REPLACE);
+  纯数字代码会误判为 FRED/macro, A 股务必带后缀。
+- **错误处理范式**：
+  - 缺 codes/日期 → error + expected 示例
+  - 日期范围非法 → error + 校验说明
+  - 指定 source 不可用 → error + 可用源列表
+  - 网络失败 → error (transient, 可重试)
+  - persist=True 幂等, 重试安全
+- **相关工具**：
+  run_backtest/compute_factor/factor_*: 数据消费方
 
 ### import_data
 
-- **用途**：手动/外部 OHLCV 数据导入 DuckDB（**非推荐主流程**）。
-- **输入**：`workspace`(自动)、`data`(必填，`{asset_code: [records]}`)、`strategy_name`(默认 `default`)。
-- **预期输出**：`{imported, n_codes, strategy_name, message}`。
-- **注意事项**：
-  - **主流程为 `get_market_data(persist=True)`**；`import_data` 仅用于粘贴外部数据/CSV。
-  - `data` 支持各种 LLM 错误包裹（单键 dict、JSON 字符串）的容错。
-  - 记录需含 `trade_date`/`date` + OHLCV；缺 close 列会报错。
-- **后续引导**：导入后可 `run_backtest` 或 `factor_analysis`。
+- **类别**: 行情 ｜ **副作用**: 写DB
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+- **用途**：
+  手动/外部 OHLCV 数据导入 DuckDB。主流程是
+  get_market_data(persist=True); 本工具仅用于粘贴外部数据/CSV。
+- **参数**：
+  - data: {asset_code: [记录列表]} (必填)
+  - strategy_name: 数据分区名 (默认 'default')
+- **示例**：
+  {"data": {"600519.SH": [{"trade_date": "2023-12-11", "close": 1544.5}]}}
+- **边界**：
+  写工具 (effects: db); 支持 LLM 错误包裹 (JSON 字符串/单键 dict) 容错。
+- **错误处理范式**：
+  - 缺 data → error + expected 结构示例
+  - 数据形状错误 → error + fix 提示用 get_market_data
+  - 均可安全重试 (INSERT OR REPLACE 幂等)
+- **相关工具**：
+  get_market_data: 推荐主流程
 
 ### list_data_sources
 
-- **用途**：列出注册的数据源与可用性/认证需求。
-- **输入**：无。
-- **预期输出**：`{n_sources, sources: [{name, available, markets, requires_auth}]}`。
-- **前置条件**：无。
-- **注意事项**：调用前会 `_ensure_registered()`。
-- **后续引导**：确认哪个源可用后决定 `get_market_data` 是否需 `source` 覆盖。
+- **类别**: 行情 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名)
+- **用途**：
+  列出全部注册数据源: 可用性/适用市场/是否需要 API key。
+  取数前先查可用源, 或排障时确认数据源状态。
+- **参数**：
+  无
+- **示例**：
+  {}
+- **边界**：
+  只读工具; 不访问网络。
+- **错误处理范式**：
+  无输入参数, 极少失败; 失败均可安全重试。
+- **相关工具**：
+  get_market_data: 用可用源取数
 
 ### search_symbol
 
-- **用途**：按名称/代码搜索 A 股标的（akshare）。
-- **输入**：`query`(必填)、`market`(默认 `a_share`)、`limit`(默认 10)。
-- **预期输出**：`{results: [{code, name, market, price, change_pct}], query, market, limit, n_results}`。
-- **前置条件**：`akshare` 已安装、网络可用。
-- **注意事项**：非 a_share 市场支持有限。
-- **后续引导**：用搜索到的代码调用 `get_market_data`。
+- **类别**: 行情 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名)
+- **用途**：
+  按名称或代码模糊搜索证券 (A 股主, 经 akshare spot 数据)。
+- **参数**：
+  - query: 查询词 (必填, 名称或代码)
+  - market: 市场过滤 (默认 'a_share')
+  - limit: 最大结果数 (默认 10)
+- **示例**：
+  {"query": "茅台"}
+- **边界**：
+  只读工具; 依赖 akshare 与网络; 无匹配返回空列表 (非错误)。
+- **错误处理范式**：
+  - 缺 query → error + expected 示例
+  - akshare 未装 → fix 安装
+  - 网络失败 → error + fix 换查询词/检查网络
+- **相关工具**：
+  get_market_data: 搜到的代码直接取数
 
 ---
 
@@ -354,20 +662,54 @@
 
 ### options_pricing
 
-- **用途**：Black-Scholes 期权定价 + Greeks。
-- **输入**：`spot`/`strike`/`rate`/`volatility`/`time_to_expiry`/`option_type`(全必填)。
-- **预期输出**：`{option_type, spot, strike, rate, volatility, time_to_expiry, price, delta, gamma, theta, vega, rho}`。
-- **注意事项**：需 scipy；参数需为正；option_type 限 `call`/`put`。
-- **后续引导**：无固定后续。
+- **类别**: 分析 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  用 Black-Scholes 公式计算欧式期权理论价与 Greeks
+  (delta/gamma/theta/vega/rho), 用于研究中的敏感度分析。
+  仅支持欧式期权, 不处理分红与美式提前行权。
+- **参数**：
+  - spot/strike/rate/volatility/time_to_expiry: 标的价/行权价/
+  无风险利率/波动率/剩余期限 (年), 均须为正
+  - option_type: call 或 put (默认 call)
+- **示例**：
+  {"spot": 100.0, "strike": 105.0, "rate": 0.03, "volatility": 0.25,
+  "time_to_expiry": 0.5, "option_type": "call"}
+- **边界**：
+  只读工具; 无需 workspace/数据库; 需 scipy; strict 工具 (schema
+  由 strict 模式强制必填)。
+- **错误处理范式**：
+  - option_type 非 call/put → error + 枚举提示, 修正后重试
+  - 任一参数非正 → error + 提示, 修正后重试
+  - 幂等: 纯函数计算
+- **相关工具**：
+  pattern_recognition: 行情形态分析 (研究输入)
 
 ### pattern_recognition
 
-- **用途**：趋势/支撑阻力/波动率挤压检测。
-- **输入**：`workspace`(自动)、`asset`(可选)、`lookback`(默认 60)。
-- **预期输出**：`{asset, lookback, current_price, range_pct, patterns: [{pattern, confidence, ...}]}`。
-- **前置条件**：DuckDB 有 OHLCV；数据 ≥ 10 行。
-- **注意事项**：基于 MA20/MA5 的简化启发式，非严格形态识别。
-- **后续引导**：模式结果作为研究输入。
+- **类别**: 分析 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  从 DuckDB ohlcv 读取最近 N 根 K 线, 用简化启发式检测价格形态:
+  均线趋势 (MA5 vs MA20)、近阻力/近支撑 (接近近期高低点 2% 内)、
+  波动率挤压 (近 5 日标准差 < 近 20 日的 60%)。非严格形态识别,
+  输出带置信度, 作为研究输入而非交易信号。
+- **参数**：
+  - asset: 限定单个资产代码 (可选; 缺省分析全部资产)
+  - lookback: 分析的 K 线数量 (默认 60)
+- **示例**：
+  {"asset": "600519.SH", "lookback": 120}
+- **边界**：
+  只读工具; 需要 workspace 含 DuckDB 且 ohlcv 非空; 数据量 < 10 根
+  报 insufficient data。
+- **错误处理范式**：
+  - 缺 workspace / 库不可用 / ohlcv 为空 → error, 先入库
+  - 数据不足 (< 10 根) → error, 需 get_market_data(persist=True)
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: get_market_data / import_data; 同类: compute_factor
 
 ---
 
@@ -375,18 +717,48 @@
 
 ### list_skills
 
-- **用途**：列出方法论技能（workspace `.skills/` 优先，合并内置 `templates/.skills/`）。
-- **输入**：`workspace`(自动)、`category`(可选过滤)。
-- **预期输出**：`{n_skills, categories, skills: [{name, category, description}]}`。
-- **后续引导**：用 `load_skill` 读取感兴趣的技能全文。
+- **类别**: 技能 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  列出方法论技能: workspace/.skills/ 优先, 合并内置
+  templates/.skills/, 返回名称/类别/一句话描述, 可按类别过滤。
+  技能全文用 load_skill 按需加载, 避免大全文直接进 prompt。
+- **参数**：
+  - category: 按类别过滤 (可选; 缺省返回全部)
+- **示例**：
+  {"category": "因子研究"}
+- **边界**：
+  只读工具; 需要 workspace 上下文; 无技能时返回空列表 (非错误)。
+- **错误处理范式**：
+  - 缺 workspace 上下文 → error, 需 AgentLoop 注入
+  - 扫描/加载异常 → error + 异常信息, 可重试
+  - 幂等: 只读不写
+- **相关工具**：
+  load_skill: 加载技能全文; tool_help: 同类按需加载机制
 
 ### load_skill
 
-- **用途**：加载技能全文。
-- **输入**：`workspace`(自动)、`name`(必填)。
-- **预期输出**：`{name, category, description, tags, content}`。
-- **注意事项**：技能不存在时返回可用技能名列表（最多 20）。
-- **后续引导**：按技能内工作流执行。
+- **类别**: 技能 ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  按名称加载技能的完整 markdown 全文 (含 API 契约/工作流/示例),
+  供 agent 按方法论执行。workspace/.skills/ 覆盖同名内置技能。
+  先 list_skills 浏览目录, 再决定加载哪个。
+- **参数**：
+  - name: 技能名 (必填)
+- **示例**：
+  {"name": "factor-research"}
+- **边界**：
+  只读工具; 需要 workspace 上下文; name 为空/非字符串报错。
+- **错误处理范式**：
+  - name 缺失/非法 → error + 提示
+  - 技能不存在 → error + available 列表 (最多 20 个)
+  - 内部异常 → error + 异常信息, 可重试
+  - 幂等: 只读不写
+- **相关工具**：
+  list_skills: 目录浏览; tool_help: 同类按需加载机制
 
 ---
 
@@ -394,76 +766,191 @@
 
 ### web_search
 
-- **用途**：DuckDuckGo 搜索。
-- **输入**：`query`(必填)、`max_results`(默认 10)。
-- **预期输出**：搜索结果（title/URL/snippet）。
-- **前置条件**：`duckduckgo_search` 已安装（未安装则工具不注册）。
-- **注意事项**：网络可能受限；失败时给出可用修复建议。
-- **后续引导**：对关键结果用 `read_url` 深入。
+- **类别**: Web ｜ **副作用**: 网络
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名)
+- **用途**：
+  DuckDuckGo 网页搜索, 返回标题/URL/摘要。无需 API key。
+- **参数**：
+  - query: 搜索词 (必填)
+  - max_results: 最大结果数 (默认 10)
+- **示例**：
+  {"query": "A-share momentum factor research"}
+- **边界**：
+  只读工具 (effects: net); 依赖 duckduckgo_search 包。
+- **错误处理范式**：
+  - 缺 query → error + expected 示例
+  - 网络失败 → error (transient, 可重试)
+- **相关工具**：
+  read_url: 打开结果
 
 ### read_url
 
-- **用途**：抓取网页转 Markdown。
-- **输入**：`url`(必填)、`max_chars`(默认 10000)。
-- **预期输出**：网页正文 Markdown。
-- **注意事项**：仅 http(s)；大页面按 max_chars 截断。
-- **后续引导**：提取信息后用于研究/证据。
+- **类别**: Web ｜ **副作用**: 网络
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名)
+- **用途**：
+  抓取网页 URL 并返回 Markdown 内容; 适合读文档/文章/论文。
+- **参数**：
+  - url: 要抓取的 URL (必填)
+  - max_chars: 最大字符数 (默认 10000)
+- **示例**：
+  {"url": "https://docs.python.org/3/"}
+- **边界**：
+  只读工具 (effects: net); 依赖 ...web.fetch。
+- **错误处理范式**：
+  - 缺 url → error + expected 示例
+  - 网络/解析失败 → error (transient, 可重试)
+- **相关工具**：
+  web_search: 找 URL
 
 ### read_document
 
-- **用途**：PDF 提取文本（PyMuPDF）。
-- **输入**：`path`(必填，绝对路径)、`max_pages`(默认 50)。
-- **预期输出**：带页码标记的提取文本。
-- **前置条件**：`fitz` (PyMuPDF) 已安装（未安装不注册）。
-- **后续引导**：用提取内容辅助研究。
+- **类别**: Web ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 迁移 v2 (显式签名)
+- **用途**：
+  从 PDF 文件提取文本内容 (含页码标记)。需 PyMuPDF。
+- **参数**：
+  - path: PDF 文件路径 (必填, 绝对路径)
+  - max_pages: 最大页数 (默认 50)
+- **示例**：
+  {"path": "/home/user/papers/momentum.pdf"}
+- **边界**：
+  只读工具; 依赖 fitz (PyMuPDF), 缺失时被排除注册。
+- **错误处理范式**：
+  - 缺 path → error + expected 示例
+  - 文件无法解析 → error
+- **相关工具**：
+  无
 
 ---
 
 ## 8. Goal
 
-> Goal 工具写 `goals.db`。`session_id` 由 AgentLoop 自动注入（聊天场景），否则回退 `"default"`。
+> Goal 工具写 `goals.db`（effects=db）。`session_id` 由框架经 ToolContext 注入（聊天场景），否则回退 `"default"`。
 > 典型生命周期：`create_goal` → `add_evidence`(可多次) → `complete_goal`；用 `get_goal_status`/`list_goals` 查看。
 
 ### create_goal
 
-- **用途**：创建/替换当前会话的研究目标。
-- **输入**：`session_id`(自动)、`objective`(必填)、`criteria`(可选，list[str]，为空用默认)。
-- **预期输出**：`{goal_id, goal_status, objective, progress_percent}`。
-- **注意事项**：已存在目标会被取代（superseded）。
-- **后续引导**：开展研究并用 `add_evidence` 记录证据。
+- **类别**: Goal ｜ **副作用**: 写DB
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  为当前会话创建研究目标 (goals.db), 已存在目标则被取代。
+  criteria 为空时用默认标准。研究开始前用本工具确立目标,
+  研究中用 add_evidence 记录证据。
+- **参数**：
+  - objective: 研究目标描述 (必填, 非空)
+  - criteria: 完成标准列表 (可选, list[str]; 字符串/JSON/单键
+  包裹均容错解析; 缺省用默认标准)
+- **示例**：
+  {"objective": "评估动量因子在 A 股的有效性",
+  "criteria": ["完成截面 IC 分析", "完成分层回测"]}
+- **边界**：
+  写 goals.db (effects=db); session_id 由框架注入, 无会话回退
+  default; 已存在目标被取代, 创建前可先 get_goal_status。
+- **错误处理范式**：
+  - objective 缺失/空 → error + expected/fix
+  - 存储异常 → error + 输入回显, 验证参数后重试
+  - 幂等性: 替换语义, 重复调用会覆盖旧目标
+- **相关工具**：
+  后续: add_evidence / get_goal_status / complete_goal
 
 ### add_evidence
 
-- **用途**：向当前目标追加证据。
-- **输入**：`session_id`(自动)、`text`(必填)、`criterion_id`/`run_id`(可选)、`source_type`(默认 `evidence`)。
-- **预期输出**：`{evidence_id, goal_id, progress_percent}`。
-- **前置条件**：会话已有 active goal（否则提示先 `create_goal`）。
-- **注意事项**：evidence 关联 criterion 可推动进度百分比。
-- **后续引导**：证据累积完成后 `complete_goal`。
+- **类别**: Goal ｜ **副作用**: 写DB
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  向当前会话的 active goal 追加证据条目 (指标/观测/结论), 可关联
+  criterion 推动进度百分比; 证据累积完成后用 complete_goal 收尾。
+- **参数**：
+  - text: 证据文本 (必填, 非空)
+  - criterion_id: 关联的完成标准 id (可选)
+  - source_type: 证据来源类型 (默认 evidence)
+  - run_id: 关联的回测 run id (可选)
+- **示例**：
+  {"text": "截面 IC = 0.045 (2023-01-01 至 2023-12-31)",
+  "criterion_id": "c1"}
+- **边界**：
+  写 goals.db (effects=db); 需要会话已有 active goal; session_id
+  由框架注入, 无会话回退 default。
+- **错误处理范式**：
+  - text 缺失 → error + expected/fix
+  - 无 active goal → error + fix (先 create_goal)
+  - 存储异常 → error + 文本预览回显, 可重试
+  - 幂等性: 每次追加独立证据记录
+- **相关工具**：
+  前置: create_goal; 后续: get_goal_status / complete_goal
 
 ### complete_goal
 
-- **用途**：完成当前目标（lite 模式，校验每个必填 criterion 有证据）。
-- **输入**：`session_id`(自动)、`recap`(可选摘要)。
-- **预期输出**：`{goal_id, goal_status, recap}`。
-- **前置条件**：有 active goal。
-- **注意事项**：缺证据的必填 criterion 会阻止完成。
-- **后续引导**：完成后可 `create_goal` 开始新目标。
+- **类别**: Goal ｜ **副作用**: 写DB
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  将当前会话的 active goal 标记为完成 (lite 模式), 可附 recap
+  总结。必填 criterion 缺证据时会阻止完成。
+- **参数**：
+  - recap: 完成总结 (可选)
+- **示例**：
+  {"recap": "动量因子截面 IC 显著, 回测 Sharpe 1.2"}
+- **边界**：
+  写 goals.db (effects=db); 需要会话已有 active goal; 无目标时
+  提示先 create_goal; session_id 由框架注入。
+- **错误处理范式**：
+  - 无 active goal → error + fix (先 create_goal)
+  - 必填 criterion 缺证据 → 完成被拒 (补齐证据后重试)
+  - 存储异常 → error, 检查目标是否已完成
+  - 幂等性: 已完成的目标重复调用会报错
+- **相关工具**：
+  前置: create_goal / add_evidence; 后续: list_goals
 
 ### get_goal_status
 
-- **用途**：当前目标快照（进度/标准/证据数）。
-- **输入**：`session_id`(自动)。
-- **预期输出**：`{has_goal, goal_id, goal_status, objective, progress_percent, criteria_count, evidence_count, criteria}`；无目标时 `{has_goal: false}`。
-- **后续引导**：根据进度决定继续/完成。
+- **类别**: Goal ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  查询当前会话 active goal 的快照: 状态/进度百分比/完成标准及
+  各自状态/证据数。研究过程检查进度或决定是否 complete_goal。
+- **参数**：
+  (无显式业务参数; session_id 由框架注入)
+- **示例**：
+  {}
+- **边界**：
+  只读工具 (不写库); 无 active goal 时返回 {has_goal: false}
+  而非错误; session_id 由框架注入。
+- **错误处理范式**：
+  - 数据库不可访问 → error + fix
+  - 无目标 → 正常返回 has_goal=false (非错误)
+  - 幂等: 只读不写
+- **相关工具**：
+  前置: create_goal; 后续: add_evidence / complete_goal
 
 ### list_goals
 
-- **用途**：列出目标（可过滤）。
-- **输入**：`session_id`(可选)、`status`(可选，`active`/`complete`/`abandoned`)、`limit`(默认 10)。
-- **预期输出**：`{goals: [{goal_id, session_id, goal_status, objective, progress_percent, created_at}], count}`。
-- **注意事项**：非法 status 值报错并提示合法枚举。
-- **后续引导**：查看历史目标/恢复研究。
+- **类别**: Goal ｜ **副作用**: 只读
+- **版本**: 1.1.0
+- **变更**: v1.1.0 补全说明书 (v2 范式 8 节模板)
+- **用途**：
+  列出 goals.db 中的研究目标摘要 (goal_id/会话/状态/进度/创建时间),
+  可按状态过滤, 用于回顾历史目标或恢复研究。
+- **参数**：
+  - status: 过滤状态 (可选; active/complete/abandoned, 缺省全部)
+  - limit: 返回条数上限 (默认 10)
+- **示例**：
+  {"status": "active", "limit": 20}
+- **边界**：
+  只读工具 (不写库); session_id 由框架注入; 未指定会话时列出
+  全部会话的目标 (跨会话浏览)。
+- **错误处理范式**：
+  - status 非法 → error + expected 枚举提示
+  - 数据库异常 → error + fix
+  - 幂等: 只读不写
+- **相关工具**：
+  get_goal_status: 当前目标快照; create_goal: 创建目标
 
 ---
 
