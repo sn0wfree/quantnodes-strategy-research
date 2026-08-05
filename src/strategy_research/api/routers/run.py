@@ -91,6 +91,53 @@ async def run_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/equity")
+async def run_equity(
+    request: Request,
+    workspace_path: str = ".",
+    strategy_name: str = "",
+    run_name: str = "",
+    max_points: int = 2000,
+):
+    """读取 run 的净值曲线 equity_curve.csv（等距采样至 max_points 点）。"""
+    try:
+        run_dir = _resolve_run_dir(workspace_path, strategy_name, run_name)
+
+        if not run_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Run not found: {run_dir}")
+
+        equity_path = run_dir / "equity_curve.csv"
+        if not equity_path.exists():
+            return {"status": "ok", "run": run_name, "equity": []}
+
+        import pandas as pd
+
+        df = pd.read_csv(equity_path)
+        if df.empty:
+            return {"status": "ok", "run": run_name, "equity": []}
+
+        if len(df) > max_points:
+            step = len(df) / max_points
+            idx = sorted({
+                0,
+                *(int(i * step) for i in range(1, max_points - 1)),
+                len(df) - 1,
+            })
+            df = df.iloc[idx]
+
+        df = df.fillna(0)
+        equity = df.to_dict(orient="records")
+        for row in equity:
+            for k, v in list(row.items()):
+                if isinstance(v, float):
+                    row[k] = round(v, 6)
+        return {"status": "ok", "run": run_name, "equity": equity}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/list")
 async def run_list(
     request: Request,

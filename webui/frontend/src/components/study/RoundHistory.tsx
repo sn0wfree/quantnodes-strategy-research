@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { ChevronRight, ChevronDown, AlertTriangle } from 'lucide-react'
+import { ChevronRight, ChevronDown, AlertTriangle, ExternalLink } from 'lucide-react'
 import type { StudyRoundSummary } from '../../api/client'
 
 interface Props {
   rounds: StudyRoundSummary[]
   currentRound: number
+  /** When provided, renders a per-round link to the run detail page. */
+  onOpenRun?: (runName: string) => void
 }
 
 function formatTime(iso: string): string {
@@ -26,18 +28,27 @@ function MetricValue({ label, value }: { label: string; value?: number | null })
   )
 }
 
-function RoundItem({ round, isCurrent }: { round: StudyRoundSummary; isCurrent: boolean }) {
+function RoundItem({
+  round,
+  isCurrent,
+  onOpenRun,
+}: {
+  round: StudyRoundSummary
+  isCurrent: boolean
+  onOpenRun?: (runName: string) => void
+}) {
   const [expanded, setExpanded] = useState(false)
   const hasFailures = round.factor_failures && round.factor_failures.length > 0
 
   return (
     <div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={`w-full flex items-center gap-1.5 text-left py-1 px-1 rounded hover:bg-slate-800 transition-colors ${
-          isCurrent ? 'bg-slate-800/50' : ''
-        }`}
-      >
+      <div className="flex items-center gap-1 rounded hover:bg-slate-800 transition-colors">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className={`flex flex-1 items-center gap-1.5 text-left py-1 px-1 rounded transition-colors ${
+            isCurrent ? 'bg-slate-800/50' : ''
+          }`}
+        >
         {expanded ? (
           <ChevronDown className="h-3 w-3 text-slate-500 flex-shrink-0" />
         ) : (
@@ -45,6 +56,9 @@ function RoundItem({ round, isCurrent }: { round: StudyRoundSummary; isCurrent: 
         )}
         <span className="text-[10px] text-slate-400 w-6">R{round.round_num}</span>
         <span className="text-[10px] text-slate-500 w-10">{formatTime(round.created_at)}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400">
+          {round.run_name}
+        </span>
         <span
           className={`text-[10px] px-1 rounded ${
             round.verdict === 'keep'
@@ -61,7 +75,18 @@ function RoundItem({ round, isCurrent }: { round: StudyRoundSummary; isCurrent: 
         {hasFailures && (
           <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0 ml-auto" />
         )}
-      </button>
+        </button>
+        {onOpenRun && (
+          <button
+            type="button"
+            title="查看回测产物"
+            onClick={() => onOpenRun(round.run_name)}
+            className="p-1 rounded text-slate-500 hover:text-sky-400 hover:bg-slate-800 transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" />
+          </button>
+        )}
+      </div>
 
       {expanded && (
         <div className="ml-5 mr-1 mb-2 border-l-2 border-slate-700 pl-2 space-y-2">
@@ -93,7 +118,7 @@ function RoundItem({ round, isCurrent }: { round: StudyRoundSummary; isCurrent: 
   )
 }
 
-export function RoundHistory({ rounds, currentRound }: Props) {
+export function RoundHistory({ rounds, currentRound, onOpenRun }: Props) {
   if (rounds.length === 0) {
     return (
       <div className="rounded border border-slate-700 bg-slate-900 p-2">
@@ -112,6 +137,7 @@ export function RoundHistory({ rounds, currentRound }: Props) {
             key={round.round_num}
             round={round}
             isCurrent={round.round_num === currentRound}
+            onOpenRun={onOpenRun}
           />
         ))}
       </div>

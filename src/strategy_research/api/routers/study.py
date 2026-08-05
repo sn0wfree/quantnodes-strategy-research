@@ -431,6 +431,11 @@ async def study_summary(study_id: str):
         "current_round": study.current_round,
         "max_rounds": study.max_rounds,
         "objective": study.objective,
+        "strategy_name": study.strategy_name,
+        "workspace_path": study.workspace_path,
+        "created_at": study.created_at,
+        "updated_at": study.updated_at,
+        "completed_at": study.completed_at,
         "last_metrics": study.last_metrics,
         "last_verdict": study.last_verdict,
         "recent_rounds": [

@@ -113,3 +113,44 @@ async def test_status_no_study(_app_env):
         r = await client.get("/api/study/status?session_id=no-such-session")
         assert r.status_code == 200
         assert r.json()["status"] == "no_study"
+
+
+@pytest.mark.asyncio
+async def test_summary_returns_strategy_and_round_fields(_app_env, tmp_path, monkeypatch):
+    """summary 端点应返回 strategy_name/workspace_path/timestamps，
+    且不因 round 记录缺 factor_failures 而 500。"""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        study = store.create_study(
+            session_id="sess-1",
+            goal_id=None,
+            objective="test objective",
+            workspace_path=str(_app_env),
+            strategy_name="demo_strategy",
+            executor_type="autoresearch",
+            max_rounds=5,
+        )
+        store.append_round(
+            study.study_id, 1, "run_0001",
+            metrics={"sharpe": 1.5}, verdict="keep",
+        )
+        study_id = study.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        r = await client.get(f"/api/study/{study_id}/summary")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["strategy_name"] == "demo_strategy"
+        assert data["workspace_path"] == str(_app_env)
+        assert data["created_at"]
+        assert data["updated_at"]
+        assert len(data["recent_rounds"]) == 1
+        assert data["recent_rounds"][0]["run_name"] == "run_0001"
+        assert data["recent_rounds"][0]["metrics"] == {"sharpe": 1.5}

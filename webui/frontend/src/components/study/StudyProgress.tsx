@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Pause, Play, X, ArrowRightCircle, ExternalLink } from 'lucide-react'
 import { useStudyStore } from '../../stores/study'
 import { api, type StudySummaryResponse, type FlowNodeData } from '../../api/client'
+import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { FlowCard } from './FlowCard'
 import { RoundHistory } from './RoundHistory'
@@ -10,32 +11,6 @@ import { ScoreboardMini } from './ScoreboardMini'
 interface Props {
   sessionId: string
   pollIntervalMs?: number
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  queued: '排队中',
-  running: '运行中',
-  paused: '已暂停',
-  interrupted: '已中断',
-  error: '错误',
-  complete: '已完成',
-  cancelled: '已取消',
-  budget_limited: '预算受限',
-  monitoring: '监控中',
-  needs_refresh: '需刷新证据',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  queued: 'bg-slate-700 text-slate-200',
-  running: 'bg-sky-700 text-sky-100',
-  paused: 'bg-amber-700 text-amber-100',
-  interrupted: 'bg-orange-700 text-orange-100',
-  error: 'bg-rose-700 text-rose-100',
-  complete: 'bg-emerald-700 text-emerald-100',
-  cancelled: 'bg-slate-700 text-slate-300',
-  budget_limited: 'bg-orange-700 text-orange-100',
-  monitoring: 'bg-indigo-700 text-indigo-100',
-  needs_refresh: 'bg-rose-800 text-rose-100',
 }
 
 // 9-agent workflow nodes
@@ -184,10 +159,10 @@ export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
       <div className="flex items-center gap-2">
         <span
           className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-            STATUS_COLORS[status] ?? 'bg-slate-700 text-slate-100'
+            STUDY_STATUS_COLORS[status] ?? 'bg-slate-700 text-slate-100'
           }`}
         >
-          {STATUS_LABELS[status] ?? status}
+          {STUDY_STATUS_LABELS[status] ?? status}
         </span>
         <span className="text-xs text-slate-400">
           Round {current.current_round ?? 0}/{maxRounds}

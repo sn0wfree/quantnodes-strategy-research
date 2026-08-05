@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuthStore } from '../../stores/auth'
 import { api } from '../../api/client'
 
@@ -37,8 +37,9 @@ export function LoginPage() {
         </h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm text-slate-400">用户名</label>
+            <label htmlFor="login-username" className="mb-1 block text-sm text-slate-400">用户名</label>
             <input
+              id="login-username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -47,8 +48,9 @@ export function LoginPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-400">密码</label>
+            <label htmlFor="login-password" className="mb-1 block text-sm text-slate-400">密码</label>
             <input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -67,6 +69,12 @@ export function LoginPage() {
             {loading ? '登录中...' : '登录'}
           </button>
         </form>
+        <p className="mt-4 text-center text-sm text-slate-500">
+          没有账号？{' '}
+          <Link to="/register" className="text-primary-400 hover:underline">
+            注册
+          </Link>
+        </p>
       </div>
     </div>
   )

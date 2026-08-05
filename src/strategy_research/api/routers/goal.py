@@ -124,6 +124,7 @@ async def goal_list(
                     "session_id": g.session_id,
                     "goal_status": g.status.value,
                     "objective": g.objective,
+                    "workflow_id": g.workflow_id,
                     "created_at": g.created_at,
                 }
                 for g in goals

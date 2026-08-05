@@ -149,6 +149,32 @@ async def workflow_list():
     return {"status": "ok", "workflows": list_goal_workflows()}
 
 
+@router.get("/{name}/graph")
+async def workflow_graph(name: str):
+    """Return the DAG structure (nodes + edges) for a workflow preset."""
+    from ...core.goal.workflow_config import load_goal_workflow
+    try:
+        config = load_goal_workflow(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    nodes = [{"id": a.id, "label": a.id} for a in config.agents]
+    edges = [
+        {"source": dep, "target": agent.id}
+        for agent in config.agents
+        for dep in config.dag.get(agent.id, [])
+    ]
+    return {
+        "status": "ok",
+        "name": config.name,
+        "description": config.description,
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 async def workflow_event_stream(runner):
     """Async generator streaming workflow progress as SSE payloads.
 

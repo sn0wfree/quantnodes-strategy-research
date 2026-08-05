@@ -50,6 +50,20 @@ export interface Criterion {
   evidence_count?: number
 }
 
+export interface GoalListItem {
+  goal_id: string
+  session_id: string
+  goal_status: string
+  objective: string
+  workflow_id?: string | null
+  created_at: string
+}
+
+export interface GoalListResponse {
+  status: string
+  goals: GoalListItem[]
+}
+
 class APIClient {
   private getToken(): string | null {
     return useAuthStore.getState().token
@@ -144,6 +158,9 @@ class APIClient {
     getStatus: (sessionId: string) =>
       this.get<GoalStatusResponse>(`/goal/status?session_id=${sessionId}`),
 
+    list: (params: { session_id?: string; status?: string; limit?: number } = {}) =>
+      this.get<GoalListResponse>('/goal/list' + qs(params)),
+
     start: (sessionId: string, objective: string, criteria?: string[]) =>
       this.post<GoalStartResponse>('/goal/start', {
         session_id: sessionId,
@@ -200,6 +217,64 @@ class APIClient {
 
     summary: (studyId: string) =>
       this.get<StudySummaryResponse>(`/study/${studyId}/summary`),
+
+    directives: (studyId: string) =>
+      this.get<StudyDirectivesResponse>(`/study/${studyId}/directives`),
+  }
+
+  run = {
+    status: (
+      workspacePath: string,
+      strategyName: string,
+      runName: string,
+    ) =>
+      this.get<RunStatusResponse>(
+        `/run/status?workspace_path=${encodeURIComponent(workspacePath)}` +
+          `&strategy_name=${encodeURIComponent(strategyName)}` +
+          `&run_name=${encodeURIComponent(runName)}`,
+      ),
+
+    equity: (
+      workspacePath: string,
+      strategyName: string,
+      runName: string,
+      maxPoints = 2000,
+    ) =>
+      this.get<RunEquityResponse>(
+        `/run/equity?workspace_path=${encodeURIComponent(workspacePath)}` +
+          `&strategy_name=${encodeURIComponent(strategyName)}` +
+          `&run_name=${encodeURIComponent(runName)}` +
+          `&max_points=${maxPoints}`,
+      ),
+  }
+
+  workflow = {
+    list: () => this.get<WorkflowListResponse>('/goal/workflow/list'),
+
+    graph: (name: string) =>
+      this.get<WorkflowGraphResponse>(`/goal/workflow/${name}/graph`),
+
+    start: (sessionId: string, workflowName: string, objective: string) =>
+      this.post<WorkflowStartResponse>('/goal/workflow/start', {
+        session_id: sessionId,
+        workflow_name: workflowName,
+        objective,
+      }),
+
+    status: (goalId: string) =>
+      this.get<WorkflowStatusResponse>(
+        `/goal/workflow/status?goal_id=${encodeURIComponent(goalId)}`,
+      ),
+
+    pause: (goalId: string) =>
+      this.post<{ status: string; paused: boolean }>(
+        `/goal/workflow/pause?goal_id=${encodeURIComponent(goalId)}`,
+      ),
+
+    resume: (goalId: string) =>
+      this.post<{ status: string; resumed: boolean }>(
+        `/goal/workflow/resume?goal_id=${encodeURIComponent(goalId)}`,
+      ),
   }
 }
 
@@ -302,6 +377,20 @@ export interface StudyDirectiveResponse {
   created_at: string
 }
 
+export interface StudyDirectiveItem {
+  directive_id: string
+  content: string
+  issued_by?: string
+  created_at: string
+  consumed_at?: string | null
+}
+
+export interface StudyDirectivesResponse {
+  status: string
+  study_id: string
+  directives: StudyDirectiveItem[]
+}
+
 // ── Study Summary types ─────────────────────────────────────────────
 
 export interface StudyRoundSummary {
@@ -309,8 +398,8 @@ export interface StudyRoundSummary {
   run_name: string
   metrics: Record<string, number> | null
   verdict: string | null
-  created_at: string
   factor_failures?: FactorFailure[]
+  created_at: string
 }
 
 export interface LeverScoreSummary {
@@ -336,8 +425,13 @@ export interface StudySummaryResponse {
   current_round: number
   max_rounds?: number
   objective: string
+  strategy_name?: string
+  workspace_path?: string
   last_metrics?: Record<string, number> | null
   last_verdict?: string | null
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
   recent_rounds: StudyRoundSummary[]
   scoreboard: LeverScoreSummary[]
   goal_snapshot?: {
@@ -365,6 +459,71 @@ export interface FlowNodeData {
   status: NodeStatus
   started_at?: string
   duration_ms?: number
+}
+
+// ── Run API types ──────────────────────────────────────────────────
+
+export interface RunStatusResponse {
+  status: string
+  run: string
+  metrics: Record<string, number | string>
+}
+
+export interface RunEquityPoint {
+  timestamp: string | number
+  capital?: number
+  unrealized?: number
+  equity: number
+  positions?: number
+}
+
+export interface RunEquityResponse {
+  status: string
+  run: string
+  equity: RunEquityPoint[]
+}
+
+// ── Workflow API types ─────────────────────────────────────────────
+
+export interface WorkflowListItem {
+  name: string
+  description?: string
+  path?: string
+}
+
+export interface WorkflowListResponse {
+  status: string
+  workflows: WorkflowListItem[]
+}
+
+export interface WorkflowGraphResponse {
+  status: string
+  name: string
+  description?: string
+  nodes: Array<{ id: string; label: string }>
+  edges: Array<{ source: string; target: string }>
+}
+
+export interface WorkflowStartResponse {
+  status: string
+  goal_id: string
+  workflow_name: string
+}
+
+export interface WorkflowStatusResponse {
+  status: string
+  goal_id: string
+  workflow_name: string
+  progress?: {
+    status?: string
+    current_layer?: number
+    total_layers?: number
+    agents_completed?: number
+    agents_total?: number
+    evidence_count?: number
+    paused?: boolean
+    agent_statuses?: Record<string, string>
+  }
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
