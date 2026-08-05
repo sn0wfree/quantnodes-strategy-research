@@ -15,7 +15,7 @@ interface EquityDatum {
   drawdown: number
 }
 
-function computeDrawdowns(points: Array<{ equity: number }>): EquityDatum[] {
+export function computeDrawdowns(points: Array<{ equity: number }>): EquityDatum[] {
   let peak = -Infinity
   return points.map((p, i) => {
     peak = Math.max(peak, p.equity)
@@ -24,7 +24,7 @@ function computeDrawdowns(points: Array<{ equity: number }>): EquityDatum[] {
   })
 }
 
-function fmt(n: number | string | null | undefined, digits = 4): string {
+export function fmt(n: number | string | null | undefined, digits = 4): string {
   if (n == null) return '—'
   const v = typeof n === 'string' ? Number(n) : n
   if (!Number.isFinite(v)) return String(n)

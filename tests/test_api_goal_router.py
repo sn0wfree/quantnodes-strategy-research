@@ -299,3 +299,47 @@ class TestAuthRequired:
 
         res = client.post("/api/goal/complete", json={"session_id": "x"})
         assert res.status_code == 401
+
+class TestListWorkflowId:
+    def test_list_returns_workflow_id_for_workflow_goals(self, app, client):
+        """goal list 应透出 workflow_id（工作流启动的 goal 需用于恢复）。"""
+        from strategy_research.core.goal import GoalStore
+
+        with GoalStore(db_path=app.state.goal_db_path) as store:
+            store.replace_goal(
+                session_id="sess-wf",
+                objective="带工作流的目标",
+                criteria=["Sharpe > 1.0"],
+                workflow_id="factor_research",
+            )
+            store.replace_goal(
+                session_id="sess-wf",
+                objective="普通目标",
+                criteria=["Sharpe > 1.0"],
+            )
+
+        res = client.get("/api/goal/list?session_id=sess-wf", headers=auth_header())
+        assert res.status_code == 200
+        goals = {g["objective"]: g for g in res.json()["goals"]}
+        assert goals["带工作流的目标"]["workflow_id"] == "factor_research"
+        assert goals["普通目标"]["workflow_id"] is None
+
+    def test_list_workflow_id_survives_status_filter(self, app, client):
+        """状态过滤后 workflow_id 仍保留。"""
+        from strategy_research.core.goal import GoalStore
+
+        with GoalStore(db_path=app.state.goal_db_path) as store:
+            store.replace_goal(
+                session_id="sess-wf2",
+                objective="工作流目标",
+                criteria=["x"],
+                workflow_id="risk_assessment",
+            )
+
+        res = client.get(
+            "/api/goal/list?session_id=sess-wf2&status=active",
+            headers=auth_header(),
+        )
+        data = res.json()
+        assert len(data["goals"]) == 1
+        assert data["goals"][0]["workflow_id"] == "risk_assessment"

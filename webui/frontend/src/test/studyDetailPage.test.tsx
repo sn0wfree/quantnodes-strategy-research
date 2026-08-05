@@ -2,8 +2,8 @@
 // summary/directives rendering, control buttons and 404 empty state.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom'
 
 vi.mock('../api/client', async () => {
   return {
@@ -176,5 +176,103 @@ describe('StudyDetailPage', () => {
     )
     renderPage()
     expect(await screen.findByText(/研究任务不存在/)).toBeInTheDocument()
+  })
+})
+
+describe('StudyDetailPage interactions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockSummary.mockResolvedValue(summaryFixture() as never)
+    mockDirectives.mockResolvedValue({
+      status: 'ok',
+      study_id: 'st-1',
+      directives: [],
+    } as never)
+  })
+
+  it('calls resume for a paused study', async () => {
+    mockSummary.mockResolvedValue(
+      summaryFixture({ execution_status: 'paused' }) as never
+    )
+    vi.mocked(api.study.resume).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', action: 'resumed',
+    } as never)
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /恢复/ }))
+    await waitFor(() => expect(api.study.resume).toHaveBeenCalledWith('st-1'))
+  })
+
+  it('submits a directive and refreshes the list', async () => {
+    vi.mocked(api.study.directive).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', directive_id: 'd-new',
+      created_at: '2026-08-01T12:00:00',
+    } as never)
+    mockDirectives
+      .mockResolvedValueOnce({
+        status: 'ok', study_id: 'st-1', directives: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'ok', study_id: 'st-1',
+        directives: [
+          {
+            directive_id: 'd-new', content: '试试反转因子',
+            issued_by: 'webui', created_at: '2026-08-01T12:00:00',
+            consumed_at: null,
+          },
+        ],
+      } as never)
+
+    renderPage()
+    const input = await screen.findByPlaceholderText(/改成动量因子/)
+    fireEvent.change(input, { target: { value: '  试试反转因子  ' } })
+    fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
+
+    await waitFor(() =>
+      expect(api.study.directive).toHaveBeenCalledWith('st-1', '试试反转因子', 'webui')
+    )
+    // Trimmed content + refreshed list appear; input is cleared.
+    expect(await screen.findByText('试试反转因子')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/改成动量因子/)).toHaveValue('')
+  })
+
+  it('surfaces directive submission errors', async () => {
+    vi.mocked(api.study.directive).mockRejectedValueOnce(
+      new Error('directive rejected') as never
+    )
+    renderPage()
+    const input = await screen.findByPlaceholderText(/改成动量因子/)
+    fireEvent.change(input, { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
+    expect(await screen.findByText(/directive rejected/)).toBeInTheDocument()
+  })
+
+  it('does not submit an empty directive', async () => {
+    renderPage()
+    await screen.findByText(/mom_20d/)
+    fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
+    expect(api.study.directive).not.toHaveBeenCalled()
+  })
+
+  it('navigates to the run detail page when opening a round', async () => {
+    function RunStub() {
+      const { strategyName, runName } = useParams<{
+        strategyName: string
+        runName: string
+      }>()
+      return <div>RUN:{strategyName}:{runName}</div>
+    }
+    render(
+      <MemoryRouter initialEntries={['/study/st-1']}>
+        <Routes>
+          <Route path="/study/:studyId" element={<StudyDetailPage />} />
+          <Route path="/run/:strategyName/:runName" element={<RunStub />} />
+        </Routes>
+      </MemoryRouter>
+    )
+    const linkBtn = await waitFor(() =>
+      screen.getAllByTitle('查看回测产物')[0]
+    )
+    fireEvent.click(linkBtn)
+    expect(await screen.findByText('RUN:mom_20d:run_0002')).toBeInTheDocument()
   })
 })
