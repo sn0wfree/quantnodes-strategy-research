@@ -313,3 +313,103 @@ async def test_summary_goal_snapshot_and_scoreboard(_app_env, tmp_path, monkeypa
         assert by_lever["reversal"]["attempts"] == 1
         assert by_lever["reversal"]["reverted"] == 1
         assert by_lever["reversal"]["precision_mean"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_list_filter_by_session_id(_app_env, tmp_path, monkeypatch):
+    """list?session_id= 应只返回该 session 的 study。"""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        s_a = store.create_study(
+            session_id="sess-A", goal_id=None, objective="A obj",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        store.create_study(
+            session_id="sess-B", goal_id=None, objective="B obj",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        study_a_id = s_a.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.get("/api/study/list?session_id=sess-A")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["studies"]) == 1
+        assert data["studies"][0]["study_id"] == study_a_id
+        assert data["studies"][0]["session_id"] == "sess-A"
+
+
+@pytest.mark.asyncio
+async def test_list_filter_by_status_returns_matching_only(
+    _app_env, tmp_path, monkeypatch
+):
+    """list?status=running 应只返回该 execution_status 的 study。"""
+    from strategy_research.core.study import StudyStatus, StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        s_queued = store.create_study(
+            session_id="sess-1", goal_id=None, objective="queued obj",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        s_running = store.create_study(
+            session_id="sess-1", goal_id=None, objective="running obj",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        store.update_execution_status(s_running.study_id, StudyStatus.RUNNING)
+        store.update_execution_status(
+            s_queued.study_id, StudyStatus.COMPLETE,
+            last_metrics={"sharpe": 1.2}, last_verdict="keep",
+        )
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        # status=running → 只有 s_running
+        r = await client.get("/api/study/list?status=running")
+        assert r.status_code == 200
+        rows = r.json()["studies"]
+        assert len(rows) == 1
+        assert rows[0]["execution_status"] == "running"
+        assert rows[0]["last_verdict"] is None
+
+        # status=complete → 只有 s_queued（已 complete）
+        r2 = await client.get("/api/study/list?status=complete")
+        rows2 = r2.json()["studies"]
+        assert len(rows2) == 1
+        assert rows2[0]["execution_status"] == "complete"
+        assert rows2[0]["last_verdict"] == "keep"
+
+
+@pytest.mark.asyncio
+async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
+    """list?limit=N 应最多返回 N 条 study。"""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        for i in range(5):
+            store.create_study(
+                session_id=f"sess-{i}", goal_id=None,
+                objective=f"obj {i}",
+                workspace_path=str(_app_env), strategy_name="demo",
+                executor_type="autoresearch", max_rounds=3,
+            )
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.get("/api/study/list?limit=2")
+        assert r.status_code == 200
+        assert len(r.json()["studies"]) == 2
