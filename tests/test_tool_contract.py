@@ -54,6 +54,19 @@ class TestRegistryContract:
             assert first_line, f"{tool.name} docstring empty"
             assert first_line[:20] in tool.brief, f"{tool.name} brief out of sync"
 
+    def test_spec_sections_complete(self):
+        """说明书 8 节完整性: 版本/变更行 + 6 个 ## 章节 (v2 范式模板)。"""
+        sections = [
+            "## 用途", "## 参数", "## 示例", "## 边界",
+            "## 错误处理范式", "## 相关工具",
+        ]
+        for tool in _all_tools():
+            doc = inspect.getdoc(tool) or ""
+            assert "版本:" in doc, f"{tool.name} missing 版本 line"
+            assert "变更:" in doc, f"{tool.name} missing 变更 line"
+            missing = [s for s in sections if s not in doc]
+            assert not missing, f"{tool.name} spec missing sections: {missing}"
+
 
 # ── 副作用契约 ───────────────────────────────────────────────────────
 

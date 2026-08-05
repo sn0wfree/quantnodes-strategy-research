@@ -1082,7 +1082,38 @@ class FactorAnalysisTool(BaseTool):
 
 
 class PatternRecognitionTool(BaseTool):
-    """识别价格形态（头肩/双顶底/趋势线/支撑阻力）。"""
+    """识别价格形态（头肩/双顶底/趋势线/支撑阻力）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 从 DuckDB ohlcv 读取最近 N 根 K 线, 用简化启发式检测价格形态:
+    # 均线趋势 (MA5 vs MA20)、近阻力/近支撑 (接近近期高低点 2% 内)、
+    # 波动率挤压 (近 5 日标准差 < 近 20 日的 60%)。非严格形态识别,
+    # 输出带置信度, 作为研究输入而非交易信号。
+    #
+    # ## 参数
+    # - asset: 限定单个资产代码 (可选; 缺省分析全部资产)
+    # - lookback: 分析的 K 线数量 (默认 60)
+    #
+    # ## 示例
+    # {"asset": "600519.SH", "lookback": 120}
+    #
+    # ## 边界
+    # 只读工具; 需要 workspace 含 DuckDB 且 ohlcv 非空; 数据量 < 10 根
+    # 报 insufficient data。
+    #
+    # ## 错误处理范式
+    # - 缺 workspace / 库不可用 / ohlcv 为空 → error, 先入库
+    # - 数据不足 (< 10 根) → error, 需 get_market_data(persist=True)
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: get_market_data / import_data; 同类: compute_factor
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "pattern_recognition"
     description = "识别常见图表形态 (头肩顶底/双顶底/趋势线/支撑阻力); 需要 DuckDB 价格数据。"
@@ -1172,7 +1203,35 @@ class PatternRecognitionTool(BaseTool):
 
 
 class ListSkillsTool(BaseTool):
-    """列出可用技能（名称 + 一句话描述）。"""
+    """列出可用技能（名称 + 一句话描述）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 列出方法论技能: workspace/.skills/ 优先, 合并内置
+    # templates/.skills/, 返回名称/类别/一句话描述, 可按类别过滤。
+    # 技能全文用 load_skill 按需加载, 避免大全文直接进 prompt。
+    #
+    # ## 参数
+    # - category: 按类别过滤 (可选; 缺省返回全部)
+    #
+    # ## 示例
+    # {"category": "因子研究"}
+    #
+    # ## 边界
+    # 只读工具; 需要 workspace 上下文; 无技能时返回空列表 (非错误)。
+    #
+    # ## 错误处理范式
+    # - 缺 workspace 上下文 → error, 需 AgentLoop 注入
+    # - 扫描/加载异常 → error + 异常信息, 可重试
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # load_skill: 加载技能全文; tool_help: 同类按需加载机制
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "list_skills"
     description = "列出全部方法技能: 名称/类别/一句话描述; load_skill 获取全文。"
@@ -1228,7 +1287,36 @@ class ListSkillsTool(BaseTool):
 
 
 class LoadSkillTool(BaseTool):
-    """按名称加载技能全文。"""
+    """按名称加载技能全文。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 按名称加载技能的完整 markdown 全文 (含 API 契约/工作流/示例),
+    # 供 agent 按方法论执行。workspace/.skills/ 覆盖同名内置技能。
+    # 先 list_skills 浏览目录, 再决定加载哪个。
+    #
+    # ## 参数
+    # - name: 技能名 (必填)
+    #
+    # ## 示例
+    # {"name": "factor-research"}
+    #
+    # ## 边界
+    # 只读工具; 需要 workspace 上下文; name 为空/非字符串报错。
+    #
+    # ## 错误处理范式
+    # - name 缺失/非法 → error + 提示
+    # - 技能不存在 → error + available 列表 (最多 20 个)
+    # - 内部异常 → error + 异常信息, 可重试
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # list_skills: 目录浏览; tool_help: 同类按需加载机制
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "load_skill"
     description = "按名称加载技能完整 markdown 文档 (含 API 契约/工作流/示例)。"
@@ -1282,7 +1370,39 @@ class LoadSkillTool(BaseTool):
 
 
 class OptionsPricingTool(BaseTool):
-    """Black-Scholes 期权定价与 Greeks。"""
+    """Black-Scholes 期权定价与 Greeks。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 用 Black-Scholes 公式计算欧式期权理论价与 Greeks
+    # (delta/gamma/theta/vega/rho), 用于研究中的敏感度分析。
+    # 仅支持欧式期权, 不处理分红与美式提前行权。
+    #
+    # ## 参数
+    # - spot/strike/rate/volatility/time_to_expiry: 标的价/行权价/
+    #   无风险利率/波动率/剩余期限 (年), 均须为正
+    # - option_type: call 或 put (默认 call)
+    #
+    # ## 示例
+    # {"spot": 100.0, "strike": 105.0, "rate": 0.03, "volatility": 0.25,
+    #  "time_to_expiry": 0.5, "option_type": "call"}
+    #
+    # ## 边界
+    # 只读工具; 无需 workspace/数据库; 需 scipy; strict 工具 (schema
+    # 由 strict 模式强制必填)。
+    #
+    # ## 错误处理范式
+    # - option_type 非 call/put → error + 枚举提示, 修正后重试
+    # - 任一参数非正 → error + 提示, 修正后重试
+    # - 幂等: 纯函数计算
+    #
+    # ## 相关工具
+    # pattern_recognition: 行情形态分析 (研究输入)
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "options_pricing"
     description = "计算 Black-Scholes 期权价格与 Greeks (delta/gamma/theta/vega/rho)。"
@@ -1356,7 +1476,43 @@ class OptionsPricingTool(BaseTool):
 
 
 class FactorCrossSectionalAnalysis(BaseTool):
-    """截面 IC 分析（全资产池，Pearson/Spearman）。"""
+    """截面 IC 分析（全资产池，Pearson/Spearman）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 对资产池计算因子表达式的逐日截面 IC (Pearson + Spearman), 汇总
+    # IC 均值/标准差/IR/IC>0 比例, 并附前 5 个样本日期。验证因子在
+    # 横截面上是否有区分度。单资产验证用 factor_analysis。
+    #
+    # ## 参数
+    # - factor_code: 因子表达式 (必填, 语法见 .skills/factor-research.md)
+    # - universe: 逗号分隔代码或 all (默认 all)
+    # - start_date/end_date: 数据时间窗 (可选, ISO 日期)
+    # - forward_days: 前向收益窗口天数 (默认 5)
+    #
+    # ## 示例
+    # {"factor_code": "ts_mean(close,20)/ts_mean(close,60)-1",
+    #  "universe": "600519.SH,000858.SZ,000001.SZ"}
+    #
+    # ## 边界
+    # 只读工具; 需要 DuckDB ohlcv 数据; 需 ≥3 资产且 ≥3 个因子计算
+    # 成功; 有效 IC 观测 ≥5; 样本 < 20 根 K 线的资产被跳过。
+    #
+    # ## 错误处理范式
+    # - universe 含不存在代码 → error + 缺失列表
+    # - 资产数/因子成功数 < 3 → error, 需先入库更多资产
+    # - IC 观测 < 5 → error "too few valid IC observations"
+    # - ohlcv 为空/库不可用 → error, 先 get_market_data(persist=True)
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: get_market_data; 后续: factor_quintile_returns / factor_ic_decay;
+    # 同类: factor_analysis (单资产)
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "factor_cross_sectional_analysis"
     description = "对资产池计算因子表达式的截面 IC (Pearson/Spearman): IC mean/std/IR/IC>0 比例, 含日度 IC 序列。"
@@ -1502,7 +1658,42 @@ class FactorCrossSectionalAnalysis(BaseTool):
 
 
 class FactorQuintileReturns(BaseTool):
-    """因子分层组合收益分析（quintile 分组）。"""
+    """因子分层组合收益分析（quintile 分组）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 把资产池按因子值逐日分为 N 组 (默认 5 组), 计算各组的平均前向
+    # 收益 (holding_period 天) 与多空价差 (Qn - Q1), 检验因子分组
+    # 单调性。
+    #
+    # ## 参数
+    # - factor_code: 因子表达式 (必填)
+    # - universe: 逗号分隔代码或 all (默认 all)
+    # - start_date/end_date: 数据时间窗 (可选)
+    # - n_groups: 分组数 (默认 5)
+    # - holding_period: 前向收益持有天数 (默认 5)
+    #
+    # ## 示例
+    # {"factor_code": "ts_rank(close,20)", "n_groups": 5, "holding_period": 5}
+    #
+    # ## 边界
+    # 只读工具; 需要 DuckDB ohlcv; 资产数须 ≥ n_groups*2; 样本 < 20 根
+    # 或因子计算失败的资产被跳过; 某日有效资产不足则跳过该日。
+    #
+    # ## 错误处理范式
+    # - 资产不足 n_groups*2 → error + 所需/实有数量
+    # - ohlcv 为空 → error, 先入库
+    # - 某组无观测 → 该组 mean_return 为 null (非整体失败)
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: get_market_data; 后续: factor_ic_decay / factor_turnover;
+    # 同类: factor_cross_sectional_analysis
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "factor_quintile_returns"
     description = "把资产池按因子值分 N 组, 计算各组的平均前向收益与多空价差。"
@@ -1645,7 +1836,42 @@ class FactorQuintileReturns(BaseTool):
 
 
 class FactorICDecay(BaseTool):
-    """因子 IC 衰减曲线（多前向周期）。"""
+    """因子 IC 衰减曲线（多前向周期）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 计算因子在多个前向收益周期 (默认 1,5,10,20,60 天) 的逐日截面
+    # Spearman IC 均值/标准差/IR, 观察预测力随周期的衰减速度,
+    # 用于选择因子最佳持有周期。
+    #
+    # ## 参数
+    # - factor_code: 因子表达式 (必填)
+    # - universe: 逗号分隔代码或 all (默认 all)
+    # - start_date/end_date: 数据时间窗 (可选)
+    # - horizons: 逗号分隔的前向周期列表 (默认 1,5,10,20,60)
+    #
+    # ## 示例
+    # {"factor_code": "ts_mean(close,20)/ts_mean(close,60)-1",
+    #  "horizons": "5,10,20"}
+    #
+    # ## 边界
+    # 只读工具; 需要 DuckDB ohlcv; 因子计算成功资产须 ≥3; 单日截面
+    # 有效资产 < 3 则跳过该日。
+    #
+    # ## 错误处理范式
+    # - 因子成功资产 < 3 → error
+    # - 某 horizon 无有效观测 → 该周期 ic_mean 等为 null (非整体失败)
+    # - ohlcv 为空 → error, 先入库
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: get_market_data; 后续: 按最佳 horizon 构建策略;
+    # 同类: factor_cross_sectional_analysis / factor_turnover
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "factor_ic_decay"
     description = "计算因子在多个前向收益周期 (如 1,5,10,20,60 天) 的截面 IC, 衡量预测力衰减速度。"
@@ -1778,7 +2004,41 @@ class FactorICDecay(BaseTool):
 
 
 class FactorTurnover(BaseTool):
-    """因子排名换手率分析（排名稳定性）。"""
+    """因子排名换手率分析（排名稳定性）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 按 rebalance_freq 天间隔采样因子值, 计算相邻采样日资产排名的
+    # Spearman 相关, 换手率 = 1 - 秩相关; 输出平均/中位换手与排名
+    # 稳定度 (1 - 平均换手)。低换手因子排名稳定, 更适合实盘。
+    #
+    # ## 参数
+    # - factor_code: 因子表达式 (必填)
+    # - universe: 逗号分隔代码或 all (默认 all)
+    # - start_date/end_date: 数据时间窗 (可选)
+    # - rebalance_freq: 采样间隔天数 (默认 5)
+    #
+    # ## 示例
+    # {"factor_code": "ts_mean(close,20)/ts_mean(close,60)-1",
+    #  "rebalance_freq": 10}
+    #
+    # ## 边界
+    # 只读工具; 需要 DuckDB ohlcv; 因子成功资产须 ≥3; 采样期 < 2 报错;
+    # 相邻采样日公共资产 < 3 的间隔被跳过。
+    #
+    # ## 错误处理范式
+    # - 采样期 < 2 → error "not enough rebalancing periods"
+    # - 无有效换手观测 → error "no valid turnover observations"
+    # - 因子成功资产 < 3 → error
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: get_market_data; 同类: factor_ic_decay / factor_quintile_returns
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "factor_turnover"
     description = "衡量因子排名随时间的变化: 相邻调仓期的平均秩相关; 低换手 = 因子稳定。"
@@ -1899,7 +2159,38 @@ class FactorTurnover(BaseTool):
 
 
 class StrategyCompare(BaseTool):
-    """多策略指标横向对比。"""
+    """多策略指标横向对比。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 读取多个策略 runs/results.tsv 的最新一行, 按指定指标列横向对比,
+    # 用于回测结果选优。缺失结果文件的策略带 error 字段, 不整体失败。
+    #
+    # ## 参数
+    # - strategy_names: 逗号分隔的策略名列表 (必填)
+    # - metrics: 逗号分隔的指标列 (默认
+    #   sharpe,ann_return,max_dd,calmar,turnover,win_rate)
+    #
+    # ## 示例
+    # {"strategy_names": "mom_20d,mom_60d", "metrics": "sharpe,ann_return,max_dd"}
+    #
+    # ## 边界
+    # 只读工具; 需要 workspace; 各策略须已跑过回测 (results.tsv 存在);
+    # 指标列不存在时该列为 null; 数值转浮点失败时保留原值。
+    #
+    # ## 错误处理范式
+    # - strategy_names 缺失 → error
+    # - 单策略 results.tsv 缺失/读取失败/无记录 → 该策略行带 error
+    #   (非整体失败)
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: run_backtest; 后续: drawdown_analysis / benchmark_comparison
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "strategy_compare"
     description = "对比多个策略的回测指标 (读各策略 runs/results.tsv), 指标列可指定。"
@@ -1967,7 +2258,39 @@ class StrategyCompare(BaseTool):
 
 
 class DrawdownAnalysis(BaseTool):
-    """策略回撤深度分析（最大回撤/回撤期列表）。"""
+    """策略回撤深度分析（最大回撤/回撤期列表）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 从最新 run 的权益曲线计算回撤序列: 最大回撤、当前回撤、回撤期
+    # 数量与按深度排序的 Top N 回撤区间 (含开始/谷底/恢复索引与时长)。
+    # 依据回撤深度与恢复时长判断风控参数是否需要调整。
+    #
+    # ## 参数
+    # - strategy_name: 策略名 (必填)
+    # - top_n: 返回的回撤区间数量 (默认 5)
+    #
+    # ## 示例
+    # {"strategy_name": "mom_20d", "top_n": 10}
+    #
+    # ## 边界
+    # 只读工具; 需要 workspace; 最新 run 须含权益曲线
+    # (equity.csv/equity_curve.csv/portfolio.csv/nav.csv 之一, 或
+    # run.log 含 equity= 数值); 权益点 < 10 报错; 仍在回撤中的区间
+    # recovery_idx 为 null。
+    #
+    # ## 错误处理范式
+    # - runs 目录不存在/无 run → error
+    # - 找不到权益曲线或点 < 10 → error, 检查 run 输出
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: run_backtest; 后续: benchmark_comparison / strategy_compare
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "drawdown_analysis"
     description = "分析策略回撤期: 从最近 run 的权益曲线计算最大回撤与 Top N 回撤区间。"
@@ -2099,7 +2422,41 @@ class DrawdownAnalysis(BaseTool):
 
 
 class BenchmarkComparison(BaseTool):
-    """策略 vs 基准表现对比（alpha/beta/IR）。"""
+    """策略 vs 基准表现对比（alpha/beta/IR）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 对比策略最新 run 的权益曲线与基准 (DuckDB ohlcv 中的指数/标的)
+    # 的日收益: 年化 alpha、beta、跟踪误差、信息比率、最大相对回撤与
+    # 双方年化收益。用于判断策略是否相对基准有超额。
+    #
+    # ## 参数
+    # - strategy_name: 策略名 (必填)
+    # - benchmark_code: 基准代码 (必填, 如 000300.SH, 须已在 ohlcv)
+    # - start_date/end_date: 基准数据时间窗 (可选, ISO 日期)
+    #
+    # ## 示例
+    # {"strategy_name": "mom_20d", "benchmark_code": "000300.SH"}
+    #
+    # ## 边界
+    # 只读工具; 需要 workspace; 策略须有最新权益曲线 (≥10 点);
+    # 基准代码须已入库; 两者按尾部对齐取较短长度; 基准查询用字符串
+    # 拼接 asset 值 — 仅传已知代码。
+    #
+    # ## 错误处理范式
+    # - 策略/基准缺参 → error + expected
+    # - 基准未入库/无数据 → error, 先 get_market_data(benchmark_code)
+    # - 权益曲线缺失 → error
+    # - beta 分母为零时 beta/alpha 为 null (非失败)
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: run_backtest + get_market_data; 同类: drawdown_analysis
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "benchmark_comparison"
     description = "对比策略与基准: alpha/beta/tracking error/information ratio/相对回撤。"
@@ -2376,6 +2733,36 @@ class ToolHelpTool(BaseTool):
 
     需要了解某个工具的详细用法、参数语义、边界或错误处理范式时调用；
     出错 debug 时调用可拿到该工具的完整错误处理说明。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 说明书移入 docstring (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 返回注册表中任意工具的详细版说明书 (docstring 原文), 含用途、
+    # 参数语义、示例、边界、错误处理范式、相关工具。系统提示中的
+    # 工具目录 (简略版) 只提供一行摘要; 选中工具后或 debug 时用
+    # 本工具获取完整说明。
+    #
+    # ## 参数
+    # - name: 目标工具名 (与目录条目中的名字一致)
+    #
+    # ## 示例
+    # {"name": "run_backtest"}
+    #
+    # ## 边界
+    # 只读工具; 不修改任何状态; 需绑定 registry (由 build_default_registry
+    # 构造)。
+    #
+    # ## 错误处理范式
+    # - name 缺失/非字符串 → error + expected 提示
+    # - 工具不存在 → error + available 列表 (最多 30 个)
+    # - 未绑定 registry → error
+    # - 本工具始终可安全重试
+    #
+    # ## 相关工具
+    # list_skills / load_skill: 技能系统 (非工具) 的类似按需加载机制
+    # ─────────────────────────────────────────────────────────────
     """
 
     # ── 工具说明书 ──────────────────────────────────────────────────

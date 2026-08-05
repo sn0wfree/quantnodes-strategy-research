@@ -52,7 +52,39 @@ def _get_session_id(kwargs: dict[str, Any]) -> str:
 
 
 class CreateGoalTool(BaseTool):
-    """创建或替换当前会话的研究目标。"""
+    """创建或替换当前会话的研究目标。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 为当前会话创建研究目标 (goals.db), 已存在目标则被取代。
+    # criteria 为空时用默认标准。研究开始前用本工具确立目标,
+    # 研究中用 add_evidence 记录证据。
+    #
+    # ## 参数
+    # - objective: 研究目标描述 (必填, 非空)
+    # - criteria: 完成标准列表 (可选, list[str]; 字符串/JSON/单键
+    #   包裹均容错解析; 缺省用默认标准)
+    #
+    # ## 示例
+    # {"objective": "评估动量因子在 A 股的有效性",
+    #  "criteria": ["完成截面 IC 分析", "完成分层回测"]}
+    #
+    # ## 边界
+    # 写 goals.db (effects=db); session_id 由框架注入, 无会话回退
+    # default; 已存在目标被取代, 创建前可先 get_goal_status。
+    #
+    # ## 错误处理范式
+    # - objective 缺失/空 → error + expected/fix
+    # - 存储异常 → error + 输入回显, 验证参数后重试
+    # - 幂等性: 替换语义, 重复调用会覆盖旧目标
+    #
+    # ## 相关工具
+    # 后续: add_evidence / get_goal_status / complete_goal
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "create_goal"
     description = "为当前会话创建研究目标 (已存在则取代); 返回 goal_id 与状态。"
@@ -115,7 +147,40 @@ class CreateGoalTool(BaseTool):
 
 
 class AddEvidenceTool(BaseTool):
-    """为当前目标添加证据条目。"""
+    """为当前目标添加证据条目。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 向当前会话的 active goal 追加证据条目 (指标/观测/结论), 可关联
+    # criterion 推动进度百分比; 证据累积完成后用 complete_goal 收尾。
+    #
+    # ## 参数
+    # - text: 证据文本 (必填, 非空)
+    # - criterion_id: 关联的完成标准 id (可选)
+    # - source_type: 证据来源类型 (默认 evidence)
+    # - run_id: 关联的回测 run id (可选)
+    #
+    # ## 示例
+    # {"text": "截面 IC = 0.045 (2023-01-01 至 2023-12-31)",
+    #  "criterion_id": "c1"}
+    #
+    # ## 边界
+    # 写 goals.db (effects=db); 需要会话已有 active goal; session_id
+    # 由框架注入, 无会话回退 default。
+    #
+    # ## 错误处理范式
+    # - text 缺失 → error + expected/fix
+    # - 无 active goal → error + fix (先 create_goal)
+    # - 存储异常 → error + 文本预览回显, 可重试
+    # - 幂等性: 每次追加独立证据记录
+    #
+    # ## 相关工具
+    # 前置: create_goal; 后续: get_goal_status / complete_goal
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "add_evidence"
     description = "为目标添加证据条目 (指标/观测); 关联可选 criterion/run。"
@@ -186,7 +251,36 @@ class AddEvidenceTool(BaseTool):
 
 
 class CompleteGoalTool(BaseTool):
-    """完成当前目标并附上总结。"""
+    """完成当前目标并附上总结。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 将当前会话的 active goal 标记为完成 (lite 模式), 可附 recap
+    # 总结。必填 criterion 缺证据时会阻止完成。
+    #
+    # ## 参数
+    # - recap: 完成总结 (可选)
+    #
+    # ## 示例
+    # {"recap": "动量因子截面 IC 显著, 回测 Sharpe 1.2"}
+    #
+    # ## 边界
+    # 写 goals.db (effects=db); 需要会话已有 active goal; 无目标时
+    # 提示先 create_goal; session_id 由框架注入。
+    #
+    # ## 错误处理范式
+    # - 无 active goal → error + fix (先 create_goal)
+    # - 必填 criterion 缺证据 → 完成被拒 (补齐证据后重试)
+    # - 存储异常 → error, 检查目标是否已完成
+    # - 幂等性: 已完成的目标重复调用会报错
+    #
+    # ## 相关工具
+    # 前置: create_goal / add_evidence; 后续: list_goals
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "complete_goal"
     description = "将当前目标标记为完成, 可附 recap 总结。"
@@ -234,7 +328,35 @@ class CompleteGoalTool(BaseTool):
 
 
 class GetGoalStatusTool(BaseTool):
-    """查询当前目标状态与证据。"""
+    """查询当前目标状态与证据。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 查询当前会话 active goal 的快照: 状态/进度百分比/完成标准及
+    # 各自状态/证据数。研究过程检查进度或决定是否 complete_goal。
+    #
+    # ## 参数
+    # (无显式业务参数; session_id 由框架注入)
+    #
+    # ## 示例
+    # {}
+    #
+    # ## 边界
+    # 只读工具 (不写库); 无 active goal 时返回 {has_goal: false}
+    # 而非错误; session_id 由框架注入。
+    #
+    # ## 错误处理范式
+    # - 数据库不可访问 → error + fix
+    # - 无目标 → 正常返回 has_goal=false (非错误)
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # 前置: create_goal; 后续: add_evidence / complete_goal
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "get_goal_status"
     description = "查询当前会话目标: 状态/进度/标准/证据数。"
@@ -290,7 +412,36 @@ class GetGoalStatusTool(BaseTool):
 
 
 class ListGoalsTool(BaseTool):
-    """列出目标（可按状态过滤）。"""
+    """列出目标（可按状态过滤）。
+
+    # ── 工具说明书 ──────────────────────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 补全说明书 (v2 范式 8 节模板)
+    #
+    # ## 用途
+    # 列出 goals.db 中的研究目标摘要 (goal_id/会话/状态/进度/创建时间),
+    # 可按状态过滤, 用于回顾历史目标或恢复研究。
+    #
+    # ## 参数
+    # - status: 过滤状态 (可选; active/complete/abandoned, 缺省全部)
+    # - limit: 返回条数上限 (默认 10)
+    #
+    # ## 示例
+    # {"status": "active", "limit": 20}
+    #
+    # ## 边界
+    # 只读工具 (不写库); session_id 由框架注入; 未指定会话时列出
+    # 全部会话的目标 (跨会话浏览)。
+    #
+    # ## 错误处理范式
+    # - status 非法 → error + expected 枚举提示
+    # - 数据库异常 → error + fix
+    # - 幂等: 只读不写
+    #
+    # ## 相关工具
+    # get_goal_status: 当前目标快照; create_goal: 创建目标
+    # ─────────────────────────────────────────────────────────────
+    """
 
     name = "list_goals"
     description = "列出目标列表 (可按状态过滤), 返回目标摘要与计数。"
