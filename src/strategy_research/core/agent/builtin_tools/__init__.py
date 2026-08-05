@@ -2216,62 +2216,65 @@ class BenchmarkComparison(BaseTool):
 
 
 class DataCleanTool(BaseTool):
-    """数据清洗工具集"""
+    """清洗工作区 OHLCV 数据（去重/填充/异常/变频）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.2.0
+    # 变更: v1.2.0 迁移 v2 (显式签名 + ToolContext); v1.1.0 修复 price_data 查询
+    #
+    # ## 用途
+    # 清洗策略的 OHLCV 数据: 去重/缺失填充/异常检测/变频。
+    # preset 快捷执行或 steps+params 自定义。
+    #
+    # ## 参数
+    # - strategy_name: 策略名 (默认 'default')
+    # - preset: 预设模式 (quick/standard/thorough/resample/custom, 默认 standard)
+    # - steps: 自定义步骤列表 (custom 模式)
+    # - params: 自定义参数
+    # - dry_run: 只生成报告不写库 (默认 True)
+    #
+    # ## 示例
+    # {"strategy_name": "default", "preset": "standard", "dry_run": False}
+    #
+    # ## 边界
+    # 写工具 (effects: db); dry_run=False 会清空并重写该策略的 price_data;
+    # 幂等 (重跑安全)。
+    #
+    # ## 错误处理范式
+    # - 无效 preset → error + expected 枚举
+    # - 无 DB/空表 → error + fix 提示 get_market_data
+    # - 均可安全重试 (dry_run=False 重跑覆盖)
+    #
+    # ## 相关工具
+    # get_market_data: 数据来源; run_backtest: 清洗后回测
+    # ─────────────────────────────────────────────
+    """
 
     name = "clean_data"
     description = (
-        "清洗 OHLCV 数据，支持去重、缺失值填充、异常值检测、变频。"
-        "可通过 preset 快速执行常用清洗，或通过 steps + params 自定义清洗流程。"
+        "清洗 OHLCV 数据 (去重/缺失填充/异常检测/变频); preset 或 steps+params; "
+        "dry_run 只出报告, False 写回 DuckDB。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "工作区路径"},
-            "strategy_name": {
-                "type": "string",
-                "description": "策略名称",
-                "default": "default"
-            },
-            "preset": {
-                "type": "string",
-                "enum": ["quick", "standard", "thorough", "resample", "custom"],
-                "description": "预设清洗模式",
-                "default": "standard"
-            },
-            "steps": {
-                "type": "array",
-                "items": {
-                    "type": "string",
-                    "enum": ["dedup", "impute", "outlier", "resample", "returns"]
-                },
-                "description": "清洗步骤列表（custom 模式或覆盖预设步骤）"
-            },
-            "params": {
-                "type": "object",
-                "description": "自定义清洗参数"
-            },
-            "dry_run": {
-                "type": "boolean",
-                "description": "是否只生成报告不执行",
-                "default": True
-            }
-        },
-        "required": ["workspace"]
-    }
-    is_readonly = False
     repeatable = True
+    category = "数据"
+    effects = frozenset({EFFECT_DB})
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="clean_data")
-
-        strategy_name = kwargs.get("strategy_name", "default")
-        preset = kwargs.get("preset", "standard")
-        steps = kwargs.get("steps")
-        params = kwargs.get("params")
-        dry_run = kwargs.get("dry_run", True)
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_name: str = "default",
+        preset: str = "standard",
+        steps: list[str] | None = None,
+        params: dict[str, Any] | None = None,
+        dry_run: bool = True,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="clean_data",
+            )
+        workspace = ctx.workspace
 
         # 验证 preset
         from ...tools.data_clean import PRESETS
@@ -2420,8 +2423,11 @@ class ToolHelpTool(BaseTool):
     def __init__(self, registry: ToolRegistry | None = None) -> None:
         self._registry = registry
 
-    def execute(self, **kwargs: Any) -> str:
-        name = kwargs.get("name")
+    def execute(
+        self,
+        ctx: ToolContext,
+        name: str,
+    ) -> str:
         if not isinstance(name, str) or not name:
             return err_actionable(
                 "missing or invalid 'name'",

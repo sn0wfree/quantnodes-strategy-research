@@ -17,6 +17,7 @@ from strategy_research.core.agent.builtin_tools import (
     DataCleanTool,
     build_default_registry,
 )
+from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.db import get_connection, save_ohlcv_to_db
 
 
@@ -86,7 +87,7 @@ class TestDataCleanTool:
         """dry_run=True 只返回报告，DB 不变。"""
         tool = build_default_registry().get("clean_data")
         result = json.loads(tool.execute(
-            workspace=str(db_with_nan), strategy_name="clean_strat"
+            ctx=ToolContext(workspace=db_with_nan), strategy_name="clean_strat"
         ))
         assert result["status"] == "ok"
         assert result["dry_run"] is True
@@ -103,7 +104,7 @@ class TestDataCleanTool:
         """dry_run=False 清空并重写 price_data，NaN 被填充。"""
         tool = build_default_registry().get("clean_data")
         result = json.loads(tool.execute(
-            workspace=str(db_with_nan),
+            ctx=ToolContext(workspace=db_with_nan),
             strategy_name="clean_strat",
             dry_run=False,
         ))
@@ -117,7 +118,7 @@ class TestDataCleanTool:
         """preset=custom + steps/params 被透传。"""
         tool = build_default_registry().get("clean_data")
         result = json.loads(tool.execute(
-            workspace=str(db_with_nan),
+            ctx=ToolContext(workspace=db_with_nan),
             strategy_name="clean_strat",
             preset="custom",
             steps=["impute"],
@@ -132,7 +133,7 @@ class TestDataCleanTool:
         """无效 preset → 可操作错误。"""
         tool = build_default_registry().get("clean_data")
         result = json.loads(tool.execute(
-            workspace=str(db_with_nan),
+            ctx=ToolContext(workspace=db_with_nan),
             strategy_name="clean_strat",
             preset="bogus",
         ))
@@ -144,7 +145,7 @@ class TestDataCleanTool:
         """无 DB/无数据 → 提示先取数。"""
         tool = build_default_registry().get("clean_data")
         result = json.loads(tool.execute(
-            workspace=str(workspace), strategy_name="clean_strat"
+            ctx=ToolContext(workspace=workspace), strategy_name="clean_strat"
         ))
         assert result["status"] == "error"
         assert "duckdb" in result["error"].lower() or "empty" in result["error"].lower()
@@ -153,6 +154,8 @@ class TestDataCleanTool:
     def test_missing_workspace(self, db_with_nan):
         """缺 workspace → 结构化错误。"""
         tool = build_default_registry().get("clean_data")
-        result = json.loads(tool.execute(strategy_name="clean_strat"))
+        result = json.loads(tool.execute(
+            ctx=ToolContext(), strategy_name="clean_strat",
+        ))
         assert result["status"] == "error"
         assert "workspace" in result["error"]

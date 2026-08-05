@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..tools import BaseTool, ToolRegistry
+from ..tools import BaseTool, ToolContext, ToolRegistry
 from .utils import err_actionable, safe_get_param
 
 logger = logging.getLogger(__name__)
@@ -21,23 +21,40 @@ def _ok(payload: dict[str, Any]) -> str:
 
 
 class WebSearchTool(BaseTool):
-    """Search the web using DuckDuckGo."""
+    """DuckDuckGo 网页搜索（无需 API key）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名)
+    #
+    # ## 用途
+    # DuckDuckGo 网页搜索, 返回标题/URL/摘要。无需 API key。
+    #
+    # ## 参数
+    # - query: 搜索词 (必填)
+    # - max_results: 最大结果数 (默认 10)
+    #
+    # ## 示例
+    # {"query": "A-share momentum factor research"}
+    #
+    # ## 边界
+    # 只读工具 (effects: net); 依赖 duckduckgo_search 包。
+    #
+    # ## 错误处理范式
+    # - 缺 query → error + expected 示例
+    # - 网络失败 → error (transient, 可重试)
+    #
+    # ## 相关工具
+    # read_url: 打开结果
+    # ─────────────────────────────────────────────
+    """
 
     name = "web_search"
-    description = (
-        "Search the web using DuckDuckGo. Returns top results with title, URL, "
-        "and snippet. No API key required."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query."},
-            "max_results": {"type": "integer", "description": "Max results (default 10, omit to use default)."},
-        },
-        "required": ["query", "max_results"],
-    }
+    description = "DuckDuckGo 网页搜索 (无需 API key); 返回标题/URL/摘要。"
     repeatable = True
-    strict = True  # All params required (max_results may use default 10)
+    strict = True
+    category = "Web"
+    effects = frozenset({"net"})
 
     @classmethod
     def check_available(cls) -> bool:
@@ -47,9 +64,13 @@ class WebSearchTool(BaseTool):
         except ImportError:
             return False
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        query: str,
+        max_results: int = 10,
+    ) -> str:
         from ...web.search import web_search
-        query = kwargs.get("query", "")
         if not query:
             return err_actionable(
                 "missing required parameter 'query'",
@@ -57,10 +78,6 @@ class WebSearchTool(BaseTool):
                 fix="pass a non-empty query, e.g. query='Python pandas tutorial'",
                 tool="web_search",
             )
-        try:
-            max_results = safe_get_param(kwargs, "max_results", int, default=10)
-        except TypeError:
-            max_results = 10
         return web_search(query=query, max_results=max_results)
 
 
@@ -68,27 +85,48 @@ class WebSearchTool(BaseTool):
 
 
 class ReadUrlTool(BaseTool):
-    """Fetch a URL and convert HTML to Markdown."""
+    """抓取网页并转 Markdown。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名)
+    #
+    # ## 用途
+    # 抓取网页 URL 并返回 Markdown 内容; 适合读文档/文章/论文。
+    #
+    # ## 参数
+    # - url: 要抓取的 URL (必填)
+    # - max_chars: 最大字符数 (默认 10000)
+    #
+    # ## 示例
+    # {"url": "https://docs.python.org/3/"}
+    #
+    # ## 边界
+    # 只读工具 (effects: net); 依赖 ...web.fetch。
+    #
+    # ## 错误处理范式
+    # - 缺 url → error + expected 示例
+    # - 网络/解析失败 → error (transient, 可重试)
+    #
+    # ## 相关工具
+    # web_search: 找 URL
+    # ─────────────────────────────────────────────
+    """
 
     name = "read_url"
-    description = (
-        "Fetch a web page URL and return its content as Markdown. "
-        "Useful for reading documentation, articles, and research papers."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "URL to fetch."},
-            "max_chars": {"type": "integer", "description": "Max characters (default 10000, omit to use default)."},
-        },
-        "required": ["url", "max_chars"],
-    }
+    description = "抓取网页 URL 并返回 Markdown 内容。"
     repeatable = True
-    strict = True  # All params required
+    strict = True
+    category = "Web"
+    effects = frozenset({"net"})
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        url: str,
+        max_chars: int = 10_000,
+    ) -> str:
         from ...web.fetch import read_url
-        url = kwargs.get("url", "")
         if not url:
             return err_actionable(
                 "missing required parameter 'url'",
@@ -96,10 +134,6 @@ class ReadUrlTool(BaseTool):
                 fix="pass a valid http(s) URL, e.g. url='https://example.com/article'",
                 tool="read_url",
             )
-        try:
-            max_chars = safe_get_param(kwargs, "max_chars", int, default=10_000)
-        except TypeError:
-            max_chars = 10_000
         return read_url(url=url, max_chars=max_chars)
 
 
@@ -107,23 +141,39 @@ class ReadUrlTool(BaseTool):
 
 
 class ReadDocumentTool(BaseTool):
-    """Extract text from a PDF document."""
+    """从 PDF 提取文本。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名)
+    #
+    # ## 用途
+    # 从 PDF 文件提取文本内容 (含页码标记)。需 PyMuPDF。
+    #
+    # ## 参数
+    # - path: PDF 文件路径 (必填, 绝对路径)
+    # - max_pages: 最大页数 (默认 50)
+    #
+    # ## 示例
+    # {"path": "/home/user/papers/momentum.pdf"}
+    #
+    # ## 边界
+    # 只读工具; 依赖 fitz (PyMuPDF), 缺失时被排除注册。
+    #
+    # ## 错误处理范式
+    # - 缺 path → error + expected 示例
+    # - 文件无法解析 → error
+    #
+    # ## 相关工具
+    # 无
+    # ─────────────────────────────────────────────
+    """
 
     name = "read_document"
-    description = (
-        "Extract text content from a PDF file. Returns extracted text "
-        "with page markers. Requires PyMuPDF (optional dependency)."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Path to PDF file."},
-            "max_pages": {"type": "integer", "description": "Max pages (default 50, omit to use default)."},
-        },
-        "required": ["path", "max_pages"],
-    }
+    description = "从 PDF 文件提取文本 (含页码标记); 需 PyMuPDF。"
     repeatable = True
-    strict = True  # All params required
+    strict = True
+    category = "Web"
 
     @classmethod
     def check_available(cls) -> bool:
@@ -133,9 +183,13 @@ class ReadDocumentTool(BaseTool):
         except ImportError:
             return False
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        path: str,
+        max_pages: int = 50,
+    ) -> str:
         from ...web.pdf import read_document
-        path = kwargs.get("path", "")
         if not path:
             return err_actionable(
                 "missing required parameter 'path'",
@@ -143,10 +197,6 @@ class ReadDocumentTool(BaseTool):
                 fix="pass an absolute path, e.g. path='/home/user/papers/momentum.pdf'",
                 tool="read_document",
             )
-        try:
-            max_pages = safe_get_param(kwargs, "max_pages", int, default=50)
-        except TypeError:
-            max_pages = 50
         return read_document(path=path, max_pages=max_pages)
 
 

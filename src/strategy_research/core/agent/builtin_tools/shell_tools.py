@@ -13,7 +13,7 @@ import subprocess
 import time
 from typing import Any
 
-from ..tools import BaseTool, ToolRegistry
+from ..tools import BaseTool, EFFECT_FS, EFFECT_NET, ToolContext, ToolRegistry
 from .utils import err_actionable, safe_get_param
 
 logger = logging.getLogger(__name__)
@@ -46,53 +46,58 @@ def _truncate(text: str, limit: int = _MAX_OUTPUT_CHARS) -> str:
 
 
 class ShellExecTool(BaseTool):
-    """Execute a shell command in the workspace directory."""
+    """在工作区目录执行 shell 命令。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext; effects 声明)
+    #
+    # ## 用途
+    # 在工作区目录执行 shell 命令 (pip/环境检查/脚本/git/系统命令)。
+    # opt-in 工具 (allow_shell_tools 开启时注册)。
+    #
+    # ## 参数
+    # - command: 要执行的命令 (必填)
+    # - timeout: 超时秒数 (默认 30, 上限 120)
+    #
+    # ## 示例
+    # {"command": "python -c 'import pandas; print(pandas.__version__)'"}
+    #
+    # ## 边界
+    # 写工具 (effects: fs + net); 危险命令被拦截; 输出截断。
+    #
+    # ## 错误处理范式
+    # - 缺 command → error + expected 示例
+    # - 危险命令 → error + 拦截说明
+    # - 超时/退出码非 0 → error + 详情
+    #
+    # ## 相关工具
+    # 无 (系统级能力)
+    # ─────────────────────────────────────────────
+    """
 
     name = "run_command"
-    description = (
-        "Execute a shell command in the workspace directory. "
-        "Returns stdout, stderr, and exit code. Use this for installing "
-        "packages (pip install), checking environment (python -c), "
-        "running scripts, git operations, or any system command. "
-        "Commands run with a timeout and output is truncated for safety."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {
-                "type": "string",
-                "description": "Workspace root path (command runs in this directory).",
-            },
-            "command": {
-                "type": "string",
-                "description": "Shell command to execute.",
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "Timeout in seconds (default 30, max 120).",
-            },
-        },
-        "required": ["workspace", "command"],
-    }
+    description = "在工作区目录执行 shell 命令 (opt-in); 返回 stdout/stderr/退出码。"
     repeatable = True
-    is_readonly = False
+    category = "系统"
+    effects = frozenset({EFFECT_FS, EFFECT_NET})
 
-    def execute(self, **kwargs: Any) -> str:
+    def execute(
+        self,
+        ctx: ToolContext,
+        command: str,
+        timeout: int = 30,
+    ) -> str:
         from pathlib import Path
 
-        # ── Parse workspace ──────────────────────────────────
-        ws_raw = kwargs.get("workspace")
-        if ws_raw is None:
+        if ctx.workspace is None:
             return err_actionable(
-                "missing required kwarg 'workspace'",
-                expected="absolute path to workspace root",
-                fix="pass workspace='/path/to/your/workspace'",
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
                 tool="run_command",
             )
-        workspace = Path(str(ws_raw)).resolve()
+        workspace = Path(str(ctx.workspace)).resolve()
 
-        # ── Parse command ────────────────────────────────────
-        command = kwargs.get("command")
         if not command or not isinstance(command, str):
             return err_actionable(
                 "missing or empty 'command' parameter",
@@ -102,10 +107,6 @@ class ShellExecTool(BaseTool):
             )
 
         # ── Parse timeout ────────────────────────────────────
-        try:
-            timeout = safe_get_param(kwargs, "timeout", int, default=_DEFAULT_TIMEOUT)
-        except TypeError:
-            timeout = _DEFAULT_TIMEOUT
         timeout = max(1, min(timeout, 120))  # clamp 1..120
 
         # ── Safety: block obviously destructive commands ──────

@@ -652,20 +652,22 @@ class TestWebTools:
             pytest.skip("web_search dependencies not installed")
 
     def test_read_url_missing_url(self):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         try:
             from strategy_research.core.agent.builtin_tools.web_tools import ReadUrlTool
             tool = ReadUrlTool()
-            result = parse_result(tool.execute())
-            assert result["status"] == "error"
+            with pytest.raises(TypeError):
+                tool.execute(ctx=ToolContext())
         except ImportError:
             pytest.skip("read_url dependencies not installed")
 
     def test_read_document_missing_path(self):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         try:
             from strategy_research.core.agent.builtin_tools.web_tools import ReadDocumentTool
             tool = ReadDocumentTool()
-            result = parse_result(tool.execute())
-            assert result["status"] == "error"
+            with pytest.raises(TypeError):
+                tool.execute(ctx=ToolContext())
         except ImportError:
             pytest.skip("read_document dependencies not installed")
 

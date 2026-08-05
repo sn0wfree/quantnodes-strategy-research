@@ -14,7 +14,7 @@ import json
 import logging
 from typing import Any
 
-from ..tools import BaseTool
+from ..tools import BaseTool, EFFECT_DB, ToolContext
 from .utils import err_actionable, safe_get_param, try_unwrap_list
 
 logger = logging.getLogger(__name__)
@@ -52,35 +52,21 @@ def _get_session_id(kwargs: dict[str, Any]) -> str:
 
 
 class CreateGoalTool(BaseTool):
-    """Create or replace a research goal for the current session."""
+    """创建或替换当前会话的研究目标。"""
 
     name = "create_goal"
-    description = (
-        "Create a new research goal for the current session. "
-        "If a goal already exists, it will be superseded. "
-        "Returns the goal_id and status."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "session_id": {"type": "string", "description": "Session ID (auto-injected by AgentLoop)."},
-            "objective": {"type": "string", "description": "Research objective description."},
-            "criteria": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of success criteria. Pass null to use defaults.",
-                "nullable": True,
-            },
-        },
-        "required": ["session_id", "objective", "criteria"],
-    }
-    is_readonly = False
+    description = "为当前会话创建研究目标 (已存在则取代); 返回 goal_id 与状态。"
     repeatable = False
-    strict = True  # All params required (criteria nullable)
-
-    def execute(self, **kwargs: Any) -> str:
-        session_id = _get_session_id(kwargs)
-        objective = kwargs.get("objective", "")
+    strict = True
+    category = "Goal"
+    effects = frozenset({EFFECT_DB})
+    def execute(
+        self,
+        ctx: ToolContext,
+        objective: str,
+        criteria: list[str] | None = None,
+    ) -> str:
+        session_id = ctx.session_id or "default"
         if not objective:
             return err_actionable(
                 "missing 'objective'",
@@ -90,7 +76,6 @@ class CreateGoalTool(BaseTool):
             )
 
         # Defensive: criteria may be string, list, or wrapped list
-        criteria = kwargs.get("criteria")
         if isinstance(criteria, str):
             try:
                 criteria = json.loads(criteria)
@@ -130,39 +115,22 @@ class CreateGoalTool(BaseTool):
 
 
 class AddEvidenceTool(BaseTool):
-    """Append evidence to the current research goal."""
+    """为当前目标添加证据条目。"""
 
     name = "add_evidence"
-    description = (
-        "Append evidence (analysis results, observations, metrics) to the "
-        "current research goal. Optionally link to a specific criterion."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "session_id": {"type": "string", "description": "Session ID (auto-injected by AgentLoop)."},
-            "text": {"type": "string", "description": "Evidence text (required)."},
-            "criterion_id": {
-                "type": "string",
-                "description": "Link to a specific criterion. Pass null if not applicable.",
-                "nullable": True,
-            },
-            "source_type": {"type": "string", "description": "Source type (e.g. 'analysis', 'backtest'). Default 'evidence' if null."},
-            "run_id": {
-                "type": "string",
-                "description": "Related run ID. Pass null if not applicable.",
-                "nullable": True,
-            },
-        },
-        "required": ["session_id", "text", "criterion_id", "source_type", "run_id"],
-    }
-    is_readonly = False
+    description = "为目标添加证据条目 (指标/观测); 关联可选 criterion/run。"
     repeatable = True
-    strict = True  # All params required (nullable for optional)
-
-    def execute(self, **kwargs: Any) -> str:
-        session_id = _get_session_id(kwargs)
-        text = kwargs.get("text", "")
+    category = "Goal"
+    effects = frozenset({EFFECT_DB})
+    def execute(
+        self,
+        ctx: ToolContext,
+        text: str,
+        criterion_id: str | None = None,
+        source_type: str = "evidence",
+        run_id: str | None = None,
+    ) -> str:
+        session_id = ctx.session_id or "default"
         if not text:
             return err_actionable(
                 "missing 'text'",
@@ -171,9 +139,7 @@ class AddEvidenceTool(BaseTool):
                 tool="add_evidence",
             )
 
-        criterion_id = kwargs.get("criterion_id")
-        source_type = kwargs.get("source_type", "evidence")
-        run_id = kwargs.get("run_id")
+
 
         try:
             from ...goal import EvidenceInput
@@ -220,28 +186,19 @@ class AddEvidenceTool(BaseTool):
 
 
 class CompleteGoalTool(BaseTool):
-    """Mark the current research goal as complete (lite mode)."""
+    """完成当前目标并附上总结。"""
 
     name = "complete_goal"
-    description = (
-        "Complete the current research goal. Uses 'lite' mode which verifies "
-        "every required criterion has evidence but does not require audit rows. "
-        "Optionally include a recap summary."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "session_id": {"type": "string", "description": "Session ID (auto-injected)."},
-            "recap": {"type": "string", "description": "Optional recap summary of the research."},
-        },
-        "required": [],
-    }
-    is_readonly = False
-    repeatable = False
-
-    def execute(self, **kwargs: Any) -> str:
-        session_id = _get_session_id(kwargs)
-        recap = kwargs.get("recap")
+    description = "将当前目标标记为完成, 可附 recap 总结。"
+    repeatable = True
+    category = "Goal"
+    effects = frozenset({EFFECT_DB})
+    def execute(
+        self,
+        ctx: ToolContext,
+        recap: str | None = None,
+    ) -> str:
+        session_id = ctx.session_id or "default"
 
         try:
             store = _get_store()
@@ -277,24 +234,17 @@ class CompleteGoalTool(BaseTool):
 
 
 class GetGoalStatusTool(BaseTool):
-    """Get the current goal status and progress."""
+    """查询当前目标状态与证据。"""
 
     name = "get_goal_status"
-    description = (
-        "Get the current research goal's status, progress, criteria, "
-        "and evidence count. Returns a full snapshot."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "session_id": {"type": "string", "description": "Session ID (auto-injected)."},
-        },
-        "required": [],
-    }
+    description = "查询当前会话目标: 状态/进度/标准/证据数。"
     repeatable = True
-
-    def execute(self, **kwargs: Any) -> str:
-        session_id = _get_session_id(kwargs)
+    category = "Goal"
+    def execute(
+        self,
+        ctx: ToolContext,
+    ) -> str:
+        session_id = ctx.session_id or "default"
 
         try:
             store = _get_store()
@@ -340,31 +290,20 @@ class GetGoalStatusTool(BaseTool):
 
 
 class ListGoalsTool(BaseTool):
-    """List goals with optional session and status filters."""
+    """列出目标（可按状态过滤）。"""
 
     name = "list_goals"
-    description = (
-        "List research goals. Optionally filter by session_id and/or status. "
-        "Returns goal summaries ordered by creation time (newest first)."
-    )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "session_id": {"type": "string", "description": "Filter by session ID (optional)."},
-            "status": {"type": "string", "description": "Filter by status (e.g. 'active', 'complete')."},
-            "limit": {"type": "integer", "description": "Max results (default 10)."},
-        },
-        "required": [],
-    }
+    description = "列出目标列表 (可按状态过滤), 返回目标摘要与计数。"
     repeatable = True
-
-    def execute(self, **kwargs: Any) -> str:
-        session_id = kwargs.get("session_id")
-        status_str = kwargs.get("status")
-        try:
-            limit = safe_get_param(kwargs, "limit", int, default=10)
-        except TypeError:
-            limit = 10
+    category = "Goal"
+    def execute(
+        self,
+        ctx: ToolContext,
+        status: str | None = None,
+        limit: int = 10,
+    ) -> str:
+        session_id = ctx.session_id
+        status_str = status
 
         try:
             from ...goal import GoalStatus, GoalStore

@@ -16,6 +16,8 @@ import json
 
 import pytest
 
+from strategy_research.core.agent.tools import ToolContext
+
 
 # ── Test fixtures ──────────────────────────────────────────────────
 
@@ -39,7 +41,7 @@ def tmp_workspace(tmp_path):
 
 class TestShellExecBasic:
     def test_echo_returns_stdout(self, tool, tmp_workspace):
-        result = json.loads(tool.execute(workspace=str(tmp_workspace), command="echo hello"))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command="echo hello"))
         assert result["status"] == "ok"
         assert result["stdout"].strip() == "hello"
         assert result["exit_code"] == 0
@@ -47,7 +49,7 @@ class TestShellExecBasic:
         assert result["command"] == "echo hello"
 
     def test_pwd_runs_in_workspace(self, tool, tmp_workspace):
-        result = json.loads(tool.execute(workspace=str(tmp_workspace), command="pwd"))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command="pwd"))
         assert result["status"] == "ok"
         # pwd should be the workspace directory
         assert tmp_workspace.name in result["stdout"] or str(tmp_workspace) in result["stdout"]
@@ -55,7 +57,7 @@ class TestShellExecBasic:
     def test_ls_lists_workspace(self, tool, tmp_workspace):
         (tmp_workspace / "file1.txt").write_text("a")
         (tmp_workspace / "file2.txt").write_text("b")
-        result = json.loads(tool.execute(workspace=str(tmp_workspace), command="ls"))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command="ls"))
         assert result["status"] == "ok"
         assert "file1.txt" in result["stdout"]
         assert "file2.txt" in result["stdout"]
@@ -66,13 +68,13 @@ class TestShellExecBasic:
 
 class TestShellExecExitCodes:
     def test_nonzero_exit_code_reported(self, tool, tmp_workspace):
-        result = json.loads(tool.execute(workspace=str(tmp_workspace), command="exit 7"))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command="exit 7"))
         assert result["status"] == "ok"  # status reflects execution, not exit code
         assert result["exit_code"] == 7
 
     def test_stderr_captured(self, tool, tmp_workspace):
         result = json.loads(tool.execute(
-            workspace=str(tmp_workspace),
+            ctx=ToolContext(workspace=str(tmp_workspace)),
             command="sh -c 'echo to_stdout; echo to_stderr 1>&2'",
         ))
         assert result["status"] == "ok"
@@ -86,7 +88,7 @@ class TestShellExecExitCodes:
 class TestShellExecTimeout:
     def test_timeout_returns_error(self, tool, tmp_workspace):
         result = json.loads(tool.execute(
-            workspace=str(tmp_workspace),
+            ctx=ToolContext(workspace=str(tmp_workspace)),
             command="sleep 5",
             timeout=1,
         ))
@@ -96,7 +98,7 @@ class TestShellExecTimeout:
 
     def test_custom_timeout_respected(self, tool, tmp_workspace):
         result = json.loads(tool.execute(
-            workspace=str(tmp_workspace),
+            ctx=ToolContext(workspace=str(tmp_workspace)),
             command="echo done",
             timeout=10,
         ))
@@ -115,7 +117,7 @@ class TestShellExecSafety:
         "chmod -R 777 /",
     ])
     def test_dangerous_command_blocked(self, tool, tmp_workspace, cmd):
-        result = json.loads(tool.execute(workspace=str(tmp_workspace), command=cmd))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command=cmd))
         assert result["status"] == "error"
         assert "blocked" in result["error"].lower()
 
@@ -125,16 +127,16 @@ class TestShellExecSafety:
 
 class TestShellExecParameters:
     def test_missing_command(self, tool, tmp_workspace):
-        result = json.loads(tool.execute(workspace=str(tmp_workspace)))
-        assert result["status"] == "error"
-        assert "command" in result["error"].lower()
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)))
 
     def test_empty_command(self, tool, tmp_workspace):
-        result = json.loads(tool.execute(workspace=str(tmp_workspace), command=""))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command=""))
         assert result["status"] == "error"
 
     def test_missing_workspace(self, tool):
-        result = json.loads(tool.execute(command="echo hi"))
+        result = json.loads(tool.execute(ctx=ToolContext(), command="echo hi"))
         assert result["status"] == "error"
         assert "workspace" in result["error"].lower()
 
@@ -146,7 +148,7 @@ class TestShellExecTruncation:
     def test_large_stdout_truncated(self, tool, tmp_workspace):
         # 60KB of output, limit is 50_000
         result = json.loads(tool.execute(
-            workspace=str(tmp_workspace),
+            ctx=ToolContext(workspace=str(tmp_workspace)),
             command="python3 -c \"print('x' * 60000)\"",
         ))
         assert result["status"] == "ok"
@@ -206,7 +208,8 @@ class TestShellToolSchema:
         assert schema["type"] == "function"
         assert schema["function"]["name"] == "run_command"
         params = schema["function"]["parameters"]
-        assert "workspace" in params["required"]
+        # v2: workspace 由 ToolContext 注入, 不在 schema 中
+        assert "workspace" not in params["properties"]
         assert "command" in params["required"]
         assert "timeout" in params["properties"]
 

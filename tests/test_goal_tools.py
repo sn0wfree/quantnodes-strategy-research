@@ -9,6 +9,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from strategy_research.core.agent.tools import ToolContext
+
 from strategy_research.core.agent.builtin_tools.goal_tools import (
     CreateGoalTool,
     AddEvidenceTool,
@@ -48,8 +50,7 @@ class TestGoalTools:
         tool = CreateGoalTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
                 objective="Analyze momentum factor IC",
                 criteria=["IC > 0.05", "IR > 0.3"],
             )
@@ -63,8 +64,7 @@ class TestGoalTools:
         tool = CreateGoalTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
                 objective="",
             )
         data = json.loads(result)
@@ -82,8 +82,7 @@ class TestGoalTools:
         tool = AddEvidenceTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
                 text="IC mean = 0.06, IR = 0.5",
             )
         data = json.loads(result)
@@ -95,8 +94,7 @@ class TestGoalTools:
         tool = AddEvidenceTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
                 text="Some evidence",
             )
         data = json.loads(result)
@@ -113,8 +111,7 @@ class TestGoalTools:
         tool = AddEvidenceTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
                 text="",
             )
         data = json.loads(result)
@@ -141,8 +138,7 @@ class TestGoalTools:
         tool = CompleteGoalTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
                 recap="Research complete",
             )
         data = json.loads(result)
@@ -154,8 +150,7 @@ class TestGoalTools:
         tool = CompleteGoalTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
             )
         data = json.loads(result)
         assert data["status"] == "error"
@@ -171,8 +166,7 @@ class TestGoalTools:
         tool = GetGoalStatusTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
             )
         data = json.loads(result)
         assert data["status"] == "ok"
@@ -186,8 +180,7 @@ class TestGoalTools:
         tool = GetGoalStatusTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="test-session",
+                ctx=ToolContext(session_id="test-session"),
             )
         data = json.loads(result)
         assert data["status"] == "ok"
@@ -207,9 +200,7 @@ class TestGoalTools:
         )
         tool = ListGoalsTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
-            result = tool.execute(
-                workspace=str(workspace),
-            )
+            result = tool.execute(ctx=ToolContext())
         data = json.loads(result)
         assert data["status"] == "ok"
         assert data["count"] == 2
@@ -229,8 +220,7 @@ class TestGoalTools:
         tool = ListGoalsTool()
         with patch("strategy_research.core.agent.builtin_tools.goal_tools._get_store", return_value=store):
             result = tool.execute(
-                workspace=str(workspace),
-                session_id="s1",
+                ctx=ToolContext(session_id="s1"),
             )
         data = json.loads(result)
         assert data["status"] == "ok"
@@ -379,8 +369,7 @@ class TestGoalLifecycle:
             # 1. Create goal
             create_tool = CreateGoalTool()
             result = json.loads(create_tool.execute(
-                workspace=str(workspace),
-                session_id="lifecycle-test",
+                ctx=ToolContext(session_id="lifecycle-test"),
                 objective="Test full lifecycle",
                 criteria=["Criterion A", "Criterion B"],
             ))
@@ -390,8 +379,7 @@ class TestGoalLifecycle:
             # 2. Check status
             status_tool = GetGoalStatusTool()
             result = json.loads(status_tool.execute(
-                workspace=str(workspace),
-                session_id="lifecycle-test",
+                ctx=ToolContext(session_id="lifecycle-test"),
             ))
             assert result["has_goal"] is True
             assert result["progress_percent"] == 0
@@ -401,15 +389,13 @@ class TestGoalLifecycle:
             criterion_ids = {c.text: c.criterion_id for c in criteria}
             ev_tool = AddEvidenceTool()
             result = json.loads(ev_tool.execute(
-                workspace=str(workspace),
-                session_id="lifecycle-test",
+                ctx=ToolContext(session_id="lifecycle-test"),
                 text="Evidence for criterion A",
                 criterion_id=criterion_ids.get("Criterion A"),
             ))
             assert result["status"] == "ok"
             result = json.loads(ev_tool.execute(
-                workspace=str(workspace),
-                session_id="lifecycle-test",
+                ctx=ToolContext(session_id="lifecycle-test"),
                 text="Evidence for criterion B",
                 criterion_id=criterion_ids.get("Criterion B"),
             ))
@@ -418,8 +404,7 @@ class TestGoalLifecycle:
             # 4. Complete goal
             complete_tool = CompleteGoalTool()
             result = json.loads(complete_tool.execute(
-                workspace=str(workspace),
-                session_id="lifecycle-test",
+                ctx=ToolContext(session_id="lifecycle-test"),
                 recap="All criteria covered",
             ))
             assert result["status"] == "ok"
@@ -427,8 +412,7 @@ class TestGoalLifecycle:
             # 5. Verify completed - after complete, get_current_goal returns None
             #    but the goal should still be in the list
             list_result = json.loads(ListGoalsTool().execute(
-                workspace=str(workspace),
-                session_id="lifecycle-test",
+                ctx=ToolContext(session_id="lifecycle-test"),
             ))
             assert list_result["count"] == 1
             assert list_result["goals"][0]["goal_status"] == "complete"

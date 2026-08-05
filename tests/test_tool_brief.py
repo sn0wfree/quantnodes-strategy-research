@@ -116,7 +116,7 @@ class TestToolHelp:
 
     def test_returns_docstring_raw(self):
         reg = build_default_registry()
-        result = json.loads(reg.get("tool_help").execute(name="run_backtest"))
+        result = json.loads(reg.get("tool_help").execute(ctx=None, name="run_backtest"))
         assert result["status"] == "ok"
         assert result["name"] == "run_backtest"
         assert "运行回测" in result["doc"]
@@ -124,20 +124,20 @@ class TestToolHelp:
 
     def test_unknown_tool(self):
         reg = build_default_registry()
-        result = json.loads(reg.get("tool_help").execute(name="nope"))
+        result = json.loads(reg.get("tool_help").execute(ctx=None, name="nope"))
         assert result["status"] == "error"
         assert "not found" in result["error"]
         assert "available" in result
 
     def test_missing_name(self):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         reg = build_default_registry()
-        result = json.loads(reg.get("tool_help").execute())
-        assert result["status"] == "error"
-        assert "name" in result["error"]
+        with pytest.raises(TypeError):
+            reg.get("tool_help").execute(ctx=None)
 
     def test_self_referential(self):
         reg = build_default_registry()
-        result = json.loads(reg.get("tool_help").execute(name="tool_help"))
+        result = json.loads(reg.get("tool_help").execute(ctx=None, name="tool_help"))
         assert result["status"] == "ok"
         assert "详细版说明书" in result["doc"]
 
