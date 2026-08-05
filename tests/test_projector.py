@@ -332,7 +332,9 @@ class TestProjectorHandlers(unittest.TestCase):
         self.assertEqual(len(self.state.messages), 0)
 
     def test_thinking_events_absorbed(self) -> None:
-        """Thinking events don't create parts in B1 (preserved in event_log)."""
+        """Thinking events render as a collapsed ``thinking`` part in B1
+        (B7-fix: _on_thinking_start creates a collapsed part; deltas append).
+        """
         for et in (EventType.THINKING_START, EventType.THINKING_DELTA,
                    EventType.THINKING_DONE, EventType.THINKING_END):
             e = EventV2.create("s1", 1, et, {
@@ -342,7 +344,11 @@ class TestProjectorHandlers(unittest.TestCase):
             self.projector.apply(e, self.state)
         m = self.state.messages.get("asst-msg-1")
         if m:
-            self.assertEqual(m.parts, {})
+            part = m.parts.get("think_1")
+            assert part is not None, f"expected thinking part, got {m.parts}"
+            self.assertEqual(part.type, "thinking")
+            self.assertTrue(part.data.get("collapsed"))
+            self.assertEqual(part.data.get("text"), "thought")
 
 
 class TestProjectorIntegration(unittest.TestCase):

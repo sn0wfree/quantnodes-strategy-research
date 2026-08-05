@@ -492,6 +492,17 @@ class TestReadonly:
         )
         assert loop.registry.get("write_file") is None
 
+    def test_readonly_filters_run_backtest(self, workspace):
+        """readonly=True 时 run_backtest 被过滤（写工具，产 runs/）"""
+        loop = AgentLoop(
+            stream_mode=False,
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            readonly=True,
+        )
+        assert loop.registry.get("run_backtest") is None
+
     def test_readonly_preserves_read_tools(self, workspace):
         """readonly=True 时所有只读工具保留"""
         loop = AgentLoop(
@@ -505,7 +516,6 @@ class TestReadonly:
         assert loop.registry.get("list_history") is not None
         assert loop.registry.get("git_diff") is not None
         assert loop.registry.get("compute_factor") is not None
-        assert loop.registry.get("run_backtest") is not None
 
     def test_readonly_false_keeps_all(self, workspace):
         """readonly=False 时全部工具保留"""

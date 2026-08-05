@@ -332,7 +332,9 @@ class FactorStrategy:
                     f"{self.strategy_name!r} up to {date}; cannot evaluate "
                     "expression factors."
                 )
-            ohlcv_panels = long_to_wide_ohlcv_per_asset(long_ohlcv)
+            ohlcv_panels = long_to_wide_ohlcv_per_asset(
+                long_ohlcv, asset_col="asset_code"
+            )
 
         for factor in self.factors:
             name = factor.get("name", "unknown")
@@ -478,8 +480,10 @@ def run_from_yaml(yaml_path: str | Path, workspace_path: Path) -> BacktestResult
     if data.empty:
         raise ValueError("数据为空，请先导入价格数据")
 
-    # 归一化价格
-    data_norm = data / data.iloc[0]
+    # 归一化价格. 不同资产的起始交易日可能不同（列内前导 NaN），
+    # 不能用 data.iloc[0] 做除数（整列会被 NaN 污染）：
+    # 每列除以各自的首个有效值（bfill 把前导 NaN 填为首个有效值）。
+    data_norm = data / data.bfill().iloc[0]
 
     # 参数
     rebal_cfg = cfg.get("rebalance", {})

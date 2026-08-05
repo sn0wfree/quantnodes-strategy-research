@@ -120,7 +120,7 @@ class TestRunWithAgentForwardsBudget(unittest.TestCase):
         with (
             patch.object(SessionService, "_run_test_script"),
             patch(
-                "strategy_research.core.agent.loop.AgentLoop",
+                "strategy_research.core.agent.chat_loop.AgentLoop",
                 lambda **kw: type(
                     "AL", (), {"arun": fake_agent_arun, "max_iterations": kw.get("max_iterations")}
                 )(),

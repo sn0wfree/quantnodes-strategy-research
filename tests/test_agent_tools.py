@@ -352,6 +352,60 @@ rebalance:
         result = parse_result(tool.execute(strategy_name="x"))
         assert result["status"] == "error"
 
+    def test_run_backtest_e2e_with_price_data(self, workspace: Path):
+        """End-to-end regression: expression factors read OHLCV from the
+        ``price_data`` table (``asset_code`` column).
+
+        Previously this crashed with ``long format requires columns
+        [date, asset, ...]`` because ``long_to_wide_ohlcv_per_asset`` was
+        called without ``asset_col="asset_code"``.
+        """
+        import numpy as np
+        import pandas as pd
+
+        from strategy_research.core.db import save_ohlcv_to_db
+
+        codes = ["000001.SZ", "600519.SH", "300015.SZ"]
+        dates = pd.bdate_range("2023-01-02", periods=300)
+        rng = np.random.default_rng(7)
+        data_map: dict[str, pd.DataFrame] = {}
+        for code in codes:
+            close = 100 * np.cumprod(1 + rng.normal(0.0005, 0.02, len(dates)))
+            data_map[code] = pd.DataFrame(
+                {
+                    "open": close * 0.99,
+                    "high": close * 1.02,
+                    "low": close * 0.98,
+                    "close": close,
+                    "volume": 1_000_000 + rng.integers(0, 500_000, len(dates)),
+                },
+                index=pd.DatetimeIndex(dates, name="trade_date"),
+            )
+        save_ohlcv_to_db(workspace, data_map, "e2e_strat")
+
+        sdir = workspace / "strategies" / "e2e_strat"
+        sdir.mkdir()
+        (sdir / "config.yaml").write_text("""strategy:
+  name: e2e_strat
+  type: rotation
+data:
+  source: duckdb
+rebalance:
+  freq: M
+  min_history: 60
+factors:
+  - name: momentum_20d
+    code: ts_return(close, 20)
+    weight: 1.0
+""")
+        tool = RunBacktestTool()
+        result = parse_result(tool.execute(
+            workspace=workspace, strategy_name="e2e_strat",
+        ))
+        assert result["status"] in ("ok", "pending"), result
+        metrics = result.get("metrics") or {}
+        assert "ann_return" in metrics
+
 
 # ── ComputeFactorTool ────────────────────────────────────────────────
 

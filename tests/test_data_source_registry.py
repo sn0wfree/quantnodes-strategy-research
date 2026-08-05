@@ -183,12 +183,11 @@ class TestGetLoaderOrFallback:
         )
         # resolve_loader_with_fallback raises because fake_down.is_available() == False
         # and 'fake_down' has no markets (so no market-chain fallback either).
-        result = registry.get_loader_or_fallback("fake_down")
-        # Either tushare fallback returned, or NoAvailableSourceError was raised
-        # depending on tushare availability. Acceptable outcomes: it's tushare OR raises.
-        if result is None:
-            return  # No tushare available → resolve_loader_with_fallback raised → caught here
-        # If tushare available in test env, result is tushare; else raises (already handled).
+        try:
+            result = registry.get_loader_or_fallback("fake_down")
+        except registry.NoAvailableSourceError:
+            return  # tushare unavailable → re-raise is the documented behavior
+        assert result is registry.LOADER_REGISTRY["tushare"]
 
     def test_does_not_loop_to_tushare_when_already_asking_tushare(self, monkeypatch):
         # If someone asks for tushare and it raises, we should NOT

@@ -20,6 +20,13 @@ from strategy_research.core.llm.errors import (
 )
 from strategy_research.core.llm import openai_client as oc_mod
 
+# Minimal provider adapter so the new ``adapter`` parameters of
+# _build_headers / _build_payload get exercised (see openai_client.py).
+_FAKE_ADAPTER = unittest.mock.Mock()
+_FAKE_ADAPTER.custom_headers.return_value = {}
+_FAKE_ADAPTER.custom_payload.side_effect = lambda payload, config: payload
+_FAKE_ADAPTER.custom_stream_options.return_value = None
+
 class TestIsRetryableStatus(unittest.TestCase):
     """_is_retryable_status: 429 and 5xx are retryable."""
 
@@ -188,7 +195,7 @@ class TestBuildHeaders(unittest.TestCase):
 
     def test_basic_headers(self) -> None:
         cfg = LLMConfig(api_key="sk-test")
-        headers = oc_mod._build_headers(cfg)
+        headers = oc_mod._build_headers(cfg, _FAKE_ADAPTER)
         self.assertEqual(headers["Authorization"], "Bearer sk-test")
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(headers["Accept"], "application/json")
@@ -198,55 +205,55 @@ class TestBuildPayload(unittest.TestCase):
 
     def test_minimal(self) -> None:
         cfg = LLMConfig(api_key="sk-test", model="gpt-4o-mini")
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["model"], "gpt-4o-mini")
         self.assertEqual(len(payload["messages"]), 1)
         self.assertNotIn("stream", payload)
 
     def test_with_temperature(self) -> None:
         cfg = LLMConfig(api_key="sk-test", temperature=0.5)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["temperature"], 0.5)
 
     def test_temperature_none_excluded(self) -> None:
         cfg = LLMConfig(api_key="sk-test", temperature=None)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertNotIn("temperature", payload)
 
     def test_with_top_p(self) -> None:
         cfg = LLMConfig(api_key="sk-test", top_p=0.9)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["top_p"], 0.9)
 
     def test_top_p_default_excluded(self) -> None:
         cfg = LLMConfig(api_key="sk-test", top_p=1.0)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertNotIn("top_p", payload)
 
     def test_max_tokens_none_excluded(self) -> None:
         cfg = LLMConfig(api_key="sk-test", max_tokens=None)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertNotIn("max_tokens", payload)
 
     def test_max_tokens_set(self) -> None:
         cfg = LLMConfig(api_key="sk-test", max_tokens=4096)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["max_tokens"], 4096)
 
     def test_overrides_model(self) -> None:
         cfg = LLMConfig(api_key="sk-test", model="gpt-4o-mini")
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {"model": "gpt-4o"})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {"model": "gpt-4o"}, _FAKE_ADAPTER)
         self.assertEqual(payload["model"], "gpt-4o")
 
     def test_overrides_temperature(self) -> None:
         cfg = LLMConfig(api_key="sk-test", temperature=0.7)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {"temperature": 0.1})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {"temperature": 0.1}, _FAKE_ADAPTER)
         self.assertEqual(payload["temperature"], 0.1)
 
     def test_with_tools(self) -> None:
         cfg = LLMConfig(api_key="sk-test")
         tools = [{"type": "function", "function": {"name": "read_file"}}]
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], tools, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], tools, None, {}, _FAKE_ADAPTER)
         self.assertIn("tools", payload)
         self.assertEqual(payload["tool_choice"], "auto")
         self.assertTrue(payload["parallel_tool_calls"])
@@ -254,32 +261,32 @@ class TestBuildPayload(unittest.TestCase):
     def test_with_tool_choice(self) -> None:
         cfg = LLMConfig(api_key="sk-test")
         tools = [{"type": "function", "function": {"name": "read_file"}}]
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], tools, "required", {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], tools, "required", {}, _FAKE_ADAPTER)
         self.assertEqual(payload["tool_choice"], "required")
 
     def test_frequency_penalty(self) -> None:
         cfg = LLMConfig(api_key="sk-test", frequency_penalty=0.5)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["frequency_penalty"], 0.5)
 
     def test_presence_penalty(self) -> None:
         cfg = LLMConfig(api_key="sk-test", presence_penalty=0.5)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["presence_penalty"], 0.5)
 
     def test_stop(self) -> None:
         cfg = LLMConfig(api_key="sk-test", stop=("END", "STOP"))
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["stop"], ["END", "STOP"])
 
     def test_seed(self) -> None:
         cfg = LLMConfig(api_key="sk-test", seed=42)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["seed"], 42)
 
     def test_seed_none_excluded(self) -> None:
         cfg = LLMConfig(api_key="sk-test", seed=None)
-        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {})
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertNotIn("seed", payload)
 
 class TestExtractErrorCode(unittest.TestCase):

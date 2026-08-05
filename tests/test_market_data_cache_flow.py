@@ -39,7 +39,8 @@ class _FakeLoader:
     def is_available(self):
         return True
 
-    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None,
+              force_refresh=False):
         out = {}
         for c in codes:
             dates = pd.date_range(start_date, periods=10, freq="D")

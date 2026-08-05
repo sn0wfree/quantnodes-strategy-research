@@ -186,13 +186,13 @@ class TestRetryAgentSpawn(unittest.TestCase):
         def spawn():
             return "invalid"
         result = retry_agent_spawn(spawn, "researcher", max_retries=2, retry_delay=0)
-        self.assertEqual(result["error"], "max_retries_exceeded")
+        self.assertEqual(result["error"], "parse_failed")
 
     def test_exception_handled(self) -> None:
         def spawn():
             raise RuntimeError("boom")
         result = retry_agent_spawn(spawn, "researcher", max_retries=2, retry_delay=0)
-        self.assertEqual(result["error"], "max_retries_exceeded")
+        self.assertEqual(result["error"], "execution_failed")
 
 
 class TestGetCooldownSeconds(unittest.TestCase):

@@ -94,7 +94,7 @@ def compute_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str,
     Returns:
         dict: {factor_name: DataFrame} 每个因子的值 (index=date, columns=assets)
 
-    Note: factor_failures 属性包含计算失败的因子信息 (设置在返回的 dict 上)
+    Note: factor_failures key 包含计算失败的因子信息 (设置在返回的 dict 上)
     """
     if not factor_exprs:
         return {}
@@ -150,7 +150,7 @@ def compute_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str,
             })
             print(f"⚠️  因子 {name} ({code}) 计算失败: {e}")
 
-    factors.factor_failures = factor_failures
+    factors["factor_failures"] = factor_failures
     if factor_failures:
         import json as _json
         try:
@@ -233,6 +233,11 @@ def evaluate(params: dict, factor_exprs: list[dict],
     factors = compute_factors(prices, factor_exprs)
     if not factors:
         return _empty_metrics()
+
+    # factor_failures 是元数据 key，不进因子面板迭代
+    factor_failures = factors.pop("factor_failures", None)
+    if factor_failures:
+        _persist_factor_failures(Path(__file__).parent, factor_failures)
 
     # 计算综合分数
     scores = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
