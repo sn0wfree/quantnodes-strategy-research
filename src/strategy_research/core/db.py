@@ -316,9 +316,14 @@ def load_price_data(
         if df.empty:
             return pd.DataFrame()
 
-        # pivot to panel
-        panel = df.pivot(index="date", columns="asset_code", values="close")
-        panel.index = pd.to_datetime(panel.index)
+        from .tools.data_transforms import long_to_wide_close
+
+        # pivot to panel.  DuckDB schema uses ``asset_code`` as the asset
+        # column name (vs. our helper's default ``asset``), so we pass it
+        # explicitly.
+        panel = long_to_wide_close(
+            df, asset_col="asset_code", value_col="close"
+        )
         return panel
 
     except Exception as e:
@@ -390,50 +395,10 @@ def load_ohlcv_data(
         return {}
 
 
-def save_price_data(
-    workspace_path: Path,
-    strategy_name: str,
-    prices: pd.DataFrame,
-) -> bool:
-    """保存价格数据到 DuckDB。
-
-    Args:
-        prices: (T, N) 价格面板, index=date, columns=assets
-    """
-    conn = get_connection(workspace_path)
-    if conn is None:
-        return False
-
-    try:
-        # melt to long format
-        df = prices.reset_index()
-        # 确保日期列名为 'date'
-        date_col = df.columns[0]  # 第一列是 index
-        if date_col != "date":
-            df = df.rename(columns={date_col: "date"})
-
-        df = df.melt(
-            id_vars="date", var_name="asset_code", value_name="close"
-        )
-        df["strategy_name"] = strategy_name
-        df["open"] = df["close"]  # 简化: open = close
-        df["high"] = df["close"]
-        df["low"] = df["close"]
-        df["volume"] = 0.0
-
-        conn.execute("""
-            INSERT OR REPLACE INTO price_data
-            (strategy_name, asset_code, date, open, high, low, close, volume)
-            SELECT strategy_name, asset_code, date, open, high, low, close, volume
-            FROM df
-        """)
-
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"❌ 保存价格数据失败: {e}")
-        conn.close()
-        return False
+# save_price_data removed 2026-08-05: it accepted a wide close-only panel and
+# synthesised fake open/high/low/volume (= close, 0) to fit the schema.
+# Any code that relied on real OHLCV was misled.
+# Use save_ohlcv_to_db() or save_ohlcv_data() instead — both require real OHLCV.
 
 
 def get_price_data_info(workspace_path: Path, strategy_name: str) -> dict:
@@ -479,8 +444,8 @@ def save_ohlcv_data(
 ) -> bool:
     """保存单资产 OHLCV 数据到 DuckDB。
 
-    与 save_price_data 的区别：save_price_data 接受宽面板 (T, N) 仅含 close 列；
     save_ohlcv_data 接受单资产的 OHLCV DataFrame (T, OHLCV)，完整保留 open/high/low/volume。
+    For multi-asset bulk write, use save_ohlcv_to_db() which takes a {asset: ohlcv} dict.
 
     Args:
         workspace_path: 工作区路径

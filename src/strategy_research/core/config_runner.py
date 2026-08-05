@@ -206,7 +206,7 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
 # 4. 策略创建
 # ============================================================
 
-def create_strategy(cfg: dict):
+def create_strategy(cfg: dict, workspace_path=None):
     """从 YAML 配置创建策略实例."""
     factors = cfg.get("factors", [])
     params = cfg.get("strategy_params", {})
@@ -216,7 +216,12 @@ def create_strategy(cfg: dict):
         if key in cfg and key not in params:
             params[key] = cfg[key]
 
-    return FactorStrategy(factors, params)
+    strategy_name = params.get("name") or cfg.get("strategy", {}).get("name", "default")
+    return FactorStrategy(
+        factors, params,
+        workspace_path=workspace_path,
+        strategy_name=strategy_name,
+    )
 
 
 class FactorStrategy:
@@ -226,11 +231,65 @@ class FactorStrategy:
     1. **code**: 表达式因子（如 `ts_return(close, 20)`）
     2. **alpha_id**: 单个 Alpha Zoo 因子（如 `gtja191_001`）
     3. **alpha_ids**: 多个 Alpha Zoo 因子组合 + combination 方法
+
+    Expression factors need per-asset wide (T, 5) OHLCV panels to satisfy
+    the factor DSL.  When ``workspace_path`` and ``strategy_name`` are
+    set, ``compute_weights`` loads long-format OHLCV from DuckDB, splits
+    it per asset, runs the DSL on each, and stitches the result back
+    into a wide (T, N) factor panel.
     """
 
-    def __init__(self, factors: list[dict], params: dict):
+    def __init__(
+        self,
+        factors: list[dict],
+        params: dict,
+        workspace_path: str | Path | None = None,
+        strategy_name: str | None = None,
+    ):
         self.factors = factors
         self.params = params
+        self.workspace_path = (
+            Path(workspace_path) if workspace_path is not None else None
+        )
+        self.strategy_name = strategy_name
+
+    def _load_long_ohlcv(
+        self, up_to_date: pd.Timestamp
+    ) -> pd.DataFrame:
+        """Load long-format OHLCV from DuckDB up to and including ``up_to_date``.
+
+        Raises:
+            RuntimeError: when ``workspace_path`` / ``strategy_name`` is
+                not set, or DuckDB is missing / unreadable.
+        """
+        if self.workspace_path is None or self.strategy_name is None:
+            raise RuntimeError(
+                "FactorStrategy needs workspace_path and strategy_name to load OHLCV. "
+                "Pass them to create_strategy(cfg, workspace_path=...)."
+            )
+        from .db import get_connection
+
+        conn = get_connection(self.workspace_path, read_only=True)
+        if conn is None:
+            raise RuntimeError(
+                f"Cannot open DuckDB at {self.workspace_path}; cannot load OHLCV"
+            )
+        try:
+            df = conn.execute(
+                """
+                SELECT date, asset_code, open, high, low, close, volume
+                FROM price_data
+                WHERE strategy_name = ? AND date <= ?
+                ORDER BY date, asset_code
+                """,
+                [self.strategy_name, pd.Timestamp(up_to_date).date()],
+            ).fetchdf()
+        finally:
+            conn.close()
+        return df
+
+    def _has_expression_factors(self) -> bool:
+        return any(f.get("code") for f in self.factors)
 
     def compute_weights(
         self,
@@ -240,11 +299,40 @@ class FactorStrategy:
     ) -> dict[str, float]:
         """计算权重."""
         from .alpha_zoo_adapter import AlphaZooAdapter
-        from .compute_factor import compute_factor
+        from .compute_factor import compute_factor, FactorComputeError
+        from .tools.data_transforms import (
+            is_wide_close_format,
+            long_to_wide_ohlcv_per_asset,
+        )
 
         # 1. 计算因子值
         factor_values = {}
         alpha_zoo = None  # lazy init
+
+        # Expression factors need real per-asset OHLCV.  Load once from
+        # DuckDB, split per asset, then run the DSL on each panel.
+        ohlcv_panels: dict[str, pd.DataFrame] | None = None
+        if self._has_expression_factors() and self.workspace_path is not None:
+            long_ohlcv = self._load_long_ohlcv(date)
+            if long_ohlcv.empty:
+                # fail-fast: expression factors with no data is a bug
+                # (caller passed price_panel that we cannot match against)
+                if is_wide_close_format(price_panel):
+                    raise RuntimeError(
+                        "FactorStrategy.compute_weights received multi-asset "
+                        "wide(T, N) close-only panel AND DuckDB has no OHLCV. "
+                        "Either provide long-format OHLCV in DuckDB "
+                        f"({self.workspace_path}/{self.strategy_name}) "
+                        "or use alpha_id / alpha_ids factors instead of "
+                        "expression 'code' factors."
+                    )
+                # No DB data, no helpful panel: cannot evaluate expressions.
+                raise RuntimeError(
+                    f"No OHLCV data in DuckDB for strategy "
+                    f"{self.strategy_name!r} up to {date}; cannot evaluate "
+                    "expression factors."
+                )
+            ohlcv_panels = long_to_wide_ohlcv_per_asset(long_ohlcv)
 
         for factor in self.factors:
             name = factor.get("name", "unknown")
@@ -252,10 +340,31 @@ class FactorStrategy:
             # 方式 1: 表达式因子
             code = factor.get("code", "")
             if code:
-                try:
-                    factor_values[name] = compute_factor(code, price_panel.loc[:date])
-                except Exception as e:
-                    print(f"⚠️  因子 {name} 计算失败: {e}")
+                if ohlcv_panels is None:
+                    print(
+                        f"⚠️  因子 {name} 跳过: expression factor requires "
+                        "workspace_path and strategy_name; provide them via "
+                        "create_strategy(cfg, workspace_path=...)"
+                    )
+                    continue
+                # wide(T, N) per-asset factor result, indexed by date
+                wide = pd.DataFrame(
+                    index=price_panel.index,
+                    columns=price_panel.columns,
+                    dtype=float,
+                )
+                for asset in price_panel.columns:
+                    asset_df = ohlcv_panels.get(asset)
+                    if asset_df is None:
+                        continue
+                    try:
+                        s = compute_factor(code, asset_df.loc[:date])
+                        wide[asset] = s.reindex(price_panel.index)
+                    except FactorComputeError as e:
+                        print(f"⚠️  因子 {name} 在 {asset} 失败: {e}")
+                    except Exception as e:
+                        print(f"⚠️  因子 {name} 在 {asset} 异常: {e}")
+                factor_values[name] = wide
                 continue
 
             # 方式 2: 单个 Alpha Zoo 因子
@@ -362,7 +471,7 @@ def run_from_yaml(yaml_path: str | Path, workspace_path: Path) -> BacktestResult
         BacktestResult (nav_daily, weights_history, metrics)
     """
     cfg = load_yaml_config(yaml_path)
-    strategy = create_strategy(cfg)
+    strategy = create_strategy(cfg, workspace_path=workspace_path)
     engine = create_engine(cfg)
     data = load_data(cfg, workspace_path)
 

@@ -11,7 +11,9 @@ same files the old ``cmd_init`` produced:
 * ``config.yaml``
 * ``strategies/<name>/strategy.py`` + ``prepare.py``
 * ``strategies/<name>/runs/``
-* DuckDB seeded via ``init_db`` + ``import_dataframe``
+* DuckDB seeded via ``init_db`` + ``save_ohlcv_to_db``
+  (formerly ``import_dataframe``, removed 2026-08-05 along with
+  ``save_price_data`` to eliminate close-only → fake-OHLCV pollution).
 """
 from __future__ import annotations
 
@@ -32,11 +34,8 @@ def _build_workspace(workspace_path: Path, strategy_name: str = "eval_strat") ->
     Mirror of ``tests/test_autoresearch.py::_build_workspace`` so the
     cmd_evaluate integration test suite has a deterministic fixture.
     """
-    from strategy_research.core.db import init_db
-    from strategy_research.core.data_import import (
-        generate_sample_data,
-        import_dataframe,
-    )
+    from strategy_research.core.db import init_db, save_ohlcv_to_db
+    from strategy_research.core.data_import import generate_sample_ohlcv_data
 
     workspace_path.mkdir(exist_ok=True)
 
@@ -77,8 +76,10 @@ def _build_workspace(workspace_path: Path, strategy_name: str = "eval_strat") ->
         dst.write_text(text, encoding="utf-8")
 
     init_db(workspace_path)
-    prices = generate_sample_data(n_assets=10, n_days=504, start_date="2022-01-01")
-    import_dataframe(workspace_path, strategy_name, prices)
+    ohlcv_map = generate_sample_ohlcv_data(
+        n_assets=10, n_days=504, start_date="2022-01-01"
+    )
+    save_ohlcv_to_db(workspace_path, ohlcv_map, strategy_name)
 
     return workspace_path
 

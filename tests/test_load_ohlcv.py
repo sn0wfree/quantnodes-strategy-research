@@ -13,7 +13,6 @@ from strategy_research.core.db import (
     load_ohlcv_data,
     load_price_data,
     save_ohlcv_data,
-    save_price_data,
 )
 
 
@@ -166,26 +165,18 @@ class TestOhlcvVsPriceData:
             panel_close = panel[code]
             pd.testing.assert_series_equal(ohlcv_close, panel_close, check_names=False)
 
-    def test_ohlcv_preserves_open_high_low(self, tmp_path):
-        """save_price_data 会丢失 OHLV；save_ohlcv_data 保留。"""
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        init_db(ws)
+    def test_save_price_data_was_removed(self, tmp_path):
+        """save_price_data removed 2026-08-05 — must no longer be importable.
 
-        # save_price_data 只有 close
-        close_panel = pd.DataFrame(
-            {"A": [100.0, 101.0, 102.0]},
-            index=pd.bdate_range("2024-01-02", periods=3),
-        )
-        save_price_data(ws, "s1", close_panel)
+        Replaces the old test_ohlcv_preserves_open_high_low which exercised
+        save_price_data's fake-OHLCV path.  That path was a source of
+        downstream pollution and has been deleted; callers should use
+        save_ohlcv_data / save_ohlcv_to_db which preserve real OHLCV.
+        """
+        import pytest as _pytest
 
-        # load_ohlcv_data 应该有 open=close, high=close, low=close, volume=0
-        ohlcv = load_ohlcv_data(ws, "s1")
-        df = ohlcv["A"]
-        assert (df["open"] == df["close"]).all()
-        assert (df["high"] == df["close"]).all()
-        assert (df["low"] == df["close"]).all()
-        assert (df["volume"] == 0.0).all()
+        with _pytest.raises(ImportError):
+            from strategy_research.core.db import save_price_data  # noqa: F401
 
 
 # ============================================================
@@ -226,3 +217,99 @@ class TestLoadOhlcvIsolation:
 
         assert r1["A"]["close"].iloc[0] == pytest.approx(100.5)
         assert r2["A"]["close"].iloc[0] == pytest.approx(200.5)
+
+
+# ============================================================
+# import_csv_ohlcv — long format OHLCV CSV import
+# ============================================================
+
+
+class TestImportCsvOhlcv:
+    def _write_csv(self, tmp_path: Path, name: str, df: pd.DataFrame) -> Path:
+        p = tmp_path / name
+        df.to_csv(p, index=False)
+        return p
+
+    def _setup_ws(self, tmp_path: Path, strategy: str = "s1") -> Path:
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        init_db(ws)
+        return ws
+
+    def test_happy_path_with_volume(self, tmp_path):
+        from strategy_research.core.data_import import import_csv_ohlcv
+
+        ws = self._setup_ws(tmp_path)
+        dates = pd.bdate_range("2024-01-02", periods=5)
+        long = pd.DataFrame(
+            {
+                "date": list(dates) * 2,
+                "asset": ["A"] * 5 + ["B"] * 5,
+                "open": [100.0] * 5 + [200.0] * 5,
+                "high": [101.0] * 5 + [201.0] * 5,
+                "low": [99.0] * 5 + [199.0] * 5,
+                "close": [100.5] * 5 + [200.5] * 5,
+                "volume": [1000.0] * 5 + [2000.0] * 5,
+            }
+        )
+        csv = self._write_csv(tmp_path, "ohlcv.csv", long)
+
+        success = import_csv_ohlcv(ws, "s1", csv)
+        assert success is True
+
+        ohlcv = load_ohlcv_data(ws, "s1")
+        assert set(ohlcv.keys()) == {"A", "B"}
+        assert ohlcv["A"]["close"].iloc[0] == 100.5
+        assert ohlcv["B"]["open"].iloc[0] == 200.0
+        assert ohlcv["A"]["volume"].iloc[0] == 1000.0
+
+    def test_missing_close_column_raises(self, tmp_path):
+        from strategy_research.core.data_import import import_csv_ohlcv
+
+        ws = self._setup_ws(tmp_path)
+        long = pd.DataFrame(
+            {
+                "date": pd.bdate_range("2024-01-02", periods=3),
+                "asset": ["A"] * 3,
+                "open": [100.0] * 3,
+                "high": [101.0] * 3,
+                "low": [99.0] * 3,
+                # close MISSING
+            }
+        )
+        csv = self._write_csv(tmp_path, "bad.csv", long)
+
+        with pytest.raises(ValueError, match="missing required columns"):
+            import_csv_ohlcv(ws, "s1", csv)
+
+    def test_missing_file_raises(self, tmp_path):
+        from strategy_research.core.data_import import import_csv_ohlcv
+
+        ws = self._setup_ws(tmp_path)
+        with pytest.raises(FileNotFoundError, match="不存在"):
+            import_csv_ohlcv(ws, "s1", tmp_path / "nope.csv")
+
+    def test_no_volume_column_works(self, tmp_path):
+        from strategy_research.core.data_import import import_csv_ohlcv
+
+        ws = self._setup_ws(tmp_path)
+        dates = pd.bdate_range("2024-01-02", periods=3)
+        long = pd.DataFrame(
+            {
+                "date": list(dates),
+                "asset": ["A"] * 3,
+                "open": [100.0] * 3,
+                "high": [101.0] * 3,
+                "low": [99.0] * 3,
+                "close": [100.5] * 3,
+                # volume optional
+            }
+        )
+        csv = self._write_csv(tmp_path, "no_vol.csv", long)
+        assert import_csv_ohlcv(ws, "s1", csv) is True
+        # volume is part of DuckDB price_data schema (NOT NULL with default
+        # 0), so load_ohlcv_data always returns it.  The default is 0.0
+        # when input CSV omitted the column.
+        ohlcv = load_ohlcv_data(ws, "s1")
+        assert "volume" in ohlcv["A"].columns
+        assert (ohlcv["A"]["volume"] == 0.0).all()

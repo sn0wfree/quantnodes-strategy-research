@@ -526,12 +526,11 @@ def cmd_import(args: argparse.Namespace) -> int:
     from strategy_research.core.data_import import (
         generate_sample_data,
         import_akshare,
-        import_csv,
-        import_dataframe,
+        import_csv_ohlcv,
         import_fred,
         import_from_source,
         import_ifind,
-        import_parquet,
+        import_parquet_ohlcv,
         import_tushare,
     )
     from strategy_research.core.db import init_db
@@ -544,28 +543,43 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     # 本地文件源
     if source == "sample":
-        prices = generate_sample_data(
-            n_assets=args.n_assets,
-            n_days=args.n_days,
+        # generate_sample_data still returns close-only panel; full OHLCV
+        # path is TBD (see TODO(toolsets)).  Tell user to use the API
+        # sources (tushare/akshare/...) or the online fetch in run_backtest.
+        print(
+            "❌ 'sample' source temporarily unavailable: generate_sample_data "
+            "returns close-only data. Use tushare/akshare source or run "
+            "run_backtest (auto fetches OHLCV)."
         )
-        success = import_dataframe(path, strategy_name, prices)
+        return 1
 
     elif source == "csv":
         if not args.file:
             print("❌ 请指定 --file 参数")
             return 1
-        success = import_csv(
-            path, strategy_name, args.file,
-            date_column=args.date_column,
-            price_column=args.price_column,
-            asset_column=args.asset_column,
-        )
+        try:
+            success = import_csv_ohlcv(
+                path, strategy_name, args.file,
+                date_column=args.date_column,
+                asset_column=args.asset_column,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ CSV 导入失败: {e}")
+            return 1
 
     elif source == "parquet":
         if not args.file:
             print("❌ 请指定 --file 参数")
             return 1
-        success = import_parquet(path, strategy_name, args.file)
+        try:
+            success = import_parquet_ohlcv(
+                path, strategy_name, args.file,
+                date_column=args.date_column,
+                asset_column=args.asset_column,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ Parquet 导入失败: {e}")
+            return 1
 
     # API 数据源
     elif source == "tushare":

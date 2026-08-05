@@ -1,6 +1,6 @@
 {
   "_comment": "Bundled fallback for unknown providers/models. See docs/model-catalog-design.md.",
-  "context_tokens": 8192,
+  "context_tokens": 200000,
   "max_output_tokens": 4096,
   "supports_vision": false,
   "supports_audio": false,

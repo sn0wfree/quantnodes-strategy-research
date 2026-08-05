@@ -279,7 +279,11 @@ class TestImportWithLoaderUsesOHLCV:
 
 
 class TestGenerateSampleDataLegacy:
-    """老的 generate_sample_data 仍返回宽 close 面板（用于 import_dataframe）。"""
+    """generate_sample_data 仍返回宽 close 面板。
+
+    2026-08-05: 此函数保留 (用于 CLI 旧 sample 路径), 但已无 in-tree 调用方
+    (import_dataframe 已删除). 未来要彻底清理 — TODO(toolsets).
+    """
 
     def test_returns_wide_close_panel(self):
         from strategy_research.core.data_import import generate_sample_data

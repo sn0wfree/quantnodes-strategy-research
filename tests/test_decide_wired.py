@@ -34,11 +34,8 @@ def _build_workspace(tmp_path: Path) -> Path:
     ``decide()`` receives ``{}`` (rather than the real-metrics this test
     asserts on).
     """
-    from strategy_research.core.db import init_db
-    from strategy_research.core.data_import import (
-        generate_sample_data,
-        import_dataframe,
-    )
+    from strategy_research.core.db import init_db, save_ohlcv_to_db
+    from strategy_research.core.data_import import generate_sample_ohlcv_data
 
     workspace = tmp_path / "ws"
     workspace.mkdir(exist_ok=True)
@@ -80,8 +77,10 @@ def _build_workspace(tmp_path: Path) -> Path:
         dst.write_text(text, encoding="utf-8")
 
     init_db(workspace)
-    prices = generate_sample_data(n_assets=10, n_days=504, start_date="2022-01-01")
-    import_dataframe(workspace, "momentum_baseline", prices)
+    ohlcv_map = generate_sample_ohlcv_data(
+        n_assets=10, n_days=504, start_date="2022-01-01"
+    )
+    save_ohlcv_to_db(workspace, ohlcv_map, "momentum_baseline")
 
     return workspace
 

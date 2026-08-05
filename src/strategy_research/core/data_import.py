@@ -1,12 +1,18 @@
 """数据导入工具。
 
 支持从多种数据源导入价格数据到 DuckDB:
-- CSV/Parquet (本地文件)
+- CSV/Parquet (本地文件, long format with OHLCV columns)
 - Tushare (A 股/ETF/指数/港股)
 - iFinD (宏观/港美股)
 - FRED (美国宏观 56 系列)
 - AKShare (免费全市场)
 - 示例数据 (合成)
+
+历史说明 (2026-08-05):
+  save_price_data / import_csv / import_parquet / import_dataframe 已删除。
+  原实现接受 close-only 面板，合成假 open/high/low/volume 写入 DuckDB，
+  污染下游依赖真实 OHLCV 的代码。新实现 (import_csv_ohlcv / import_parquet_ohlcv)
+  要求长格式必须含完整 OHLCV 列。
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ from .db import (
     get_last_import_date,
     get_price_data_info,
     save_ohlcv_data,
-    save_price_data,
+    save_ohlcv_to_db,
     update_data_fingerprint,
     update_import_meta,
 )
@@ -275,120 +281,145 @@ def import_akshare(
 
 
 # ============================================================
-# 本地文件导入 (保持兼容)
+# 本地文件导入 (OHLCV 长格式)
 # ============================================================
+#
+# 历史: import_csv / import_parquet / import_dataframe 接受 close-only 面板,
+# 通过 save_price_data 合成假 OHLCV 写入。2026-08-05 删除。
+# 替换为 import_csv_ohlcv / import_parquet_ohlcv, 要求长格式必须含
+# 完整 OHLCV 列 (open, high, low, close, [volume])。
 
-def import_csv(
+_REQUIRED_OHLCV = ("open", "high", "low", "close")
+_OPTIONAL_OHLCV = ("volume",)
+
+
+def _validate_long_ohlcv(df: pd.DataFrame, date_col: str, asset_col: str) -> None:
+    """Validate that ``df`` is long format with required OHLCV columns.
+
+    Raises:
+        ValueError: missing required columns.
+    """
+    missing = [c for c in (date_col, asset_col, *_REQUIRED_OHLCV) if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"missing required columns: {missing}. "
+            f"Expected long format with [{date_col}, {asset_col}, open, high, low, close, "
+            f"(volume)]; got {list(df.columns)}"
+        )
+
+
+def _long_to_ohlcv_map(
+    df: pd.DataFrame, date_col: str, asset_col: str
+) -> dict[str, pd.DataFrame]:
+    """Convert validated long OHLCV DataFrame to ``{asset: wide(ohlcv)}`` dict.
+
+    The per-asset DataFrame is sorted by ``date_col`` and indexed by it,
+    with the available subset of ``[open, high, low, close, volume]`` columns.
+    """
+    has_volume = "volume" in df.columns
+    ohlcv_cols = list(_REQUIRED_OHLCV) + (["volume"] if has_volume else [])
+
+    data_map: dict[str, pd.DataFrame] = {}
+    for asset, sub in df.groupby(asset_col, sort=False):
+        sub = sub.drop_duplicates(subset=[date_col], keep="last")
+        sub = sub.set_index(date_col)[ohlcv_cols].sort_index()
+        sub.index = pd.to_datetime(sub.index)
+        if has_volume:
+            sub["volume"] = sub["volume"].astype(float)
+        data_map[str(asset)] = sub
+    return data_map
+
+
+def import_csv_ohlcv(
     workspace_path: Path,
     strategy_name: str,
-    csv_path: str,
+    csv_path: str | Path,
     date_column: str = "date",
-    price_column: str = "close",
-    asset_column: str | None = None,
+    asset_column: str = "asset",
 ) -> bool:
-    """从 CSV 导入价格数据。"""
+    """从长格式 CSV 导入完整 OHLCV 数据。
+
+    CSV 必须为长格式, 列: ``date, asset, open, high, low, close, [volume]``。
+    缺任一必需列会抛 ``ValueError``; 不会合成假数据。
+
+    Args:
+        workspace_path: 工作区根路径
+        strategy_name: 策略名称 (写入 price_data.strategy_name)
+        csv_path: CSV 文件路径
+        date_column: 日期列名 (默认 ``date``)
+        asset_column: 资产代码列名 (默认 ``asset``)
+
+    Returns:
+        True on success.
+
+    Raises:
+        FileNotFoundError: csv_path 不存在
+        ValueError: 缺必需 OHLCV 列
+    """
     csv_path = Path(csv_path)
     if not csv_path.exists():
-        print(f"❌ CSV 文件不存在: {csv_path}")
-        return False
+        raise FileNotFoundError(f"CSV 文件不存在: {csv_path}")
 
-    try:
-        df = pd.read_csv(csv_path, parse_dates=[date_column])
+    df = pd.read_csv(csv_path, parse_dates=[date_column])
+    _validate_long_ohlcv(df, date_col=date_column, asset_col=asset_column)
+    data_map = _long_to_ohlcv_map(df, date_col=date_column, asset_col=asset_column)
 
-        if asset_column:
-            prices = df.pivot(index=date_column, columns=asset_column, values=price_column)
-        else:
-            prices = df.set_index(date_column)
+    n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
 
-        success = save_price_data(workspace_path, strategy_name, prices)
-
-        if success:
-            fingerprint = compute_data_fingerprint(prices)
-            update_data_fingerprint(
-                workspace_path, strategy_name, "price_data",
-                fingerprint, len(prices)
-            )
-            info = get_price_data_info(workspace_path, strategy_name)
-            print(f"✓ 导入 CSV: {info.get('n_assets', 0)} 个资产, "
-                  f"{info.get('n_dates', 0)} 个日期")
-
-        return success
-
-    except Exception as e:
-        print(f"❌ 导入 CSV 失败: {e}")
-        return False
+    fingerprint = compute_data_fingerprint(df)
+    update_data_fingerprint(
+        workspace_path, strategy_name, "price_data",
+        fingerprint, len(df),
+    )
+    info = get_price_data_info(workspace_path, strategy_name)
+    print(
+        f"✓ 导入 CSV (OHLCV): {info.get('n_assets', 0)} 个资产, "
+        f"{info.get('n_dates', 0)} 个日期, {n_rows} 行"
+    )
+    return True
 
 
-def import_parquet(
+def import_parquet_ohlcv(
     workspace_path: Path,
     strategy_name: str,
-    parquet_path: str,
+    parquet_path: str | Path,
+    date_column: str = "date",
+    asset_column: str = "asset",
 ) -> bool:
-    """从 Parquet 导入价格数据。"""
+    """从长格式 Parquet 导入完整 OHLCV 数据。
+
+    与 ``import_csv_ohlcv`` 同样要求长格式 OHLCV 列。Parquet 文件中日期
+    列存储为 ``datetime64[ns]`` (推荐) 或 ISO 字符串。
+
+    Raises:
+        FileNotFoundError: parquet_path 不存在
+        ValueError: 缺必需 OHLCV 列
+    """
     parquet_path = Path(parquet_path)
     if not parquet_path.exists():
-        print(f"❌ Parquet 文件不存在: {parquet_path}")
-        return False
+        raise FileNotFoundError(f"Parquet 文件不存在: {parquet_path}")
 
-    try:
-        df = pd.read_parquet(parquet_path)
+    df = pd.read_parquet(parquet_path)
+    if date_column in df.columns and not pd.api.types.is_datetime64_any_dtype(
+        df[date_column]
+    ):
+        df[date_column] = pd.to_datetime(df[date_column])
+    _validate_long_ohlcv(df, date_col=date_column, asset_col=asset_column)
+    data_map = _long_to_ohlcv_map(df, date_col=date_column, asset_col=asset_column)
 
-        if isinstance(df.index, pd.MultiIndex):
-            if "close" in df.columns:
-                prices = df["close"].unstack()
-            else:
-                num_cols = df.select_dtypes(include=["number"]).columns
-                if len(num_cols) > 0:
-                    prices = df[num_cols[0]].unstack()
-                else:
-                    print("❌ 无法找到价格列")
-                    return False
-        else:
-            prices = df
+    n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
 
-        success = save_price_data(workspace_path, strategy_name, prices)
-
-        if success:
-            fingerprint = compute_data_fingerprint(prices)
-            update_data_fingerprint(
-                workspace_path, strategy_name, "price_data",
-                fingerprint, len(prices)
-            )
-            info = get_price_data_info(workspace_path, strategy_name)
-            print(f"✓ 导入 Parquet: {info.get('n_assets', 0)} 个资产, "
-                  f"{info.get('n_dates', 0)} 个日期")
-
-        return success
-
-    except Exception as e:
-        print(f"❌ 导入 Parquet 失败: {e}")
-        return False
-
-
-def import_dataframe(
-    workspace_path: Path,
-    strategy_name: str,
-    prices: pd.DataFrame,
-) -> bool:
-    """从 DataFrame 导入价格数据。"""
-    try:
-        success = save_price_data(workspace_path, strategy_name, prices)
-
-        if success:
-            fingerprint = compute_data_fingerprint(prices)
-            update_data_fingerprint(
-                workspace_path, strategy_name, "price_data",
-                fingerprint, len(prices)
-            )
-            info = get_price_data_info(workspace_path, strategy_name)
-            print(f"✓ 导入 DataFrame: {info.get('n_assets', 0)} 个资产, "
-                  f"{info.get('n_dates', 0)} 个日期")
-
-        return success
-
-    except Exception as e:
-        print(f"❌ 导入 DataFrame 失败: {e}")
-        return False
+    fingerprint = compute_data_fingerprint(df)
+    update_data_fingerprint(
+        workspace_path, strategy_name, "price_data",
+        fingerprint, len(df),
+    )
+    info = get_price_data_info(workspace_path, strategy_name)
+    print(
+        f"✓ 导入 Parquet (OHLCV): {info.get('n_assets', 0)} 个资产, "
+        f"{info.get('n_dates', 0)} 个日期, {n_rows} 行"
+    )
+    return True
 
 
 def generate_sample_data(
