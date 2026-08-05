@@ -528,7 +528,7 @@ class TestComputeFactorTool:
     def test_no_workspace_db(self, workspace: Path):
         tool = ComputeFactorTool()
         result = parse_result(tool.execute(
-            workspace=workspace, factor_code="ts_return(close, 1)",
+            ctx=ToolContext(workspace=workspace), factor_code="ts_return(close, 1)",
         ))
         assert result["status"] == "error"
 
@@ -547,7 +547,7 @@ class TestComputeFactorTool:
 
         tool = ComputeFactorTool()
         result = parse_result(tool.execute(
-            workspace=workspace, factor_code="ts_return(close, 1)",
+            ctx=ToolContext(workspace=workspace), factor_code="ts_return(close, 1)",
         ))
         assert result["status"] == "error"
         assert "empty" in result["error"].lower()
@@ -557,7 +557,7 @@ class TestComputeFactorTool:
         tool = ComputeFactorTool()
         # Use the project's custom DSL (ts_mean, ts_return, etc.)
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 1)",
             factor_name="ret1",
             n_samples=3,
@@ -569,9 +569,10 @@ class TestComputeFactorTool:
         assert len(result["sample"]) <= 3
 
     def test_missing_factor_code(self, workspace: Path):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = ComputeFactorTool()
-        result = parse_result(tool.execute(workspace=workspace))
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(workspace=workspace))
 
 
 # ── GitDiffTool ──────────────────────────────────────────────────────

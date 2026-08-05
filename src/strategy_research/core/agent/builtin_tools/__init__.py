@@ -554,39 +554,65 @@ class RunBacktestTool(BaseTool):
 
 
 class ComputeFactorTool(BaseTool):
-    """Compute a factor expression on workspace price data.
+    """在工作区价格数据上计算因子表达式（单资产，返回采样）。
 
-    The compute_factor DSL expects a single-asset wide-format DataFrame with
-    columns like 'close', 'open', 'high', 'low', 'volume'. The agent should
-    specify an `asset` to compute on. Defaults to the first available asset.
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext)
+    #
+    # ## 用途
+    # 在单资产宽表 (close/open/high/low/volume) 上计算因子表达式
+    # (如 'ts_mean(close, 20) / ts_mean(close, 60) - 1'), 返回结果采样。
+    #
+    # ## 参数
+    # - factor_code: 因子表达式 (必填)
+    # - asset: 资产代码 (默认第一个可用资产)
+    # - factor_name: 因子名 (可选, 用于展示)
+    # - n_samples: 采样数 (默认 5)
+    #
+    # ## 示例
+    # {"factor_code": "ts_return(close, 20)"}
+    #
+    # ## 边界
+    # 只读工具; 读取 workspace DuckDB 的 ohlcv 视图 (price_data);
+    # 数据为空会给 workflow 提示。
+    #
+    # ## 错误处理范式
+    # - 缺 factor_code → error + expected 示例
+    # - 无 DB/空表 → error + fix: get_market_data → compute_factor
+    # - asset 不存在 → error + expected 可用资产列表
+    # - 表达式错误 → error + available_columns 与示例表达式
+    # - 均可安全重试
+    #
+    # ## 相关工具
+    # get_market_data: 数据前置; factor_analysis/factor_quintile_returns 等: 后续分析
+    # ─────────────────────────────────────────────
     """
 
     name = "compute_factor"
     description = (
-        "Compute a factor expression (e.g. 'ts_mean(close, 20) / ts_mean(close, 60) - 1') "
-        "on a single asset's price data from the workspace's DuckDB. Returns a "
-        "sample of the resulting series."
+        "在单资产价格数据上计算因子表达式 (如 'ts_mean(close, 20) / ts_mean(close, 60) - 1'), "
+        "返回结果采样; 数据来自 workspace DuckDB。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "factor_code": {"type": "string", "description": "Factor expression."},
-            "asset": {"type": "string", "description": "Asset code to compute on (default: first asset)."},
-            "factor_name": {"type": "string", "description": "Optional factor name."},
-            "n_samples": {"type": "integer", "description": "How many sample values to return (default 5)."},
-        },
-        "required": ["workspace", "factor_code"],
-    }
     repeatable = True
+    category = "因子"
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="compute_factor")
+    def execute(
+        self,
+        ctx: ToolContext,
+        factor_code: str,
+        asset: str | None = None,
+        factor_name: str | None = None,
+        n_samples: int = 5,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="compute_factor",
+            )
+        workspace = ctx.workspace
 
-        factor_code = kwargs.get("factor_code")
         if not isinstance(factor_code, str) or not factor_code:
             return err_actionable(
                 "missing or invalid 'factor_code'",
@@ -595,12 +621,7 @@ class ComputeFactorTool(BaseTool):
                 fix="pass a valid expression; see templates/.skills/factor-research.md for operators",
                 tool="compute_factor",
             )
-        asset = kwargs.get("asset")
-        factor_name = kwargs.get("factor_name") or ""
-        try:
-            n_samples = safe_get_param(kwargs, "n_samples", int, default=5)
-        except TypeError:
-            n_samples = 5
+        factor_name = factor_name or ""
 
         # Load price data from workspace DuckDB
         try:
@@ -680,14 +701,6 @@ class ComputeFactorTool(BaseTool):
                 ),
                 tool="compute_factor",
             )
-        except Exception as exc:                    # noqa: BLE001
-            logger.exception("compute_factor failed")
-            return err_actionable(
-                f"compute failed: {exc}",
-                received=factor_code,
-                fix="check factor expression syntax; see templates/.skills/factor-research.md",
-                tool="compute_factor",
-            )
 
         # Sample the result
         non_null = series.dropna()
@@ -712,9 +725,6 @@ class ComputeFactorTool(BaseTool):
             "first_date": str(series.index.min()) if len(series) else None,
             "last_date": str(series.index.max()) if len(series) else None,
         })
-
-
-# ── 5. GitDiffTool ──────────────────────────────────────────────────
 
 
 class GitDiffTool(BaseTool):

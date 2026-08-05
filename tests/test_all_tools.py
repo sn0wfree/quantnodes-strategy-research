@@ -683,8 +683,9 @@ class TestToolDescriptions:
         r = build_default_registry()
         for name in r.tool_names:
             tool = r.get(name)
-            assert tool.parameters.get("type") == "object", f"{name} missing object parameters"
-            assert "properties" in tool.parameters, f"{name} missing properties"
+            schema = tool.to_openai_schema()["function"]["parameters"]
+            assert schema.get("type") == "object", f"{name} missing object parameters"
+            assert "properties" in schema, f"{name} missing properties"
 
     def test_core_tools_have_examples(self):
         """Core tools should have input/output examples in description."""
