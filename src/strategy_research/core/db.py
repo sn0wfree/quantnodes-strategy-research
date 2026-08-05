@@ -245,7 +245,7 @@ def save_ohlcv_to_db(
             cl = col.lower()
             if cl in ("trade_date", "tradedate", "datetime"):
                 col_map[col] = "date"
-            elif cl in ("code", "symbol", "ticker"):
+            elif cl in ("code", "symbol", "ticker", "asset"):
                 col_map[col] = "asset_code"
         if col_map:
             df = df.rename(columns=col_map)

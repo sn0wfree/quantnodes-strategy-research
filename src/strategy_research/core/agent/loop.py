@@ -55,6 +55,16 @@ from .trace import TraceWriter
 logger = logging.getLogger(__name__)
 
 
+# ── Tool-level auto-retry (transient errors only) ───────────────────
+# Shared by sync (_execute_tool_call) and async (_aexecute_tool_call).
+_TOOL_MAX_RETRIES = 2
+_TOOL_RETRY_DELAY = 2.0
+_TRANSIENT_TOOL_ERRORS = (
+    ValueError, TypeError, KeyError, ConnectionError, TimeoutError,
+    OSError, IOError,
+)
+
+
 # ── Cached GoalStore (goal-snapshot injection) ─────────────────────
 # Constructing a GoalStore per loop iteration leaked one SQLite
 # connection each (the store had no close() before F1-2); a single
@@ -1068,19 +1078,13 @@ class AgentLoop:
 
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors ──────────────
-        _TOOL_MAX_RETRIES = 2
-        _TOOL_RETRY_DELAY = 2.0
-        _TRANSIENT_ERRORS = (
-            ValueError, TypeError, KeyError, ConnectionError, TimeoutError,
-            OSError, IOError,
-        )
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
             try:
                 output = tool.execute(**kwargs)
                 last_exc = None
                 break
-            except _TRANSIENT_ERRORS as exc:
+            except _TRANSIENT_TOOL_ERRORS as exc:
                 last_exc = exc
                 logger.warning("tool %s raised %s (attempt %d/%d): %s",
                                tc.name, type(exc).__name__, _attempt + 1,
@@ -1273,12 +1277,33 @@ class AgentLoop:
             kwargs["session_id"] = self.session_id
 
         t0 = time.perf_counter()
-        try:
-            output = await asyncio.to_thread(tool.execute, **kwargs)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("tool %s raised", tc.name)
+        # ── Tool-level auto-retry for transient errors (sync parity) ─
+        last_exc = None
+        for _attempt in range(_TOOL_MAX_RETRIES):
+            try:
+                output = await asyncio.to_thread(tool.execute, **kwargs)
+                last_exc = None
+                break
+            except _TRANSIENT_TOOL_ERRORS as exc:
+                last_exc = exc
+                logger.warning("tool %s raised %s (attempt %d/%d): %s",
+                               tc.name, type(exc).__name__, _attempt + 1,
+                               _TOOL_MAX_RETRIES, exc)
+                if _attempt < _TOOL_MAX_RETRIES - 1:
+                    await asyncio.sleep(_TOOL_RETRY_DELAY)
+            except Exception as exc:                    # noqa: BLE001
+                logger.exception("tool %s raised", tc.name)
+                output = json.dumps(
+                    {"status": "error", "error": f"{type(exc).__name__}: {exc}"},
+                    ensure_ascii=False,
+                )
+                last_exc = None
+                break
+        else:
+            # All retries exhausted for transient errors
             output = json.dumps(
-                {"status": "error", "error": f"{type(exc).__name__}: {exc}"},
+                {"status": "error", "error": f"{type(last_exc).__name__}: {last_exc}",
+                 "hint": "tool failed after retries; check input parameters or data quality"},
                 ensure_ascii=False,
             )
         elapsed_ms = int((time.perf_counter() - t0) * 1000)

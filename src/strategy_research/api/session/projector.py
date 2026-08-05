@@ -580,7 +580,9 @@ class Projector:
         state = self.project(session_id)
         messages = state.to_messages()
         if limit and len(messages) > limit:
-            messages = messages[-limit:]  # most-recent N, chronological
+            # First N by seq, matching SessionStore.get_messages() /
+            # the DB read path (ORDER BY seq ASC LIMIT N).
+            messages = messages[:limit]
         return messages
 
     # ── Event handlers ──────────────────────────────────────────

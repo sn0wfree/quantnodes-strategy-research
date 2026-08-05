@@ -419,17 +419,19 @@ class RunBacktestTool(BaseTool):
                 "metrics": result.get("metrics", {}),
             }
             fix_msg = "check strategies/<name>/config.yaml and runs/<name>/logs for details"
-            if "数据为空" in err_msg or "empty" in err_msg.lower():
+            if (
+                "数据为空" in err_msg
+                or "empty" in err_msg.lower()
+                or "cannot open database" in err_msg.lower()
+            ):
                 fix_msg = (
-                    "data is empty. Workflow: 1) get_market_data(codes=[...], "
-                    "start_date='...', end_date='...') to fetch OHLCV (writes to "
-                    "parquet cache); 2) commit_market_data(cache_keys=[...], "
-                    "codes=[...], strategy_name=...) to merge into DuckDB; "
-                    "3) run_backtest(strategy_name=...) again"
+                    "data is empty. Workflow: 1) get_market_data("
+                    "codes=['600519.SH'], start_date='2023-01-01', "
+                    "end_date='2023-12-31', strategy_name='<name>') fetches "
+                    "and persists OHLCV to DuckDB in one step; 2) "
+                    "run_backtest(strategy_name='<name>') again"
                 )
-                extra["workflow"] = [
-                    "get_market_data", "commit_market_data", "run_backtest",
-                ]
+                extra["workflow"] = ["get_market_data", "run_backtest"]
             return err_actionable(
                 err_msg,
                 received=strategy_name,
@@ -531,9 +533,10 @@ class ComputeFactorTool(BaseTool):
             return err_actionable(
                 "ohlcv table is empty",
                 fix=(
-                    "1) get_market_data(codes=['600519.SH'], start_date='2023-01-01', end_date='2023-12-31'); "
-                    "2) commit_market_data(cache_keys=[...], codes=[...]); "
-                    "3) compute_factor(...)"
+                    "1) get_market_data(codes=['600519.SH'], "
+                    "start_date='2023-01-01', end_date='2023-12-31', "
+                    "strategy_name='default') fetches and persists OHLCV to "
+                    "DuckDB in one step; 2) compute_factor(factor_code=...) again"
                 ),
                 tool="compute_factor",
             )
@@ -2235,7 +2238,14 @@ class DataCleanTool(BaseTool):
 
             # 加载数据
             from ...db import get_connection
-            conn = get_connection(workspace, read_only=True)
+            if not (workspace / "data.duckdb").exists():
+                return err_actionable(
+                    "no DuckDB database in workspace",
+                    received={"strategy_name": strategy_name},
+                    fix="use get_market_data to fetch and persist data first",
+                    tool="clean_data",
+                )
+            conn = get_connection(workspace, read_only=dry_run)
             if conn is None:
                 return err_actionable(
                     "failed to open DuckDB",
@@ -2243,7 +2253,8 @@ class DataCleanTool(BaseTool):
                 )
 
             df = conn.execute(
-                "SELECT * FROM ohlcv WHERE strategy_name = ?",
+                "SELECT date, asset_code AS asset, open, high, low, close, volume "
+                "FROM price_data WHERE strategy_name = ?",
                 [strategy_name]
             ).fetch_df()
 
@@ -2262,9 +2273,9 @@ class DataCleanTool(BaseTool):
             # 如果不是 dry_run，保存结果
             if not dry_run:
                 from ...db import save_ohlcv_to_db
-                # 清空旧数据
+                # 清空旧数据 (ohlcv 是视图不可 DELETE，直接清 price_data)
                 conn.execute(
-                    "DELETE FROM ohlcv WHERE strategy_name = ?",
+                    "DELETE FROM price_data WHERE strategy_name = ?",
                     [strategy_name]
                 )
                 # 保存新数据

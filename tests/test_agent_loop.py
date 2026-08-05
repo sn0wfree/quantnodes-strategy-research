@@ -528,6 +528,45 @@ class TestReadonly:
         )
         assert loop.registry.get("write_file") is not None
 
+    @pytest.mark.parametrize("write_tool", [
+        "write_file",
+        "run_backtest",
+        "get_market_data",
+        "import_data",
+        "clean_data",
+        "create_goal",
+        "add_evidence",
+        "complete_goal",
+        "run_command",
+    ])
+    def test_readonly_filters_every_write_tool(self, workspace, write_tool):
+        """readonly=True 过滤全部 is_readonly=False 工具。"""
+        loop = AgentLoop(
+            stream_mode=False,
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            readonly=True,
+        )
+        assert loop.registry.get(write_tool) is None
+
+    def test_readonly_filters_by_is_readonly_metadata(self, workspace):
+        """元数据驱动：readonly 过滤 = 全部 is_readonly=False 工具被滤。"""
+        full = build_default_registry()
+        loop = AgentLoop(
+            stream_mode=False,
+            config=LLMConfig(api_key="sk-test"),
+            registry=full,
+            workspace=workspace,
+            readonly=True,
+        )
+        for name in full.tool_names:
+            is_readonly = getattr(full.get(name), "is_readonly", True)
+            if is_readonly:
+                assert loop.registry.get(name) is not None, name
+            else:
+                assert loop.registry.get(name) is None, name
+
 
 # ── Run with context ─────────────────────────────────────────────────
 

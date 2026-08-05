@@ -489,6 +489,76 @@ class TestBenchmarkComparison:
         ))
         assert result["status"] == "error"
 
+    def test_success_path(self, workspace: Path):
+        """有 equity 曲线 + benchmark 行情 → alpha/beta/IR 计算。"""
+        import numpy as np
+        import pandas as pd
+
+        from strategy_research.core.db import save_ohlcv_to_db
+
+        # Strategy equity curve (steady 0.1%/day)
+        dates = pd.date_range("2023-01-02", periods=100, freq="B")
+        run_dir = workspace / "strategies" / "bench_s" / "runs" / "run_0001"
+        run_dir.mkdir(parents=True)
+        pd.DataFrame({
+            "date": dates.strftime("%Y-%m-%d"),
+            "equity": 100 * np.cumprod(np.full(100, 1.001)),
+        }).to_csv(run_dir / "equity.csv", index=False)
+
+        # Benchmark prices in DuckDB (steady 0.05%/day)
+        bench_close = 3000 * np.cumprod(np.full(100, 1.0005))
+        bench_df = pd.DataFrame(
+            {
+                "open": bench_close * 0.99,
+                "high": bench_close * 1.01,
+                "low": bench_close * 0.98,
+                "close": bench_close,
+                "volume": 1e6,
+            },
+            index=pd.DatetimeIndex(dates, name="trade_date"),
+        )
+        save_ohlcv_to_db(workspace, {"000300.SH": bench_df}, "bench_s")
+
+        tool = BenchmarkComparison()
+        result = parse_result(tool.execute(
+            workspace=workspace,
+            strategy_name="bench_s",
+            benchmark_code="000300.SH",
+        ))
+        assert result["status"] == "ok", result
+        assert result["n_periods"] == 100
+        for key in (
+            "alpha_annualized", "beta", "tracking_error",
+            "information_ratio", "max_relative_drawdown",
+            "strategy_annual_return", "benchmark_annual_return",
+        ):
+            assert key in result, key
+            assert np.isfinite(result[key]), key
+        # Strategy drifts harder than benchmark → positive alpha
+        assert result["alpha_annualized"] > 0
+        assert result["strategy_annual_return"] > result["benchmark_annual_return"]
+
+    def test_no_benchmark_data(self, workspace: Path):
+        """有 equity 曲线但 benchmark 无行情 → 可操作错误。"""
+        import pandas as pd
+
+        dates = pd.date_range("2023-01-02", periods=50, freq="B")
+        run_dir = workspace / "strategies" / "bench_s" / "runs" / "run_0001"
+        run_dir.mkdir(parents=True)
+        pd.DataFrame({
+            "date": dates.strftime("%Y-%m-%d"),
+            "equity": 100 * pd.Series(range(1, 51)),
+        }).to_csv(run_dir / "equity.csv", index=False)
+
+        tool = BenchmarkComparison()
+        result = parse_result(tool.execute(
+            workspace=workspace,
+            strategy_name="bench_s",
+            benchmark_code="000300.SH",
+        ))
+        assert result["status"] == "error"
+        assert "no data" in result["error"].lower() or "benchmark" in result["error"].lower()
+
 
 # ── Data Tools ───────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import pytest
 from strategy_research.core.agent.builtin_tools import (
     ComputeFactorTool,
     GitDiffTool,
+    ListFilesTool,
     ListHistoryTool,
     ListSkillsTool,
     LoadSkillTool,
@@ -78,6 +79,82 @@ class TestRegistry:
         # Should be valid JSON
         d = json.loads(out)
         assert "status" in d
+
+
+# ── ListFilesTool ────────────────────────────────────────────────────
+
+
+class TestListFilesTool:
+    """ListFilesTool: 目录浏览/glob/错误路径。"""
+
+    def test_list_root(self, workspace):
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(workspace=str(workspace)))
+        assert result["status"] == "ok"
+        assert result["count"] >= 4
+        names = [e["name"] for e in result["entries"]]
+        assert "strategies" in names
+        assert "README.md" in names
+        assert result["count"] == len(result["entries"])
+
+    def test_list_subdirectory(self, workspace):
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(
+            workspace=str(workspace), path="strategies"
+        ))
+        assert result["status"] == "ok"
+        assert result["count"] == 0  # empty dir
+
+    def test_list_with_pattern(self, workspace):
+        (workspace / "a.md").write_text("x")
+        (workspace / "b.py").write_text("y")
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(
+            workspace=str(workspace), pattern="*.md"
+        ))
+        assert result["status"] == "ok"
+        names = [e["name"] for e in result["entries"]]
+        assert "a.md" in names
+        assert "b.py" not in names
+        assert result["count"] == len(names)
+
+    def test_entry_types_and_sizes(self, workspace):
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(
+            workspace=str(workspace), path="."
+        ))
+        by_name = {e["name"]: e for e in result["entries"]}
+        assert by_name["strategies"]["type"] == "dir"
+        assert by_name["README.md"]["type"] == "file"
+        assert by_name["README.md"]["size"] == len("# test workspace\n")
+
+    def test_path_not_found(self, workspace):
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(
+            workspace=str(workspace), path="nope"
+        ))
+        assert result["status"] == "error"
+        assert "not found" in result["error"]
+
+    def test_path_is_file(self, workspace):
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(
+            workspace=str(workspace), path="README.md"
+        ))
+        assert result["status"] == "error"
+        assert "not a directory" in result["error"]
+
+    def test_missing_workspace(self):
+        tool = ListFilesTool()
+        result = parse_result(tool.execute(path="."))
+        assert result["status"] == "error"
+        assert "workspace" in result["error"]
+
+    def test_registered_as_readonly(self):
+        registry = build_default_registry()
+        tool = registry.get("list_files")
+        assert isinstance(tool, ListFilesTool)
+        assert tool.is_readonly is True
 
 
 # ── ReadFileTool ─────────────────────────────────────────────────────
