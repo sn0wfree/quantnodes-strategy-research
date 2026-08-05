@@ -225,7 +225,7 @@ class TestPersistCompactionEvent(unittest.TestCase):
         from unittest.mock import patch
         from strategy_research.core.agent.compact import CompactConfig
         from strategy_research.core.llm import LLMConfig
-        from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.agent.loop import AgentLoop, compaction_persister_registered
 
         cfg = LLMConfig(model="m", base_url="http://localhost", api_key="k")
         loop = AgentLoop(
@@ -236,11 +236,13 @@ class TestPersistCompactionEvent(unittest.TestCase):
             event_bus=None,  # ← no event bus, legacy path
         )
 
-        # Mock the legacy persist_message
+        # Register the legacy persister (required now that we fail-fast
+        # on missing registration), then mock the underlying call.
         with patch(
             "strategy_research.api.routers.web_session.persist_message"
         ) as mock_persist:
-            loop._persist_compaction_event("legacy summary", "recent")
+            with compaction_persister_registered(mock_persist):
+                loop._persist_compaction_event("legacy summary", "recent")
             mock_persist.assert_called_once()
 
             call_kwargs = mock_persist.call_args.kwargs

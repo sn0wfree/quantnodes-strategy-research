@@ -34,6 +34,7 @@ import logging
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,32 @@ def register_compaction_persister(fn: Any) -> None:
     """Register a ``persist_message``-compatible callback (see web_session)."""
     global _compaction_persister
     _compaction_persister = fn
+
+
+@contextmanager
+def compaction_persister_registered(fn: Any):
+    """Context manager for safe persister registration in tests.
+
+    Registers ``fn`` as the compaction persister for the duration of
+    the ``with`` block, then restores the previous value (typically
+    ``None``) on exit — even if the block raises.
+
+    Production code should call ``register_compaction_persister`` once
+    at process start; this context manager is for tests that need to
+    inject a mock without leaking state across tests.
+
+    Example::
+
+        with compaction_persister_registered(mock_persist):
+            loop._persist_compaction_event("summary", "recent")
+    """
+    global _compaction_persister
+    previous = _compaction_persister
+    _compaction_persister = fn
+    try:
+        yield
+    finally:
+        _compaction_persister = previous
 
 
 # ── Result dataclass ────────────────────────────────────────────────
@@ -1418,7 +1445,10 @@ class AgentLoop:
         if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
             self._previous_summary = l4_summary_text
             try:
-                self._persist_compaction_event(l4_summary_text, l4_recent_text or "")
+                self._persist_compaction_event(
+                    l4_summary_text, l4_recent_text or "",
+                    compressed_messages=messages,
+                )
             except Exception:
                 # Persistence failed AFTER L4 generated summary.
                 # Roll back to original messages so the LLM keeps
@@ -1434,6 +1464,7 @@ class AgentLoop:
         self,
         summary_text: str,
         recent_text: str,
+        compressed_messages: list[dict] | None = None,
     ) -> None:
         """Persist a CompactionMessage event for the L4 layer.
 
@@ -1447,6 +1478,15 @@ class AgentLoop:
         Args:
             summary_text: LLM-generated summary (non-empty).
             recent_text: Pre-serialized recent messages from compact.
+            compressed_messages: Post-L4 messages list (system + recent).
+                When provided AND the ``SR_L4_INCLUDE_MESSAGES`` env
+                var is truthy, this list is included in the
+                ``compact.ended`` event so the projector can replace
+                the previous messages table contents — keeping the DB
+                consistent with the in-memory state already updated
+                by ``compact_messages``.  When the flag is off (the
+                default), the previous behaviour is preserved: only a
+                marker is emitted, original messages stay in DB.
 
         Raises:
             Exception: propagates critical errors (not silent fail).
@@ -1472,51 +1512,73 @@ class AgentLoop:
 
             if self._event_bus is not None:
                 # B6: Event-sourced path. Emit compact.ended event.
-                # Note: L4 auto-compaction is a "compaction happened"
-                # marker — it does NOT replace existing history. So
-                # we do NOT include the 'messages' field (which the
-                # projector interprets as a replacement set used by
-                # /compact manual command).
-                # The projector creates a single compaction marker
-                # message from the summary.
+                #
+                # Two modes (controlled by SR_L4_INCLUDE_MESSAGES):
+                # 1. Default: emit only a marker. The DB keeps the
+                #    original messages; the marker records that
+                #    compaction happened.  In-memory state has
+                #    already been compressed by compact_messages, so
+                #    the LLM sees the compressed view, but a fresh
+                #    reload from the DB would see the originals.
+                # 2. Flag enabled: include the post-L4 messages list
+                #    so the projector replaces the DB contents with
+                #    the compressed view.  This makes the DB
+                #    consistent with the in-memory state, matching
+                #    what manual /compact already does.
+                import os
+
+                include_msgs = (
+                    compressed_messages is not None
+                    and os.environ.get("SR_L4_INCLUDE_MESSAGES", "").lower()
+                    in ("1", "true", "yes")
+                )
+                payload: dict[str, Any] = {
+                    "summary": comp.summary,
+                    "reason": "auto",
+                    "compaction_id": comp.id,
+                    "metadata": comp.metadata,
+                }
+                if include_msgs:
+                    payload["messages"] = compressed_messages
                 self._event_bus.emit(
                     session_id,
                     "compact.ended",
-                    {
-                        "summary": comp.summary,
-                        "reason": "auto",
-                        "compaction_id": comp.id,
-                        "metadata": comp.metadata,
-                    },
+                    payload,
                 )
                 logger.info(
-                    "compaction event emitted: %s (summary=%d chars, recent=%d chars)",
+                    "compaction event emitted: %s (summary=%d chars, "
+                    "recent=%d chars, include_messages=%s)",
                     comp.id, len(comp.summary), len(comp.recent),
+                    include_msgs,
                 )
             else:
                 # Legacy fallback: direct DB write via the registered
                 # persister (registered by api/ and TUI entry points).
-                # Without a registration, compaction persistence is
-                # skipped with a warning instead of importing the API
-                # layer from core.
+                #
+                # Fail-fast: if no persister is registered, raise.
+                # Previously this path silently dropped the compaction
+                # event, which made misconfigured deployments invisible
+                # to operators. Now the misconfiguration is surfaced
+                # immediately at runtime.
                 if _compaction_persister is None:
-                    logger.warning(
-                        "No compaction persister registered; skipping "
-                        "legacy DB write for %s", comp.id,
+                    raise RuntimeError(
+                        f"compaction_persister not registered; cannot "
+                        f"persist compaction event {comp.id}. Register "
+                        f"via register_compaction_persister() in the "
+                        f"api/cli entry point."
                     )
-                else:
-                    _compaction_persister(
-                        session_id=comp.session_id,
-                        role="assistant",  # DB compat
-                        content=comp.summary,
-                        parts=comp.to_parts(),
-                        message_id=comp.id,
-                        message_type="compaction",
-                    )
-                    logger.info(
-                        "compaction event persisted (legacy): %s (summary=%d chars, recent=%d chars)",
-                        comp.id, len(comp.summary), len(comp.recent),
-                    )
+                _compaction_persister(
+                    session_id=comp.session_id,
+                    role="assistant",  # DB compat
+                    content=comp.summary,
+                    parts=comp.to_parts(),
+                    message_id=comp.id,
+                    message_type="compaction",
+                )
+                logger.info(
+                    "compaction event persisted (legacy): %s (summary=%d chars, recent=%d chars)",
+                    comp.id, len(comp.summary), len(comp.recent),
+                )
         except Exception:
             # Critical: propagate with full traceback. The caller
             # (compact_messages path) will see the error and roll
@@ -1527,7 +1589,17 @@ class AgentLoop:
     async def _amaybe_compact(
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Async version of _maybe_compact — uses sync compact_messages with achat fallback for L4."""
+        """Async version of _maybe_compact — runs sync compact_messages
+        in a worker thread so the event loop is never blocked.
+
+        Previously this used a nested ``_AchatAdapter`` that called
+        ``asyncio.run(asyncio.to_thread(...))`` from inside a running
+        loop, which raised ``RuntimeError`` and produced a
+        "coroutine 'to_thread' was never awaited" warning.  Running
+        the whole ``compact_messages`` call off-loop is simpler and
+        correct: the sync LLM client (``self.client.chat``) is invoked
+        directly from the worker thread, with no nested event loop.
+        """
         # Overflow detection
         if self.config.model_context_tokens:
             usable = self.config.model_context_tokens - 4096
@@ -1535,36 +1607,16 @@ class AgentLoop:
             if tokens >= usable * self.cc.overflow_ratio:
                 logger.debug("Overflow detected (async): %d tokens", tokens)
 
-        # For async path, use compact_messages with achat-wrapped client
-        class _AchatAdapter:
-            """Wraps self.client.achat as sync .chat() for compact_messages."""
-            def __init__(self, client: Any) -> None:
-                self._client = client
-            def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
-                import asyncio
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-                if loop and loop.is_running():
-                    # We're inside the running event loop (async agent
-                    # path); a blocking sync LLM call here would freeze
-                    # the whole server. Run it in a worker thread.
-                    return asyncio.run(
-                        asyncio.to_thread(self._client.chat, messages, **kwargs)
-                    )
-                return asyncio.run(self._client.achat(messages, **kwargs))
-
-        adapter = _AchatAdapter(self.client)
         original_messages = list(messages)
         try:
-            messages, applied, l4_summary_text, l4_recent_text = compact_messages(
+            messages, applied, l4_summary_text, l4_recent_text = await asyncio.to_thread(
+                compact_messages,
                 messages,
                 config=self.cc,
                 threshold_tokens=self.threshold_tokens,
                 model_context_tokens=self.config.model_context_tokens,
                 model_max_output_tokens=self.config.model_max_output_tokens,
-                llm_client=adapter,
+                llm_client=self.client,
                 previous_summary=self._previous_summary,
                 session_id=self.session_id,
             )
@@ -1575,7 +1627,10 @@ class AgentLoop:
         if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
             self._previous_summary = l4_summary_text
             try:
-                self._persist_compaction_event(l4_summary_text, l4_recent_text or "")
+                self._persist_compaction_event(
+                    l4_summary_text, l4_recent_text or "",
+                    compressed_messages=messages,
+                )
             except Exception:
                 logger.exception(
                     "compaction persistence failed (async); rolling back",

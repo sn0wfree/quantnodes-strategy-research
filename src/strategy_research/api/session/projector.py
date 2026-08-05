@@ -293,6 +293,15 @@ class Projector:
         if event.type in (EventType.COMPACT, EventType.COMPACT_ENDED):
             if isinstance(data.get("messages"), list):
                 touched.add("*")
+            else:
+                # Simple marker mode (L4 auto-compaction without
+                # replacement list): explicitly record the marker id
+                # so the delta flush actually writes it to the
+                # messages table.  Without this, the marker is
+                # created in the in-memory state but never persisted
+                # because ``touched`` stays empty.
+                marker_id = f"compact-{event.id[:8]}"
+                touched.add(marker_id)
 
     @staticmethod
     def _message_row(msg: ProjectedMessage) -> Dict[str, Any]:

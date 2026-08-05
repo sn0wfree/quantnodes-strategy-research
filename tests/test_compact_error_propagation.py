@@ -45,16 +45,27 @@ class TestPersistPropagatesErrors:
         """If persist_message fails, the error propagates (not silent)."""
         loop = self._make_loop()
 
+        # Register a persister that raises, so the legacy path actually
+        # invokes persist_message and we can verify error propagation.
+        from strategy_research.core.agent.loop import (
+            compaction_persister_registered,
+        )
+
         with patch(
             "strategy_research.api.routers.web_session.persist_message",
             side_effect=RuntimeError("DB connection lost"),
-        ):
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                loop._persist_compaction_event("summary", "recent")
+        ) as mock_persist:
+            with compaction_persister_registered(mock_persist):
+                with pytest.raises(RuntimeError, match="DB connection lost"):
+                    loop._persist_compaction_event("summary", "recent")
 
     def test_persist_message_failure_logs_traceback(self):
         """logger.exception is called (includes traceback)."""
         loop = self._make_loop()
+
+        from strategy_research.core.agent.loop import (
+            compaction_persister_registered,
+        )
 
         with patch(
             "strategy_research.core.agent.loop.logger"
@@ -62,9 +73,10 @@ class TestPersistPropagatesErrors:
             with patch(
                 "strategy_research.api.routers.web_session.persist_message",
                 side_effect=RuntimeError("DB error"),
-            ):
-                with pytest.raises(RuntimeError):
-                    loop._persist_compaction_event("summary", "recent")
+            ) as mock_persist:
+                with compaction_persister_registered(mock_persist):
+                    with pytest.raises(RuntimeError):
+                        loop._persist_compaction_event("summary", "recent")
             # logger.exception was called (not just logger.warning)
             mock_logger.exception.assert_called()
 

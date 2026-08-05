@@ -18,7 +18,10 @@ from strategy_research.core.agent.compact import (
     _resolve_threshold_tokens,
     compact_messages,
 )
-from strategy_research.core.agent.loop import AgentLoop
+from strategy_research.core.agent.loop import (
+    AgentLoop,
+    compaction_persister_registered,
+)
 from strategy_research.core.llm.config import LLMConfig
 
 
@@ -116,36 +119,46 @@ class TestPersistCompactionEvent:
         regardless of preserve_recent_tokens value.
         """
         loop = self._make_loop(preserve_recent_tokens=None)
-        # Should not raise
-        loop._persist_compaction_event("summary text", "recent text")
+        # Register a no-op persister since the loop has no event_bus.
+        # Previously this path silently dropped compaction events; now
+        # we fail-fast on missing registration.  Tests opt in via the
+        # context manager so production misconfiguration is still loud.
+        with compaction_persister_registered(MagicMock()):
+            # Should not raise
+            loop._persist_compaction_event("summary text", "recent text")
         # No assertion needed — absence of exception is success
 
     def test_works_with_preserve_recent_int(self):
         loop = self._make_loop(preserve_recent_tokens=10000)
-        loop._persist_compaction_event("summary text", "recent text")
+        with compaction_persister_registered(MagicMock()):
+            loop._persist_compaction_event("summary text", "recent text")
 
     def test_works_with_preserve_recent_zero(self):
         loop = self._make_loop(preserve_recent_tokens=0)
-        loop._persist_compaction_event("summary text", "recent text")
+        with compaction_persister_registered(MagicMock()):
+            loop._persist_compaction_event("summary text", "recent text")
 
     def test_empty_summary_skips(self):
         loop = self._make_loop()
         # Should not raise even with empty summary
-        loop._persist_compaction_event("", "recent text")
-        loop._persist_compaction_event("   ", "recent text")
-        loop._persist_compaction_event(None, "recent text")
+        with compaction_persister_registered(MagicMock()):
+            loop._persist_compaction_event("", "recent text")
+            loop._persist_compaction_event("   ", "recent text")
+            loop._persist_compaction_event(None, "recent text")
 
     def test_no_session_id_skips(self):
         loop = self._make_loop()
         loop.session_id = None
         # Should not raise
-        loop._persist_compaction_event("summary", "recent")
+        with compaction_persister_registered(MagicMock()):
+            loop._persist_compaction_event("summary", "recent")
 
     def test_empty_recent_still_persists(self):
         """Empty recent is OK — summary is the important part."""
         loop = self._make_loop()
         # Should not raise
-        loop._persist_compaction_event("summary", "")
+        with compaction_persister_registered(MagicMock()):
+            loop._persist_compaction_event("summary", "")
 
 
 # ── compact_messages 4-tuple (opencode-aligned) ──────────────
