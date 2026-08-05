@@ -10,7 +10,7 @@
 ## 工具范式 v2（设计定稿）
 
 > 状态：**已完成实施（P1-P5，2026-08-05）**。本范式由 9 个维度的逐项讨论收敛而成；
-> 实施计划、契约测试见下文；P6 被动学习后置立项。
+> 实施计划、契约测试见下文；P6 被动学习已立项，规划见 [docs/passive-learning-proposal.md](passive-learning-proposal.md)。
 > 落地验证：477 tests passed（工具/loop/chat/workflow/role 相关面），
 > 遗留事项见"落地验证与遗留"小节。
 
@@ -101,7 +101,7 @@
 477 passed、4 skipped；契约测试 20 例、组合库 18 例常驻守护。
 
 **遗留事项**：
-- **P6 被动学习**（后置立项）：trace.jsonl + event_log 双源、双粒度（同 turn 合作性 / 跨 turn 流程性）共现挖掘 → 规则初筛 + 组合提案 + 人工确认 → 写入组合库；框架已就绪（组合库/加载器/契约测试），只差挖掘器
+- **P6 被动学习**（后置立项，规划详见 [docs/passive-learning-proposal.md](passive-learning-proposal.md)）：trace.jsonl + event_log 双源、双粒度（同 turn 合作性 / 跨 turn 流程性）共现挖掘 → 规则初筛 + 组合提案 + 人工确认 → 写入组合库；框架已就绪（组合库/加载器/契约测试），缺挖掘器 + 产线 trace 接线（当前 `trace_dir` 无人传）
 - **pre-existing 失败**：`test_assistant_message_event.py` 5 例（loop compact 溢出检测对 mock config 的 `overflow_ratio` 比较抛 TypeError）；`test_b3_read_path_consistency` 的 limit 语义已修；`test_role_factory` 偶发 LLM 超时（环境相关，单跑绿）
 - **说明书完整性**：goal/web/shell 工具说明书为简版章节，后续迭代补全（契约测试只强制 docstring 首行与 brief 同源）
 
@@ -114,7 +114,7 @@
 | P3 | 33 个存量工具迁移（一次性切换，无旧 `parameters` dict 回退）：docstring 说明书填写、删手写解析与样板、effects 声明 | **已完成** |
 | P4 | 分层注册重构 + 组合库：核心显式清单 + 能力组 + 组合库加载器 + 组合执行器 | **已完成** |
 | P5 | 契约测试（注册表↔说明书↔effects↔schema 一致性；fix_msg 与说明书同源断言）+ 文档同步 | **已完成** |
-| P6 | 被动学习：挖掘器（双源双粒度共现）+ 评估器（规则初筛 + 提案 + 人工确认）+ 沉淀（组合库 + 回馈统计） | 后置立项 |
+| P6 | 被动学习：挖掘器（双源双粒度共现）+ 评估器（规则初筛 + 提案 + 人工确认）+ 沉淀（组合库 + 回馈统计） | 已立项，规划见 [docs/passive-learning-proposal.md](passive-learning-proposal.md) |
 
 ### 对本文档其余部分的衔接
 
