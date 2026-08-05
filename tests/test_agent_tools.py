@@ -251,7 +251,7 @@ class TestWriteFileTool:
     def test_write_new_file(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="strategies/foo/strategy.py",
             content="# new strategy\nx = 1\n",
         ))
@@ -265,7 +265,7 @@ class TestWriteFileTool:
         (workspace / "templates" / "strategy.py").write_text("old")
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace, path="templates/strategy.py", content="new",
+            ctx=ToolContext(workspace=workspace), path="templates/strategy.py", content="new",
         ))
         assert result["status"] == "ok"
         assert (workspace / "templates" / "strategy.py").read_text() == "new"
@@ -273,7 +273,7 @@ class TestWriteFileTool:
     def test_write_creates_parent_dirs(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="strategies/a/b/c/d/file.py",
             content="x = 1",
         ))
@@ -283,7 +283,7 @@ class TestWriteFileTool:
     def test_write_blocks_exec(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="strategies/bad.py",
             content="exec('print(1)')",
         ))
@@ -293,7 +293,7 @@ class TestWriteFileTool:
     def test_write_blocks_import_os(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="strategies/bad.py",
             content="import os\n",
         ))
@@ -303,7 +303,7 @@ class TestWriteFileTool:
     def test_write_blocks_outside_whitelist(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="data/foo.txt",  # data/ is read-only
             content="x",
         ))
@@ -312,7 +312,7 @@ class TestWriteFileTool:
     def test_write_blocks_absolute_path(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="/tmp/evil.txt",
             content="x",
         ))
@@ -321,7 +321,7 @@ class TestWriteFileTool:
     def test_write_blocks_dotdot(self, workspace: Path):
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="../escape.py",
             content="x",
         ))
@@ -331,7 +331,7 @@ class TestWriteFileTool:
         # Non-.py files skip AST validation
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="memory/notes.md",
             content="any content at all\n",
         ))
@@ -357,25 +357,21 @@ class MyStrategy:
 """
         tool = WriteFileTool()
         result = parse_result(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             path="strategies/momentum/strategy.py",
             content=code,
         ))
         assert result["status"] == "ok", result.get("error")
 
     def test_write_missing_content(self, workspace: Path):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = WriteFileTool()
-        result = parse_result(tool.execute(
-            workspace=workspace, path="memory/x.txt",
-        ))
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(workspace=workspace), path="memory/x.txt")
 
-    def test_write_invalid_workspace_type(self):
+    def test_write_missing_ctx(self):
         tool = WriteFileTool()
-        result = parse_result(tool.execute(
-            workspace=123,  # type: ignore
-            path="memory/x.txt", content="x",
-        ))
+        result = parse_result(tool.execute(ctx=ToolContext(), path="memory/x.txt", content="x"))
         assert result["status"] == "error"
 
 
@@ -386,15 +382,16 @@ class TestRunBacktestTool:
     def test_missing_strategy_dir(self, workspace: Path):
         tool = RunBacktestTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="nonexistent",
+            ctx=ToolContext(workspace=workspace), strategy_name="nonexistent",
         ))
         assert result["status"] == "error"
         assert "配置文件不存在" in result["error"] or "not found" in result["error"].lower()
 
     def test_missing_strategy_name(self, workspace: Path):
+        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
         tool = RunBacktestTool()
-        result = parse_result(tool.execute(workspace=workspace))
-        assert result["status"] == "error"
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ToolContext(workspace=workspace))
 
     def test_existing_strategy(self, workspace: Path):
         # Create a minimal strategy
@@ -410,7 +407,7 @@ rebalance:
 """)
         tool = RunBacktestTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="foo", action="agent_test",
+            ctx=ToolContext(workspace=workspace), strategy_name="foo", action="agent_test",
         ))
         # Could be ok (if sample data works) or error (if data missing)
         # The point is it shouldn't crash with a Python exception
@@ -422,14 +419,14 @@ rebalance:
         (sdir / "config.yaml").write_text("strategy:\n  name: foo\n  type: rotation\n")
         tool = RunBacktestTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="foo",
+            ctx=ToolContext(workspace=workspace), strategy_name="foo",
         ))
         # Should default action to 'agent' (no crash)
         assert "status" in result
 
     def test_run_backtest_missing_workspace(self):
         tool = RunBacktestTool()
-        result = parse_result(tool.execute(strategy_name="x"))
+        result = parse_result(tool.execute(ctx=ToolContext(), strategy_name="x"))
         assert result["status"] == "error"
 
     def test_run_backtest_e2e_with_price_data(self, workspace: Path):
@@ -480,7 +477,7 @@ factors:
 """)
         tool = RunBacktestTool()
         result = parse_result(tool.execute(
-            workspace=workspace, strategy_name="e2e_strat",
+            ctx=ToolContext(workspace=workspace), strategy_name="e2e_strat",
         ))
         assert result["status"] in ("ok", "pending"), result
         metrics = result.get("metrics") or {}

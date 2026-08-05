@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
+from strategy_research.core.agent.tools import ToolContext
 
 
 # ── Fixtures ────────────────────────────────────────────────────
@@ -68,8 +69,8 @@ class TestAllToolsStructuredErrors:
         tool = registry.get(tool_name)
         if tool is None:
             pytest.skip(f"{tool_name} not available")
-        # Don't pass workspace at all
-        result = json.loads(tool.execute(**kwargs))
+        # No workspace in ctx (v2: workspace lives in ToolContext)
+        result = json.loads(tool.invoke({"ctx": ToolContext(), **kwargs}))
         # Some tools may have other required params
         if result["status"] == "ok":
             pytest.skip(f"{tool_name} succeeded without workspace (unexpected)")
@@ -86,9 +87,9 @@ class TestToolErrorStructure:
     def test_run_backtest_invalid_strategy_name(self, registry, workspace):
         """run_backtest with empty strategy_name → structured error."""
         tool = registry.get("run_backtest")
-        result = json.loads(tool.execute(
-            workspace=str(workspace), strategy_name=""
-        ))
+        result = json.loads(tool.invoke({
+            "ctx": ToolContext(workspace=workspace), "strategy_name": "",
+        }))
         assert result["status"] == "error"
         assert "error" in result
         # Should mention strategy_name
@@ -115,9 +116,9 @@ class TestToolErrorStructure:
             "    code: ts_return(close, 20)\n"
             "    weight: 1.0\n"
         )
-        result = json.loads(tool.execute(
-            workspace=str(workspace), strategy_name="empty_strat"
-        ))
+        result = json.loads(tool.invoke({
+            "ctx": ToolContext(workspace=workspace), "strategy_name": "empty_strat",
+        }))
         assert result["status"] == "error"
         assert "get_market_data" in result.get("fix", "")
         # commit_market_data retired after get_market_data(persist=True) merge

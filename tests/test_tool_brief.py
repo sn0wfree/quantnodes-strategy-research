@@ -119,7 +119,8 @@ class TestToolHelp:
         result = json.loads(reg.get("tool_help").execute(name="run_backtest"))
         assert result["status"] == "ok"
         assert result["name"] == "run_backtest"
-        assert "Run a backtest" in result["doc"]
+        assert "运行回测" in result["doc"]
+        assert "错误处理范式" in result["doc"]
 
     def test_unknown_tool(self):
         reg = build_default_registry()

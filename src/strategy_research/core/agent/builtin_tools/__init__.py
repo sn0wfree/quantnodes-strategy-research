@@ -33,7 +33,14 @@ from ..sandbox import (
     PathWhitelist,
     validate_python_source,
 )
-from ..tools import BaseTool, ToolContext, ToolRegistry
+from ..tools import (
+    EFFECT_DB,
+    EFFECT_FS,
+    EFFECT_NET,
+    BaseTool,
+    ToolContext,
+    ToolRegistry,
+)
 from .utils import err_actionable, safe_get_param, try_unwrap_list, try_unwrap_dict
 
 logger = logging.getLogger(__name__)
@@ -303,35 +310,58 @@ class ListFilesTool(BaseTool):
 
 
 class WriteFileTool(BaseTool):
-    """Write content to a file in the workspace (sandbox + AST guard)."""
+    """写入工作区文件（沙箱路径白名单 + .py AST 安全检查）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext; 副作用改 effects)
+    #
+    # ## 用途
+    # 写入文件内容到工作区。路径限允许写根目录
+    # (strategies/templates/memory/logs); .py 文件做 AST 校验,
+    # 危险代码 (exec/eval、受限 import、dunder 访问) 会被拒绝。
+    #
+    # ## 参数
+    # - path: 相对 workspace 的文件路径 (必填, 限写白名单)
+    # - content: 文件内容 (必填, 字符串)
+    #
+    # ## 示例
+    # {"path": "strategies/momentum_20d/strategy.py", "content": "..."}
+    #
+    # ## 边界
+    # 写工具 (effects=fs); 自动创建父目录; 覆盖已有文件。
+    #
+    # ## 错误处理范式
+    # - 缺 path/content → error + expected 示例
+    # - AST 校验失败 → error 含具体危险代码说明
+    # - 白名单外 → error + fix 允许根目录
+    # - 写入失败 → error + fix 检查权限
+    # - 幂等: 重跑覆盖同一路径, 安全
+    #
+    # ## 相关工具
+    # read_file: 读回校验; list_files: 浏览
+    # ─────────────────────────────────────────────
+    """
 
     name = "write_file"
     description = (
-        "Write content to a file in the workspace. Path must be under an allowed "
-        "write root (strategies/templates/memory/logs). .py files are AST-validated; "
-        "dangerous code (exec/eval, blocked imports, dunder access) is rejected."
+        "写入文件到工作区 (限 strategies/templates/memory/logs 写白名单); "
+        ".py 做 AST 安全检查, 危险代码被拒。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "path": {"type": "string", "description": "File path relative to workspace."},
-            "content": {"type": "string", "description": "File content to write."},
-        },
-        "required": ["workspace", "path", "content"],
-    }
     repeatable = True
-    is_readonly = False
     strict = True  # All params required, no dict-shape → strict-safe
+    category = "文件"
+    effects = frozenset({EFFECT_FS})
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="write_file")
+    def execute(self, ctx: ToolContext, path: str, content: str) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="write_file",
+            )
+        workspace = ctx.workspace
 
-        path = kwargs.get("path")
-        content = kwargs.get("content")
         if not isinstance(path, str) or not path:
             return err_actionable(
                 "missing or invalid 'path'",
@@ -392,34 +422,67 @@ class WriteFileTool(BaseTool):
 
 
 class RunBacktestTool(BaseTool):
-    """Run a backtest using the workspace's strategy configuration."""
+    """从策略配置运行回测并写入 runs/ 与 DuckDB。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.1.0
+    # 变更: v1.1.0 迁移 v2 (显式签名 + ToolContext; effects 声明)
+    #
+    # ## 用途
+    # 读取 strategies/<name>/config.yaml 运行回测, 产出新 run 写入
+    # runs/<name>/ 与 DuckDB。策略配置就绪且数据已入库后验证表现。
+    # 数据未入库时先 get_market_data; 只看历史结果用 list_history。
+    #
+    # ## 参数
+    # - strategy_name: 策略目录名 (必填, strategies/<name>/config.yaml 须存在)
+    # - action: 运行标注 (审计用, 默认 'agent')
+    # - description: 可选描述
+    # - yaml_path: 覆盖默认 config 路径 (相对 workspace)
+    #
+    # ## 示例
+    # {"strategy_name": "momentum_20d"}
+    #
+    # ## 边界
+    # 写工具 (effects: db + fs); 前置: price_data 已有该策略数据;
+    # 同策略重复运行产生新 run, 不覆盖旧 run。
+    #
+    # ## 错误处理范式
+    # - 缺 strategy_name → error + expected 示例
+    # - 策略目录不存在 → fix 提示 list_files 查看 strategies/
+    # - 数据为空 / 无 DB → fix 给 workflow: get_market_data(persist=True) → 重跑
+    # - 配置 YAML 非法 → fix 指向 config.yaml 检查
+    # - 所有失败均可安全重试 (无部分写入遗留)
+    #
+    # ## 相关工具
+    # get_market_data: 数据前置; list_history/drawdown_analysis/
+    # benchmark_comparison: 结果消费
+    # ─────────────────────────────────────────────
+    """
 
     name = "run_backtest"
     description = (
-        "Run a backtest for the given strategy. Reads config.yaml from "
-        "strategies/<strategy_name>/ and produces a new run under runs/."
+        "从 strategies/<name>/config.yaml 运行回测, 新 run 写入 runs/ 与 DuckDB。"
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "workspace": {"type": "string", "description": "Workspace root path."},
-            "strategy_name": {"type": "string", "description": "Strategy name."},
-            "action": {"type": "string", "description": "Action label (e.g. 'manual', 'agent')."},
-            "description": {"type": "string", "description": "Optional description."},
-            "yaml_path": {"type": "string", "description": "Override YAML config path."},
-        },
-        "required": ["workspace", "strategy_name"],
-    }
-    is_readonly = False
     repeatable = True
+    category = "回测"
+    effects = frozenset({EFFECT_DB, EFFECT_FS})
 
-    def execute(self, **kwargs: Any) -> str:
-        try:
-            workspace = _workspace_from_kwargs(kwargs)
-        except ValueError as exc:
-            return _workspace_error(exc, tool="run_backtest")
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_name: str,
+        action: str = "agent",
+        description: str = "",
+        yaml_path: str | None = None,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="run_backtest",
+            )
+        workspace = ctx.workspace
 
-        strategy_name = kwargs.get("strategy_name")
         if not isinstance(strategy_name, str) or not strategy_name:
             return err_actionable(
                 "missing or invalid 'strategy_name'",
@@ -428,9 +491,8 @@ class RunBacktestTool(BaseTool):
                 fix="list strategies with list_files(workspace=..., path='strategies') and pick an existing name",
                 tool="run_backtest",
             )
-        action = kwargs.get("action") or "agent"
-        description = kwargs.get("description") or ""
-        yaml_path = kwargs.get("yaml_path")
+        action = action or "agent"
+        description = description or ""
         if yaml_path is not None:
             yaml_path = str(workspace / yaml_path)
 
