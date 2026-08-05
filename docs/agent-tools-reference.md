@@ -9,8 +9,10 @@
 
 ## 工具范式 v2（设计定稿）
 
-> 状态：**设计定稿，尚未实施**。本范式由 9 个维度的逐项讨论收敛而成（2026-08-05）。
-> 实施计划见下文"实施计划"；P3 迁移完成后，本文档各工具条目将按说明书模板重写。
+> 状态：**已完成实施（P1-P5，2026-08-05）**。本范式由 9 个维度的逐项讨论收敛而成；
+> 实施计划、契约测试见下文；P6 被动学习后置立项。
+> 落地验证：477 tests passed（工具/loop/chat/workflow/role 相关面），
+> 遗留事项见"落地验证与遗留"小节。
 
 ### 范式总览（9 维度决策）
 
@@ -92,6 +94,16 @@
 - 写工具 effects 非空（9 个 write 工具逐一断言）、只读工具 effects 为空、effects 枚举合法
 - 注入参数（workspace 等）不出现在 schema；必填参数与签名无默认值参数一致（strict 工具除外）
 - 引导同源：run_backtest/compute_factor 说明书与代码 fix 的 workflow 一致，`commit_market_data` 全库零残留
+
+### 落地验证与遗留
+
+**验证**（P1-P5 完成后全量回归）：工具/loop/chat/workflow/role 相关 26 个测试文件
+477 passed、4 skipped；契约测试 20 例、组合库 18 例常驻守护。
+
+**遗留事项**：
+- **P6 被动学习**（后置立项）：trace.jsonl + event_log 双源、双粒度（同 turn 合作性 / 跨 turn 流程性）共现挖掘 → 规则初筛 + 组合提案 + 人工确认 → 写入组合库；框架已就绪（组合库/加载器/契约测试），只差挖掘器
+- **pre-existing 失败**：`test_assistant_message_event.py` 5 例（loop compact 溢出检测对 mock config 的 `overflow_ratio` 比较抛 TypeError）；`test_b3_read_path_consistency` 的 limit 语义已修；`test_role_factory` 偶发 LLM 超时（环境相关，单跑绿）
+- **说明书完整性**：goal/web/shell 工具说明书为简版章节，后续迭代补全（契约测试只强制 docstring 首行与 brief 同源）
 
 ### 实施计划
 
