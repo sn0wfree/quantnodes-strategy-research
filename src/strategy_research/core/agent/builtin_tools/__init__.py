@@ -2455,15 +2455,19 @@ class ToolHelpTool(BaseTool):
             "name": tool.name,
             "category": tool.category,
             "brief": tool.brief,
-            "doc": inspect.getdoc(type(tool)) or "",
+            "doc": inspect.getdoc(tool) or "",
         })
 
 
-def build_default_registry() -> ToolRegistry:
+def build_default_registry(workspace: Path | None = None) -> ToolRegistry:
     """Build a ToolRegistry with all tools.
 
     Tools are stateless; AgentLoop injects `workspace` per call.
     No workspace is bound at construction time.
+
+    When ``workspace`` is given, composite tools from
+    ``<workspace>/tools/combo/*.yml`` are loaded and registered
+    (paradigm v2 分层注册: 显式核心 + 能力组 + 组合库加载器).
     """
     r = ToolRegistry()
     r.register(ReadFileTool())
@@ -2515,6 +2519,12 @@ def build_default_registry() -> ToolRegistry:
         pass
     # Tool documentation (self-referential; registered last)
     r.register(ToolHelpTool(r))
+
+    # Paradigm v2 分层注册: 组合库加载器 (workspace tools/combo/*.yml)
+    if workspace is not None:
+        from ..combo import load_combo_tools
+        load_combo_tools(workspace, r)
+
     return r
 
 

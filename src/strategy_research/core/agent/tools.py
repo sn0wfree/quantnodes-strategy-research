@@ -108,9 +108,13 @@ def _truncate_payload(value: Any, max_len: int = 200) -> Any:
     return value
 
 
-def _doc_first_line(tool_cls: type) -> str:
-    """docstring 首行 = 简略版用途一句话 (与详细版同源)。"""
-    doc = inspect.getdoc(tool_cls)
+def _doc_first_line(tool) -> str:
+    """docstring 首行 = 简略版用途一句话 (与详细版同源)。
+
+    Accepts a tool instance so instances with dynamic ``__doc__``
+    (e.g. composite tools) produce their own brief.
+    """
+    doc = inspect.getdoc(tool)
     if doc:
         line = doc.strip().splitlines()[0].strip()
         if line:
@@ -155,7 +159,7 @@ def _effects_label(tool: BaseTool) -> str:
 
 def _build_tool_brief(tool: BaseTool) -> str:
     """注册时生成简略版目录条目。"""
-    summary = _doc_first_line(type(tool))
+    summary = _doc_first_line(tool)
     required = _required_params(tool)
     category = getattr(tool, "category", "other") or "other"
     parts = [f"- {tool.name}[{category}]: {summary}"]
