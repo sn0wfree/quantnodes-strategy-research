@@ -23,6 +23,9 @@ import time
 from collections import deque
 from typing import Any
 
+import hmac
+import logging
+
 from fastapi import APIRouter, Header, HTTPException, Query
 
 logger = logging.getLogger(__name__)
@@ -45,7 +48,7 @@ def _verify_admin(x_admin_token: str | None = Header(None)) -> None:
             status_code=503,
             detail="Admin endpoints disabled. Set SR_ADMIN_TOKEN env var.",
         )
-    if not x_admin_token or x_admin_token != expected:
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing X-Admin-Token header.",

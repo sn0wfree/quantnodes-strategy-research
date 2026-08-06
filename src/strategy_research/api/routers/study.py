@@ -135,7 +135,22 @@ async def study_start(req: StudyStartRequest):
             status_code=400,
             detail=f"workspace_path does not exist: {req.workspace_path}",
         )
-    strat_dir = ws / "strategies" / req.strategy_name
+    # Security: reject strategy_name that escapes the workspace via "..",
+    # path separators, or NUL bytes. Then resolve and verify containment.
+    if not req.strategy_name or "/" in req.strategy_name or "\\" in req.strategy_name \
+            or "\0" in req.strategy_name or req.strategy_name.startswith("."):
+        raise HTTPException(
+            status_code=400,
+            detail="strategy_name must be a single segment without path separators",
+        )
+    ws_resolved = ws.resolve()
+    strat_dir = (ws_resolved / "strategies" / req.strategy_name).resolve()
+    try:
+        strat_dir.relative_to(ws_resolved)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="strategy_name resolves outside workspace",
+        )
     if not strat_dir.exists():
         # Auto-create strategy directory with minimal strategy.py
         strat_dir.mkdir(parents=True, exist_ok=True)

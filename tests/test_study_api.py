@@ -686,3 +686,54 @@ async def test_resume_unknown_study_returns_404(_app_env, monkeypatch):
         assert r.status_code == 404
         sched.resume.assert_not_called()
         sched.resume_interrupted.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_strategy_name_with_path_traversal(_app_env, monkeypatch):
+    """A1: strategy_name 包含路径分隔符或 ".." 必须被拒绝（400）。"""
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    from unittest.mock import MagicMock, AsyncMock
+    from strategy_research.api.routers import study as study_router
+
+    sched = MagicMock()
+    sched.submit = AsyncMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    for bad_name in ["../pwned", "foo/bar", "..", ".hidden", "with\\backslash"]:
+        body = {
+            "session_id": "sess-1", "objective": "x",
+            "workspace_path": str(_app_env),
+            "strategy_name": bad_name,
+            "executor_type": "autoresearch", "max_rounds": 1,
+        }
+        async with _api_client() as client:
+            r = await client.post("/api/study/start", json=body)
+            assert r.status_code == 400, f"{bad_name!r} should be 400, got {r.status_code}"
+            assert "strategy_name" in r.json()["detail"].lower() or "segment" in r.json()["detail"].lower() or "outside" in r.json()["detail"].lower()
+        sched.submit.assert_not_called()
+        sched.submit.reset_mock()
+
+
+@pytest.mark.asyncio
+async def test_start_accepts_plain_strategy_name(_app_env, monkeypatch):
+    """A1: 合法的 strategy_name 仍然通过。"""
+    from unittest.mock import MagicMock, AsyncMock
+    from strategy_research.api.routers import study as study_router
+
+    sched = MagicMock()
+    sched.submit = AsyncMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    body = {
+        "session_id": "sess-1", "objective": "x",
+        "workspace_path": str(_app_env),
+        "strategy_name": "demo_strategy",
+        "executor_type": "autoresearch", "max_rounds": 1,
+    }
+    async with _api_client() as client:
+        r = await client.post("/api/study/start", json=body)
+        assert r.status_code == 200

@@ -93,7 +93,9 @@ class LocalLoader:
         elif file_type == "duckdb":
             import duckdb
             conn = duckdb.connect(str(path), read_only=True)
-            df = conn.execute(f"SELECT * FROM prices WHERE asset_code = '{code}'").df()
+            df = conn.execute(
+                "SELECT * FROM prices WHERE asset_code = ?", [code]
+            ).df()
             conn.close()
         else:
             return None

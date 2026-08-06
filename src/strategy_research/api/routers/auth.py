@@ -6,6 +6,7 @@ Default admin account: admin / admin (seeded on first startup).
 
 from __future__ import annotations
 
+import hmac
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -100,7 +101,9 @@ async def login(body: UserLogin):
     """Login with username + password."""
     db = _get_user_db()
     user = db.get_user_by_username(body.username)
-    if not user or user["password_hash"] != _hash_password(body.password):
+    if not user or not hmac.compare_digest(
+        user["password_hash"], _hash_password(body.password)
+    ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = _create_token(user["id"])
@@ -148,7 +151,7 @@ async def change_password(
     user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user["password_hash"] != _hash_password(body.old_password):
+    if not hmac.compare_digest(user["password_hash"], _hash_password(body.old_password)):
         raise HTTPException(status_code=401, detail="Old password incorrect")
 
     from ..user_db import hash_password

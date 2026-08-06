@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ValidateRunRequest(BaseModel):
@@ -27,7 +30,20 @@ async def validate_run(req: ValidateRunRequest, request: Request):
     try:
         from ...core.validation.runner import run_validation
 
-        run_dir = Path(req.run_dir)
+        # Security: resolve run_dir and require it to live under the
+        # configured workspace (env: STRATEGY_RESEARCH_VALIDATE_ROOT,
+        # default $HOME). Prevents arbitrary FS read by this endpoint.
+        try:
+            run_dir = Path(req.run_dir).resolve()
+            root = Path(
+                os.environ.get("STRATEGY_RESEARCH_VALIDATE_ROOT", os.path.expanduser("~"))
+            ).resolve()
+            run_dir.relative_to(root)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"run_dir must resolve under {root}",
+            )
         if not run_dir.exists():
             raise HTTPException(status_code=404, detail=f"Run dir not found: {run_dir}")
 

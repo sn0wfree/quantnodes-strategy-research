@@ -411,11 +411,20 @@ class TestHypothesisRouter:
 
 
 class TestValidationRouter:
-    def test_validate_run_not_found(self, client):
-        resp = client.post("/api/validate/run", json={
-            "run_dir": "/nonexistent/path",
-        })
+    def test_validate_run_not_found(self, client, tmp_path, monkeypatch):
+        # A3: containment check fires first if path is outside the
+        # configured root. Use the home dir as root and an in-root
+        # missing dir → still 404.
+        monkeypatch.setenv("STRATEGY_RESEARCH_VALIDATE_ROOT", str(tmp_path))
+        missing = tmp_path / "no-such-run"
+        resp = client.post("/api/validate/run", json={"run_dir": str(missing)})
         assert resp.status_code == 404
+
+    def test_validate_run_rejects_path_outside_root(self, client, tmp_path, monkeypatch):
+        """A3: paths outside STRATEGY_RESEARCH_VALIDATE_ROOT → 400."""
+        monkeypatch.setenv("STRATEGY_RESEARCH_VALIDATE_ROOT", str(tmp_path))
+        resp = client.post("/api/validate/run", json={"run_dir": "/etc"})
+        assert resp.status_code == 400
 
 
 # ============================================================
