@@ -204,6 +204,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         # One-time compaction-type backfill (full-table LIKE scan)
         _migrate_message_types(conn)
         conn.execute("PRAGMA user_version = 3")
+    if version < 4:
+        # Chat persona column (Composer agent selector). Nullable so old
+        # rows start as the default chat persona.
+        _add_column(conn, "attempts", "persona", "TEXT")
+        conn.execute("PRAGMA user_version = 4")
 
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
@@ -221,6 +226,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             completed_at TEXT,
             error TEXT,
             message_id TEXT,
+            persona TEXT,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         )
     """)

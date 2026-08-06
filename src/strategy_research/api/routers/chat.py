@@ -503,6 +503,7 @@ async def send_async(body: ChatMessage, request: Request):
         content=body.content,
         max_iterations=_max_iter,
         allow_shell_tools=_allow_shell,
+        persona=body.agent_id,
     )
 
     # Queue-full guard: SessionService returns {"error": "queue_full", ...}
@@ -1515,6 +1516,37 @@ async def list_active_attempts(
     _fetch_session_owned(_get_db(), session_id, user_id)
     service = _get_session_service()
     return {"attempts": service.list_active_attempts(session_id)}
+
+
+@router.get("/personas")
+async def list_personas(request: Request = None):
+    """List available chat personas (roles) for the Composer agent selector.
+
+    Returns ``{"personas": [{"id", "name", "description"}, ...]}`` — the
+    curated set of role prompts the composer may switch to. ``chat`` is the
+    default (general) persona.
+    """
+    from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
+
+    labels = {
+        "chat": ("通用助手", "默认聊天助手，适合日常问答与策略讨论"),
+        "researcher": ("研究员", "深度资料调研与信息检索"),
+        "strategist": ("策略师", "策略设计与回测分析"),
+        "factor_analyst": ("因子分析师", "因子计算与有效性分析"),
+        "data_quality": ("数据质量", "数据质量与来源核查"),
+        "portfolio_construction": ("组合构建", "组合权重与配置优化"),
+        "risk_controller": ("风控", "风险度量与回撤控制"),
+        "attribution_analyst": ("归因分析", "收益与风险归因"),
+        "anti_overfit_analyst": ("反过拟合", "过拟合诊断与稳健性检验"),
+        "backtest_diagnostics": ("回测诊断", "回测结果核查与诊断"),
+        "critic": ("评审", "对结论与策略进行批判性审查"),
+    }
+    persona = PromptBuilderFactory.list_roles()
+    personas = []
+    for pid in persona:
+        name, desc = labels.get(pid, (pid, ""))
+        personas.append({"id": pid, "name": name, "description": desc})
+    return {"personas": personas}
 
 
 async def _event_generator(

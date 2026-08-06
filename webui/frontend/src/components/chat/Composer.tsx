@@ -2,23 +2,51 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, Image as ImageIcon, X, Square } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
 import { useSessionStore } from '../../stores/session'
+import { usePersonaStore } from '../../stores/personas'
 import { useToastStore } from '../../stores/toast'
 import { api } from '../../api/client'
 import { uuid } from '../../utils/uuid'
+import { ComposerToolbar } from './ComposerToolbar'
+import { SlashCommandMenu } from './SlashCommandMenu'
 
 export function Composer() {
   const [text, setText] = useState('')
   const [images, setImages] = useState<string[]>([])
   const [sending, setSending] = useState(false)
+  const [slashQuery, setSlashQuery] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const addMessage = useChatStore((s) => s.addMessage)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const setActiveAttempt = useChatStore((s) => s.setActiveAttempt)
   const cancelAttempt = useChatStore((s) => s.cancelAttempt)
   const addToast = useToastStore((s) => s.addToast)
+  const getSessionPersona = usePersonaStore((s) => s.getSessionPersona)
 
   const isStreaming = streamingMessageId !== null
+
+  const draftKey = currentSessionId ? `sr-draft-${currentSessionId}` : null
+
+  // Restore draft when switching sessions
+  useEffect(() => {
+    if (!draftKey) {
+      setText('')
+      return
+    }
+    setText(localStorage.getItem(draftKey) ?? '')
+  }, [draftKey])
+
+  // Persist draft (debounced); empty text clears the draft
+  useEffect(() => {
+    if (!draftKey) return
+    if (!text.trim()) {
+      localStorage.removeItem(draftKey)
+      return
+    }
+    const t = setTimeout(() => localStorage.setItem(draftKey, text), 300)
+    return () => clearTimeout(t)
+  }, [text, draftKey])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -35,9 +63,11 @@ export function Composer() {
 
     const content = text.trim()
     const messageImages = [...images]
+    const persona = currentSessionId ? getSessionPersona(currentSessionId) : undefined
     setText('')
     setImages([])
     setSending(true)
+    setSlashQuery(null)
 
     // Optimistic: add user message to store immediately with a local temp id.
     const tempUserId = uuid('msg')
@@ -63,6 +93,7 @@ export function Composer() {
         session_id: currentSessionId,
         content,
         images: messageImages.length > 0 ? messageImages : undefined,
+        agent_id: persona && persona !== 'chat' ? persona : undefined,
       })
 
       // Store attempt_id for cancel support
@@ -106,13 +137,37 @@ export function Composer() {
     } finally {
       setSending(false)
     }
-  }, [text, images, currentSessionId, addMessage, setActiveAttempt])
+  }, [text, images, currentSessionId, addMessage, setActiveAttempt, getSessionPersona, addToast])
 
   const handleCancel = useCallback(() => {
     cancelAttempt()
   }, [cancelAttempt])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Slash command menu navigation
+    if (slashQuery !== null) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('sr:slash-nav', { detail: 1 }))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('sr:slash-nav', { detail: -1 }))
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashQuery(null)
+        return
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('sr:slash-enter'))
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (isStreaming) {
@@ -122,6 +177,57 @@ export function Composer() {
       }
     }
   }
+
+  // Track typing to open/close the slash command menu
+  const handleChange = (v: string) => {
+    setText(v)
+    const ta = textareaRef.current
+    if (ta) {
+      const caret = ta.selectionStart ?? v.length
+      // Find the extent of the current "word" being typed after the last
+      // whitespace to decide whether to show the menu.
+      const before = v.slice(0, caret)
+      const m = /(\/[\w]*)$/.exec(before)
+      if (m && m[1].startsWith('/')) {
+        setSlashQuery(m[1])
+      } else {
+        setSlashQuery(null)
+      }
+    }
+  }
+
+  const applyMarkdown = useCallback((prefix: string, suffix?: string) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    const sel = text.slice(start, end)
+    const before = text.slice(0, start)
+    const after = text.slice(end)
+    const wrapped = sel
+      ? `${prefix}${sel}${suffix ?? ''}`
+      : `${prefix}${suffix ?? ''}`
+    const next = `${before}${wrapped}${after}`
+    setText(next)
+    setSlashQuery(null)
+    // Restore focus + selection after state update
+    requestAnimationFrame(() => {
+      ta.focus()
+      const newCaret = before.length + prefix.length + sel.length
+      ta.setSelectionRange(newCaret, newCaret)
+    })
+  }, [text])
+
+  const selectSlashCommand = useCallback((command: string) => {
+    // Replace the partial `/xxx` token with the full command
+    setText((prev) => {
+      const m = /(\/[\w]*)$/.exec(prev)
+      if (m) return prev.slice(0, m.index) + command + ' '
+      return prev + command + ' '
+    })
+    setSlashQuery(null)
+    textareaRef.current?.focus()
+  }, [])
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData.items)
@@ -141,24 +247,31 @@ export function Composer() {
   }, [])
 
   const handleFileSelect = useCallback(() => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0]
-      if (file && file.size <= 5 * 1024 * 1024) {
-        const reader = new FileReader()
-        reader.onload = () => {
-          setImages((prev) => [...prev, reader.result as string])
-        }
-        reader.readAsDataURL(file)
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file && file.size <= 5 * 1024 * 1024) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        setImages((prev) => [...prev, reader.result as string])
       }
+      reader.readAsDataURL(file)
     }
-    input.click()
+    e.target.value = ''
   }, [])
 
   return (
     <div className="border-t border-slate-800 bg-slate-900/80 p-4">
+      {/* Hidden file input reused for image attachments */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
       {/* Image previews */}
       {images.length > 0 && (
         <div className="mb-2 flex gap-2">
@@ -176,12 +289,22 @@ export function Composer() {
         </div>
       )}
 
+      {/* Slash command menu (anchored above the toolbar row) */}
+      <div className="relative">
+        {slashQuery !== null && (
+          <SlashCommandMenu query={slashQuery} onSelect={selectSlashCommand} />
+        )}
+      </div>
+
+      {/* Toolbar: persona selector + markdown actions */}
+      <ComposerToolbar sessionId={currentSessionId} onApplyMarkdown={applyMarkdown} />
+
       {/* Input area */}
       <div className="glass rounded-xl flex items-end gap-2 px-4 py-3">
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={
@@ -216,7 +339,8 @@ export function Composer() {
             <button
               onClick={handleSend}
               disabled={sending || (!text.trim() && images.length === 0) || !currentSessionId}
-              className="rounded-lg bg-primary-600 p-1.5 text-white hover:bg-primary-700 disabled:opacity-30 disabled:hover:bg-primary-600 transition-colors"
+              className="rounded-lg bg-gradient-to-br from-primary-500 to-accent-400 p-1.5 text-white shadow-glow transition-all hover:brightness-110 disabled:opacity-30 disabled:shadow-none disabled:hover:brightness-100"
+              title="发送 (Enter)"
             >
               <Send className="h-4 w-4" />
             </button>

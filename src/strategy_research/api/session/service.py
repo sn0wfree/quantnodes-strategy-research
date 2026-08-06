@@ -122,6 +122,7 @@ class SessionService:
         max_iterations: int = 50,
         system_prompt: Optional[str] = None,
         allow_shell_tools: bool = False,
+        persona: str | None = None,
     ) -> dict[str, str]:
         """Send a user message and enqueue background AgentLoop execution.
 
@@ -139,6 +140,10 @@ class SessionService:
             system_prompt: Optional custom system prompt (TUI goal mode uses
                 a different prompt than API chat mode).
             allow_shell_tools: Whether the registry may include shell tools.
+            persona: Optional role/persona name (e.g. ``researcher``,
+                ``strategist``). When provided and valid, its system prompt
+                replaces the default chat prompt. Unknown personas fall back
+                to the default chat persona.
 
         Returns:
             ``{"message_id": ..., "attempt_id": ..., "queue_position": N}``
@@ -198,6 +203,7 @@ class SessionService:
             message_id=str(uuid.uuid4()),
             status=AttemptStatus.PENDING,
             created_at=_utc_now_iso(),
+            persona=persona,
         )
         self.store.create_attempt(attempt)
         self.event_bus.emit(
@@ -565,6 +571,7 @@ class SessionService:
                 max_iterations=max_iterations,
                 system_prompt=system_prompt,
                 allow_shell_tools=allow_shell_tools,
+                persona=getattr(attempt, "persona", None),
                 cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
                 accumulated_parts=accumulated_parts,
             )
@@ -699,6 +706,7 @@ class SessionService:
         allow_shell_tools: bool,
         accumulated_parts: list[dict[str, Any]],
         cfg: LLMConfig,
+        persona: Optional[str] = None,
     ) -> dict[str, Any]:
         """Build AgentLoop and run it. Returns ``{content, status, ...}``.
 
@@ -881,15 +889,33 @@ class SessionService:
         # Bootstrap workspace if incomplete
         _bootstrap_workspace(workspace_path)
 
+        # Persona override: when a valid persona is requested, render its
+        # system prompt and use it in place of the default chat prompt.
+        # Unknown persona → fall back to the caller-provided/default chat
+        # prompt (empty string is treated as "no override").
+        final_prompt = system_prompt
+        loop_role = "chat"
+        if system_prompt is None and persona:
+            from strategy_research.core.agent.prompt_builder import (
+                PromptBuilderFactory,
+            )
+            if persona in PromptBuilderFactory.list_roles():
+                persona_prompt = PromptBuilderFactory.get(persona).build_system_prompt(
+                    persona, {}
+                )
+                if persona_prompt:
+                    final_prompt = persona_prompt
+                    loop_role = persona
+
         agent = build_chat_agent_loop(
             config=cfg,
             session_id=attempt.session_id,
-            role="chat",
+            role=loop_role,
             workspace=workspace_path,  # P3: real workspace path for {workspace}
             on_event=event_callback,
             event_bus=self.event_bus,
             max_iterations=max_iterations,
-            system_prompt_override=system_prompt,  # caller-provided wins
+            system_prompt_override=final_prompt,  # caller-provided wins
             allow_shell_tools=allow_shell_tools,
         )
 

@@ -1,8 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, Command, PanelRight, PanelRightClose, Pencil } from 'lucide-react'
+import { Search, Command, PanelRight, PanelRightClose, Pencil, Moon, Sun, Columns2, Sparkles } from 'lucide-react'
 import { useSessionStore } from '../../stores/session'
-import { useLayoutStore } from '../../stores/layout'
+import { useLayoutStore, type Density } from '../../stores/layout'
+import { useThemeStore } from '../../stores/theme'
+import { useThinkingPrefStore } from '../../stores/thinkingPref'
 import { SSEStatus } from '../common/SSEStatus'
+
+const DENSITY_CYCLE: Density[] = ['compact', 'comfortable', 'spacious']
+const DENSITY_LABEL: Record<Density, string> = {
+  compact: '紧凑',
+  comfortable: '舒适',
+  spacious: '宽松',
+}
 
 export function TopBar() {
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
@@ -12,6 +21,12 @@ export function TopBar() {
   const currentSession = sessions.find((s) => s.id === currentSessionId)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
+  const density = useLayoutStore((s) => s.density)
+  const setDensity = useLayoutStore((s) => s.setDensity)
+  const theme = useThemeStore((s) => s.theme)
+  const toggleTheme = useThemeStore((s) => s.toggleTheme)
+  const thinkingCollapsed = useThinkingPrefStore((s) => s.collapsed)
+  const setThinkingCollapsed = useThinkingPrefStore((s) => s.setCollapsed)
 
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState('')
@@ -47,7 +62,6 @@ export function TopBar() {
   return (
     <header className="glass flex h-12 items-center justify-between border-b border-slate-800 px-4">
       <div className="flex items-center gap-3 min-w-0">
-        <h1 className="text-sm font-medium text-slate-200 flex-shrink-0">Strategy Research</h1>
         {currentSession && (
           <div className="flex items-center gap-1 min-w-0">
             <span className="text-xs text-slate-500 flex-shrink-0">/</span>
@@ -93,6 +107,41 @@ export function TopBar() {
         </div>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={() => {
+            const idx = DENSITY_CYCLE.indexOf(density)
+            const next = DENSITY_CYCLE[(idx + 1) % DENSITY_CYCLE.length]
+            setDensity(next)
+          }}
+          title={`布局密度：${DENSITY_LABEL[density]}（点击切换）`}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/50 px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-300"
+        >
+          <Columns2 className="h-3.5 w-3.5" />
+          <span>{DENSITY_LABEL[density]}</span>
+        </button>
+        <button
+          onClick={() => setThinkingCollapsed(!thinkingCollapsed)}
+          title={thinkingCollapsed ? '展开思考过程' : '折叠思考过程'}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+            thinkingCollapsed
+              ? 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-slate-600 hover:text-slate-300'
+              : 'border-violet-500/50 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20'
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          <span>{thinkingCollapsed ? '思考折叠' : '思考展开'}</span>
+        </button>
+        <button
+          onClick={toggleTheme}
+          title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/50 px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-300"
+        >
+          {theme === 'dark' ? (
+            <Sun className="h-3.5 w-3.5" />
+          ) : (
+            <Moon className="h-3.5 w-3.5" />
+          )}
+        </button>
         <button
           onClick={toggleRightPanel}
           title={rightPanelVisible ? '隐藏右侧面板' : '显示右侧面板'}

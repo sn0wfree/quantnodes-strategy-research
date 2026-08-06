@@ -254,8 +254,8 @@ class SessionStore:
                 INSERT INTO attempts (
                     attempt_id, session_id, parent_attempt_id, status,
                     prompt, run_dir, summary, react_trace_json, metrics_json,
-                    created_at, completed_at, error, message_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, completed_at, error, message_id, persona
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     attempt.attempt_id,
@@ -271,6 +271,7 @@ class SessionStore:
                     attempt.completed_at,
                     attempt.error,
                     attempt.message_id,
+                    attempt.persona,
                 ),
             )
             conn.commit()
@@ -372,6 +373,7 @@ def _row_to_attempt(row: sqlite3.Row) -> Attempt:
         error=row["error"],
         message_id=row["message_id"],
         metrics=json.loads(row["metrics_json"]) if row["metrics_json"] else None,
+        persona=row["persona"] if "persona" in row.keys() else None,
     )
 
 

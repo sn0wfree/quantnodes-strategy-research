@@ -3,6 +3,7 @@ import { Sparkles, ChevronRight, Copy, Check } from 'lucide-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { formatDuration } from '../../utils/time'
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
+import { useThinkingPrefStore } from '../../stores/thinkingPref'
 
 interface ThinkingBlockProps {
   text: string
@@ -19,14 +20,18 @@ export function ThinkingBlock({
   startTime,
   endTime,
 }: ThinkingBlockProps) {
+  const globalCollapsed = useThinkingPrefStore((s) => s.collapsed)
   const [isExpanded, setIsExpanded] = useState(!collapsed)
   const [copied, copy] = useCopyToClipboard()
   const [tickMs, setTickMs] = useState(0)
 
-  // Sync expanded state with collapsed prop
+  // Sync expanded state with collapsed prop. While streaming, reasoning is
+  // always shown expanded (opencode behavior); when sealed, respect the
+  // global collapse preference so the user's fold state persists across
+  // messages (Phase C3).
   useEffect(() => {
-    setIsExpanded(!collapsed)
-  }, [collapsed])
+    setIsExpanded(streaming ? true : !(collapsed && globalCollapsed))
+  }, [collapsed, streaming, globalCollapsed])
 
   useEffect(() => {
     if (!streaming || !startTime) return
@@ -78,7 +83,9 @@ export function ThinkingBlock({
         <Sparkles className="h-3 w-3 text-violet-400/70" />
         <span className="font-medium">{label}</span>
         {streaming && (
-          <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse ml-0.5" />
+          <span className="thinking-dots ml-0.5">
+            <span /><span /><span />
+          </span>
         )}
         <span className="ml-auto flex items-center gap-2 text-[10px] text-violet-400/50">
           {text.length > 50 && <span>{text.length} 字</span>}

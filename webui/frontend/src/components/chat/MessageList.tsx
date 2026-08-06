@@ -10,8 +10,9 @@ import { EmptyState } from '../common/EmptyState'
 import { QueuePauseBanner } from './QueuePauseBanner'
 import { ContextUsageBar } from './ContextUsageBar'
 import { CompactBanner } from './CompactBanner'
+import { QuickStartChips } from './QuickStartChips'
 import { MessageSquare } from 'lucide-react'
-import { formatTime } from '../../utils/time'
+import { formatTime, dayLabel } from '../../utils/time'
 
 
 export function MessageList() {
@@ -72,6 +73,9 @@ export function MessageList() {
             description="发送消息与 Agent 交流"
           />
         </div>
+        <div className="flex flex-col items-center pb-6">
+          <QuickStartChips />
+        </div>
       </div>
     )
   }
@@ -100,6 +104,20 @@ export function MessageList() {
             : undefined,
         }}
         itemContent={(_index, message) => {
+          // Day separator: show a date divider when the calendar day
+          // changes from the previous message.
+          const prev = _index > 0 ? messageList[_index - 1] : null
+          const showDay =
+            _index === 0 ||
+            (prev && dayLabel(prev.created_at) !== dayLabel(message.created_at))
+          const daySeparator = showDay ? (
+            <div className="flex items-center gap-3 px-4 pt-3">
+              <div className="h-px flex-1 bg-slate-800/60" />
+              <span className="text-[11px] text-slate-500">{dayLabel(message.created_at)}</span>
+              <div className="h-px flex-1 bg-slate-800/60" />
+            </div>
+          ) : null
+
           // Tool messages are persisted to DB for history reconstruction
           // (see _convert_messages_to_history in backend) but should NOT
           // render as Agent cards in the UI. Each tool result is already
@@ -111,26 +129,28 @@ export function MessageList() {
           // Error messages: show as warning bubble with collapsible detail
           if (message.message_type === 'error') {
             return (
+              <>
+                {daySeparator}
               <div className="px-4 py-3 transition-all">
                 <div className="flex gap-3">
-                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-400">
                     ⚠
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex items-center gap-2 text-xs">
-                      <span className="font-medium text-amber-700">请求失败</span>
+                      <span className="font-medium text-red-400">请求失败</span>
                       <span className="text-slate-500">{formatTime(message.created_at)}</span>
                     </div>
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                       {message.parts?.map((part, i) => (
                         <span key={i}>{part.type === 'text' ? part.text : ''}</span>
                       ))}
                       {message.metadata?.details && (
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-xs text-amber-700 hover:text-amber-800">
+                          <summary className="cursor-pointer text-xs text-red-400 hover:text-red-300">
                             查看详情
                           </summary>
-                          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-amber-100/60 p-2 text-xs text-amber-800">
+                          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-red-500/10 p-2 text-xs text-red-400">
                             {message.metadata.details}
                           </pre>
                         </details>
@@ -139,23 +159,29 @@ export function MessageList() {
                   </div>
                 </div>
               </div>
+              </>
             )
           }
 
           // Compaction messages: show as historical summary card
           if (message.message_type === 'compaction') {
             return (
+              <>
+                {daySeparator}
               <div className="px-4 py-3 transition-all">
-                <div className="mb-1 flex items-center gap-2 text-xs">
-                  <span className="font-medium text-slate-500">📋 历史摘要</span>
-                  <span className="text-slate-600">{formatTime(message.created_at)}</span>
-                </div>
-                <div className="text-sm text-slate-400 leading-relaxed">
-                  {message.parts?.map((part, i) => (
-                    <span key={i}>{part.type === 'text' ? part.text : ''}</span>
-                  ))}
+                <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 px-3 py-2.5">
+                  <div className="mb-1 flex items-center gap-2 text-xs">
+                    <span className="font-medium text-slate-400">📋 历史摘要</span>
+                    <span className="text-slate-600">{formatTime(message.created_at)}</span>
+                  </div>
+                  <div className="text-sm text-slate-400 leading-relaxed">
+                    {message.parts?.map((part, i) => (
+                      <span key={i}>{part.type === 'text' ? part.text : ''}</span>
+                    ))}
+                  </div>
                 </div>
               </div>
+              </>
             )
           }
 
@@ -166,15 +192,23 @@ export function MessageList() {
             message.metadata?.queue_status === 'queued' &&
             !isStreaming
           if (message.role === 'user') {
-            return <MessageBubble message={message} layout={chatLayout} />
+            return (
+              <>
+                {daySeparator}
+                <MessageBubble message={message} layout={chatLayout} />
+              </>
+            )
           }
           return (
-            <AssistantMessage
-              message={message}
-              isStreaming={isStreaming}
-              isQueued={isQueued}
-              layout={chatLayout}
-            />
+            <>
+              {daySeparator}
+              <AssistantMessage
+                message={message}
+                isStreaming={isStreaming}
+                isQueued={isQueued}
+                layout={chatLayout}
+              />
+            </>
           )
         }}
         followOutput="smooth"

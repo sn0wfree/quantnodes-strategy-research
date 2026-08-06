@@ -246,6 +246,28 @@ class APIClient {
           `&run_name=${encodeURIComponent(runName)}` +
           `&max_points=${maxPoints}`,
       ),
+
+    list: (
+      workspacePath: string,
+      strategyName = '',
+      limit = 20,
+    ) =>
+      this.get<RunListResponse>(
+        `/run/list?workspace_path=${encodeURIComponent(workspacePath)}` +
+          `&strategy_name=${encodeURIComponent(strategyName)}` +
+          `&limit=${limit}`,
+      ),
+  }
+
+  strategies = {
+    list: (workspacePath: string) =>
+      this.get<StrategiesListResponse>(
+        `/strategies/list?workspace_path=${encodeURIComponent(workspacePath)}`,
+      ),
+  }
+
+  personas = {
+    list: () => this.get<PersonasResponse>('/chat/personas'),
   }
 
   workflow = {
@@ -483,6 +505,28 @@ export interface RunEquityResponse {
   equity: RunEquityPoint[]
 }
 
+export interface RunListItem {
+  name: string
+  metrics: Record<string, number | string>
+}
+
+export interface RunListResponse {
+  status: string
+  runs: RunListItem[]
+}
+
+// ── Strategies API types ───────────────────────────────────────────
+
+export interface StrategyListItem {
+  name: string
+  has_strategy_py: boolean
+  has_config_yaml: boolean
+}
+
+export interface StrategiesListResponse {
+  strategies: StrategyListItem[]
+}
+
 // ── Workflow API types ─────────────────────────────────────────────
 
 export interface WorkflowListItem {
@@ -494,6 +538,18 @@ export interface WorkflowListItem {
 export interface WorkflowListResponse {
   status: string
   workflows: WorkflowListItem[]
+}
+
+// ── Chat personas API types ────────────────────────────────────────
+
+export interface ChatPersona {
+  id: string
+  name: string
+  description: string
+}
+
+export interface PersonasResponse {
+  personas: ChatPersona[]
 }
 
 export interface WorkflowGraphResponse {

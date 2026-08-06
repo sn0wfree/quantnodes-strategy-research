@@ -17,6 +17,7 @@ import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
 import { ImageBlock } from './ImageBlock'
 import { StreamingText } from './StreamingText'
+import { MessageActions } from './MessageActions'
 import { formatTime } from '../../utils/time'
 import { useChatStore } from '../../stores/chat'
 
@@ -61,6 +62,42 @@ function QueuedIndicator({
         等待中... {pos}/{len}
       </span>
     </div>
+  )
+}
+
+/** Shape of the L2 claim-validation result attached to message metadata. */
+interface ClaimValidation {
+  ok: boolean
+  total_claims: number
+  verified: string[]
+  unverified: string[]
+  confidence: number
+  detail: string
+}
+
+/**
+ * Verifiability badge — surfaces whether the assistant's metric claims
+ * trace back to real tool results (truthfulness L3).
+ *
+ * - no metadata / ok / no claims → rendered nothing
+ * - confidence >= 0.5 → 🟡 yellow (some unverified)
+ * - confidence < 0.5  → 🔴 red (mostly unverified)
+ */
+function VerifiabilityBadge({ cv }: { cv?: ClaimValidation }) {
+  if (!cv || cv.ok || cv.total_claims === 0) return null
+  const red = cv.confidence < 0.5
+  return (
+    <span
+      className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-bold leading-none ${
+        red
+          ? 'bg-red-500/20 text-red-400 ring-1 ring-red-500/40'
+          : 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/40'
+      }`}
+      title={cv.detail}
+      aria-label={cv.detail}
+    >
+      {red ? '!' : '?'}
+    </span>
   )
 }
 
@@ -267,14 +304,44 @@ export function AssistantMessage({
     ? `Agent · ${message.metadata.model}`
     : 'Agent'
 
+  // Live status line while streaming: tool-call count (from parts) and
+  // token usage (from metadata.tokens_used when the backend has pushed it).
+  const toolCount = (message.parts ?? []).filter((p) => p.type === 'tool_call').length
+  const statusChips = isStreaming ? (
+    <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+      {toolCount > 0 && <span>· {toolCount} 工具</span>}
+      {typeof message.metadata?.tokens_used === 'number' && (
+        <span>· {message.metadata.tokens_used} tokens</span>
+      )}
+    </span>
+  ) : null
+
+  const actions = (
+    <MessageActions message={message} alwaysVisible={layout === 'flat'} />
+  )
+
   const headerLine = (
     <div className="mb-1.5 flex items-center gap-2">
       {layout === 'bubble' && (
-        <span className="text-xs font-medium text-slate-400">{modelLabel}</span>
+        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
+          {isStreaming && (
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-500 shadow-glow" />
+          )}
+          {modelLabel}
+          <VerifiabilityBadge cv={message.metadata?.claim_validation} />
+          {statusChips}
+        </span>
       )}
       {layout === 'flat' && (
         <>
-          <span className="text-xs font-medium text-emerald-400">{modelLabel}</span>
+          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+            {isStreaming && (
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-500 shadow-glow" />
+            )}
+            {modelLabel}
+            <VerifiabilityBadge cv={message.metadata?.claim_validation} />
+            {statusChips}
+          </span>
           <span className="text-xs text-slate-600">{formatTime(message.created_at)}</span>
         </>
       )}
@@ -323,7 +390,8 @@ export function AssistantMessage({
 
   if (layout === 'flat') {
     return (
-      <div className="px-4 py-3 border-b border-slate-800/40 last:border-b-0">
+      <div className="group relative px-4 py-3 border-b border-slate-800/40 last:border-b-0">
+        <div className="absolute right-2 top-2">{actions}</div>
         {headerLine}
         {body}
       </div>
@@ -332,8 +400,9 @@ export function AssistantMessage({
 
   // bubble mode (default)
   return (
-    <div className="flex gap-3 px-4 py-2.5">
-      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary-600 text-white text-xs font-medium">
+    <div className="group relative flex gap-3 px-4 py-2.5">
+      <div className="absolute right-2 top-2.5">{actions}</div>
+      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-accent-400 text-white text-xs font-medium">
         <Bot className="h-3.5 w-3.5" />
       </div>
       <div className="min-w-0 flex-1">
