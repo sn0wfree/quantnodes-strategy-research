@@ -14,7 +14,6 @@ import asyncio
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 import pytest
 
@@ -52,9 +51,7 @@ class MockLLM:
 
 
 def _make_loop(sink, *, max_iterations=1, stream_mode=False, no_progress_window=10):
-    cfg = mock.MagicMock()
-    cfg.model = "fake-model"
-    cfg.temperature = 0.7
+    cfg = LLMConfig(api_key="sk-test", model="fake-model", temperature=0.7)
     workspace = Path(tempfile.mkdtemp())
     return AgentLoop(
         config=cfg,

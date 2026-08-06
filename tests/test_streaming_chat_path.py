@@ -12,7 +12,6 @@ import asyncio
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 import pytest
 
@@ -47,7 +46,10 @@ class FakeStreamChunk:
     def __init__(self, content: str = "", *, usage: dict | None = None,
                  finish_reason: str | None = None):
         self.delta_content = content
-        self.delta_tool_calls = None
+        self.raw_content = content
+        self.delta_thinking = None
+        self.raw_thinking = None
+        self.delta_tool_calls = []
         self.usage = usage
         self.finish_reason = finish_reason
 
@@ -58,8 +60,7 @@ async def _astream_chunks(chunks):
 
 
 def _make_loop(sink, *, stream_mode=True, max_iterations=1):
-    cfg = mock.MagicMock()
-    cfg.model = "fake-model"
+    cfg = LLMConfig(api_key="sk-test", model="fake-model")
     workspace = Path(tempfile.mkdtemp())
     return AgentLoop(
         config=cfg,
@@ -269,8 +270,7 @@ class TestRunSyncAlsoHasFallback:
 
     def test_sync_run_stream_failure_falls_back_to_chat(self):
         sink = EventSink()
-        cfg = mock.MagicMock()
-        cfg.model = "fake-model"
+        cfg = LLMConfig(api_key="sk-test", model="fake-model")
         workspace = Path(tempfile.mkdtemp())
         loop = AgentLoop(
             config=cfg, registry=build_default_registry(),
@@ -293,8 +293,7 @@ class TestRunSyncAlsoHasFallback:
 
     def test_sync_run_auth_error_propagates(self):
         sink = EventSink()
-        cfg = mock.MagicMock()
-        cfg.model = "fake-model"
+        cfg = LLMConfig(api_key="sk-test", model="fake-model")
         workspace = Path(tempfile.mkdtemp())
         loop = AgentLoop(
             config=cfg, registry=build_default_registry(),

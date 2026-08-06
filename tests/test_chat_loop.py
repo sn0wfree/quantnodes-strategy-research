@@ -89,7 +89,8 @@ class TestChatLoopFactoryDefaults:
             config=fake_config, session_id="s1", role="chat"
         )
         sp = self._system_prompt(loop)
-        assert sp.startswith("# Role: QuantNodes-Research Chat Assistant")
+        # Common layer prepends principles.md; role content follows.
+        assert "# Role: QuantNodes-Research Chat Assistant" in sp
 
     def test_researcher_role_uses_static_builder(self, fake_config, fake_registry):
         """role='researcher' → StaticFilePromptBuilder (verbatim researcher.md)."""
@@ -99,7 +100,7 @@ class TestChatLoopFactoryDefaults:
             config=fake_config, session_id="s1", role="researcher"
         )
         sp = self._system_prompt(loop)
-        assert sp.startswith("# Role: Researcher")
+        assert "# Role: Researcher" in sp
 
     def test_stream_mode_forced_true(self, fake_config, fake_registry):
         from strategy_research.core.agent.chat_loop import build_chat_agent_loop

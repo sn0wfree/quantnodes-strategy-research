@@ -13,8 +13,11 @@ from unittest import mock
 
 import pytest
 
+from strategy_research import _TEMPLATES_DIR
 from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.session import ChatSession
+
+_CHAT_PROMPT_PATH = _TEMPLATES_DIR / ".prompts" / "chat.md"
 
 
 # ---------------------------------------------------------------- InteractiveContext default
@@ -109,7 +112,6 @@ class TestPromptSelection:
         session.session_logger = None
         session._pending_input = None
 
-        from strategy_research.cli.tui import _CHAT_PROMPT_PATH
         chat_content = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
 
         # Capture what system_prompt is passed to AgentLoop
@@ -186,23 +188,19 @@ class TestPromptSelection:
 
 class TestChatPromptFile:
     def test_chat_md_exists(self):
-        from strategy_research.cli.tui import _CHAT_PROMPT_PATH
         assert _CHAT_PROMPT_PATH.exists()
 
     def test_chat_md_not_empty(self):
-        from strategy_research.cli.tui import _CHAT_PROMPT_PATH
         content = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
         assert len(content.strip()) > 0
 
     def test_chat_md_no_json_instruction(self):
         """chat.md must NOT instruct the LLM to output JSON."""
-        from strategy_research.cli.tui import _CHAT_PROMPT_PATH
         content = _CHAT_PROMPT_PATH.read_text(encoding="utf-8").lower()
         assert "纯 json" not in content
         assert "必须返回" not in content or "json" not in content
         assert "直接以 {" not in content
 
     def test_chat_md_mentions_natural_language(self):
-        from strategy_research.cli.tui import _CHAT_PROMPT_PATH
         content = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
         assert "自然语言" in content

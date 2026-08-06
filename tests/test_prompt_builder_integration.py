@@ -118,8 +118,9 @@ class TestPhase5BehaviorUnchanged:
         ]
         for role in roles:
             prompt = PromptBuilderFactory.get(role).build_system_prompt(role, {})
-            assert prompt.startswith("# Role:"), (
-                f"{role} prompt should start with '# Role:' header, got: "
+            # Common layer prepends principles.md; role header follows.
+            assert "# Role:" in prompt, (
+                f"{role} prompt missing '# Role:' header, got: "
                 f"{prompt[:60]!r}"
             )
 

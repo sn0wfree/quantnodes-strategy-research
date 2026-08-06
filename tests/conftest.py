@@ -39,3 +39,36 @@ def _isolate_llm_bridge(tmp_path_factory):
     mp.setenv("STRATEGY_RESEARCH_LLM_CONFIG", str(fixture))
     yield
     mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _purge_llm_env(monkeypatch):
+    """Strip host LLM credentials before every test.
+
+    ``LLMConfig.load()`` calls ``_try_load_dotenv()`` which re-injects keys
+    from ``~/.quantnodes/.env`` into ``os.environ`` after a test's own
+    ``monkeypatch.delenv`` has cleared them — so the very first ``load()``
+    would see a clean env, but the second (e.g. inside ``should_use_real_llm``)
+    would see the dotenv-restored ``LLM_API_KEY`` and take the real-LLM path.
+
+    This runs per-test (not session) so it re-cleans right before each test,
+    and is order-independent of any test-local monkeypatch calls.
+
+    ``_try_load_dotenv`` is neutralized entirely so ``LLMConfig.load()`` can
+    never pull host keys from ``~/.quantnodes/.env`` mid-test (tests that
+    genuinely need a key load it explicitly, e.g. ``test_chat_real_llm``).
+    """
+    for var in (
+        "LLM_API_KEY",
+        "OPENAI_API_KEY",
+        "NVIDIA_API_KEY",
+        "MINIMAX_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "ZHIPU_API_KEY",
+        "QIANFAN_API_KEY",
+        "MOONSHOT_API_KEY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    import strategy_research.core.llm.config as _cfg
+    monkeypatch.setattr(_cfg, "_try_load_dotenv", lambda: None)

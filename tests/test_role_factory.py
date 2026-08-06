@@ -26,7 +26,9 @@ class TestRolePromptLoading:
         for role in roles:
             prompt = PromptBuilderFactory.get(role).build_system_prompt(role, {})
             assert len(prompt) > 50, f"{role} prompt is too short or missing"
-            assert prompt.startswith("# Role:"), f"{role} prompt missing # Role: header"
+            # After common layer prepended, role content follows; check
+            # for header anywhere in the prompt (not just at start).
+            assert "# Role:" in prompt, f"{role} prompt missing # Role: header"
 
     def test_unknown_role_returns_empty(self):
         from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
@@ -227,6 +229,7 @@ class TestSpawnAgentFallback:
         """_spawn_agent() 在无 API key 时仍返回合法 JSON (走 stub)."""
         monkeypatch.delenv("AUTORESEARCH_BEHAVIOR", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         # conftest._isolate_llm_bridge disables the bridge, so no api_key
         # is available -> should_use_real_llm() returns False -> stub.
         from strategy_research.cli import _spawn_agent
