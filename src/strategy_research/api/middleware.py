@@ -20,7 +20,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PREFIXES = [
         "/api/auth/",
         "/api/chat/",
-        "/api/study/",   # study task system — bound to a chat session
+        # /api/study/ removed from public prefixes: study task endpoints
+        # require authentication + session ownership like chat (see
+        # _fetch_session_owned in routers/web_session.py).
         "/api/system/",
         "/api/admin/",  # Admin endpoints use X-Admin-Token header
         "/assets/",

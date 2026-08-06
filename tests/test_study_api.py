@@ -32,6 +32,37 @@ def _build_asgi_app():
 def _app_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+    # Sessions DB is consulted by /api/study/* for ownership checks
+    # (A2); point it at a fresh per-test file and seed a "sess-1" row
+    # owned by "tester" (the user_id encoded by _bearer below).
+    sessions_db = tmp_path / "sessions.db"
+    monkeypatch.setenv("SR_SESSIONS_DB", str(sessions_db))
+    import sqlite3
+    conn = sqlite3.connect(str(sessions_db))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          title TEXT,
+          created_at TEXT,
+          updated_at TEXT,
+          starred INTEGER NOT NULL DEFAULT 0,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          message_count INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    now = "2026-08-01T10:00:00"
+    for sid in ("sess-1", "sess-A", "sess-other", "sess-stale"):
+        conn.execute(
+            "INSERT INTO sessions (id, user_id, title, created_at, updated_at) "
+            "VALUES (?, 'tester', 't', ?, ?)",
+            (sid, now, now),
+        )
+    conn.commit()
+    conn.close()
     ws = tmp_path / "ws"
     strat_dir = ws / "strategies" / "demo_strategy"
     strat_dir.mkdir(parents=True)
@@ -43,18 +74,28 @@ def _app_env(tmp_path: Path, monkeypatch):
     return ws
 
 
+def _bearer(user_id: str = "tester") -> dict:
+    from strategy_research.api.auth_tokens import create_token
+
+    return {"Authorization": f"Bearer {create_token(user_id)}"}
+
+
 @pytest.mark.asyncio
 async def test_start_rejects_missing_workspace(_app_env):
     app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
         body = {
             "session_id": "no-such", "objective": "x",
             "workspace_path": "/tmp/no-such-ws-xyz", "strategy_name": "demo",
         }
         r = await client.post("/api/study/start", json=body)
-        assert r.status_code == 400
-        assert "does not exist" in r.json()["detail"]
+        # A2: session ownership fires first (404 for unknown session).
+        assert r.status_code == 404
+        assert "session not found" in r.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -79,8 +120,11 @@ async def test_start_auto_creates_strategy(_app_env):
 @pytest.mark.asyncio
 async def test_cancel_unknown_returns_404(_app_env):
     app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
         r = await client.post("/api/study/unknown_study/pause")
         assert r.status_code == 404
 
@@ -88,8 +132,11 @@ async def test_cancel_unknown_returns_404(_app_env):
 @pytest.mark.asyncio
 async def test_list_returns_all_empty(_app_env):
     app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
         r = await client.get("/api/study/list")
         assert r.status_code == 200
         assert "studies" in r.json()
@@ -99,8 +146,11 @@ async def test_list_returns_all_empty(_app_env):
 @pytest.mark.asyncio
 async def test_list_invalid_status_returns_400(_app_env):
     app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
         r = await client.get("/api/study/list?status=bogus")
         assert r.status_code == 400
 
@@ -108,11 +158,54 @@ async def test_list_invalid_status_returns_400(_app_env):
 @pytest.mark.asyncio
 async def test_status_no_study(_app_env):
     app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
-        r = await client.get("/api/study/status?session_id=no-such-session")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        # sess-1 exists but has no study row → no_study
+        r = await client.get("/api/study/status?session_id=sess-1")
         assert r.status_code == 200
         assert r.json()["status"] == "no_study"
+
+
+@pytest.mark.asyncio
+async def test_status_unknown_session_returns_404(_app_env):
+    """A2: unknown session → 404 (ownership before status lookup)."""
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.get("/api/study/status?session_id=ghost-session")
+        assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_status_other_users_session_returns_403(_app_env, tmp_path, monkeypatch):
+    """A2: caller cannot read another user's session."""
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        # bob owns nothing in fixture (sessions are all owned by 'tester').
+        headers=_bearer("bob"),
+    ) as client:
+        r = await client.get("/api/study/status?session_id=sess-1")
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_status_unauthenticated_returns_401(_app_env):
+    """A2: missing token → 401."""
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        r = await client.get("/api/study/status?session_id=sess-1")
+        assert r.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -142,8 +235,11 @@ async def test_summary_returns_strategy_and_round_fields(_app_env, tmp_path, mon
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
 
     app = _build_asgi_app()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
         r = await client.get(f"/api/study/{study_id}/summary")
         assert r.status_code == 200
         data = r.json()
@@ -176,8 +272,11 @@ def _seed_study(_app_env, tmp_path, monkeypatch, *, objective="test objective",
 
 
 def _api_client():
+    from strategy_research.api.auth_tokens import create_token
+
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=_build_asgi_app()),
-                             base_url="http://test")
+                             base_url="http://test",
+                             headers={"Authorization": f"Bearer {create_token('tester')}"})
 
 
 @pytest.mark.asyncio
@@ -505,9 +604,10 @@ async def test_status_returns_no_study_when_session_has_none(_app_env, monkeypat
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
 
     async with _api_client() as client:
-        r = await client.get("/api/study/status?session_id=ghost-session")
+        # sess-other exists in the fixture but has no study row.
+        r = await client.get("/api/study/status?session_id=sess-other")
         assert r.status_code == 200
-        assert r.json() == {"status": "no_study", "session_id": "ghost-session"}
+        assert r.json() == {"status": "no_study", "session_id": "sess-other"}
 
 
 @pytest.mark.asyncio
@@ -542,7 +642,7 @@ async def test_status_returns_active_study_for_session(_app_env, tmp_path, monke
 
 @pytest.mark.asyncio
 async def test_status_returns_study_by_id(_app_env, tmp_path, monkeypatch):
-    """GET /status?study_id= 直接查询某个 study（不依赖 session）。"""
+    """GET /status?study_id= 直接查询某个 study（不依赖 session 过滤）。"""
     from strategy_research.core.study import StudyStore
 
     db_path = tmp_path / "goals.db"
@@ -558,9 +658,17 @@ async def test_status_returns_study_by_id(_app_env, tmp_path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
 
     async with _api_client() as client:
-        r = await client.get(f"/api/study/status?session_id=any&study_id={study_id}")
+        # Use sess-other (the study's parent session); study_id is also
+        # passed for explicit lookup. A2 ensures we can't read another
+        # user's study by ID alone.
+        r = await client.get(f"/api/study/status?session_id=sess-other&study_id={study_id}")
         assert r.status_code == 200
         assert r.json()["study_id"] == study_id
+
+    # IDOR: tester cannot read sess-other's study via study_id alone.
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/status?session_id=sess-1&study_id={study_id}")
+        assert r.status_code == 403
 
 
 @pytest.mark.asyncio

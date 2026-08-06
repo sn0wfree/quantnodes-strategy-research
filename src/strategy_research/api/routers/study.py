@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -120,11 +120,17 @@ class DirectiveRequest(BaseModel):
 
 
 @router.post("/start")
-async def study_start(req: StudyStartRequest):
+async def study_start(req: StudyStartRequest, request: Request):
     """Create a study + its goal ledger row + queue the executor.
 
     Returns ``{study_id, goal_id, status:"queued"}``.
     """
+    # Security: enforce session ownership (IDOR protection).
+    from .web_session import _fetch_session_owned, _get_db
+
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    _fetch_session_owned(_get_db(), req.session_id, user_id)
+
     print(f"[STUDY:api] POST /study/start session={req.session_id} "
           f"strategy={req.strategy_name} objective={req.objective[:40]}",
           flush=True)
@@ -319,11 +325,21 @@ async def study_start(req: StudyStartRequest):
 
 @router.get("/list")
 async def study_list(
+    request: Request,
     session_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
 ):
-    """List studies, optionally filtered by session/status."""
+    """List studies, optionally filtered by session/status.
+
+    When session_id is provided, enforces ownership (IDOR).
+    """
+    if session_id:
+        # Security: only allow listing studies for sessions the caller
+        # owns.
+        from .web_session import _fetch_session_owned, _get_db
+        user_id = getattr(request.state, "user_id", None) or "anonymous"
+        _fetch_session_owned(_get_db(), session_id, user_id)
     from ...core.study import StudyStore, StudyStatus
     try:
         status_enum = StudyStatus(status) if status else None
@@ -349,17 +365,34 @@ async def study_list(
 
 @router.get("/status")
 async def study_status(
+    request: Request,
     session_id: str = Query(...),
     study_id: Optional[str] = None,
 ):
-    """Return the active study (or one by id) for a session + its goal snapshot."""
+    """Return the active study (or one by id) for a session + its goal snapshot.
+
+    Security: enforces session ownership before reading the session's
+    studies. When `study_id` is also provided, verifies that the
+    study belongs to the queried session (cross-session IDOR block).
+    """
     print(f"[STUDY:api] GET /study/status session={session_id} study_id={study_id}",
           flush=True)
+    # Security: enforce session ownership.
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    _fetch_session_owned(_get_db(), session_id, user_id)
     from ...core.goal import GoalStore
     from ...core.study import StudyStore
     with StudyStore() as store:
         if study_id:
             study = store.get_study(study_id)
+            if study is None:
+                return {"status": "no_study", "session_id": session_id}
+            # Defense in depth: the study must belong to this session.
+            if study.session_id != session_id:
+                raise HTTPException(
+                    status_code=403, detail="Study does not belong to this session",
+                )
         else:
             study = store.get_active_study(session_id)
         if study is None:
@@ -412,7 +445,7 @@ def _snapshot(s: dict | None) -> dict | None:
 
 
 @router.get("/{study_id}/summary")
-async def study_summary(study_id: str):
+async def study_summary(request: Request, study_id: str):
     """Return study summary with recent rounds, scoreboard, and goal snapshot."""
     from ...core.goal import GoalStore
     from ...core.study import StudyStore
@@ -420,6 +453,8 @@ async def study_summary(study_id: str):
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
+        # Security: enforce session ownership (study -> session lookup).
+        _verify_study_ownership(request, study.session_id)
 
         # Recent rounds (last 5)
         recent_rounds = store.list_rounds(study_id, limit=5)
@@ -502,8 +537,27 @@ def _build_scoreboard(journal_entries: list) -> list[dict]:
 # ── POST /study/{study_id}/pause|resume|cancel ──────────────────────
 
 
+def _verify_study_ownership(request: Request, session_id: str) -> None:
+    """Enforce IDOR for any study-derived endpoint (study_id → session_id)."""
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    _fetch_session_owned(_get_db(), session_id, user_id)
+
+
+def _study_session_id(study_id: str) -> str | None:
+    """Look up a study's parent session_id; returns None if not found."""
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+    return study.session_id if study else None
+
+
 @router.post("/{study_id}/pause")
-async def study_pause(study_id: str):
+async def study_pause(request: Request, study_id: str):
+    sid = _study_session_id(study_id)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="study not active")
+    _verify_study_ownership(request, sid)
     sched = _get_study_scheduler()
     if not sched.pause(study_id):
         raise HTTPException(status_code=404, detail="study not active")
@@ -511,8 +565,14 @@ async def study_pause(study_id: str):
 
 
 @router.post("/{study_id}/resume")
-async def study_resume(study_id: str):
+async def study_resume(request: Request, study_id: str):
     """Resume a paused or interrupted study."""
+    sid = _study_session_id(study_id)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="study not found")
+
+    # Security: enforce session ownership.
+    _verify_study_ownership(request, sid)
     sched = _get_study_scheduler()
 
     # Check current status to decide resume path
@@ -535,7 +595,11 @@ async def study_resume(study_id: str):
 
 
 @router.post("/{study_id}/cancel")
-async def study_cancel(study_id: str):
+async def study_cancel(request: Request, study_id: str):
+    sid = _study_session_id(study_id)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="study not active")
+    _verify_study_ownership(request, sid)
     sched = _get_study_scheduler()
     if not sched.cancel(study_id):
         raise HTTPException(status_code=404, detail="study not active")
@@ -546,13 +610,19 @@ async def study_cancel(study_id: str):
 
 
 @router.post("/{study_id}/directive")
-async def study_directive(study_id: str, req: DirectiveRequest):
+async def study_directive(request: Request, study_id: str, req: DirectiveRequest):
     """Inject a user-issued directive into the study's next round.
 
     Persists to ``study_directives``; the executor's per-round loop
     consumes it and emits ``study_directives_consumed`` once the
     researcher agent has seen it.
     """
+    # Security: enforce session ownership before any DB mutation.
+    sid = _study_session_id(study_id)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="study not found")
+    _verify_study_ownership(request, sid)
+
     from ...core.study import StudyStore
     try:
         with StudyStore() as store:
@@ -588,13 +658,15 @@ async def study_directive(study_id: str, req: DirectiveRequest):
 
 
 @router.get("/{study_id}/directives")
-async def study_directives_list(study_id: str):
+async def study_directives_list(request: Request, study_id: str):
     """List pending + consumed directives for a study (audit trail)."""
     from ...core.study import StudyStore
     with StudyStore() as store:
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
+        # Security: enforce session ownership.
+        _verify_study_ownership(request, study.session_id)
         # Pull all (pending + consumed). Direct access on store.conn —
         # acceptable for the audit-only endpoint.
         with store._lock:  # noqa: SLF001 — internal but stable
