@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import time
 
@@ -21,21 +23,39 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
 
+from strategy_research.api.auth_tokens import _b64_decode, _b64_encode, _load_secret
 from strategy_research.api.middleware import AuthMiddleware
 
 
+def _sign(encoded: str) -> str:
+    signature = hmac.new(
+        _load_secret(), encoded.encode(), hashlib.sha256
+    ).digest()
+    return _b64_encode(signature)
+
+
 def make_token(user_id: str = "user-1", expires_in: int = 3600) -> str:
-    """生成简单的 JWT（base64 编码的 JSON，模拟 _verify_token 期望的格式）。"""
+    """生成签名 JWT（与 auth_tokens.create_token 同格式）。"""
     payload = {
         "sub": user_id,
-        "exp": int(time.time()) + expires_in,
+        "exp": time.time() + expires_in,
     }
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    encoded = _b64_encode(json.dumps(payload, separators=(",", ":")).encode())
+    return f"{encoded}.{_sign(encoded)}"
 
 
 def make_expired_token(user_id: str = "user-1") -> str:
-    payload = {"sub": user_id, "exp": int(time.time()) - 100}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    payload = {"sub": user_id, "exp": time.time() - 100}
+    encoded = _b64_encode(json.dumps(payload, separators=(",", ":")).encode())
+    return f"{encoded}.{_sign(encoded)}"
+
+
+def make_bad_signature_token(user_id: str = "user-1") -> str:
+    """有效载荷 + 错误签名（模拟篡改/旧格式）。"""
+    payload = {"sub": user_id, "exp": time.time() + 3600}
+    encoded = _b64_encode(json.dumps(payload, separators=(",", ":")).encode())
+    bogus = _b64_encode(b"\x00" * 32)
+    return f"{encoded}.{bogus}"
 
 
 @pytest.fixture
