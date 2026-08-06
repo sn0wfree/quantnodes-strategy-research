@@ -39,7 +39,7 @@ function ChartRenderer({ chart }: { chart: ChartPart }) {
             <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <Tooltip
-              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
             />
             <Bar dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} />
           </BarChart>
@@ -53,7 +53,7 @@ function ChartRenderer({ chart }: { chart: ChartPart }) {
             <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <Tooltip
-              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
             />
             <Line type="monotone" dataKey={yKey} stroke="#3b82f6" strokeWidth={2} dot={false} />
           </LineChart>
@@ -77,7 +77,7 @@ function ChartRenderer({ chart }: { chart: ChartPart }) {
               ))}
             </Pie>
             <Tooltip
-              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -90,7 +90,7 @@ function ChartRenderer({ chart }: { chart: ChartPart }) {
             <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
             <Tooltip
-              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
             />
             <Scatter dataKey={yKey} fill="#8b5cf6" />
           </ScatterChart>

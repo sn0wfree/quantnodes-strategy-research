@@ -45,7 +45,7 @@ describe('DAGNode', () => {
 
   it('applies status border color', () => {
     const { container } = renderWithReactFlow(mockNodeData)
-    const node = container.querySelector('.border-blue-500')
+    const node = container.querySelector('.border-primary-500')
     expect(node).toBeInTheDocument()
   })
 

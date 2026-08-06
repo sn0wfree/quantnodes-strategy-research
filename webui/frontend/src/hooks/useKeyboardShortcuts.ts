@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useCommandPaletteStore } from '../stores/commandPalette'
 import { useLayoutStore } from '../stores/layout'
 import { useSessionStore } from '../stores/session'
@@ -12,6 +13,7 @@ type KeyBinding = {
 }
 
 export function useKeyboardShortcuts() {
+  const navigate = useNavigate()
   const togglePalette = useCommandPaletteStore((s) => s.toggle)
   const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
@@ -21,13 +23,14 @@ export function useKeyboardShortcuts() {
   const switchSession = useSessionStore((s) => s.switchSession)
   const openSessionIds = useSessionStore((s) => s.openSessionIds)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
 
   const bindings: KeyBinding[] = [
     // Search
     { key: 'k', meta: true, action: () => setSearchOpen(true) },
     // Panel toggles
     { key: 'g', meta: true, action: () => setRightPanelTab('goal') },
-    { key: 'w', meta: true, action: () => setRightPanelTab('dag') },
+    { key: 'w', meta: true, action: () => navigate('/dag') },
     { key: 'b', meta: true, action: toggleRightPanel },
     // Tabs
     { key: '1', meta: true, action: () => openSessionIds[0] && void switchSession(openSessionIds[0]) },
@@ -39,8 +42,8 @@ export function useKeyboardShortcuts() {
     { key: '7', meta: true, action: () => openSessionIds[6] && void switchSession(openSessionIds[6]) },
     { key: '8', meta: true, action: () => openSessionIds[7] && void switchSession(openSessionIds[7]) },
     { key: '9', meta: true, action: () => openSessionIds[8] && void switchSession(openSessionIds[8]) },
-    // New tab
-    { key: 't', meta: true, action: () => void createNewSession('新会话') },
+    // New tab (⌘T) — jump into the chat workspace
+    { key: 't', meta: true, action: () => { void createNewSession('新会话'); navigate('/chat'); toggleSidebar() } },
     // Close current tab (⌘W also opens DAG — overlap, ignore ⌘W conflict)
     { key: 'w', meta: true, shift: true, action: () => currentSessionId && closeSession(currentSessionId) },
   ]
@@ -78,6 +81,7 @@ export function useKeyboardShortcuts() {
       switchSession,
       openSessionIds,
       currentSessionId,
+      toggleSidebar,
     ]
   )
 

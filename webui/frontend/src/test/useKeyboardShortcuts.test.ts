@@ -15,6 +15,11 @@ import { useCommandPaletteStore } from '../stores/commandPalette'
 import { useLayoutStore } from '../stores/layout'
 import { useSessionStore } from '../stores/session'
 
+const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }))
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => navigateMock,
+}))
+
 function fire(key: string, opts: { metaKey?: boolean; shiftKey?: boolean; target?: EventTarget | null } = {}) {
   const event = new KeyboardEvent('keydown', {
     key,
@@ -65,10 +70,10 @@ describe('useKeyboardShortcuts', () => {
     expect(useLayoutStore.getState().rightPanelTab).toBe('goal')
   })
 
-  it('Cmd/Ctrl+W switches the right panel to the DAG tab', () => {
+  it('Cmd/Ctrl+W opens the DAG page', () => {
     renderHook(() => useKeyboardShortcuts())
     fire('w', { metaKey: true })
-    expect(useLayoutStore.getState().rightPanelTab).toBe('dag')
+    expect(navigateMock).toHaveBeenCalledWith('/dag')
   })
 
   it('Cmd/Ctrl+B toggles the right panel', () => {

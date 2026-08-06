@@ -3,6 +3,11 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './styles/globals.css'
+import { useThemeStore } from './stores/theme'
+
+// Apply the persisted theme before first paint (store applies on import,
+// this guards against later module-order changes).
+void useThemeStore.getState().theme
 
 // E2E test hook: expose stores on window when running against a TEST_MODE
 // backend. Lets Playwright inject session state without going through the

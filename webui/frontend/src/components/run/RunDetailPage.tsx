@@ -165,7 +165,7 @@ export function RunDetailPage() {
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={points} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
                   <XAxis
                     dataKey="idx"
                     stroke="#475569"
@@ -175,7 +175,7 @@ export function RunDetailPage() {
                   <YAxis stroke="#475569" fontSize={10} domain={['auto', 'auto']} width={52} />
                   <Tooltip
                     contentStyle={{
-                      background: '#0f172a', border: '1px solid #334155',
+                      background: 'var(--popover)', border: '1px solid var(--border)',
                       borderRadius: 8, fontSize: 11,
                     }}
                     labelFormatter={(v) => `进度 ${v}%`}
@@ -201,7 +201,7 @@ export function RunDetailPage() {
             <div className="h-40">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={points} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
                   <XAxis
                     dataKey="idx"
                     stroke="#475569"
@@ -211,7 +211,7 @@ export function RunDetailPage() {
                   <YAxis stroke="#475569" fontSize={10} tickFormatter={(v: number) => (v * 100).toFixed(0) + '%'} width={52} />
                   <Tooltip
                     contentStyle={{
-                      background: '#0f172a', border: '1px solid #334155',
+                      background: 'var(--popover)', border: '1px solid var(--border)',
                       borderRadius: 8, fontSize: 11,
                     }}
                     labelFormatter={(v) => `进度 ${v}%`}

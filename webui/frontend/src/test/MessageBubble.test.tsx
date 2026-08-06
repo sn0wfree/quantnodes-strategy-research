@@ -17,8 +17,8 @@ describe('MessageBubble', () => {
     const wrapper = container.firstChild as HTMLElement
     // Outer wrapper: flex justify-end
     expect(wrapper.className).toContain('justify-end')
-    // Inner: bg-primary-600
-    expect(container.querySelector('.bg-primary-600')).toBeTruthy()
+    // Inner: violet→orange gradient
+    expect(container.querySelector('.bg-gradient-to-br')).toBeTruthy()
   })
 
   it('renders left-aligned flat layout in flat mode', () => {

@@ -22,10 +22,10 @@ const STATUS_CONFIG = {
   },
   running: {
     icon: Loader2,
-    borderColor: 'border-blue-500',
-    bgColor: 'bg-blue-950/30',
-    textColor: 'text-blue-300',
-    iconColor: 'text-blue-400',
+    borderColor: 'border-primary-500',
+    bgColor: 'bg-primary-500/10',
+    textColor: 'text-primary-300',
+    iconColor: 'text-primary-400',
     label: '运行中',
   },
   completed: {
@@ -64,7 +64,7 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
     <div
       className={`relative rounded-lg border-2 ${config.borderColor} ${config.bgColor} px-4 py-3 min-w-[140px] transition-all ${
         selected ? 'ring-2 ring-primary-500/50' : ''
-      }`}
+      } ${isRunning ? 'animate-stage-pulse' : ''}`}
     >
       {/* Left color bar (agent color) */}
       {nodeData.agentColor && (

@@ -6,6 +6,10 @@ import { StudyDetailPage } from './components/study/StudyDetailPage'
 import { RunDetailPage } from './components/run/RunDetailPage'
 import { WorkflowPage } from './components/workflow/WorkflowPage'
 import { AppShell } from './components/layout/AppShell'
+import { MonitorPage } from './pages/MonitorPage'
+import { DAGPage } from './pages/DAGPage'
+import { FactorLibraryPage } from './pages/FactorLibraryPage'
+import { StrategyLibraryPage } from './pages/StrategyLibraryPage'
 import { CatalogPage } from './catalog/CatalogPage'
 import { CatalogItem } from './catalog/CatalogItem'
 import { SettingsModal } from './components/common/SettingsModal'
@@ -45,6 +49,58 @@ export default function App() {
           element={
             <AuthGuard>
               <WorkflowPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/monitor"
+          element={<Navigate to="/" replace />}
+        />
+        <Route
+          path="/"
+          element={
+            <AuthGuard>
+              <MonitorPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <AuthGuard>
+              <AppShell />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/dag"
+          element={
+            <AuthGuard>
+              <DAGPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/factors"
+          element={
+            <AuthGuard>
+              <FactorLibraryPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/strategies"
+          element={
+            <AuthGuard>
+              <StrategyLibraryPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/monitor"
+          element={
+            <AuthGuard>
+              <MonitorPage />
             </AuthGuard>
           }
         />

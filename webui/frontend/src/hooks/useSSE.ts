@@ -44,6 +44,12 @@ export function useSSE(sessionId: string | null) {
   const sourceRef = useRef<EventSource | null>(null)
   const isFirstConnect = useRef(true)
   const prevSessionId = useRef<string | null>(null)
+  // Consecutive rejected connections (e.g. 403 — session not owned by
+  // this user) cap the reconnect loop; the browser reports CLOSED for
+  // non-2xx responses and we would otherwise retry forever, hammering
+  // the backend with 403s every second.
+  const failedAttempts = useRef(0)
+  const MAX_FAILED_ATTEMPTS = 3
 
   const addMessage = useChatStore((s) => s.addMessage)
   const updateMessage = useChatStore((s) => s.updateMessage)
@@ -138,9 +144,10 @@ export function useSSE(sessionId: string | null) {
     if (sourceRef.current) {
       sourceRef.current.close()
     }
-    // Reset first-connect flag when session changes
+    // Reset per-session state when the session changes
     if (prevSessionId.current !== sessionId) {
       isFirstConnect.current = true
+      failedAttempts.current = 0
       prevSessionId.current = sessionId
     }
 
@@ -157,6 +164,7 @@ export function useSSE(sessionId: string | null) {
     const es = new EventSource(`/api/chat/events?${params}`)
 
     es.onopen = () => {
+      failedAttempts.current = 0
       useSSEStore.getState().setStatus('connected')
       if (isFirstConnect.current) {
         isFirstConnect.current = false
@@ -179,7 +187,18 @@ export function useSSE(sessionId: string | null) {
         console.debug('[SSE] onerror readyState=%s', target.readyState)
         if (target.readyState === EventSource.CLOSED) {
           // Permanent disconnect — browser won't auto-reconnect.
-          // Create a new EventSource after a short delay.
+          // Create a new EventSource after a short delay, but give up
+          // after MAX_FAILED_ATTEMPTS consecutive rejections (server
+          // 403/404 — e.g. a session owned by a different user).
+          failedAttempts.current += 1
+          if (failedAttempts.current >= MAX_FAILED_ATTEMPTS) {
+            console.warn(
+              `[SSE] connection rejected ${failedAttempts.current} times for session ${sessionId}, giving up`,
+            )
+            useSSEStore.getState().setStatus('disconnected')
+            sourceRef.current?.close()
+            return
+          }
           console.warn('[SSE] EventSource CLOSED, reconnecting in 1s...')
           setTimeout(() => connect(), 1000)
           return

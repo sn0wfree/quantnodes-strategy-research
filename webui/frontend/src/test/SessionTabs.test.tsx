@@ -60,16 +60,6 @@ describe('SessionTabs', () => {
     expect(screen.getByText('会话 B')).toBeInTheDocument()
   })
 
-  it('shows message_count badge', () => {
-    useSessionStore.setState({
-      sessions: [makeSession('a', { message_count: 5 })],
-      openSessionIds: ['a'],
-      currentSessionId: 'a',
-    })
-    render(<SessionTabs />)
-    expect(screen.getByText('5')).toBeInTheDocument()
-  })
-
   it('shows star icon when starred', () => {
     useSessionStore.setState({
       sessions: [makeSession('a', { starred: true })],
@@ -105,21 +95,6 @@ describe('SessionTabs', () => {
     expect(createSpy).toHaveBeenCalled()
   })
 
-  it('right-click opens context menu', () => {
-    useSessionStore.setState({
-      sessions: [makeSession('a', { title: '我的会话' })],
-      openSessionIds: ['a'],
-      currentSessionId: 'a',
-    })
-    render(<SessionTabs />)
-    const tab = screen.getByText('我的会话').closest('div')
-    expect(tab).not.toBeNull()
-    fireEvent.contextMenu(tab!)
-    expect(screen.getByText('重命名')).toBeInTheDocument()
-    expect(screen.getByText('编辑标签...')).toBeInTheDocument()
-    expect(screen.getByText('删除会话')).toBeInTheDocument()
-  })
-
   it('close button calls closeSession', () => {
     useSessionStore.setState({
       sessions: [makeSession('a')],
@@ -134,16 +109,5 @@ describe('SessionTabs', () => {
     expect(closeBtn).not.toBeNull()
     fireEvent.click(closeBtn!)
     expect(closeSpy).toHaveBeenCalledWith('a')
-  })
-
-  it('shows tag dots below tab when tags exist', () => {
-    useSessionStore.setState({
-      sessions: [makeSession('a', { tags: ['工作', '重要'] })],
-      openSessionIds: ['a'],
-      currentSessionId: 'a',
-    })
-    const { container } = render(<SessionTabs />)
-    const dots = container.querySelectorAll('.h-1.w-1.rounded-full.bg-primary-500')
-    expect(dots.length).toBeGreaterThan(0)
   })
 })

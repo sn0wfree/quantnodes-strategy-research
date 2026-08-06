@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build / scratch artifacts
+public/fonts/
+public/mockup.html
+public/.ipynb_checkpoints/

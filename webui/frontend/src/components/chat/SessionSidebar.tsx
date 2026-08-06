@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import {
-  Plus, Search, Star, Archive, Trash2, Edit3, X, MessageSquare,
+  Plus, Search, Star, Archive, Trash2, Edit3, X, MessageSquare, Tag,
 } from 'lucide-react'
 import { useSessionStore, type Session } from '../../stores/session'
 import { useLayoutStore } from '../../stores/layout'
 import { ConfirmDialog } from '../common/ConfirmDialog'
+import { groupSessions, SESSION_GROUP_LABELS } from '../../utils/sessionGroups'
 
 type Filter = 'all' | 'starred' | 'archived'
 
@@ -31,8 +32,11 @@ export function SessionSidebar() {
   const [filter, setFilter] = useState<Filter>('all')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [taggingId, setTaggingId] = useState<string | null>(null)
+  const [tagInput, setTagInput] = useState('')
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
   const editRef = useRef<HTMLInputElement>(null)
+  const tagRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (editingId && editRef.current) {
@@ -40,6 +44,12 @@ export function SessionSidebar() {
       editRef.current.select()
     }
   }, [editingId])
+
+  useEffect(() => {
+    if (taggingId && tagRef.current) {
+      tagRef.current.focus()
+    }
+  }, [taggingId])
 
   // Test/debug session keywords to filter out
   const TEST_KEYWORDS = ['test', 'verify', 'debug', 'diag', 'check', 'probe', 'quick']
@@ -62,6 +72,8 @@ export function SessionSidebar() {
 
     return [...list].sort((a, b) => b.updated_at - a.updated_at)
   }, [sessions, filter, search])
+
+  const grouped = useMemo(() => groupSessions(filtered), [filtered])
 
   const handleNew = async () => {
     await createNewSession('新会话')
@@ -95,6 +107,25 @@ export function SessionSidebar() {
   const handleToggleArchive = async (id: string) => {
     const sess = sessions.find((s) => s.id === id)
     if (sess) await updateSessionMeta(id, { archived: !sess.archived })
+  }
+
+  const handleStartTag = (sess: Session) => {
+    setTaggingId(sess.id)
+    setTagInput(sess.tags.join(', '))
+  }
+
+  const handleCommitTags = async () => {
+    if (!taggingId) return
+    const tags = tagInput
+      .split(',')
+      .map((t) => t.trim().slice(0, 32))
+      .filter(Boolean)
+    try {
+      await updateSessionMeta(taggingId, { tags })
+    } catch (err) {
+      console.error('tag failed', err)
+    }
+    setTaggingId(null)
   }
 
   const handleDelete = (sess: Session) => {
@@ -132,14 +163,14 @@ export function SessionSidebar() {
 
       {/* Search */}
       <div className="px-3 py-2">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+        <div className="glow-border relative rounded-md border border-slate-700 bg-slate-800">
+          <Search className="absolute left-2 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索会话..."
-            className="w-full rounded-md border border-slate-700 bg-slate-800 py-1.5 pl-8 pr-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-primary-500"
+            className="relative z-10 w-full rounded-md bg-transparent py-1.5 pl-8 pr-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-primary-500"
           />
         </div>
       </div>
@@ -169,90 +200,42 @@ export function SessionSidebar() {
             <span className="text-sm">暂无会话</span>
           </div>
         ) : (
-          filtered.map((sess) => (
-            <div
-              key={sess.id}
-              onClick={() => handleSelect(sess.id)}
-              className={`group mb-1 cursor-pointer rounded-md px-2 py-1.5 transition-colors ${
-                currentSessionId === sess.id
-                  ? 'bg-primary-600/20 text-primary-300'
-                  : 'text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              {editingId === sess.id ? (
-                <input
-                  ref={editRef}
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  onBlur={handleCommitEdit}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCommitEdit()
-                    if (e.key === 'Escape') setEditingId(null)
-                  }}
-                  className="w-full rounded border border-primary-500 bg-slate-800 px-1 py-0.5 text-sm text-slate-200 outline-none"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <>
-                  <div className="flex items-center gap-1.5">
-                    {sess.starred && (
-                      <Star className="h-3 w-3 flex-shrink-0 fill-yellow-400 text-yellow-400" />
-                    )}
-                    <span className="flex-1 truncate text-sm">{sess.title}</span>
-                    <span className="text-xs text-slate-500">{sess.message_count}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">
-                      {formatTime(sess.updated_at)}
-                    </span>
-                    {/* Action buttons (visible on hover) */}
-                    <div className="hidden gap-0.5 group-hover:flex">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleToggleStar(sess.id)
-                        }}
-                        className="rounded p-0.5 text-slate-400 hover:text-yellow-400"
-                        title={sess.starred ? '取消星标' : '星标'}
-                      >
-                        <Star className={`h-3 w-3 ${sess.starred ? 'fill-yellow-400' : ''}`} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleStartEdit(sess)
-                        }}
-                        className="rounded p-0.5 text-slate-400 hover:text-slate-200"
-                        title="重命名"
-                      >
-                        <Edit3 className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleToggleArchive(sess.id)
-                        }}
-                        className="rounded p-0.5 text-slate-400 hover:text-slate-200"
-                        title={sess.archived ? '取消归档' : '归档'}
-                      >
-                        <Archive className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(sess)
-                        }}
-                        className="rounded p-0.5 text-slate-400 hover:text-red-400"
-                        title="删除"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          ))
+          SESSION_GROUP_LABELS.map(({ key, label }) => {
+            const items = grouped[key]
+            if (items.length === 0) return null
+            return (
+              <div key={key} className="mb-1">
+                <div className="px-2 pb-1 pt-2.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                  {label}
+                </div>
+                {items.map((sess) => (
+                  <SessionRow
+                    key={sess.id}
+                    sess={sess}
+                    isActive={currentSessionId === sess.id}
+                    editing={editingId === sess.id}
+                    tagging={taggingId === sess.id}
+                    editValue={editValue}
+                    tagInput={tagInput}
+                    editRef={editRef}
+                    tagRef={tagRef}
+                    onSelect={() => handleSelect(sess.id)}
+                    onEditChange={(v) => setEditValue(v)}
+                    onEditCommit={handleCommitEdit}
+                    onEditCancel={() => setEditingId(null)}
+                    onTagChange={(v) => setTagInput(v)}
+                    onTagCommit={handleCommitTags}
+                    onTagCancel={() => setTaggingId(null)}
+                    onToggleStar={() => void handleToggleStar(sess.id)}
+                    onStartEdit={() => handleStartEdit(sess)}
+                    onStartTag={() => handleStartTag(sess)}
+                    onToggleArchive={() => void handleToggleArchive(sess.id)}
+                    onDelete={() => handleDelete(sess)}
+                  />
+                ))}
+              </div>
+            )
+          })
         )}
       </div>
 
@@ -266,6 +249,160 @@ export function SessionSidebar() {
         variant="danger"
         onConfirm={confirmDelete}
       />
+    </div>
+  )
+}
+
+interface SessionRowProps {
+  sess: Session
+  isActive: boolean
+  editing: boolean
+  tagging: boolean
+  editValue: string
+  tagInput: string
+  editRef: React.RefObject<HTMLInputElement | null>
+  tagRef: React.RefObject<HTMLInputElement | null>
+  onSelect: () => void
+  onEditChange: (v: string) => void
+  onEditCommit: () => void
+  onEditCancel: () => void
+  onTagChange: (v: string) => void
+  onTagCommit: () => void
+  onTagCancel: () => void
+  onToggleStar: () => void
+  onStartEdit: () => void
+  onStartTag: () => void
+  onToggleArchive: () => void
+  onDelete: () => void
+}
+
+function SessionRow({
+  sess,
+  isActive,
+  editing,
+  tagging,
+  editValue,
+  tagInput,
+  editRef,
+  tagRef,
+  onSelect,
+  onEditChange,
+  onEditCommit,
+  onEditCancel,
+  onTagChange,
+  onTagCommit,
+  onTagCancel,
+  onToggleStar,
+  onStartEdit,
+  onStartTag,
+  onToggleArchive,
+  onDelete,
+}: SessionRowProps) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`group mb-1 cursor-pointer rounded-md px-2 py-1.5 transition-colors ${
+        isActive
+          ? 'bg-primary-600/20 text-primary-300'
+          : 'text-slate-300 hover:bg-slate-800'
+      }`}
+    >
+      {editing ? (
+        <input
+          ref={editRef}
+          value={editValue}
+          onChange={(e) => onEditChange(e.target.value)}
+          onBlur={onEditCommit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onEditCommit()
+            if (e.key === 'Escape') onEditCancel()
+          }}
+          className="w-full rounded border border-primary-500 bg-slate-800 px-1 py-0.5 text-sm text-slate-200 outline-none"
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : tagging ? (
+        <input
+          ref={tagRef}
+          value={tagInput}
+          onChange={(e) => onTagChange(e.target.value)}
+          onBlur={onTagCommit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onTagCommit()
+            if (e.key === 'Escape') onTagCancel()
+          }}
+          onClick={(e) => e.stopPropagation()}
+          placeholder="tag1, tag2"
+          className="w-full rounded border border-primary-500 bg-slate-800 px-1 py-0.5 text-sm text-slate-200 outline-none"
+        />
+      ) : (
+        <>
+          <div className="flex items-center gap-1.5">
+            {sess.starred && (
+              <Star className="h-3 w-3 flex-shrink-0 fill-yellow-400 text-yellow-400" />
+            )}
+            <span className="flex-1 truncate text-sm">{sess.title}</span>
+            <span className="text-xs text-slate-500">{sess.message_count}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-slate-500">
+              {formatTime(sess.updated_at)}
+            </span>
+            {/* Action buttons (visible on hover) */}
+            <div className="hidden gap-0.5 group-hover:flex">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleStar()
+                }}
+                className="rounded p-0.5 text-slate-400 hover:text-yellow-400"
+                title={sess.starred ? '取消星标' : '星标'}
+              >
+                <Star className={`h-3 w-3 ${sess.starred ? 'fill-yellow-400' : ''}`} />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onStartEdit()
+                }}
+                className="rounded p-0.5 text-slate-400 hover:text-slate-200"
+                title="重命名"
+              >
+                <Edit3 className="h-3 w-3" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onStartTag()
+                }}
+                className="rounded p-0.5 text-slate-400 hover:text-slate-200"
+                title="编辑标签"
+              >
+                <Tag className="h-3 w-3" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleArchive()
+                }}
+                className="rounded p-0.5 text-slate-400 hover:text-slate-200"
+                title={sess.archived ? '取消归档' : '归档'}
+              >
+                <Archive className="h-3 w-3" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete()
+                }}
+                className="rounded p-0.5 text-slate-400 hover:text-red-400"
+                title="删除"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -148,7 +148,7 @@ export function StreamingText({ text, isDone, partId }: StreamingTextProps) {
       )}
       {isStreaming && (
         <span
-          className="inline-block w-2 h-4 bg-primary-400 animate-pulse ml-0.5 align-middle"
+          className="streaming-cursor ml-0.5"
           aria-label="streaming"
         />
       )}

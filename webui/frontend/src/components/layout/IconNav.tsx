@@ -1,61 +1,118 @@
-import { MessageSquare, Settings, LogOut } from 'lucide-react'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import {
+  MessageSquare,
+  Network,
+  Sigma,
+  Layers,
+  BookOpen,
+  Settings,
+  LogOut,
+} from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useAuthStore } from '../../stores/auth'
-import { useNavigate } from 'react-router-dom'
 
-const NAV_ITEMS: {
+interface NavEntry {
+  to: string
+  label: string
   icon: typeof MessageSquare
-  action: 'chat' | 'settings' | 'logout'
-}[] = [
-  { icon: MessageSquare, action: 'chat' },
-  { icon: Settings, action: 'settings' },
-  { icon: LogOut, action: 'logout' },
+  end?: boolean
+  toggleSidebar?: boolean
+}
+
+const NAV_ITEMS: NavEntry[] = [
+  { to: '/chat', label: 'Chat', icon: MessageSquare, toggleSidebar: true },
+  { to: '/dag', label: '编排', icon: Network },
+  { to: '/factors', label: '因子库', icon: Sigma },
+  { to: '/strategies', label: '策略库', icon: Layers },
 ]
 
 export function IconNav() {
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
   const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
-  const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
-
-  const handleClick = (action: (typeof NAV_ITEMS)[number]['action']) => {
-    if (action === 'logout') {
-      logout()
-      navigate('/login')
-      return
-    }
-    if (action === 'settings') {
-      setSettingsOpen(true)
-      return
-    }
-    // 'chat' — toggle sidebar
-    toggleSidebar()
-  }
+  const location = useLocation()
+  const isHome = location.pathname === '/'
 
   return (
     <nav className="flex h-screen w-16 flex-col items-center gap-1 border-r border-slate-800 bg-slate-900/50 py-3">
-      {NAV_ITEMS.map((item, i) => {
+      {/* Brand / logo — doubles as the home (dashboard) entry */}
+      <button
+        onClick={() => navigate('/')}
+        title="Strategy Research"
+        className={`group relative mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-accent-400 transition-all hover:scale-105 ${
+          isHome ? 'shadow-glow ring-2 ring-primary-400/50' : 'shadow-soft'
+        }`}
+      >
+        {isHome && (
+          <span className="absolute -left-[9px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary-500 shadow-glow" />
+        )}
+        <span className="font-sans text-base font-bold text-white">SR</span>
+        <span className="pointer-events-none absolute left-[52px] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-slate-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+          {isHome ? 'Strategy Research · 首页' : 'Strategy Research'}
+        </span>
+      </button>
+
+      {NAV_ITEMS.map((item) => {
         const Icon = item.icon
-        const isChat = item.action === 'chat'
         return (
-          <button
-            key={i}
-            onClick={() => handleClick(item.action)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors
-              ${isChat
-                ? sidebarOpen
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            onClick={() => {
+              if (item.toggleSidebar) toggleSidebar()
+            }}
+            title={item.label}
+            className={({ isActive }) =>
+              `group relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors
+              ${
+                isActive
                   ? 'bg-primary-600/30 text-primary-300'
-                  : 'bg-primary-600/20 text-primary-400'
-                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }
-            `}
-            title={item.action === 'chat' ? (sidebarOpen ? '收起侧边栏' : '展开侧边栏') : item.action === 'settings' ? '设置' : '登出'}
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`
+            }
           >
-            <Icon className="h-5 w-5" />
-          </button>
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span className="absolute -left-[9px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary-500 shadow-glow" />
+                )}
+                <Icon className="h-5 w-5" />
+              </>
+            )}
+          </NavLink>
         )
       })}
+
+      {/* 知识库 — placeholder, planned for a later release */}
+      <button
+        title="知识库 · 规划中"
+        disabled
+        className="flex h-10 w-10 cursor-not-allowed items-center justify-center rounded-lg text-slate-600 opacity-40"
+      >
+        <BookOpen className="h-5 w-5" />
+      </button>
+
+      <div className="flex-1" />
+
+      <button
+        onClick={() => setSettingsOpen(true)}
+        title="设置"
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+      >
+        <Settings className="h-5 w-5" />
+      </button>
+      <button
+        onClick={() => {
+          logout()
+          navigate('/login')
+        }}
+        title="登出"
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+      >
+        <LogOut className="h-5 w-5" />
+      </button>
     </nav>
   )
 }

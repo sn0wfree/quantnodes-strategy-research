@@ -11,6 +11,7 @@ import {
   errorEvent,
 } from '../hooks/sse/controlHandlers'
 import { useChatStore } from '../stores/chat'
+import type { Agent } from '../stores/agents'
 import type { SSEContext } from '../hooks/sse/types'
 
 function ctx(overrides: Partial<SSEContext> = {}): SSEContext {
@@ -140,14 +141,14 @@ describe('compact', () => {
   })
 
   it('increments the agent compaction counter when agent_id is provided', () => {
-    let updated: { id: string; updater: (a: { compaction_count?: number }) => void } | null = null
-    const updateAgent = (id: string, updater: (a: { compaction_count?: number }) => void): void => {
+    let updated: { id: string; updater: (a: Agent) => void } | null = null
+    const updateAgent = (id: string, updater: (a: Agent) => void): void => {
       updated = { id, updater }
     }
     compact({ agent_id: 'a-1', layer: 'context' }, ctx({ updateAgent }))
     expect(updated).not.toBeNull()
     expect(updated!.id).toBe('a-1')
-    const a: { compaction_count?: number } = {}
+    const a = {} as Agent
     updated!.updater(a)
     expect(a.compaction_count).toBe(1)
   })

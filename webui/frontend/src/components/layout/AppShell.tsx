@@ -8,6 +8,8 @@ import { IconNav } from './IconNav'
 import { TopBar } from './TopBar'
 import { MainSplit } from './MainSplit'
 import { RightPanel } from './RightPanel'
+import { ResizablePanel } from './ResizablePanel'
+import { ContextPanel } from '../context/ContextPanel'
 import { SessionSidebar } from '../chat/SessionSidebar'
 import { ToastManager } from '../common/Toast'
 import { CommandPalette } from '../common/CommandPalette'
@@ -79,20 +81,63 @@ export function AppShell() {
   useSSE(currentSessionId)
 
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
+  const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
+  const leftRatio = useLayoutStore((s) => s.leftRatio)
+  const setLeftRatio = useLayoutStore((s) => s.setLeftRatio)
+  const contextRatio = useLayoutStore((s) => s.contextRatio)
+  const setContextRatio = useLayoutStore((s) => s.setContextRatio)
+  const rightRatio = useLayoutStore((s) => s.rightRatio)
+  const setRightRatio = useLayoutStore((s) => s.setRightRatio)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-950">
-      <IconNav />
-      {sidebarOpen && <SessionSidebar />}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar />
-        <div className="flex flex-1 overflow-hidden">
-          <ErrorBoundary>
-            <MainSplit />
-          </ErrorBoundary>
-          <ErrorBoundary>
-            <RightPanel />
-          </ErrorBoundary>
+    <div className="relative flex h-screen overflow-hidden bg-app">
+      {/* Ambient backdrop: grid + aurora + vignette + grain */}
+      <div className="aurora-backdrop">
+        <div className="grid-layer" />
+        <div className="aurora-layer" />
+        <div className="vignette-layer" />
+        <div className="grain-layer" />
+      </div>
+      <div className="relative z-10 flex h-full w-full overflow-hidden">
+        <IconNav />
+        {sidebarOpen && <SessionSidebar />}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <TopBar />
+          <div className="flex flex-1 overflow-hidden">
+            <ErrorBoundary>
+              <ResizablePanel
+                side="left"
+                ratio={leftRatio}
+                setRatio={setLeftRatio}
+              >
+                <MainSplit />
+              </ResizablePanel>
+            </ErrorBoundary>
+            <ErrorBoundary>
+              <ResizablePanel
+                side="right"
+                ratio={contextRatio}
+                setRatio={setContextRatio}
+              >
+                <ContextPanel />
+              </ResizablePanel>
+            </ErrorBoundary>
+            {/* Adaptive gap between context and goal/study — flex-1
+                absorbs whatever space is left over so the gap stays
+                strictly between panels. */}
+            <div className="flex-1 min-w-0" />
+            {rightPanelVisible && (
+              <ErrorBoundary>
+                <ResizablePanel
+                  side="right"
+                  ratio={rightRatio}
+                  setRatio={setRightRatio}
+                >
+                  <RightPanel />
+                </ResizablePanel>
+              </ErrorBoundary>
+            )}
+          </div>
         </div>
       </div>
       <ToastManager />

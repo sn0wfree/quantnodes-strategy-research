@@ -4,11 +4,12 @@ import { useCommandPaletteStore } from '../../stores/commandPalette'
 import {
   Search, MessageSquare, Target, Workflow, Bot, Plus,
   Settings, Eye, EyeOff, RefreshCw, ArrowRight, Layers,
-  BookOpen,
+  BookOpen, Activity,
 } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
+import { useNavigate } from 'react-router-dom'
 
 interface Command {
   id: string
@@ -32,10 +33,12 @@ function fuzzyMatch(query: string, text: string): number {
 export function CommandPalette() {
   const open = useCommandPaletteStore((s) => s.open)
   const setOpen = useCommandPaletteStore((s) => s.setOpen)
+  const navigate = useNavigate()
   const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const setWorkMode = useLayoutStore((s) => s.setWorkMode)
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
   const createNewSession = useSessionStore((s) => s.createNewSession)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen)
@@ -48,13 +51,13 @@ export function CommandPalette() {
     // View
     {
       id: 'view-dag',
-      label: '显示 DAG 面板',
-      description: '切换右主区到 DAG 可视化',
+      label: '打开编排页',
+      description: 'DAG 工作流编排 + Agent 运行监控',
       category: 'view',
       icon: Workflow,
       shortcut: '⌘W',
-      action: () => { setRightPanelTab('dag'); setOpen(false) },
-      keywords: ['dag', 'workflow', '图'],
+      action: () => { navigate('/dag'); setOpen(false) },
+      keywords: ['dag', 'workflow', '图', '编排'],
     },
     {
       id: 'view-goal',
@@ -68,13 +71,13 @@ export function CommandPalette() {
     },
     {
       id: 'view-agent',
-      label: '显示 Agent 面板',
-      description: '切换右主区到 Agent 列表',
+      label: '打开 Agent 监控',
+      description: '编排页内的 Agent 运行监控视图',
       category: 'view',
       icon: Bot,
       shortcut: '⌘B',
-      action: () => { setRightPanelTab('agent'); setOpen(false) },
-      keywords: ['agent', '智能体'],
+      action: () => { navigate('/dag'); setOpen(false) },
+      keywords: ['agent', '智能体', '监控'],
     },
     {
       id: 'view-study',
@@ -165,6 +168,25 @@ export function CommandPalette() {
 
     // Navigation
     {
+      id: 'nav-chat',
+      label: '打开 Chat',
+      description: '进入聊天工作区（会话 / 研究对话）',
+      category: 'navigation',
+      icon: MessageSquare,
+      shortcut: '⌘T',
+      action: () => { navigate('/chat'); toggleSidebar(); setOpen(false) },
+      keywords: ['chat', '聊天', '会话', '对话'],
+    },
+    {
+      id: 'nav-home',
+      label: '监控首页',
+      description: '聚合总览：KPI、活跃研究、最近运行',
+      category: 'navigation',
+      icon: Activity,
+      action: () => { navigate('/'); setOpen(false) },
+      keywords: ['home', '首页', '监控', 'dashboard', '总览'],
+    },
+    {
       id: 'nav-settings',
       label: '设置',
       description: '打开设置页面',
@@ -173,7 +195,7 @@ export function CommandPalette() {
       action: () => { setOpen(false); setSettingsOpen(true) },
       keywords: ['settings', '配置'],
     },
-  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setSettingsOpen, setOpen, createNewSession, currentSessionId, setSearchOpen, loadMessages])
+  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setSettingsOpen, setOpen, createNewSession, currentSessionId, setSearchOpen, loadMessages, navigate])
 
   // Filter by query
   const filtered = useMemo(() => {

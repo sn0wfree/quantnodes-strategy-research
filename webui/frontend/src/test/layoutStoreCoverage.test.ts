@@ -11,7 +11,7 @@ beforeEach(() => {
     navWidth: 64,
     sidebarOpen: true,
     rightPanelVisible: true,
-    rightPanelTab: 'dag',
+    rightPanelTab: 'goal',
     workMode: 'monitor',
     leftRatio: 0.5,
     settingsOpen: false,
@@ -46,11 +46,11 @@ describe('useLayoutStore', () => {
     expect(useLayoutStore.getState().rightPanelVisible).toBe(false)
   })
 
-  it('setLeftRatio clamps to [0.2, 0.8]', () => {
+  it('setLeftRatio clamps to [0.2, 0.85]', () => {
     useLayoutStore.getState().setLeftRatio(0.1)
     expect(useLayoutStore.getState().leftRatio).toBe(0.2)
     useLayoutStore.getState().setLeftRatio(0.9)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.8)
+    expect(useLayoutStore.getState().leftRatio).toBe(0.85)
     useLayoutStore.getState().setLeftRatio(0.4)
     expect(useLayoutStore.getState().leftRatio).toBe(0.4)
   })

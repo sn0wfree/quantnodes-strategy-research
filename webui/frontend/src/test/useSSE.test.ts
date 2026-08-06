@@ -6,6 +6,9 @@ enableMapSet()
 
 // Mock EventSource with controllable instances
 class MockEventSource {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSED = 2
   static instances: MockEventSource[] = []
   url: string
   onopen: ((ev?: any) => void) | null = null
@@ -158,6 +161,38 @@ describe('useSSE', () => {
         vi.advanceTimersByTime(5000)
       })
       expect(MockEventSource.instances.length).toBe(initialCount)
+
+      vi.useRealTimers()
+    })
+
+    it('gives up reconnecting after 3 consecutive CLOSED rejections (e.g. 403)', () => {
+      vi.useFakeTimers()
+      renderHook(() => useSSE('sess-1'))
+      const initialCount = MockEventSource.instances.length
+
+      const reject = () => {
+        const es = getCurrentES()
+        es.readyState = 2 // CLOSED — server rejected the stream
+        act(() => {
+          if (es.onerror) es.onerror({ currentTarget: es } as unknown as Event)
+        })
+      }
+
+      // 1st rejection → schedules a manual reconnect in 1s
+      reject()
+      act(() => { vi.advanceTimersByTime(1000) })
+      expect(MockEventSource.instances.length).toBe(initialCount + 1)
+
+      // 2nd rejection → still retries
+      reject()
+      act(() => { vi.advanceTimersByTime(1000) })
+      expect(MockEventSource.instances.length).toBe(initialCount + 2)
+
+      // 3rd rejection → gives up permanently
+      reject()
+      expect(useSSEStore.getState().status).toBe('disconnected')
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(MockEventSource.instances.length).toBe(initialCount + 2)
 
       vi.useRealTimers()
     })

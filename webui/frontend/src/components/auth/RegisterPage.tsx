@@ -32,8 +32,14 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950">
-      <div className="glass-elevated w-full max-w-sm rounded-2xl p-8">
+    <div className="relative flex min-h-screen items-center justify-center bg-app">
+      <div className="aurora-backdrop">
+        <div className="grid-layer" />
+        <div className="aurora-layer" />
+        <div className="vignette-layer" />
+        <div className="grain-layer" />
+      </div>
+      <div className="glass-elevated relative z-10 w-full max-w-sm rounded-2xl p-8">
         <h1 className="mb-6 text-center text-xl font-semibold text-slate-100">
           创建账号
         </h1>

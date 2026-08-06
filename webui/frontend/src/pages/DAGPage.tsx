@@ -1,0 +1,179 @@
+import { useState } from 'react'
+import * as Tabs from '@radix-ui/react-tabs'
+import { Network, Bot, Zap, CheckCircle, Clock, Moon, Sun } from 'lucide-react'
+import { IconNav } from '../components/layout/IconNav'
+import { WorkflowDAG } from '../components/workflow/WorkflowDAG'
+import { AgentItem } from '../components/agent/AgentItem'
+import { useWorkflowStore } from '../stores/workflow'
+import { useAgentStore } from '../stores/agents'
+import { useThemeStore } from '../stores/theme'
+
+export function DAGPage() {
+  const [tab, setTab] = useState('dag')
+  const theme = useThemeStore((s) => s.theme)
+  const toggleTheme = useThemeStore((s) => s.toggleTheme)
+
+  const dagNodes = useWorkflowStore((s) => s.dagNodes)
+  const dagEdges = useWorkflowStore((s) => s.dagEdges)
+  const executionProgress = useWorkflowStore((s) => s.executionProgress)
+  const presets = useWorkflowStore((s) => s.presets)
+  const currentPresetId = useWorkflowStore((s) => s.currentPresetId)
+  const currentPreset = presets.find((p) => p.id === currentPresetId)
+
+  const agents = useAgentStore((s) => s.agents)
+  const agentList = Array.from(agents.values()).sort(
+    (a, b) => b.created_at - a.created_at,
+  )
+  const runningCount = agentList.filter((a) => a.status === 'running').length
+  const completedCount = agentList.filter(
+    (a) => a.status === 'completed' || a.status === 'failed',
+  ).length
+  const pendingCount = agentList.filter((a) => a.status === 'pending').length
+
+  return (
+    <div className="relative flex h-screen overflow-hidden bg-app">
+      <div className="aurora-backdrop">
+        <div className="grid-layer" />
+        <div className="aurora-layer" />
+        <div className="vignette-layer" />
+        <div className="grain-layer" />
+      </div>
+
+      <div className="relative z-10 flex h-full w-full overflow-hidden">
+        <IconNav />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <header className="glass flex h-12 flex-shrink-0 items-center justify-between border-b border-slate-800 px-4">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="text-primary-400"><Network className="h-4 w-4" /></span>
+              <h1 className="truncate text-sm font-semibold tracking-tight text-slate-100">编排</h1>
+              <span className="hidden truncate font-mono text-[10px] text-slate-500 md:inline">
+                DAG 工作流 + Agent 运行监控
+              </span>
+            </div>
+            <button
+              onClick={toggleTheme}
+              title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/50 px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-300"
+            >
+              {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            </button>
+          </header>
+
+          <Tabs.Root value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+            <Tabs.List className="flex flex-shrink-0 border-b border-slate-800 bg-slate-900/40 px-4">
+              <Tabs.Trigger
+                value="dag"
+                className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 text-sm text-slate-400 transition-colors
+                  data-[state=active]:border-primary-500 data-[state=active]:text-slate-100"
+              >
+                <Network className="h-4 w-4" />
+                编排
+              </Tabs.Trigger>
+              <Tabs.Trigger
+                value="agent"
+                className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 text-sm text-slate-400 transition-colors
+                  data-[state=active]:border-primary-500 data-[state=active]:text-slate-100"
+              >
+                <Bot className="h-4 w-4" />
+                Agent 监控
+              </Tabs.Trigger>
+            </Tabs.List>
+
+            <Tabs.Content value="dag" className="min-h-0 flex-1 overflow-hidden">
+              <WorkflowDAG
+                workflowName={currentPreset?.name || '未命名工作流'}
+                nodes={dagNodes.map((n) => ({
+                  ...n,
+                  status: n.status ?? 'pending',
+                  agentColor: n.status === 'running' ? '#f59e0b' : undefined,
+                }))}
+                edges={dagEdges}
+                progress={executionProgress}
+                completed={dagNodes.filter((n) => n.status === 'completed').length}
+                total={dagNodes.length}
+              />
+            </Tabs.Content>
+
+            <Tabs.Content value="agent" className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-[1440px] px-6 py-5">
+                {/* Summary row */}
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <SummaryStat
+                    icon={<Bot className="h-4 w-4" />}
+                    label="Agent 总数"
+                    value={String(agentList.length)}
+                    color="text-sky-400"
+                    bg="border border-sky-500/30 bg-sky-500/10 text-sky-400"
+                  />
+                  <SummaryStat
+                    icon={<Zap className="h-4 w-4" />}
+                    label="运行中"
+                    value={String(runningCount)}
+                    color="text-amber-400"
+                    bg="border border-amber-500/30 bg-amber-500/10 text-amber-400"
+                  />
+                  <SummaryStat
+                    icon={<CheckCircle className="h-4 w-4" />}
+                    label="已完成"
+                    value={String(completedCount)}
+                    color="text-emerald-400"
+                    bg="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                  />
+                  <SummaryStat
+                    icon={<Clock className="h-4 w-4" />}
+                    label="待启动"
+                    value={String(pendingCount)}
+                    color="text-slate-400"
+                    bg="border border-slate-700 bg-slate-500/10 text-slate-400"
+                  />
+                </div>
+
+                {agentList.length === 0 ? (
+                  <div className="mt-8 rounded-xl border border-dashed border-slate-800 px-4 py-12 text-center">
+                    <Bot className="mx-auto h-10 w-10 text-slate-600" />
+                    <p className="mt-3 text-sm text-slate-400">暂无 Agent</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Agent 会在聊天或编排任务执行时自动创建
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                    {agentList.map((agent) => (
+                      <AgentItem key={agent.id} agent={agent} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Tabs.Content>
+          </Tabs.Root>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SummaryStat({
+  icon,
+  label,
+  value,
+  color,
+  bg,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+  color: string
+  bg: string
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 shadow-soft transition-colors hover:border-slate-700">
+      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${bg}`}>
+        {icon}
+      </div>
+      <div>
+        <div className={`font-mono text-xl font-bold tabular-nums ${color}`}>{value}</div>
+        <div className="text-[10px] text-slate-500">{label}</div>
+      </div>
+    </div>
+  )
+}
