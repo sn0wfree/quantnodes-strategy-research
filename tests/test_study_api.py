@@ -496,3 +496,193 @@ async def test_start_internal_error_returns_500(_app_env, monkeypatch):
         async with _api_client() as client:
             r = await client.post("/api/study/start", json=body)
             assert r.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_status_returns_no_study_when_session_has_none(_app_env, monkeypatch):
+    """GET /status for a session that has no active study → 'no_study'。"""
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.get("/api/study/status?session_id=ghost-session")
+        assert r.status_code == 200
+        assert r.json() == {"status": "no_study", "session_id": "ghost-session"}
+
+
+@pytest.mark.asyncio
+async def test_status_returns_active_study_for_session(_app_env, tmp_path, monkeypatch):
+    """GET /status?session_id= 应返回该 session 的 active study。"""
+    from strategy_research.core.study import StudyStore, StudyStatus
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        s = store.create_study(
+            session_id="sess-1", goal_id=None, objective="找 alpha",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=5,
+        )
+        store.update_execution_status(s.study_id, StudyStatus.RUNNING)
+        study_id = s.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.get("/api/study/status?session_id=sess-1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        assert data["study_id"] == study_id
+        assert data["execution_status"] == "running"
+        assert data["objective"] == "找 alpha"
+        assert data["strategy_name"] == "demo"
+        assert data["workspace_path"] == str(_app_env)
+
+
+@pytest.mark.asyncio
+async def test_status_returns_study_by_id(_app_env, tmp_path, monkeypatch):
+    """GET /status?study_id= 直接查询某个 study（不依赖 session）。"""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        s = store.create_study(
+            session_id="sess-other", goal_id=None, objective="其他 session",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        study_id = s.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/status?session_id=any&study_id={study_id}")
+        assert r.status_code == 200
+        assert r.json()["study_id"] == study_id
+
+
+@pytest.mark.asyncio
+async def test_status_includes_goal_snapshot_when_goal_linked(_app_env, tmp_path, monkeypatch):
+    """study.goal_id 存在时，summary 应包含 goal_snapshot。"""
+    from strategy_research.core.goal import GoalStore
+    from strategy_research.core.goal.store import RiskTier
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with GoalStore(db_path=db_path) as gs:
+        goal = gs.replace_goal(
+            session_id="sess-1", objective="with goal",
+            criteria=["Sharpe > 1"], risk_tier=RiskTier.RESEARCH_GENERAL,
+        )
+        goal_id = goal.goal_id
+
+    with StudyStore(db_path=db_path) as store:
+        s = store.create_study(
+            session_id="sess-1", goal_id=goal_id, objective="with goal",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        study_id = s.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.get("/api/study/status?session_id=sess-1")
+        assert r.status_code == 200
+        data = r.json()
+        snap = data["goal_snapshot"]
+        assert snap["goal_id"] == goal_id
+        assert snap["objective"] == "with goal"
+        assert isinstance(snap["criteria"], list)
+
+
+@pytest.mark.asyncio
+async def test_resume_interrupted_study_calls_resume_interrupted(
+    _app_env, tmp_path, monkeypatch
+):
+    """INTERRUPTED 状态的 study 应走 sched.resume_interrupted 路径。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from strategy_research.api.routers import study as study_router
+    from strategy_research.core.study import StudyStatus, StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        s = store.create_study(
+            session_id="sess-1", goal_id=None, objective="interrupted obj",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        store.update_execution_status(s.study_id, StudyStatus.INTERRUPTED)
+        study_id = s.study_id
+
+    sched = MagicMock()
+    sched.resume_interrupted = AsyncMock(return_value=True)
+    sched.resume = MagicMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.post(f"/api/study/{study_id}/resume")
+        assert r.status_code == 200
+        assert r.json()["action"] == "resumed_from_interrupted"
+        sched.resume_interrupted.assert_awaited_once_with(study_id)
+        sched.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_interrupted_failure_returns_400(_app_env, tmp_path, monkeypatch):
+    """resume_interrupted 返回 False → 400。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from strategy_research.api.routers import study as study_router
+    from strategy_research.core.study import StudyStatus, StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        s = store.create_study(
+            session_id="sess-1", goal_id=None, objective="interrupted",
+            workspace_path=str(_app_env), strategy_name="demo",
+            executor_type="autoresearch", max_rounds=3,
+        )
+        store.update_execution_status(s.study_id, StudyStatus.INTERRUPTED)
+        study_id = s.study_id
+
+    sched = MagicMock()
+    sched.resume_interrupted = AsyncMock(return_value=False)
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.post(f"/api/study/{study_id}/resume")
+        assert r.status_code == 400
+        assert "failed to resume" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_resume_unknown_study_returns_404(_app_env, monkeypatch):
+    """resume 不存在的 study_id → 404。"""
+    from unittest.mock import MagicMock
+
+    from strategy_research.api.routers import study as study_router
+
+    sched = MagicMock()
+    sched.resume = MagicMock()
+    sched.resume_interrupted = MagicMock()
+    monkeypatch.setattr(study_router, "_get_study_scheduler", lambda: sched)
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
+
+    async with _api_client() as client:
+        r = await client.post("/api/study/ghost-study/resume")
+        assert r.status_code == 404
+        sched.resume.assert_not_called()
+        sched.resume_interrupted.assert_not_called()

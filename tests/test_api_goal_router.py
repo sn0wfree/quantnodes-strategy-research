@@ -343,3 +343,124 @@ class TestListWorkflowId:
         data = res.json()
         assert len(data["goals"]) == 1
         assert data["goals"][0]["workflow_id"] == "risk_assessment"
+
+
+class TestErrorBranches:
+    """500/409 兜底分支：端点在底层抛非预期异常时的保护。"""
+
+    def test_status_internal_error_returns_500(self, app, client, monkeypatch):
+        """status 端点底层抛错时，端点兜底为 500 而非裸异常。"""
+        import strategy_research.core.goal as goal_module
+
+        class _BoomStore:
+            def __init__(self, *a, **k):
+                raise RuntimeError("status boom")
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(goal_module, "GoalStore", _BoomStore)
+
+        res = client.get("/api/goal/status?session_id=sess-1", headers=auth_header())
+        assert res.status_code == 500
+        assert "status boom" in res.json()["detail"]
+
+    def test_list_internal_error_returns_500(self, app, client, monkeypatch):
+        import strategy_research.core.goal as goal_module
+
+        class _BoomStore:
+            def __init__(self, *a, **k):
+                raise RuntimeError("list boom")
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(goal_module, "GoalStore", _BoomStore)
+
+        res = client.get("/api/goal/list", headers=auth_header())
+        assert res.status_code == 500
+        assert "list boom" in res.json()["detail"]
+
+    def test_evidence_internal_error_returns_500(self, app, client, monkeypatch):
+        import strategy_research.core.goal as goal_module
+
+        class _BoomStore:
+            def __init__(self, *a, **k):
+                raise RuntimeError("evidence boom")
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(goal_module, "GoalStore", _BoomStore)
+
+        res = client.post(
+            "/api/goal/evidence",
+            headers=auth_header(),
+            json={"session_id": "s", "evidence": "x"},
+        )
+        assert res.status_code == 500
+        assert "evidence boom" in res.json()["detail"]
+
+    def test_complete_internal_error_returns_500(self, app, client, monkeypatch):
+        import strategy_research.core.goal as goal_module
+
+        class _BoomStore:
+            def __init__(self, *a, **k):
+                raise RuntimeError("complete boom")
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(goal_module, "GoalStore", _BoomStore)
+
+        res = client.post(
+            "/api/goal/complete",
+            headers=auth_header(),
+            json={"session_id": "s", "outcome": "complete"},
+        )
+        assert res.status_code == 500
+        assert "complete boom" in res.json()["detail"]
+
+    def test_complete_stale_goal_returns_409(self, app, client, monkeypatch):
+        """StaleGoalError（expected_goal_id 不匹配）→ 409。"""
+        import strategy_research.core.goal as goal_module
+        from strategy_research.core.goal.models import StaleGoalError
+
+        class FakeStore:
+            def __init__(self, *a, **k):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def get_current_goal(self, session_id):
+                from strategy_research.core.goal.models import GoalRecord, GoalStatus, RiskTier
+                return GoalRecord(
+                    goal_id="current-goal",
+                    session_id=session_id,
+                    objective="x",
+                    status=GoalStatus.ACTIVE,
+                    ui_summary="",
+                    source="api",
+                    protocol="thesis_review",
+                    risk_tier=RiskTier.RESEARCH_GENERAL,
+                )
+            def update_status(self, *a, **k):
+                raise StaleGoalError("expected current-goal but caller passed stale-goal")
+
+        monkeypatch.setattr(goal_module, "GoalStore", FakeStore)
+
+        res = client.post(
+            "/api/goal/complete",
+            headers=auth_header(),
+            json={
+                "session_id": "sess-stale",
+                "outcome": "complete",
+            },
+        )
+        assert res.status_code == 409
+        assert "stale" in res.json()["detail"].lower()
