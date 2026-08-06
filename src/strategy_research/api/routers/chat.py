@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from ..session.service import SessionService
 from ..session.store import SessionStore
 from ..sse_buffer import sse_buffer
+from ._task_utils import log_task_exception
 from strategy_research.core.agent.event_store import EventStore
 
 logger = logging.getLogger(__name__)
@@ -862,7 +863,8 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
                 # AEGIS: autoresearch → scheduler
                 sched = _get_study_scheduler()
                 import asyncio as _asyncio
-                _asyncio.create_task(sched.submit(study))
+                task = _asyncio.create_task(sched.submit(study))
+                task.add_done_callback(log_task_exception)
             else:
                 await _start_workflow_runner(
                     config, session_id, goal_id, objective, ws, session_service,

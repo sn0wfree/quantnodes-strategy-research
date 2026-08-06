@@ -20,6 +20,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ._task_utils import log_task_exception
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -203,7 +205,8 @@ async def study_start(req: StudyStartRequest, request: Request):
             # Use scheduler → AutoresearchRunner (AEGIS-powered round loop)
             sched = _get_study_scheduler()
             import asyncio
-            asyncio.create_task(sched.submit(study))
+            task = asyncio.create_task(sched.submit(study))
+            task.add_done_callback(log_task_exception)
             return {
                 "status": "ok",
                 "study_id": study.study_id,
@@ -303,8 +306,9 @@ async def study_start(req: StudyStartRequest, request: Request):
             workspace=ws,
         )
         runner.set_goal_id(goal.goal_id)
-        # Start in background (non-blocking)
-        asyncio.create_task(runner.start(req.objective))
+        # Start in background (non-blocking). A5: log uncaught exceptions.
+        task = asyncio.create_task(runner.start(req.objective))
+        task.add_done_callback(log_task_exception)
         return {
             "status": "ok",
             "study_id": study.study_id,
