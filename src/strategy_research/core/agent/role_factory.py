@@ -82,6 +82,8 @@ def build_agent_loop(
     llm_config: Any | None = None,
     session_manager: Any | None = None,
     max_iterations: int = 8,
+    enable_claim_validation: bool = False,
+    strict_claim_validation: bool = False,
 ) -> "AgentLoop | None":  # noqa: F821
     """为 role 构造 AgentLoop.
 
@@ -92,6 +94,8 @@ def build_agent_loop(
         llm_config: 可选 LLMConfig; None 时自动 LLMConfig.load()
         session_manager: 跨角色共享 session (strategist 可看 researcher 输出)
         max_iterations: ReAct 最大迭代数
+        enable_claim_validation: 开启 claim 验证 (truthfulness L2), 默认关
+        strict_claim_validation: strict 模式, 未验证数字追加警告, 默认关
 
     Returns:
         AgentLoop 实例. 如果系统提示词为空, 返回 None (调用方走 stub fallback).
@@ -119,6 +123,8 @@ def build_agent_loop(
         session_manager=session_manager,
         strategy_name=strategy_name,
         auto_git_commit=False,  # git commit 由 autoresearch 主循环统一控制
+        enable_claim_validation=enable_claim_validation,
+        strict_claim_validation=strict_claim_validation,
     )
 
 

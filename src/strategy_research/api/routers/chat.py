@@ -250,13 +250,17 @@ def _persist_assistant_message(
     parts: list[dict[str, Any]],
     message_id: str,
     cfg: Any = None,
+    claim_validation: dict[str, Any] | None = None,
 ) -> None:
     """Persist assistant message to DB."""
     from .web_session import persist_message
+    metadata: dict[str, Any] = {"model": getattr(cfg, "model", None)} if cfg else {}
+    if claim_validation:
+        metadata["claim_validation"] = claim_validation
     persist_message(
         session_id=session_id, role="assistant", content=content,
         parts=parts or None,
-        metadata={"model": getattr(cfg, "model", None)} if cfg else None,
+        metadata=metadata or None,
         message_id=message_id,
     )
 
@@ -347,7 +351,14 @@ async def _run_agent_loop_background(
             await mm.append(session_id, "assistant", result.answer)
 
         _emit_agent_done(session_id, message_id, result.answer)
-        _persist_assistant_message(session_id, result.answer or accumulator.assistant_content, accumulator.parts, message_id, cfg)
+        _persist_assistant_message(
+            session_id,
+            result.answer or accumulator.assistant_content,
+            accumulator.parts,
+            message_id,
+            cfg,
+            claim_validation=result.metrics.get("claim_validation"),
+        )
 
     except Exception as exc:
         logger.error("AgentLoop failed for session %s: %s", session_id, exc, exc_info=True)

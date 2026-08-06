@@ -631,6 +631,10 @@ class SessionService:
                             "run_id": str(Path(attempt.run_dir).name) if attempt.run_dir else None,
                             "status": attempt.status.value,
                             "metrics": attempt.metrics,
+                            "claim_validation": (
+                                (attempt.metrics or {}).get("claim_validation")
+                                if attempt.metrics else None
+                            ),
                         },
                     },
                 )
@@ -917,6 +921,11 @@ class SessionService:
                 "input_tokens": usage_state["input"],
                 "output_tokens": usage_state["output"],
                 "total_tokens": usage_state["input"] + usage_state["output"],
+                **(
+                    {"claim_validation": loop_result.metrics.get("claim_validation")}
+                    if loop_result.metrics.get("claim_validation")
+                    else {}
+                ),
             },
         }
 

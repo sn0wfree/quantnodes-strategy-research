@@ -36,6 +36,8 @@ def build_chat_agent_loop(
     registry: Any = None,
     compact_config: Any | None = None,
     allow_shell_tools: bool = False,
+    enable_claim_validation: bool = False,
+    strict_claim_validation: bool = False,
 ) -> AgentLoop:
     """Construct a chat-mode ``AgentLoop``.
 
@@ -122,6 +124,8 @@ def build_chat_agent_loop(
         strategy_name=strategy_name,
         compact_config=compact_config,
         event_bus=event_bus,
+        enable_claim_validation=enable_claim_validation,
+        strict_claim_validation=strict_claim_validation,
     )
 
 

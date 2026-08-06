@@ -1,4 +1,4 @@
-"""PromptBuilder — Phase 4/5 of the Chat Agent refactor.
+"""PromptBuilder — Phase 4/5 of the Chat Agent refactor + Common Layer (truthfulness).
 
 Unifies four parallel ``system_prompt`` loading paths:
 - ``api/routers/chat.py:_get_system_prompt`` (web chat, removed in Phase 5)
@@ -21,6 +21,17 @@ Design (Phase 5):
 - ``PromptBuilderFactory.get(unknown_role)`` returns ``_NullBuilder``
   instead of raising — preserves the legacy "unknown role → empty
   string → stub fallback" behavior that ``role_factory`` callers depend on.
+
+Common Layer (truthfulness-design):
+- ``_common/principles.md`` is always prepended to every role's system
+  prompt (values + red lines + thinking mode + examples). Stays in
+  context for every conversation so the model cannot "forget" honesty
+  constraints.
+- ``_common/rules/*.md`` is NOT auto-injected — roles access detailed
+  rules on-demand via ``read_file`` (similar to LangChain's
+  ``SkillsMiddleware`` pattern).
+- ``_COMMON_OPT_OUT`` allows specific roles to skip the common layer if
+  needed (reserved slot, currently empty).
 """
 from __future__ import annotations
 
@@ -40,6 +51,50 @@ _PROMPTS_DIR = (
     Path(__file__).parent.parent.parent / "templates" / ".prompts"
 )
 # Resolves to: src/strategy_research/templates/.prompts/
+
+# Common layer (truthfulness-design): principles 常驻, rules 按需
+_COMMON_DIR = _PROMPTS_DIR / "_common"
+_PRINCIPLES_FILE = _COMMON_DIR / "principles.md"
+
+
+# ── Common layer helpers ───────────────────────────────────────────────
+
+
+def _load_common(role: str) -> tuple[str, str, str]:
+    """Return ``(principles, rule_injected, future)``.
+
+    - **principles**: always loaded from ``_common/principles.md`` and
+      prepended to every role's system prompt. Contains values, red
+      lines, thinking mode, and examples.
+    - **rule_injected**: currently empty — detailed rules in
+      ``_common/rules/`` are accessed on-demand via ``read_file``.
+    - **future**: reserved slot for future common layer additions.
+
+    Opt-out: roles in ``PromptBuilderFactory._COMMON_OPT_OUT`` get empty
+    strings, skipping the common layer entirely.
+    """
+    if role in PromptBuilderFactory._COMMON_OPT_OUT:
+        return "", "", ""
+    principles = (
+        _PRINCIPLES_FILE.read_text(encoding="utf-8")
+        if _PRINCIPLES_FILE.exists()
+        else ""
+    )
+    return principles, "", ""
+
+
+def _compose(
+    principles: str,
+    rule: str,
+    role_specific: str,
+    future: str = "",
+) -> str:
+    """Join common + role-specific content with ``---`` separators.
+
+    Empty segments are dropped (so opting out produces no extra ``---``).
+    """
+    parts = [p for p in (principles, rule, role_specific, future) if p]
+    return "\n\n---\n\n".join(parts)
 
 
 # ── Validation ─────────────────────────────────────────────────────────
@@ -135,7 +190,8 @@ class ChatPromptBuilder:
         text = self._path.read_text(encoding="utf-8")
         for placeholder, key in self._PLACEHOLDERS:
             text = text.replace(placeholder, context.get(key, ""))
-        return text
+        top, middle, future = _load_common(role)
+        return _compose(top, middle, text, future)
 
     def build_messages(
         self,
@@ -183,7 +239,9 @@ class StaticFilePromptBuilder:
     def build_system_prompt(self, role: str, context: dict[str, Any]) -> str:
         if not self._path.exists():
             return ""
-        return self._path.read_text(encoding="utf-8")
+        text = self._path.read_text(encoding="utf-8")
+        top, middle, future = _load_common(role)
+        return _compose(top, middle, text, future)
 
     def build_messages(
         self,
@@ -262,6 +320,10 @@ class PromptBuilderFactory:
         "critic": StaticFilePromptBuilder("critic"),
     }
 
+    # Roles in this set skip the common layer entirely (no principles.md
+    # prepend). Reserved slot for future opt-out use; currently empty.
+    _COMMON_OPT_OUT: set[str] = set()
+
     @classmethod
     def get(cls, role: str) -> PromptBuilder:
         if role not in cls._BUILDERS:
@@ -285,4 +347,6 @@ __all__ = [
     "PromptBuilderFactory",
     "StaticFilePromptBuilder",
     "ValidationResult",
+    "_compose",
+    "_load_common",
 ]

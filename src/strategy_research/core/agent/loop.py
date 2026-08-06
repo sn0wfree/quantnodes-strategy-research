@@ -197,6 +197,8 @@ class AgentLoop:
         event_bus: Any | None = None,
         circuit_breaker: ToolLoopCircuitBreaker | None = None,
         retry_policy: RetryPolicy | None = None,
+        enable_claim_validation: bool = False,
+        strict_claim_validation: bool = False,
     ):
         self.config = config
         self.memory = memory
@@ -217,6 +219,8 @@ class AgentLoop:
         self._event_bus = event_bus
         self._circuit_breaker = circuit_breaker
         self._retry_policy = retry_policy or RetryPolicy()
+        self._enable_claim_validation = enable_claim_validation
+        self._strict_claim_validation = strict_claim_validation
         self.cc = compact_config or config.compact_config or CompactConfig()
         self._previous_summary: str | None = None
 
@@ -788,6 +792,40 @@ class AgentLoop:
             "compression": result.compression_applied,
         })
 
+    def _run_claim_validation(
+        self, result: LoopResult, messages: list[dict[str, Any]],
+    ) -> None:
+        """Validate metric claims in the final answer against tool results.
+
+        Attaches ``ClaimValidationResult.__dict__`` to
+        ``result.metrics["claim_validation"]`` so the API layer can
+        surface it in assistant-message metadata (→ 🟡/🔴 badge).
+
+        When ``strict_claim_validation`` is enabled and unverified
+        claims exist, a soft warning is appended to the answer (never
+        rewrites or deletes the model's text).
+        """
+        if not self._enable_claim_validation:
+            return
+        from .validators import validate_claims
+
+        tool_texts = [
+            m.get("content", "")
+            for m in messages if m.get("role") == "tool"
+        ]
+        cv = validate_claims(result.answer or "", tool_texts)
+        result.metrics["claim_validation"] = cv.__dict__
+        if self._strict_claim_validation and not cv.ok:
+            warning = (
+                "\n\n> ⚠️ 数据真实性警告：以下数字未在工具返回值中找到，"
+                f"可能为模型推测：{', '.join(cv.unverified)}"
+            )
+            result.answer = (result.answer or "") + warning
+            self._trace({
+                "type": "claim_validation_warning",
+                "unverified": cv.unverified,
+            })
+
     # ── Public API ───────────────────────────────
 
     def run(
@@ -887,6 +925,7 @@ class AgentLoop:
             self._handle_max_iter(result)
 
         self._finalize_metrics(result, messages, t0)
+        self._run_claim_validation(result, messages)
         self._fire_hooks("after_run", hook_ctx, result)
         self._git_commit(full_task, result)
 
@@ -991,6 +1030,7 @@ class AgentLoop:
             self._handle_max_iter(result)
 
         self._finalize_metrics(result, messages, t0)
+        self._run_claim_validation(result, messages)
         await self._afire_hooks("after_run", hook_ctx, result)
         await asyncio.to_thread(self._git_commit, full_task, result)
 
