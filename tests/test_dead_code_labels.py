@@ -1,0 +1,79 @@
+"""B1-B17: source-grep 守门, 确保所有 DELETE-CANDIDATE v0.6 标签都在."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+# Each entry: (path-relative-to-repo-root, substring-of-existing-context).
+EXPECTED_LABELS: list[tuple[str, str]] = [
+    # ── core (B1..B7) ──
+    ("src/strategy_research/core/llm/builder.py", "fluent layering contract"),
+    ("src/strategy_research/core/llm/config.py", "legacy CLI flag"),
+    ("src/strategy_research/core/agent/progress.py", "inline callback"),
+    ("src/strategy_research/core/agent/to_llm_message.py", "inline projection"),
+    ("src/strategy_research/core/workflow/agent_runner.py", "deprecated kwargs only"),
+    ("src/strategy_research/core/hooks/unified.py", "composite.AgentHook"),
+    ("src/strategy_research/core/hooks/adapter.py", "composite.AgentHook"),
+    ("src/strategy_research/core/swarm/runtime.py", "GroundingProvider never read"),
+    # ── api (B8..B16) ──
+    ("src/strategy_research/api/routers/web_session.py", "parts_json dropped by v2"),
+    ("src/strategy_research/api/session/store.py", "keep list_attempts_by_status"),  # append_message
+    ("src/strategy_research/api/session/store.py", "production callers"),  # get_session_metadata (shared hint)
+    ("src/strategy_research/api/session/store.py", "use list_attempts_by_status"),  # list_attempts
+    ("src/strategy_research/api/routers/goal.py", "silently dropped by handler"),
+    ("src/strategy_research/core/agent/compact.py", "L1 path removed"),
+    ("src/strategy_research/core/agent/compact.py", "0 production callers"),
+    ("src/strategy_research/api/routers/session.py", "0 callers for /api/session/start"),
+    ("src/strategy_research/api/routers/strategy.py", "0 callers for the two endpoints"),
+    ("src/strategy_research/api/routers/memory.py", "legacy, test-only"),
+    ("src/strategy_research/api/session/events.py", "ring buffer not consumed"),
+    # ── webui (B17) ──
+    ("webui/frontend/src/components/common/Skeleton.tsx", "never imported"),
+]
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_all_delete_candidate_labels_present():
+    missing: list[str] = []
+    for rel_path, hint in EXPECTED_LABELS:
+        full = REPO_ROOT / rel_path
+        assert full.exists(), f"missing file: {rel_path}"
+        text = full.read_text(encoding="utf-8")
+        # Match: a DELETE-CANDIDATE v0.6 line containing the hint substring
+        pattern = rf"DELETE-CANDIDATE v0\.6:[^\n]*{re.escape(hint)}"
+        if not re.search(pattern, text):
+            missing.append(f"{rel_path}: hint '{hint}' not adjacent to a DELETE-CANDIDATE line")
+    assert not missing, "missing DELETE-CANDIDATE v0.6 labels:\n  " + "\n  ".join(missing)
+
+
+def test_no_unlabelled_todo_delete_suggestion():
+    """Files mentioning 'unused/dormant/0 callers' TODOs must also have a
+    DELETE-CANDIDATE label somewhere (informational gate)."""
+    candidates: list[tuple[str, int, str]] = []
+    for ext in ("*.py", "*.ts", "*.tsx"):
+        for f in REPO_ROOT.rglob(f"src/**/{ext}"):
+            if "/node_modules/" in str(f) or "/__pycache__/" in str(f):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                if re.match(r"\s*#\s*(TODO|FIXME)\(architecture\):", line):
+                    lower = line.lower()
+                    if any(k in lower for k in (
+                        "0 production callers", "unused", "dormant",
+                        "no callers", "not wired",
+                    )):
+                        candidates.append((str(f.relative_to(REPO_ROOT)), i, line.strip()[:80]))
+    missing_label: list[str] = []
+    for rel, lineno, _ in candidates:
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        if "DELETE-CANDIDATE v0.6" not in text:
+            missing_label.append(f"{rel}:{lineno}")
+    assert not missing_label, (
+        "files with 'unused/dormant/0 callers' TODOs but no DELETE-CANDIDATE:\n  "
+        + "\n  ".join(missing_label)
+    )

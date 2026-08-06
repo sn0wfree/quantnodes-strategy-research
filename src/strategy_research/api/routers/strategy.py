@@ -1,4 +1,7 @@
-"""Strategy API router — ``/api/strategies/*``."""
+"""Strategy API router — ``/api/strategies/*``.
+
+DELETE-CANDIDATE v0.6: 0 callers for the two endpoints below (frontend + tests).
+"""
 
 from __future__ import annotations
 

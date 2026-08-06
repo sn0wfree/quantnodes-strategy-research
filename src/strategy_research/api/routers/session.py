@@ -1,5 +1,6 @@
 """Session API router — /api/session/*
 
+DELETE-CANDIDATE v0.6: 0 callers for /api/session/start; the router as a whole is candidate for removal (legacy SessionDB tech debt).
 TODO(architecture): legacy router, kept alive alongside the
 event-sourced chat stack. Registered in app.py with no frontend
 callers found; it uses ``SessionDB`` against a different database than

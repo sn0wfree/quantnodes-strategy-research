@@ -3,6 +3,7 @@ interface SkeletonProps {
   variant?: 'rect' | 'circle' | 'text'
 }
 
+// DELETE-CANDIDATE v0.6: never imported.
 // TODO(feature): MessageSkeleton / AgentSkeleton are never imported.
 // Written for the initial loading states; the app now renders real
 // content immediately (store is populated from backend before paint),

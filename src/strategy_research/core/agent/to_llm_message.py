@@ -1,5 +1,6 @@
 """Unified LLM projection layer (opencode-aligned).
 
+# DELETE-CANDIDATE v0.6: 0 production callers; loop uses inline projection.
 TODO(architecture): module is currently NOT wired into production —
 ``loop.py`` still uses its own inline projection instead of this
 module, despite docs/compaction-summary-fix.md designating it the

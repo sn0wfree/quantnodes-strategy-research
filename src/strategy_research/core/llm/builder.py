@@ -1,6 +1,7 @@
 """LLMConfig builder — fluent composition of LLMConfig (Phase 2.4).
 
-TODO(architecture): currently UNUSED in production — the 4-layer merge
+# DELETE-CANDIDATE v0.6: 0 production callers; tests use it as fluent layering contract.
+# TODO(architecture): currently UNUSED in production — the 4-layer merge
 (CLI > env > llm.json/profiles > defaults) lives in ``config.py:
 LLMConfig.load()`` which superseded this builder. Kept because:
   1. tests (test_llm_config_builder.py) lock the fluent layering contract

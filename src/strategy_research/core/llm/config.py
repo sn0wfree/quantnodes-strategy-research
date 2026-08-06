@@ -616,6 +616,7 @@ def find_llm_config_path() -> Path:
 
 # ── Back-compat stubs (yaml/profile API removed in v0.5.0) ───────────
 #
+# DELETE-CANDIDATE v0.6: legacy CLI flag, no profile concept anymore.
 # TODO(architecture): retire these stubs once no external importers
 # remain. The profile system was re-added in v0.7 as llm.json
 # "profiles"/"active_profile" (see cli/commands/llm.py + config

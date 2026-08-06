@@ -1,5 +1,6 @@
 """Progress emission channel for long-running tools.
 
+# DELETE-CANDIDATE v0.6: 0 production callers; loop uses inline callback.
 TODO(architecture): the structured-progress half of this module
 (``emit_progress`` / ``_set_emitter`` / ``ProgressEvent``) is currently
 UNUSED — the agent loop injects progress via

@@ -14,6 +14,7 @@ class GoalStartRequest(BaseModel):
     session_id: str
     objective: str
     risk_tier: str = "research_general"
+    # DELETE-CANDIDATE v0.6: silently dropped by handler.
     # TODO(feature): accepted for API compatibility but currently
     # dropped on the floor — no goal handler reads it. Wire it into
     # goal creation (universe/market routing) or remove from the schema.

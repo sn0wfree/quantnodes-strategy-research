@@ -1,4 +1,8 @@
-"""Memory API router — /api/memory/*"""
+"""Memory API router — /api/memory/*
+
+DELETE-CANDIDATE v0.6: legacy, test-only — keep if memory search is
+ever needed in production.
+"""
 
 from __future__ import annotations
 

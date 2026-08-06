@@ -950,6 +950,7 @@ def update_message_content(
 ) -> None:
     """Update a message's content (and optional parts).
 
+    DELETE-CANDIDATE v0.6: FIXME broken; no callers; parts_json dropped by v2.
     FIXME(broken): no callers exist, and the ``parts is not None``
     branch writes to ``parts_json`` — a column dropped by the
     version-2 migration — so it would silently fail (caught + logged)

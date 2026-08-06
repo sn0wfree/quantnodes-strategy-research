@@ -165,6 +165,7 @@ class EventBus:
     ) -> List[SSEEvent]:
         """Replay buffered session events for reconnect recovery.
 
+        DELETE-CANDIDATE v0.6: 0 callers; per-session ring buffer not consumed.
         TODO(architecture): legacy buffer superseded by
         ``api/sse_buffer.py`` (the live ``/api/chat/events`` endpoint
         replays from sse_buffer, not this per-session ring buffer).

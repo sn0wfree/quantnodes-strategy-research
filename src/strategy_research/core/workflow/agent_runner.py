@@ -1,5 +1,6 @@
 """AgentRunner — pluggable agent execution for Goal Workflow.
 
+# DELETE-CANDIDATE v0.6: 0 callers; workflow.py keeps deprecated kwargs only.
 FIXME(architecture): module is effectively dormant — no production
 callers. The Goal Workflow executes agents via ``SwarmRuntime`` /
 WorkflowController instead. ``agent_runner`` / ``agent_runner_type``

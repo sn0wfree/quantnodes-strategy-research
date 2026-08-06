@@ -139,6 +139,7 @@ class CompactConfig:
     # ── Phase A simplification toggle ─────────────────────────
     # When True (default), use opencode-aligned L4-only 2-step flow.
     # When False, fall back to legacy 3-layer (L1+L4+L3) flow.
+    # DELETE-CANDIDATE v0.6: L1 path removed; flag is dead.
     # TODO(future): reserved for the L1 re-introduction; Phase A
     # removed the legacy code path, so False currently selects a
     # code path that no longer exists. Wire the flag back only when
@@ -608,6 +609,7 @@ def compact_messages(
         session_id: Session id (required for L4 to persist event).
         on_compaction: Optional callback invoked with the
             CompactionMessage after L4 generates it.
+            DELETE-CANDIDATE v0.6: 0 production callers.
             TODO(architecture): no callers pass this today — planned
             hook point for streaming/persisting the generated
             CompactionMessage to the caller's event channel.

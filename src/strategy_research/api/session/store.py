@@ -62,6 +62,7 @@ class SessionStore:
     # EventBusV2 emission + projector flush (and messages are read via
     # the projector). get_session_metadata would crash if called — it
     # imports the ASYNC router endpoint get_session and calls it
+    # DELETE-CANDIDATE v0.6: 0 production callers; keep list_attempts_by_status.
     # synchronously. Remove when the transition window (docs/
     # compaction-summary-fix.md B4) closes.
 
@@ -235,6 +236,7 @@ class SessionStore:
             )
             return self._get_messages_from_db(session_id, limit)
 
+    # DELETE-CANDIDATE v0.6: 0 production callers.
     def get_session_metadata(self, session_id: str) -> Optional[dict[str, Any]]:
         """Return session metadata (title, message_count, starred, tags)."""
         from ..routers.web_session import get_session
@@ -318,6 +320,7 @@ class SessionStore:
                 return None
             return _row_to_attempt(row)
 
+    # DELETE-CANDIDATE v0.6: 0 production callers; use list_attempts_by_status.
     def list_attempts(self, session_id: str, limit: int = 50) -> list[Attempt]:
         """List Attempts for a session, newest first."""
         with self._conn() as conn:

@@ -1,5 +1,6 @@
 """UnifiedHook — 统一 hook 接口.
 
+# DELETE-CANDIDATE v0.6: superseded by composite.AgentHook.
 TODO(architecture): legacy pre-P5 unified-hook design — currently only
 exported for back-compat (hooks/__init__.py) with no production callers
 in this repo. The active hook system is hooks/composite.py +

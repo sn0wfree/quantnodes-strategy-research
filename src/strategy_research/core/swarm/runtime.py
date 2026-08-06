@@ -117,6 +117,7 @@ class SwarmRuntime:
         max_workers: int = 4,
     ) -> None:
         self._controller = controller
+        # DELETE-CANDIDATE v0.6: GroundingProvider never read.
         # TODO(architecture): grounding is stored but never read —
         # future feature: ground agent outputs against a knowledge
         # source (docs/validation-design / research grounding) before
