@@ -8,6 +8,14 @@ interface DAGNodeDetailProps {
 }
 
 export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
+  const prompt = typeof node.prompt === 'string' ? node.prompt : undefined
+  const conditions = (() => {
+    const c = node.conditions
+    if (typeof c === 'string' || typeof c === 'object' && c !== null) {
+      return c as string | object
+    }
+    return undefined
+  })()
   return (
     <div className="absolute right-0 top-0 bottom-0 w-[360px] bg-slate-900 border-l border-slate-800 z-20 flex flex-col shadow-2xl">
       {/* Header */}
@@ -51,19 +59,19 @@ export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
         )}
 
         {/* Prompt / Description (from extra data) */}
-        {(node as any).prompt && (
+        {prompt && (
           <DetailSection title="Prompt" icon={<FileText className="h-3.5 w-3.5" />}>
             <pre className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-800/50 rounded p-2 max-h-40 overflow-y-auto">
-              {(node as any).prompt}
+              {prompt}
             </pre>
           </DetailSection>
         )}
 
         {/* Conditions */}
-        {(node as any).conditions && (
+        {conditions && (
           <DetailSection title="条件" icon={<Clock className="h-3.5 w-3.5" />}>
             <span className="text-xs text-slate-300">
-              {JSON.stringify((node as any).conditions)}
+              {JSON.stringify(conditions)}
             </span>
           </DetailSection>
         )}

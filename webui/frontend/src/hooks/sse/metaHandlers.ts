@@ -1,4 +1,29 @@
+import type { Goal } from '../../stores/goal'
 import type { SSEHandler } from './types'
+
+/** Backend goal_updated event payload (service.py / chat.py). */
+export interface GoalUpdatedEvent {
+  goal_id?: string
+  session_id?: string
+  status?: string
+  objective?: string
+  progress_percent?: number
+  criteria?: unknown[]
+  evidence_count?: number
+}
+
+/** Backend goal_evidence_added event payload. */
+export interface GoalEvidenceAddedEvent {
+  goal_id?: string
+  progress_percent?: number
+}
+
+/** Backend goal_completed event payload. */
+export interface GoalCompletedEvent {
+  goal_id?: string
+  status?: string
+  recap?: string
+}
 
 /**
  * Goal SSE handlers — wired to backend goal_* events emitted from
@@ -9,7 +34,7 @@ import type { SSEHandler } from './types'
  * the goal immediately after creation.
  */
 export const goalUpdated: SSEHandler = (data, { setGoal }) => {
-  const goalData = data as any
+  const goalData = data as GoalUpdatedEvent
   if (!goalData.goal_id) return
 
   setGoal({
@@ -18,7 +43,7 @@ export const goalUpdated: SSEHandler = (data, { setGoal }) => {
     status: goalData.status || 'active',
     objective: goalData.objective || '',
     progress_percent: goalData.progress_percent || 0,
-    criteria: goalData.criteria || [],
+    criteria: (goalData.criteria ?? []) as Goal['criteria'],
     evidence_count: goalData.evidence_count || 0,
   })
 
@@ -28,7 +53,7 @@ export const goalUpdated: SSEHandler = (data, { setGoal }) => {
 }
 
 export const goalEvidenceAdded: SSEHandler = (data, { updateGoal }) => {
-  const evData = data as any
+  const evData = data as GoalEvidenceAddedEvent
   updateGoal((g) => {
     g.evidence_count = (g.evidence_count || 0) + 1
     if (evData.progress_percent !== undefined) {
@@ -38,7 +63,7 @@ export const goalEvidenceAdded: SSEHandler = (data, { updateGoal }) => {
 }
 
 export const goalCompleted: SSEHandler = (data, { updateGoal }) => {
-  const compData = data as any
+  const compData = data as GoalCompletedEvent
   updateGoal((g) => {
     g.status = compData.status || 'complete'
     if (compData.recap) g.recap = compData.recap

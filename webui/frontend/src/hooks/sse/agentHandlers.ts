@@ -1,4 +1,5 @@
-import type { SSEHandler } from './types'
+import type { AgentStatus } from '../../stores/agents'
+import type { NodeStatus, SSEHandler } from './types'
 
 /**
  * Agent / DAG / progress events.
@@ -13,11 +14,11 @@ import type { SSEHandler } from './types'
 export const agentStatus: SSEHandler = (data, { updateAgent }) => {
   const { agent_id, status, ...rest } = data as {
     agent_id: string
-    status: string
+    status: AgentStatus
     [key: string]: unknown
   }
-  updateAgent(agent_id, (agent: any) => {
-    agent.status = status as any
+  updateAgent(agent_id, (agent) => {
+    agent.status = status
     Object.assign(agent, rest)
   })
 }
@@ -27,14 +28,14 @@ export const agentLoop: SSEHandler = (data, { updateAgent }) => {
     agent_id: string
     [key: string]: unknown
   }
-  updateAgent(agent_id, (agent: any) => {
+  updateAgent(agent_id, (agent) => {
     Object.assign(agent, loopData)
   })
 }
 
 export const dagUpdate: SSEHandler = (data, { updateNodeStatus }) => {
-  const { node_id, status } = data as { node_id: string; status: string }
-  updateNodeStatus(node_id, status as any)
+  const { node_id, status } = data as { node_id: string; status: NodeStatus }
+  updateNodeStatus(node_id, status)
 }
 
 export const progress: SSEHandler = (data, ctx) => {
@@ -57,7 +58,7 @@ export const progress: SSEHandler = (data, ctx) => {
   }
   if (p.agent_statuses && typeof p.agent_statuses === 'object') {
     for (const [nodeId, status] of Object.entries(p.agent_statuses)) {
-      ctx.updateNodeStatus(nodeId, status as any)
+      ctx.updateNodeStatus(nodeId, status as NodeStatus)
     }
   }
 }

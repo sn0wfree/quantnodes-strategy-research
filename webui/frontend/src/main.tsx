@@ -8,18 +8,27 @@ import './styles/globals.css'
 // backend. Lets Playwright inject session state without going through the
 // UI (no session creation UI exists yet). Only enabled when VITE_E2E is
 // set (CI/E2E builds) — previously this ran unconditionally in production.
+declare global {
+  interface Window {
+    __sessionStore?: unknown
+    __chatStore?: unknown
+    __workflowStore?: unknown
+    __commandPalette?: unknown
+  }
+}
+
 if (typeof window !== 'undefined' && import.meta.env.VITE_E2E) {
   import('./stores/session').then(({ useSessionStore }) => {
-    ;(window as any).__sessionStore = useSessionStore
+    window.__sessionStore = useSessionStore
   })
   import('./stores/chat').then(({ useChatStore }) => {
-    ;(window as any).__chatStore = useChatStore
+    window.__chatStore = useChatStore
   })
   import('./stores/workflow').then(({ useWorkflowStore }) => {
-    ;(window as any).__workflowStore = useWorkflowStore
+    window.__workflowStore = useWorkflowStore
   })
   import('./stores/commandPalette').then(({ useCommandPaletteStore }) => {
-    ;(window as any).__commandPalette = useCommandPaletteStore
+    window.__commandPalette = useCommandPaletteStore
   })
 }
 

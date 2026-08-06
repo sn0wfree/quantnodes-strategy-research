@@ -1,5 +1,17 @@
+import type { Agent } from '../../stores/agents'
 import type { Message } from '../../stores/chat'
 import type { Goal } from '../../stores/goal'
+
+/**
+ * DAG/workflow node execution status. Matches `DAGNodeData.status`
+ * in `components/workflow/DAGNode.tsx`.
+ */
+export type NodeStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
 
 export type SSEEventType =
   | 'text.started'
@@ -117,9 +129,9 @@ export interface SSEContext {
     getTokensUsed: (sessionId: string) => number
   }
   // Agent store
-  updateAgent: (id: string, updater: (a: any) => void) => void
+  updateAgent: (id: string, updater: (a: Agent) => void) => void
   // Workflow store
-  updateNodeStatus: (id: string, status: any) => void
+  updateNodeStatus: (id: string, status: NodeStatus) => void
   setExecutionProgress: (p: number) => void
   // Goal store
   setGoal: (g: Goal | null) => void
