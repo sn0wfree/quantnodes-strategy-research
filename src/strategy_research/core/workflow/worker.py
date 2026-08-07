@@ -153,6 +153,23 @@ class SwarmWorker:
         self._timeout_s = timeout_s
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._event_callback: Any = None  # optional (event_type, data) callback
+
+    def set_event_callback(self, callback: Any) -> None:
+        """Set an optional callback for forwarding tool/text events.
+
+        The callback receives (event_type: str, data: dict) and is called
+        for tool_call, tool_result, and text_delta events during execution.
+        """
+        self._event_callback = callback
+
+    def _emit_event(self, event_type: str, data: dict[str, Any]) -> None:
+        """Emit an event via the callback if set."""
+        if self._event_callback is not None:
+            try:
+                self._event_callback(event_type, data)
+            except Exception:
+                logger.debug("event_callback raised for %s", event_type, exc_info=True)
 
     # ── Public API ─────────────────────────────────────────────
 
@@ -221,6 +238,10 @@ class SwarmWorker:
             content = (response.content or "").strip()
             tool_calls: list[ToolCall] = response.tool_calls or []
 
+            # Emit text_delta for streaming visibility
+            if content:
+                self._emit_event("text_delta", {"delta": content})
+
             # Append assistant message
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
             if tool_calls:
@@ -248,7 +269,17 @@ class SwarmWorker:
 
             # Execute tools
             for tc in tool_calls:
+                self._emit_event("tool_call", {
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                })
                 tool_result = self._registry.execute(tc.name, tc.arguments)
+                self._emit_event("tool_result", {
+                    "tool_call_id": tc.id,
+                    "result": tool_result[:500] if isinstance(tool_result, str) else str(tool_result)[:500],
+                    "status": "done",
+                })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,

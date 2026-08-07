@@ -105,6 +105,14 @@ class EventType:
     CHART = "chart"
     IMAGE = "image"
 
+    # Subagent lifecycle
+    SUBAGENT_STARTED = "subagent_started"
+    SUBAGENT_TOOL_CALL = "subagent_tool_call"
+    SUBAGENT_TOOL_RESULT = "subagent_tool_result"
+    SUBAGENT_TEXT_DELTA = "subagent_text_delta"
+    SUBAGENT_COMPLETED = "subagent_completed"
+    SUBAGENT_FAILED = "subagent_failed"
+
 
 # Set of all known event types (for validation)
 _ALL_EVENT_TYPES: Set[str] = set()

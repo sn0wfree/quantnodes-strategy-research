@@ -250,6 +250,8 @@ class AgentLoop:
         self.client = OpenAICompatClient(config)
         # Track tool_calls per iteration for no_progress detection
         self._recent_hashes: list[str] = []
+        # Subagent delegation counter (reset per arun())
+        self._subagent_count: list[int] = [0]  # mutable ref for SubAgentTool
         # Trace writer (optional)
         self._trace_writer: TraceWriter | None = None
         if trace_dir is not None:
@@ -859,6 +861,7 @@ class AgentLoop:
             logger.info("[AGENT] compaction_in_history=%d", compaction_count)
 
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
+        self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
         self._fire_hooks("before_run", hook_ctx)
 
@@ -961,6 +964,7 @@ class AgentLoop:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
+        self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
         await self._afire_hooks("before_run", hook_ctx)
 
@@ -1121,6 +1125,13 @@ class AgentLoop:
             session_id=self.session_id,
             emit_progress=_progress_callback,
         )
+
+        # SubAgentTool injection: emit_event, message_id, count ref, parent registry
+        if tc.name == "delegate_to_agent":
+            kwargs["emit_event"] = self._emit
+            kwargs["message_id"] = getattr(self, "_current_message_id", None)
+            kwargs["_subagent_count_ref"] = self._subagent_count
+            kwargs["_parent_registry"] = self.registry
 
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors ──────────────
@@ -1336,6 +1347,13 @@ class AgentLoop:
             session_id=self.session_id,
             emit_progress=_progress_callback,
         )
+
+        # SubAgentTool injection: emit_event, message_id, count ref, parent registry
+        if tc.name == "delegate_to_agent":
+            kwargs["emit_event"] = self._emit
+            kwargs["message_id"] = getattr(self, "_current_message_id", None)
+            kwargs["_subagent_count_ref"] = self._subagent_count
+            kwargs["_parent_registry"] = self.registry
 
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors (sync parity) ─
