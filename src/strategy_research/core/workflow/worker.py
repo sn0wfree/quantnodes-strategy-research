@@ -25,6 +25,7 @@ construct fresh per task.
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import time
@@ -32,7 +33,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..agent.tools import ToolRegistry
+from ..agent.tools import ToolContext, ToolRegistry
 from ..llm import LLMResponse, ToolCall
 from ..llm.errors import LLMError
 
@@ -129,6 +130,10 @@ class SwarmWorker:
         tool call hangs; we treat per-iteration timeouts as TIMEOUT status.
     temperature, max_tokens:
         Passed through to ``client.chat``.
+    tool_context:
+        Optional ``ToolContext`` injected into tool calls that declare a
+        ``ctx`` parameter (v2 signature tools). Without it, such tools
+        raise ``TypeError: missing 1 required positional argument: 'ctx'``.
 
     The worker is single-shot; create a new one per task. It does not
     retain state between ``run()`` calls.
@@ -144,6 +149,7 @@ class SwarmWorker:
         timeout_s: float = 60.0,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        tool_context: ToolContext | None = None,
     ) -> None:
         self._client = client
         self._registry = registry
@@ -153,6 +159,7 @@ class SwarmWorker:
         self._timeout_s = timeout_s
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._tool_context = tool_context
         self._event_callback: Any = None  # optional (event_type, data) callback
 
     def set_event_callback(self, callback: Any) -> None:
@@ -170,6 +177,27 @@ class SwarmWorker:
                 self._event_callback(event_type, data)
             except Exception:
                 logger.debug("event_callback raised for %s", event_type, exc_info=True)
+
+    def _inject_tool_context(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Inject ``ctx`` into tool args when the tool declares a ctx param."""
+        if self._tool_context is None:
+            return arguments
+        tool = self._registry.get(tool_name)
+        if tool is None:
+            return arguments
+        try:
+            sig = inspect.signature(tool.execute)
+        except (TypeError, ValueError):
+            return arguments
+        if "ctx" not in sig.parameters:
+            return arguments
+        out = dict(arguments)
+        out["ctx"] = self._tool_context
+        return out
 
     # ── Public API ─────────────────────────────────────────────
 
@@ -274,7 +302,8 @@ class SwarmWorker:
                     "name": tc.name,
                     "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                 })
-                tool_result = self._registry.execute(tc.name, tc.arguments)
+                args = self._inject_tool_context(tc.name, tc.arguments)
+                tool_result = self._registry.execute(tc.name, args)
                 self._emit_event("tool_result", {
                     "tool_call_id": tc.id,
                     "result": tool_result[:500] if isinstance(tool_result, str) else str(tool_result)[:500],

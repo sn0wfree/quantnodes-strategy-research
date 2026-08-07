@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
-from ..tools import BaseTool, ToolRegistry, EFFECT_FS
+from ..tools import BaseTool, ToolContext, ToolRegistry, EFFECT_FS
 from ...llm.config import LLMConfig
 from ...llm.openai_client import OpenAICompatClient
 
@@ -165,6 +166,7 @@ class SubAgentTool(BaseTool):
         emit_event = kwargs.get("emit_event")
         message_id = kwargs.get("message_id")
         workspace = kwargs.get("workspace")
+        session_id = kwargs.get("session_id")
         subagent_count_ref = kwargs.get("_subagent_count_ref")
 
         # ── Count limit ────────────────────────────────────────────
@@ -217,6 +219,10 @@ class SubAgentTool(BaseTool):
                 system_prompt=system_prompt,
                 max_iterations=max_iterations,
                 timeout_s=120.0,
+                tool_context=ToolContext(
+                    workspace=Path(workspace) if workspace else None,
+                    session_id=session_id,
+                ),
             )
 
             # Set event callback for forwarding

@@ -467,3 +467,96 @@ class TestSwarmWorkerTimeout:
         )
         result = worker.run("slow task")
         assert result.status == WorkerStatus.TIMEOUT
+
+
+# ── ToolContext injection ─────────────────────────────────────────────
+
+
+class TestSwarmWorkerToolContext:
+    def test_ctx_injected_into_v2_signature_tool(self):
+        from strategy_research.core.agent.tools import BaseTool, ToolContext
+
+        class CtxTool(BaseTool):
+            name = "ctx_tool"
+            description = "needs ctx"
+            parameters = {"type": "object", "properties": {}, "required": []}
+            is_readonly = True
+
+            def execute(self, ctx, **kwargs):
+                ws = ctx.workspace.name if ctx.workspace else None
+                return json.dumps({"status": "ok", "workspace": ws})
+
+        registry = ToolRegistry()
+        registry.register(CtxTool())
+        mock = MockLLM([
+            tool_resp("ctx_tool", {}, content="thinking"),
+            text_resp("done"),
+        ])
+        worker = SwarmWorker(
+            client=mock,
+            registry=registry,
+            system_prompt="x",
+            tool_context=ToolContext(workspace=Path("/tmp/ws"), session_id="s-1"),
+        )
+        result = worker.run("t")
+        assert result.status == WorkerStatus.COMPLETED
+        # ctx reached the tool → workspace name came through
+        tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
+        assert '"workspace": "ws"' in tool_msg[-1]["content"]
+
+    def test_no_ctx_but_ctx_requiring_tool_is_wrapped_error(self):
+        from strategy_research.core.agent.tools import BaseTool
+
+        class CtxTool(BaseTool):
+            name = "ctx_tool"
+            description = "needs ctx"
+            parameters = {"type": "object", "properties": {}, "required": []}
+            is_readonly = True
+
+            def execute(self, ctx, **kwargs):
+                return json.dumps({"status": "ok"})
+
+        registry = ToolRegistry()
+        registry.register(CtxTool())
+        mock = MockLLM([
+            tool_resp("ctx_tool", {}, content="thinking"),
+            text_resp("done"),
+        ])
+        worker = SwarmWorker(
+            client=mock,
+            registry=registry,
+            system_prompt="x",
+        )
+        result = worker.run("t")
+        # No ctx injected → tool.invoke wraps the TypeError as an error result
+        tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
+        assert "missing 1 required positional argument: 'ctx'" in tool_msg[-1]["content"]
+
+    def test_legacy_kwargs_tool_unaffected_by_tool_context(self):
+        from strategy_research.core.agent.tools import BaseTool, ToolContext
+
+        class KwargsTool(BaseTool):
+            name = "kwargs_tool"
+            description = "legacy"
+            parameters = {"type": "object", "properties": {}, "required": []}
+            is_readonly = True
+
+            def execute(self, **kwargs):
+                return json.dumps({"status": "ok", "saw_ctx": "ctx" in kwargs})
+
+        registry = ToolRegistry()
+        registry.register(KwargsTool())
+        mock = MockLLM([
+            tool_resp("kwargs_tool", {}, content="thinking"),
+            text_resp("done"),
+        ])
+        worker = SwarmWorker(
+            client=mock,
+            registry=registry,
+            system_prompt="x",
+            tool_context=ToolContext(workspace=Path("/tmp/ws")),
+        )
+        result = worker.run("t")
+        assert result.status == WorkerStatus.COMPLETED
+        tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
+        assert '"saw_ctx": false' in tool_msg[-1]["content"]
