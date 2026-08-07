@@ -5,6 +5,7 @@ import {
   Sigma,
   Layers,
   BookOpen,
+  Library,
   Settings,
   LogOut,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ interface NavEntry {
 const NAV_ITEMS: NavEntry[] = [
   { to: '/chat', label: 'Chat', icon: MessageSquare, toggleSidebar: true },
   { to: '/dag', label: '编排', icon: Network },
+  { to: '/study', label: 'Study', icon: BookOpen },
   { to: '/factors', label: '因子库', icon: Sigma },
   { to: '/strategies', label: '策略库', icon: Layers },
 ]
@@ -91,7 +93,7 @@ export function IconNav() {
         disabled
         className="flex h-10 w-10 cursor-not-allowed items-center justify-center rounded-lg text-slate-600 opacity-40"
       >
-        <BookOpen className="h-5 w-5" />
+        <Library className="h-5 w-5" />
       </button>
 
       <div className="flex-1" />

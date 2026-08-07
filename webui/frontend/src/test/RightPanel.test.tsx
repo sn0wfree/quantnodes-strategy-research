@@ -57,11 +57,11 @@ describe('RightPanel (merged panel)', () => {
     setupStores()
   })
 
-  it('renders the three cards: token, curve, goal & study', () => {
+  it('renders the two cards: token, goal & progress', () => {
     render(<RightPanel />)
     expect(screen.getByText('Token 使用情况')).toBeTruthy()
+    expect(screen.getByText('目标 & 进度')).toBeTruthy()
     expect(screen.getByText('表现曲线')).toBeTruthy()
-    expect(screen.getByText('目标 & Study')).toBeTruthy()
   })
 
   it('token card shows usage percent and message count', () => {
@@ -75,12 +75,6 @@ describe('RightPanel (merged panel)', () => {
     expect(screen.getByText('分析 20 日动量因子 IC')).toBeTruthy()
     expect(screen.getByText('研究标准')).toBeTruthy()
     expect(screen.getByText('计算 IC 序列')).toBeTruthy()
-  })
-
-  it('study section renders the create form when no active study', () => {
-    render(<RightPanel />)
-    // StudyTab without an active study shows the create form header
-    expect(screen.getByText('Study')).toBeTruthy()
   })
 
   it('shows empty state when no goal exists', () => {

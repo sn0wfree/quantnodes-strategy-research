@@ -342,6 +342,7 @@ async def _run_agent_loop_background(
             role="chat",
             on_event=accumulator.handle,
             workspace=None,
+            enable_goal_injection=True,  # long-horizon: continue until goal criteria met
         )
 
         result = await loop.arun(task)

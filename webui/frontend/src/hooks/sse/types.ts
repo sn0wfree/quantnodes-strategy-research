@@ -65,6 +65,7 @@ export type SSEEventType =
   | 'subagent_text_delta'
   | 'subagent_completed'
   | 'subagent_failed'
+  | 'todo_updated'
 
 export const EVENT_TYPES: SSEEventType[] = [
   'text.started', 'text_delta', 'text.ended',
@@ -93,6 +94,8 @@ export const EVENT_TYPES: SSEEventType[] = [
   // Subagent events
   'subagent_started', 'subagent_tool_call', 'subagent_tool_result',
   'subagent_text_delta', 'subagent_completed', 'subagent_failed',
+  // Todo / task tracking
+  'todo_updated',
 ]
 
 /**

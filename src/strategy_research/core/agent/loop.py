@@ -874,6 +874,7 @@ class AgentLoop:
             if applied:
                 self._emit_compaction(applied, iteration, result)
             self._emit_iter_start(iteration, messages)
+            self._inject_todos_snapshot(messages)
 
             try:
                 if self._stream_mode:
@@ -977,6 +978,7 @@ class AgentLoop:
             if applied:
                 self._emit_compaction(applied, iteration, result)
             self._emit_iter_start(iteration, messages)
+            self._inject_todos_snapshot(messages)
 
             try:
                 if self._stream_mode:
@@ -1132,6 +1134,10 @@ class AgentLoop:
             kwargs["message_id"] = getattr(self, "_current_message_id", None)
             kwargs["_subagent_count_ref"] = self._subagent_count
             kwargs["_parent_registry"] = self.registry
+
+        # TodoWriteTool injection: emit_event (session_id already injected)
+        if tc.name == "todo_write":
+            kwargs["emit_event"] = self._emit
 
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors ──────────────
@@ -1354,6 +1360,10 @@ class AgentLoop:
             kwargs["message_id"] = getattr(self, "_current_message_id", None)
             kwargs["_subagent_count_ref"] = self._subagent_count
             kwargs["_parent_registry"] = self.registry
+
+        # TodoWriteTool injection: emit_event (session_id already injected)
+        if tc.name == "todo_write":
+            kwargs["emit_event"] = self._emit
 
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors (sync parity) ─
@@ -1837,6 +1847,28 @@ class AgentLoop:
             return _get_goal_store().get_current_snapshot(self.session_id)
         except Exception:  # noqa: BLE001
             return None
+
+    def _inject_todos_snapshot(self, messages: list[dict[str, Any]]) -> None:
+        """Append a <current-todos> system block when the session has todos.
+
+        Injects only when the snapshot changed since the last injection
+        (tracked via hash) so we don't spam identical system messages.
+        """
+        if not self.session_id:
+            return
+        try:
+            from .builtin_tools.todo_tools import TodoStore, _format_todos_snapshot
+            todos = TodoStore.get(self.session_id)
+        except Exception:  # noqa: BLE001
+            return
+        if not todos:
+            return
+        block = _format_todos_snapshot(todos)
+        h = hash(block)
+        if getattr(self, "_last_todos_hash", None) == h:
+            return
+        self._last_todos_hash = h
+        messages.append({"role": "system", "content": block})
 
     # ── Git commit after run ──────────────────────
 

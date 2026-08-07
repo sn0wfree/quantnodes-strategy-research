@@ -13,6 +13,7 @@ import { StrategyLibraryPage } from './pages/StrategyLibraryPage'
 import { CatalogPage } from './catalog/CatalogPage'
 import { CatalogItem } from './catalog/CatalogItem'
 import { SettingsModal } from './components/common/SettingsModal'
+import { StudyPage } from './pages/StudyPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -33,6 +34,14 @@ export default function App() {
           element={
             <AuthGuard>
               <StudyDetailPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/study"
+          element={
+            <AuthGuard>
+              <StudyPage />
             </AuthGuard>
           }
         />

@@ -113,6 +113,9 @@ class EventType:
     SUBAGENT_COMPLETED = "subagent_completed"
     SUBAGENT_FAILED = "subagent_failed"
 
+    # Todo / task tracking (opencode-style todo_write tool)
+    TODO_UPDATED = "todo_updated"
+
 
 # Set of all known event types (for validation)
 _ALL_EVENT_TYPES: Set[str] = set()

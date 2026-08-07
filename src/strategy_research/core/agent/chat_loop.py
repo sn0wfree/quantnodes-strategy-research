@@ -38,6 +38,7 @@ def build_chat_agent_loop(
     allow_shell_tools: bool = False,
     enable_claim_validation: bool = False,
     strict_claim_validation: bool = False,
+    enable_goal_injection: bool = False,
 ) -> AgentLoop:
     """Construct a chat-mode ``AgentLoop``.
 
@@ -49,8 +50,10 @@ def build_chat_agent_loop(
       explicitly overridden
     - ``registry`` defaults to ``build_default_registry()`` (safe fallback
       to ``None`` if import fails)
-    - ``enable_goal_injection`` and ``enable_hypothesis_auto_create``
-      are disabled (chat mode is non-agentic)
+    - ``enable_goal_injection`` (default ``False``): when True the loop
+      injects <current-research-goal> context and forces continuation
+      while required criteria are uncovered (long-horizon chat mode);
+      ``enable_hypothesis_auto_create`` stays disabled
     - ``system_prompt`` is rendered via ``PromptBuilderFactory.get(role)``
       with ``extra_context`` (e.g. ``{"workspace": ..., "tool_list": ...}``)
       unless ``system_prompt_override`` is provided
@@ -119,7 +122,7 @@ def build_chat_agent_loop(
         session_id=session_id,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,  # P2: default None (all tools)
-        enable_goal_injection=False,  # chat mode: no goal injection
+        enable_goal_injection=enable_goal_injection,
         enable_hypothesis_auto_create=False,
         strategy_name=strategy_name,
         compact_config=compact_config,

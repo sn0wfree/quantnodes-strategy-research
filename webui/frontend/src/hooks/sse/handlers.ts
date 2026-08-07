@@ -47,6 +47,7 @@ import {
   subagentCompleted,
   subagentFailed,
 } from './subagentHandlers'
+import { todoUpdated } from './todoHandlers'
 
 /**
  * Dispatch table mapping every registered SSE event type to its handler.
@@ -106,4 +107,6 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   subagent_text_delta: subagentTextDelta,
   subagent_completed: subagentCompleted,
   subagent_failed: subagentFailed,
+  // Todo / task tracking
+  todo_updated: todoUpdated,
 }

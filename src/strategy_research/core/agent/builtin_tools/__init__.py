@@ -2911,6 +2911,9 @@ def build_default_registry(workspace: Path | None = None) -> ToolRegistry:
     # Sub-agent delegation
     from .subagent_tool import SubAgentTool
     r.register(SubAgentTool())
+    # Todo / task tracking
+    from .todo_tools import TodoWriteTool
+    r.register(TodoWriteTool())
 
     # Paradigm v2 分层注册: 组合库加载器 (workspace tools/combo/*.yml)
     if workspace is not None:

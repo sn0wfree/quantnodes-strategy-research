@@ -917,6 +917,7 @@ class SessionService:
             max_iterations=max_iterations,
             system_prompt_override=final_prompt,  # caller-provided wins
             allow_shell_tools=allow_shell_tools,
+            enable_goal_injection=True,  # long-horizon: continue until goal criteria met
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).
