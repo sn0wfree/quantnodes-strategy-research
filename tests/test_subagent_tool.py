@@ -666,3 +666,103 @@ class TestBatchOfDelegates:
         started = [e for e in events if e[0] == "subagent_started"]
         assert len(started) == 2
         assert len({e[1]["agent_id"] for e in started}) == 2
+
+
+# ── _forward_event unit tests ────────────────────────────────────────
+
+
+class TestForwardEvent:
+    def test_lifecycle_events_pass_through(self):
+        from strategy_research.core.agent.builtin_tools.subagent_tool import _forward_event
+
+        seen: list[tuple[str, dict]] = []
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "subagent_started", {"a": 1})
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "subagent_completed", {"b": 2})
+        assert seen[0] == ("subagent_started", {"agent_id": "sub-1", "message_id": "msg-1", "a": 1})
+        assert seen[1][0] == "subagent_completed"
+        assert seen[1][1]["b"] == 2
+
+    def test_child_events_namespaced(self):
+        from strategy_research.core.agent.builtin_tools.subagent_tool import _forward_event
+
+        seen: list[tuple[str, dict]] = []
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "tool_call", {"name": "read_file"})
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "tool_result", {"ok": True})
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "text_delta", {"delta": "x"})
+        assert [e[0] for e in seen] == [
+            "subagent_tool_call", "subagent_tool_result", "subagent_text_delta",
+        ]
+        assert seen[0][1]["agent_id"] == "sub-1"
+        assert seen[0][1]["message_id"] == "msg-1"
+        assert seen[0][1]["name"] == "read_file"
+
+    def test_none_callback_is_noop(self):
+        from strategy_research.core.agent.builtin_tools.subagent_tool import _forward_event
+
+        _forward_event(None, "sub-1", "msg-1", "tool_call", {"x": 1})  # must not raise
+
+    def test_unknown_event_type_passes_through_unchanged(self):
+        from strategy_research.core.agent.builtin_tools.subagent_tool import _forward_event
+
+        seen: list[tuple[str, dict]] = []
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "thinking_delta", {"t": "..."})
+        assert seen[0][0] == "thinking_delta"
+
+
+# ── SwarmWorker event callback ───────────────────────────────────────
+
+
+class TestSwarmWorkerEventCallback:
+    def test_callback_receives_tool_and_text_events(self):
+        from strategy_research.core.workflow.worker import SwarmWorker
+
+        class NoopTool(BaseTool):
+            name = "noop_tool"
+            description = "no-op"
+            parameters = {"type": "object", "properties": {}, "required": []}
+            is_readonly = True
+
+            def execute(self, **kwargs):
+                return json.dumps({"status": "ok"})
+
+        registry = ToolRegistry()
+        registry.register(NoopTool())
+
+        # Child: tool call then text
+        mock = SyncMockLLM([
+            child_tool_resp("noop_tool", {}, call_id="cc-1"),
+            text_resp("child final"),
+        ])
+        worker = SwarmWorker(client=mock, registry=registry, system_prompt="x")
+        seen: list[tuple[str, dict]] = []
+        worker.set_event_callback(lambda et, d: seen.append((et, d)))
+
+        result = worker.run("do it")
+        assert result.status.value == "completed"
+        assert result.answer == "child final"
+
+        events = {et for et, _ in seen}
+        assert "tool_call" in events
+        assert "tool_result" in events
+        assert "text_delta" in events
+
+    def test_callback_error_is_swallowed(self):
+        from strategy_research.core.workflow.worker import SwarmWorker
+
+        mock = SyncMockLLM([text_resp("plain text")])
+        worker = SwarmWorker(client=mock, registry=ToolRegistry(), system_prompt="x")
+
+        def _boom(et, d):
+            raise RuntimeError("callback boom")
+
+        worker.set_event_callback(_boom)
+        result = worker.run("t")  # must not raise
+        assert result.status.value == "completed"
+
+    def test_no_callback_defaults_to_noop(self):
+        from strategy_research.core.workflow.worker import SwarmWorker
+
+        mock = SyncMockLLM([text_resp("plain text")])
+        worker = SwarmWorker(client=mock, registry=ToolRegistry(), system_prompt="x")
+        result = worker.run("t")
+        assert result.status.value == "completed"
