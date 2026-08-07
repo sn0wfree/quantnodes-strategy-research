@@ -1,4 +1,5 @@
-// todo store — replaceTodos / setDrawerOpen / clearTodos.
+// todo store — replaceTodos / setExpanded / toggleExpanded / clearTodos,
+// with per-session first-seen auto-expand via sessionStorage.
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useTodoStore } from '../stores/todo'
@@ -8,33 +9,74 @@ const TODOS = [
   { id: 't2', content: '计算因子', status: 'pending' as const },
 ]
 
+const SESSION = 's-store-test'
+
 beforeEach(() => {
-  useTodoStore.setState({ todos: [], drawerOpen: false })
+  useTodoStore.setState({ todos: [], expanded: false })
+  sessionStorage.clear()
 })
 
 describe('useTodoStore', () => {
-  it('replaceTodos replaces the list and keeps drawer state by default', () => {
-    useTodoStore.getState().replaceTodos(TODOS)
+  it('starts empty and collapsed', () => {
+    const s = useTodoStore.getState()
+    expect(s.todos).toEqual([])
+    expect(s.expanded).toBe(false)
+  })
+
+  it('replaceTodos replaces the list', () => {
+    useTodoStore.getState().replaceTodos(SESSION, TODOS)
     expect(useTodoStore.getState().todos).toEqual(TODOS)
-    expect(useTodoStore.getState().drawerOpen).toBe(false)
   })
 
-  it('replaceTodos can auto-open the drawer', () => {
-    useTodoStore.getState().replaceTodos(TODOS, { open: true })
-    expect(useTodoStore.getState().drawerOpen).toBe(true)
+  it('auto-expands on the FIRST replaceTodos for a session', () => {
+    useTodoStore.getState().replaceTodos(SESSION, TODOS, { expand: true })
+    expect(useTodoStore.getState().expanded).toBe(true)
+    expect(useTodoStore.getState().hasSeenFor(SESSION)).toBe(true)
   })
 
-  it('setDrawerOpen toggles visibility', () => {
-    useTodoStore.getState().setDrawerOpen(true)
-    expect(useTodoStore.getState().drawerOpen).toBe(true)
-    useTodoStore.getState().setDrawerOpen(false)
-    expect(useTodoStore.getState().drawerOpen).toBe(false)
+  it('does NOT auto-expand on subsequent updates once seen', () => {
+    // First event marks seen + expands
+    useTodoStore.getState().replaceTodos(SESSION, TODOS, { expand: true })
+    // User collapses
+    useTodoStore.getState().setExpanded(false)
+    // Second event: must respect user's collapse
+    useTodoStore.getState().replaceTodos(SESSION, TODOS, { expand: true })
+    expect(useTodoStore.getState().expanded).toBe(false)
   })
 
-  it('clearTodos resets list and closes the drawer', () => {
-    useTodoStore.getState().replaceTodos(TODOS, { open: true })
+  it('does NOT auto-expand for a different session that has never seen it', () => {
+    useTodoStore.getState().replaceTodos(SESSION, TODOS, { expand: true })
+    useTodoStore.getState().setExpanded(false)
+    // brand new session id → auto-expand again
+    useTodoStore.getState().replaceTodos('s-other', TODOS, { expand: true })
+    expect(useTodoStore.getState().expanded).toBe(true)
+  })
+
+  it('replaceTodos without expand flag leaves expansion state untouched', () => {
+    useTodoStore.getState().replaceTodos(SESSION, TODOS)
+    expect(useTodoStore.getState().expanded).toBe(false)
+  })
+
+  it('setExpanded and toggleExpanded work', () => {
+    useTodoStore.getState().setExpanded(true)
+    expect(useTodoStore.getState().expanded).toBe(true)
+    useTodoStore.getState().toggleExpanded()
+    expect(useTodoStore.getState().expanded).toBe(false)
+    useTodoStore.getState().toggleExpanded()
+    expect(useTodoStore.getState().expanded).toBe(true)
+  })
+
+  it('clearTodos resets list and collapses', () => {
+    useTodoStore.getState().replaceTodos(SESSION, TODOS, { expand: true })
     useTodoStore.getState().clearTodos()
-    expect(useTodoStore.getState().todos).toEqual([])
-    expect(useTodoStore.getState().drawerOpen).toBe(false)
+    const s = useTodoStore.getState()
+    expect(s.todos).toEqual([])
+    expect(s.expanded).toBe(false)
+  })
+
+  it('markSeenFor persists to sessionStorage', () => {
+    useTodoStore.getState().markSeenFor(SESSION)
+    expect(sessionStorage.getItem(`strategy-research:todo-seen:${SESSION}`)).toBe('1')
+    expect(useTodoStore.getState().hasSeenFor(SESSION)).toBe(true)
   })
 })

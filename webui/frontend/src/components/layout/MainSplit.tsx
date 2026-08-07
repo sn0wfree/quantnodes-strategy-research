@@ -1,7 +1,7 @@
 import { MessageList } from '../chat/MessageList'
 import { Composer } from '../chat/Composer'
 import { SessionTabs } from '../chat/SessionTabs'
-import { TodoDrawer } from '../chat/TodoDrawer'
+import { TodoPanel } from '../chat/TodoPanel'
 
 export function MainSplit() {
   return (
@@ -11,11 +11,11 @@ export function MainSplit() {
       <div className="flex-1 overflow-hidden">
         <MessageList />
       </div>
+      {/* Todo panel (opencode-style): floats above the composer, only
+          mounts when todo_updated SSE pushes a non-empty list. */}
+      <TodoPanel />
       {/* Composer */}
       <Composer />
-      {/* Todo drawer: slides over the chat column when the agent
-          starts tracking a multi-step task (todo_updated SSE). */}
-      <TodoDrawer />
     </div>
   )
 }

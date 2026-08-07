@@ -9,15 +9,53 @@ import { useTodoStore, type TodoItem } from '../../stores/todo'
  *
  *     data: { todos: [{ id, content, status }] }
  *
- * The frontend replaces the whole list and auto-opens the drawer on
- * the first event so the user can follow long-horizon task progress.
+ * The frontend replaces the whole list and, on the FIRST event for a
+ * session, auto-expands the panel so the user can follow long-horizon
+ * task progress. Subsequent updates respect the user's collapsed /
+ * expanded choice (mirrors opencode's per-session persistence).
+ *
+ * When every todo reaches a terminal state (completed / cancelled),
+ * the panel collapses and clears itself after a short delay, matching
+ * opencode's `closeMs=400` close animation.
  */
 
-export const todoUpdated: SSEHandler = (data) => {
+const AUTO_CLOSE_DELAY_MS = 400
+let closeTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleAutoClose() {
+  if (closeTimer) clearTimeout(closeTimer)
+  closeTimer = setTimeout(() => {
+    closeTimer = null
+    useTodoStore.getState().clearTodos()
+  }, AUTO_CLOSE_DELAY_MS)
+}
+
+function cancelAutoClose() {
+  if (closeTimer) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+}
+
+export const todoUpdated: SSEHandler = (data, ctx) => {
   const { todos } = data as { todos?: TodoItem[] }
   if (!Array.isArray(todos)) return
+  const sessionId = ctx?.sessionId ?? 'default'
   const normalized = todos.filter(
     (t) => t && typeof t.id === 'string' && typeof t.content === 'string'
   )
-  useTodoStore.getState().replaceTodos(normalized, { open: true })
+
+  const allDone =
+    normalized.length > 0 &&
+    normalized.every((t) => t.status === 'completed' || t.status === 'cancelled')
+
+  if (allDone) {
+    // Keep the snapshot visible briefly, then collapse + clear
+    useTodoStore.getState().replaceTodos(sessionId, normalized, { expand: true })
+    scheduleAutoClose()
+    return
+  }
+
+  cancelAutoClose()
+  useTodoStore.getState().replaceTodos(sessionId, normalized, { expand: true })
 }
