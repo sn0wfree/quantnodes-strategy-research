@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useLayoutStore } from '../stores/layout'
 
 describe('useLayoutStore', () => {
@@ -7,10 +7,7 @@ describe('useLayoutStore', () => {
     useLayoutStore.setState({
       navWidth: 64,
       rightPanelVisible: true,
-      rightPanelTab: 'progress',
       workMode: 'monitor',
-      leftRatio: 0.55,
-      contextRatio: 0.22,
       rightRatio: 0.30,
       density: 'comfortable',
       settingsOpen: false,
@@ -24,10 +21,22 @@ describe('useLayoutStore', () => {
     expect(useLayoutStore.getState().rightPanelVisible).toBe(!initial)
   })
 
-  it('sets right panel tab', () => {
-    useLayoutStore.getState().setRightPanelTab('progress')
-    expect(useLayoutStore.getState().rightPanelTab).toBe('progress')
-    expect(useLayoutStore.getState().rightPanelVisible).toBe(true)
+  it('persists right panel visibility to localStorage', () => {
+    useLayoutStore.getState().toggleRightPanel()
+    expect(localStorage.getItem('sr-right-visible')).toBe('false')
+    useLayoutStore.getState().toggleRightPanel()
+    expect(localStorage.getItem('sr-right-visible')).toBe('true')
+  })
+
+  it('loads right panel visibility from localStorage', async () => {
+    localStorage.setItem('sr-right-visible', 'false')
+    vi.resetModules()
+    const { useLayoutStore: fresh } = await import('../stores/layout')
+    expect(fresh.getState().rightPanelVisible).toBe(false)
+    localStorage.setItem('sr-right-visible', 'true')
+    vi.resetModules()
+    const { useLayoutStore: fresh2 } = await import('../stores/layout')
+    expect(fresh2.getState().rightPanelVisible).toBe(true)
   })
 
   it('switches work mode', () => {
@@ -36,34 +45,15 @@ describe('useLayoutStore', () => {
     expect(useLayoutStore.getState().rightPanelVisible).toBe(false)
   })
 
-  it('clamps left ratio to [0.2, 0.85]', () => {
-    useLayoutStore.getState().setLeftRatio(0.9)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.85)
-
-    useLayoutStore.getState().setLeftRatio(0.1)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.2)
-
-    useLayoutStore.getState().setLeftRatio(0.5)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.5)
-    expect(localStorage.getItem('sr-left-ratio')).toBe('0.5')
+  it('setWorkMode("monitor") forces rightPanelVisible=true', () => {
+    useLayoutStore.setState({ rightPanelVisible: false })
+    useLayoutStore.getState().setWorkMode('monitor')
+    expect(useLayoutStore.getState().workMode).toBe('monitor')
+    expect(useLayoutStore.getState().rightPanelVisible).toBe(true)
   })
 
   it('defaults rightRatio to comfortable preset (0.30)', () => {
     expect(useLayoutStore.getState().rightRatio).toBe(0.30)
-  })
-
-  it('defaults contextRatio to comfortable preset (0.22)', () => {
-    expect(useLayoutStore.getState().contextRatio).toBe(0.22)
-  })
-
-  it('clamps contextRatio to [0.15, 0.35] and persists', () => {
-    useLayoutStore.getState().setContextRatio(0.5)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.35)
-    useLayoutStore.getState().setContextRatio(0.05)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.15)
-    useLayoutStore.getState().setContextRatio(0.25)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.25)
-    expect(localStorage.getItem('sr-context-ratio')).toBe('0.25')
   })
 
   it('clamps rightRatio to [0.25, 0.55] and persists', () => {
@@ -99,11 +89,9 @@ describe('useLayoutStore', () => {
     expect(useLayoutStore.getState().density).toBe('comfortable')
   })
 
-  it('setDensity applies preset widths and persists', () => {
+  it('setDensity applies preset width and persists', () => {
     useLayoutStore.getState().setDensity('compact')
     expect(useLayoutStore.getState().density).toBe('compact')
-    expect(useLayoutStore.getState().leftRatio).toBe(0.52)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.20)
     expect(useLayoutStore.getState().rightRatio).toBe(0.28)
     expect(localStorage.getItem('sr-density')).toBe('compact')
   })
@@ -111,18 +99,13 @@ describe('useLayoutStore', () => {
   it('setDensity("spacious") applies spacious preset', () => {
     useLayoutStore.getState().setDensity('spacious')
     expect(useLayoutStore.getState().density).toBe('spacious')
-    expect(useLayoutStore.getState().leftRatio).toBe(0.40)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.26)
     expect(useLayoutStore.getState().rightRatio).toBe(0.34)
   })
 
-  it('setDensity overwrites manual ratio overrides', () => {
-    useLayoutStore.getState().setLeftRatio(0.7)
-    useLayoutStore.getState().setContextRatio(0.30)
+  it('setDensity overwrites manual ratio override', () => {
+    useLayoutStore.getState().setRightRatio(0.5)
     useLayoutStore.getState().setDensity('compact')
-    expect(useLayoutStore.getState().leftRatio).toBe(0.52)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.20)
-    expect(localStorage.getItem('sr-left-ratio')).toBeNull()
-    expect(localStorage.getItem('sr-context-ratio')).toBeNull()
+    expect(useLayoutStore.getState().rightRatio).toBe(0.28)
+    expect(localStorage.getItem('sr-right-ratio')).toBeNull()
   })
 })

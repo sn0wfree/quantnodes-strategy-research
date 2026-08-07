@@ -1,37 +1,26 @@
 import { create } from 'zustand'
 
-export type RightPanelTab = 'progress' | 'study' | 'agent'
 export type WorkMode = 'chat' | 'monitor' | 'focus'
 export type ChatLayout = 'bubble' | 'flat'
 export type Density = 'compact' | 'comfortable' | 'spacious'
 
 /**
- * Per-density presets for the three-column layout. The left chat column
- * is `flex-1` (absorbs all leftover width), so only the middle context
- * panel and the right Progress/Study panel carry fixed ratios of the
- * parent flex container. Each preset defines those two column widths.
+ * Per-density presets for the two-column layout. The left chat column
+ * is `flex-1` (absorbs all leftover width), so only the right panel
+ * carries a fixed ratio of the parent flex container.
  */
-const DENSITY_PRESETS: Record<Density, {
-  leftRatio: number
-  contextRatio: number
-  rightRatio: number
-}> = {
-  compact:    { leftRatio: 0.52, contextRatio: 0.20, rightRatio: 0.28 },
-  comfortable: { leftRatio: 0.48, contextRatio: 0.22, rightRatio: 0.30 },
-  spacious:   { leftRatio: 0.40, contextRatio: 0.26, rightRatio: 0.34 },
+const DENSITY_PRESETS: Record<Density, { rightRatio: number }> = {
+  compact:    { rightRatio: 0.28 },
+  comfortable: { rightRatio: 0.30 },
+  spacious:   { rightRatio: 0.34 },
 }
 
 const CHAT_LAYOUT_KEY = 'sr-chat-layout'
 const SIDEBAR_KEY = 'sr-sidebar-open'
-const LEFT_RATIO_KEY = 'sr-left-ratio'
-const CONTEXT_RATIO_KEY = 'sr-context-ratio'
 const RIGHT_RATIO_KEY = 'sr-right-ratio'
 const DENSITY_KEY = 'sr-density'
+const RIGHT_VISIBLE_KEY = 'sr-right-visible'
 
-const RATIO_MIN = 0.2
-const RATIO_MAX = 0.85
-const CONTEXT_RATIO_MIN = 0.15
-const CONTEXT_RATIO_MAX = 0.35
 const RIGHT_RATIO_MIN = 0.25
 const RIGHT_RATIO_MAX = 0.55
 
@@ -45,6 +34,11 @@ function loadInitialSidebar(): boolean {
   return localStorage.getItem(SIDEBAR_KEY) !== 'false'
 }
 
+function loadInitialRightVisible(): boolean {
+  if (typeof window === 'undefined') return true
+  return localStorage.getItem(RIGHT_VISIBLE_KEY) !== 'false'
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
@@ -56,28 +50,10 @@ function loadInitialDensity(): Density {
   return 'comfortable'
 }
 
-function loadInitialLeftRatio(density: Density): number {
-  if (typeof window === 'undefined') return DENSITY_PRESETS[density].leftRatio
-  // getItem returns null when absent; Number(null) === 0 which would be
-  // clamped up — treat missing as the preset default.
-  const raw = localStorage.getItem(LEFT_RATIO_KEY)
-  if (raw === null) return DENSITY_PRESETS[density].leftRatio
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return DENSITY_PRESETS[density].leftRatio
-  return clamp(n, RATIO_MIN, RATIO_MAX)
-}
-
-function loadInitialContextRatio(density: Density): number {
-  if (typeof window === 'undefined') return DENSITY_PRESETS[density].contextRatio
-  const raw = localStorage.getItem(CONTEXT_RATIO_KEY)
-  if (raw === null) return DENSITY_PRESETS[density].contextRatio
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return DENSITY_PRESETS[density].contextRatio
-  return clamp(n, CONTEXT_RATIO_MIN, CONTEXT_RATIO_MAX)
-}
-
 function loadInitialRightRatio(density: Density): number {
   if (typeof window === 'undefined') return DENSITY_PRESETS[density].rightRatio
+  // getItem returns null when absent; Number(null) === 0 which would be
+  // clamped up — treat missing as the preset default.
   const raw = localStorage.getItem(RIGHT_RATIO_KEY)
   if (raw === null) return DENSITY_PRESETS[density].rightRatio
   const n = Number(raw)
@@ -89,10 +65,7 @@ interface LayoutState {
   navWidth: number
   sidebarOpen: boolean
   rightPanelVisible: boolean
-  rightPanelTab: RightPanelTab
   workMode: WorkMode
-  leftRatio: number
-  contextRatio: number
   rightRatio: number
   density: Density
   settingsOpen: boolean
@@ -101,10 +74,7 @@ interface LayoutState {
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
   toggleRightPanel: () => void
-  setRightPanelTab: (tab: RightPanelTab) => void
   setWorkMode: (mode: WorkMode) => void
-  setLeftRatio: (r: number) => void
-  setContextRatio: (r: number) => void
   setRightRatio: (r: number) => void
   setDensity: (d: Density) => void
   setSettingsOpen: (open: boolean) => void
@@ -116,11 +86,8 @@ export const useLayoutStore = create<LayoutState>()((set) => {
   return {
     navWidth: 64,
     sidebarOpen: loadInitialSidebar(),
-    rightPanelVisible: true,
-    rightPanelTab: 'progress',
+    rightPanelVisible: loadInitialRightVisible(),
     workMode: 'monitor',
-    leftRatio: loadInitialLeftRatio(density),
-    contextRatio: loadInitialContextRatio(density),
     rightRatio: loadInitialRightRatio(density),
     density,
     settingsOpen: false,
@@ -140,27 +107,19 @@ export const useLayoutStore = create<LayoutState>()((set) => {
       }
       set({ sidebarOpen: open })
     },
-    toggleRightPanel: () => set((s) => ({ rightPanelVisible: !s.rightPanelVisible })),
-    setRightPanelTab: (tab) => set({ rightPanelTab: tab, rightPanelVisible: true }),
+    toggleRightPanel: () =>
+      set((s) => {
+        const next = !s.rightPanelVisible
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(RIGHT_VISIBLE_KEY, String(next))
+        }
+        return { rightPanelVisible: next }
+      }),
     setWorkMode: (mode) =>
       set({
         workMode: mode,
         rightPanelVisible: mode === 'monitor',
       }),
-    setLeftRatio: (r) => {
-      const clamped = clamp(r, RATIO_MIN, RATIO_MAX)
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(LEFT_RATIO_KEY, String(clamped))
-      }
-      set({ leftRatio: clamped })
-    },
-    setContextRatio: (r) => {
-      const clamped = clamp(r, CONTEXT_RATIO_MIN, CONTEXT_RATIO_MAX)
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(CONTEXT_RATIO_KEY, String(clamped))
-      }
-      set({ contextRatio: clamped })
-    },
     setRightRatio: (r) => {
       const clamped = clamp(r, RIGHT_RATIO_MIN, RIGHT_RATIO_MAX)
       if (typeof window !== 'undefined') {
@@ -172,16 +131,12 @@ export const useLayoutStore = create<LayoutState>()((set) => {
       const preset = DENSITY_PRESETS[d]
       if (typeof window !== 'undefined') {
         localStorage.setItem(DENSITY_KEY, d)
-        // Switching density restores its preset widths (user's manual
-        // overrides are stored separately under their own keys).
-        localStorage.removeItem(LEFT_RATIO_KEY)
-        localStorage.removeItem(CONTEXT_RATIO_KEY)
+        // Switching density restores its preset width (user's manual
+        // overrides are stored separately under their own key).
         localStorage.removeItem(RIGHT_RATIO_KEY)
       }
       set({
         density: d,
-        leftRatio: preset.leftRatio,
-        contextRatio: preset.contextRatio,
         rightRatio: preset.rightRatio,
       })
     },

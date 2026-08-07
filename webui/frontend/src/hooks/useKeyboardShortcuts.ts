@@ -15,7 +15,6 @@ type KeyBinding = {
 export function useKeyboardShortcuts() {
   const navigate = useNavigate()
   const togglePalette = useCommandPaletteStore((s) => s.toggle)
-  const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen)
   const createNewSession = useSessionStore((s) => s.createNewSession)
@@ -29,9 +28,8 @@ export function useKeyboardShortcuts() {
     // Search
     { key: 'k', meta: true, action: () => setSearchOpen(true) },
     // Panel toggles
-    { key: 'g', meta: true, action: () => setRightPanelTab('progress') },
-    { key: 'w', meta: true, action: () => navigate('/dag') },
     { key: 'b', meta: true, action: toggleRightPanel },
+    { key: 'w', meta: true, action: () => navigate('/dag') },
     // Tabs
     { key: '1', meta: true, action: () => openSessionIds[0] && void switchSession(openSessionIds[0]) },
     { key: '2', meta: true, action: () => openSessionIds[1] && void switchSession(openSessionIds[1]) },
@@ -73,7 +71,6 @@ export function useKeyboardShortcuts() {
     },
     [
       togglePalette,
-      setRightPanelTab,
       toggleRightPanel,
       setSearchOpen,
       createNewSession,

@@ -36,7 +36,7 @@ function fire(key: string, opts: { metaKey?: boolean; shiftKey?: boolean; target
 describe('useKeyboardShortcuts', () => {
   beforeEach(() => {
     useCommandPaletteStore.setState({ open: false })
-    useLayoutStore.setState({ rightPanelTab: 'progress', rightPanelVisible: true })
+    useLayoutStore.setState({ rightPanelVisible: true })
     useSessionStore.setState({
       openSessionIds: [],
       currentSessionId: null,
@@ -62,12 +62,6 @@ describe('useKeyboardShortcuts', () => {
     renderHook(() => useKeyboardShortcuts())
     fire('k', { metaKey: true })
     expect(setSearchOpen).toHaveBeenCalledWith(true)
-  })
-
-  it('Cmd/Ctrl+G switches the right panel to the progress tab', () => {
-    renderHook(() => useKeyboardShortcuts())
-    fire('g', { metaKey: true })
-    expect(useLayoutStore.getState().rightPanelTab).toBe('progress')
   })
 
   it('Cmd/Ctrl+W opens the DAG page', () => {

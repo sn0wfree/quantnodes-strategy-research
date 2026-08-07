@@ -1,33 +1,34 @@
-import * as Tabs from '@radix-ui/react-tabs'
-import { useLayoutStore, type RightPanelTab } from '../../stores/layout'
+import { useMemo } from 'react'
+import { useLayoutStore } from '../../stores/layout'
 import { useWorkflowStore } from '../../stores/workflow'
 import { useGoalStore } from '../../stores/goal'
 import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { useSessionStore } from '../../stores/session'
 import { useSystemStore } from '../../stores/system'
-import { Activity, BookOpen, Bot } from 'lucide-react'
-import { ProgressTab, type ProgressTabGoal } from '../goal/ProgressTab'
-import { StudyTab } from '../study/StudyTab'
-import { AgentActivityTab } from '../agent/AgentActivityTab'
+import { useChatStore } from '../../stores/chat'
+import { extractEquityCurve } from '../../utils/equityCurve'
+import { EquityCurveCard } from '../performance/EquityCurveCard'
+import { TokenCard } from '../context/TokenCard'
+import { GoalStudyCard } from '../goal/GoalStudyCard'
+import type { GoalTabGoal } from '../goal/GoalTab'
 
-const TABS = [
-  { value: 'progress', label: 'Progress', icon: Activity },
-  { value: 'study', label: 'Study', icon: BookOpen },
-  { value: 'agent', label: 'Agent', icon: Bot },
-] as const
-
+/**
+ * Merged single right panel: a scrollable column of cards —
+ * token usage, backtest performance curve, and goal + study.
+ */
 export function RightPanel() {
-  const tab = useLayoutStore((s) => s.rightPanelTab)
-  const setTab = useLayoutStore((s) => s.setRightPanelTab)
+  const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
+
+  // Poll goal status while the panel is open (no backend goal_* SSE)
+  useGoalPolling(rightPanelVisible)
 
   // Goal state
   const currentGoal = useGoalStore((s) => s.currentGoal)
 
   // Study / Session
-  const sessionId = useSessionStore((s) => s.currentSessionId ?? undefined)
-
-  // Poll goal status while the Progress tab is open (no backend goal_* SSE)
-  useGoalPolling(tab === 'progress')
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const sessionId = currentSessionId ?? undefined
+  const messages = useChatStore((s) => s.messages)
 
   // Resolve workspace for Study creation form. Default to the
   // system workspace path, falling back to the current preset's workspace_path.
@@ -40,8 +41,16 @@ export function RightPanel() {
     || (currentPreset as unknown as { workspace_path?: string })?.workspace_path
     || ''
 
-  // Map GoalStore goal to the display model used by ProgressTab
-  const goalTabGoal: ProgressTabGoal | null = currentGoal ? {
+  // Performance curve decoded from the session's backtest output
+  const curve = useMemo(() => {
+    const list = Array.from(messages.values())
+      .filter((m) => !currentSessionId || m.session_id === currentSessionId)
+      .sort((a, b) => a.created_at - b.created_at)
+    return extractEquityCurve(list)
+  }, [messages, currentSessionId])
+
+  // Map GoalStore goal to the display model used by GoalTab
+  const goalTabGoal: GoalTabGoal | null = currentGoal ? {
     id: currentGoal.goal_id,
     title: currentGoal.objective,
     description: '',
@@ -60,36 +69,14 @@ export function RightPanel() {
   } : null
 
   return (
-    <Tabs.Root value={tab} onValueChange={(v) => setTab(v as RightPanelTab)} className="flex h-full w-full flex-col bg-slate-900">
-      <Tabs.List className="flex border-b border-slate-800">
-        {TABS.map((t) => {
-          const Icon = t.icon
-          return (
-            <Tabs.Trigger
-              key={t.value}
-              value={t.value}
-              className="flex flex-1 items-center justify-center gap-2 border-b-2 border-transparent px-4 py-2.5 text-sm text-slate-400 transition-colors
-                data-[state=active]:border-primary-500 data-[state=active]:text-slate-100"
-            >
-              <Icon className="h-4 w-4" />
-              {t.label}
-            </Tabs.Trigger>
-          )
-        })}
-      </Tabs.List>
-
-      <Tabs.Content value="progress" className="flex-1 overflow-y-auto p-4">
-        <ProgressTab goal={goalTabGoal} />
-      </Tabs.Content>
-      <Tabs.Content value="study" className="flex-1 overflow-y-auto p-4">
-        <StudyTab
-          sessionId={sessionId}
-          workspacePath={workspacePath}
-        />
-      </Tabs.Content>
-      <Tabs.Content value="agent" className="flex-1 overflow-y-auto p-4">
-        <AgentActivityTab />
-      </Tabs.Content>
-    </Tabs.Root>
+    <div className="flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-900 p-3">
+      <TokenCard />
+      <EquityCurveCard curve={curve} />
+      <GoalStudyCard
+        goal={goalTabGoal}
+        sessionId={sessionId}
+        workspacePath={workspacePath}
+      />
+    </div>
   )
 }

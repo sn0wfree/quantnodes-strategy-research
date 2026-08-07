@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useCommandPaletteStore } from '../../stores/commandPalette'
 import {
-  Search, MessageSquare, Target, Workflow, Bot, Plus,
-  Settings, Eye, EyeOff, RefreshCw, ArrowRight, Layers,
-  BookOpen, Activity,
+  Search, MessageSquare, Workflow, Plus,
+  Settings, Eye, EyeOff, RefreshCw, ArrowRight, Layers, Activity,
 } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useSessionStore } from '../../stores/session'
@@ -34,7 +33,6 @@ export function CommandPalette() {
   const open = useCommandPaletteStore((s) => s.open)
   const setOpen = useCommandPaletteStore((s) => s.setOpen)
   const navigate = useNavigate()
-  const setRightPanelTab = useLayoutStore((s) => s.setRightPanelTab)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const setWorkMode = useLayoutStore((s) => s.setWorkMode)
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
@@ -58,36 +56,6 @@ export function CommandPalette() {
       shortcut: '⌘W',
       action: () => { navigate('/dag'); setOpen(false) },
       keywords: ['dag', 'workflow', '图', '编排'],
-    },
-    {
-      id: 'view-goal',
-      label: '显示 Goal 面板',
-      description: '切换右主区到目标管理',
-      category: 'view',
-      icon: Target,
-      shortcut: '⌘G',
-      action: () => { setRightPanelTab('progress'); setOpen(false) },
-      keywords: ['goal', '目标'],
-    },
-    {
-      id: 'view-agent',
-      label: '打开 Agent 监控',
-      description: '编排页内的 Agent 运行监控视图',
-      category: 'view',
-      icon: Bot,
-      shortcut: '⌘B',
-      action: () => { navigate('/dag'); setOpen(false) },
-      keywords: ['agent', '智能体', '监控'],
-    },
-    {
-      id: 'view-study',
-      label: '显示 Study 面板',
-      description: '切换右主区到 Study（goal + autoresearch 任务系统）',
-      category: 'view',
-      icon: BookOpen,
-      shortcut: '⌘Y',
-      action: () => { setRightPanelTab('study'); setOpen(false) },
-      keywords: ['study', '研究', 'autoresearch'],
     },
     {
       id: 'view-toggle',
@@ -195,7 +163,7 @@ export function CommandPalette() {
       action: () => { setOpen(false); setSettingsOpen(true) },
       keywords: ['settings', '配置'],
     },
-  ], [setRightPanelTab, toggleRightPanel, setWorkMode, setSettingsOpen, setOpen, createNewSession, currentSessionId, setSearchOpen, loadMessages, navigate])
+  ], [toggleRightPanel, setWorkMode, setSettingsOpen, setOpen, createNewSession, currentSessionId, setSearchOpen, loadMessages, navigate])
 
   // Filter by query
   const filtered = useMemo(() => {

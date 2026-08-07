@@ -1,6 +1,5 @@
 // layout store — covers setNavWidth, setWorkMode (toggling
-// rightPanelVisible), setLeftRatio (clamped 0.2..0.8), setSettingsOpen,
-// and chatLayout persistence to localStorage.
+// rightPanelVisible), setSettingsOpen, and chatLayout persistence.
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useLayoutStore } from '../stores/layout'
@@ -11,9 +10,8 @@ beforeEach(() => {
     navWidth: 64,
     sidebarOpen: true,
     rightPanelVisible: true,
-    rightPanelTab: 'progress',
     workMode: 'monitor',
-    leftRatio: 0.5,
+    rightRatio: 0.3,
     settingsOpen: false,
     chatLayout: 'bubble',
   })
@@ -46,13 +44,10 @@ describe('useLayoutStore', () => {
     expect(useLayoutStore.getState().rightPanelVisible).toBe(false)
   })
 
-  it('setLeftRatio clamps to [0.2, 0.85]', () => {
-    useLayoutStore.getState().setLeftRatio(0.1)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.2)
-    useLayoutStore.getState().setLeftRatio(0.9)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.85)
-    useLayoutStore.getState().setLeftRatio(0.4)
-    expect(useLayoutStore.getState().leftRatio).toBe(0.4)
+  it('toggleRightPanel persists visibility to localStorage', () => {
+    useLayoutStore.getState().toggleRightPanel()
+    expect(useLayoutStore.getState().rightPanelVisible).toBe(false)
+    expect(localStorage.getItem('sr-right-visible')).toBe('false')
   })
 
   it('setSettingsOpen flips settingsOpen', () => {

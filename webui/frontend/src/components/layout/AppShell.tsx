@@ -9,7 +9,6 @@ import { TopBar } from './TopBar'
 import { MainSplit } from './MainSplit'
 import { RightPanel } from './RightPanel'
 import { SplitDivider } from './SplitDivider'
-import { ContextPanel } from '../context/ContextPanel'
 import { SessionSidebar } from '../chat/SessionSidebar'
 import { ToastManager } from '../common/Toast'
 import { CommandPalette } from '../common/CommandPalette'
@@ -81,7 +80,6 @@ export function AppShell() {
 
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
-  const contextRatio = useLayoutStore((s) => s.contextRatio)
   const rightRatio = useLayoutStore((s) => s.rightRatio)
 
   return (
@@ -100,35 +98,17 @@ export function AppShell() {
           <TopBar />
           <div className="flex flex-1 overflow-hidden">
             {/* Left chat column — flex-1 absorbs all leftover width so the
-                three columns always tile edge-to-edge with no gap. */}
+                visible columns always tile edge-to-edge with no gap. */}
             <div className="flex flex-1 min-w-0">
               <MainSplit />
             </div>
-            {/* Left divider: dragging TOWARD chat (delta < 0) grows
-                context; chat (flex-1) absorbs the difference. */}
-            <SplitDivider
-              onDrag={(delta) => {
-                useLayoutStore.setState((s) => ({
-                  contextRatio: s.contextRatio - delta,
-                }))
-              }}
-            />
-            <div
-              className="flex h-full flex-shrink-0 overflow-hidden"
-              style={{ width: `${contextRatio * 100}%` }}
-            >
-              <ContextPanel />
-            </div>
             {rightPanelVisible && (
               <>
-                {/* Right divider: dragging TOWARD right (delta < 0) grows
-                    right; context shrinks by the same amount; chat
-                    (flex-1) is unchanged because contextRatio + rightRatio
-                    stays constant. */}
+                {/* Divider: dragging TOWARD right (delta < 0) grows the
+                    panel; chat (flex-1) absorbs the difference. */}
                 <SplitDivider
                   onDrag={(delta) => {
                     useLayoutStore.setState((s) => ({
-                      contextRatio: s.contextRatio + delta,
                       rightRatio: s.rightRatio - delta,
                     }))
                   }}
