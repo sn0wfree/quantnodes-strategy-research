@@ -5,13 +5,15 @@ import { useGoalStore } from '../../stores/goal'
 import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { useSessionStore } from '../../stores/session'
 import { useSystemStore } from '../../stores/system'
-import { Activity, BookOpen } from 'lucide-react'
+import { Activity, BookOpen, Bot } from 'lucide-react'
 import { ProgressTab, type ProgressTabGoal } from '../goal/ProgressTab'
 import { StudyTab } from '../study/StudyTab'
+import { AgentActivityTab } from '../agent/AgentActivityTab'
 
 const TABS = [
   { value: 'progress', label: 'Progress', icon: Activity },
   { value: 'study', label: 'Study', icon: BookOpen },
+  { value: 'agent', label: 'Agent', icon: Bot },
 ] as const
 
 export function RightPanel() {
@@ -84,6 +86,9 @@ export function RightPanel() {
           sessionId={sessionId}
           workspacePath={workspacePath}
         />
+      </Tabs.Content>
+      <Tabs.Content value="agent" className="flex-1 overflow-y-auto p-4">
+        <AgentActivityTab />
       </Tabs.Content>
     </Tabs.Root>
   )

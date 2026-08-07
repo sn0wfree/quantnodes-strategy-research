@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Bot } from 'lucide-react'
-import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
+import type { Message, MessagePart, ToolCallPart, AgentPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { useSystemStore } from '../../stores/system'
 import {
@@ -16,6 +16,7 @@ import { FileEditBlock } from './FileEditBlock'
 import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
 import { ImageBlock } from './ImageBlock'
+import { AgentCard } from './AgentCard'
 import { StreamingText } from './StreamingText'
 import { MessageActions } from './MessageActions'
 import { formatTime } from '../../utils/time'
@@ -255,6 +256,8 @@ function PartRenderer({
       return <ChartBlock chart={part} />
     case 'image':
       return <ImageBlock src={part.url} alt={part.alt} />
+    case 'agent':
+      return <AgentCard agentPart={part} isStreaming={isStreaming} />
     default:
       return null
   }
@@ -419,6 +422,7 @@ export function AssistantMessage({
 function partKeyFor(part: MessagePart, idx: number): string {
   if (part.type === 'text') return `text-${part.id}`
   if (part.type === 'tool_call') return `tc-${part.id}`
+  if (part.type === 'agent') return `agent-${part.id}`
   if (part.type === 'thinking') {
     // thinking parts share the same conceptual id across renders
     // (built from messageId + index in the textHandlers hooks), so
@@ -436,7 +440,8 @@ function isStreamingFlagOf(part: MessagePart): boolean {
   return (
     part.type === 'text' ||
     part.type === 'tool_call' ||
-    part.type === 'thinking'
+    part.type === 'thinking' ||
+    part.type === 'agent'
   )
     ? !!part.isStreaming
     : false

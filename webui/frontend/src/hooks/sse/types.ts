@@ -59,6 +59,12 @@ export type SSEEventType =
   | 'study_monitoring_started'
   | 'study_monitor_check'
   | 'study_drift_detected'
+  | 'subagent_started'
+  | 'subagent_tool_call'
+  | 'subagent_tool_result'
+  | 'subagent_text_delta'
+  | 'subagent_completed'
+  | 'subagent_failed'
 
 export const EVENT_TYPES: SSEEventType[] = [
   'text.started', 'text_delta', 'text.ended',
@@ -84,6 +90,9 @@ export const EVENT_TYPES: SSEEventType[] = [
   'study_paused', 'study_resumed', 'study_interrupted', 'study_cancelled',
   'study_monitoring_started', 'study_monitor_check',
   'study_drift_detected',
+  // Subagent events
+  'subagent_started', 'subagent_tool_call', 'subagent_tool_result',
+  'subagent_text_delta', 'subagent_completed', 'subagent_failed',
 ]
 
 /**

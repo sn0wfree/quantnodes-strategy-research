@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type RightPanelTab = 'progress' | 'study'
+export type RightPanelTab = 'progress' | 'study' | 'agent'
 export type WorkMode = 'chat' | 'monitor' | 'focus'
 export type ChatLayout = 'bubble' | 'flat'
 export type Density = 'compact' | 'comfortable' | 'spacious'

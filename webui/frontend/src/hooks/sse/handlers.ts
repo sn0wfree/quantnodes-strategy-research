@@ -39,6 +39,14 @@ import {
   studyDriftDetected,
   studyMonitorCheck,
 } from './studyHandlers'
+import {
+  subagentStarted,
+  subagentToolCall,
+  subagentToolResult,
+  subagentTextDelta,
+  subagentCompleted,
+  subagentFailed,
+} from './subagentHandlers'
 
 /**
  * Dispatch table mapping every registered SSE event type to its handler.
@@ -91,4 +99,11 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   study_monitoring_started: studyMonitoringStarted,
   study_monitor_check: studyMonitorCheck,
   study_drift_detected: studyDriftDetected,
+  // Subagent lifecycle
+  subagent_started: subagentStarted,
+  subagent_tool_call: subagentToolCall,
+  subagent_tool_result: subagentToolResult,
+  subagent_text_delta: subagentTextDelta,
+  subagent_completed: subagentCompleted,
+  subagent_failed: subagentFailed,
 }

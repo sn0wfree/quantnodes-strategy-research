@@ -67,7 +67,22 @@ export interface ImagePart {
   alt?: string
 }
 
-export type MessagePart = TextPart | ToolCallPart | ThinkingPart | FileEditPart | TablePart | ChartPart | ImagePart
+export interface AgentPart {
+  type: 'agent'
+  id: string
+  agentId: string
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  toolCalls: ToolCallPart[]
+  streamingText: string
+  startedAt: number
+  finishedAt?: number
+  tokensUsed?: number
+  error?: string
+  isStreaming?: boolean
+}
+
+export type MessagePart = TextPart | ToolCallPart | ThinkingPart | FileEditPart | TablePart | ChartPart | ImagePart | AgentPart
 
 export interface Message {
   id: string
