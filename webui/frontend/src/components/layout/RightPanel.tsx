@@ -5,12 +5,12 @@ import { useGoalStore } from '../../stores/goal'
 import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { useSessionStore } from '../../stores/session'
 import { useSystemStore } from '../../stores/system'
-import { Target, BookOpen } from 'lucide-react'
-import { GoalTab } from '../goal/GoalTab'
+import { Activity, BookOpen } from 'lucide-react'
+import { ProgressTab, type ProgressTabGoal } from '../goal/ProgressTab'
 import { StudyTab } from '../study/StudyTab'
 
 const TABS = [
-  { value: 'goal', label: 'Goal', icon: Target },
+  { value: 'progress', label: 'Progress', icon: Activity },
   { value: 'study', label: 'Study', icon: BookOpen },
 ] as const
 
@@ -24,8 +24,8 @@ export function RightPanel() {
   // Study / Session
   const sessionId = useSessionStore((s) => s.currentSessionId ?? undefined)
 
-  // Poll goal status while the Goal tab is open (no backend goal_* SSE)
-  useGoalPolling(tab === 'goal')
+  // Poll goal status while the Progress tab is open (no backend goal_* SSE)
+  useGoalPolling(tab === 'progress')
 
   // Resolve workspace for Study creation form. Default to the
   // system workspace path, falling back to the current preset's workspace_path.
@@ -38,8 +38,8 @@ export function RightPanel() {
     || (currentPreset as unknown as { workspace_path?: string })?.workspace_path
     || ''
 
-  // Map GoalStore goal to GoalTab's expected format
-  const goalTabGoal = currentGoal ? {
+  // Map GoalStore goal to the display model used by ProgressTab
+  const goalTabGoal: ProgressTabGoal | null = currentGoal ? {
     id: currentGoal.goal_id,
     title: currentGoal.objective,
     description: '',
@@ -76,8 +76,8 @@ export function RightPanel() {
         })}
       </Tabs.List>
 
-      <Tabs.Content value="goal" className="flex-1 overflow-y-auto p-4">
-        <GoalTab goal={goalTabGoal} />
+      <Tabs.Content value="progress" className="flex-1 overflow-y-auto p-4">
+        <ProgressTab goal={goalTabGoal} />
       </Tabs.Content>
       <Tabs.Content value="study" className="flex-1 overflow-y-auto p-4">
         <StudyTab

@@ -7,11 +7,11 @@ describe('useLayoutStore', () => {
     useLayoutStore.setState({
       navWidth: 64,
       rightPanelVisible: true,
-      rightPanelTab: 'goal',
+      rightPanelTab: 'progress',
       workMode: 'monitor',
       leftRatio: 0.55,
       contextRatio: 0.22,
-      rightRatio: 0.32,
+      rightRatio: 0.30,
       density: 'comfortable',
       settingsOpen: false,
       chatLayout: 'bubble',
@@ -25,8 +25,8 @@ describe('useLayoutStore', () => {
   })
 
   it('sets right panel tab', () => {
-    useLayoutStore.getState().setRightPanelTab('goal')
-    expect(useLayoutStore.getState().rightPanelTab).toBe('goal')
+    useLayoutStore.getState().setRightPanelTab('progress')
+    expect(useLayoutStore.getState().rightPanelTab).toBe('progress')
     expect(useLayoutStore.getState().rightPanelVisible).toBe(true)
   })
 
@@ -48,8 +48,8 @@ describe('useLayoutStore', () => {
     expect(localStorage.getItem('sr-left-ratio')).toBe('0.5')
   })
 
-  it('defaults rightRatio to comfortable preset (0.32)', () => {
-    expect(useLayoutStore.getState().rightRatio).toBe(0.32)
+  it('defaults rightRatio to comfortable preset (0.30)', () => {
+    expect(useLayoutStore.getState().rightRatio).toBe(0.30)
   })
 
   it('defaults contextRatio to comfortable preset (0.22)', () => {
@@ -102,9 +102,9 @@ describe('useLayoutStore', () => {
   it('setDensity applies preset widths and persists', () => {
     useLayoutStore.getState().setDensity('compact')
     expect(useLayoutStore.getState().density).toBe('compact')
-    expect(useLayoutStore.getState().leftRatio).toBe(0.50)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.18)
-    expect(useLayoutStore.getState().rightRatio).toBe(0.20)
+    expect(useLayoutStore.getState().leftRatio).toBe(0.52)
+    expect(useLayoutStore.getState().contextRatio).toBe(0.20)
+    expect(useLayoutStore.getState().rightRatio).toBe(0.28)
     expect(localStorage.getItem('sr-density')).toBe('compact')
   })
 
@@ -112,16 +112,16 @@ describe('useLayoutStore', () => {
     useLayoutStore.getState().setDensity('spacious')
     expect(useLayoutStore.getState().density).toBe('spacious')
     expect(useLayoutStore.getState().leftRatio).toBe(0.40)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.25)
-    expect(useLayoutStore.getState().rightRatio).toBe(0.30)
+    expect(useLayoutStore.getState().contextRatio).toBe(0.26)
+    expect(useLayoutStore.getState().rightRatio).toBe(0.34)
   })
 
   it('setDensity overwrites manual ratio overrides', () => {
     useLayoutStore.getState().setLeftRatio(0.7)
     useLayoutStore.getState().setContextRatio(0.30)
     useLayoutStore.getState().setDensity('compact')
-    expect(useLayoutStore.getState().leftRatio).toBe(0.50)
-    expect(useLayoutStore.getState().contextRatio).toBe(0.18)
+    expect(useLayoutStore.getState().leftRatio).toBe(0.52)
+    expect(useLayoutStore.getState().contextRatio).toBe(0.20)
     expect(localStorage.getItem('sr-left-ratio')).toBeNull()
     expect(localStorage.getItem('sr-context-ratio')).toBeNull()
   })

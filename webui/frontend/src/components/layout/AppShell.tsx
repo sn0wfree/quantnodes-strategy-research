@@ -82,8 +82,6 @@ export function AppShell() {
 
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
-  const leftRatio = useLayoutStore((s) => s.leftRatio)
-  const setLeftRatio = useLayoutStore((s) => s.setLeftRatio)
   const contextRatio = useLayoutStore((s) => s.contextRatio)
   const setContextRatio = useLayoutStore((s) => s.setContextRatio)
   const rightRatio = useLayoutStore((s) => s.rightRatio)
@@ -104,15 +102,11 @@ export function AppShell() {
         <div className="flex flex-1 flex-col overflow-hidden">
           <TopBar />
           <div className="flex flex-1 overflow-hidden">
-            <ErrorBoundary>
-              <ResizablePanel
-                side="left"
-                ratio={leftRatio}
-                setRatio={setLeftRatio}
-              >
-                <MainSplit />
-              </ResizablePanel>
-            </ErrorBoundary>
+            {/* Left chat column — flex-1 absorbs all leftover width so the
+                three columns always tile edge-to-edge with no gap. */}
+            <div className="flex flex-1 min-w-0">
+              <MainSplit />
+            </div>
             <ErrorBoundary>
               <ResizablePanel
                 side="right"
@@ -122,10 +116,6 @@ export function AppShell() {
                 <ContextPanel />
               </ResizablePanel>
             </ErrorBoundary>
-            {/* Adaptive gap between context and goal/study — flex-1
-                absorbs whatever space is left over so the gap stays
-                strictly between panels. */}
-            <div className="flex-1 min-w-0" />
             {rightPanelVisible && (
               <ErrorBoundary>
                 <ResizablePanel

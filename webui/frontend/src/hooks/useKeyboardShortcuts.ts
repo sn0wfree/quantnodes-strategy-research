@@ -29,7 +29,7 @@ export function useKeyboardShortcuts() {
     // Search
     { key: 'k', meta: true, action: () => setSearchOpen(true) },
     // Panel toggles
-    { key: 'g', meta: true, action: () => setRightPanelTab('goal') },
+    { key: 'g', meta: true, action: () => setRightPanelTab('progress') },
     { key: 'w', meta: true, action: () => navigate('/dag') },
     { key: 'b', meta: true, action: toggleRightPanel },
     // Tabs

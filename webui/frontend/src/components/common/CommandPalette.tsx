@@ -66,7 +66,7 @@ export function CommandPalette() {
       category: 'view',
       icon: Target,
       shortcut: '⌘G',
-      action: () => { setRightPanelTab('goal'); setOpen(false) },
+      action: () => { setRightPanelTab('progress'); setOpen(false) },
       keywords: ['goal', '目标'],
     },
     {

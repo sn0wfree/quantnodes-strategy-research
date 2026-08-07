@@ -11,7 +11,7 @@ beforeEach(() => {
     navWidth: 64,
     sidebarOpen: true,
     rightPanelVisible: true,
-    rightPanelTab: 'goal',
+    rightPanelTab: 'progress',
     workMode: 'monitor',
     leftRatio: 0.5,
     settingsOpen: false,

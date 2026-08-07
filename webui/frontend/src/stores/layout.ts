@@ -1,25 +1,24 @@
 import { create } from 'zustand'
 
-export type RightPanelTab = 'goal' | 'study'
+export type RightPanelTab = 'progress' | 'study'
 export type WorkMode = 'chat' | 'monitor' | 'focus'
 export type ChatLayout = 'bubble' | 'flat'
 export type Density = 'compact' | 'comfortable' | 'spacious'
 
 /**
- * Per-density presets for the main split layout. Each preset defines
- * the default widths of the left chat area, the middle context panel,
- * and the right Goal/Study panel — all as ratios of the parent flex
- * container. Together they sum to ≤ 1; the remainder is the auto-filled
- * gap between panels, which adapts to the screen width.
+ * Per-density presets for the three-column layout. The left chat column
+ * is `flex-1` (absorbs all leftover width), so only the middle context
+ * panel and the right Progress/Study panel carry fixed ratios of the
+ * parent flex container. Each preset defines those two column widths.
  */
 const DENSITY_PRESETS: Record<Density, {
   leftRatio: number
   contextRatio: number
   rightRatio: number
 }> = {
-  compact:    { leftRatio: 0.50, contextRatio: 0.18, rightRatio: 0.20 },
-  comfortable: { leftRatio: 0.45, contextRatio: 0.22, rightRatio: 0.25 },
-  spacious:   { leftRatio: 0.40, contextRatio: 0.25, rightRatio: 0.30 },
+  compact:    { leftRatio: 0.52, contextRatio: 0.20, rightRatio: 0.28 },
+  comfortable: { leftRatio: 0.48, contextRatio: 0.22, rightRatio: 0.30 },
+  spacious:   { leftRatio: 0.40, contextRatio: 0.26, rightRatio: 0.34 },
 }
 
 const CHAT_LAYOUT_KEY = 'sr-chat-layout'
@@ -118,7 +117,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     navWidth: 64,
     sidebarOpen: loadInitialSidebar(),
     rightPanelVisible: true,
-    rightPanelTab: 'goal',
+    rightPanelTab: 'progress',
     workMode: 'monitor',
     leftRatio: loadInitialLeftRatio(density),
     contextRatio: loadInitialContextRatio(density),

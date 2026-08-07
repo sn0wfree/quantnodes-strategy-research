@@ -9,7 +9,7 @@ import { statusLabel } from '../../utils/status'
 // (goal_id/objective/criteria) — RightPanel converts between them by
 // hand. Once the goal panel is wired to real data (see the goal_* SSE
 // TODO in useSSE.ts), merge the two models instead of duplicating.
-interface Goal {
+export interface GoalTabGoal {
   id: string
   title: string
   description: string
@@ -31,7 +31,7 @@ interface Goal {
 }
 
 interface GoalTabProps {
-  goal: Goal | null
+  goal: GoalTabGoal | null
 }
 
 export function GoalTab({ goal }: GoalTabProps) {
