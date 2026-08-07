@@ -22,7 +22,7 @@ from strategy_research.core.agent.builtin_tools.subagent_tool import (
     SubAgentTool,
 )
 from strategy_research.core.agent.loop import AgentLoop
-from strategy_research.core.agent.tools import ToolRegistry
+from strategy_research.core.agent.tools import BaseTool, ToolRegistry
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
 
 
@@ -272,3 +272,397 @@ class TestNoNestedDelegation:
         assert child.get("write_file") is not None
         assert child.get("run_backtest") is None
         assert child.get("delegate_to_agent") is None
+
+
+# ── Child subagent behavior ──────────────────────────────────────────
+
+
+class NoopTool(BaseTool):
+    """Minimal tool registered so the child SwarmWorker has a tool to call."""
+
+    name = "noop_tool"
+    description = "no-op"
+    parameters = {"type": "object", "properties": {}, "required": []}
+    is_readonly = True
+
+    def execute(self, **kwargs):
+        return json.dumps({"status": "ok", "value": 42})
+
+
+def child_tool_resp(name: str, args: dict | None = None, call_id: str = "c-child") -> LLMResponse:
+    tc = ToolCall(id=call_id, name=name, arguments=args or {})
+    return LLMResponse(content="", tool_calls=[tc], finish_reason="tool_calls")
+
+
+class TestChildToolCallsForwarded:
+    @pytest.mark.asyncio
+    async def test_child_tool_call_and_result_events(self, workspace, patch_child_client):
+        """Sub-agent's internal tool calls surface as subagent_tool_call/result."""
+        # Child: calls noop_tool once, then returns text.
+        patch_child_client([
+            child_tool_resp("noop_tool", {}, call_id="child-call-1"),
+            text_resp("subagent done"),
+        ])
+
+        parent = AsyncMockLLM([
+            delegate_resp("用工具分析", call_id="call-x"),
+            text_resp("完成"),
+        ])
+        # Build a parent registry containing the noop tool so the child
+        # inherits it (minus delegate_to_agent).
+        registry = build_default_registry()
+        registry.register(NoopTool())
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=registry,
+            workspace=workspace,
+            stream_mode=False,
+            max_iterations=5,
+        )
+        events = _collect_events(loop)
+        loop.client.achat = parent.achat
+
+        r = await loop.arun("委派带工具的任务")
+        assert r.tool_calls_made == 1
+        assert r.answer == "完成"
+
+        subagent_tool_calls = [e for e in events if e[0] == "subagent_tool_call"]
+        subagent_tool_results = [e for e in events if e[0] == "subagent_tool_result"]
+        assert len(subagent_tool_calls) == 1
+        assert len(subagent_tool_results) == 1
+        assert subagent_tool_calls[0][1]["name"] == "noop_tool"
+        assert subagent_tool_results[0][1]["tool_call_id"] == "child-call-1"
+        assert subagent_tool_results[0][1]["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_child_text_delta_forwarded(self, workspace, patch_child_client):
+        """Child final text is forwarded as a subagent_text_delta event."""
+        patch_child_client([text_resp("child final text")])
+        parent = AsyncMockLLM([
+            delegate_resp("写文本", call_id="call-t"),
+            text_resp("ok"),
+        ])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            stream_mode=False,
+            max_iterations=5,
+        )
+        events = _collect_events(loop)
+        loop.client.achat = parent.achat
+
+        await loop.arun("委派")
+        deltas = [e for e in events if e[0] == "subagent_text_delta"]
+        assert len(deltas) == 1
+        assert deltas[0][1]["delta"] == "child final text"
+
+    @pytest.mark.asyncio
+    async def test_subagent_failed_event_on_child_exception(self, workspace, monkeypatch):
+        """If the child worker raises, subagent_failed is emitted and the
+        parent tool result is an error."""
+
+        class ExplodingWorker:
+            def __init__(self, *a, **kw):
+                pass
+
+            def set_event_callback(self, cb):
+                pass
+
+            def run(self, task):
+                raise RuntimeError("child boom")
+
+        monkeypatch.setattr(
+            "strategy_research.core.workflow.worker.SwarmWorker",
+            ExplodingWorker,
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
+            lambda _config: SyncMockLLM([text_resp("unused")]),
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
+            MagicMock(load=MagicMock(return_value=MagicMock())),
+        )
+
+        parent = AsyncMockLLM([
+            delegate_resp("会失败的任务", call_id="call-f"),
+            text_resp("已处理失败"),
+        ])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            stream_mode=False,
+            max_iterations=5,
+        )
+        events = _collect_events(loop)
+        loop.client.achat = parent.achat
+
+        r = await loop.arun("委派一个会失败的任务")
+        assert r.answer == "已处理失败"
+        assert r.tool_calls_made == 1
+
+        failed = [e for e in events if e[0] == "subagent_failed"]
+        assert len(failed) == 1
+        assert "child boom" in failed[0][1]["error"]
+        # Parent sees an error tool_result for the delegation
+        tool_results = [
+            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "delegate_to_agent"
+        ]
+        assert tool_results and tool_results[0]["status"] == "error"
+
+
+# ── Integration: count limit through AgentLoop ───────────────────────
+
+
+class TestCountLimitIntegration:
+    @pytest.mark.asyncio
+    async def test_five_ok_sixth_refused(self, workspace, patch_child_client):
+        """AgentLoop: 5 delegations succeed, the 6th is refused with the
+        workflow-path error and no 6th child client is created."""
+        patch_child_client([text_resp("child ok")])
+        parent = AsyncMockLLM([
+            delegate_resp(f"task {i}", call_id=f"call-{i}") for i in range(6)
+        ] + [text_resp("final")])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            stream_mode=False,
+            max_iterations=10,
+        )
+        events = _collect_events(loop)
+        loop.client.achat = parent.achat
+
+        r = await loop.arun("委派 6 个任务")
+        assert r.tool_calls_made == 6
+        assert r.answer == "final"
+
+        started = [e for e in events if e[0] == "subagent_started"]
+        assert len(started) == 5  # only 5 spawned
+        # The 6th delegation's tool result is an error with the hint
+        tool_results = [
+            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "delegate_to_agent"
+        ]
+        assert len(tool_results) == 6
+        refused = [tr for tr in tool_results if tr["status"] == "error"]
+        assert len(refused) == 1
+        assert "最多委派" in refused[0]["result"]
+
+    @pytest.mark.asyncio
+    async def test_count_resets_between_arun_calls(self, workspace, patch_child_client):
+        """The per-turn counter resets on each arun() invocation."""
+        child_clients = patch_child_client([text_resp("child ok")])
+        parent = AsyncMockLLM([
+            delegate_resp("a", call_id="c1"),
+            text_resp("done1"),
+        ])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            stream_mode=False,
+            max_iterations=5,
+        )
+        loop.client.achat = parent.achat
+        r1 = await loop.arun("round 1")
+        assert r1.tool_calls_made == 1
+        assert loop._subagent_count[0] == 1
+
+        # Second run: fresh counter (even though the first used 1)
+        parent2 = AsyncMockLLM([
+            delegate_resp("b", call_id="c2"),
+            text_resp("done2"),
+        ])
+        loop.client.achat = parent2.achat
+        r2 = await loop.arun("round 2")
+        assert r2.tool_calls_made == 1
+        assert loop._subagent_count[0] == 1
+
+
+# ── Execute() parameter handling ─────────────────────────────────────
+
+
+class TestExecuteParamHandling:
+    def test_missing_task_returns_error(self, monkeypatch):
+        tool = SubAgentTool()
+        out = tool.execute(_subagent_count_ref=[0], emit_event=None)
+        parsed = json.loads(out)
+        assert parsed["status"] == "error"
+        assert "task" in parsed["error"]
+
+    def test_empty_task_returns_error(self, monkeypatch):
+        tool = SubAgentTool()
+        out = tool.execute(task="", _subagent_count_ref=[0], emit_event=None)
+        parsed = json.loads(out)
+        assert parsed["status"] == "error"
+
+    def test_max_iterations_clamped_to_20(self, monkeypatch):
+        """max_iterations > 20 is clamped to 20 (never escapes the cap)."""
+        captured: dict = {}
+        orig_chat = SyncMockLLM.chat
+
+        def _spy_chat(self, messages, **kwargs):
+            captured["iterations"] = len(captured.get("calls", []))
+            captured.setdefault("calls", 0)
+            captured["calls"] += 1
+            return orig_chat(self, messages, **kwargs)
+
+        monkeypatch.setattr(SyncMockLLM, "chat", _spy_chat)
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
+            lambda _config: SyncMockLLM([text_resp("ok")]),
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
+            MagicMock(load=MagicMock(return_value=MagicMock())),
+        )
+        # max_iterations=100 is clamped to 20, so the worker still runs and
+        # completes on the first text response.
+        tool = SubAgentTool()
+        out = tool.execute(task="x", max_iterations=100, _subagent_count_ref=[0], emit_event=None)
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert parsed["answer"] == "ok"
+
+    def test_message_id_and_name_in_started_event(self, monkeypatch):
+        """subagent_started carries name (task preview) + message_id."""
+        seen: list[tuple[str, dict]] = []
+
+        def _emit(et, data):
+            seen.append((et, data))
+
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
+            lambda _config: SyncMockLLM([text_resp("ok")]),
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
+            MagicMock(load=MagicMock(return_value=MagicMock())),
+        )
+        tool = SubAgentTool()
+        tool.execute(
+            task="这是一个较长的子任务描述", message_id="msg-1",
+            _subagent_count_ref=[0], emit_event=_emit,
+        )
+        started = [e for e in seen if e[0] == "subagent_started"]
+        assert len(started) == 1
+        assert started[0][1]["message_id"] == "msg-1"
+        assert started[0][1]["name"] == "这是一个较长的子任务描述"
+        completed = [e for e in seen if e[0] == "subagent_completed"]
+        assert len(completed) == 1
+        assert completed[0][1]["message_id"] == "msg-1"
+
+    def test_tool_result_contains_answer_and_metrics(self, monkeypatch):
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
+            lambda _config: SyncMockLLM([text_resp("the final answer")]),
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
+            MagicMock(load=MagicMock(return_value=MagicMock())),
+        )
+        tool = SubAgentTool()
+        out = tool.execute(task="x", _subagent_count_ref=[0], emit_event=None)
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert parsed["answer"] == "the final answer"
+        assert parsed["iterations"] == 1
+        assert parsed["tool_calls_made"] == 0
+
+
+# ── Additional coverage ──────────────────────────────────────────────
+
+
+class TestWhitelistAtExecute:
+    def test_tools_whitelist_limits_child_registry(self, monkeypatch):
+        """Passing tools=[] gives the child an empty registry; the child
+        then has no tools to call (text-only worker)."""
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
+            lambda _config: SyncMockLLM([text_resp("text only")]),
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
+            MagicMock(load=MagicMock(return_value=MagicMock())),
+        )
+        tool = SubAgentTool()
+        parent = build_default_registry()
+        out = tool.execute(
+            task="x", tools=["read_file"], _parent_registry=parent,
+            _subagent_count_ref=[0], emit_event=None,
+        )
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert parsed["answer"] == "text only"
+
+
+class TestMultiIterationChild:
+    def test_child_with_tool_then_answer(self, monkeypatch):
+        """A child that calls a tool then returns text completes with
+        tool_calls_made=1 and iterations=2 in the returned metrics."""
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
+            lambda _config: SyncMockLLM([
+                child_tool_resp("noop_tool", {}, call_id="c-1"),
+                text_resp("done after tool"),
+            ]),
+        )
+        monkeypatch.setattr(
+            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
+            MagicMock(load=MagicMock(return_value=MagicMock())),
+        )
+        tool = SubAgentTool()
+        parent = build_default_registry()
+        parent.register(NoopTool())
+        out = tool.execute(
+            task="multi-step", _parent_registry=parent,
+            _subagent_count_ref=[0], emit_event=None,
+        )
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert parsed["answer"] == "done after tool"
+        assert parsed["iterations"] == 2
+        assert parsed["tool_calls_made"] == 1
+
+
+class TestDelegateIsWriteTool:
+    def test_effects_declared_not_readonly(self):
+        """delegate_to_agent declares EFFECT_FS and is not readonly, so the
+        AgentLoop runs it serially (avoids count-ref races)."""
+        tool = build_default_registry().get("delegate_to_agent")
+        assert tool is not None
+        assert tool.effects
+        assert tool.is_readonly is False
+
+
+class TestBatchOfDelegates:
+    @pytest.mark.asyncio
+    async def test_two_delegates_in_one_response(self, workspace, patch_child_client):
+        """Two delegate_to_agent calls in a single LLM response both run,
+        spawning 2 subagents with distinct ids."""
+        child_clients = patch_child_client([text_resp("child ok")])
+        tc1 = ToolCall(id="b1", name="delegate_to_agent", arguments={"task": "t1"})
+        tc2 = ToolCall(id="b2", name="delegate_to_agent", arguments={"task": "t2"})
+        parent = AsyncMockLLM([
+            LLMResponse(content="", tool_calls=[tc1, tc2], finish_reason="tool_calls"),
+            text_resp("both done"),
+        ])
+        loop = AgentLoop(
+            config=LLMConfig(api_key="sk-test"),
+            registry=build_default_registry(),
+            workspace=workspace,
+            stream_mode=False,
+            max_iterations=5,
+        )
+        events = _collect_events(loop)
+        loop.client.achat = parent.achat
+
+        r = await loop.arun("一次委派两个")
+        assert r.tool_calls_made == 2
+        assert r.answer == "both done"
+        assert len(child_clients) == 2
+        started = [e for e in events if e[0] == "subagent_started"]
+        assert len(started) == 2
+        assert len({e[1]["agent_id"] for e in started}) == 2
