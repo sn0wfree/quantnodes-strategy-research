@@ -9,6 +9,7 @@ import {
   Link2,
   Quote,
   ChevronDown,
+  ChevronUp,
   Bot,
 } from 'lucide-react'
 import { usePersonaStore } from '../../stores/personas'
@@ -59,10 +60,10 @@ export function ComposerToolbar({ sessionId, onApplyMarkdown }: ComposerToolbarP
         >
           <Bot className="h-3.5 w-3.5 text-primary-400" />
           <span className="font-medium">{selected?.name ?? '通用助手'}</span>
-          <ChevronDown className="h-3 w-3 text-slate-500" />
+          <ChevronDown className={`h-3 w-3 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
         {open && (
-          <div className="glass absolute left-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-xl border border-slate-700/60 shadow-2xl">
+          <div className="glass absolute left-0 bottom-full z-50 mb-1 w-64 overflow-hidden rounded-xl border border-slate-700/60 shadow-2xl">
             <ul className="max-h-64 overflow-y-auto py-1">
               {personas.map((p) => (
                 <li key={p.id}>
