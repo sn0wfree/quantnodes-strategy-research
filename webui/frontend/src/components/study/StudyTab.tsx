@@ -21,8 +21,8 @@ export function StudyTab({ sessionId, workspacePath }: StudyTabProps) {
     current && current.status === 'ok' && current.study_id
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
+    <div className="flex h-full flex-col gap-4">
+      <div className="flex items-center gap-2 flex-shrink-0">
         <BookOpen className="h-4 w-4 text-slate-400" />
         <h3 className="text-sm font-semibold text-slate-100">Study</h3>
         {hasActiveStudy && (
@@ -36,31 +36,37 @@ export function StudyTab({ sessionId, workspacePath }: StudyTabProps) {
       </div>
 
       {!sessionId && (
-        <EmptyState
-          icon={<BookOpen className="h-10 w-10" />}
-          title="尚未选择 session"
-          description="先在左侧选择或创建一个 chat session"
-        />
+        <div className="flex-1 flex flex-col min-h-0">
+          <EmptyState
+            icon={<BookOpen className="h-10 w-10" />}
+            title="尚未选择 session"
+            description="先在左侧选择或创建一个 chat session"
+          />
+        </div>
       )}
 
       {sessionId && (creating || !hasActiveStudy) && (
-        <StudyCreateForm
-          sessionId={sessionId}
-          workspacePath={workspacePath}
-          onCreated={() => setCreating(false)}
-        />
+        <div className="flex-1 flex flex-col min-h-0">
+          <StudyCreateForm
+            sessionId={sessionId}
+            workspacePath={workspacePath}
+            onCreated={() => setCreating(false)}
+          />
+        </div>
       )}
 
       {sessionId && hasActiveStudy && !creating && (
-        <>
+        <div className="flex flex-1 flex-col gap-3 min-h-0">
           <button
             onClick={() => setCreating(true)}
-            className="w-full rounded border border-dashed border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200"
+            className="w-full flex-shrink-0 rounded border border-dashed border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200"
           >
             + 启动新的 study
           </button>
-          <StudyProgress sessionId={sessionId} />
-        </>
+          <div className="flex-1 flex flex-col min-h-0">
+            <StudyProgress sessionId={sessionId} />
+          </div>
+        </div>
       )}
     </div>
   )

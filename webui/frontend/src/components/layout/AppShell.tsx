@@ -8,12 +8,11 @@ import { IconNav } from './IconNav'
 import { TopBar } from './TopBar'
 import { MainSplit } from './MainSplit'
 import { RightPanel } from './RightPanel'
-import { ResizablePanel } from './ResizablePanel'
+import { SplitDivider } from './SplitDivider'
 import { ContextPanel } from '../context/ContextPanel'
 import { SessionSidebar } from '../chat/SessionSidebar'
 import { ToastManager } from '../common/Toast'
 import { CommandPalette } from '../common/CommandPalette'
-import { ErrorBoundary } from '../common/ErrorBoundary'
 import { SearchModal } from '../common/SearchModal'
 
 export function AppShell() {
@@ -83,9 +82,7 @@ export function AppShell() {
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
   const contextRatio = useLayoutStore((s) => s.contextRatio)
-  const setContextRatio = useLayoutStore((s) => s.setContextRatio)
   const rightRatio = useLayoutStore((s) => s.rightRatio)
-  const setRightRatio = useLayoutStore((s) => s.setRightRatio)
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-app">
@@ -107,25 +104,42 @@ export function AppShell() {
             <div className="flex flex-1 min-w-0">
               <MainSplit />
             </div>
-            <ErrorBoundary>
-              <ResizablePanel
-                side="right"
-                ratio={contextRatio}
-                setRatio={setContextRatio}
-              >
-                <ContextPanel />
-              </ResizablePanel>
-            </ErrorBoundary>
+            {/* Left divider: dragging TOWARD chat (delta < 0) grows
+                context; chat (flex-1) absorbs the difference. */}
+            <SplitDivider
+              onDrag={(delta) => {
+                useLayoutStore.setState((s) => ({
+                  contextRatio: s.contextRatio - delta,
+                }))
+              }}
+            />
+            <div
+              className="flex h-full flex-shrink-0 overflow-hidden"
+              style={{ width: `${contextRatio * 100}%` }}
+            >
+              <ContextPanel />
+            </div>
             {rightPanelVisible && (
-              <ErrorBoundary>
-                <ResizablePanel
-                  side="right"
-                  ratio={rightRatio}
-                  setRatio={setRightRatio}
+              <>
+                {/* Right divider: dragging TOWARD right (delta < 0) grows
+                    right; context shrinks by the same amount; chat
+                    (flex-1) is unchanged because contextRatio + rightRatio
+                    stays constant. */}
+                <SplitDivider
+                  onDrag={(delta) => {
+                    useLayoutStore.setState((s) => ({
+                      contextRatio: s.contextRatio + delta,
+                      rightRatio: s.rightRatio - delta,
+                    }))
+                  }}
+                />
+                <div
+                  className="flex h-full flex-shrink-0 overflow-hidden"
+                  style={{ width: `${rightRatio * 100}%` }}
                 >
                   <RightPanel />
-                </ResizablePanel>
-              </ErrorBoundary>
+                </div>
+              </>
             )}
           </div>
         </div>

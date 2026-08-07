@@ -24,9 +24,13 @@ export function ProgressTab({ goal }: { goal: GoalTabGoal | null }) {
   }, [messages, currentSessionId])
 
   return (
-    <div className="space-y-6">
-      <EquityCurveCard curve={curve} />
-      <GoalTab goal={goal} />
+    <div className="flex h-full flex-col gap-6">
+      <div className="flex-1 flex flex-col min-h-0 items-stretch justify-start">
+        <EquityCurveCard curve={curve} />
+      </div>
+      <div className="flex-1 flex flex-col min-h-0 items-center justify-center">
+        <GoalTab goal={goal} />
+      </div>
     </div>
   )
 }

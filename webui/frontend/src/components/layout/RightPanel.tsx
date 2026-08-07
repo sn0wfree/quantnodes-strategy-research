@@ -58,7 +58,7 @@ export function RightPanel() {
   } : null
 
   return (
-    <Tabs.Root value={tab} onValueChange={(v) => setTab(v as RightPanelTab)} className="flex h-full flex-col bg-slate-900/80">
+    <Tabs.Root value={tab} onValueChange={(v) => setTab(v as RightPanelTab)} className="flex h-full w-full flex-col bg-slate-900">
       <Tabs.List className="flex border-b border-slate-800">
         {TABS.map((t) => {
           const Icon = t.icon

@@ -47,7 +47,7 @@ export function ContextPanel() {
     && strategyFiles.length === 0
 
   return (
-    <div className="flex h-full flex-col bg-slate-900/40">
+    <div className="flex h-full w-full flex-col bg-slate-900">
       <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
         <span className="text-xs font-medium text-slate-300">上下文</span>
         <span className="text-[10px] text-slate-500">
@@ -66,28 +66,31 @@ export function ContextPanel() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-2 space-y-3">
+        <div className="flex flex-1 flex-col gap-3 overflow-hidden p-2">
           {/* TODO: replace these inline previews with the dedicated
               Section components (FileSection / ToolActivitySection /
               MetricsSection / BacktestSection). Kept inline for the
               first slice so we can validate the layout + extractors
               before splitting. */}
           {fileChanges.length > 0 && (
-            <PreviewBlock icon={FileCode} label="文件" count={fileChanges.length}>
-              {fileChanges.slice(0, 6).map((f) => (
-                <div
-                  key={f.path}
-                  className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-slate-800/60"
-                >
-                  <FileCode className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />
-                  <span className="flex-1 truncate text-slate-300">{f.path}</span>
-                  <span className="text-[10px] text-amber-400">{f.status}</span>
-                </div>
-              ))}
-            </PreviewBlock>
+            <div className="flex-1 flex flex-col min-h-0">
+              <PreviewBlock icon={FileCode} label="文件" count={fileChanges.length}>
+                {fileChanges.slice(0, 6).map((f) => (
+                  <div
+                    key={f.path}
+                    className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-slate-800/60"
+                  >
+                    <FileCode className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />
+                    <span className="flex-1 truncate text-slate-300">{f.path}</span>
+                    <span className="text-[10px] text-amber-400">{f.status}</span>
+                  </div>
+                ))}
+              </PreviewBlock>
+            </div>
           )}
 
           {tools.length > 0 && (
+            <div className="flex-1 flex flex-col min-h-0">
             <PreviewBlock icon={Wrench} label="工具活动" count={tools.length}>
               {tools.map((t) => {
                 const dot = t.status === 'running'
@@ -118,13 +121,19 @@ export function ContextPanel() {
                 )
               })}
             </PreviewBlock>
+            </div>
           )}
 
-          <MetricsPreview sessionId={currentSessionId} />
+          <div className="flex-1 flex flex-col min-h-0">
+            <MetricsPreview sessionId={currentSessionId} />
+          </div>
 
-          <StrategyFileSection files={strategyFiles} />
+          <div className="flex-1 flex flex-col min-h-0">
+            <StrategyFileSection files={strategyFiles} />
+          </div>
 
           {backtests.length > 0 && (
+            <div className="flex-1 flex flex-col min-h-0">
             <PreviewBlock icon={LineChart} label="回测结果" count={backtests.length}>
               {backtests.map((r, i) => (
                 <div
@@ -146,6 +155,7 @@ export function ContextPanel() {
                 </div>
               ))}
             </PreviewBlock>
+            </div>
           )}
         </div>
       )}
