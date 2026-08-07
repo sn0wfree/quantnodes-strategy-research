@@ -16,7 +16,7 @@ import logging
 import uuid
 from typing import Any
 
-from ..tools import BaseTool, ToolRegistry
+from ..tools import BaseTool, ToolRegistry, EFFECT_FS
 from ...llm.config import LLMConfig
 from ...llm.openai_client import OpenAICompatClient
 
@@ -32,64 +32,121 @@ def _forward_event(
     event_type: str,
     data: dict[str, Any],
 ) -> None:
-    """Forward a child agent event as a subagent_* SSE event."""
+    """Forward a child agent event as a subagent_* SSE event.
+
+    ``subagent_started`` / ``subagent_completed`` / ``subagent_failed`` are
+    passed through as-is; child events (tool_call / tool_result / text_delta)
+    are namespaced with the ``subagent_`` prefix.
+    """
     if emit_event is None:
         return
-    mapping = {
-        "tool_call": "subagent_tool_call",
-        "tool_result": "subagent_tool_result",
-        "text_delta": "subagent_text_delta",
-    }
-    mapped = mapping.get(event_type)
-    if mapped:
-        emit_event(mapped, {
-            "agent_id": agent_id,
-            "message_id": message_id,
-            **data,
-        })
+    mapped = event_type
+    if event_type in ("tool_call", "tool_result", "text_delta"):
+        mapped = f"subagent_{event_type}"
+    emit_event(mapped, {
+        "agent_id": agent_id,
+        "message_id": message_id,
+        **data,
+    })
 
 
 class SubAgentTool(BaseTool):
     """委派子任务给专注的子 agent，获取结果后继续。
 
-    子 agent 运行一个轻量的 ReAct 循环（SwarmWorker），拥有独立的
-    工具白名单（不含 SubAgentTool 自身），可读文件、跑回测、调用因子
-    分析等工具。结果作为工具返回值交回父 agent。
-
-    约束:
-    - 子 agent 不能再次调用 SubAgentTool（禁止嵌套委派）。
-    - 父 agent 单次执行最多委派 MAX_SUBAGENTS 个子任务。
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.0.0
+    # 变更: v1.0.0 新增 (SubAgentTool 委派机制)
+    #
+    # ## 用途
+    # 将独立子任务委派给子 agent。子 agent 运行一个轻量的 ReAct 循环
+    # (SwarmWorker)，拥有独立工具白名单（不含 delegate_to_agent），
+    # 可读写文件、跑回测、调用因子分析等工具。结果作为工具返回值交回父 agent。
+    #
+    # ## 参数
+    # - task: 子任务详细描述 (必填) — 包含目标、约束、期望输出格式
+    # - tools: 可选工具白名单 (数组) — 限制子 agent 可用工具
+    # - max_iterations: 子 agent 最大推理轮次 (默认 10, 上限 20)
+    #
+    # ## 示例
+    # {"task": "分析 momentum_20_60 因子的 IC 衰减, 输出摘要报告"}
+    #
+    # ## 边界
+    # - 子 agent 不能再次调用 delegate_to_agent (禁止嵌套委派)
+    # - 父 agent 单次执行最多委派 MAX_SUBAGENTS 个 (默认 5)
+    # - 超过上限拒绝执行, 提示使用工作流路径 (/study)
+    #
+    # ## 错误处理范式
+    # - 缺 task → error + 提示必填参数
+    # - 超委派上限 → error + 提示切换工作流执行
+    # - 子 agent 失败 → error + 透传子 agent 错误信息
+    #
+    # ## 相关工具
+    # 子 agent 内部可用: read_file, write_file, run_backtest, compute_factor 等
+    # ─────────────────────────────────────────────
     """
 
     name = "delegate_to_agent"
     category = "agent"
+    # Sub-agents may write files / run backtests → treated as a write tool
+    # (serial execution; avoids count-ref races in parallel dispatch).
+    effects = frozenset({EFFECT_FS})
     description = (
         "委派一个独立的子任务给专注的子 agent。子 agent 拥有独立的推理循环，"
         "可读写文件、运行回测、调用因子分析等工具。适合需要独立思考或多步操作"
         "的子任务。结果会作为文本返回。"
     )
     parameters = {
-        "task": {
-            "type": "string",
-            "description": (
-                "子任务的详细描述。应包含足够的上下文让子 agent 独立完成工作，"
-                "例如目标、约束条件、期望的输出格式等。"
-            ),
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "子任务的详细描述。应包含足够的上下文让子 agent 独立完成工作，"
+                    "例如目标、约束条件、期望的输出格式等。"
+                ),
+            },
+            "tools": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "可选的工具白名单。如果指定，子 agent 只能使用这些工具。"
+                    "不指定则使用全部可用工具（不含 delegate_to_agent）。"
+                ),
+            },
+            "max_iterations": {
+                "type": "integer",
+                "description": "子 agent 最大推理轮次（默认 10，最大 20）。",
+                "default": 10,
+            },
         },
-        "tools": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": (
-                "可选的工具白名单。如果指定，子 agent 只能使用这些工具。"
-                "不指定则使用全部可用工具（不含 delegate_to_agent）。"
-            ),
-        },
-        "max_iterations": {
-            "type": "integer",
-            "description": "子 agent 最大推理轮次（默认 10，最大 20）。",
-            "default": 10,
-        },
+        "required": ["task"],
     }
+
+    def _build_child_registry(
+        self,
+        parent_registry: ToolRegistry | None,
+        tools_whitelist: list[str] | None,
+    ) -> ToolRegistry:
+        """Build the sub-agent's tool registry.
+
+        Excludes ``delegate_to_agent`` (no nested delegation) and applies
+        the optional whitelist on top.
+        """
+        from ..tools import ToolRegistry as TR
+
+        filtered = TR()
+        if parent_registry is not None:
+            for t_name, t_obj in parent_registry._tools.items():
+                if t_name != "delegate_to_agent":
+                    filtered.register(t_obj)
+        if tools_whitelist:
+            wl_registry = TR()
+            for t_name in tools_whitelist:
+                t = filtered.get(t_name)
+                if t is not None:
+                    wl_registry.register(t)
+            filtered = wl_registry
+        return filtered
 
     def execute(self, **kwargs: Any) -> str:
         """Execute delegation — runs a SwarmWorker in a thread."""
@@ -139,29 +196,13 @@ class SubAgentTool(BaseTool):
         # ── Build child SwarmWorker ────────────────────────────────
         try:
             from ...workflow.worker import SwarmWorker
-            from ..tools import ToolRegistry as TR
 
             config = LLMConfig.load()
             client = OpenAICompatClient(config)
 
             # Build filtered registry (exclude delegate_to_agent)
             parent_registry: ToolRegistry | None = kwargs.get("_parent_registry")
-            if parent_registry is not None:
-                filtered = TR()
-                for t_name, t_obj in parent_registry._tools.items():
-                    if t_name != "delegate_to_agent":
-                        filtered.register(t_obj)
-            else:
-                filtered = TR()
-
-            # Apply explicit whitelist if provided
-            if tools_whitelist:
-                wl_registry = TR()
-                for t_name in tools_whitelist:
-                    t = filtered.get(t_name)
-                    if t is not None:
-                        wl_registry.register(t)
-                filtered = wl_registry
+            filtered = self._build_child_registry(parent_registry, tools_whitelist)
 
             # System prompt for sub-agent
             system_prompt = (
