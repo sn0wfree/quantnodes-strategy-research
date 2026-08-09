@@ -208,7 +208,7 @@ class RiskAwareStrategy(BaseStrategy):
 
 
 def test_engine_prefers_strategy_risk_callback():
-    """策略 on_risk_check 覆盖引擎 _apply_engine_risk."""
+    """策略 on_risk_check 先执行, 引擎 VT/TF/SL 兜底叠加."""
     panel = make_price_panel(periods=300)
     # 启用 vol_targeting,正常会缩放权重
     vt = VolTargetingConfig(enabled=True, target_vol=0.5, min_scale=0.1, max_scale=2.0)
@@ -220,6 +220,110 @@ def test_engine_prefers_strategy_risk_callback():
     result = engine.run(panel, strat, min_history=144)
     # 至少跑完
     assert not result.nav_daily.isna().any()
+
+
+# ============================================================
+# 6b. 回归: 策略自定义 on_risk_check 时引擎风控仍生效
+# ============================================================
+
+def make_declining_panel(periods=400, codes=("A", "B", "C")) -> pd.DataFrame:
+    """构造 (T, N) 价格面板 (持续下行, 触发 trend_filter 熊市)."""
+    dates = pd.bdate_range("2023-01-01", periods=periods)
+    prices = 100 * (0.99 ** np.arange(periods))[:, None]
+    return pd.DataFrame(
+        np.broadcast_to(prices, (periods, len(codes))),
+        index=dates,
+        columns=list(codes),
+    )
+
+
+class PassThroughRiskStrategy(EqualWeightStrategy):
+    """自定义 on_risk_check 但原样返回 (模拟 max_weight 类业务规则)."""
+
+    def on_risk_check(self, weights, nav_history, date):
+        return dict(weights)
+
+
+def test_engine_applies_trend_filter_after_strategy_risk_callback():
+    """修复回归: FactorStrategy 自定义 on_risk_check 时, 引擎 trend_filter
+    必须仍然生效 (旧代码 `if/else` 分支导致 TF/VT/SL 被完全旁路)."""
+    panel = make_declining_panel(periods=400)
+    tf = TrendFilterConfig(enabled=True, ma_window=50, bear_exposure=0.0)
+
+    engine = StrategyEngine(trend_filter=tf)
+    strat = PassThroughRiskStrategy()
+
+    result = engine.run(panel, strat, min_history=60)
+    assert result.weights_history, "expected at least one rebalance"
+
+    # 熊市清仓至少在部分调仓日触发 (bear_exposure=0.0)
+    assert any(
+        all(abs(v) < 1e-9 for v in w.values())
+        for _date, w in result.weights_history
+    ), "trend_filter 被旁路: 没有任何调仓日触发熊市清仓"
+
+
+def test_engine_trend_filter_off_keeps_weights():
+    """对照: 无 trend_filter 时下行市场不缩仓."""
+    panel = make_declining_panel(periods=400)
+    engine = StrategyEngine()  # no risk
+    strat = PassThroughRiskStrategy()
+
+    result = engine.run(panel, strat, min_history=60)
+    assert result.weights_history
+    # 没有任何调仓日被清零
+    assert not any(
+        all(abs(v) < 1e-9 for v in w.values())
+        for _date, w in result.weights_history
+    )
+
+
+def test_engine_trend_filter_reduces_loss_in_bear_market():
+    """熊市清仓 (bear_exposure=0.0) 应比不清仓损失更小."""
+    panel = make_declining_panel(periods=400)
+    strat = PassThroughRiskStrategy()
+
+    filtered = StrategyEngine(
+        trend_filter=TrendFilterConfig(enabled=True, ma_window=50, bear_exposure=0.0)
+    ).run(panel, strat, min_history=60)
+    unfiltered = StrategyEngine().run(panel, strat, min_history=60)
+
+    assert filtered.nav_daily.iloc[-1] > unfiltered.nav_daily.iloc[-1]
+
+
+# ============================================================
+# 6c. 年化换手 (ann_turnover)
+# ============================================================
+
+class AlternatingStrategy(BaseStrategy):
+    """每次调仓在 A/B 之间轮换, 制造高换手."""
+
+    def compute_weights(self, date, price_panel, nav_history):
+        n_rebal = len(nav_history)
+        # 用调仓序号奇偶切换持仓
+        if n_rebal % 2 == 0:
+            return {"A": 1.0}
+        return {"B": 1.0}
+
+
+def test_engine_ann_turnover_computed_from_weights():
+    """修复回归: ann_turnover 不再硬编码为 0 (旧代码 `# 占位`)."""
+    panel = make_price_panel(periods=400)
+    engine = StrategyEngine()
+    strat = AlternatingStrategy()
+
+    result = engine.run(panel, strat, min_history=60)
+    assert result.metrics["ann_turnover"] > 0.0
+
+
+def test_engine_ann_turnover_zero_for_constant_weights():
+    """持仓不变 → 年化换手为 0."""
+    panel = make_price_panel(periods=300)
+    engine = StrategyEngine()
+    strat = EqualWeightStrategy()
+
+    result = engine.run(panel, strat, min_history=60)
+    assert result.metrics["ann_turnover"] == 0.0
 
 
 # ============================================================

@@ -12,6 +12,7 @@ import pandas as pd
 
 from .backtest_config import BacktestConfig
 from .backtest_utils import (
+    annual_turnover_from_weights,
     apply_max_weight,
     calculate_turnover,
     generate_rebalance_dates,
@@ -182,6 +183,7 @@ def run_backtest(
 
     # 4. 计算指标
     metrics = extended_metrics(nav_daily)
+    metrics["ann_turnover"] = annual_turnover_from_weights(weights_history, dates)
 
     return BacktestResult(
         nav_daily=nav_daily,

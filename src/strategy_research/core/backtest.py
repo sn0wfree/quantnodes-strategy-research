@@ -171,9 +171,10 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
         metrics.get("action", ""),
         str(metrics.get("calmar", 0.0)),
         str(metrics.get("sharpe", 0.0)),
-        str(metrics.get("max_dd", 0.0)),
+        # metrics.json 里是 max_drawdown / ann_turnover; 兼容旧键名
+        str(metrics.get("max_dd", metrics.get("max_drawdown", 0.0))),
         str(metrics.get("ann_return", 0.0)),
-        str(metrics.get("turnover", 0.0)),
+        str(metrics.get("turnover", metrics.get("ann_turnover", 0.0))),
         str(metrics.get("factors_added", 0)),
         str(metrics.get("factors_removed", 0)),
         str(metrics.get("params_changed", 0)),

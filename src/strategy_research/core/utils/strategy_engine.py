@@ -16,7 +16,11 @@ from .backtest_config import (
     TrendFilterConfig,
     VolTargetingConfig,
 )
-from .backtest_utils import calculate_turnover, generate_rebalance_dates
+from .backtest_utils import (
+    annual_turnover_from_weights,
+    calculate_turnover,
+    generate_rebalance_dates,
+)
 from .metrics import extended_metrics
 
 
@@ -62,9 +66,9 @@ class BacktestResult:
 class StrategyEngine:
     """通用回测引擎.
 
-    风控优先级:
-      1. 策略实现了 on_risk_check → 用策略的
-      2. 策略没实现 → 用引擎配置的 VT/TF/SL
+    风控叠加:
+      1. 策略的 on_risk_check（业务规则，如 max_weight）先执行
+      2. 引擎配置的 VT/TF/SL 兜底（即使策略重写了 on_risk_check 也生效）
       3. 都没有 → 不做风控
     """
 
@@ -107,21 +111,21 @@ class StrategyEngine:
 
         for i, date in enumerate(dates):
             if date in rebal_set and i >= min_history:
+                # 调仓日: 先结转前一日权益 (当日不累计收益, 风控看到的是
+                # 真实最新净值, 而不是未初始化的 1.0 占位)
+                nav[i] = nav[i - 1] if i > 0 else 1.0
                 nav_s = pd.Series(nav[:i + 1], index=dates[:i + 1])
                 new_w = strategy.compute_weights(date, price_panel, nav_s)
 
-                # 风控: 策略回调 > 引擎配置
+                # 风控叠加: 策略回调（业务规则）→ 引擎 VT/TF/SL 兜底
                 if self._has_risk_callback:
                     new_w = strategy.on_risk_check(new_w, nav_s, date)
-                else:
-                    new_w = self._apply_engine_risk(new_w, nav_s, date)
+                new_w = self._apply_engine_risk(new_w, nav_s, date)
 
                 # 成本
                 if cost.enabled and prev_w:
                     t = calculate_turnover(prev_w, new_w)
-                    nav[i] = nav[i - 1] * (1 - t * cost.cost_rate())
-                elif i > 0:
-                    nav[i] = nav[i - 1]
+                    nav[i] = nav[i] * (1 - t * cost.cost_rate())
 
                 prev_w = new_w
                 w_hist.append((date, dict(new_w)))
@@ -139,6 +143,7 @@ class StrategyEngine:
 
         nav_s = pd.Series(nav, index=dates, name="nav")
         metrics = extended_metrics(nav_s)
+        metrics["ann_turnover"] = annual_turnover_from_weights(w_hist, dates)
 
         return BacktestResult(
             nav_daily=nav_s,

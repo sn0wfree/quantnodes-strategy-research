@@ -39,6 +39,29 @@ def calculate_turnover_cost(
     return turnover * cost_cfg.cost_rate()
 
 
+def annual_turnover_from_weights(
+    weights_history: list[tuple[pd.Timestamp, dict[str, float]]],
+    dates: pd.DatetimeIndex,
+) -> float:
+    """从调仓权重历史计算年化单边换手率.
+
+    年化换手 = 相邻调仓日单边换手均值 × 年调仓次数.
+    少于 2 个调仓日 → 0.0.
+    """
+    if len(weights_history) < 2:
+        return 0.0
+    turnovers = [
+        calculate_turnover(weights_history[i][1], weights_history[i + 1][1])
+        for i in range(len(weights_history) - 1)
+    ]
+    avg_turnover = float(sum(turnovers) / len(turnovers))
+    if len(dates) >= 2:
+        years = max((dates[-1] - dates[0]).days / 365.25, 1e-9)
+    else:
+        years = 1.0
+    return round(avg_turnover * (len(weights_history) / years), 6)
+
+
 # ============================================================
 # 2. 调仓日生成
 # ============================================================

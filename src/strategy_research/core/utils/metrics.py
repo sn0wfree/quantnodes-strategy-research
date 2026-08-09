@@ -212,7 +212,7 @@ def extended_metrics(
         "calmar_avg_dd": calmar_avg_dd,
         "var_95": var_95,
         "cvar_95": cvar_95,
-        "ann_turnover": 0.0,  # 占位
+        "ann_turnover": 0.0,  # 由引擎根据 weights_history 覆盖填充
         "max_monthly_loss": _max_monthly_loss(nav),
         "profit_months_ratio": _profit_months_ratio(nav),
     }
