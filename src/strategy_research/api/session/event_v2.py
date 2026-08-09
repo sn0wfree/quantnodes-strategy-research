@@ -86,6 +86,12 @@ class EventType:
     TOOL_HEARTBEAT = "tool_heartbeat"
     TOOL_INPUT = "tool.input"
 
+    # Permission gate (Tier 1 A1) — emitted by PermissionGateway when
+    # a tool call hits an ASK rule. The frontend answers via
+    # POST /api/chat/permission/respond which calls gateway.respond().
+    PERMISSION_REQUEST = "permission_request"
+    PERMISSION_RESULT = "permission_result"
+
     # Iteration
     ITER_START = "iter_start"
     ITER_END = "iter_end"

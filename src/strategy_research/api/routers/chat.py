@@ -37,6 +37,76 @@ router = APIRouter()
 # per session). Keyed by db path so tests/workspace switches re-create.
 _session_service_cache: dict[str, SessionService] = {}
 
+# ── Tier 1 A1: permission gateway ──────────────────────────────────
+# One process-wide PermissionGateway (mirrors SessionService). Wired
+# with an ``on_request`` hook that pushes a ``permission_request``
+# SSE event for every ASK verdict; the front-end answers via
+# ``POST /api/chat/permission/respond`` which calls
+# ``gateway.respond(tool_call_id, ...)``.
+_permission_gateway_cache: dict[str, "PermissionGateway"] = {}
+
+
+def _get_permission_gateway(request: Request | None = None) -> "PermissionGateway | None":
+    """Lazy-init the process-wide gateway.
+
+    The ``on_request`` hook is wired on first use so we can attach the
+    SSE buffer without circular imports.
+    """
+    from ...core.permission import PermissionGateway
+
+    gateway = _permission_gateway_cache.get("default")
+    if gateway is not None:
+        return gateway
+
+    def _push_sse(tool_call_id, decision, args):
+        # Lazy import — sse_buffer is a heavy module.
+        try:
+            from ...api.sse_buffer import sse_buffer  # local import
+            from ...api.session.event_v2 import EventType
+
+            session_id = args.get("__session_id__") or ""
+            if not session_id:
+                # No session scope = no subscriber can see this.
+                # Drop on the floor (and log so operators notice).
+                logger.warning(
+                    "permission request without session_id; dropping",
+                )
+                return
+            # Tool name is implicit from the EventType subscriber;
+            # payload carries call_id + args for the dialog UI.
+            import json as _json
+            payload = {
+                "tool_call_id": tool_call_id,
+                "tool_name": args.get("__tool_name__", ""),
+                "args": _safe_payload(args),
+                "pattern": decision.pattern,
+                "target": decision.target,
+            }
+            sse_buffer.push(
+                EventType.PERMISSION_REQUEST,
+                _json.dumps(payload, ensure_ascii=False),
+                session_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("permission SSE push failed: %s", exc)
+
+    gateway = PermissionGateway(
+        on_request=_push_sse,
+    )
+    _permission_gateway_cache["default"] = gateway
+    return gateway
+
+
+def _safe_payload(args: dict) -> dict:
+    """Drop large fields before SSE-serialising the request."""
+    out = {}
+    for k, v in args.items():
+        if k.startswith("__") and k.endswith("__"):
+            continue  # internal marker
+        s = repr(v)
+        out[k] = s[:200] + "…" if len(s) > 200 else v
+    return out
+
 
 def _get_session_service() -> SessionService:
     """Return the process-wide singleton SessionService for the DB.
@@ -343,6 +413,11 @@ async def _run_agent_loop_background(
             on_event=accumulator.handle,
             workspace=None,
             enable_goal_injection=True,  # long-horizon: continue until goal criteria met
+            # Tier 1 A1: wire the permission gate so ASK verdicts
+            # trigger an SSE permission_request that the front-end
+            # answers via POST /api/chat/permission/respond.
+            permission_evaluator=_get_permission_gateway(None).evaluator,
+            permission_gateway=_get_permission_gateway(None),
         )
 
         result = await loop.arun(task)

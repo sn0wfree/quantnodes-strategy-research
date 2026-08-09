@@ -13,6 +13,9 @@ import { SessionSidebar } from '../chat/SessionSidebar'
 import { ToastManager } from '../common/Toast'
 import { CommandPalette } from '../common/CommandPalette'
 import { SearchModal } from '../common/SearchModal'
+import { PermissionRequestDialog } from '../chat/PermissionRequestDialog'
+import { useToastStore } from '../../stores/toast'
+import { api } from '../../api/client'
 
 export function AppShell() {
   useKeyboardShortcuts()
@@ -134,6 +137,56 @@ export function AppShell() {
       <ToastManager />
       <CommandPalette />
       <SearchModal />
+      <PermissionRequestDialogBridge />
     </div>
+  )
+}
+
+/**
+ * Bridge component: wires the chat store's `pendingPermission` slot
+ * to the dialog's `onRespond` callback (which posts to the backend
+ * gateway endpoint). Kept inline so the dialog is only rendered when
+ * there is a real pending request, and so the `api` import is not
+ * pulled into the dialog module (single responsibility).
+ */
+function PermissionRequestDialogBridge() {
+  const pending = useChatStore((s) => s.pendingPermission)
+  const clearPending = useChatStore.setState
+  const addToast = useToastStore((s) => s.addToast)
+
+  if (!pending) return null
+
+  const handleRespond = async (
+    action: 'allow' | 'deny',
+    permanent: boolean,
+  ) => {
+    // Optimistically close the dialog — the SSE permission_result
+    // event (if the gateway emits one) will be a no-op since the
+    // store has already cleared the slot.
+    clearPending({ pendingPermission: null })
+    try {
+      const res = await api.permission.respond({
+        tool_call_id: pending.tool_call_id,
+        action,
+        permanent,
+      })
+      if (res.status === 'expired') {
+        addToast('warning', '权限请求已过期（操作可能已超时）')
+      } else if (res.status === 'ok') {
+        addToast(
+          'success',
+          permanent
+            ? `已${action === 'allow' ? '始终允许' : '始终拒绝'} ${pending.tool_name}`
+            : `已${action === 'allow' ? '允许' : '拒绝'}本次`,
+        )
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '未知错误'
+      addToast('error', `权限请求失败：${msg}`)
+    }
+  }
+
+  return (
+    <PermissionRequestDialog request={pending} onRespond={handleRespond} />
   )
 }

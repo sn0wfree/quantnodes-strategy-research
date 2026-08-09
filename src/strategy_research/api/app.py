@@ -140,7 +140,7 @@ def create_app(
     app.add_middleware(AuthMiddleware)
 
     # Register routers
-    from .routers import admin, auth, chat, goal, hypothesis, memory, run, session, study, validation, web_session, workflow
+    from .routers import admin, auth, chat, goal, hypothesis, memory, permission, run, session, study, validation, web_session, workflow
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
@@ -155,6 +155,11 @@ def create_app(
     app.include_router(session.router, prefix="/api/session", tags=["session"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
+
+    # Permission gate (Tier 1 A1) — answers to permission_request SSE
+    # events. Mounted under /api/chat so the frontend can use the
+    # same base path as the rest of the chat surface.
+    app.include_router(permission.router, prefix="/api/chat/permission", tags=["permission"])
 
     # Strategy listing/checking
     from .routers import strategy

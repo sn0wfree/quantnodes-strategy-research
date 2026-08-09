@@ -120,6 +120,14 @@ interface ChatState {
   streamingMessageId: string | null
   streamingText: string
   activeAttemptId: string | null
+  /**
+   * Tier 1 A1: most recent pending permission_request from the
+   * backend. The PermissionRequestDialog subscribes to this and
+   * posts the verdict via /api/chat/permission/respond.
+   * Single-slot — concurrent requests are unusual because the
+   * AgentLoop is sequential within one attempt.
+   */
+  pendingPermission: import('../hooks/sse/permissionHandlers').PermissionRequest | null
   /** Per-session flag: true when the consumer queue was paused after cancel. */
   queuePaused: Map<string, boolean>
   /** Per-session current queue length snapshot. */
@@ -208,6 +216,7 @@ export const useChatStore = create<ChatState>()(
     totalTokensSeen: new Map(),
     lastCompaction: null,
     partTextAccumDelta: {},
+    pendingPermission: null,
     setLastCompaction: (c) => set({ lastCompaction: c }),
     accumulatePartText: (partId, delta) =>
       set((state) => {

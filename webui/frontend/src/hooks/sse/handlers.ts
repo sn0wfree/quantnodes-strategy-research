@@ -48,6 +48,7 @@ import {
   subagentFailed,
 } from './subagentHandlers'
 import { todoUpdated } from './todoHandlers'
+import { permissionRequest, permissionResult } from './permissionHandlers'
 
 /**
  * Dispatch table mapping every registered SSE event type to its handler.
@@ -118,4 +119,7 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   subagent_failed: subagentFailed,
   // Todo / task tracking
   todo_updated: todoUpdated,
+  // Tier 1 A1: permission gate handshake (backend -> frontend).
+  permission_request: permissionRequest,
+  permission_result: permissionResult,
 }

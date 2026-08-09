@@ -46,7 +46,7 @@ TRANSIENT_TOOL_ERRORS = (
 
 @dataclass
 class ToolContext:
-    """显式运行上下文 (paradigm v2): 由 AgentLoop 构造并注入。
+    """显式运行上下文 (paradigm v2):由 AgentLoop 构造并注入。
 
     LLM 不可见 (不在 schema 中); 工具经 execute 的 ``ctx`` 参数接收。
     """
@@ -54,6 +54,14 @@ class ToolContext:
     workspace: Optional[Path] = None
     session_id: Optional[str] = None
     emit_progress: Optional[Callable[[dict], None]] = None
+    # ── Tier 1 A1: permission plumbing ─────────────────────────
+    # Set by AgentLoop per-attempt. ``permission_evaluator`` is the
+    # ruleset source of truth; ``permission_gateway`` is the async
+    # handshake (ask → SSE → user response). ``tool_call_id`` keys
+    # the request/response pairing in the gateway.
+    permission_evaluator: Optional[Any] = None
+    permission_gateway: Optional[Any] = None
+    tool_call_id: Optional[str] = None
 
 
 class ToolError(Exception):
@@ -443,7 +451,7 @@ class BaseTool(ABC):
         """
         try:
             cleaned = self._coerce_params(kwargs)
-            return self.execute(**cleaned)
+            return self._dispatch(cleaned)
         except ToolError as exc:
             return exc.to_json()
         except TRANSIENT_TOOL_ERRORS:
@@ -455,6 +463,111 @@ class BaseTool(ABC):
                 "error": f"{type(exc).__name__}: {exc}",
                 "tool": self.name,
             }, ensure_ascii=False)
+
+    def _dispatch(self, cleaned: Dict[str, Any]) -> str:
+        """Call ``execute`` with the right signature. v2 tools take
+        ``(self, ctx, **kwargs)``; legacy tools take ``(self, **kwargs)``.
+        Detected once via inspect — no runtime overhead after first call.
+        """
+        import inspect as _inspect
+        try:
+            sig = _inspect.signature(self.execute)
+            takes_ctx = any(
+                p.name == "ctx" or p.kind is _inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+        except (TypeError, ValueError):
+            takes_ctx = False
+        if takes_ctx:
+            ctx = cleaned.pop("ctx", None)
+            return self.execute(ctx=ctx, **cleaned)
+        return self.execute(**cleaned)
+
+    async def ainvoke(
+        self,
+        kwargs: Dict[str, Any],
+        ctx: Optional["ToolContext"] = None,
+    ) -> str:
+        """Async entry point used by AgentLoop. Wraps ``invoke`` with
+        the Tier 1 A1 permission gate: ask -> SSE -> user response.
+
+        ``ctx`` is optional — when absent (synchronous fallback or
+        pre-permission plumbing) the tool runs without a permission
+        check, matching the legacy ``invoke`` behavior. The agent
+        loop always passes ``ctx`` for every tool invocation.
+        """
+        if ctx is not None and ctx.permission_evaluator is not None:
+            await self._enforce_permission(kwargs, ctx)
+        return self.invoke(kwargs)
+
+    async def _enforce_permission(
+        self,
+        kwargs: Dict[str, Any],
+        ctx: "ToolContext",
+    ) -> None:
+        """Evaluate the ruleset; honor allow / ask / deny."""
+        # Local imports avoid a circular dependency at module load
+        # (permission -> tools -> permission).
+        from ..permission import (
+            PermissionAction,
+            PermissionDeniedError,
+            PermissionGateway,
+        )
+
+        decision = ctx.permission_evaluator.evaluate(self.name, kwargs)
+        if decision.action == PermissionAction.ALLOW:
+            return
+        if decision.action == PermissionAction.DENY:
+            err = PermissionDeniedError(
+                f"Permission denied: {self.name} pattern={decision.pattern}",
+                rule=decision.rule,
+                target=decision.target,
+            )
+            raise err
+
+        # ASK — defer to the user via the gateway.
+        gateway: PermissionGateway | None = ctx.permission_gateway
+        if gateway is None:
+            # No gateway wired up (e.g. tests, sync path). Fail open
+            # to ASK behaviour but skip the handshake — the loop
+            # logs a warning so operators notice.
+            logger.warning(
+                "tool %s gated by ASK but no permission_gateway on ctx; "
+                "treating as allow", self.name,
+            )
+            return
+
+        tool_call_id = ctx.tool_call_id or ""
+        if not tool_call_id:
+            logger.warning(
+                "tool %s ASK without tool_call_id — failing allow",
+                self.name,
+            )
+            return
+
+        # Stash session_id on ctx for the SSE hook — the gateway's
+        # ``on_request`` callback runs without any reference to ctx,
+        # so we thread session_id through the gateway's request
+        # by piggybacking it on the args payload the hook receives.
+        scoped_args = dict(kwargs)
+        scoped_args["__session_id__"] = ctx.session_id or ""
+
+        response = await gateway.request(
+            tool_call_id=tool_call_id,
+            tool_name=self.name,
+            args=scoped_args,
+            decision=decision,
+        )
+
+        if response.action == PermissionAction.DENY:
+            err = PermissionDeniedError(
+                response.reason or f"User rejected: {self.name}",
+                rule=decision.rule,
+                target=decision.target,
+            )
+            raise err
+        # ALLOW (one-shot or permanent) — gateway already persisted
+        # the rule if permanent=True.
 
     def _coerce_params(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """框架统一容错: 按 execute 显式签名注解, 仅在类型不匹配时触发。

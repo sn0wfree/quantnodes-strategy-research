@@ -39,6 +39,9 @@ def build_chat_agent_loop(
     enable_claim_validation: bool = False,
     strict_claim_validation: bool = False,
     enable_goal_injection: bool = False,
+    # ── Tier 1 A1: permission gate plumbing ─────────────────────
+    permission_evaluator: Any | None = None,
+    permission_gateway: Any | None = None,
 ) -> AgentLoop:
     """Construct a chat-mode ``AgentLoop``.
 
@@ -112,7 +115,7 @@ def build_chat_agent_loop(
     if compact_config is None and config is not None:
         compact_config = getattr(config, "compact_config", None)
 
-    return AgentLoop(
+    loop = AgentLoop(
         config=config,
         registry=registry,
         workspace=workspace,
@@ -130,6 +133,15 @@ def build_chat_agent_loop(
         enable_claim_validation=enable_claim_validation,
         strict_claim_validation=strict_claim_validation,
     )
+    # Tier 1 A1: stash the permission gate on the loop instance so
+    # ToolContext can pick them up per tool call (see AgentLoop._*
+    # hooks in loop.py). Defaults to None — sync / TUI paths can
+    # opt out by simply not passing these kwargs.
+    if permission_evaluator is not None:
+        loop._permission_evaluator = permission_evaluator
+    if permission_gateway is not None:
+        loop._permission_gateway = permission_gateway
+    return loop
 
 
 __all__ = ["build_chat_agent_loop"]

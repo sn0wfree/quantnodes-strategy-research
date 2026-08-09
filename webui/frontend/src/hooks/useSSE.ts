@@ -115,6 +115,18 @@ export function useSSE(sessionId: string | null) {
               sess.id === sid ? { ...sess, ...patch } : sess,
             ),
           })),
+        // Tier 1 A1: permission handshake. Both setters write to
+        // the chat store which exposes ``pendingPermission`` so the
+        // PermissionRequestDialog can subscribe.
+        setPendingPermission: (req) => {
+          useChatStore.setState({ pendingPermission: req })
+        },
+        clearPendingPermission: (_toolCallId) => {
+          // Single-slot today: the most-recent pending request is
+          // always the one the dialog shows. When the backend
+          // resolves it (allow/deny), we clear the slot.
+          useChatStore.setState({ pendingPermission: null })
+        },
       }
 
       const handler = HANDLERS[event]

@@ -1121,11 +1121,16 @@ class AgentLoop:
         kwargs["_progress_callback"] = _progress_callback
 
         # v2: explicit ToolContext (workspace/session_id kwargs stay for
-        # legacy tools until P3 migration removes them)
+        # legacy tools until P3 migration removes them). The
+        # permission_evaluator / permission_gateway / tool_call_id
+        # fields wire the Tier 1 A1 permission gate into ainvoke().
         kwargs["ctx"] = ToolContext(
             workspace=self.workspace,
             session_id=self.session_id,
             emit_progress=_progress_callback,
+            permission_evaluator=getattr(self, "_permission_evaluator", None),
+            permission_gateway=getattr(self, "_permission_gateway", None),
+            tool_call_id=tc.id,
         )
 
         # SubAgentTool injection: emit_event, message_id, count ref, parent registry
@@ -1352,6 +1357,9 @@ class AgentLoop:
             workspace=self.workspace,
             session_id=self.session_id,
             emit_progress=_progress_callback,
+            permission_evaluator=getattr(self, "_permission_evaluator", None),
+            permission_gateway=getattr(self, "_permission_gateway", None),
+            tool_call_id=tc.id,
         )
 
         # SubAgentTool injection: emit_event, message_id, count ref, parent registry
@@ -1367,10 +1375,14 @@ class AgentLoop:
 
         t0 = time.perf_counter()
         # ── Tool-level auto-retry for transient errors (sync parity) ─
+        # Tier 1 A1: the async path uses ``ainvoke`` so the permission
+        # gate (ASK -> SSE -> user reply) can run via the event loop
+        # without blocking the worker thread. Sync parity path below
+        # keeps ``invoke`` since async-in-thread would deadlock.
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
             try:
-                output = await asyncio.to_thread(tool.invoke, kwargs)
+                output = await tool.ainvoke(kwargs, kwargs.get("ctx"))
                 last_exc = None
                 break
             except TRANSIENT_TOOL_ERRORS as exc:

@@ -266,6 +266,26 @@ class APIClient {
       ),
   }
 
+  // Tier 1 A1: permission handshake reply. Returns the gateway's
+  // verdict acknowledgement ("ok" / "expired" / "invalid_action").
+  permission = {
+    respond: (body: {
+      tool_call_id: string
+      action: 'allow' | 'deny'
+      permanent?: boolean
+      reason?: string
+    }) =>
+      this.post<{ status: string }>(
+        '/chat/permission/respond',
+        {
+          tool_call_id: body.tool_call_id,
+          action: body.action,
+          permanent: body.permanent ?? false,
+          reason: body.reason ?? '',
+        },
+      ),
+  }
+
   personas = {
     list: () => this.get<PersonasResponse>('/chat/personas'),
   }

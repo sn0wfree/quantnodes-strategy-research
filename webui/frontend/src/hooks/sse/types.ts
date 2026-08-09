@@ -66,6 +66,9 @@ export type SSEEventType =
   | 'subagent_completed'
   | 'subagent_failed'
   | 'todo_updated'
+  // Tier 1 A1: permission gate handshake
+  | 'permission_request'
+  | 'permission_result'
 
 export const EVENT_TYPES: SSEEventType[] = [
   'text.started', 'text_delta', 'text.ended',
@@ -96,6 +99,8 @@ export const EVENT_TYPES: SSEEventType[] = [
   'subagent_text_delta', 'subagent_completed', 'subagent_failed',
   // Todo / task tracking
   'todo_updated',
+  // Tier 1 A1: permission gate (opencode-style)
+  'permission_request', 'permission_result',
 ]
 
 /**
@@ -152,6 +157,11 @@ export interface SSEContext {
   addToast: (kind: 'error' | 'info' | 'success', msg: string) => void
   // Session store meta update (auth-side session list patching)
   patchSessionMeta: (session_id: string, patch: Record<string, unknown>) => void
+  // Tier 1 A1: permission handshake. The store holds the most recent
+  // pending permission_request so the dialog can render. Frontend
+  // posts the verdict to /api/chat/permission/respond.
+  setPendingPermission: (req: import('./permissionHandlers').PermissionRequest) => void
+  clearPendingPermission: (tool_call_id: string) => void
 }
 
 export type SSEHandler = (data: Record<string, unknown>, ctx: SSEContext) => void
