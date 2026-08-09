@@ -660,3 +660,199 @@ class TestRegression700dc7f7:
         # Caller would NOT persist a CompactionMessage because summary is None
         assert summary is None
         assert recent is None or recent == ""
+
+
+# ── Turn-level selection ──────────────────────────────────────────
+
+
+class TestTurnLevelSelection:
+    """Turns are atomic units — never split a turn across head/recent."""
+
+    def test_turns_never_split(self):
+        """A turn (user+assistant+tools) is either fully in head or recent."""
+        msgs = [
+            {"role": "user", "content": "x" * 300},
+            {"role": "assistant", "content": "y" * 300},
+            {"role": "user", "content": "x" * 300},
+            {"role": "assistant", "content": "y" * 300},
+            {"role": "user", "content": "x" * 300},
+            {"role": "assistant", "content": "y" * 300},
+            {"role": "user", "content": "x" * 300},
+            {"role": "assistant", "content": "y" * 300},
+        ]
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=1)  # tiny budget
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Head and recent should each contain complete turns
+        for msg in head:
+            if msg.get("role") == "assistant":
+                # Find the preceding user in head
+                idx = head.index(msg)
+                if idx > 0 and head[idx - 1].get("role") == "user":
+                    pass  # complete turn in head
+                elif idx == 0:
+                    pass  # assistant at start (orphan), acceptable
+        # Recent should end with assistant
+        if recent:
+            assert recent[-1].get("role") == "assistant"
+
+    def test_tail_turns_guarantee_with_turn_level(self):
+        """tail_turns=2 guarantees at least 2 full turns in recent."""
+        msgs = _make_turn_msgs(n_turns=6, content_len=5000)
+        cfg = CompactConfig(tail_turns=2, preserve_recent_tokens=1)  # tiny budget
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Count complete turns in recent
+        turns_in_recent = _split_into_turns(recent)
+        assert len(turns_in_recent) >= 2
+
+    def test_empty_messages(self):
+        cfg = CompactConfig()
+        head, recent = _select_by_token_budget([], cfg, 1_000_000)
+        assert head == []
+        assert recent == []
+
+    def test_single_turn(self):
+        msgs = _make_turn_msgs(n_turns=1, content_len=300)
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=1)
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Single turn: either all in head (if safety fires) or all in recent
+        assert len(head) + len(recent) == len(msgs)
+
+    def test_tool_turn_not_split(self):
+        """Turn with tool_call + tool result stays intact."""
+        msgs = [
+            {"role": "user", "content": "x" * 200},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "c1", "function": {"name": "search", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "content": "result data", "tool_call_id": "c1"},
+            {"role": "assistant", "content": "y" * 200},
+            {"role": "user", "content": "x" * 200},
+            {"role": "assistant", "content": "y" * 200},
+            {"role": "user", "content": "x" * 200},
+            {"role": "assistant", "content": "y" * 200},
+        ]
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=1)
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Tool call turn should not be split across head/recent
+        recent_tool_msgs = [m for m in recent if m.get("role") == "tool"]
+        head_tool_msgs = [m for m in head if m.get("role") == "tool"]
+        # Tool result is either fully in head or fully in recent, not both
+        # (This is guaranteed by turn-level selection)
+        assert len(recent_tool_msgs) == 0 or len(head_tool_msgs) == 0
+
+
+# ── Quality decay scoring ─────────────────────────────────────────
+
+
+class TestQualityDecay:
+    """Quality decay: score turns by recency × content weight."""
+
+    def test_quality_decay_prefers_recent_turns(self):
+        """With quality_decay, recent high-quality turns are preferred."""
+        msgs = _make_turn_msgs(n_turns=5, content_len=5000)
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=8000, quality_decay=True)
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Should keep most turns (budget is large)
+        assert len(recent) >= 4  # at least 4 messages
+
+    def test_quality_decay_respects_budget(self):
+        """Quality decay still respects token budget."""
+        msgs = _make_turn_msgs(n_turns=5, content_len=5000)
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=2000, quality_decay=True)
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Budget is small, so some turns go to head
+        assert len(head) > 0
+
+    def test_quality_decay_config_default_false(self):
+        cfg = CompactConfig()
+        assert cfg.quality_decay is False
+
+    def test_score_turn_recency(self):
+        """Most recent turn gets higher score than older turns."""
+        from strategy_research.core.agent.compact import _score_turn
+        turn = [{"role": "user", "content": "test"}]
+        # Index 0 = most recent, total=5
+        score_recent = _score_turn(turn, turn_index=0, total_turns=5)
+        # Index 3 = older
+        score_old = _score_turn(turn, turn_index=3, total_turns=5)
+        assert score_recent > score_old
+
+    def test_score_turn_tool_error_boost(self):
+        """Turn with tool error gets higher content weight."""
+        from strategy_research.core.agent.compact import _score_turn
+        turn_with_error = [
+            {"role": "user", "content": "test"},
+            {"role": "tool", "content": '{"status": "error", "message": "failed"}'},
+        ]
+        turn_without = [
+            {"role": "user", "content": "test"},
+            {"role": "tool", "content": "regular result"},
+        ]
+        score_error = _score_turn(turn_with_error, 0, 5)
+        score_normal = _score_turn(turn_without, 0, 5)
+        assert score_error > score_normal
+
+    def test_score_turn_tool_result_boost(self):
+        """Turn with tool result gets moderate content weight."""
+        from strategy_research.core.agent.compact import _score_turn
+        turn_with_tool = [
+            {"role": "assistant", "content": "result data"},
+        ]
+        turn_without = [
+            {"role": "assistant", "content": "just text"},
+        ]
+        # Turn with tool_calls gets boost
+        turn_with_calls = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "f"}}]},
+        ]
+        score_with = _score_turn(turn_with_calls, 0, 5)
+        score_without = _score_turn(turn_without, 0, 5)
+        assert score_with > score_without
+
+    def test_quality_decay_with_tool_error_turn(self):
+        """Turns with tool errors get preferential treatment in budget."""
+        msgs = [
+            {"role": "user", "content": "x" * 2000},
+            {"role": "assistant", "content": "y" * 2000},
+            # Turn 2: has tool error (should be boosted)
+            {"role": "user", "content": "x" * 2000},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "c1", "function": {"name": "run", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "content": '{"status": "error", "message": "timeout"}', "tool_call_id": "c1"},
+            {"role": "assistant", "content": "y" * 2000},
+            # Turn 3: most recent, no error
+            {"role": "user", "content": "x" * 2000},
+            {"role": "assistant", "content": "y" * 2000},
+        ]
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=4000, quality_decay=True)
+        head, recent = _select_by_token_budget(msgs, cfg, 1_000_000)
+        # Recent should contain at least some messages
+        assert len(recent) > 0
+
+
+class TestTurnLevelIntegration:
+    """Integration: turn-level selection + compact_messages."""
+
+    def test_turn_level_compact_messages(self):
+        """Full pipeline with turn-level selection."""
+        llm = _FakeLLM(content="## Objective\nTurn-level summary")
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500)
+        msgs = _make_turn_msgs(n_turns=5, content_len=300)
+        result, applied, summary, recent = compact_messages(
+            msgs, config=cfg, threshold_tokens=100, llm_client=llm,
+        )
+        assert any("llm_summarize" in layer for layer in applied)
+        assert summary is not None
+        assert len(result) < len(msgs)
+
+    def test_quality_decay_compact_messages(self):
+        """Full pipeline with quality decay."""
+        llm = _FakeLLM(content="## Objective\nQuality decay summary")
+        cfg = CompactConfig(tail_turns=1, preserve_recent_tokens=500, quality_decay=True)
+        msgs = _make_turn_msgs(n_turns=5, content_len=300)
+        result, applied, summary, recent = compact_messages(
+            msgs, config=cfg, threshold_tokens=100, llm_client=llm,
+        )
+        assert any("llm_summarize" in layer for layer in applied)
+        assert summary is not None

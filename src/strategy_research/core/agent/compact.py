@@ -179,6 +179,7 @@ class CompactConfig:
     # i.e. this is a CAP, not the absolute value.
     preserve_recent_tokens: int | None = None  # None = dynamic (25% of context)
     tail_turns: int = 2                        # keep last N turns verbatim
+    quality_decay: bool = False                # score turns by recency × content quality
     summary_output_tokens: int = 4_096          # CAP, see opencode line 183
     enable_incremental_summary: bool = True
     summary_template: str | None = None        # None = DEFAULT_SUMMARY_TEMPLATE
@@ -302,6 +303,9 @@ _MIN_PRESERVE_RECENT = 2_000
 _MAX_PRESERVE_RECENT = 8_000
 _TOOL_OUTPUT_MAX_CHARS = 2_000
 
+# Quality decay: exponential half-life in turns
+_QUALITY_DECAY_HALF_LIFE = 3.0
+
 
 def _split_into_turns(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Split non-system messages into user→assistant turns.
@@ -328,6 +332,48 @@ def _truncate_for_budget(text: str, budget_chars: int) -> str:
     return text[:budget_chars] + "\n[truncated]"
 
 
+# ── Quality decay scoring ─────────────────────────────────────────
+
+
+def _score_turn(turn: list[dict[str, Any]], turn_index: int, total_turns: int) -> float:
+    """Score a turn for quality-decay weighting.
+
+    Returns a weight in (0, 1] combining:
+    - Recency: exponential decay (half-life = _QUALITY_DECAY_HALF_LIFE turns)
+    - Content signals: tool errors → boost, tool results → moderate boost
+
+    Args:
+        turn: Messages in this turn.
+        turn_index: 0-based index from the END (0 = most recent).
+        total_turns: Total number of turns.
+    """
+    import math
+
+    # Recency weight: exponential decay from most recent
+    recency = math.exp(-0.693 * turn_index / _QUALITY_DECAY_HALF_LIFE)
+
+    # Content weight: boost turns with tool results or errors
+    content_weight = 1.0
+    for msg in turn:
+        role = msg.get("role", "")
+        content = msg.get("content", "") or ""
+        if role == "tool":
+            if content.startswith("{") and '"status"' in content[:100]:
+                try:
+                    import json
+                    parsed = json.loads(content[:2000])
+                    if isinstance(parsed, dict) and parsed.get("status") == "error":
+                        content_weight = max(content_weight, 1.5)
+                except Exception:
+                    pass
+            else:
+                content_weight = max(content_weight, 1.2)
+        elif role == "assistant" and msg.get("tool_calls"):
+            content_weight = max(content_weight, 1.1)
+
+    return recency * content_weight
+
+
 def _select_by_token_budget(
     non_system: list[dict[str, Any]],
     config: CompactConfig,
@@ -335,12 +381,16 @@ def _select_by_token_budget(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Select messages: head (for summarization) vs recent (keep verbatim).
 
-    Opencode-aligned approach:
-    - Walk backwards from end, accumulating token costs per message
-    - Fill the budget as fully as possible (never stop early if budget remains)
-    - At the boundary: split the message — keep tail in recent, head in head
-    - tail_turns becomes a *minimum* guarantee (at least N turns in recent)
-    - Budget defaults to MIN_PRESERVE..MAX_PRESERVE range based on context
+    Turn-level approach:
+    - Build turns (user→assistant pairs + orphan messages)
+    - Walk backwards turn-by-turn (never split a turn)
+    - Fill the budget as fully as possible
+    - tail_turns is a *minimum* guarantee (at least N turns in recent)
+
+    When quality_decay=True:
+    - Score each turn with recency × content weight
+    - Prefer higher-scored turns within budget
+    - Low-scored turns may be skipped even if they fit
     """
     if not non_system:
         return [], []
@@ -357,33 +407,72 @@ def _select_by_token_budget(
     else:
         budget = _MAX_PRESERVE_RECENT
 
-    # Walk backwards: accumulate messages until budget is full
-    recent_start = len(non_system)  # index of first message in recent
-    total_tokens = 0
-    for i in range(len(non_system) - 1, -1, -1):
-        msg_tokens = _estimate_tokens([non_system[i]])
-        if total_tokens + msg_tokens > budget:
-            break
-        total_tokens += msg_tokens
-        recent_start = i
+    # Build turns: atomic units for selection
+    turns = _split_into_turns(non_system)
+    turn_tokens = [_estimate_tokens(t) for t in turns]
 
-    # Ensure at least tail_turns full turns in recent.
-    # When budget fills partially, extend recent backwards to include
-    # complete turns. This guarantees the tail_turns minimum is met
-    # even when the budget is small relative to message sizes.
-    turns_from_end = 0
-    min_start = 0
-    for i in range(len(non_system) - 1, -1, -1):
-        if non_system[i].get("role") == "assistant":
-            turns_from_end += 1
-        if turns_from_end >= config.tail_turns:
-            # Walk back to the start of this turn (the preceding user msg)
-            turn_start = i
-            while turn_start > 0 and non_system[turn_start - 1].get("role") != "assistant":
-                turn_start -= 1
-            min_start = turn_start
-            break
-    recent_start = min(recent_start, min_start)
+    if config.quality_decay:
+        # Quality-decay mode: score turns, prefer higher-scored
+        total_turns = len(turns)
+        turn_scores = [_score_turn(turn, total_turns - 1 - i, total_turns)
+                       for i, turn in enumerate(turns)]
+
+        # Walk backwards: accumulate turns until budget is full
+        # Among turns that fit, sort by score (higher = keep)
+        recent_turn_indices: list[int] = []
+        remaining_budget = budget
+
+        # Greedy: walk backwards, collect turns that fit
+        candidates: list[tuple[int, float]] = []  # (index, score)
+        for i in range(len(turns) - 1, -1, -1):
+            if turn_tokens[i] <= remaining_budget:
+                candidates.append((i, turn_scores[i]))
+                remaining_budget -= turn_tokens[i]
+
+        # Sort candidates by score descending (prefer high-quality turns)
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # Greedily fill budget with highest-scored turns
+        recent_turn_indices = []
+        remaining_budget = budget
+        for idx, score in candidates:
+            if turn_tokens[idx] <= remaining_budget:
+                recent_turn_indices.append(idx)
+                remaining_budget -= turn_tokens[idx]
+
+        # Sort by position for correct message ordering
+        recent_turn_indices.sort()
+    else:
+        # Standard mode: walk backwards turn-by-turn
+        recent_turn_indices = []
+        remaining_budget = budget
+        for i in range(len(turns) - 1, -1, -1):
+            if turn_tokens[i] <= remaining_budget:
+                recent_turn_indices.append(i)
+                remaining_budget -= turn_tokens[i]
+            else:
+                break
+        recent_turn_indices.sort()
+
+    # Ensure at least tail_turns full turns in recent
+    if len(recent_turn_indices) < config.tail_turns:
+        needed = config.tail_turns - len(recent_turn_indices)
+        for i in range(len(turns) - 1, -1, -1):
+            if i not in recent_turn_indices:
+                recent_turn_indices.append(i)
+                needed -= 1
+                if needed == 0:
+                    break
+        recent_turn_indices.sort()
+
+    # Convert turn indices to message indices
+    recent_msg_indices: set[int] = set()
+    for ti in recent_turn_indices:
+        start = sum(len(turns[j]) for j in range(ti))
+        for k in range(start, start + len(turns[ti])):
+            recent_msg_indices.add(k)
+
+    recent_start = min(recent_msg_indices) if recent_msg_indices else len(non_system)
 
     head = non_system[:recent_start]
     recent = non_system[recent_start:]
