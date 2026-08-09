@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { extractEquityCurve } from '../utils/equityCurve'
+import {
+  extractEquityCurve,
+  extractLatestBacktestMetrics,
+} from '../utils/equityCurve'
 import type { Message, MessagePart } from '../stores/chat'
 
 function makeMsg(ts: number, parts: MessagePart[]): Message {
@@ -81,5 +84,85 @@ describe('extractEquityCurve', () => {
     const curve = extractEquityCurve(messages)
     expect(curve!.points.map((p) => p.value)).toEqual([1.0, 1.1, 1.2])
     expect(curve!.points.map((p) => p.label)).toEqual(['0', '1', '2'])
+  })
+})
+
+describe('extractLatestBacktestMetrics', () => {
+  it('returns null when no run_backtest tool_call is present', () => {
+    expect(extractLatestBacktestMetrics([])).toBeNull()
+    const messages: Message[] = [
+      makeMsg(1, [{ type: 'tool_call', id: 't1', name: 'list_strategies', arguments: '{}', status: 'done' }]),
+    ]
+    expect(extractLatestBacktestMetrics(messages)).toBeNull()
+  })
+
+  it('decodes metrics from the latest run_backtest result', () => {
+    const result = JSON.stringify({
+      run: 'momentum_v3_20260101',
+      strategy: 'momentum',
+      metrics: {
+        total_return: 0.123,
+        sharpe: 1.45,
+        max_drawdown: -0.082,
+        annual_return: 0.18,
+        win_rate: 0.56,
+      },
+      status: 'success',
+    })
+    const messages: Message[] = [
+      makeMsg(1, [
+        {
+          type: 'tool_call',
+          id: 't1',
+          name: 'run_backtest',
+          arguments: '{"strategy_name":"momentum"}',
+          status: 'done',
+          result,
+        },
+      ]),
+    ]
+    const m = extractLatestBacktestMetrics(messages)
+    expect(m).not.toBeNull()
+    expect(m!.total_return).toBeCloseTo(0.123)
+    expect(m!.sharpe).toBeCloseTo(1.45)
+    expect(m!.max_drawdown).toBeCloseTo(-0.082)
+    expect(m!.run).toBe('momentum_v3_20260101')
+    expect(m!.strategy).toBe('momentum')
+  })
+
+  it('picks the most recent run_backtest when several are present', () => {
+    const older = JSON.stringify({ run: 'old', strategy: 's1', metrics: { total_return: 0.05 } })
+    const newer = JSON.stringify({ run: 'new', strategy: 's2', metrics: { total_return: 0.10 } })
+    const messages: Message[] = [
+      makeMsg(1, [{ type: 'tool_call', id: 'a', name: 'run_backtest', arguments: '{}', status: 'done', result: older }]),
+      makeMsg(2, [{ type: 'tool_call', id: 'b', name: 'run_backtest', arguments: '{}', status: 'done', result: newer }]),
+    ]
+    const m = extractLatestBacktestMetrics(messages)
+    expect(m!.run).toBe('new')
+    expect(m!.total_return).toBeCloseTo(0.10)
+  })
+
+  it('handles a markdown-fenced JSON payload', () => {
+    const fenced = '```json\n{"run":"r","strategy":"s","metrics":{"total_return":0.2}}\n```'
+    const messages: Message[] = [
+      makeMsg(1, [{ type: 'tool_call', id: 'a', name: 'run_backtest', arguments: '{}', status: 'done', result: fenced }]),
+    ]
+    const m = extractLatestBacktestMetrics(messages)
+    expect(m!.total_return).toBeCloseTo(0.2)
+    expect(m!.run).toBe('r')
+  })
+
+  it('returns null when result is unparseable', () => {
+    const messages: Message[] = [
+      makeMsg(1, [{ type: 'tool_call', id: 'a', name: 'run_backtest', arguments: '{}', status: 'done', result: 'not json' }]),
+    ]
+    expect(extractLatestBacktestMetrics(messages)).toBeNull()
+  })
+
+  it('skips non-string result payloads', () => {
+    const messages: Message[] = [
+      makeMsg(1, [{ type: 'tool_call', id: 'a', name: 'run_backtest', arguments: '{}', status: 'done', result: { already: 'parsed' } as unknown as string }]),
+    ]
+    expect(extractLatestBacktestMetrics(messages)).toBeNull()
   })
 })

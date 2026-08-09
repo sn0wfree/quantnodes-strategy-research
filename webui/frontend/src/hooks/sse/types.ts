@@ -71,12 +71,12 @@ export const EVENT_TYPES: SSEEventType[] = [
   'text.started', 'text_delta', 'text.ended',
   'tool_call', 'tool_result', 'tool_progress',
   'thinking_start', 'thinking_delta', 'thinking_done', 'thinking_end',
-  // TODO(feature): file_edit/table/chart/image listeners are
-  // registered but have NO switch cases (silently dropped) and the
-  // backend never emits them (only the unused FILE_EDIT enum in
-  // api/session/event_v2.py). The blocks (FileEditBlock etc.) are
-  // reachable only via DB-loaded parts the backend never produces.
-  // Wire these once the block-part emission lands in service.py.
+  // Block-part events (file_edit / table / chart / image) — handlers
+  // are registered (Tier B P6). The backend AgentLoop does not
+  // currently emit these at SSE time; when emission lands the
+  // parts will land in the assistant message automatically. The
+  // matching block components (FileEditBlock etc.) are reachable
+  // today via DB-loaded parts.
   'file_edit', 'table', 'chart', 'image',
   'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
   'dag_update', 'progress', 'message_received', 'error',

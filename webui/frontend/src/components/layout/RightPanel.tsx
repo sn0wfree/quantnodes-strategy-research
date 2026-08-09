@@ -4,7 +4,10 @@ import { useGoalStore } from '../../stores/goal'
 import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
-import { extractEquityCurve } from '../../utils/equityCurve'
+import {
+  extractEquityCurve,
+  extractLatestBacktestMetrics,
+} from '../../utils/equityCurve'
 import { TokenCard } from '../context/TokenCard'
 import { GoalCard } from '../goal/GoalCard'
 import type { GoalTabGoal } from '../goal/GoalTab'
@@ -34,6 +37,18 @@ export function RightPanel() {
     return extractEquityCurve(list)
   }, [messages, currentSessionId])
 
+  // Metrics-only fallback for the right-panel card (Tier B P7).
+  // When no chart parts are available (the backend does not emit
+  // chart SSE), the most recent run_backtest tool_call result still
+  // gives us total_return / sharpe / max_drawdown so the panel
+  // never reads "no data" after a real backtest.
+  const metrics = useMemo(() => {
+    const list = Array.from(messages.values())
+      .filter((m) => !currentSessionId || m.session_id === currentSessionId)
+      .sort((a, b) => a.created_at - b.created_at)
+    return extractLatestBacktestMetrics(list)
+  }, [messages, currentSessionId])
+
   // Map GoalStore goal to the display model used by GoalTab
   const goalTabGoal: GoalTabGoal | null = currentGoal ? {
     id: currentGoal.goal_id,
@@ -56,7 +71,7 @@ export function RightPanel() {
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-900 p-3">
       <TokenCard />
-      <GoalCard goal={goalTabGoal} curve={curve} />
+      <GoalCard goal={goalTabGoal} curve={curve} metrics={metrics} />
     </div>
   )
 }

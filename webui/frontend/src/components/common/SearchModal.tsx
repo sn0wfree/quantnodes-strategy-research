@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { Search, X, User, Bot, FileText, Loader2 } from 'lucide-react'
 import { useSessionStore, type SearchHit } from '../../stores/session'
 
@@ -25,9 +25,19 @@ export function SearchModal() {
   const runSearch = useSessionStore((s) => s.runSearch)
   const clearSearch = useSessionStore((s) => s.clearSearch)
   const openSession = useSessionStore((s) => s.openSession)
+  const roleFilter = useSessionStore((s) => s.searchRoleFilter)
+  const setRoleFilter = useSessionStore((s) => s.setSearchRoleFilter)
 
   const [selectedIdx, setSelectedIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Tier B P52: client-side role filter applied on top of backend hits.
+  // Re-select first hit whenever the filter changes so the keyboard
+  // cursor doesn't point past the new (possibly shorter) list.
+  const filteredResults = useMemo(
+    () => (roleFilter ? results.filter((h) => h.role === roleFilter) : results),
+    [results, roleFilter],
+  )
 
   // Focus input on open
   useEffect(() => {
@@ -36,6 +46,11 @@ export function SearchModal() {
       setSelectedIdx(0)
     }
   }, [open])
+
+  // Reset selection when the filter changes the visible list.
+  useEffect(() => {
+    setSelectedIdx(0)
+  }, [roleFilter])
 
   // Debounced search
   useEffect(() => {
@@ -75,13 +90,13 @@ export function SearchModal() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setSelectedIdx((i) => Math.min(i + 1, results.length - 1))
+      setSelectedIdx((i) => Math.min(i + 1, filteredResults.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setSelectedIdx((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const hit = results[selectedIdx]
+      const hit = filteredResults[selectedIdx]
       if (hit) void handleSelect(hit)
     } else if (e.key === 'Escape') {
       e.preventDefault()
@@ -127,13 +142,42 @@ export function SearchModal() {
           </button>
         </div>
 
+        {/* Tier B P52: client-side role filter chips. Only rendered
+            once there are hits — hiding them keeps the empty state
+            visually quiet. */}
+        {filteredResults.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2 text-[10px]">
+            <span className="text-slate-500">角色:</span>
+            {([null, 'user', 'assistant', 'tool'] as const).map((r) => {
+              const active = roleFilter === r
+              const label =
+                r === null ? '全部' : r === 'user' ? '用户' : r === 'assistant' ? '助手' : '工具'
+              return (
+                <button
+                  key={r ?? 'all'}
+                  type="button"
+                  data-testid={`search-role-filter-${r ?? 'all'}`}
+                  onClick={() => setRoleFilter(r)}
+                  className={`rounded px-2 py-0.5 transition-colors ${
+                    active
+                      ? 'bg-primary-600/30 text-primary-200'
+                      : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {/* Results */}
         <div className="max-h-[60vh] overflow-y-auto p-2">
           {!query.trim() ? (
             <div className="py-12 text-center text-sm text-slate-500">
               输入关键词搜索所有会话的消息
             </div>
-          ) : isSearching && results.length === 0 ? (
+          ) : isSearching && filteredResults.length === 0 ? (
             <div
               data-testid="search-loading"
               className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500"
@@ -141,12 +185,14 @@ export function SearchModal() {
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>搜索中…</span>
             </div>
-          ) : results.length === 0 ? (
+          ) : filteredResults.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-500">
-              未找到匹配结果
+              {roleFilter && results.length > 0
+                ? `没有匹配 "${roleFilter}" 角色的结果（共 ${results.length} 条已隐藏）`
+                : '未找到匹配结果'}
             </div>
           ) : (
-            results.map((hit, idx) => (
+            filteredResults.map((hit, idx) => (
               <button
                 key={`${hit.session_id}-${hit.message_id}`}
                 onClick={() => void handleSelect(hit)}
@@ -198,7 +244,11 @@ export function SearchModal() {
               关闭
             </span>
           </div>
-          <span>{results.length} 个结果</span>
+          <span>
+              {roleFilter
+                ? `${filteredResults.length} / ${results.length} 个结果`
+                : `${results.length} 个结果`}
+            </span>
         </div>
       </div>
     </div>

@@ -4,7 +4,7 @@ import {
   Clock, Copy, Check, RefreshCw,
   Code, FileText, FolderOpen, Pencil, Search, Globe,
   Play, BarChart3, Database, GitCompare, TrendingDown,
-  Download, Wrench, Layers, BookOpen, Calculator,
+  Download, Wrench, Layers, BookOpen, Calculator, AlertTriangle,
 } from 'lucide-react'
 import type { ToolCallPart } from '../../stores/chat'
 import { MarkdownRenderer } from './MarkdownRenderer'
@@ -16,6 +16,23 @@ interface ToolCallBlockProps {
   startTime?: number
   onRetry?: (toolCall: ToolCallPart) => void
 }
+
+/**
+ * Tier B P17: tools that mutate user-visible state outside the chat
+ * sandbox (filesystem writes, shell commands, destructive DB ops).
+ * The block surfaces an explicit warning badge so the user can spot
+ * destructive actions at a glance. A future iteration will hook a
+ * per-tool confirmation dialog; today the block only *labels* these
+ * tools so the chat history makes the action obvious in retrospect.
+ */
+const DANGEROUS_TOOLS = new Set([
+  'write_file',
+  'edit',
+  'delete_file',
+  'run_command',
+  'run_backtest',
+  'import_data',
+])
 
 // Tool-specific icon mapping
 const TOOL_ICONS: Record<string, typeof Code> = {
@@ -220,6 +237,16 @@ export function ToolCallBlock({ toolCall, startTime, onRetry }: ToolCallBlockPro
         <span className="font-mono font-medium text-slate-200">
           {toolCall.name}
         </span>
+        {DANGEROUS_TOOLS.has(toolCall.name) && (
+          <span
+            data-testid="dangerous-tool-badge"
+            title="此工具会修改文件系统、运行 shell 命令或触发回测，请留意执行内容。"
+            className="inline-flex items-center gap-1 rounded border border-amber-700/50 bg-amber-900/20 px-1.5 py-0.5 text-[10px] font-normal text-amber-300"
+          >
+            <AlertTriangle className="h-2.5 w-2.5" />
+            <span>危险</span>
+          </span>
+        )}
         {argsPreview && (
           <span className="text-slate-500 truncate font-mono text-[11px] max-w-[260px]">
             {argsPreview}

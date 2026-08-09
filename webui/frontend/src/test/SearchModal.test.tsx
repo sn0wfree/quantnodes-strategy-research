@@ -210,4 +210,64 @@ describe('SearchModal', () => {
     expect(screen.queryByTestId('search-spinner')).toBeNull()
     expect(screen.queryByTestId('search-loading')).toBeNull()
   })
+
+  // ── Tier B P52: role filter ──
+
+  it('shows role filter chips when there are hits', () => {
+    useSessionStore.setState({
+      searchOpen: true,
+      searchQuery: 'alpha',
+      searchResults: sampleHits,
+    })
+    render(<SearchModal />)
+    expect(screen.getByTestId('search-role-filter-all')).toBeInTheDocument()
+    expect(screen.getByTestId('search-role-filter-user')).toBeInTheDocument()
+    expect(screen.getByTestId('search-role-filter-assistant')).toBeInTheDocument()
+    expect(screen.getByTestId('search-role-filter-tool')).toBeInTheDocument()
+  })
+
+  it('filters hits by role when a chip is clicked', () => {
+    useSessionStore.setState({
+      searchOpen: true,
+      searchQuery: 'alpha',
+      searchResults: sampleHits,
+    })
+    render(<SearchModal />)
+    // Default: both hits visible.
+    expect(screen.getByText('alpha 探索')).toBeInTheDocument()
+    expect(screen.getByText('回测讨论')).toBeInTheDocument()
+
+    // Filter to user — only the user hit remains.
+    fireEvent.click(screen.getByTestId('search-role-filter-user'))
+    expect(screen.getByText('alpha 探索')).toBeInTheDocument()
+    expect(screen.queryByText('回测讨论')).toBeNull()
+  })
+
+  it('shows the empty-filter hint when filter excludes all hits', () => {
+    useSessionStore.setState({
+      searchOpen: true,
+      searchQuery: 'alpha',
+      searchResults: sampleHits,
+      searchRoleFilter: 'tool',
+    })
+    render(<SearchModal />)
+    expect(
+      screen.getByText(/没有匹配 "tool" 角色的结果/),
+    ).toBeInTheDocument()
+  })
+
+  it('clearing the filter restores all hits', () => {
+    useSessionStore.setState({
+      searchOpen: true,
+      searchQuery: 'alpha',
+      searchResults: sampleHits,
+      searchRoleFilter: 'user',
+    })
+    render(<SearchModal />)
+    expect(screen.queryByText('回测讨论')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('search-role-filter-all'))
+    expect(screen.getByText('alpha 探索')).toBeInTheDocument()
+    expect(screen.getByText('回测讨论')).toBeInTheDocument()
+  })
 })

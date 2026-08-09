@@ -8,7 +8,7 @@ import {
   thinkingDone,
   thinkingEnd,
 } from './textHandlers'
-import { toolCall, toolResult, toolProgress, assistantMessage } from './messageHandlers'
+import { toolCall, toolResult, toolProgress, assistantMessage, fileEdit, table, chart, image } from './messageHandlers'
 import { messageReceived, attemptStarted, queuePaused, queueState } from './queueHandlers'
 import {
   sessionTotalTokens,
@@ -69,6 +69,15 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   tool_result: toolResult,
   tool_progress: toolProgress,
   assistant_message: assistantMessage,
+  // Block-part handlers (P6) — register so the dispatcher doesn't
+  // drop them silently. Defense-in-depth: the backend does not
+  // currently emit these at SSE time (see projector.py:985-994);
+  // when emission lands, the assistant message will pick up the
+  // part automatically.
+  file_edit: fileEdit,
+  table,
+  chart,
+  image,
   message_received: messageReceived,
   'attempt.started': attemptStarted,
   queue_paused: queuePaused,

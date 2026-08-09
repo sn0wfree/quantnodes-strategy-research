@@ -11,6 +11,24 @@ export interface EquityCurve {
   timestamp: number
 }
 
+/**
+ * Metrics extracted from a ``run_backtest`` tool_call result. Used
+ * by EquityCurveCard's metrics-only fallback when no chart parts
+ * are available (the backend AgentLoop does not currently emit
+ * `chart` SSE events, so the curve is always empty in practice).
+ */
+export interface BacktestMetrics {
+  total_return?: number
+  sharpe?: number
+  max_drawdown?: number
+  annual_return?: number
+  win_rate?: number
+  /** Which run produced these metrics, for the card subtitle. */
+  run?: string
+  strategy?: string
+  timestamp: number
+}
+
 /** Titles (case-insensitive) that mark a line chart as an equity/nav curve. */
 const EQUITY_TITLE_PATTERNS: RegExp[] = [
   /净值/i,
@@ -52,6 +70,84 @@ export function extractEquityCurve(messages: Message[]): EquityCurve | null {
   }
 
   return best ? best.curve : null
+}
+
+/**
+ * Pick the latest ``run_backtest`` tool_call result and decode its
+ * metrics. Used as the metrics-only fallback in EquityCurveCard when
+ * no chart parts are available (the AgentLoop does not currently emit
+ * ``chart`` SSE events; see projector.py:985-994).
+ *
+ * The tool result payload is the JSON string returned by
+ * ``builtin_tools.RunBacktestTool.execute``:
+ *     { run, strategy, metrics, status }
+ * where ``metrics`` is a flat dict (total_return, sharpe,
+ * max_drawdown, ...). The parser is defensive — any failure yields
+ * null, not a crash.
+ */
+export function extractLatestBacktestMetrics(
+  messages: Message[],
+): BacktestMetrics | null {
+  let best: { metrics: BacktestMetrics } | null = null
+
+  for (const m of messages) {
+    for (const p of m.parts) {
+      if (p.type !== 'tool_call') continue
+      if (p.name !== 'run_backtest') continue
+      const raw = p.result
+      if (typeof raw !== 'string' || !raw.trim()) continue
+
+      let parsed: Record<string, unknown> | null = null
+      try {
+        const v = JSON.parse(raw)
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          parsed = v as Record<string, unknown>
+        }
+      } catch {
+        // Tool sometimes wraps the JSON in a markdown ```json fence
+        // — strip the fence and retry once.
+        const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+        if (fence) {
+          try {
+            const v = JSON.parse(fence[1])
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+              parsed = v as Record<string, unknown>
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+      }
+      if (!parsed) continue
+
+      const metricsRaw = parsed.metrics
+      const metricsObj =
+        metricsRaw && typeof metricsRaw === 'object' && !Array.isArray(metricsRaw)
+          ? (metricsRaw as Record<string, unknown>)
+          : {}
+      const pick = (k: string): number | undefined => {
+        const v = metricsObj[k]
+        return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      }
+
+      const bm: BacktestMetrics = {
+        total_return: pick('total_return'),
+        sharpe: pick('sharpe'),
+        max_drawdown: pick('max_drawdown'),
+        annual_return: pick('annual_return'),
+        win_rate: pick('win_rate'),
+        run: typeof parsed.run === 'string' ? parsed.run : undefined,
+        strategy:
+          typeof parsed.strategy === 'string' ? parsed.strategy : undefined,
+        timestamp: m.created_at,
+      }
+      if (!best || bm.timestamp > best.metrics.timestamp) {
+        best = { metrics: bm }
+      }
+    }
+  }
+
+  return best ? best.metrics : null
 }
 
 function decodePoints(data: unknown[]): EquityPoint[] {

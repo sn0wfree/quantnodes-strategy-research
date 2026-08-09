@@ -1,12 +1,23 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ThinkingBlock } from '../components/chat/ThinkingBlock'
+import { useThinkingPrefStore } from '../stores/thinkingPref'
 
 // Mock navigator.clipboard
 const writeText = vi.fn().mockResolvedValue(undefined)
 Object.assign(navigator, { clipboard: { writeText } })
 
 describe('ThinkingBlock', () => {
+  beforeEach(() => {
+    // Reset the store to default values between tests so the
+    // enabled/disabled toggle has a deterministic starting point.
+    useThinkingPrefStore.setState({
+      collapsed: true,
+      enabled: true,
+    })
+    writeText.mockClear()
+  })
+
   it('renders single-line header when collapsed', () => {
     render(<ThinkingBlock text="reasoning content here" collapsed />)
     expect(screen.getByText(/Thought/)).toBeTruthy()
@@ -44,5 +55,32 @@ describe('ThinkingBlock', () => {
     const copyBtn = screen.getByTitle('复制')
     fireEvent.click(copyBtn)
     expect(writeText).toHaveBeenCalledWith('hello to copy')
+  })
+
+  // ── P21: global kill-switch ──
+
+  it('renders nothing when global enabled=false', () => {
+    useThinkingPrefStore.setState({ enabled: false })
+    const { container } = render(
+      <ThinkingBlock text="should not render" collapsed={false} />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('global enabled=false suppresses streaming blocks too', () => {
+    useThinkingPrefStore.setState({ enabled: false })
+    const { container } = render(<ThinkingBlock text="live" streaming />)
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('toggling enabled restores rendering', () => {
+    useThinkingPrefStore.setState({ enabled: false })
+    const { container, rerender } = render(
+      <ThinkingBlock text="should appear" collapsed={false} />
+    )
+    expect(container.firstChild).toBeNull()
+    useThinkingPrefStore.setState({ enabled: true })
+    rerender(<ThinkingBlock text="should appear" collapsed={false} />)
+    expect(screen.getByText('should appear')).toBeTruthy()
   })
 })

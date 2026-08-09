@@ -21,6 +21,7 @@ export function ThinkingBlock({
   endTime,
 }: ThinkingBlockProps) {
   const globalCollapsed = useThinkingPrefStore((s) => s.collapsed)
+  const globalEnabled = useThinkingPrefStore((s) => s.enabled)
   const [isExpanded, setIsExpanded] = useState(!collapsed)
   const [copied, copy] = useCopyToClipboard()
   const [tickMs, setTickMs] = useState(0)
@@ -39,6 +40,12 @@ export function ThinkingBlock({
     return () => clearInterval(id)
   }, [streaming, startTime])
 
+  // Global kill-switch AFTER hooks so the hook order stays stable
+  // across enabled/disabled renders (React rules of hooks). When
+  // disabled, render nothing regardless of streaming state. Persists
+  // across reloads so users who want to hide reasoning entirely
+  // don't have to keep folding every block.
+  if (!globalEnabled) return null
   if (!text) return null
 
   let label: string

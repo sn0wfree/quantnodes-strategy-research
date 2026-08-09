@@ -132,3 +132,113 @@ export const assistantMessage: SSEHandler = (data, ctx) => {
     }
   })
 }
+
+// ── block-part handlers (file_edit / table / chart / image) ───────
+//
+// The backend AgentLoop does NOT currently emit these events at SSE
+// time (see api/session/event_v2.py and projector.py:985-994 — the
+// projector persists them as a defense-in-depth measure if/when
+// emission lands). But the front-end SSE dispatcher registers the
+// event names so any future emitter lands without code changes.
+//
+// When such an event arrives:
+//   * we attach a stable part to the assistant message so the
+//     matching <FileEditBlock> / <TableBlock> / <ChartBlock> /
+//     <ImageBlock> renders inside AssistantMessage.PartRenderer
+//   * dedup by part id (the event may include `id` or fall back to
+//     `<type>_<seq>`)
+//   * missing message_id is a no-op (the event has no UI home)
+
+interface BlockPartEvent {
+  message_id?: string
+  id?: string
+  // file_edit
+  file_path?: string
+  old_content?: string
+  new_content?: string
+  // table
+  headers?: string[]
+  rows?: string[][]
+  caption?: string
+  // chart
+  chart_type?: 'bar' | 'line' | 'pie' | 'scatter'
+  data?: unknown[]
+  title?: string
+  // image
+  url?: string
+  alt?: string
+}
+
+function attachBlockPart(
+  data: BlockPartEvent,
+  ctx: Parameters<SSEHandler>[1],
+  typeLabel: string,
+  build: (id: string) => unknown,
+): void {
+  const { message_id: mid, id: rawId } = data
+  if (!mid) return
+  const partId = rawId || `${typeLabel}_${Date.now()}`
+  ctx.updateMessage(mid, (msg) => {
+    if (msg.parts.some((p) => 'id' in p && p.id === partId)) return
+    msg.parts.push(build(partId) as never)
+  })
+}
+
+export const fileEdit: SSEHandler = (data, ctx) => {
+  attachBlockPart(
+    data,
+    ctx,
+    'file_edit',
+    (id) => ({
+      type: 'file_edit' as const,
+      id,
+      file_path: (data as BlockPartEvent).file_path ?? '',
+      old_content: (data as BlockPartEvent).old_content ?? '',
+      new_content: (data as BlockPartEvent).new_content ?? '',
+    }),
+  )
+}
+
+export const table: SSEHandler = (data, ctx) => {
+  attachBlockPart(
+    data,
+    ctx,
+    'table',
+    (id) => ({
+      type: 'table' as const,
+      id,
+      headers: (data as BlockPartEvent).headers ?? [],
+      rows: (data as BlockPartEvent).rows ?? [],
+      caption: (data as BlockPartEvent).caption,
+    }),
+  )
+}
+
+export const chart: SSEHandler = (data, ctx) => {
+  attachBlockPart(
+    data,
+    ctx,
+    'chart',
+    (id) => ({
+      type: 'chart' as const,
+      id,
+      chart_type: (data as BlockPartEvent).chart_type ?? 'bar',
+      data: (data as BlockPartEvent).data ?? [],
+      title: (data as BlockPartEvent).title,
+    }),
+  )
+}
+
+export const image: SSEHandler = (data, ctx) => {
+  attachBlockPart(
+    data,
+    ctx,
+    'image',
+    (id) => ({
+      type: 'image' as const,
+      id,
+      url: (data as BlockPartEvent).url ?? '',
+      alt: (data as BlockPartEvent).alt,
+    }),
+  )
+}

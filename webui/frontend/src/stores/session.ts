@@ -37,6 +37,11 @@ interface SessionState {
   searchOpen: boolean
   searchQuery: string
   isSearching: boolean
+  /**
+   * Optional client-side role filter applied on top of the backend
+   * search hits. Tier B P52 — when null, all roles are shown.
+   */
+  searchRoleFilter: SearchHit['role'] | null
 
   // Existing
   setSessions: (sessions: Session[]) => void
@@ -55,6 +60,8 @@ interface SessionState {
   setSearchOpen: (open: boolean) => void
   runSearch: (query: string) => Promise<void>
   clearSearch: () => void
+  /** Set the role filter; null clears it. */
+  setSearchRoleFilter: (role: SearchHit['role'] | null) => void
   /** Backfill Agent / DAG / Goal panels from the backend snapshot. */
   loadSessionState: (id: string) => Promise<void>
 }
@@ -119,6 +126,7 @@ export const useSessionStore = create<SessionState>()(
       searchOpen: false,
       searchQuery: '',
       isSearching: false,
+      searchRoleFilter: null,
 
       setSessions: (sessions) => set({ sessions }),
       setCurrentSession: (id) => set({ currentSessionId: id }),
@@ -409,7 +417,8 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      clearSearch: () => set({ searchResults: [], searchQuery: '' }),
+      clearSearch: () => set({ searchResults: [], searchQuery: '', searchRoleFilter: null }),
+      setSearchRoleFilter: (role) => set({ searchRoleFilter: role }),
     }),
     {
       name: 'sr-sessions',
