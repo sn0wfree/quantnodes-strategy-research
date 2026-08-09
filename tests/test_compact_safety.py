@@ -83,9 +83,11 @@ class TestL4SummarizeSafety:
         """Normal L4 with user message present should succeed."""
         messages = [
             {"role": "system", "content": "sys"},
-            {"role": "user", "content": "u1"},
-            {"role": "assistant", "content": "a1"},
-            {"role": "user", "content": "u2"},
+            {"role": "user", "content": "u1 " * 5000},
+            {"role": "assistant", "content": "a1 " * 5000},
+            {"role": "user", "content": "u2 " * 5000},
+            {"role": "assistant", "content": "a2 " * 5000},
+            {"role": "user", "content": "u3 " * 5000},
         ]
         client = _mock_llm_client("summary text")
         cfg = CompactConfig(tail_turns=1)  # keep last 1 turn

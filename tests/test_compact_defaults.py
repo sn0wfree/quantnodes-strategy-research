@@ -39,7 +39,7 @@ class TestCompactConfigDefaults:
 
     def test_llm_summarize_ratio_default(self):
         """User-specified: 0.95."""
-        assert CompactConfig().llm_summarize_ratio == 0.95
+        assert CompactConfig().llm_summarize_ratio == 0.80
 
     def test_hard_truncate_ratio_default(self):
         """User-specified: 0.99."""

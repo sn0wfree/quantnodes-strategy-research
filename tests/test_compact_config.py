@@ -29,7 +29,7 @@ class TestCompactConfig:
         assert cfg.enabled is True
         # opencode-aligned defaults (user-specified)
         assert cfg.microcompact_ratio == 0.9
-        assert cfg.llm_summarize_ratio == 0.95
+        assert cfg.llm_summarize_ratio == 0.80
         assert cfg.hard_truncate_ratio == 0.99
         assert cfg.overflow_ratio == 0.99
         # opencode-aligned: chars not tokens
@@ -447,8 +447,8 @@ class TestCompactMessages:
         """
         msgs = []
         for i in range(5):
-            msgs.append({"role": "user", "content": f"msg {i} " * 30})
-            msgs.append({"role": "assistant", "content": f"reply {i} " * 30})
+            msgs.append({"role": "user", "content": f"msg {i} " * 500})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 500})
 
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock(content="- bullet 1\n- bullet 2")

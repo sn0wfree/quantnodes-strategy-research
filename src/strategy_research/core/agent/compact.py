@@ -161,7 +161,7 @@ class CompactConfig:
     # Kept for backward compat with existing llm.json files.
     # Ignored at runtime; only llm_summarize_ratio is used.
     microcompact_ratio: float = 0.9        # DEPRECATED: was L1 ratio (0.9)
-    llm_summarize_ratio: float = 0.95      # L4: 95%  (was 0.8)
+    llm_summarize_ratio: float = 0.80      # L4: 80% (opencode-aligned: trigger earlier for more room)
     hard_truncate_ratio: float = 0.99      # DEPRECATED: was L3 ratio (0.99)
     overflow_ratio: float = 0.99          # DEPRECATED: was overflow detection (0.99)
 
@@ -298,8 +298,17 @@ def _serialize_message(msg: dict[str, Any], tool_max_chars: int = TOOL_OUTPUT_MA
 
 # ── L4: LLM Summarize (structured template + token budget) ────────
 
+_MIN_PRESERVE_RECENT = 2_000
+_MAX_PRESERVE_RECENT = 8_000
+_TOOL_OUTPUT_MAX_CHARS = 2_000
+
+
 def _split_into_turns(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    """Split non-system messages into user→assistant turns."""
+    """Split non-system messages into user→assistant turns.
+
+    Kept as a backward-compat shim (no production callers since
+    _select_by_token_budget was rewritten). Tests still import it.
+    """
     turns: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
     for msg in messages:
@@ -312,6 +321,13 @@ def _split_into_turns(messages: list[dict[str, Any]]) -> list[list[dict[str, Any
     return turns
 
 
+def _truncate_for_budget(text: str, budget_chars: int) -> str:
+    """Truncate text to fit within budget_chars, appending a marker."""
+    if len(text) <= budget_chars:
+        return text
+    return text[:budget_chars] + "\n[truncated]"
+
+
 def _select_by_token_budget(
     non_system: list[dict[str, Any]],
     config: CompactConfig,
@@ -319,44 +335,60 @@ def _select_by_token_budget(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Select messages: head (for summarization) vs recent (keep verbatim).
 
-    Opencode approach:
-    - tail_turns: keep last N turns verbatim
-    - preserve_recent_tokens: token budget for recent messages
+    Opencode-aligned approach:
+    - Walk backwards from end, accumulating token costs per message
+    - Fill the budget as fully as possible (never stop early if budget remains)
+    - At the boundary: split the message — keep tail in recent, head in head
+    - tail_turns becomes a *minimum* guarantee (at least N turns in recent)
+    - Budget defaults to MIN_PRESERVE..MAX_PRESERVE range based on context
     """
-    turns = _split_into_turns(non_system)
+    if not non_system:
+        return [], []
 
-    if not turns:
-        return non_system, []
-
-    # Keep last tail_turns turns verbatim
-    tail_turns_list = turns[-config.tail_turns:] if config.tail_turns > 0 and len(turns) > config.tail_turns else []
-
-    # Calculate preserve_recent_tokens budget
+    # Resolve budget
     if config.preserve_recent_tokens is not None:
         budget = config.preserve_recent_tokens
     elif model_context_tokens is not None:
-        budget = min(8000, max(2000, int(model_context_tokens * 0.20)))
+        usable = model_context_tokens - config.compaction_buffer_tokens
+        budget = min(
+            _MAX_PRESERVE_RECENT,
+            max(_MIN_PRESERVE_RECENT, int(usable * 0.25)),
+        )
     else:
-        budget = 4000
+        budget = _MAX_PRESERVE_RECENT
 
-    # Fill budget from recent turns backwards
-    recent_msgs: list[dict[str, Any]] = []
+    # Walk backwards: accumulate messages until budget is full
+    recent_start = len(non_system)  # index of first message in recent
     total_tokens = 0
-    for turn in reversed(tail_turns_list):
-        turn_tokens = _estimate_tokens(turn)
-        if total_tokens + turn_tokens <= budget:
-            recent_msgs.extend(turn)
-            total_tokens += turn_tokens
-        else:
+    for i in range(len(non_system) - 1, -1, -1):
+        msg_tokens = _estimate_tokens([non_system[i]])
+        if total_tokens + msg_tokens > budget:
             break
+        total_tokens += msg_tokens
+        recent_start = i
 
-    recent_msgs.reverse()
+    # Ensure at least tail_turns full turns in recent.
+    # When budget fills partially, extend recent backwards to include
+    # complete turns. This guarantees the tail_turns minimum is met
+    # even when the budget is small relative to message sizes.
+    turns_from_end = 0
+    min_start = 0
+    for i in range(len(non_system) - 1, -1, -1):
+        if non_system[i].get("role") == "assistant":
+            turns_from_end += 1
+        if turns_from_end >= config.tail_turns:
+            # Walk back to the start of this turn (the preceding user msg)
+            turn_start = i
+            while turn_start > 0 and non_system[turn_start - 1].get("role") != "assistant":
+                turn_start -= 1
+            min_start = turn_start
+            break
+    recent_start = min(recent_start, min_start)
 
-    # Head = everything not in recent
-    recent_ids = {id(m) for m in recent_msgs}
-    head = [m for m in non_system if id(m) not in recent_ids]
+    head = non_system[:recent_start]
+    recent = non_system[recent_start:]
 
-    return head, recent_msgs
+    return head, recent
 
 
 def _build_summary_prompt(
