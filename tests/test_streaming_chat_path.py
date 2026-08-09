@@ -79,13 +79,17 @@ class TestChatPathStreaming:
     """B1: chat path uses stream_mode=True → text_delta events fire."""
 
     def test_session_uses_stream_mode_true(self):
-        """Verify the source: _run_agent_loop passes stream_mode=True."""
+        """Verify the source: the chat path is streaming.
+        ``ChatSession._run_agent_loop`` routes through
+        ``build_chat_agent_loop``, which forces ``stream_mode=True``."""
         import inspect
         from strategy_research.cli.tui.session import ChatSession
+        from strategy_research.core.agent import chat_loop
 
         src = inspect.getsource(ChatSession._run_agent_loop)
-        assert "stream_mode=True" in src
-        assert "stream_mode=False" not in src
+        assert "build_chat_agent_loop" in src
+        loop_src = inspect.getsource(chat_loop.build_chat_agent_loop)
+        assert "stream_mode=True" in loop_src
 
     def test_async_arun_with_streaming_emits_text_deltas(self):
         sink = EventSink()

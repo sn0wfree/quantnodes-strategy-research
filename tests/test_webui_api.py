@@ -79,9 +79,11 @@ class TestSSEBuffer:
         buf.push("text_delta", '{"delta":"a"}', "sess1")
         buf.push("text_delta", '{"delta":"b"}', "sess1")
 
-        # Unknown ID → returns empty (no events found after it)
+        # Unknown ID (evicted) → falls back to recent events for the
+        # session so SSE reconnect never loses the latest state
         events = buf.replay_from("evt_999", "sess1")
-        assert len(events) == 0
+        assert len(events) == 2
+        assert [e.id for e in events] == ["evt_1", "evt_2"]
 
     def test_session_isolation(self):
         from strategy_research.api.sse_buffer import SSEEventBuffer
@@ -143,11 +145,32 @@ class TestWebSession:
 
 
 class TestChatAPI:
+    def _stub_send(self, status="processing"):
+        """Stub the session service so send_async never starts a real
+        AgentLoop background task (which would block TestClient close)."""
+        from unittest.mock import MagicMock, patch
+
+        svc = MagicMock()
+        async def _send(*args, **kwargs):
+            return {
+                "message_id": "m1",
+                "user_message_id": "um1",
+                "assistant_message_id": "am1",
+                "event_id": "e1",
+                "status": status,
+            }
+        svc.send_message = _send
+        return patch("strategy_research.api.routers.chat._get_session_service",
+                     return_value=svc)
+
     def test_send_async(self, client):
-        res = client.post("/api/chat/send_async", json={
-            "session_id": "test-session",
-            "content": "Hello",
-        })
+        # Session must exist before sending (ownership check)
+        sid = client.post("/api/chat/session", json={"title": "S"}).json()["id"]
+        with self._stub_send():
+            res = client.post("/api/chat/send_async", json={
+                "session_id": sid,
+                "content": "Hello",
+            })
         assert res.status_code == 200
         data = res.json()
         assert "message_id" in data
@@ -155,12 +178,16 @@ class TestChatAPI:
         assert data["status"] == "processing"
 
     def test_send_sync(self, client):
-        res = client.post("/api/chat/send", json={
-            "session_id": "test-session",
-            "content": "Hello",
-        })
-        # 200 if LLM is configured, 503 if not
-        assert res.status_code in (200, 503)
+        # Session must exist before sending (ownership check)
+        sid = client.post("/api/chat/session", json={"title": "S"}).json()["id"]
+        with self._stub_send():
+            res = client.post("/api/chat/send", json={
+                "session_id": sid,
+                "content": "Hello",
+            })
+        # Stub service has no attempt_id → 504 (LLM response timed out)
+        # is the expected response for a fully-stubbed pipeline
+        assert res.status_code == 504
 
 
 # ─────────────────────────────────────────────────────────────────────────────

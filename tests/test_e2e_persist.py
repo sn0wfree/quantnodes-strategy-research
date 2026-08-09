@@ -5,6 +5,15 @@ from playwright.async_api import async_playwright
 
 BASE_URL = "http://127.0.0.1:8783"
 
+pytest_plugins = ["conftest_e2e"]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _use_test_server(backend_server):
+    """Point this module at the self-started TEST_MODE backend."""
+    global BASE_URL
+    BASE_URL = backend_server["base_url"]
+
 
 async def _login(page):
     await page.goto(f"{BASE_URL}/login")
@@ -14,20 +23,38 @@ async def _login(page):
     await page.locator('button:has-text("登录")').first.click()
     await page.wait_for_url("**/", timeout=10000)
     await page.wait_for_load_state("networkidle")
+    # Navigate into the chat page explicitly (login now lands on
+    # the monitor home page)
+    await page.goto(f"{BASE_URL}/chat")
+    await page.wait_for_load_state("domcontentloaded")
     await page.wait_for_timeout(2000)
 
 
 async def _create_session(page):
-    btn = page.locator("button").filter(has_text="+").first
+    btn = page.locator('button[title="新建会话"]').first
     if await btn.is_visible(timeout=3000):
         await btn.click()
         await page.wait_for_timeout(1000)
 
 
 async def _send(page, text):
+    # Wait for the composer to be writable (disabled while streaming)
+    await page.locator("textarea").first.wait_for(state="visible", timeout=15000)
+    await page.wait_for_timeout(500)
+    if await page.locator("textarea").first.is_disabled():
+        # Still streaming — wait for the stop button to disappear
+        await page.wait_for_function(
+            "() => !document.querySelector('textarea').disabled",
+            timeout=15000,
+        )
     await page.locator("textarea").first.fill(text)
     await page.wait_for_timeout(300)
     await page.locator("button:has(svg.lucide-send)").first.click()
+    # Wait until the composer is cleared (message accepted)
+    await page.wait_for_function(
+        "() => document.querySelector('textarea').value === ''",
+        timeout=10000,
+    )
 
 
 async def _wait_done(page, timeout_s=30):
@@ -72,16 +99,24 @@ async def test_messages_persist_after_new_send():
                 # Screenshot
                 await page.screenshot(path=f"/tmp/test_persist_{i+1}.png")
 
-                # Count user bubbles (blue, right-aligned with rounded-2xl)
-                user_bubbles = page.locator('.rounded-2xl.bg-primary-600')
-                count = await user_bubbles.count()
-                print(f"  User bubbles visible: {count}")
-                assert count == i + 1, f"Expected {i+1} user bubbles, got {count}"
+            # Reload and verify all messages persisted. The message list
+            # is a Virtuoso virtualized list, so counting bubbles live
+            # is unreliable; the persistence contract is "survives a
+            # reload" (backend + projector write path).
+            await page.reload()
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(3000)
 
-                # Check each user bubble text
-                for j in range(count):
-                    text = await user_bubbles.nth(j).inner_text()
-                    print(f"  Bubble {j}: {text[:30]}")
+            body = await page.inner_text("body")
+            for i, msg in enumerate(msgs):
+                print(f"  After reload, msg{i+1} present: {msg in body}")
+                assert msg in body, f"msg{i+1} {msg!r} lost after reload"
+
+            # Bubbles must also be rendered on reload
+            user_bubbles = page.locator('div.rounded-br-md.bg-gradient-to-br')
+            count = await user_bubbles.count()
+            print(f"  User bubbles after reload: {count}")
+            assert count == len(msgs), f"Expected {len(msgs)} user bubbles after reload, got {count}"
 
             print("✅ All messages persisted — none disappeared")
         finally:

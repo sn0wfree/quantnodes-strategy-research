@@ -118,7 +118,11 @@ class TestConvertHistoryLegacyFormat:
     """Test history conversion with tool_calls in parts (legacy format, no role=tool rows)."""
 
     def test_legacy_tool_calls_reconstructed(self):
-        """Legacy: tool_call info comes from parts inside assistant message."""
+        """Legacy: tool_call info comes from parts inside assistant message.
+
+        The assistant's tool_call parts are emitted as tool_calls, and
+        the embedded result becomes a role=tool message immediately
+        after (opencode-aligned assistant-tool grouping)."""
         parts = [
             {"type": "tool_call", "id": "call_1", "name": "read_file",
              "arguments": '{"path":"test.py"}', "result": "file content", "status": "done"},
@@ -130,10 +134,13 @@ class TestConvertHistoryLegacyFormat:
             _make_msg("user", "current", message_id="u2"),
         ]
         history = SessionService._convert_messages_to_history(messages)
-        assert len(history) == 2
+        assert len(history) == 3
         assert history[1]["role"] == "assistant"
         assert len(history[1]["tool_calls"]) == 1
         assert history[1]["tool_calls"][0]["function"]["name"] == "read_file"
+        assert history[2]["role"] == "tool"
+        assert history[2]["tool_call_id"] == "call_1"
+        assert history[2]["content"] == "file content"
 
     def test_legacy_mixed_text_and_tool_call_parts(self):
         parts = [
@@ -148,9 +155,11 @@ class TestConvertHistoryLegacyFormat:
             _make_msg("user", "current", message_id="u2"),
         ]
         history = SessionService._convert_messages_to_history(messages)
-        assert len(history) == 2
+        assert len(history) == 3
         assert history[1]["content"] == "Let me check..."
         assert len(history[1]["tool_calls"]) == 1
+        assert history[2]["role"] == "tool"
+        assert history[2]["content"] == "[]"
 
     def test_legacy_no_tool_parts(self):
         messages = [

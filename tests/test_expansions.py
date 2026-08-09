@@ -76,8 +76,10 @@ class TestNewAgentTools:
 
     def test_options_pricing_call(self):
         from strategy_research.core.agent.builtin_tools import OptionsPricingTool
+        from strategy_research.core.agent.tools import ToolContext
         tool = OptionsPricingTool()
         result = tool.execute(
+            ctx=ToolContext(),
             spot=100, strike=100, rate=0.05, volatility=0.2,
             time_to_expiry=0.5, option_type="call",
         )
@@ -87,8 +89,10 @@ class TestNewAgentTools:
 
     def test_options_pricing_put(self):
         from strategy_research.core.agent.builtin_tools import OptionsPricingTool
+        from strategy_research.core.agent.tools import ToolContext
         tool = OptionsPricingTool()
         result = tool.execute(
+            ctx=ToolContext(),
             spot=100, strike=110, rate=0.05, volatility=0.3,
             time_to_expiry=1.0, option_type="put",
         )
@@ -96,8 +100,10 @@ class TestNewAgentTools:
 
     def test_options_pricing_invalid_type(self):
         from strategy_research.core.agent.builtin_tools import OptionsPricingTool
+        from strategy_research.core.agent.tools import ToolContext
         tool = OptionsPricingTool()
         result = tool.execute(
+            ctx=ToolContext(),
             spot=100, strike=100, rate=0.05, volatility=0.2,
             time_to_expiry=0.5, option_type="straddle",
         )

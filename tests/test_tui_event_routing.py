@@ -233,8 +233,12 @@ class TestSessionRunAgentLoop:
         fake_result = mock.MagicMock()
         fake_result.answer = "hello"
         fake_result.error = None
+        # Patch the name bound in chat_loop (it does `from .loop import
+        # AgentLoop`), NOT the loop module attribute: if another test
+        # imported chat_loop first, patching loop.AgentLoop would be
+        # invisible to the already-cached module binding.
         with mock.patch(
-            "strategy_research.core.agent.loop.AgentLoop"
+            "strategy_research.core.agent.chat_loop.AgentLoop"
         ) as MockLoop:
             instance = mock.MagicMock()
             instance.arun = mock.AsyncMock(return_value=fake_result)
@@ -250,8 +254,9 @@ class TestSessionRunAgentLoop:
         assert ctor_kwargs["max_iterations"] == 1
         assert ctor_kwargs["session_id"] == "test-sid"
 
-        # arun() was called with the task
-        instance.arun.assert_called_once_with("hi")
+        # arun() was called with the task (plus empty history from
+        # MemoryManager fallback when the shared DB is unavailable)
+        instance.arun.assert_called_once_with("hi", history=None)
 
         # Result appended to ctx.history
         assert len(history_list) == 1
@@ -277,7 +282,7 @@ class TestSessionRunAgentLoop:
         fake_result.error = None
 
         with mock.patch(
-            "strategy_research.core.agent.loop.AgentLoop"
+            "strategy_research.core.agent.chat_loop.AgentLoop"
         ) as MockLoop:
             instance = mock.MagicMock()
             instance.arun = mock.AsyncMock(return_value=fake_result)

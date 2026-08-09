@@ -74,10 +74,10 @@ def _setup_db(db_path: Path, with_session: bool = True) -> None:
 
 
 class TestProjectorMediaEvents(unittest.TestCase):
-    """file_edit, table, chart, image events have no handler in B1.
-    They should be silently absorbed (forward-compat) — the projector
-    does NOT lazy-create the message for these events either, since
-    they don't fit the part model."""
+    """file_edit, table, chart, image events are persisted as parts
+    (B7-2 defense-in-depth): each lazy-creates its assistant message
+    and records a typed part so a future backend emit is never
+    silently dropped."""
 
     def setUp(self) -> None:
         self.state = ProjectedSession(session_id="s1")
@@ -85,33 +85,42 @@ class TestProjectorMediaEvents(unittest.TestCase):
 
     def test_file_edit_absorbed(self) -> None:
         e = EventV2.create("s1", 1, EventType.FILE_EDIT, {
-            "message_id": "a1", "path": "/tmp/foo.py",
-            "old_text": "a", "new_text": "b",
+            "message_id": "a1", "file_path": "/tmp/foo.py",
+            "old_content": "a", "new_content": "b",
         })
         self.projector.apply(e, self.state)
-        # No state at all — no handler, no lazy-create
-        self.assertEqual(len(self.state.messages), 0)
+        part = self.state.messages["a1"].parts["file_edit_1"]
+        self.assertEqual(part.type, "file_edit")
+        self.assertEqual(part.data["file_path"], "/tmp/foo.py")
+        self.assertEqual(part.data["new_content"], "b")
 
     def test_table_absorbed(self) -> None:
         e = EventV2.create("s1", 1, EventType.TABLE, {
-            "message_id": "a1", "rows": [["a", "b"], ["c", "d"]],
+            "message_id": "a1", "headers": ["a", "b"],
+            "rows": [["c", "d"]],
         })
         self.projector.apply(e, self.state)
-        self.assertEqual(len(self.state.messages), 0)
+        part = self.state.messages["a1"].parts["table_1"]
+        self.assertEqual(part.type, "table")
+        self.assertEqual(part.data["rows"], [["c", "d"]])
 
     def test_chart_absorbed(self) -> None:
         e = EventV2.create("s1", 1, EventType.CHART, {
-            "message_id": "a1", "kind": "line", "data": [1, 2, 3],
+            "message_id": "a1", "chart_type": "line", "data": [1, 2, 3],
         })
         self.projector.apply(e, self.state)
-        self.assertEqual(len(self.state.messages), 0)
+        part = self.state.messages["a1"].parts["chart_1"]
+        self.assertEqual(part.type, "chart")
+        self.assertEqual(part.data["data"], [1, 2, 3])
 
     def test_image_absorbed(self) -> None:
         e = EventV2.create("s1", 1, EventType.IMAGE, {
             "message_id": "a1", "url": "https://example.com/x.png",
         })
         self.projector.apply(e, self.state)
-        self.assertEqual(len(self.state.messages), 0)
+        part = self.state.messages["a1"].parts["image_1"]
+        self.assertEqual(part.type, "image")
+        self.assertEqual(part.data["url"], "https://example.com/x.png")
 
 
 # ── Projector: dangling parts ──────────────────────────────────────
@@ -147,15 +156,16 @@ class TestProjectorDanglingParts(unittest.TestCase):
         projector.apply(e, state)
         part = state.messages["a1"].parts["tc-1"]
         self.assertEqual(part.data["state"], "call")
+        self.assertEqual(part.data["status"], "running")
         self.assertNotIn("result", part.data)
-        self.assertNotIn("status", part.data)
 
 
 # ── Projector: only thinking events ────────────────────────────────
 
 
 class TestProjectorOnlyThinkingEvents(unittest.TestCase):
-    """Pure thinking stream should not create any messages."""
+    """Pure thinking stream: the message is lazy-created with one
+    thinking part (collapsed by default, B7-2)."""
 
     def test_thinking_only_stream(self) -> None:
         state = ProjectedSession(session_id="s1")
@@ -164,11 +174,12 @@ class TestProjectorOnlyThinkingEvents(unittest.TestCase):
                    EventType.THINKING_DELTA, EventType.THINKING_DONE):
             e = EventV2.create("s1", 1, et, {"message_id": "a1", "delta": "..."})
             projector.apply(e, state)
-        # No message_id event was emitted, but the message could be
-        # lazy-created. Let's verify: the projector creates the message
-        # but no parts (thinking events are absorbed).
-        if "a1" in state.messages:
-            self.assertEqual(state.messages["a1"].parts, {})
+        self.assertIn("a1", state.messages)
+        parts = state.messages["a1"].parts
+        self.assertEqual(len(parts), 1)
+        (part,) = parts.values()
+        self.assertEqual(part.type, "thinking")
+        self.assertEqual(part.data["collapsed"], True)
 
 
 # ── Projector: after_seq > last_seq ────────────────────────────────

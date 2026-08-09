@@ -253,7 +253,8 @@ class TestOrphanTools:
 
     def test_assistant_with_tool_call_but_no_tool_message(self):
         """Assistant has tool_calls but tool result message is missing.
-        Emits the assistant anyway; LLM will see unmatched tool_calls.
+        Emits the assistant anyway plus an empty tool result, keeping
+        the OpenAI tool protocol pairing intact.
         """
         messages = [
             _make_message("user", "u1", created_at=1.0, message_id="u1"),
@@ -268,10 +269,12 @@ class TestOrphanTools:
             _make_message("user", "u2", created_at=3.0, message_id="u2"),
         ]
         history = SessionService._convert_messages_to_history(messages)
-        # Assistant emitted (no tool to follow)
-        assert len(history) == 2
+        # Assistant emitted with empty tool result immediately after
+        assert len(history) == 3
         assert history[1]["role"] == "assistant"
         assert history[1].get("tool_calls")
+        assert history[2]["role"] == "tool"
+        assert history[2]["tool_call_id"] == "lost_tc"
 
 
 class TestTrimGroupIntegrity:

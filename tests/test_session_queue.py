@@ -39,8 +39,17 @@ def event_bus():
 
 @pytest.fixture
 def session_service(temp_db, event_bus):
+    from strategy_research.api.routers.web_session import _ensure_schema
     from strategy_research.api.session.service import SessionService
     from strategy_research.api.session.store import SessionStore
+
+    import sqlite3
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        _ensure_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
 
     store = SessionStore(temp_db)
     return SessionService(store=store, event_bus=event_bus)

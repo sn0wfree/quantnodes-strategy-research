@@ -52,7 +52,8 @@ async def test_event_generator_yields_connected_first():
     fake_buffer.get_events_since.return_value = []
     fake_buffer.replay_from.return_value = []
 
-    with patch("strategy_research.api.routers.chat.sse_buffer", fake_buffer):
+    with patch("strategy_research.api.routers.chat.sse_buffer", fake_buffer), \
+            patch("strategy_research.api.routers.web_session._fetch_session_owned") as mock_fetch:
         # Import inside the patch so the route module picks up the
         # mocked sse_buffer.
         from strategy_research.api.routers.chat import chat_events
@@ -63,6 +64,7 @@ async def test_event_generator_yields_connected_first():
             session_id=session_id,
             token=None,
             last_event_id=None,
+            request=mock_request,
         )
 
         # Drain the generator — it must yield the comment line first.

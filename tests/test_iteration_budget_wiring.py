@@ -59,6 +59,7 @@ class TestSendAsyncPassesConfigBudget(unittest.TestCase):
         class _Body:
             session_id = "s1"
             content = "hello"
+            agent_id = None
 
         class _Request:
             state = MagicMock(user_id="u1")

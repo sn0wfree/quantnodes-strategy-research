@@ -14,6 +14,17 @@ from playwright.async_api import async_playwright
 
 BASE_URL = "http://127.0.0.1:8783"
 
+pytest_plugins = ["conftest_e2e"]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _use_test_server(backend_server):
+    """Point this module at the self-started TEST_MODE backend
+    (the hardcoded 8783 is a manually-run deployment server that is
+    not guaranteed to exist during CI)."""
+    global BASE_URL
+    BASE_URL = backend_server["base_url"]
+
 
 async def _login(page):
     """Login via UI and return JWT token."""
@@ -33,6 +44,10 @@ async def _login(page):
     # Wait for navigation to chat page
     await page.wait_for_url("**/", timeout=10000)
     await page.wait_for_load_state("networkidle")
+    # Navigate into the chat page explicitly (login now lands on
+    # the monitor home page)
+    await page.goto(f"{BASE_URL}/chat")
+    await page.wait_for_load_state("domcontentloaded")
     await page.wait_for_timeout(2000)
 
     # Extract token from localStorage
@@ -50,8 +65,8 @@ async def _login(page):
 
 async def _create_session(page):
     """Create a new chat session via UI."""
-    # Click "+" to create new session
-    plus_btn = page.locator("button").filter(has_text="+").first
+    # Click "+" to create new session (SVG Plus icon, title="新建会话")
+    plus_btn = page.locator('button[title="新建会话"]').first
     if await plus_btn.is_visible(timeout=3000):
         await plus_btn.click()
         await page.wait_for_timeout(1000)

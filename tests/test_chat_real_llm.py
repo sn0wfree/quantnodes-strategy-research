@@ -11,6 +11,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -52,6 +53,11 @@ def real_server():
 
     env = os.environ.copy()
     env.pop("STRATEGY_RESEARCH_TEST_CHAT", None)
+    # The conftest _isolate_llm_bridge autouse fixture points
+    # STRATEGY_RESEARCH_LLM_CONFIG at a stubbed (disabled) llm.json.
+    # Real-LLM tests must use the host's actual llm.json instead, so the
+    # subprocess cannot inherit that env var.
+    env.pop("STRATEGY_RESEARCH_LLM_CONFIG", None)
     env.update({
         "STATIC_DIR": str(REPO_ROOT / "webui" / "static"),
         "CORS_ORIGINS": "*",
@@ -77,9 +83,10 @@ def real_server():
         "--host", "127.0.0.1", "--port", str(port),
         "--log-level", "warning",
     ]
+    log_file = open(Path(tempfile.gettempdir()) / "real_llm_server.log", "wb")
     proc = subprocess.Popen(
         cmd, cwd=str(REPO_ROOT), env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdout=log_file, stderr=subprocess.STDOUT,
     )
     try:
         _wait_for_http(f"{base_url}/health")
@@ -91,6 +98,7 @@ def real_server():
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=2)
+        log_file.close()
 
 
 @pytest.fixture
@@ -128,8 +136,8 @@ def _read_sse_until_done(base_url: str, session_id: str, token: str, timeout: fl
                 data = {}
             if evt_type == "text_delta":
                 full_text += data.get("text", "")
-            elif evt_type == "error":
-                error_msg = data.get("error", "unknown error")
+            elif evt_type in ("error", "attempt.failed"):
+                error_msg = data.get("error") or data.get("status") or "unknown error"
             elif evt_type == "agent_done":
                 data_lines = []
                 return True
@@ -311,27 +319,83 @@ class TestRealLLMChat:
         assert r.status_code == 200
 
     def test_error_with_bad_key(self, real_server):
-        """Invalid API key → error event."""
-        base_url = real_server["base_url"]
-        r = requests.post(f"{base_url}/api/auth/login", json={"username": "admin", "password": "admin"})
-        token = r.json()["access_token"]
-        headers = {"Authorization": f"Bearer {token}"}
+        """Invalid API key → error event.
 
-        r = requests.post(f"{base_url}/api/chat/session", headers=headers, json={"title": "Err"})
-        sid = r.json()["id"]
+        The shared real_server subprocess inherits the host's real key
+        at startup, so this test launches its own server with an
+        invalid LLM_API_KEY under an isolated HOME (the host
+        ~/.quantnodes/.env would otherwise be re-injected by
+        load_dotenv(override=True) inside _build_llm_config).
+        """
+        import tempfile as _tf
 
-        old_key = os.environ.get("LLM_API_KEY")
-        os.environ["LLM_API_KEY"] = "sk-invalid"
+        port = _find_free_port()
+        base_url = f"http://127.0.0.1:{port}"
+
+        fake_home = Path(_tf.mkdtemp(prefix="badkey_home"))
+        (fake_home / ".quantnodes").mkdir()
+        bridge = fake_home / ".quantnodes" / "llm.json"
+        bridge.write_text(json.dumps({
+            "llm": {
+                "active_profile": "minimax",
+                "profiles": {
+                    "minimax": {
+                        "provider": "minimax",
+                        "model": "minimax-M3",
+                        "api_key": "env:LLM_API_KEY",
+                        "base_url": "https://api.minimaxi.com/v1",
+                    },
+                },
+            },
+        }))
+
+        env = os.environ.copy()
+        env["LLM_API_KEY"] = "sk-invalid"
+        env["HOME"] = str(fake_home)
+        # Keep the host's user site-packages importable (uvicorn lives
+        # in ~/.local for /usr/bin/python3; a fake HOME would break it).
+        env["PYTHONUSERBASE"] = str(Path.home() / ".local")
+        env.pop("STRATEGY_RESEARCH_LLM_CONFIG", None)
+        env.update({
+            "STATIC_DIR": str(REPO_ROOT / "webui" / "static"),
+            "CORS_ORIGINS": "*",
+            "PYTHONUNBUFFERED": "1",
+            "SR_WORKSPACE_PATH": str(REPO_ROOT),
+        })
+        cmd = [
+            sys.executable, "-u", "-m", "uvicorn",
+            "strategy_research.api.app:create_app",
+            "--factory",
+            "--host", "127.0.0.1", "--port", str(port),
+            "--log-level", "warning",
+        ]
+        log_file = open(Path(_tf.gettempdir()) / "real_llm_badkey_server.log", "wb")
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), env=env,
+            stdout=log_file, stderr=subprocess.STDOUT,
+        )
         try:
+            _wait_for_http(f"{base_url}/health")
+
+            r = requests.post(f"{base_url}/api/auth/login", json={"username": "admin", "password": "admin"})
+            token = r.json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+
+            r = requests.post(f"{base_url}/api/chat/session", headers=headers, json={"title": "Err"})
+            sid = r.json()["id"]
+
             r = requests.post(f"{base_url}/api/chat/send_async", headers=headers, json={
                 "session_id": sid, "content": "test",
             })
             assert r.status_code == 200
 
-            _, error_msg = _read_sse_until_done(base_url, sid, token, timeout=30)
+            _, error_msg = _read_sse_until_done(base_url, sid, token, timeout=60)
             assert error_msg is not None, "Expected error event for invalid API key"
         finally:
-            if old_key:
-                os.environ["LLM_API_KEY"] = old_key
-            elif "LLM_API_KEY" in os.environ:
-                del os.environ["LLM_API_KEY"]
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+            log_file.close()

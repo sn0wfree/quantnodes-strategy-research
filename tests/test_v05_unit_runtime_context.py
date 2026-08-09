@@ -403,8 +403,11 @@ class TestGoalNeedsContinuation:
         assert goal_ctx.goal_needs_continuation(snapshot) is False
 
     def test_no_criteria(self):
+        """No criteria → nothing left to drive → continuation stops
+        (4bf5e7a: goal_needs_continuation returns False when nothing
+        to drive)."""
         snapshot = {"goal": {"status": "active"}, "criteria": []}
-        assert goal_ctx.goal_needs_continuation(snapshot) is True
+        assert goal_ctx.goal_needs_continuation(snapshot) is False
 
     def test_blocked_status(self):
         snapshot = {"goal": {"status": "blocked"}, "criteria": []}

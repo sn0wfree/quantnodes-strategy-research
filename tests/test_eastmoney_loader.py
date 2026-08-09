@@ -109,11 +109,13 @@ class TestFetchFiltering:
 
         monkeypatch.setattr(loader, "_fetch_one", mock_fetch_one)
 
-        # 混合：2 个 A 股 + 1 个美股
+        # 混合：2 个 A 股 + 1 个美股 (force_refresh 绕过 file_cache，
+        # 否则命中磁盘缓存时 _fetch_one 不会被调用)
         result = loader.fetch(
             codes=["600519.SH", "000001.SZ", "AAPL.US"],
             start_date="2024-01-01",
             end_date="2024-01-31",
+            force_refresh=True,
         )
 
         # 只应调用 A 股的 fetch

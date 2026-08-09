@@ -267,11 +267,16 @@ class ChatSession:
         # mirror - we just call loop.arun(task) and let it build messages.
         result = await loop.arun(task, history=history)
 
-        # Phase 7+8: persist via MemoryManager (shared SQLite with web)
+        # Phase 7+8: persist via MemoryManager (shared SQLite with web).
+        # append() degrades internally to an emergency buffer on failure
+        # (never raises), so detect the degradation and keep ctx.history
+        # in sync (legacy in-memory path) when it happens.
         if result.answer:
             try:
-                await mm.append(session_id, "user", task)
-                await mm.append(session_id, "assistant", result.answer)
+                user_msg_id = await mm.append(session_id, "user", task)
+                asst_msg_id = await mm.append(session_id, "assistant", result.answer)
+                if str(user_msg_id).startswith("emergency_") or str(asst_msg_id).startswith("emergency_"):
+                    self.ctx.history.append({"role": "assistant", "content": result.answer})
             except Exception:
                 # Fallback: keep ctx.history in sync (legacy path)
                 self.ctx.history.append({"role": "assistant", "content": result.answer})

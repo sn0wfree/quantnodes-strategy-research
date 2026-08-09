@@ -27,10 +27,10 @@ from strategy_research.cli.tui.messages import (
     WriteTranscript,
 )
 from strategy_research.cli.tui.widgets import (
-    ActivityRail,
     Banner,
     CommandSidebar,
     HintFooter,
+    ToolsRail,
     TranscriptView,
 )
 from strategy_research.cli.utils.ascii_compat import register_ascii_mode
@@ -87,7 +87,7 @@ async def test_capture_mount_state():
 
         # Verify widgets are mounted
         assert app.query_one(TranscriptView).is_mounted
-        assert app.query_one(ActivityRail).is_mounted
+        assert app.query_one(ToolsRail).is_mounted
         assert app.query_one(CommandSidebar).is_mounted
         assert app.query_one(HintFooter).is_mounted
 
@@ -125,7 +125,7 @@ async def test_capture_tool_event_state():
         await pilot.pause()
 
         # Simulate a tool event flowing through the rail
-        app.write_rail({
+        app.write_rail("tool_call", {
             "tool": "get_financials",
             "args": {"symbol": "AAPL"},
             "status": "ok",
@@ -134,8 +134,8 @@ async def test_capture_tool_event_state():
         await pilot.pause()
         await pilot.pause()
 
-        # Verify the rail has at least one entry
-        rail = app.query_one(ActivityRail)
+        # Verify the rail is mounted
+        rail = app.query_one(ToolsRail)
         assert rail.is_mounted, "rail should be mounted"
 
         # Capture
@@ -258,7 +258,7 @@ async def test_capture_full_lifecycle():
             ("compute_alpha", "running", "call"),
             ("compute_alpha", "ok", "result"),
         ]:
-            app.write_rail({
+            app.write_rail("tool_call", {
                 "tool": tool,
                 "args": {},
                 "status": status,
@@ -327,7 +327,7 @@ async def test_capture_ascii_fallback_mode():
             assert is_ascii_mode(), "should be in ASCII mode"
 
             # Emit a tool event with status marker
-            app.write_rail({
+            app.write_rail("tool_call", {
                 "tool": "fetch_data",
                 "args": {"symbol": "AAPL"},
                 "status": "ok",
@@ -354,7 +354,7 @@ async def test_capture_ascii_fallback_mode():
 
             # Verify no Unicode glyphs leaked (raw text should be ASCII)
             # The rail entry should be mounted
-            rail = app.query_one(ActivityRail)
+            rail = app.query_one(ToolsRail)
             assert rail.is_mounted, "rail should be mounted in ASCII mode"
     finally:
         register_ascii_mode(None)

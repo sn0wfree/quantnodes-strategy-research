@@ -16,11 +16,10 @@ class TestE2EFlow:
     """End-to-end test: register → login → create session → send message → receive events."""
 
     def test_full_user_flow(self, client):
-        # 1. Register
-        res = client.post("/api/auth/register", json={
-            "username": "e2e_user",
-            "display_name": "E2E Tester",
-            "password": "e2e_pass",
+        # 1. Login (registration is disabled; admin/admin is seeded)
+        res = client.post("/api/auth/login", json={
+            "username": "admin",
+            "password": "admin",
         })
         assert res.status_code == 200
         token = res.json()["access_token"]
@@ -30,11 +29,27 @@ class TestE2EFlow:
         assert res.status_code == 200
         session_id = res.json()["id"]
 
-        # 3. Send async message
-        res = client.post("/api/chat/send_async", json={
-            "session_id": session_id,
-            "content": "Hello, E2E test!",
-        })
+        # 3. Send async message (stub the session service so no real
+        # AgentLoop background task blocks TestClient shutdown)
+        from unittest.mock import MagicMock, patch
+
+        async def _send(*args, **kwargs):
+            return {
+                "message_id": "m1",
+                "user_message_id": "um1",
+                "assistant_message_id": "am1",
+                "event_id": "e1",
+                "status": "processing",
+            }
+
+        svc = MagicMock()
+        svc.send_message = _send
+        with patch("strategy_research.api.routers.chat._get_session_service",
+                   return_value=svc):
+            res = client.post("/api/chat/send_async", json={
+                "session_id": session_id,
+                "content": "Hello, E2E test!",
+            })
         assert res.status_code == 200
         data = res.json()
         assert "message_id" in data
@@ -48,7 +63,7 @@ class TestE2EFlow:
         assert session_id in session_ids
 
         # 5. Update session title
-        res = client.put(f"/api/chat/session/{session_id}", json={
+        res = client.patch(f"/api/chat/session/{session_id}", json={
             "title": "Updated E2E Session",
         })
         assert res.status_code == 200
@@ -106,9 +121,9 @@ class TestE2EFlow:
         assert res.status_code == 404
 
     def test_delete_nonexistent_session(self, client):
-        """Deleting non-existent session returns 200 (idempotent)."""
+        """Deleting non-existent session returns 404 (ownership check)."""
         res = client.delete("/api/chat/session/nonexistent-id")
-        assert res.status_code == 200
+        assert res.status_code == 404
 
 
 class TestStaticFiles:

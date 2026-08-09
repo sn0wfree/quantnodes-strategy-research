@@ -81,12 +81,18 @@ def backend_server(built_frontend: Path) -> Iterator[dict]:
     port = _find_free_port()
     base_url = f"http://127.0.0.1:{port}"
 
+    # Isolated workspace: the backend would otherwise use the repo's
+    # real session DB (cwd fallback), polluting tests with history rows.
+    import tempfile
+    ws = Path(tempfile.mkdtemp(prefix="e2e_workspace_"))
+
     env = os.environ.copy()
     env.update({
         "STRATEGY_RESEARCH_TEST_CHAT": "1",
         "STATIC_DIR": str(built_frontend),
         "CORS_ORIGINS": "*",
         "PYTHONUNBUFFERED": "1",
+        "SR_WORKSPACE_PATH": str(ws),
     })
 
     # Use the package's CLI entry point so we hit the same code path users would.

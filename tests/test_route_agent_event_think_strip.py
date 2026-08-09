@@ -21,6 +21,8 @@ class TestTextDeltaStrip:
         app = ResearchApp.__new__(ResearchApp)
         app._tool_total = 0
         app._tool_ok = 0
+        app._finalized_text_ids = set()
+        app._active_text_id = None
         mock_tv = mock.MagicMock(spec=TranscriptView)
         app.query_one = mock.MagicMock(return_value=mock_tv)
         # Mock update_streaming_delta explicitly
@@ -68,6 +70,8 @@ class TestAssistantMessageExtract:
         app = ResearchApp.__new__(ResearchApp)
         app._tool_total = 0
         app._tool_ok = 0
+        app._finalized_text_ids = set()
+        app._active_text_id = None
         mock_tv = mock.MagicMock()
         app.query_one = mock.MagicMock(return_value=mock_tv)
         return app, mock_tv

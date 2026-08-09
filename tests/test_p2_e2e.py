@@ -77,6 +77,10 @@ class TestAgentLoopHookIntegration:
         mock_response.has_tool_calls.return_value = False
         mock_response.finish_reason = "stop"
         mock_client.chat.return_value = mock_response
+        # stream_mode is default: stream() must yield nothing and
+        # parse_response must return the canned response
+        mock_client.stream.return_value = iter([])
+        mock_client.parse_response.return_value = mock_response
 
         registry = ToolRegistry()
         config = LLMConfig(model="test", api_key="test")
@@ -107,6 +111,10 @@ class TestAgentLoopHookIntegration:
         mock_response.has_tool_calls.return_value = False
         mock_response.finish_reason = "stop"
         mock_client.chat.return_value = mock_response
+        # stream_mode is default: stream() must yield nothing and
+        # parse_response must return the canned response
+        mock_client.stream.return_value = iter([])
+        mock_client.parse_response.return_value = mock_response
 
         registry = ToolRegistry()
         config = LLMConfig(model="test", api_key="test")
@@ -132,6 +140,10 @@ class TestAgentLoopHookIntegration:
         mock_response.has_tool_calls.return_value = False
         mock_response.finish_reason = "stop"
         mock_client.chat.return_value = mock_response
+        # stream_mode is default: stream() must yield nothing and
+        # parse_response must return the canned response
+        mock_client.stream.return_value = iter([])
+        mock_client.parse_response.return_value = mock_response
 
         registry = ToolRegistry()
         config = LLMConfig(model="test", api_key="test")
@@ -164,6 +176,10 @@ class TestAgentLoopHookIntegration:
         mock_response.has_tool_calls.return_value = False
         mock_response.finish_reason = "stop"
         mock_client.chat.return_value = mock_response
+        # stream_mode is default: stream() must yield nothing and
+        # parse_response must return the canned response
+        mock_client.stream.return_value = iter([])
+        mock_client.parse_response.return_value = mock_response
 
         registry = ToolRegistry()
         config = LLMConfig(model="test", api_key="test")

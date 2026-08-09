@@ -23,6 +23,8 @@ def _make_app() -> ResearchApp:
     app = ResearchApp.__new__(ResearchApp)
     app._tool_total = 0
     app._tool_ok = 0
+    app._finalized_text_ids = set()
+    app._active_text_id = None
     return app
 
 

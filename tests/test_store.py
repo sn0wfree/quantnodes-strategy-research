@@ -96,6 +96,7 @@ def _setup_full_db(db_path: Path) -> None:
                 completed_at TEXT,
                 error TEXT,
                 message_id TEXT,
+                persona TEXT,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
         """)

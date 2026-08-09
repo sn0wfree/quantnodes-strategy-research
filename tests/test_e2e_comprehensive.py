@@ -22,6 +22,15 @@ from playwright.async_api import async_playwright
 
 BASE_URL = "http://127.0.0.1:8783"
 
+pytest_plugins = ["conftest_e2e"]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _use_test_server(backend_server):
+    """Point this module at the self-started TEST_MODE backend."""
+    global BASE_URL
+    BASE_URL = backend_server["base_url"]
+
 
 async def _login(page):
     """Login via UI and return JWT token."""
@@ -38,6 +47,8 @@ async def _login(page):
 
     await page.wait_for_url("**/", timeout=10000)
     await page.wait_for_load_state("networkidle")
+    await page.goto(f"{BASE_URL}/chat")
+    await page.wait_for_load_state("domcontentloaded")
     await page.wait_for_timeout(2000)
 
     token = await page.evaluate("""() => {
@@ -299,10 +310,17 @@ async def test_full_session_history():
 
             # 6. Verify all messages are displayed
             print("6. Verifying message history...")
+
+            # Reload so the Virtuoso virtualized list renders all
+            # persisted messages (live rendering only keeps a window)
+            await page.reload()
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(3000)
+
             body = await page.inner_text("body")
 
-            # Check multiple user messages
-            user_msgs = page.locator('[class*="bg-primary"][class*="rounded-lg"]')
+            # Check multiple user messages (gradient bubble)
+            user_msgs = page.locator('div.rounded-br-md.bg-gradient-to-br')
             user_count = await user_msgs.count()
             print(f"   Total user messages: {user_count}")
             assert user_count >= 3, f"Expected ≥3 user messages, got {user_count}"
