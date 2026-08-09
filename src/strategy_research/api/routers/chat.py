@@ -484,6 +484,19 @@ async def send_async(body: ChatMessage, request: Request):
     if body.content.strip() == "/compact":
         return await _handle_compact_command(body)
 
+    # ── /clear command intercept (webui only — clears LLM-visible
+    # history while preserving the persisted message log). Returns
+    # immediately without invoking the LLM. The TUI does not use this
+    # path; equivalent TUI behaviour is `clear_session`. ─────────────
+    if body.content.strip() == "/clear":
+        return await _handle_clear_command(body)
+
+    # ── /help command intercept — returns a static cheat-sheet text
+    # in a synthetic assistant message so the user sees it in context.
+    # Skips LLM invocation. ──────────────────────────────────────────
+    if body.content.strip() == "/help":
+        return await _handle_help_command(body)
+
     # Delegate to SessionService — it handles DB persistence, queueing,
     # AgentLoop execution, history context, and event emission.
     service = _get_session_service()
@@ -1360,6 +1373,149 @@ async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
         "status": "completed",
     })
 
+    return SendMessageResponse(
+        message_id=user_msg_id,
+        user_message_id=user_msg_id,
+        assistant_message_id=assistant_msg_id,
+        event_id="",
+        status="done",
+    )
+
+
+# ── /clear command handler (webui only) ─────────────────────────────
+
+
+_HELP_TEXT = (
+    "## 可用命令\n"
+    "\n"
+    "- `/goal <目标描述>` — 创建并跟踪一个复合目标\n"
+    "- `/study <目标描述>` — 启动一个研究任务（多轮迭代）\n"
+    "- `/compact` — 压缩当前会话的上下文\n"
+    "- `/clear` — 清空当前会话的 LLM 上下文（保留历史消息）\n"
+    "- `/help` — 显示本帮助\n"
+    "\n"
+    "## 快捷键\n"
+    "\n"
+    "- ⌘K — 搜索会话\n"
+    "- ⌘P — 打开命令面板\n"
+    "- ⌘T — 新建会话\n"
+    "- ⌘B — 切换右栏\n"
+    "- ⌘1–9 — 切换会话 tab\n"
+    "- Enter — 发送 · Shift+Enter — 换行\n"
+)
+
+
+async def _handle_clear_command(body: ChatMessage) -> SendMessageResponse:
+    """Handle ``/clear`` — drop the LLM-visible history for this session.
+
+    Implementation: calls ``MemoryManager.clear`` which truncates the
+    session's memory backend rows (the buffer the AgentLoop reads at
+    attempt start). The persisted message log (the ``messages`` table
+    populated by the projector) is intentionally NOT touched so the
+    user can still scroll their conversation. The UI sees a synthetic
+    assistant acknowledgement via the same text-event flow as
+    ``/compact``.
+    """
+    import uuid
+
+    try:
+        from strategy_research.core.agent.memory_manager import (
+            get_default_memory_manager,
+        )
+        mm = get_default_memory_manager()
+        await mm.clear(body.session_id)
+        response_text = "✅ 已清空当前会话的上下文。历史消息保留可见。"
+    except Exception as exc:
+        logger.exception("clear failed")
+        response_text = f"❌ 清空失败: {exc}"
+
+    user_msg_id = str(uuid.uuid4())
+    assistant_msg_id = str(uuid.uuid4())
+    service = _get_session_service()
+    event_bus = service.event_bus
+    text_id = str(uuid.uuid4())
+
+    event_bus.emit(body.session_id, "message_received", {
+        "message_id": user_msg_id,
+        "user_message_id": user_msg_id,
+        "assistant_message_id": assistant_msg_id,
+        "content": body.content,
+        "role": "user",
+        "status": "done",
+    })
+    event_bus.emit(body.session_id, "text.started", {
+        "text_id": text_id,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "text_delta", {
+        "text": response_text,
+        "text_id": text_id,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "text.ended", {
+        "text_id": text_id,
+        "text": response_text,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "assistant_message", {
+        "message_id": assistant_msg_id,
+        "content": response_text,
+        "message_type": "assistant",
+    })
+    event_bus.emit(body.session_id, "agent_done", {
+        "message_id": assistant_msg_id,
+        "status": "completed",
+    })
+    return SendMessageResponse(
+        message_id=user_msg_id,
+        user_message_id=user_msg_id,
+        assistant_message_id=assistant_msg_id,
+        event_id="",
+        status="done",
+    )
+
+
+async def _handle_help_command(body: ChatMessage) -> SendMessageResponse:
+    """Handle ``/help`` — return the static cheat-sheet as an assistant message."""
+    import uuid
+
+    user_msg_id = str(uuid.uuid4())
+    assistant_msg_id = str(uuid.uuid4())
+    service = _get_session_service()
+    event_bus = service.event_bus
+    text_id = str(uuid.uuid4())
+
+    event_bus.emit(body.session_id, "message_received", {
+        "message_id": user_msg_id,
+        "user_message_id": user_msg_id,
+        "assistant_message_id": assistant_msg_id,
+        "content": body.content,
+        "role": "user",
+        "status": "done",
+    })
+    event_bus.emit(body.session_id, "text.started", {
+        "text_id": text_id,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "text_delta", {
+        "text": _HELP_TEXT,
+        "text_id": text_id,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "text.ended", {
+        "text_id": text_id,
+        "text": _HELP_TEXT,
+        "message_id": assistant_msg_id,
+    })
+    event_bus.emit(body.session_id, "assistant_message", {
+        "message_id": assistant_msg_id,
+        "content": _HELP_TEXT,
+        "message_type": "assistant",
+    })
+    event_bus.emit(body.session_id, "agent_done", {
+        "message_id": assistant_msg_id,
+        "status": "completed",
+    })
     return SendMessageResponse(
         message_id=user_msg_id,
         user_message_id=user_msg_id,

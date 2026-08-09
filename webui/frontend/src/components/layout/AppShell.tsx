@@ -55,8 +55,15 @@ export function AppShell() {
           if (target && target !== state.currentSessionId) {
             await state.switchSession(target)
           } else if (target) {
-            // Same session — just reload messages
-            await useChatStore.getState().loadMessages(target)
+            // Same session — just reload messages and backfill
+            // Agent / DAG / Goal panels (loadSessionState). The original
+            // code only reloaded messages, leaving the right panel
+            // empty until the next run started (B13 follow-up; see
+            // session.ts loadSessionState docstring).
+            await Promise.all([
+              useChatStore.getState().loadMessages(target),
+              state.loadSessionState(target),
+            ])
           }
         } else {
           // No valid sessions — create one

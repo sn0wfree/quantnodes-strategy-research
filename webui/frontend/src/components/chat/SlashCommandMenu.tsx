@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { SLASH_COMMANDS } from './slashCommands'
+import { SLASH_COMMANDS, type SlashCommand } from './slashCommands'
 
 interface SlashCommandMenuProps {
   query: string
-  onSelect: (command: string) => void
+  onSelect: (command: string, autoSend?: boolean) => void
 }
 
 export function SlashCommandMenu({ query, onSelect }: SlashCommandMenuProps) {
@@ -42,7 +42,7 @@ export function SlashCommandMenu({ query, onSelect }: SlashCommandMenuProps) {
     }
     const onEnter = () => {
       const cmd = filtered[activeIndex]
-      if (cmd) onSelect(cmd.command)
+      if (cmd) onSelect(cmd.command, cmd.autoSend)
     }
     window.addEventListener('sr:slash-nav', onNav)
     window.addEventListener('sr:slash-enter', onEnter)
@@ -60,34 +60,41 @@ export function SlashCommandMenu({ query, onSelect }: SlashCommandMenuProps) {
     )
   }
 
+  const renderRow = (cmd: SlashCommand, i: number) => (
+    <li key={cmd.command}>
+      <button
+        type="button"
+        onMouseEnter={() => setActiveIndex(i)}
+        onClick={() => onSelect(cmd.command, cmd.autoSend)}
+        className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+          i === activeIndex
+            ? 'bg-slate-700/40 text-slate-100'
+            : 'text-slate-300 hover:bg-slate-700/30'
+        }`}
+      >
+        <span className="text-primary-400">{cmd.icon}</span>
+        <span className="flex-1">
+          <span className="block text-sm font-medium">
+            <span className="text-primary-400">{cmd.command}</span>
+            <span className="ml-2 text-slate-400">{cmd.label}</span>
+          </span>
+          <span className="block text-xs text-slate-500">
+            {cmd.description}
+          </span>
+        </span>
+        {cmd.autoSend && (
+          <span className="shrink-0 rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
+            直发
+          </span>
+        )}
+      </button>
+    </li>
+  )
+
   return (
     <div className="glass absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-xl border border-slate-700/60 shadow-2xl">
       <ul ref={listRef} className="max-h-72 overflow-y-auto py-1">
-        {filtered.map((cmd, i) => (
-          <li key={cmd.command}>
-            <button
-              type="button"
-              onMouseEnter={() => setActiveIndex(i)}
-              onClick={() => onSelect(cmd.command)}
-              className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-                i === activeIndex
-                  ? 'bg-slate-700/40 text-slate-100'
-                  : 'text-slate-300 hover:bg-slate-700/30'
-              }`}
-            >
-              <span className="text-primary-400">{cmd.icon}</span>
-              <span className="flex-1">
-                <span className="block text-sm font-medium">
-                  <span className="text-primary-400">{cmd.command}</span>
-                  <span className="ml-2 text-slate-400">{cmd.label}</span>
-                </span>
-                <span className="block text-xs text-slate-500">
-                  {cmd.description}
-                </span>
-              </span>
-            </button>
-          </li>
-        ))}
+        {filtered.map((cmd, i) => renderRow(cmd, i))}
       </ul>
     </div>
   )

@@ -1,8 +1,11 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { Bot } from 'lucide-react'
 import type { Message, MessagePart, ToolCallPart, AgentPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { useSystemStore } from '../../stores/system'
+import { useSessionStore } from '../../stores/session'
+import { useToastStore } from '../../stores/toast'
+import { api } from '../../api/client'
 import {
   splitTextIncremental,
   shouldSplitInline,
@@ -271,6 +274,52 @@ export function AssistantMessage({
 }: AssistantMessageProps) {
   const provider = useSystemStore((s) => s.llm.provider)
   const readPartText = useReadPartText()
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const messages = useChatStore((s) => s.messages)
+  const addToast = useToastStore((s) => s.addToast)
+
+  /**
+   * Retry a failed tool call by re-sending the user message that
+   * triggered this assistant turn. Backend lacks a per-tool retry
+   * endpoint; the safest fallback is to re-issue the original prompt
+   * with the agent's existing context (matches MessageActions'
+   * regenerate). The user keeps the failed tool_call block visible in
+   * history and a fresh attempt produces a new assistant message.
+   */
+  const handleToolRetry = useCallback(
+    async (tc: ToolCallPart) => {
+      const sessionId = currentSessionId
+      if (!sessionId) return
+      // Find the user message immediately preceding this assistant message.
+      const sorted = Array.from(messages.values()).sort(
+        (a, b) => a.created_at - b.created_at,
+      )
+      let prevUser: Message | null = null
+      for (const m of sorted) {
+        if (m.id === message.id) break
+        if (m.role === 'user') prevUser = m
+      }
+      const content = prevUser?.parts
+        ?.filter((p) => p.type === 'text')
+        .map((p) => (p as { text?: string }).text ?? '')
+        .join('\n')
+        .trim()
+      if (!content) {
+        addToast('error', '找不到触发该工具调用的用户消息，无法重试')
+        return
+      }
+      try {
+        await api.post('/chat/send_async', { session_id: sessionId, content })
+        addToast(
+          'success',
+          `已重新发送，将重试「${tc.name}」`,
+        )
+      } catch (err: any) {
+        addToast('error', `重试失败：${err?.message ?? '未知错误'}`)
+      }
+    },
+    [currentSessionId, messages, message.id, addToast],
+  )
 
   // Group consecutive tool_call parts into a single ToolCallGroup
   // (matches the original design — same opencode-style "adjacent tool
@@ -370,7 +419,13 @@ export function AssistantMessage({
         // not at agent_done.
         groupedParts.map((item, idx) => {
           if (item.type === 'tool_group') {
-            return <ToolCallGroup key={`group-${idx}`} toolCalls={item.calls} />
+            return (
+              <ToolCallGroup
+                key={`group-${idx}`}
+                toolCalls={item.calls}
+                onRetry={handleToolRetry}
+              />
+            )
           }
           const part = item.part
           // Only text / tool_call / thinking carry the per-part
@@ -384,6 +439,7 @@ export function AssistantMessage({
               part={part}
               isStreaming={isPartStreaming}
               readPartText={readPartText}
+              onRetry={handleToolRetry}
             />
           )
         })

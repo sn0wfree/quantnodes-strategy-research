@@ -14,6 +14,15 @@ export function Composer() {
   const [images, setImages] = useState<string[]>([])
   const [sending, setSending] = useState(false)
   const [slashQuery, setSlashQuery] = useState<string | null>(null)
+  /**
+   * When the user picks an ``autoSend: true`` slash command from the
+   * menu, we set this flag and let the useEffect below pick it up
+   * once the textarea has actually been updated to the new text.
+   * Driving the send through useEffect (rather than a
+   * requestAnimationFrame) keeps handleSend reading the latest
+   * committed state — same model as Enter-key send.
+   */
+  const [pendingAutoSend, setPendingAutoSend] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
@@ -218,7 +227,7 @@ export function Composer() {
     })
   }, [text])
 
-  const selectSlashCommand = useCallback((command: string) => {
+  const selectSlashCommand = useCallback((command: string, autoSend?: boolean) => {
     // Replace the partial `/xxx` token with the full command
     setText((prev) => {
       const m = /(\/[\w]*)$/.exec(prev)
@@ -226,8 +235,30 @@ export function Composer() {
       return prev + command + ' '
     })
     setSlashQuery(null)
+    if (autoSend) {
+      // Flag the intent — the useEffect below fires handleSend once
+      // `text` has actually been committed by React. Reading `text`
+      // from the next render (vs the closure here) avoids a race
+      // where handleSend still sees the pre-command draft.
+      setPendingAutoSend(true)
+      return
+    }
     textareaRef.current?.focus()
   }, [])
+
+  // Drain the pendingAutoSend flag once the new draft has been
+  // committed to state. Mirrors the Enter-key send path: the effect
+  // runs after `text` settles, then calls handleSend exactly once.
+  useEffect(() => {
+    if (!pendingAutoSend) return
+    if (sending) return
+    if (!currentSessionId) {
+      setPendingAutoSend(false)
+      return
+    }
+    setPendingAutoSend(false)
+    void handleSend()
+  }, [pendingAutoSend, text, sending, currentSessionId, handleSend])
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData.items)

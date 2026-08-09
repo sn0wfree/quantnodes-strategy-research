@@ -29,7 +29,10 @@ describe('SlashCommandMenu', () => {
     const onSelect = vi.fn()
     render(<SlashCommandMenu query="/goal" onSelect={onSelect} />)
     fireEvent.click(screen.getByText('目标'))
-    expect(onSelect).toHaveBeenCalledWith('/goal')
+    // /goal is an argument-bearing command, so autoSend is undefined
+    // (P32). AutoSend commands (e.g. /clear) pass true as the second
+    // argument; see SlashCommandMenu.test.tsx for that contract.
+    expect(onSelect).toHaveBeenCalledWith('/goal', undefined)
   })
 
   it('shows no-match message for unknown query', () => {

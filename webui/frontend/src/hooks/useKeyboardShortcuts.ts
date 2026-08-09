@@ -27,6 +27,9 @@ export function useKeyboardShortcuts() {
   const bindings: KeyBinding[] = [
     // Search
     { key: 'k', meta: true, action: () => setSearchOpen(true) },
+    // Command palette (opencode-style ⌘P; ⌘⇧P also accepted)
+    { key: 'p', meta: true, action: togglePalette },
+    { key: 'p', meta: true, shift: true, action: togglePalette },
     // Panel toggles
     { key: 'b', meta: true, action: toggleRightPanel },
     { key: 'w', meta: true, action: () => navigate('/dag') },
@@ -62,7 +65,7 @@ export function useKeyboardShortcuts() {
         const matchShift = (b.shift ?? false) === e.shiftKey
         if (!matchKey || !matchMeta || !matchShift) continue
         // For palette/search (Cmd+K), still trigger even when in input
-        const skipIfInput = isInput && !['k', 't'].includes(b.key)
+        const skipIfInput = isInput && !['k', 't', 'p'].includes(b.key)
         if (skipIfInput) continue
         e.preventDefault()
         b.action()

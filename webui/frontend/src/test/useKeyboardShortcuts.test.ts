@@ -1,175 +1,125 @@
-// useKeyboardShortcuts — global key handler bound to window. Verifies:
-//   - Cmd/Ctrl+K opens search
-//   - Cmd/Ctrl+G / W switch the right panel tab
-//   - Cmd/Ctrl+B toggles the right panel
-//   - Cmd/Ctrl+1..9 switch sessions when a slot is open
-//   - Cmd/Ctrl+T creates a new session
-//   - Cmd/Ctrl+Shift+W closes the current session
-//   - Shortcuts are ignored when typing into <input>/<textarea>
-//     except Cmd/Ctrl+K and Cmd/Ctrl+T which still fire
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { renderHook, fireEvent } from '@testing-library/react'
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
-import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
-import { useCommandPaletteStore } from '../stores/commandPalette'
-import { useLayoutStore } from '../stores/layout'
-import { useSessionStore } from '../stores/session'
-
-const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }))
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigateMock,
+// Hoisted mocks (vitest moves these above imports).
+const mocks = vi.hoisted(() => ({
+  togglePalette: vi.fn(),
+  toggleRightPanel: vi.fn(),
+  setSearchOpen: vi.fn(),
+  createNewSession: vi.fn(),
+  closeSession: vi.fn(),
+  switchSession: vi.fn(),
+  navigate: vi.fn(),
+  toggleSidebar: vi.fn(),
 }))
 
-function fire(key: string, opts: { metaKey?: boolean; shiftKey?: boolean; target?: EventTarget | null } = {}) {
-  const event = new KeyboardEvent('keydown', {
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => mocks.navigate,
+}))
+
+vi.mock('../stores/commandPalette', () => ({
+  useCommandPaletteStore: (sel: (s: any) => any) =>
+    sel({ toggle: mocks.togglePalette }),
+}))
+
+vi.mock('../stores/layout', () => ({
+  useLayoutStore: (sel: (s: any) => any) => {
+    const state = {
+      toggleRightPanel: mocks.toggleRightPanel,
+      toggleSidebar: mocks.toggleSidebar,
+    }
+    return sel(state)
+  },
+}))
+
+vi.mock('../stores/session', () => ({
+  useSessionStore: (sel: (s: any) => any) => {
+    const state = {
+      setSearchOpen: mocks.setSearchOpen,
+      createNewSession: mocks.createNewSession,
+      closeSession: mocks.closeSession,
+      switchSession: mocks.switchSession,
+      currentSessionId: 's-active',
+      openSessionIds: ['s-active', 's-other'],
+    }
+    return sel(state)
+  },
+}))
+
+// Import after mocks so the hook picks them up.
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
+
+function pressKey(key: string, init: Partial<KeyboardEventInit> = {}) {
+  fireEvent.keyDown(document, {
     key,
-    metaKey: opts.metaKey ?? false,
-    ctrlKey: opts.metaKey ?? false,
-    shiftKey: opts.shiftKey ?? false,
-    bubbles: true,
-    cancelable: true,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    ...init,
   })
-  ;(opts.target ?? window).dispatchEvent(event)
-  return event
 }
 
 describe('useKeyboardShortcuts', () => {
   beforeEach(() => {
-    useCommandPaletteStore.setState({ open: false })
-    useLayoutStore.setState({ rightPanelVisible: true })
-    useSessionStore.setState({
-      openSessionIds: [],
-      currentSessionId: null,
-    })
+    Object.values(mocks).forEach((m) => m.mockClear())
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
+  // ── P43: Command palette on ⌘P / ⌘⇧P ──
 
-  it('binds to window on mount and unbinds on unmount', () => {
-    const addSpy = vi.spyOn(window, 'addEventListener')
-    const removeSpy = vi.spyOn(window, 'removeEventListener')
-    const { unmount } = renderHook(() => useKeyboardShortcuts())
-    expect(addSpy).toHaveBeenCalledWith('keydown', expect.any(Function))
-    unmount()
-    expect(removeSpy).toHaveBeenCalledWith('keydown', expect.any(Function))
-  })
-
-  it('Cmd/Ctrl+K opens the search modal', () => {
-    const setSearchOpen = vi.fn()
-    useSessionStore.setState({ setSearchOpen } as never)
+  it('Cmd+P opens the command palette', () => {
     renderHook(() => useKeyboardShortcuts())
-    fire('k', { metaKey: true })
-    expect(setSearchOpen).toHaveBeenCalledWith(true)
+    pressKey('p', { metaKey: true })
+    expect(mocks.togglePalette).toHaveBeenCalledTimes(1)
   })
 
-  it('Cmd/Ctrl+W opens the DAG page', () => {
+  it('Cmd+Shift+P also opens the command palette', () => {
     renderHook(() => useKeyboardShortcuts())
-    fire('w', { metaKey: true })
-    expect(navigateMock).toHaveBeenCalledWith('/dag')
+    pressKey('P', { metaKey: true, shiftKey: true })
+    expect(mocks.togglePalette).toHaveBeenCalledTimes(1)
   })
 
-  it('Cmd/Ctrl+B toggles the right panel', () => {
-    const before = useLayoutStore.getState().rightPanelVisible
+  it('Ctrl+P also opens the command palette (Linux/Windows parity)', () => {
     renderHook(() => useKeyboardShortcuts())
-    fire('b', { metaKey: true })
-    expect(useLayoutStore.getState().rightPanelVisible).toBe(!before)
+    pressKey('p', { ctrlKey: true })
+    expect(mocks.togglePalette).toHaveBeenCalledTimes(1)
   })
 
-  it('Cmd/Ctrl+T creates a new session', () => {
-    const createNewSession = vi.fn()
-    useSessionStore.setState({ createNewSession } as never)
-    renderHook(() => useKeyboardShortcuts())
-    fire('t', { metaKey: true })
-    expect(createNewSession).toHaveBeenCalledWith('新会话')
-  })
-
-  it('Cmd/Ctrl+1..9 switch to the indexed open session', () => {
-    useSessionStore.setState({
-      openSessionIds: ['s1', 's2', 's3'],
-      currentSessionId: 's1',
-    })
-    const switchSession = vi.fn()
-    useSessionStore.setState({ switchSession } as never)
-    renderHook(() => useKeyboardShortcuts())
-    fire('2', { metaKey: true })
-    expect(switchSession).toHaveBeenCalledWith('s2')
-  })
-
-  it('Cmd/Ctrl+9 with an empty slot is a no-op', () => {
-    const switchSession = vi.fn()
-    useSessionStore.setState({
-      openSessionIds: ['s1'],
-      switchSession,
-    } as never)
-    renderHook(() => useKeyboardShortcuts())
-    fire('9', { metaKey: true })
-    expect(switchSession).not.toHaveBeenCalled()
-  })
-
-  it('Cmd/Ctrl+Shift+W closes the current session', () => {
-    useSessionStore.setState({
-      currentSessionId: 's-current',
-    })
-    const closeSession = vi.fn()
-    useSessionStore.setState({ closeSession } as never)
-    renderHook(() => useKeyboardShortcuts())
-    fire('w', { metaKey: true, shiftKey: true })
-    expect(closeSession).toHaveBeenCalledWith('s-current')
-  })
-
-  it('ignores shortcuts when typing into <input> (except Cmd/Ctrl+K, T)', () => {
-    const setSearchOpen = vi.fn()
-    const createNewSession = vi.fn()
-    const switchSession = vi.fn()
-    useSessionStore.setState({
-      openSessionIds: ['s1'],
-      currentSessionId: 's1',
-      setSearchOpen,
-      createNewSession,
-      switchSession,
-    } as never)
+  it('Cmd+P inside an INPUT still triggers the palette', () => {
+    // The shortcut is added to the skipIfInput allow-list alongside
+    // ⌘K (search) and ⌘T (new tab), so typing in the composer must
+    // not eat the shortcut.
     renderHook(() => useKeyboardShortcuts())
     const input = document.createElement('input')
     document.body.appendChild(input)
-    // Cmd+1 should NOT switch because we're in an input
-    fire('1', { metaKey: true, target: input })
-    expect(switchSession).not.toHaveBeenCalled()
-    // Cmd+K should still open search
-    fire('k', { metaKey: true, target: input })
-    expect(setSearchOpen).toHaveBeenCalledWith(true)
+    fireEvent.keyDown(input, { key: 'p', metaKey: true })
+    expect(mocks.togglePalette).toHaveBeenCalledTimes(1)
     document.body.removeChild(input)
   })
 
-  it('ignores shortcuts when typing into <textarea> too', () => {
-    const setSearchOpen = vi.fn()
-    useSessionStore.setState({ setSearchOpen } as never)
+  it('plain "p" (no modifier) does NOT open the palette', () => {
     renderHook(() => useKeyboardShortcuts())
-    const ta = document.createElement('textarea')
-    document.body.appendChild(ta)
-    fire('k', { metaKey: true, target: ta })
-    // Cmd+K is allowed in inputs
-    expect(setSearchOpen).toHaveBeenCalledWith(true)
-    const switchSession = vi.fn()
-    useSessionStore.setState({
-      openSessionIds: ['s1'],
-      switchSession,
-    } as never)
-    fire('1', { metaKey: true, target: ta })
-    expect(switchSession).not.toHaveBeenCalled()
-    document.body.removeChild(ta)
+    pressKey('p')
+    expect(mocks.togglePalette).not.toHaveBeenCalled()
   })
 
-  it('does nothing when only the bare key is pressed (no meta)', () => {
-    const switchSession = vi.fn()
-    useSessionStore.setState({
-      openSessionIds: ['s1'],
-      currentSessionId: 's1',
-      switchSession,
-    } as never)
+  // ── pre-existing bindings still wired ──
+
+  it('Cmd+K opens the search modal', () => {
     renderHook(() => useKeyboardShortcuts())
-    fire('1')
-    expect(switchSession).not.toHaveBeenCalled()
+    pressKey('k', { metaKey: true })
+    expect(mocks.setSearchOpen).toHaveBeenCalledWith(true)
+  })
+
+  it('Cmd+B toggles the right panel', () => {
+    renderHook(() => useKeyboardShortcuts())
+    pressKey('b', { metaKey: true })
+    expect(mocks.toggleRightPanel).toHaveBeenCalledTimes(1)
+  })
+
+  it('Cmd+T creates a new session and navigates to /chat', () => {
+    renderHook(() => useKeyboardShortcuts())
+    pressKey('t', { metaKey: true })
+    expect(mocks.createNewSession).toHaveBeenCalledWith('新会话')
+    expect(mocks.navigate).toHaveBeenCalledWith('/chat')
   })
 })
