@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
 import { useSystemStore } from '../../stores/system'
+import { api } from '../../api/client'
 
 // Rough char-to-token estimate when SSE hasn't pushed llm_usage yet
 // (e.g. right after page load). ~3.5 chars/token for mixed Chinese/English.
@@ -37,10 +38,18 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+// Module-level set tracking which sessions have already been auto-
+// compacted in the current page lifetime. Survives component remounts
+// (e.g. when chat tab switches) but resets on full page reload —
+// which is fine because a fresh session-load will start with a low
+// context ratio again.
+const autoCompactedSessions = new Set<string>()
+
 export function ContextUsageBar() {
   const sessionId = useSessionStore((s) => s.currentSessionId)
   const tokensUsed = useChatStore((s) => s.tokensUsed.get(sessionId ?? '') ?? 0)
   const messages = useChatStore((s) => s.messages)
+  const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const modelInfo = useSystemStore((s) => s.modelInfo)
 
   const limit = modelInfo?.context_tokens ?? 0
@@ -77,6 +86,36 @@ export function ContextUsageBar() {
   }, [effectiveTokens, limit])
 
   const colors = TIER_CLASS[tier]
+
+  // Auto-trigger /compact once the session crosses the red threshold
+  // (>= 80% of model context). Throttled per-session: each session
+  // gets exactly one auto-compact per page lifetime so we don't spam
+  // the queue when the bar oscillates around the threshold. The
+  // user's manual /compact invocation goes through the same backend
+  // intercept (Tier A P31), so we just POST a slash command and let
+  // the existing event-sourcing path handle the rest.
+  useEffect(() => {
+    if (tier !== 'red') return
+    if (!sessionId) return
+    if (streamingMessageId) return // don't fire mid-stream
+    if (autoCompactedSessions.has(sessionId)) return
+
+    autoCompactedSessions.add(sessionId)
+    // Fire-and-forget. Failure is benign — the user can always type
+    // /compact manually.
+    api
+      .post('/chat/send_async', {
+        session_id: sessionId,
+        content: '/compact',
+      })
+      .catch((err) => {
+        // Roll back the throttle so a transient failure doesn't
+        // permanently lock the session out of auto-compact until
+        // page reload.
+        autoCompactedSessions.delete(sessionId)
+        console.warn('[auto-compact] failed:', err)
+      })
+  }, [tier, sessionId, streamingMessageId])
 
   if (limit <= 0) return null
 

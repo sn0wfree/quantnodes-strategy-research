@@ -1165,7 +1165,7 @@ class SessionService:
             except Exception:
                 pass
 
-        compressed, layers = compact_messages(
+        compressed, layers, _l4_summary, _l4_recent = compact_messages(
             history,
             config=config,
             threshold_tokens=0,  # force all layers for manual /compact
