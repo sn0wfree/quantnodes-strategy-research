@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Plus, Save, Pencil, Trash2, Copy, RefreshCw, Loader2 } from 'lucide-react'
-import { api, type DefinitionListItem, type DefinitionNode, type DefinitionEdge, type DefinitionRunSnapshot, type DefinitionNodeOutput } from '../../api/client'
+import { ArrowLeft, Play, Plus, Save, Pencil, Trash2, Copy, RefreshCw, Loader2, FileJson } from 'lucide-react'
+import { api, type DefinitionListItem, type DefinitionNode, type DefinitionEdge, type DefinitionRunSnapshot, type DefinitionNodeOutput, type DefinitionPayload } from '../../api/client'
 import { useSessionStore } from '../../stores/session'
 import { WorkflowEditor } from './WorkflowEditor'
 import { ApprovalDialog } from './ApprovalDialog'
+import { ImportDefinitionDialog } from './ImportDefinitionDialog'
 import { EmptyState } from '../common/EmptyState'
 
 type RunStatus = 'pending' | 'running' | 'awaiting' | 'completed' | 'failed' | 'cancelled'
@@ -36,6 +37,8 @@ export function DefinitionWorkflowPage() {
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [approvalBusy, setApprovalBusy] = useState(false)
   const [approvalPreview, setApprovalPreview] = useState('')
+  const [importOpen, setImportOpen] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
   const sseRef = useRef<EventSource | null>(null)
 
   const loadDefinitions = useCallback(async () => {
@@ -124,6 +127,47 @@ export function DefinitionWorkflowPage() {
       await loadDefinitions()
     } catch (err) {
       setError((err as Error).message)
+    }
+  }
+
+  // ── JSON import ────────────────────────────────────────────
+
+  const importToCanvas = (payload: DefinitionPayload) => {
+    closeSSE()
+    resetRun()
+    setError('')
+    setEditing({
+      name: payload.name || null,
+      nodes: (payload.nodes ?? []) as DefinitionNode[],
+      edges: (payload.edges ?? []) as DefinitionEdge[],
+    })
+    setImportOpen(false)
+  }
+
+  const importAndSave = async (payload: DefinitionPayload) => {
+    if (!payload.name) {
+      setError('导入保存需要 name 字段')
+      return
+    }
+    setImportBusy(true)
+    setError('')
+    try {
+      await api.definitions.save({
+        name: payload.name,
+        description: payload.description,
+        version: payload.version,
+        budget: payload.budget,
+        llm: payload.llm,
+        params: payload.params,
+        nodes: payload.nodes,
+        edges: payload.edges,
+      })
+      setImportOpen(false)
+      await loadDefinitions()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setImportBusy(false)
     }
   }
 
@@ -281,6 +325,12 @@ export function DefinitionWorkflowPage() {
             className="inline-flex items-center justify-center gap-1 rounded bg-indigo-600 px-2 py-1.5 text-xs text-white hover:bg-indigo-500"
           >
             <Plus className="h-3 w-3" /> 新建定义
+          </button>
+          <button
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center justify-center gap-1 rounded border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+          >
+            <FileJson className="h-3 w-3" /> 导入 JSON
           </button>
 
           <div>
@@ -446,6 +496,14 @@ export function DefinitionWorkflowPage() {
         onApprove={(edits) => respondApproval(true, edits)}
         onReject={(edits) => respondApproval(false, edits)}
         onClose={() => setApprovalOpen(false)}
+      />
+
+      <ImportDefinitionDialog
+        open={importOpen}
+        busy={importBusy}
+        onImportToCanvas={importToCanvas}
+        onSave={importAndSave}
+        onClose={() => setImportOpen(false)}
       />
     </div>
   )

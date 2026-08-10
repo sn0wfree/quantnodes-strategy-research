@@ -59,7 +59,7 @@ vi.mock('lucide-react', () => {
     Bot: Stub, CalendarCheck: Stub, ClipboardList: Stub, Gauge: Stub,
     Code2: Stub, Wrench: Stub, Check: Stub, X: Stub,
     Clock: Stub, CheckCircle: Stub, XCircle: Stub, AlertCircle: Stub,
-    ArrowRight: Stub,
+    ArrowRight: Stub, FileJson: Stub,
   }
 })
 
@@ -177,5 +177,56 @@ describe('ApprovalDialog', () => {
     fireEvent.change(notes, { target: { value: '先验证数据' } })
     fireEvent.click(screen.getByText('拒绝并重规划'))
     expect(onReject).toHaveBeenCalledWith('先验证数据')
+  })
+})
+
+describe('JSON import', () => {
+  const GOOD_JSON = JSON.stringify({
+    name: 'imported_flow',
+    nodes: [
+      { id: 'p', type: 'planner', label: '生成计划', config: { max_steps: 6 } },
+      { id: 'e', type: 'evaluator', label: '评估', config: {} },
+    ],
+    edges: [{ source: 'p', target: 'e' }],
+  })
+
+  it('imports JSON into the canvas (edit without saving)', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
+    fireEvent.click(screen.getByText('导入 JSON'))
+    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+    const ta = screen.getByPlaceholderText(/my_workflow/)
+    fireEvent.change(ta, { target: { value: GOOD_JSON } })
+    fireEvent.click(screen.getByText('导入到画布（不保存）'))
+    // Editor opens with the imported definition name (no save API call)
+    await waitFor(() => expect(screen.getByText('· imported_flow')).toBeTruthy())
+    expect(api.definitions.save).not.toHaveBeenCalled()
+  })
+
+  it('validates and saves JSON via API', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
+    fireEvent.click(screen.getByText('导入 JSON'))
+    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+    const ta = screen.getByPlaceholderText(/my_workflow/)
+    fireEvent.change(ta, { target: { value: GOOD_JSON } })
+    fireEvent.click(screen.getByText('校验并保存'))
+    await waitFor(() => expect(api.definitions.save).toHaveBeenCalled())
+    const payload = vi.mocked(api.definitions.save).mock.calls[0][0]
+    expect(payload.name).toBe('imported_flow')
+    expect(payload.nodes).toHaveLength(2)
+    expect(payload.edges).toEqual([{ source: 'p', target: 'e' }])
+  })
+
+  it('rejects invalid JSON with an error message', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
+    fireEvent.click(screen.getByText('导入 JSON'))
+    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+    const ta = screen.getByPlaceholderText(/my_workflow/)
+    fireEvent.change(ta, { target: { value: '{not json' } })
+    fireEvent.click(screen.getByText('校验并保存'))
+    await waitFor(() => expect(screen.getByText(/JSON 解析失败/)).toBeTruthy())
+    expect(api.definitions.save).not.toHaveBeenCalled()
   })
 })
