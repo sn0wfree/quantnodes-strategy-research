@@ -209,6 +209,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         # rows start as the default chat persona.
         _add_column(conn, "attempts", "persona", "TEXT")
         conn.execute("PRAGMA user_version = 4")
+    if version < 5:
+        # Plan/Build mode + model override + thinking params (A2 feature).
+        _add_column(conn, "attempts", "mode", "TEXT NOT NULL DEFAULT 'build'")
+        _add_column(conn, "attempts", "model_override", "TEXT")
+        _add_column(conn, "attempts", "thinking", "TEXT NOT NULL DEFAULT 'auto'")
+        conn.execute("PRAGMA user_version = 5")
 
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
@@ -227,6 +233,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             error TEXT,
             message_id TEXT,
             persona TEXT,
+            mode TEXT NOT NULL DEFAULT 'build',
+            model_override TEXT,
+            thinking TEXT NOT NULL DEFAULT 'auto',
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         )
     """)

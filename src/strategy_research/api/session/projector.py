@@ -447,6 +447,11 @@ class Projector:
                 # projection (e.g., after compact.ended removed them).
                 # Without this, old messages linger in the DB and the
                 # invariant breaks.
+                #
+                # Safety guard: if projection is empty but DB has
+                # messages, event_log may be incomplete (e.g. session
+                # created before event-sourcing). Skip DELETE to
+                # prevent silent data loss.
                 if msg_ids:
                     placeholders = ",".join("?" * len(msg_ids))
                     conn.execute(
@@ -455,10 +460,22 @@ class Projector:
                         (state.session_id, *msg_ids),
                     )
                 else:
-                    conn.execute(
-                        "DELETE FROM messages WHERE session_id = ?",
+                    existing_count = conn.execute(
+                        "SELECT COUNT(*) FROM messages WHERE session_id = ?",
                         (state.session_id,),
-                    )
+                    ).fetchone()[0]
+                    if existing_count > 0:
+                        logger.warning(
+                            "flush: projection empty but DB has %d messages "
+                            "for session %s — skipping DELETE "
+                            "(possible event_log gap)",
+                            existing_count, state.session_id,
+                        )
+                    else:
+                        conn.execute(
+                            "DELETE FROM messages WHERE session_id = ?",
+                            (state.session_id,),
+                        )
 
                 # UPSERT message_parts
                 for row in part_rows:

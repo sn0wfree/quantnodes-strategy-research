@@ -254,8 +254,9 @@ class SessionStore:
                 INSERT INTO attempts (
                     attempt_id, session_id, parent_attempt_id, status,
                     prompt, run_dir, summary, react_trace_json, metrics_json,
-                    created_at, completed_at, error, message_id, persona
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, completed_at, error, message_id, persona,
+                    mode, model_override, thinking
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     attempt.attempt_id,
@@ -272,6 +273,9 @@ class SessionStore:
                     attempt.error,
                     attempt.message_id,
                     attempt.persona,
+                    attempt.mode,
+                    attempt.model_override,
+                    attempt.thinking,
                 ),
             )
             conn.commit()
@@ -292,7 +296,10 @@ class SessionStore:
                     metrics_json = ?,
                     completed_at = ?,
                     error = ?,
-                    message_id = ?
+                    message_id = ?,
+                    mode = ?,
+                    model_override = ?,
+                    thinking = ?
                 WHERE attempt_id = ?
                 """,
                 (
@@ -305,6 +312,9 @@ class SessionStore:
                     attempt.completed_at,
                     attempt.error,
                     attempt.message_id,
+                    attempt.mode,
+                    attempt.model_override,
+                    attempt.thinking,
                     attempt.attempt_id,
                 ),
             )
@@ -374,6 +384,9 @@ def _row_to_attempt(row: sqlite3.Row) -> Attempt:
         message_id=row["message_id"],
         metrics=json.loads(row["metrics_json"]) if row["metrics_json"] else None,
         persona=row["persona"] if "persona" in row.keys() else None,
+        mode=row["mode"] if "mode" in row.keys() else "build",
+        model_override=row["model_override"] if "model_override" in row.keys() else None,
+        thinking=row["thinking"] if "thinking" in row.keys() else "auto",
     )
 
 
