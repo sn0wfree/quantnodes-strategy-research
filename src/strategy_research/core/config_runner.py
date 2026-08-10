@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -137,6 +138,12 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
     - "auto+duckdb": DuckDB cache + online refresh (recommended)
       1. DuckDB has fresh data → use cache
       2. DuckDB empty or stale → fetch online → save to DuckDB → return
+
+    The returned panel is filtered to ``data.codes`` when declared:
+    orphan assets left over in DuckDB from earlier fetches (codes that
+    are no longer in the strategy config) must never enter the panel —
+    they carry short/NaN histories that poison factor scores and
+    weights (see docs/run-backtest-data-gate.md).
     """
     strategy_name = cfg.get("strategy", {}).get("name", "default")
     data_cfg = cfg.get("data", {})
@@ -145,6 +152,19 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
     start_date = data_cfg.get("start_date", "2020-01-01")
     end_date = data_cfg.get("end_date", "2025-12-31")
 
+    def _finalize(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty or not codes:
+            return df
+        wanted = [c for c in codes if c in df.columns]
+        if not wanted:
+            return pd.DataFrame(index=df.index)
+        if len(wanted) < len(df.columns):
+            logger.info(
+                "filtering panel to %d/%d configured codes "
+                "(orphans dropped)", len(wanted), len(df.columns)
+            )
+        return df[wanted]
+
     # --- Cache mode: auto+duckdb ---
     if source == "auto+duckdb":
         # 1. Check if DuckDB cache is fresh
@@ -152,7 +172,7 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
             df = load_price_data(workspace_path, strategy_name, start_date, end_date)
             if not df.empty:
                 logger.info("Using DuckDB cache for %s", strategy_name)
-                return df
+                return _finalize(df)
         # 2. Cache miss — fetch online
         if codes:
             try:
@@ -166,7 +186,7 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
                 data_map = loader.fetch(codes, start_date, end_date)
                 n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
                 logger.info("Saved %d rows to DuckDB cache", n_rows)
-                return load_price_data(workspace_path, strategy_name, start_date, end_date)
+                return _finalize(load_price_data(workspace_path, strategy_name, start_date, end_date))
             except Exception as exc:
                 logger.warning("Online fetch failed: %s", exc)
         return pd.DataFrame()
@@ -175,7 +195,7 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
     if source == "duckdb":
         df = load_price_data(workspace_path, strategy_name, start_date, end_date)
         if not df.empty:
-            return df
+            return _finalize(df)
         if not codes:
             return df
 
@@ -195,7 +215,7 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
             n_rows = save_ohlcv_to_db(workspace_path, data_map, strategy_name)
             logger.info("Saved %d rows to DuckDB", n_rows)
 
-            return load_price_data(workspace_path, strategy_name, start_date, end_date)
+            return _finalize(load_price_data(workspace_path, strategy_name, start_date, end_date))
         except Exception as exc:
             logger.warning("Online fetch failed: %s", exc)
 
@@ -221,6 +241,7 @@ def create_strategy(cfg: dict, workspace_path=None):
         factors, params,
         workspace_path=workspace_path,
         strategy_name=strategy_name,
+        codes=cfg.get("data", {}).get("codes") or None,
     )
 
 
@@ -245,6 +266,7 @@ class FactorStrategy:
         params: dict,
         workspace_path: str | Path | None = None,
         strategy_name: str | None = None,
+        codes: list[str] | None = None,
     ):
         self.factors = factors
         self.params = params
@@ -252,6 +274,23 @@ class FactorStrategy:
             Path(workspace_path) if workspace_path is not None else None
         )
         self.strategy_name = strategy_name
+        self.codes = codes
+        # 运行期因子失败收集：{factor, asset, error, occurrences}。
+        # 完整列表由 run_backtest_from_yaml 写 factor_failures.json，
+        # 聚合摘要进 metrics.json 与工具返回（docs/run-backtest-data-gate.md）。
+        self.factor_failures: list[dict] = []
+
+    def _record_factor_failure(self, factor: str, asset: str, error: str) -> None:
+        for rec in self.factor_failures:
+            if rec["factor"] == factor and rec["asset"] == asset:
+                rec["occurrences"] += 1
+                return
+        self.factor_failures.append({
+            "factor": factor,
+            "asset": asset,
+            "error": str(error)[:300],
+            "occurrences": 1,
+        })
 
     def _load_long_ohlcv(
         self, up_to_date: pd.Timestamp
@@ -275,15 +314,20 @@ class FactorStrategy:
                 f"Cannot open DuckDB at {self.workspace_path}; cannot load OHLCV"
             )
         try:
-            df = conn.execute(
-                """
+            query = """
                 SELECT date, asset_code, open, high, low, close, volume
                 FROM price_data
                 WHERE strategy_name = ? AND date <= ?
-                ORDER BY date, asset_code
-                """,
-                [self.strategy_name, pd.Timestamp(up_to_date).date()],
-            ).fetchdf()
+            """
+            params: list = [self.strategy_name, pd.Timestamp(up_to_date).date()]
+            # 只加载 config.codes 内的资产 —— 幽灵资产（历史残留、短/NaN 历史）
+            # 会毒化因子分数与权重（docs/run-backtest-data-gate.md）。
+            if self.codes:
+                placeholders = ", ".join(["?" for _ in self.codes])
+                query += f" AND asset_code IN ({placeholders})"
+                params.extend(self.codes)
+            query += " ORDER BY date, asset_code"
+            df = conn.execute(query, params).fetchdf()
         finally:
             conn.close()
         return df
@@ -364,8 +408,10 @@ class FactorStrategy:
                         wide[asset] = s.reindex(price_panel.index)
                     except FactorComputeError as e:
                         print(f"⚠️  因子 {name} 在 {asset} 失败: {e}")
+                        self._record_factor_failure(name, asset, e)
                     except Exception as e:
                         print(f"⚠️  因子 {name} 在 {asset} 异常: {e}")
+                        self._record_factor_failure(name, asset, e)
                 factor_values[name] = wide
                 continue
 
@@ -379,6 +425,7 @@ class FactorStrategy:
                     factor_values[name] = wide
                 except Exception as e:
                     print(f"⚠️  Alpha Zoo {alpha_id} 计算失败: {e}")
+                    self._record_factor_failure(name, alpha_id, e)
                 continue
 
             # 方式 3: 多个 Alpha Zoo 因子组合
@@ -404,6 +451,7 @@ class FactorStrategy:
                     factor_values[name] = combined_wide
                 except Exception as e:
                     print(f"⚠️  Alpha Zoo 组合 {alpha_ids} 计算失败: {e}")
+                    self._record_factor_failure(name, ",".join(alpha_ids)[:80], e)
 
         # 2. 计算综合分数 — 取每个因子在当前 date 的横截面值
         scores = pd.Series(0.0, index=price_panel.columns)
@@ -428,16 +476,29 @@ class FactorStrategy:
                 scores = scores.add(aligned * weight, fill_value=0)
 
         # 3. 选择 top_n
+        # 防御：因子失败/无数据的资产 score 为 0/NaN，绝不能当作"最优"被选中
+        # （0 > 真实资产的负分 → 幽灵资产混入权重 → NaN 毒化）。无效分数先剔除。
+        scores = scores.replace([np.inf, -np.inf], np.nan)
+        eligible = scores.dropna()
+        if eligible.empty:
+            # 所有因子都无有效分数（数据不足/全部失败）——返回空权重，
+            # 引擎保持净值不动，绝不产出 NaN。
+            return {}
         top_n = self.params.get("top_n", 10)
-        selected = scores.nlargest(top_n).index.tolist()
+        selected = eligible.nlargest(top_n).index.tolist()
 
         # 4. 计算权重
         weight_method = self.params.get("weight_method", "inverse_vol")
         if weight_method == "inverse_vol":
             lookback = self.params.get("vol_lookback", 60)
             vols = price_panel[selected].pct_change(fill_method=None).iloc[-lookback:].std()
-            inv_vol = 1.0 / vols.clip(lower=0.01)
-            weights = (inv_vol / inv_vol.sum()).to_dict()
+            valid_vols = vols.dropna()
+            if valid_vols.empty:
+                # 波动率全部无效（历史不足/停牌）——退化为等权
+                weights = {c: 1.0 / len(selected) for c in selected}
+            else:
+                inv_vol = 1.0 / valid_vols.clip(lower=0.01)
+                weights = (inv_vol / inv_vol.sum()).to_dict()
         else:
             # 等权
             weights = {c: 1.0 / len(selected) for c in selected}
@@ -491,10 +552,13 @@ def run_from_yaml(yaml_path: str | Path, workspace_path: Path) -> BacktestResult
     min_history = rebal_cfg.get("min_history", 252)
     cost = create_cost_config(cfg)
 
-    return engine.run(
+    result = engine.run(
         price_panel=data_norm,
         strategy=strategy,
         rebal_freq=rebal_freq,
         min_history=min_history,
         cost=cost,
     )
+    # 运行期因子失败收集 → BacktestResult（由 backtest.py 落盘/返回）
+    result.factor_failures = list(getattr(strategy, "factor_failures", None) or [])
+    return result

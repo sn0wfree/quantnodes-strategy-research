@@ -146,10 +146,27 @@ def save_run_snapshot(strategy_dir: Path, run_dir: Path) -> None:
         shutil.copy2(config_src, config_dst)
 
 
+def _clean_nan(value):
+    """递归清理 NaN/±Inf → None（JSON null）。
+
+    ``json.dump`` 默认 allow_nan=True 会把 NaN 写成非法 JSON 字面量
+    （``"ann_return": NaN``），下游解析会失败。所有持久化/返回前的
+    metrics 必须经过清理（docs/run-backtest-data-gate.md）。
+    """
+    if isinstance(value, float):
+        import math
+        return None if not math.isfinite(value) else value
+    if isinstance(value, dict):
+        return {k: _clean_nan(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean_nan(v) for v in value]
+    return value
+
+
 def save_run_metrics(run_dir: Path, metrics: dict) -> None:
-    """保存 metrics.json。"""
+    """保存 metrics.json（NaN/Inf 清理为 null，保证合法 JSON）。"""
     with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=2, ensure_ascii=False)
+        json.dump(_clean_nan(metrics), f, indent=2, ensure_ascii=False)
 
 
 def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None:
@@ -300,7 +317,7 @@ def run_backtest_script(
         "commit": commit_hash,
         "action": action,
         "description": description,
-        "status": "pending",
+        "status": "success",
         "timestamp": datetime.now().isoformat(),
     })
 
@@ -321,7 +338,7 @@ def run_backtest_script(
         ann_vol=metrics.get("ann_vol", 0.0),
         sortino=metrics.get("sortino", 0.0),
         turnover=metrics.get("turnover", 0.0),
-        status="pending",
+        status="success",
         description=description,
     )
 
@@ -393,9 +410,25 @@ def run_backtest_from_yaml(
             "commit": git_get_hash(workspace_path),
             "action": action,
             "description": description,
-            "status": "pending",
+            "status": "success",
             "timestamp": datetime.now().isoformat(),
         })
+
+        # 运行期失败暴露: 完整因子失败列表落盘 factor_failures.json
+        # （与脚本路径既有格式一致, 可 read_file 审计）;
+        # metrics.json 存聚合摘要（按因子, 最多 5 条）。
+        factor_failures = list(getattr(result, "factor_failures", None) or [])
+        if factor_failures:
+            try:
+                with open(run_dir / "factor_failures.json", "w", encoding="utf-8") as f:
+                    json.dump(_clean_nan(factor_failures), f, indent=2, ensure_ascii=False)
+            except Exception:  # noqa: BLE001
+                logger.warning("failed to write factor_failures.json", exc_info=True)
+            metrics["factor_failures_summary"] = _factor_failures_summary(factor_failures)
+
+        # 运行期其他警告（equity_curve.csv 导出失败等）统一收集
+        metrics["warnings"] = list(getattr(result, "warnings", None) or [])
+
         save_run_metrics(run_dir, metrics)
         update_results_tsv(strategy_dir, run_name, metrics)
 
@@ -414,7 +447,7 @@ def run_backtest_from_yaml(
             ann_vol=metrics.get("ann_vol", 0.0),
             sortino=metrics.get("sortino", 0.0),
             turnover=metrics.get("turnover", 0.0),
-            status="pending",
+            status="success",
             description=description,
         )
 
@@ -425,6 +458,7 @@ def run_backtest_from_yaml(
         # 导出净值曲线到文件 (equity_curve.csv)。这是 show_chart /
         # show_report 的文件引用源：agent 只拿到路径，nav 数据不进
         # LLM 上下文（docs/right-panel-agent-driven.md）。
+        export_warning = ""
         try:
             nav = result.nav_daily
             if nav is not None and len(nav) > 0:
@@ -433,8 +467,12 @@ def run_backtest_from_yaml(
                     "nav": nav.values,
                 })
                 nav_df.to_csv(run_dir / "equity_curve.csv", index=False)
-        except Exception:  # noqa: BLE001
-            print("⚠️ 导出 equity_curve.csv 失败")
+        except Exception as exc:  # noqa: BLE001
+            export_warning = f"equity_curve.csv 导出失败: {exc}"
+            print(f"⚠️ {export_warning}")
+        if export_warning:
+            metrics["warnings"] = list(metrics.get("warnings", [])) + [export_warning]
+            save_run_metrics(run_dir, metrics)
 
         # Trust Layer: write run_card.{json,md}
         write_run_card(
@@ -461,10 +499,30 @@ def run_backtest_from_yaml(
             "run": run_name,
             "metrics": metrics,
             "nav": result.nav_daily,
+            "factor_failures": factor_failures,
         }
 
     except Exception as e:
         return {"success": False, "run": "", "metrics": {}, "error": str(e)}
+
+
+def _factor_failures_summary(failures: list[dict], max_items: int = 5) -> list[dict]:
+    """按因子聚合失败信息（每因子一条: 失败资产数 + 首个错误），最多 5 条。"""
+    by_factor: dict[str, dict] = {}
+    for rec in failures:
+        key = rec.get("factor", "unknown")
+        if key not in by_factor:
+            by_factor[key] = {
+                "factor": key,
+                "failed_assets": 0,
+                "first_error": rec.get("error", "")[:200],
+            }
+        by_factor[key]["failed_assets"] += 1
+    items = list(by_factor.values())[:max_items]
+    if len(by_factor) > max_items:
+        items.append({"factor": "...", "failed_assets": len(by_factor) - max_items,
+                      "first_error": f"等 {len(by_factor) - max_items} 个因子"})
+    return items
 
 
 # ============================================================

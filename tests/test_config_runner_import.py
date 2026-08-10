@@ -209,3 +209,154 @@ factors:
         assert last_nav != 1.0, "nav stayed flat at 1.0"
         ann_return = float(result.metrics.get("ann_return", 0.0))
         assert math.isfinite(ann_return), f"metrics={result.metrics}"
+
+
+class TestAssetFilteringAndNaNDefenses:
+    """Commit 1 root-cause fixes:
+    - orphan assets (not in config.codes) never enter the panel / OHLCV load
+    - ghost assets (1-row NaN history) cannot poison scores/weights/nav
+    - runtime factor failures are collected on the strategy instance
+    """
+
+    def _make_workspace(self, tmp_path, config_text: str, codes, strategy="e2e_strat"):
+        import numpy as np
+
+        from strategy_research.core.db import save_ohlcv_to_db
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        dates = pd.bdate_range("2023-01-02", periods=200)
+        rng = np.random.default_rng(3)
+        data_map: dict[str, pd.DataFrame] = {}
+        for code in codes:
+            close = 100 * np.cumprod(1 + rng.normal(0.0005, 0.015, len(dates)))
+            data_map[code] = pd.DataFrame(
+                {
+                    "open": close * 0.99,
+                    "high": close * 1.02,
+                    "low": close * 0.98,
+                    "close": close,
+                    "volume": 1_000_000,
+                },
+                index=pd.DatetimeIndex(dates, name="trade_date"),
+            )
+        # ghost asset: a single row of NaN data (historical residue)
+        ghost = pd.DataFrame(
+            {"open": [float("nan")], "high": [float("nan")], "low": [float("nan")],
+             "close": [float("nan")], "volume": [0.0]},
+            index=pd.DatetimeIndex([dates[0]], name="trade_date"),
+        )
+        data_map["999999.XX"] = ghost
+        save_ohlcv_to_db(ws, data_map, strategy)
+
+        sdir = ws / "strategies" / strategy
+        sdir.mkdir(parents=True)
+        (sdir / "config.yaml").write_text(config_text)
+        return ws
+
+    def test_orphan_assets_dropped_from_panel(self, tmp_path):
+        cfg_text = """strategy:
+  name: e2e_strat
+  type: rotation
+data:
+  source: duckdb
+  codes: ['000001.SZ', '600519.SH']
+rebalance:
+  freq: M
+  min_history: 60
+factors:
+  - name: momentum_20d
+    code: ts_return(close, 20)
+    weight: 1.0
+"""
+        from strategy_research.core.config_runner import load_data, load_yaml_config
+
+        ws = self._make_workspace(tmp_path, cfg_text, ["000001.SZ", "600519.SH"])
+        cfg = load_yaml_config(ws / "strategies" / "e2e_strat" / "config.yaml")
+        data = load_data(cfg, ws)
+        # ghost 999999.XX + third seeded code must be gone; only the 2 config codes remain
+        assert list(data.columns) == ["000001.SZ", "600519.SH"]
+
+    def test_ghost_asset_no_nan_weights_and_failures_collected(self, tmp_path):
+        cfg_text = """strategy:
+  name: e2e_strat
+  type: rotation
+data:
+  source: duckdb
+  codes: ['000001.SZ', '600519.SH']
+rebalance:
+  freq: M
+  min_history: 60
+factors:
+  - name: momentum_20d
+    code: ts_return(close, 20)
+    weight: 1.0
+"""
+        from strategy_research.core.config_runner import run_from_yaml
+
+        ws = self._make_workspace(tmp_path, cfg_text, ["000001.SZ", "600519.SH"])
+        result = run_from_yaml(
+            ws / "strategies" / "e2e_strat" / "config.yaml", ws
+        )
+        nav = result.nav_daily
+        assert int(nav.isna().sum()) == 0, "nav must not contain NaN"
+        last_nav = float(nav.iloc[-1])
+        assert last_nav != 1.0, "nav stayed flat — weights never applied"
+        # factor failures: ghost asset is not in codes anymore → no failures
+        assert result.factor_failures == []
+
+    def test_factor_failures_collected_when_asset_has_nan_history(self, tmp_path):
+        cfg_text = """strategy:
+  name: e2e_strat
+  type: rotation
+data:
+  source: duckdb
+  codes: ['000001.SZ', '999999.XX']
+rebalance:
+  freq: M
+  min_history: 60
+factors:
+  - name: momentum_20d
+    code: ts_return(close, 20)
+    weight: 1.0
+"""
+        from strategy_research.core.config_runner import run_from_yaml
+
+        ws = self._make_workspace(tmp_path, cfg_text, ["000001.SZ"])
+        result = run_from_yaml(
+            ws / "strategies" / "e2e_strat" / "config.yaml", ws
+        )
+        # ghost asset IS in codes here → factor on it fails → collected
+        assert result.factor_failures, "expected factor failures to be collected"
+        rec = result.factor_failures[0]
+        assert rec["factor"] == "momentum_20d"
+        assert rec["asset"] == "999999.XX"
+        assert rec["occurrences"] >= 1
+        assert "数据不足" in rec["error"] or "无法解析" in rec["error"]
+
+    def test_all_scores_invalid_returns_empty_weights(self, tmp_path):
+        """Every factor fails on every asset → scores empty → empty weights
+        (engine keeps nav flat) instead of selecting score=0 ghosts."""
+        from strategy_research.core.config_runner import run_from_yaml
+
+        cfg_text = """strategy:
+  name: e2e_strat
+  type: rotation
+data:
+  source: duckdb
+  codes: ['000001.SZ', '600519.SH']
+rebalance:
+  freq: M
+  min_history: 60
+factors:
+  - name: bad_factor
+    code: unknown_op(close, 20)
+    weight: 1.0
+"""
+        ws = self._make_workspace(tmp_path, cfg_text, ["000001.SZ", "600519.SH"])
+        result = run_from_yaml(
+            ws / "strategies" / "e2e_strat" / "config.yaml", ws
+        )
+        assert int(result.nav_daily.isna().sum()) == 0
+        assert result.factor_failures, "bad factor must be recorded"
+        assert any(rec["factor"] == "bad_factor" for rec in result.factor_failures)

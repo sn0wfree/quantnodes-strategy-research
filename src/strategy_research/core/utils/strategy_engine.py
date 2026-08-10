@@ -58,6 +58,11 @@ class BacktestResult:
     weights_history: list[tuple[pd.Timestamp, dict[str, float]]] = field(default_factory=list)
     rebalance_dates: list[pd.Timestamp] = field(default_factory=list)
     metrics: dict = field(default_factory=dict)
+    # 运行期因子失败收集（{factor, asset, error, occurrences}）。
+    # run_from_yaml 结束时从 strategy.factor_failures 附加；
+    # run_backtest_from_yaml 写 factor_failures.json + 聚合摘要
+    # （docs/run-backtest-data-gate.md）。
+    factor_failures: list[dict] = field(default_factory=list)
 
 
 # ============================================================
@@ -121,6 +126,11 @@ class StrategyEngine:
                 if self._has_risk_callback:
                     new_w = strategy.on_risk_check(new_w, nav_s, date)
                 new_w = self._apply_engine_risk(new_w, nav_s, date)
+
+                # NaN 防御（最后防线）: 因子失败/脏数据可能产生 NaN 权重,
+                # 一旦进入 NAV 循环会毒化整条净值序列。过滤后为空 =
+                # 空仓, 净值保持不跌。
+                new_w = {c: w for c, w in new_w.items() if pd.notna(w)}
 
                 # 成本
                 if cost.enabled and prev_w:

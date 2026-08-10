@@ -622,3 +622,61 @@ def test_get_best_experiment_handles_invalid_metric_value(tmp_path):
     result = get_best_experiment(workspace, "demo")
     assert result is not None
     assert result["run"] == "run_0002"  # run_0001 的 calmar fallback 为 0
+
+
+# ============================================================
+# Commit 1: NaN→null JSON, status success, factor_failures 落盘
+# ============================================================
+
+def test_save_run_metrics_cleans_nan_to_null(tmp_path):
+    """NaN/Inf 必须序列化为合法 JSON (null)，而不是 NaN 字面量。"""
+    import math
+
+    from strategy_research.core.backtest import save_run_metrics
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    metrics = {
+        "ann_return": float("nan"),
+        "sharpe": float("inf"),
+        "ok": 1.5,
+        "nested": {"calmar": float("nan"), "x": 1},
+        "list": [float("nan"), 2],
+    }
+    save_run_metrics(run_dir, metrics)
+    raw = (run_dir / "metrics.json").read_text(encoding="utf-8")
+    assert "NaN" not in raw and "Infinity" not in raw
+    loaded = json.loads(raw)
+    assert loaded["ann_return"] is None
+    assert loaded["sharpe"] is None
+    assert loaded["ok"] == 1.5
+    assert loaded["nested"] == {"calmar": None, "x": 1}
+    assert loaded["list"] == [None, 2]
+
+
+def test_factor_failures_summary_aggregates(tmp_path):
+    from strategy_research.core.backtest import _factor_failures_summary
+
+    failures = [
+        {"factor": "low_volatility", "asset": "600519.SH", "error": "e1", "occurrences": 2},
+        {"factor": "low_volatility", "asset": "000858.SZ", "error": "e2", "occurrences": 1},
+        {"factor": "momentum_20d", "asset": "600519.SH", "error": "e3", "occurrences": 1},
+    ]
+    summary = _factor_failures_summary(failures)
+    assert len(summary) == 2
+    by_name = {s["factor"]: s for s in summary}
+    assert by_name["low_volatility"]["failed_assets"] == 2
+    assert by_name["momentum_20d"]["failed_assets"] == 1
+    assert by_name["low_volatility"]["first_error"] == "e1"
+
+
+def test_factor_failures_summary_caps_at_5(tmp_path):
+    from strategy_research.core.backtest import _factor_failures_summary
+
+    failures = [
+        {"factor": f"f{i}", "asset": "A", "error": "x", "occurrences": 1}
+        for i in range(8)
+    ]
+    summary = _factor_failures_summary(failures)
+    assert len(summary) == 6  # 5 + "..." 聚合项
+    assert summary[-1]["factor"] == "..."
