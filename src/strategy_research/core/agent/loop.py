@@ -1668,6 +1668,9 @@ class AgentLoop:
                 }
                 if include_msgs:
                     payload["messages"] = compressed_messages
+                    # opencode-aligned: the projector infers the
+                    # compaction boundary (compacted_until_seq) from
+                    # the compressed message list + projection order.
                 self._event_bus.emit(
                     session_id,
                     "compact.ended",

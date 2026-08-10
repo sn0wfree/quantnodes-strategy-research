@@ -64,6 +64,9 @@ class ProjectedMessage:
     created_at: float = 0.0
     seq: int = 0
     parts: Dict[str, ProjectedPart] = field(default_factory=dict)
+    # Arbitrary metadata persisted to messages.metadata_json (e.g.
+    # compaction markers carry compacted_until_seq).
+    metadata: Dict[str, Any] = field(default_factory=dict)
     # attempt_id is for SSE correlation; not stored in messages table
     attempt_id: Optional[str] = None
     # Tracks the currently open thinking block so ``thinking_delta``
@@ -107,6 +110,8 @@ class ProjectedSession:
                 "message_type": m.message_type,
                 "created_at": m.created_at,
                 "seq": m.seq,
+                "metadata_json": json.dumps(m.metadata, ensure_ascii=False)
+                if m.metadata else None,
             }
             for m in self.messages_in_order()
         ]
@@ -163,6 +168,7 @@ class ProjectedSession:
                 seq=m.seq,
                 metadata={
                     "_parts": parts_list,
+                    **(m.metadata or {}),
                 },
             ))
         return out
@@ -526,11 +532,12 @@ class Projector:
     @staticmethod
     def _upsert_message(conn: sqlite3.Connection, row: Dict[str, Any]) -> None:
         """UPSERT a single messages-table row (preserves metadata_json)."""
+        metadata_json = row.get("metadata_json")
         conn.execute(
             "INSERT INTO messages "
             "(id, session_id, role, content, created_at, "
             "message_type, seq, metadata_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "session_id=excluded.session_id, "
             "role=excluded.role, "
@@ -548,6 +555,7 @@ class Projector:
                 row["created_at"],
                 row["message_type"],
                 row["seq"],
+                metadata_json,
             ),
         )
 
@@ -1099,104 +1107,94 @@ class Projector:
     def _on_compact(
         self, event: EventV2, state: ProjectedSession,
     ) -> None:
-        """Handle compaction event — create a compaction message.
+        """Handle compaction event — add a compaction marker message.
 
         Compaction messages are system-level messages that mark where
         the history was compressed. They have role='system' and
         message_type='compaction'. The content is the summary.
 
-        If the event has a 'messages' field (compact.ended with full
-        replacement data), we replace the pre-compaction messages with
-        the compressed set, keeping only the most recent message
-        (the current turn) plus the compaction message itself.
+        opencode-aligned behavior (compaction-history-filter.md):
+        - ALL original messages are KEPT in the projection (chat
+          record preserved for UI / future review).
+        - The marker records `compacted_until_seq` in its metadata:
+          every message with seq <= that value was covered by this
+          compaction and must be hidden from the LLM context (but
+          kept in the DB).
+        - Only the most recent compaction marker is used when building
+          LLM context (see SessionService._convert_messages_to_history).
         """
         data = event.data
         summary = data.get("summary") or data.get("content") or ""
         msg_id = f"compact-{event.id[:8]}"
 
-        # If messages list is provided, do full replacement
-        compressed_msgs = data.get("messages")
-        if compressed_msgs and isinstance(compressed_msgs, list):
-            # Save the last message (current turn, not compressed)
-            ordered = state.messages_in_order()
-            last_msg = ordered[-1] if ordered else None
-
-            # Clear all existing messages
-            state.messages.clear()
-
-            # Insert compressed messages
-            for i, m_data in enumerate(compressed_msgs):
-                role = m_data.get("role", "assistant")
-                content = m_data.get("content", "") or ""
-                cid = m_data.get("id") or f"cmp_{event.id[:8]}_{i}"
-
-                pmsg = ProjectedMessage(
-                    id=cid,
-                    session_id=event.aggregate_id,
-                    role=role,
-                    content=content,
-                    message_type=role if role in ("user", "assistant", "system") else "assistant",
-                    created_at=event.time_created,
-                    seq=len(state.messages) + 1,
+        # Compute the compaction boundary: the seq of the last message
+        # covered by this compaction. Prefer an explicit value from the
+        # event; otherwise infer by matching the compressed `recent`
+        # messages against the projection by (role, content).
+        compacted_until_seq = data.get("compacted_until_seq")
+        if compacted_until_seq is None:
+            compressed_msgs = data.get("messages")
+            if compressed_msgs and isinstance(compressed_msgs, list):
+                ordered = state.messages_in_order()
+                # This marker's position (if a prior partial replay
+                # added it) — messages after it are post-compaction.
+                marker_idx = next(
+                    (i for i, m in enumerate(ordered)
+                     if m.id == msg_id),
+                    len(ordered),
                 )
+                recent_msgs = [
+                    m for m in compressed_msgs
+                    if m.get("role") != "system"
+                ]
+                if recent_msgs:
+                    # Match by (role, content): the compressed recent
+                    # dicts are the same messages that exist in the
+                    # projection. The OLDEST matching message is the
+                    # first recent message; everything before it was
+                    # compacted.
+                    recent_keys = {
+                        (m.get("role"), m.get("content", ""))
+                        for m in recent_msgs
+                    }
+                    recent_indices = [
+                        idx for idx in range(marker_idx)
+                        if (ordered[idx].role, ordered[idx].content)
+                        in recent_keys
+                    ]
+                    if recent_indices:
+                        oldest = min(recent_indices)
+                        compacted_until_seq = ordered[oldest].seq - 1
+                    else:
+                        compacted_until_seq = 0
+                else:
+                    compacted_until_seq = 0
+            else:
+                compacted_until_seq = 0
 
-                # Add tool_call parts if present
-                tool_calls = m_data.get("tool_calls")
-                if role == "assistant" and tool_calls:
-                    for j, tc in enumerate(tool_calls):
-                        tc_id = tc.get("id", "") or f"tc_{i}_{j}"
-                        func = tc.get("function", {})
-                        pmsg.parts[tc_id] = ProjectedPart(
-                            id=tc_id,
-                            type="tool_call",
-                            data={
-                                "type": "tool_call",
-                                "id": tc_id,
-                                "state": "done",
-                                "tool": func.get("name", ""),
-                                "input": func.get("arguments", "{}"),
-                                "result": tc.get("result", ""),
-                                "status": "done",
-                            },
-                            seq=len(pmsg.parts),
-                            time_created=event.time_created,
-                        )
-
-                state.messages[cid] = pmsg
-
-            # Insert the compaction marker message
-            state.messages[msg_id] = ProjectedMessage(
-                id=msg_id,
-                session_id=event.aggregate_id,
-                role="system",
-                content=summary,
-                message_type="compaction",
-                created_at=event.time_created,
-                seq=len(state.messages) + 1,
-            )
-
-            # Re-add the last message (current turn) if it existed
-            if last_msg:
-                last_msg.seq = len(state.messages) + 1
-                state.messages[last_msg.id] = last_msg
-
-            return
-
-        # Simple case: just add a compaction marker message
-        if msg_id in state.messages:
-            if summary:
-                state.messages[msg_id].content = summary
-            return
-        msg_seq = len(state.messages) + 1
-        state.messages[msg_id] = ProjectedMessage(
+        marker = ProjectedMessage(
             id=msg_id,
             session_id=event.aggregate_id,
             role="system",
             content=summary,
             message_type="compaction",
             created_at=event.time_created,
-            seq=msg_seq,
+            seq=len(state.messages) + 1,
+            metadata={
+                "compacted_until_seq": compacted_until_seq,
+                "compaction_id": data.get("compaction_id", ""),
+            },
         )
+
+        # If a marker with this id already exists (replayed event),
+        # update its summary/metadata instead of duplicating.
+        existing = state.messages.get(msg_id)
+        if existing is not None:
+            existing.content = summary
+            existing.metadata = marker.metadata
+            return
+
+        state.messages[msg_id] = marker
 
 
 __all__ = [

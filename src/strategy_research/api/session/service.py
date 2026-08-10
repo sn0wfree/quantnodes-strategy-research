@@ -1234,13 +1234,25 @@ class SessionService:
 
         # Persist compressed history via event-sourcing (B4/B5)
         # Emit compact.ended event with the compressed message set.
-        # The projector handles:
-        # 1. Replacing old messages with compressed versions
-        # 2. Adding a compaction marker message
-        # 3. Preserving the last (current turn) message
+        # The projector keeps ALL original messages (chat record) and
+        # adds a compaction marker carrying compacted_until_seq.
         # EventBusV2.flush_to_messages=True ensures messages table is updated.
         if layers:
             try:
+                # opencode-aligned: emit compact.ended with the
+                # compressed set. The projector KEEPS all original
+                # messages in the projection (chat record preserved)
+                # and records compacted_until_seq on the marker so the
+                # LLM context builder can hide the covered messages.
+                # The boundary is computed from the compressed recent
+                # messages' seqs (attached during history conversion).
+                compacted_until_seq = None
+                recent_seqs = [
+                    m.get("seq") for m in (compressed or [])
+                    if m.get("role") != "system" and isinstance(m.get("seq"), int)
+                ]
+                if recent_seqs:
+                    compacted_until_seq = min(recent_seqs) - 1
                 self.event_bus.emit(
                     session_id,
                     "compact.ended",
@@ -1250,6 +1262,7 @@ class SessionService:
                         "after_tokens": after_tokens,
                         "layers": layers,
                         "messages": compressed,
+                        "compacted_until_seq": compacted_until_seq,
                     },
                 )
             except Exception:
@@ -1333,6 +1346,32 @@ class SessionService:
                     hidden,
                 )
 
+        # ── opencode-aligned: hide messages covered by compaction ──
+        # Each compaction marker records compacted_until_seq (the seq of
+        # the last message it covered). Everything with seq <= that was
+        # replaced by the summary: it stays in the DB (chat record) but
+        # must NOT enter the LLM context. The most recent compaction's
+        # boundary subsumes all older ones (summaries are cumulative).
+        hidden_until_seq: int = -1
+        for i in keep_compaction_indices:
+            msg = messages[i]
+            meta = getattr(msg, "metadata", None) or {}
+            boundary = meta.get("compacted_until_seq")
+            if isinstance(boundary, int) and boundary > hidden_until_seq:
+                hidden_until_seq = boundary
+        if hidden_until_seq >= 0:
+            hidden_msgs = sum(
+                1 for m in messages
+                if getattr(m, "seq", 0) <= hidden_until_seq
+                and getattr(m, "message_type", "") != "compaction"
+            )
+            _compaction_metrics["total_hidden"] += hidden_msgs
+            logger.debug(
+                "[HIST] hiding %d messages covered by compaction "
+                "(seq <= %d), kept in DB for chat record",
+                hidden_msgs, hidden_until_seq,
+            )
+
         # ── Pre-build indexes for assistant-tool reordering ──
         # tool_to_assistant_idx: tool_call_id -> assistant message index
         # tc_to_tool_idx: tool_call_id -> tool message index
@@ -1371,6 +1410,17 @@ class SessionService:
             content = msg.content if hasattr(msg, "content") else msg.get("content", "")
             parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
             message_type = msg.message_type if hasattr(msg, "message_type") else "assistant"
+
+            # opencode-aligned: skip messages covered by compaction.
+            # They stay in the DB (chat record) but are replaced by the
+            # summary in LLM context. Compaction markers themselves are
+            # handled by the branch below (not hidden here).
+            if (
+                hidden_until_seq >= 0
+                and message_type != "compaction"
+                and getattr(msg, "seq", 0) <= hidden_until_seq
+            ):
+                continue
 
             # Handle compaction messages: filter then convert
             if message_type == "compaction":
@@ -1416,6 +1466,11 @@ class SessionService:
                 continue
 
             entry: dict[str, Any] = {"role": role, "content": content or ""}
+            # Attach the DB seq so downstream compaction can compute
+            # the exact boundary (compacted_until_seq).
+            msg_seq = getattr(msg, "seq", None)
+            if isinstance(msg_seq, int):
+                entry["seq"] = msg_seq
             group_id: int | None = None
 
             if role == "assistant" and parts:
