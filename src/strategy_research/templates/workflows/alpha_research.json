@@ -1,0 +1,45 @@
+{
+  "name": "alpha_research",
+  "description": "静态因子研究流水线：假设生成 → 数据检查 → 回测 → 达标评估（模块化组合示例）",
+  "version": "1.0",
+  "budget": {"token": null, "turn": null, "time_seconds": 1800},
+  "params": {
+    "loop": {"max_iterations": 8},
+    "summary": {"max_chars": 300}
+  },
+  "nodes": [
+    {
+      "id": "hypothesis",
+      "type": "llm_agent",
+      "label": "提出研究假设",
+      "config": {
+        "role": "researcher",
+        "tools": ["read_file", "web_search", "read_url", "factor_analysis"],
+        "prompt_text": "基于当前策略与研究背景，提出 2-3 个可检验的因子/策略假设，明确每个假设的验证指标（预期 IC、回测指标）。"
+      }
+    },
+    {
+      "id": "data_check",
+      "type": "tool",
+      "label": "检查数据",
+      "config": {"tool": "check_data", "params": {}}
+    },
+    {
+      "id": "backtest",
+      "type": "tool",
+      "label": "运行回测",
+      "config": {"tool": "run_backtest", "params": {}}
+    },
+    {
+      "id": "evaluator",
+      "type": "evaluator",
+      "label": "达标评估",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"source": "hypothesis", "target": "data_check"},
+    {"source": "data_check", "target": "backtest"},
+    {"source": "backtest", "target": "evaluator"}
+  ]
+}

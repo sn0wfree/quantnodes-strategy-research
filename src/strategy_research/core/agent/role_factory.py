@@ -27,6 +27,10 @@ _ROLE_PROMPT_FILES = {
     "anti_overfit_analyst": "anti_overfit_analyst.md",
     "backtest_diagnostics": "backtest_diagnostics.md",
     "critic": "critic.md",
+    # Workflow-module roles (docs/workflow-module-design.md):
+    # planner 生成研究计划子图; evaluator 评估进度并决策.
+    "planner": "planner.md",
+    "evaluator": "evaluator.md",
 }
 
 # 角色对应的工具白名单 (用 build_default_registry() 注册的 9 个工具名)
@@ -41,6 +45,8 @@ _ROLE_TOOL_WHITELIST = {
     "anti_overfit_analyst":  ["read_file", "list_history", "factor_analysis"],
     "backtest_diagnostics":  ["read_file", "run_backtest", "git_diff", "show_chart", "show_report"],
     "critic":                ["read_file", "list_history"],
+    "planner":               ["read_file", "web_search", "read_url", "list_goals", "get_market_data"],
+    "evaluator":             ["read_file", "list_history", "factor_analysis"],
 }
 
 
@@ -84,6 +90,7 @@ def build_agent_loop(
     max_iterations: int = 8,
     enable_claim_validation: bool = False,
     strict_claim_validation: bool = False,
+    tools_override: list[str] | None = None,
 ) -> "AgentLoop | None":  # noqa: F821
     """为 role 构造 AgentLoop.
 
@@ -96,6 +103,7 @@ def build_agent_loop(
         max_iterations: ReAct 最大迭代数
         enable_claim_validation: 开启 claim 验证 (truthfulness L2), 默认关
         strict_claim_validation: strict 模式, 未验证数字追加警告, 默认关
+        tools_override: 覆盖角色默认工具白名单 (None=角色白名单).
 
     Returns:
         AgentLoop 实例. 如果系统提示词为空, 返回 None (调用方走 stub fallback).
@@ -111,7 +119,7 @@ def build_agent_loop(
 
     cfg = llm_config or LLMConfig.load()
     registry = build_default_registry()
-    whitelist = _get_tool_whitelist(role)
+    whitelist = tools_override if tools_override is not None else _get_tool_whitelist(role)
 
     return AgentLoop(
         config=cfg,
@@ -139,6 +147,7 @@ def run_agent_via_llm(
     llm_config: Any | None = None,
     session_manager: Any | None = None,
     max_iterations: int = 8,
+    tools_override: list[str] | None = None,
 ) -> str:
     """调用 AgentLoop.run() 完成 role 任务, 返回 JSON 字符串.
 
@@ -167,6 +176,7 @@ def run_agent_via_llm(
         llm_config=llm_config,
         session_manager=session_manager,
         max_iterations=max_iterations,
+        tools_override=tools_override,
     )
     if loop is None:
         raise RuntimeError(f"无法构造 AgentLoop for role={role!r} (prompt 不存在)")

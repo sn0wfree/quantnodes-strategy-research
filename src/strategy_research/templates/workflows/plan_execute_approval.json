@@ -1,0 +1,21 @@
+{
+  "name": "plan_execute_approval",
+  "description": "目标驱动研究 + 人工确认：planner 生成计划 → 用户审批 → 动态步骤执行 → evaluator 评估重规划（首段审批，后续 replan 自动）",
+  "version": "1.0",
+  "budget": {"token": null, "turn": null, "time_seconds": 3600},
+  "params": {
+    "planner": {"max_steps": 6},
+    "exec": {"max_segments": 3, "node_timeout_seconds": 300, "node_max_retries": 2},
+    "approval": {"timeout": null},
+    "summary": {"max_chars": 300}
+  },
+  "nodes": [
+    {"id": "planner", "type": "planner", "label": "生成研究计划", "config": {"max_steps": 6}},
+    {"id": "approval", "type": "approval", "label": "人工确认计划", "config": {}},
+    {"id": "evaluator", "type": "evaluator", "label": "评估进度", "config": {}}
+  ],
+  "edges": [
+    {"source": "planner", "target": "approval"},
+    {"source": "approval", "target": "evaluator"}
+  ]
+}

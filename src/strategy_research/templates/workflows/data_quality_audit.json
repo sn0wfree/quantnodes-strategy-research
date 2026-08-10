@@ -1,0 +1,30 @@
+{
+  "name": "data_quality_audit",
+  "description": "最小示例：数据质量检查 → AI 诊断报告（单链两点，入门模板）",
+  "version": "1.0",
+  "budget": {"token": null, "turn": null, "time_seconds": 600},
+  "params": {
+    "summary": {"max_chars": 300}
+  },
+  "nodes": [
+    {
+      "id": "check",
+      "type": "tool",
+      "label": "数据质量检查",
+      "config": {"tool": "check_data", "params": {}}
+    },
+    {
+      "id": "diagnose",
+      "type": "llm_agent",
+      "label": "生成诊断报告",
+      "config": {
+        "role": "data_quality",
+        "tools": ["read_file", "get_market_data"],
+        "prompt_text": "基于上游数据质量检查结果，输出诊断报告：问题清单、影响评估、修复建议。"
+      }
+    }
+  ],
+  "edges": [
+    {"source": "check", "target": "diagnose"}
+  ]
+}
