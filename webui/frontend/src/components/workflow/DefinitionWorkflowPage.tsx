@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Plus, Save, Pencil, Trash2, Copy, RefreshCw, Loader2, FileJson } from 'lucide-react'
+import {
+  ArrowLeft, Play, Plus, Save, Pencil, Trash2, Copy, RefreshCw, Loader2, FileJson,
+  Boxes, ListChecks, ChevronDown, ChevronUp,
+} from 'lucide-react'
 import { api, type DefinitionListItem, type DefinitionNode, type DefinitionEdge, type DefinitionRunSnapshot, type DefinitionNodeOutput, type DefinitionPayload } from '../../api/client'
 import { useSessionStore } from '../../stores/session'
-import { WorkflowEditor } from './WorkflowEditor'
+import { WorkflowEditor, NODE_PALETTE } from './WorkflowEditor'
 import { ApprovalDialog } from './ApprovalDialog'
 import { ImportDefinitionDialog } from './ImportDefinitionDialog'
 import { EmptyState } from '../common/EmptyState'
@@ -25,10 +28,13 @@ export function DefinitionWorkflowPage() {
 
   const [definitions, setDefinitions] = useState<DefinitionListItem[]>([])
   const [editing, setEditing] = useState<{ name: string | null; nodes: DefinitionNode[]; edges: DefinitionEdge[] } | null>(null)
-  const [newName, setNewName] = useState('')
+  const [editingName, setEditingName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState('')
   const [error, setError] = useState('')
 
+  const [sidebarTab, setSidebarTab] = useState<'palette' | 'defs'>('palette')
+  const [runOpen, setRunOpen] = useState(false)
   const [objective, setObjective] = useState('')
   const [starting, setStarting] = useState(false)
   const [run, setRun] = useState<DefinitionRunSnapshot | null>(null)
@@ -75,14 +81,17 @@ export function DefinitionWorkflowPage() {
         nodes: (d.nodes ?? []) as DefinitionNode[],
         edges: (d.edges ?? []) as DefinitionEdge[],
       })
+      setEditingName(d.name)
+      setSavedAt('')
     } catch (err) {
       setError((err as Error).message)
     }
   }
 
   const startNew = () => {
-    setNewName('')
     setEditing({ name: null, nodes: [], edges: [] })
+    setEditingName('')
+    setSavedAt('')
   }
 
   const saveDefinition = async (nodes: DefinitionNode[], edges: DefinitionEdge[]) => {
@@ -90,7 +99,7 @@ export function DefinitionWorkflowPage() {
     setSaving(true)
     setError('')
     try {
-      const name = editing.name ?? newName.trim()
+      const name = editing.name ?? editingName.trim()
       if (!name) {
         setError('请输入定义名称')
         return
@@ -102,7 +111,10 @@ export function DefinitionWorkflowPage() {
         edges,
       })
       await loadDefinitions()
-      setEditing(null)
+      // stay in edit mode; name may have been assigned on first save
+      setEditing((prev) => (prev ? { ...prev, name } : prev))
+      setEditingName(name)
+      setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -124,6 +136,7 @@ export function DefinitionWorkflowPage() {
     setError('')
     try {
       await api.definitions.remove(name)
+      if (editing?.name === name) setEditing(null)
       await loadDefinitions()
     } catch (err) {
       setError((err as Error).message)
@@ -141,6 +154,8 @@ export function DefinitionWorkflowPage() {
       nodes: (payload.nodes ?? []) as DefinitionNode[],
       edges: (payload.edges ?? []) as DefinitionEdge[],
     })
+    setEditingName(payload.name || '')
+    setSavedAt('')
     setImportOpen(false)
   }
 
@@ -180,6 +195,7 @@ export function DefinitionWorkflowPage() {
     closeSSE()
     try {
       const r = await api.definitionRuns.start(sessionId, editing.name, objective.trim())
+      setRunOpen(true)
       applyRun(r.run_id, r.run)
       connectRunSSE(r.run_id)
     } catch (err) {
@@ -269,6 +285,7 @@ export function DefinitionWorkflowPage() {
     setNodeOutputs([])
     setApprovalOpen(false)
     setObjective('')
+    setRunOpen(false)
   }
 
   const statusMeta = RUN_STATUS_LABELS[runStatus]
@@ -283,10 +300,30 @@ export function DefinitionWorkflowPage() {
         >
           <ArrowLeft className="h-4 w-4" /> 返回
         </button>
-        <h1 className="text-sm font-medium text-slate-200">工作流编辑器</h1>
-        {editing?.name && (
-          <span className="truncate text-xs text-slate-400">· {editing.name}</span>
-        )}
+        <div className="flex min-w-0 items-center gap-2">
+          {editing ? (
+            <>
+              <input
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                placeholder="定义名称"
+                className="w-40 rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-slate-200 outline-none hover:border-slate-700 focus:border-primary-500"
+              />
+              {editing.name && (
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                  definitions.find((d) => d.name === editing.name)?.source === 'builtin'
+                    ? 'bg-violet-900/60 text-violet-300'
+                    : 'bg-emerald-900/60 text-emerald-400'
+                }`}>
+                  {definitions.find((d) => d.name === editing.name)?.source === 'builtin' ? '内置' : '用户'}
+                </span>
+              )}
+              {savedAt && <span className="text-[10px] text-emerald-400">已保存 {savedAt}</span>}
+            </>
+          ) : (
+            <h1 className="text-sm font-medium text-slate-200">工作流编辑器</h1>
+          )}
+        </div>
         {run && (
           <span className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.cls}`}>
             {statusMeta.text}
@@ -309,6 +346,16 @@ export function DefinitionWorkflowPage() {
             <RefreshCw className="h-3 w-3" /> 停止追踪
           </button>
         )}
+        {editing && (
+          <button
+            onClick={() => setRunOpen(true)}
+            disabled={!editing.name || !sessionId}
+            title={!sessionId ? '需要先打开一个会话' : '启动运行'}
+            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-40"
+          >
+            <Play className="h-3 w-3" /> 运行
+          </button>
+        )}
       </header>
 
       {error && (
@@ -318,151 +365,120 @@ export function DefinitionWorkflowPage() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* Sidebar */}
-        <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r border-slate-800 bg-slate-900/50 p-3">
-          <button
-            onClick={startNew}
-            className="inline-flex items-center justify-center gap-1 rounded bg-indigo-600 px-2 py-1.5 text-xs text-white hover:bg-indigo-500"
-          >
-            <Plus className="h-3 w-3" /> 新建定义
-          </button>
-          <button
-            onClick={() => setImportOpen(true)}
-            className="inline-flex items-center justify-center gap-1 rounded border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
-          >
-            <FileJson className="h-3 w-3" /> 导入 JSON
-          </button>
-
-          <div>
-            <div className="mb-1.5 text-[10px] uppercase text-slate-500">定义列表</div>
-            {definitions.length === 0 ? (
-              <p className="text-xs text-slate-600">暂无定义</p>
-            ) : (
-              <ul className="space-y-1">
-                {definitions.map((d) => (
-                  <li key={d.name}>
-                    <div
-                      onClick={() => startEdit(d.name)}
-                      className={`group cursor-pointer rounded border px-2 py-1.5 ${
-                        editing?.name === d.name
-                          ? 'border-sky-500/40 bg-sky-500/10'
-                          : 'border-slate-800 bg-slate-900 hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                          d.source === 'builtin' ? 'bg-violet-900/60 text-violet-300' : 'bg-emerald-900/60 text-emerald-400'
-                        }`}>
-                          {d.source === 'builtin' ? '内置' : '用户'}
-                        </span>
-                        <span className="truncate text-xs text-slate-200">{d.name}</span>
-                        <span className="ml-auto text-[9px] text-slate-600">{d.node_count} 节点</span>
-                      </div>
-                      {d.description && (
-                        <div className="mt-0.5 truncate text-[10px] text-slate-500">{d.description}</div>
-                      )}
-                      <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); startEdit(d.name) }}
-                          className="rounded px-1 py-0.5 text-[9px] text-sky-300 hover:bg-slate-800" title="编辑"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); copyDefinition(d.name) }}
-                          className="rounded px-1 py-0.5 text-[9px] text-slate-400 hover:bg-slate-800" title="复制到用户"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </button>
-                        {d.source === 'user' && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteDefinition(d.name) }}
-                            className="rounded px-1 py-0.5 text-[9px] text-rose-400 hover:bg-slate-800" title="删除"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+        {/* Sidebar with tabs */}
+        <aside className="flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-900/50">
+          <div className="flex border-b border-slate-800">
+            <button
+              onClick={() => setSidebarTab('palette')}
+              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs ${
+                sidebarTab === 'palette' ? 'border-b-2 border-primary-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Boxes className="h-3.5 w-3.5" /> 节点库
+            </button>
+            <button
+              onClick={() => setSidebarTab('defs')}
+              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs ${
+                sidebarTab === 'defs' ? 'border-b-2 border-primary-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <ListChecks className="h-3.5 w-3.5" /> 定义库
+            </button>
           </div>
 
-          {editing && (
-            <div className="space-y-1.5 rounded border border-slate-700 bg-slate-900 p-2">
-              {editing.name === null && (
-                <div>
-                  <label className="block text-[10px] text-slate-400">定义名称</label>
-                  <input
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="my_workflow"
-                    className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
-                  />
-                </div>
-              )}
-              <label className="block text-[10px] text-slate-400">研究目标</label>
-              <textarea
-                rows={3}
-                value={objective}
-                onChange={(e) => setObjective(e.target.value)}
-                placeholder="例：找出沪深300上 Sharpe > 1.5 的动量因子"
-                className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
-              />
-              <button
-                onClick={startRun}
-                disabled={starting || !objective.trim() || !sessionId}
-                className="w-full inline-flex items-center justify-center gap-1 rounded bg-emerald-600 px-2 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                <Play className="h-3 w-3" />
-                {starting ? <Loader2 className="h-3 w-3 animate-spin" /> : '启动运行'}
-              </button>
-              {!sessionId && (
-                <p className="text-[10px] text-amber-500">需要先打开一个会话</p>
-              )}
-            </div>
-          )}
-
-          {run && (
-            <div className="space-y-1.5 rounded border border-slate-700 bg-slate-900 p-2">
-              <div className="text-[10px] uppercase text-slate-500">运行状态</div>
-              <div className="flex items-center gap-2 text-xs text-slate-300">
-                <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${statusMeta.cls}`}>
-                  {statusMeta.text}
-                </span>
-                <span className="text-[9px] text-slate-500">{run.run_id}</span>
-              </div>
-              <div className="space-y-0.5 text-[10px] text-slate-400">
-                <div>段：{run.segment_idx}/{run.segments_total} · 重规划：{run.replan_count}/{run.replan_max}</div>
-                <div>已完成节点：{run.completed_nodes.length} 个</div>
-                {run.failures.length > 0 && (
-                  <div className="text-rose-400">失败：{run.failures.join('；')}</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {nodeOutputs.length > 0 && (
-            <div>
-              <div className="mb-1.5 text-[10px] uppercase text-slate-500">节点输出</div>
-              <ul className="space-y-1">
-                {nodeOutputs.map((o) => (
-                  <li key={o.node_id} className="rounded border border-slate-800 bg-slate-900 px-2 py-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`h-1.5 w-1.5 rounded-full ${
-                        o.status === 'success' ? 'bg-emerald-400' : o.status === 'error' ? 'bg-rose-400' : 'bg-slate-500'
-                      }`} />
-                      <span className="truncate text-[10px] text-slate-300">{o.node_id}</span>
-                      <span className="ml-auto text-[9px] text-slate-600">{o.elapsed_s}s</span>
+          {sidebarTab === 'palette' ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <p className="mb-2 text-[10px] leading-relaxed text-slate-600">
+                点击或拖拽到画布添加节点，从节点右侧把手拖到目标左侧把手连线。
+              </p>
+              <div className="space-y-1">
+                {NODE_PALETTE.map((p) => {
+                  const Icon = p.icon
+                  return (
+                    <div key={p.type} className="rounded border border-slate-800 bg-slate-900 px-2 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 items-center justify-center rounded" style={{ backgroundColor: `${p.color}22`, color: p.color }}>
+                          <Icon className="h-3 w-3" />
+                        </span>
+                        <span className="text-xs text-slate-200">{p.label}</span>
+                        <span className="ml-auto text-[9px] text-slate-600">{p.type}</span>
+                      </div>
+                      <div className="mt-0.5 pl-7 text-[10px] text-slate-500">{p.desc}</div>
                     </div>
-                    {o.summary && (
-                      <div className="mt-0.5 line-clamp-2 text-[9px] text-slate-500">{o.summary}</div>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                  )
+                })}
+              </div>
+              <div className="mt-3 flex gap-1.5">
+                <button
+                  onClick={startNew}
+                  className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-indigo-600 px-2 py-1.5 text-xs text-white hover:bg-indigo-500"
+                >
+                  <Plus className="h-3 w-3" /> 新建定义
+                </button>
+                <button
+                  onClick={() => setImportOpen(true)}
+                  className="inline-flex items-center justify-center gap-1 rounded border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+                >
+                  <FileJson className="h-3 w-3" /> 导入
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <div className="mb-1.5 text-[10px] uppercase text-slate-500">定义列表</div>
+              {definitions.length === 0 ? (
+                <p className="text-xs text-slate-600">暂无定义</p>
+              ) : (
+                <ul className="space-y-1">
+                  {definitions.map((d) => (
+                    <li key={d.name}>
+                      <div
+                        onClick={() => startEdit(d.name)}
+                        className={`group cursor-pointer rounded border px-2 py-1.5 ${
+                          editing?.name === d.name
+                            ? 'border-sky-500/40 bg-sky-500/10'
+                            : 'border-slate-800 bg-slate-900 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
+                            d.source === 'builtin' ? 'bg-violet-900/60 text-violet-300' : 'bg-emerald-900/60 text-emerald-400'
+                          }`}>
+                            {d.source === 'builtin' ? '内置' : '用户'}
+                          </span>
+                          <span className="truncate text-xs text-slate-200">{d.name}</span>
+                          <span className="ml-auto text-[9px] text-slate-600">{d.node_count} 节点</span>
+                        </div>
+                        {d.description && (
+                          <div className="mt-0.5 truncate text-[10px] text-slate-500">{d.description}</div>
+                        )}
+                        <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startEdit(d.name) }}
+                            className="rounded px-1 py-0.5 text-[9px] text-sky-300 hover:bg-slate-800" title="编辑"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyDefinition(d.name) }}
+                            className="rounded px-1 py-0.5 text-[9px] text-slate-400 hover:bg-slate-800" title="复制到用户"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </button>
+                          {d.source === 'user' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteDefinition(d.name) }}
+                              className="rounded px-1 py-0.5 text-[9px] text-rose-400 hover:bg-slate-800" title="删除"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </aside>
@@ -471,6 +487,7 @@ export function DefinitionWorkflowPage() {
         <main className="min-w-0 flex-1">
           {editing ? (
             <WorkflowEditor
+              key={editing.name ?? `new-${editingName}`}
               nodes={editing.nodes}
               edges={editing.edges}
               onSave={saveDefinition}
@@ -481,12 +498,108 @@ export function DefinitionWorkflowPage() {
               <EmptyState
                 icon={<Save className="h-10 w-10" />}
                 title="编辑或新建工作流定义"
-                description="从左侧选择定义进入编辑，或点击「新建定义」从零搭建设计（Dify 风格拖拽）"
+                description="从左侧「定义库」选择定义进入编辑，或点击「新建定义」从零搭建（拖拽式画布）"
               />
             </div>
           )}
         </main>
       </div>
+
+      {/* Bottom run drawer */}
+      {runOpen && (
+        <div className="border-t border-slate-800 bg-slate-900/80">
+          <div className="flex items-center gap-3 px-4 pt-2">
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">运行面板</div>
+            <button
+              onClick={() => setRunOpen(false)}
+              className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-800"
+            >
+              <ChevronDown className="h-3 w-3" /> 折叠
+            </button>
+          </div>
+          <div className="flex items-start gap-3 px-4 py-2">
+            <div className="flex-1">
+              <textarea
+                rows={1}
+                value={objective}
+                onChange={(e) => setObjective(e.target.value)}
+                placeholder="例：找出沪深300上 Sharpe > 1.5 的动量因子"
+                className="w-full resize-none rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-primary-500"
+              />
+              {!sessionId && (
+                <p className="mt-1 text-[10px] text-amber-500">需要先打开一个会话</p>
+              )}
+            </div>
+            <button
+              onClick={startRun}
+              disabled={starting || !editing?.name || !objective.trim() || !sessionId}
+              className="inline-flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-40"
+            >
+              <Play className="h-3 w-3" />
+              {starting ? <Loader2 className="h-3 w-3 animate-spin" /> : '启动运行'}
+            </button>
+            {run && (
+              <button
+                onClick={resetRun}
+                className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800"
+              >
+                <RefreshCw className="h-3 w-3" /> 停止追踪
+              </button>
+            )}
+          </div>
+          {run && (
+            <div className="flex flex-wrap items-center gap-3 px-4 pb-2 text-[11px]">
+              <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${statusMeta.cls}`}>
+                {statusMeta.text}
+              </span>
+              <span className="text-slate-500">{run.run_id}</span>
+              <span className="text-slate-400">段：{run.segment_idx}/{run.segments_total}</span>
+              <span className="text-slate-400">重规划：{run.replan_count}/{run.replan_max}</span>
+              <span className="text-slate-400">已完成节点：{run.completed_nodes.length}</span>
+              {run.failures.length > 0 && (
+                <span className="text-rose-400">失败：{run.failures.join('；')}</span>
+              )}
+              <button
+                onClick={() => setRunOpen(false)}
+                className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-800"
+              >
+                节点输出 {nodeOutputs.length > 0 ? `(${nodeOutputs.length})` : ''}
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          {run && nodeOutputs.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto px-4 pb-2">
+              {nodeOutputs.map((o) => (
+                <div key={o.node_id} className="w-52 shrink-0 rounded border border-slate-800 bg-slate-900 px-2 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      o.status === 'success' ? 'bg-emerald-400' : o.status === 'error' ? 'bg-rose-400' : 'bg-slate-500'
+                    }`} />
+                    <span className="truncate text-[10px] text-slate-300">{o.node_id}</span>
+                    <span className="ml-auto text-[9px] text-slate-600">{o.elapsed_s}s</span>
+                  </div>
+                  {o.summary && (
+                    <div className="mt-0.5 line-clamp-2 text-[9px] text-slate-500">{o.summary}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Collapsed run toggle */}
+      {!runOpen && run && (
+        <button
+          onClick={() => setRunOpen(true)}
+          className="flex items-center gap-2 border-t border-slate-800 bg-slate-900/80 px-4 py-1.5 text-[10px] text-slate-400 hover:bg-slate-800"
+        >
+          <ChevronUp className="h-3 w-3" />
+          <span className={`rounded px-1 py-0.5 font-medium ${statusMeta.cls}`}>{statusMeta.text}</span>
+          <span className="text-slate-500">{run.run_id}</span>
+        </button>
+      )}
 
       <ApprovalDialog
         open={approvalOpen}

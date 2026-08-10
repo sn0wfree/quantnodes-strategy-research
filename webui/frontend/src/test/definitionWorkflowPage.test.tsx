@@ -60,6 +60,8 @@ vi.mock('lucide-react', () => {
     Code2: Stub, Wrench: Stub, Check: Stub, X: Stub,
     Clock: Stub, CheckCircle: Stub, XCircle: Stub, AlertCircle: Stub,
     ArrowRight: Stub, FileJson: Stub,
+    Boxes: Stub, ListChecks: Stub, ChevronDown: Stub, ChevronUp: Stub,
+    Search: Stub, LayoutGrid: Stub, Undo2: Stub, Redo2: Stub,
   }
 })
 
@@ -68,10 +70,15 @@ vi.mock('@xyflow/react', async () => {
   return {
     ReactFlow: ({ children }: { children?: React.ReactNode }) =>
       react.createElement('div', { 'data-testid': 'reactflow' }, children),
+    ReactFlowProvider: ({ children }: { children?: React.ReactNode }) =>
+      react.createElement(react.Fragment, null, children),
     Background: () => null,
     Controls: () => null,
     MiniMap: () => null,
     addEdge: (conn: unknown, edges: unknown[]) => [...edges, conn],
+    useReactFlow: () => ({
+      screenToFlowPosition: (p: { x: number; y: number }) => p,
+    }),
     useNodesState: (init: unknown[]) => {
       const [nodes, setNodes] = react.useState(init)
       return [nodes, setNodes, () => {}]
@@ -99,16 +106,32 @@ beforeEach(() => {
 })
 
 describe('DefinitionWorkflowPage', () => {
+  const openDefsTab = async () => {
+    fireEvent.click(screen.getByRole('button', { name: '定义库' }))
+    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
+  }
+
+  it('switches between 节点库 and 定义库 tabs', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    // Default tab is the node palette
+    expect(screen.getByText('节点库')).toBeTruthy()
+    expect(screen.getByText('子 Agent')).toBeTruthy()
+    await openDefsTab()
+    // Back to palette
+    fireEvent.click(screen.getByText('节点库'))
+    expect(screen.getByText('子 Agent')).toBeTruthy()
+  })
+
   it('loads and lists definitions with source badges', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
+    await openDefsTab()
     expect(screen.getByText('my_flow')).toBeTruthy()
     expect(screen.getAllByText(/内置|用户/).length).toBeGreaterThan(0)
   })
 
   it('enters edit mode and saves a definition', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('my_flow')).toBeTruthy())
+    await openDefsTab()
     fireEvent.click(screen.getByText('my_flow'))
     await waitFor(() => expect(api.definitions.get).toHaveBeenCalledWith('my_flow'))
     // Editor visible with the save button
@@ -120,10 +143,59 @@ describe('DefinitionWorkflowPage', () => {
     expect(payload).toHaveProperty('nodes')
   })
 
-  it('starts a run from the editor', async () => {
+  it('stays in edit mode after saving (shows 已保存 hint)', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
+    await openDefsTab()
+    fireEvent.click(screen.getByText('my_flow'))
+    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
+    fireEvent.click(screen.getByText('保存定义'))
+    await waitFor(() => expect(api.definitions.save).toHaveBeenCalled())
+    // still in the editor, not kicked back to the empty state
+    await waitFor(() => expect(screen.getByText(/已保存/)).toBeTruthy())
+    expect(screen.getByText('保存定义')).toBeTruthy()
+  })
+
+  it('opens a fresh canvas for a new definition and clears it when switching', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await openDefsTab()
+    fireEvent.click(screen.getByText('my_flow'))
+    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
+    // Empty canvas placeholder
+    expect(screen.getByText('空画布')).toBeTruthy()
+    // New definition resets the editor to an empty canvas as well
+    fireEvent.click(screen.getByRole('button', { name: '节点库' }))
+    fireEvent.click(screen.getByText('新建定义'))
+    expect(screen.getByText('空画布')).toBeTruthy()
+  })
+
+  it('adds a node from the palette and clears the empty canvas hint', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await openDefsTab()
+    fireEvent.click(screen.getByText('my_flow'))
+    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
+    expect(screen.getByText('空画布')).toBeTruthy()
+    fireEvent.click(screen.getByText('生成计划'))
+    await waitFor(() => expect(screen.queryByText('空画布')).not.toBeInTheDocument())
+  })
+
+  it('filters the palette by search', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await openDefsTab()
+    fireEvent.click(screen.getByText('my_flow'))
+    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
+    const search = screen.getByPlaceholderText('搜索节点…')
+    fireEvent.change(search, { target: { value: '生成计划' } })
+    expect(screen.getByText('生成计划')).toBeTruthy()
+    expect(screen.queryByText('子 Agent')).not.toBeInTheDocument()
+  })
+
+  it('starts a run from the run drawer', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await openDefsTab()
     fireEvent.click(screen.getByText('plan_execute_auto'))
+    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
+    // Open the bottom run drawer via the top bar 运行 button
+    fireEvent.click(screen.getByText('运行'))
     await waitFor(() => expect(screen.getByText('启动运行')).toBeTruthy())
     const objective = screen.getByPlaceholderText(/例：找出沪深300/)
     fireEvent.change(objective, { target: { value: '研究动量' } })
@@ -190,24 +262,28 @@ describe('JSON import', () => {
     edges: [{ source: 'p', target: 'e' }],
   })
 
+  const openImportDialog = async () => {
+    fireEvent.click(screen.getByText('导入'))
+    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+  }
+
   it('imports JSON into the canvas (edit without saving)', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
-    fireEvent.click(screen.getByText('导入 JSON'))
-    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('子 Agent')).toBeTruthy())
+    await openImportDialog()
     const ta = screen.getByPlaceholderText(/my_workflow/)
     fireEvent.change(ta, { target: { value: GOOD_JSON } })
     fireEvent.click(screen.getByText('导入到画布（不保存）'))
     // Editor opens with the imported definition name (no save API call)
-    await waitFor(() => expect(screen.getByText('· imported_flow')).toBeTruthy())
+    await waitFor(() => expect(screen.getByDisplayValue('imported_flow')).toBeTruthy())
+    expect(screen.getByText('保存定义')).toBeTruthy()
     expect(api.definitions.save).not.toHaveBeenCalled()
   })
 
   it('validates and saves JSON via API', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
-    fireEvent.click(screen.getByText('导入 JSON'))
-    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('子 Agent')).toBeTruthy())
+    await openImportDialog()
     const ta = screen.getByPlaceholderText(/my_workflow/)
     fireEvent.change(ta, { target: { value: GOOD_JSON } })
     fireEvent.click(screen.getByText('校验并保存'))
@@ -220,9 +296,8 @@ describe('JSON import', () => {
 
   it('rejects invalid JSON with an error message', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
-    fireEvent.click(screen.getByText('导入 JSON'))
-    await waitFor(() => expect(screen.getByText('导入工作流定义 (JSON)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('子 Agent')).toBeTruthy())
+    await openImportDialog()
     const ta = screen.getByPlaceholderText(/my_workflow/)
     fireEvent.change(ta, { target: { value: '{not json' } })
     fireEvent.click(screen.getByText('校验并保存'))

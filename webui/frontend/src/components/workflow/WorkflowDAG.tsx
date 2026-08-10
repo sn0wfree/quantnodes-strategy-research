@@ -7,61 +7,20 @@ import {
   useNodesState,
   useEdgesState,
   type Node,
-  type Edge,
+
   type NodeTypes,
   type EdgeTypes,
   BackgroundVariant,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import dagre from 'dagre'
 import { DAGNode, type DAGNodeData } from './DAGNode'
 import { DAGEdge } from './DAGEdge'
 import { DAGToolbar } from './DAGToolbar'
 import { DAGProgressBar } from './DAGProgressBar'
 import { DAGNodeDetail } from './DAGNodeDetail'
 import { EmptyState } from '../common/EmptyState'
+import { layoutWithDagre } from './layout'
 import { Workflow } from 'lucide-react'
-
-// dagre layout helper
-function layoutWithDagre(
-  rawNodes: DAGNodeData[],
-  rawEdges: { source: string; target: string }[]
-): { nodes: Node[]; edges: Edge[] } {
-  const g = new dagre.graphlib.Graph()
-  g.setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 120 })
-
-  rawNodes.forEach((n) => {
-    g.setNode(n.id as string, { width: 180, height: 70 })
-  })
-  rawEdges.forEach((e) => {
-    g.setEdge(e.source, e.target)
-  })
-
-  dagre.layout(g)
-
-  const nodes: Node[] = rawNodes.map((n) => {
-    const pos = g.node(n.id as string)
-    return {
-      id: n.id as string,
-      position: { x: pos.x - 90, y: pos.y - 35 },
-      data: n as unknown as Record<string, unknown>,
-      type: 'dagNode',
-    }
-  })
-
-  const edges: Edge[] = rawEdges.map((e, i) => ({
-    id: `e-${i}`,
-    source: e.source,
-    target: e.target,
-    type: 'dagEdge',
-    data: {
-      animated: rawNodes.find((n) => n.id === e.target)?.status === 'running',
-    },
-  }))
-
-  return { nodes, edges }
-}
 
 interface WorkflowDAGProps {
   workflowName?: string
