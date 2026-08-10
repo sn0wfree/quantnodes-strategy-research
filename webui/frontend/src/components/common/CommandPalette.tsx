@@ -58,6 +58,15 @@ export function CommandPalette() {
       keywords: ['dag', 'workflow', '图', '编排'],
     },
     {
+      id: 'view-workflow-definition',
+      label: '打开工作流编辑器',
+      description: '模块化 DAG 工作流：拖拽搭建 + 运行 + 人工审批',
+      category: 'view',
+      icon: Workflow,
+      action: () => { navigate('/workflow-definition'); setOpen(false) },
+      keywords: ['workflow', 'definition', '编辑', '拖拽', '审批', '模块化'],
+    },
+    {
       id: 'view-toggle',
       label: '切换右主区可见性',
       description: '显示/隐藏右主区',

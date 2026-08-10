@@ -318,6 +318,63 @@ class APIClient {
         `/goal/workflow/resume?goal_id=${encodeURIComponent(goalId)}`,
       ),
   }
+
+  // ── Modular DAG workflows (docs/workflow-module-design.md) ──
+  definitions = {
+    list: () => this.get<DefinitionListResponse>('/goal/workflow/definitions'),
+
+    get: (name: string) =>
+      this.get<DefinitionGetResponse>(`/goal/workflow/definitions/${encodeURIComponent(name)}`),
+
+    save: (payload: DefinitionPayload) =>
+      this.post<{ status: string; name: string; path: string; nodes: number; edges: number }>(
+        '/goal/workflow/definitions',
+        payload,
+      ),
+
+    remove: (name: string) =>
+      this.delete<{ status: string; deleted: string }>(
+        `/goal/workflow/definitions/${encodeURIComponent(name)}`,
+      ),
+
+    copy: (name: string) =>
+      this.post<{ status: string; name: string; path: string }>(
+        `/goal/workflow/definitions/${encodeURIComponent(name)}/copy`,
+      ),
+
+    graph: (name: string) =>
+      this.get<DefinitionGraphResponse>(
+        `/goal/workflow/definitions/${encodeURIComponent(name)}/graph`,
+      ),
+  }
+
+  definitionRuns = {
+    start: (sessionId: string, definitionName: string, objective: string, params?: Record<string, unknown>) =>
+      this.post<DefinitionRunStartResponse>('/goal/workflow/start-definition', {
+        session_id: sessionId,
+        definition_name: definitionName,
+        objective,
+        params: params ?? {},
+      }),
+
+    approve: (runId: string, approved: boolean, edits?: Record<string, unknown>) =>
+      this.post<DefinitionRunResponse>('/goal/workflow/approve', {
+        run_id: runId,
+        approved,
+        edits,
+      }),
+
+    status: (runId: string) =>
+      this.get<DefinitionRunResponse>(`/goal/workflow/run/${encodeURIComponent(runId)}/status`),
+
+    detail: (runId: string) =>
+      this.get<DefinitionRunDetailResponse>(`/goal/workflow/run/${encodeURIComponent(runId)}`),
+
+    remove: (runId: string) =>
+      this.delete<{ status: string; deleted: string }>(
+        `/goal/workflow/run/${encodeURIComponent(runId)}`,
+      ),
+  }
 }
 
 // ── Study API types ──────────────────────────────────────────────────
@@ -609,6 +666,106 @@ function qs(params: Record<string, string | number | undefined>): string {
     entries.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
   }
   return entries.length ? `?${entries.join('&')}` : ''
+}
+
+// ── Modular DAG workflow types (docs/workflow-module-design.md) ──
+
+export interface DefinitionNodeConfig {
+  [key: string]: unknown
+}
+
+export interface DefinitionNode {
+  id: string
+  type: 'llm_agent' | 'planner' | 'evaluator' | 'approval' | 'python' | 'tool'
+  label: string
+  config: DefinitionNodeConfig
+}
+
+export interface DefinitionEdge {
+  source: string
+  target: string
+}
+
+export interface DefinitionPayload {
+  name: string
+  description?: string
+  version?: string
+  budget?: Record<string, unknown>
+  llm?: Record<string, unknown>
+  params?: Record<string, unknown>
+  nodes: DefinitionNode[]
+  edges: DefinitionEdge[]
+}
+
+export interface DefinitionListItem {
+  name: string
+  source: 'builtin' | 'user'
+  description: string
+  node_count: number
+}
+
+export interface DefinitionListResponse {
+  status: string
+  definitions: DefinitionListItem[]
+}
+
+export interface DefinitionGetResponse {
+  status: string
+  definition: DefinitionPayload & { source: string }
+}
+
+export interface DefinitionGraphResponse {
+  status: string
+  name: string
+  description?: string
+  nodes: Array<{ id: string; label: string; type: string }>
+  edges: Array<{ source: string; target: string }>
+}
+
+export interface DefinitionRunSnapshot {
+  run_id: string
+  definition: string
+  status: 'pending' | 'running' | 'awaiting' | 'completed' | 'failed' | 'cancelled'
+  segment_idx: number
+  segments_total: number
+  replan_count: number
+  replan_max: number
+  completed_nodes: string[]
+  findings: string[]
+  failures: string[]
+  elapsed_s: number
+}
+
+export interface DefinitionRunStartResponse {
+  status: string
+  run_id: string
+  run: DefinitionRunSnapshot
+}
+
+export interface DefinitionRunResponse {
+  status: string
+  run_id: string
+  run: DefinitionRunSnapshot | Record<string, unknown>
+}
+
+export interface DefinitionNodeOutput {
+  run_id: string
+  segment_idx: number
+  node_id: string
+  status: string
+  summary: string
+  artifacts: string
+  metrics: string
+  error: string | null
+  elapsed_s: number
+}
+
+export interface DefinitionRunDetailResponse {
+  status: string
+  run: Record<string, unknown>
+  segments: Array<Record<string, unknown>>
+  node_outputs: DefinitionNodeOutput[]
+  approvals: Array<Record<string, unknown>>
 }
 
 export const api = new APIClient()
