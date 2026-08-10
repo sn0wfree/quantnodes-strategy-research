@@ -11,6 +11,7 @@ class AgentStatus(str, Enum):
     SUCCESS = "success"
     ERROR = "error"
     SKIPPED = "skipped"
+    AWAITING = "awaiting"  # approval gate: execution paused, waiting for user
 
 
 @dataclass(frozen=True)

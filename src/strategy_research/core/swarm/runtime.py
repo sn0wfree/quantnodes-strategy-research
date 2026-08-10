@@ -84,6 +84,12 @@ class AgentResult:
     output: str = ""
     error: str | None = None
     elapsed_s: float = 0.0
+    # Unified output envelope (workflow-module design, Commit 1):
+    # all optional — legacy consumers reading only output/status are
+    # unaffected.  Populated by workflow node dispatchers.
+    summary: str = ""
+    artifacts: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
