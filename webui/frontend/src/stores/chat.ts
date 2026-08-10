@@ -67,6 +67,14 @@ export interface ImagePart {
   alt?: string
 }
 
+export interface HtmlPart {
+  type: 'html'
+  title?: string
+  /** Self-contained HTML content (rendered in a sandboxed iframe). */
+  content: string
+  isStreaming?: boolean
+}
+
 export interface AgentPart {
   type: 'agent'
   id: string
@@ -82,7 +90,7 @@ export interface AgentPart {
   isStreaming?: boolean
 }
 
-export type MessagePart = TextPart | ToolCallPart | ThinkingPart | FileEditPart | TablePart | ChartPart | ImagePart | AgentPart
+export type MessagePart = TextPart | ToolCallPart | ThinkingPart | FileEditPart | TablePart | ChartPart | ImagePart | HtmlPart | AgentPart
 
 export interface Message {
   id: string

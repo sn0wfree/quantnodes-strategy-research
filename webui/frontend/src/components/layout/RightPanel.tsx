@@ -3,47 +3,48 @@ import { useGoalStore } from '../../stores/goal'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
 import {
-  extractEquityCurve,
   extractLatestBacktestMetrics,
+  extractLatestPanelItem,
 } from '../../utils/equityCurve'
 import { TokenCard } from '../context/TokenCard'
 import { GoalCard } from '../goal/GoalCard'
+import { PanelRenderCard } from './PanelRenderCard'
 import type { GoalTabGoal } from '../goal/GoalTab'
 
 /**
  * Merged single right panel: a scrollable column of cards —
- * token usage, and goal + performance curve.
+ * token usage, goal & progress (passive tracking), and the
+ * agent-driven performance card.
  */
 export function RightPanel() {
   // Goal state is SSE-driven (full-snapshot goal_updated events) plus
   // loadSessionState recovery on session switch / page load — no
   // polling (docs/goal-events-panel-link.md).
-  // Goal state
   const currentGoal = useGoalStore((s) => s.currentGoal)
 
   // Session / messages
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const messages = useChatStore((s) => s.messages)
 
-  // Performance curve decoded from the session's backtest output
-  const curve = useMemo(() => {
-    const list = Array.from(messages.values())
+  const sessionMessages = useMemo(() => {
+    return Array.from(messages.values())
       .filter((m) => !currentSessionId || m.session_id === currentSessionId)
       .sort((a, b) => a.created_at - b.created_at)
-    return extractEquityCurve(list)
   }, [messages, currentSessionId])
 
-  // Metrics-only fallback for the right-panel card (Tier B P7).
-  // When no chart parts are available (the backend does not emit
-  // chart SSE), the most recent run_backtest tool_call result still
-  // gives us total_return / sharpe / max_drawdown so the panel
-  // never reads "no data" after a real backtest.
-  const metrics = useMemo(() => {
-    const list = Array.from(messages.values())
-      .filter((m) => !currentSessionId || m.session_id === currentSessionId)
-      .sort((a, b) => a.created_at - b.created_at)
-    return extractLatestBacktestMetrics(list)
-  }, [messages, currentSessionId])
+  // Latest agent-driven renderable (show_chart / show_report).
+  const panelItem = useMemo(
+    () => extractLatestPanelItem(sessionMessages),
+    [sessionMessages],
+  )
+
+  // Metrics fallback for the performance card (Tier B P7): before any
+  // renderable exists, the most recent run_backtest tool_call result
+  // still gives total_return / sharpe / max_drawdown.
+  const metrics = useMemo(
+    () => extractLatestBacktestMetrics(sessionMessages),
+    [sessionMessages],
+  )
 
   // Map GoalStore goal to the display model used by GoalTab
   const goalTabGoal: GoalTabGoal | null = currentGoal ? {
@@ -67,7 +68,10 @@ export function RightPanel() {
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-900 p-3">
       <TokenCard />
-      <GoalCard goal={goalTabGoal} curve={curve} metrics={metrics} />
+      {/* 目标 & 进度 — 被动跟踪本 session goal 执行情况 */}
+      <GoalCard goal={goalTabGoal} curve={null} metrics={null} />
+      {/* 表现曲线 — 由 chat agent 决定显示什么 (show_chart / show_report) */}
+      <PanelRenderCard item={panelItem} metrics={metrics} />
     </div>
   )
 }

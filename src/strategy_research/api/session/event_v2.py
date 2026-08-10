@@ -110,6 +110,7 @@ class EventType:
     TABLE = "table"
     CHART = "chart"
     IMAGE = "image"
+    HTML = "html"
 
     # Subagent lifecycle
     SUBAGENT_STARTED = "subagent_started"

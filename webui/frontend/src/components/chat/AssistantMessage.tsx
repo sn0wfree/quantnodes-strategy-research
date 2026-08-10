@@ -19,6 +19,7 @@ import { FileEditBlock } from './FileEditBlock'
 import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
 import { ImageBlock } from './ImageBlock'
+import { HtmlBlock } from './HtmlBlock'
 import { AgentCard } from './AgentCard'
 import { StreamingText } from './StreamingText'
 import { MessageActions } from './MessageActions'
@@ -259,6 +260,8 @@ function PartRenderer({
       return <ChartBlock chart={part} />
     case 'image':
       return <ImageBlock src={part.url} alt={part.alt} />
+    case 'html':
+      return <HtmlBlock htmlPart={part} />
     case 'agent':
       return <AgentCard agentPart={part} isStreaming={isStreaming} />
     default:

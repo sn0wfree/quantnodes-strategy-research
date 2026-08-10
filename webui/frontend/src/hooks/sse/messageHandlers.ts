@@ -167,6 +167,8 @@ interface BlockPartEvent {
   // image
   url?: string
   alt?: string
+  // html
+  content?: string
 }
 
 function attachBlockPart(
@@ -239,6 +241,20 @@ export const image: SSEHandler = (data, ctx) => {
       id,
       url: (data as BlockPartEvent).url ?? '',
       alt: (data as BlockPartEvent).alt,
+    }),
+  )
+}
+
+export const html: SSEHandler = (data, ctx) => {
+  attachBlockPart(
+    data,
+    ctx,
+    'html',
+    (id) => ({
+      type: 'html' as const,
+      id,
+      title: (data as BlockPartEvent).title,
+      content: (data as BlockPartEvent).content ?? '',
     }),
   )
 }

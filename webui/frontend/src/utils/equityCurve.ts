@@ -12,6 +12,30 @@ export interface EquityCurve {
 }
 
 /**
+ * The right panel's renderable: the LATEST agent-driven chart or HTML
+ * report (show_chart / show_report tools). The agent decides what the
+ * panel shows — the frontend only picks the most recent renderable
+ * from the session's messages.
+ */
+export interface PanelRenderable {
+  kind: 'chart' | 'html'
+  /** Chart part (kind='chart'). */
+  chart?: {
+    title?: string
+    chart_type: string
+    data: unknown[]
+  }
+  /** HTML part (kind='html'). */
+  html?: {
+    title?: string
+    content: string
+  }
+  /** Which message produced it (jump-to-message linkage). */
+  message_id: string
+  timestamp: number
+}
+
+/**
  * Metrics extracted from a ``run_backtest`` tool_call result. Used
  * by EquityCurveCard's metrics-only fallback when no chart parts
  * are available (the backend AgentLoop does not currently emit
@@ -178,4 +202,39 @@ function decodePoints(data: unknown[]): EquityPoint[] {
     points.push({ label, value })
   }
   return points
+}
+/**
+ * Pick the LATEST agent-driven renderable (chart part or html part)
+ * from a session's messages. show_chart / show_report push these
+ * parts into assistant messages; the right panel shows the most
+ * recent one (the agent decided to show it last).
+ *
+ * Returns null when no renderable exists yet.
+ */
+export function extractLatestPanelItem(messages: Message[]): PanelRenderable | null {
+  let best: PanelRenderable | null = null
+
+  for (const m of messages) {
+    for (const p of m.parts) {
+      if (p.type === 'chart' && Array.isArray(p.data) && p.data.length > 0) {
+        const cand: PanelRenderable = {
+          kind: 'chart',
+          chart: { title: p.title, chart_type: p.chart_type, data: p.data },
+          message_id: m.id,
+          timestamp: m.created_at,
+        }
+        if (!best || cand.timestamp > best.timestamp) best = cand
+      } else if (p.type === 'html' && p.content) {
+        const cand: PanelRenderable = {
+          kind: 'html',
+          html: { title: p.title, content: p.content },
+          message_id: m.id,
+          timestamp: m.created_at,
+        }
+        if (!best || cand.timestamp > best.timestamp) best = cand
+      }
+    }
+  }
+
+  return best
 }

@@ -542,11 +542,21 @@ class RunBacktestTool(BaseTool):
                 extra=extra,
             )
 
+        run_name = result.get("run", "")
+        artifacts = {
+            "equity_curve": f"runs/{strategy_name}/{run_name}/equity_curve.csv",
+            "metrics": f"runs/{strategy_name}/{run_name}/metrics.json",
+            "run_card": f"runs/{strategy_name}/{run_name}/run_card.json",
+        }
         return _ok({
-            "run": result.get("run", ""),
+            "run": run_name,
             "strategy": strategy_name,
             "metrics": result.get("metrics", {}),
             "status": result.get("status", "pending"),
+            # 产物引用（相对 workspace）。净值数据本身不进上下文：
+            # 需要展示曲线时用 show_chart(source_file=...) 引用文件，
+            # 需要排查时用 read_file 读文件内容。
+            "artifacts": artifacts,
         })
 
 
@@ -2896,6 +2906,12 @@ def build_default_registry(workspace: Path | None = None) -> ToolRegistry:
     try:
         from .goal_tools import register_goal_tools
         register_goal_tools(r)
+    except Exception:
+        pass
+    # Display tools (agent-driven right panel: show_chart / show_report)
+    try:
+        from .display_tools import register_display_tools
+        register_display_tools(r)
     except Exception:
         pass
     # Data cleaning tools

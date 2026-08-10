@@ -13,7 +13,7 @@ interface ChartBlockProps {
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#f97316', '#14b8a6']
 
-function ChartRenderer({ chart }: { chart: ChartPart }) {
+export function ChartRenderer({ chart }: { chart: ChartPart }) {
   const { chart_type, data } = chart
 
   if (!data || data.length === 0) {

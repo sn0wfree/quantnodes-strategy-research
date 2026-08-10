@@ -28,6 +28,7 @@ export type SSEEventType =
   | 'table'
   | 'chart'
   | 'image'
+  | 'html'
   | 'agent_status'
   | 'agent_loop'
   | 'agent_done'
@@ -78,7 +79,7 @@ export const EVENT_TYPES: SSEEventType[] = [
   // parts will land in the assistant message automatically. The
   // matching block components (FileEditBlock etc.) are reachable
   // today via DB-loaded parts.
-  'file_edit', 'table', 'chart', 'image',
+  'file_edit', 'table', 'chart', 'image', 'html',
   'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
   'dag_update', 'progress', 'message_received', 'error',
   'session_meta_updated',

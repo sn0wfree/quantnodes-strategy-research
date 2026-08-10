@@ -57,11 +57,11 @@ describe('RightPanel (merged panel)', () => {
     setupStores()
   })
 
-  it('renders the two cards: token, goal & progress', () => {
+  it('renders the three cards: token, goal & progress, performance', () => {
     render(<RightPanel />)
     expect(screen.getByText('Token 使用情况')).toBeTruthy()
     expect(screen.getByText('目标 & 进度')).toBeTruthy()
-    expect(screen.getByText('表现曲线')).toBeTruthy()
+    expect(screen.getAllByText('表现曲线').length).toBeGreaterThanOrEqual(1)
   })
 
   it('token card shows usage percent and message count', () => {

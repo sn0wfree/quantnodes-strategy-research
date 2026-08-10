@@ -8,7 +8,7 @@ import {
   thinkingDone,
   thinkingEnd,
 } from './textHandlers'
-import { toolCall, toolResult, toolProgress, assistantMessage, fileEdit, table, chart, image } from './messageHandlers'
+import { toolCall, toolResult, toolProgress, assistantMessage, fileEdit, table, chart, image, html } from './messageHandlers'
 import { messageReceived, attemptStarted, queuePaused, queueState } from './queueHandlers'
 import {
   sessionTotalTokens,
@@ -77,6 +77,7 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   table,
   chart,
   image,
+  html,
   message_received: messageReceived,
   'attempt.started': attemptStarted,
   queue_paused: queuePaused,

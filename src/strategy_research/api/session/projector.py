@@ -264,6 +264,7 @@ class Projector:
             EventType.TABLE: self._on_table,
             EventType.CHART: self._on_chart,
             EventType.IMAGE: self._on_image,
+            EventType.HTML: self._on_html,
             # Compaction events create a compaction message (system)
             EventType.COMPACT: self._on_compact,
             EventType.COMPACT_ENDED: self._on_compact,
@@ -1145,6 +1146,34 @@ class Projector:
                 "type": "image",
                 "url": event.data.get("url", ""),
                 "alt": event.data.get("alt"),
+            },
+            seq=len(msg.parts),
+            time_created=event.time_created,
+        )
+
+    def _on_html(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """Persist an html part (agent-driven report renderable).
+
+        show_report emits an ``html`` event carrying self-contained
+        HTML content; the frontend renders it in a sandboxed iframe
+        (chat stream + right panel). Persisting the content here means
+        reloads keep the report without depending on the file.
+        """
+        msg = self._ensure_assistant_message(event, state)
+        if msg is None:
+            return
+        part_id = event.data.get("id") or f"html_{event.seq}"
+        if part_id in msg.parts:
+            return
+        msg.parts[part_id] = ProjectedPart(
+            id=part_id,
+            type="html",
+            data={
+                "type": "html",
+                "title": event.data.get("title"),
+                "content": event.data.get("content", ""),
             },
             seq=len(msg.parts),
             time_created=event.time_created,

@@ -54,6 +54,14 @@ class ToolContext:
     workspace: Optional[Path] = None
     session_id: Optional[str] = None
     emit_progress: Optional[Callable[[dict], None]] = None
+    # Emit an SSE event to the frontend (wired to AgentLoop._emit).
+    # Used by display tools (show_chart / show_report) to push
+    # renderables into the chat stream + right panel.
+    emit_event: Optional[Callable[[str, dict], None]] = None
+    # Current assistant message id (injected by AgentLoop) — display
+    # tools attach it to emitted events so the projector can persist
+    # the chart/html part into the right assistant message.
+    message_id: Optional[str] = None
     # ── Tier 1 A1: permission plumbing ─────────────────────────
     # Set by AgentLoop per-attempt. ``permission_evaluator`` is the
     # ruleset source of truth; ``permission_gateway`` is the async

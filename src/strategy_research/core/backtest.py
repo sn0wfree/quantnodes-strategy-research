@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
 from .db import (
     save_backtest_result,
     save_nav_history,
@@ -419,6 +421,20 @@ def run_backtest_from_yaml(
         # 保存权重历史和 NAV 历史到 DuckDB
         save_weight_history(workspace_path, strategy_name, run_name, result.weights_history)
         save_nav_history(workspace_path, strategy_name, run_name, result.nav_daily)
+
+        # 导出净值曲线到文件 (equity_curve.csv)。这是 show_chart /
+        # show_report 的文件引用源：agent 只拿到路径，nav 数据不进
+        # LLM 上下文（docs/right-panel-agent-driven.md）。
+        try:
+            nav = result.nav_daily
+            if nav is not None and len(nav) > 0:
+                nav_df = pd.DataFrame({
+                    "date": pd.to_datetime(nav.index).strftime("%Y-%m-%d"),
+                    "nav": nav.values,
+                })
+                nav_df.to_csv(run_dir / "equity_curve.csv", index=False)
+        except Exception:  # noqa: BLE001
+            print("⚠️ 导出 equity_curve.csv 失败")
 
         # Trust Layer: write run_card.{json,md}
         write_run_card(
