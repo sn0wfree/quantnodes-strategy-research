@@ -612,7 +612,137 @@ class ImportDataTool(BaseTool):
             )
 
 
-# ── 5. register_data_tools ──────────────────────────────────────────
+# ── 5. CheckDataTool ─────────────────────────────────────────────
+
+
+class CheckDataTool(BaseTool):
+    """检查策略数据就绪性（覆盖/孤儿/窗口/密度/质量/因子语法/行级清洗建议）。
+
+    # ── 工具说明书 ──────────────────────────────
+    # 版本: 1.0.0
+    # 变更: 初版 (docs/run-backtest-data-gate.md)
+    #
+    # ## 用途
+    # 只读检查策略名下 DuckDB 数据是否就绪可跑回测: 资产覆盖(C1)、
+    # 孤儿资产(C2)、窗口/新鲜度(C3)、覆盖密度(C4)、数据质量(C5)、
+    # 因子语法(C6)、行级质量(C7)。不修改任何数据——修复由你决策
+    # （get_market_data / clean_data / 改 config）。
+    #
+    # ## 参数
+    # - strategy_name: 策略名 (必填)
+    # - source: 'config'(默认) 读 strategies/<name>/config.yaml 的
+    #   codes/start/end; 'explicit' 用下方显式参数
+    # - codes/start_date/end_date: source='explicit' 时的显式检查范围
+    # - include_cleaning: 是否附加 C7 行级统计 (默认 True)
+    #
+    # ## 示例
+    # {"strategy_name": "blue_chip_momentum"}
+    # {"strategy_name": "x", "source": "explicit",
+    #  "codes": ["600519.SH"], "start_date": "2023-01-01", "end_date": "2024-12-31"}
+    #
+    # ## 边界
+    # 只读 (effects 为空); run_backtest 内置同款门禁 (C1~C6, 不含 C7);
+    # C7 依赖 clean_data 的 dry_run 语义, 失败降级为 warn。
+    #
+    # ## 错误处理范式
+    # - 缺 strategy_name → error + expected
+    # - 无 DB → C0 fail
+    # - 修复动作参考各 check 的 fix_hint
+    #
+    # ## 相关工具
+    # clean_data: 行级清洗; get_market_data: 补数据; run_backtest: 门禁同源
+    # ─────────────────────────────────────────────
+    """
+
+    name = "check_data"
+    description = (
+        "检查策略数据就绪性（覆盖/孤儿/窗口/密度/质量/因子语法/行级）; 只读。"
+    )
+    repeatable = True
+    category = "数据"
+    effects = frozenset()
+
+    def execute(
+        self,
+        ctx: ToolContext,
+        strategy_name: str,
+        source: str = "config",
+        codes: list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        include_cleaning: bool = True,
+    ) -> str:
+        if ctx.workspace is None:
+            return err_actionable(
+                "missing workspace context",
+                fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
+                tool="check_data",
+            )
+        if not strategy_name:
+            return err_actionable(
+                "strategy_name is required",
+                received=strategy_name,
+                expected="non-empty strategy name, e.g. 'momentum_20d'",
+                fix="pass an existing strategy name",
+                tool="check_data",
+            )
+        if source not in ("config", "explicit"):
+            return err_actionable(
+                f"invalid source: {source}",
+                received=source,
+                expected="one of: config, explicit",
+                fix="use 'config' (read strategies/<name>/config.yaml) or 'explicit' (pass codes/dates)",
+                tool="check_data",
+            )
+
+        workspace = ctx.workspace
+        cfg = None
+        if source == "config":
+            cfg_path = workspace / "strategies" / strategy_name / "config.yaml"
+            if cfg_path.exists():
+                from ...config_runner import load_yaml_config
+
+                try:
+                    cfg = load_yaml_config(cfg_path)
+                except Exception:  # noqa: BLE001
+                    cfg = None
+            else:
+                return err_actionable(
+                    f"config not found: {cfg_path}",
+                    received=strategy_name,
+                    expected="strategies/<name>/config.yaml for source='config'",
+                    fix="use source='explicit' with codes/start_date/end_date for strategies without config",
+                    tool="check_data",
+                )
+
+        from ...data_readiness import check_data_readiness
+
+        try:
+            report = check_data_readiness(
+                workspace,
+                strategy_name,
+                cfg=cfg,
+                codes=codes,
+                start_date=start_date,
+                end_date=end_date,
+                include_cleaning=include_cleaning,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("check_data failed")
+            return err_actionable(
+                f"check failed: {exc}",
+                received=strategy_name,
+                tool="check_data",
+            )
+
+        return _ok({
+            "strategy_name": strategy_name,
+            "readiness": report.to_dict(),
+            "hint": "修复动作参考 readiness.checks[*].fix_hint",
+        })
+
+
+# ── 6. register_data_tools ──────────────────────────────────────────
 
 
 def register_data_tools(registry: ToolRegistry) -> None:
@@ -622,5 +752,6 @@ def register_data_tools(registry: ToolRegistry) -> None:
         ListDataSourcesTool,
         SearchSymbolTool,
         ImportDataTool,
+        CheckDataTool,
     ):
         registry.register(tool_cls())

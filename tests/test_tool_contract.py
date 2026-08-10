@@ -143,9 +143,16 @@ class TestGuidanceConsistency:
         doc = inspect.getdoc(tool)
         assert "get_market_data" in doc
         assert "commit_market_data" not in doc
-        # 代码 fix_msg 无残留
-        from strategy_research.core.agent.builtin_tools import RunBacktestTool
+        # 代码 fix_msg 无残留（v1.2.0 拆分为组合步骤后, workflow 文案在
+        # EngineRunStep / DataReadinessStep 中）
+        from strategy_research.core.agent.builtin_tools import (
+            DataReadinessStep,
+            EngineRunStep,
+            RunBacktestTool,
+        )
         src = inspect.getsource(RunBacktestTool.execute)
+        src += inspect.getsource(EngineRunStep.execute)
+        src += inspect.getsource(DataReadinessStep.execute)
         assert "commit_market_data" not in src
         assert "get_market_data" in src
 

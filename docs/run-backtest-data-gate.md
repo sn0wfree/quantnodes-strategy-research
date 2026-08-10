@@ -74,6 +74,31 @@ check_data(strategy_name, source="config", codes=None, start_date=None, end_date
 - `ok`（可含 warn）→ 正常执行；返回附 `readiness` 摘要与运行期 `factor_failures`
 - 门禁拦的是「**结果不可信**」而非「崩溃」——崩溃兜底由 NaN 防御负责
 
+## 二点五、工具错误标准化 + 组合式拆分（v1.2.0）
+
+### tool_errors 装饰器（`core/agent/tools.py`）
+- `tool_errors` 装饰 execute：`raise ToolError` → 自动注入 tool 名 → 确定性 JSON；
+  dict 返回值 → 统一 JSON 序列化；非 transient 异常 → 结构化兜底；
+  transient（ValueError/TypeError/…）→ re-raise 交给框架重试
+- `BaseTool.__init_subclass__` 自动包装所有子类 execute（零遗漏、防重包、
+  `functools.wraps` 保持签名）
+- 职责边界：invoke 管框架层（参数 coerce/权限/transient 重试）不动；
+  装饰器管 execute 业务层
+- `ToolError` 增加 `step` 与 `extra` 字段
+
+### RunBacktestTool 拆分为组合步骤（不注册，仅编排）
+```
+RunBacktestTool.execute（编排器）
+  ├─ ConfigLoadStep      读 config → cfg / ToolError(step='config_load')
+  ├─ DataPrepareStep     数据准备: 执行 load_data（source=auto/auto+duckdb 时
+  │                      在线获取写 DB）→ 门禁检查的才是最终回测数据
+  ├─ DataReadinessStep   门禁 C1~C6 / ToolError(step='data_gate', extra=readiness)
+  └─ EngineRunStep       run_backtest_from_yaml / ToolError(step='engine_run')
+```
+- 每步继承 BaseTool（自动获得标准化错误），错误带 step 标识精确定位环节
+- 存量工具（err_actionable 手动模式）渐进迁移，本次只迁移 run_backtest 链
+- 契约测试（test_tool_contract）同步更新
+
 ## 三、运行期失败暴露
 
 `compute_weights` 内因子失败此前只 print 到 stdout（agent 不可见），现全部收集：

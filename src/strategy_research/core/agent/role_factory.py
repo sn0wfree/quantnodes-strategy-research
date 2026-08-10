@@ -32,7 +32,7 @@ _ROLE_PROMPT_FILES = {
 # 角色对应的工具白名单 (用 build_default_registry() 注册的 9 个工具名)
 _ROLE_TOOL_WHITELIST = {
     "researcher":            ["read_file", "list_history", "factor_analysis", "web_search", "read_url", "get_market_data", "search_symbol", "show_chart"],
-    "data_quality":          ["read_file", "web_search", "read_url", "get_market_data", "list_data_sources"],
+    "data_quality":          ["read_file", "web_search", "read_url", "get_market_data", "list_data_sources", "check_data", "clean_data"],
     "factor_analyst":        ["read_file", "compute_factor", "factor_analysis", "get_market_data"],
     "strategist":            ["read_file", "write_file", "run_backtest", "git_diff", "web_search", "read_url", "get_market_data", "show_chart", "show_report"],
     "portfolio_construction":["read_file", "get_market_data"],

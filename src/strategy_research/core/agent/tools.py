@@ -8,6 +8,7 @@ docstring 首行 + execute 签名 + effects 生成) and a full docstring
 from __future__ import annotations
 
 import copy
+import functools
 import inspect
 import json
 import logging
@@ -83,6 +84,8 @@ class ToolError(Exception):
         expected: str = "",
         fix: str = "",
         tool: str = "",
+        step: str = "",
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(message)
         self.message = str(message)
@@ -90,6 +93,11 @@ class ToolError(Exception):
         self.expected = expected
         self.fix = fix
         self.tool = tool
+        # 组合式工具（多步骤编排）标识失败环节, 如 'config_load' / 'data_gate' /
+        # 'engine_run'（docs/run-backtest-data-gate.md）。
+        self.step = step
+        # 附加结构化字段（如数据就绪报告、workflow 指引）。
+        self.extra = dict(extra) if extra else None
 
     def to_payload(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"status": "error", "error": self.message}
@@ -101,6 +109,10 @@ class ToolError(Exception):
             payload["fix"] = self.fix
         if self.tool:
             payload["tool"] = self.tool
+        if self.step:
+            payload["step"] = self.step
+        if self.extra:
+            payload.update(self.extra)
         return payload
 
     def to_json(self) -> str:
@@ -404,6 +416,59 @@ def _walk_strict(node: Any) -> None:
                 _walk_strict(sub)
 
 
+# ── tool_errors: execute 业务层标准化装饰器 ─────────────────────────
+#
+# 由 BaseTool.__init_subclass__ 自动应用于所有子类的 execute（零遗漏、
+# 无需手动标注）。职责边界:
+#   - 工具内部业务错误一律 raise ToolError(message, fix=, expected=, step=)
+#     → 自动注入 tool 名 → to_json（确定性、不重试）
+#   - 非 transient 意外异常 → 结构化兜底（带 tool 名 + step 名）
+#   - 返回值统一: str 原样返回; dict → JSON; 其他 → 包装
+#   - transient 异常 (ValueError/TypeError/...) → re-raise 交给 invoke/loop 重试
+# invoke 保持框架层（参数 coerce / 权限 / transient 重试）不动。
+# docs/run-backtest-data-gate.md
+
+
+def tool_errors(func: Callable) -> Callable:
+    """Standardize a tool ``execute``: ToolError → JSON, dict → JSON,
+    non-transient exceptions → structured error JSON.
+
+    Not meant to be applied manually — ``BaseTool.__init_subclass__``
+    wraps every subclass ``execute`` automatically.
+    """
+
+    @functools.wraps(func)
+    def wrapper(self, *args: Any, **kwargs: Any) -> str:
+        try:
+            result = func(self, *args, **kwargs)
+        except ToolError as exc:
+            if not exc.tool:
+                exc.tool = getattr(self, "name", "")
+            if not exc.step:
+                exc.step = getattr(self, "name", "")
+            return exc.to_json()
+        except TRANSIENT_TOOL_ERRORS:
+            raise
+        except Exception as exc:                    # noqa: BLE001
+            logger.exception("tool %s execute raised", getattr(self, "name", "?"))
+            return json.dumps({
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+                "tool": getattr(self, "name", ""),
+                "step": getattr(self, "name", ""),
+            }, ensure_ascii=False)
+        if isinstance(result, str):
+            return result
+        if isinstance(result, dict):
+            return json.dumps(result, ensure_ascii=False, default=str)
+        return json.dumps(
+            {"status": "ok", "result": result}, ensure_ascii=False, default=str
+        )
+
+    wrapper._tool_errors_wrapped = True  # type: ignore[attr-defined]
+    return wrapper
+
+
 class BaseTool(ABC):
     """Tool base class.
 
@@ -425,6 +490,19 @@ class BaseTool(ABC):
     category: str = "other"       # 领域分类: 文件/回测/因子/行情/分析/技能/Web/Goal/Shell
     effects: frozenset[str] = frozenset()  # {EFFECT_DB, EFFECT_FS, EFFECT_NET}
     brief: str = ""               # 注册时由 ToolRegistry 自动填充
+
+    def __init_subclass__(cls, **kw: Any) -> None:
+        """Automatically wrap every subclass ``execute`` with ``tool_errors``.
+
+        Zero-effort standardized error output for ALL tools (and for the
+        decomposed step classes that inherit BaseTool without being
+        registered). Idempotent: a subclass re-declaring an already
+        wrapped ``execute`` is not double-wrapped.
+        """
+        super().__init_subclass__(**kw)
+        exec_fn = cls.__dict__.get("execute")
+        if exec_fn is not None and not getattr(exec_fn, "_tool_errors_wrapped", False):
+            cls.execute = tool_errors(exec_fn)
 
     @property
     def is_readonly(self) -> bool:
