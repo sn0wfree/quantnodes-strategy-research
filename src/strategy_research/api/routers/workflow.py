@@ -281,4 +281,261 @@ async def workflow_events(goal_id: str):
     )
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Modular DAG workflows (docs/workflow-module-design.md, Commit 3)
+# Endpoints: definitions CRUD / start-definition / approve / run status
+# ─────────────────────────────────────────────────────────────────────
+
+from pathlib import Path as _Path  # noqa: E402
+
+_run_registry = None
+_run_store = None
+
+
+def _definition_workspace() -> _Path:
+    import os
+    return _Path(os.environ.get("SR_WORKSPACE_PATH", str(_Path.cwd())))
+
+
+def _get_run_store() -> Any:
+    global _run_store
+    if _run_store is None:
+        from ...core.workflow.store import WorkflowStore
+        _run_store = WorkflowStore(db_path=_definition_workspace() / "workflows.db")
+    return _run_store
+
+
+def _get_run_registry() -> Any:
+    global _run_registry
+    if _run_registry is None:
+        from ...core.workflow.executor import WorkflowRunRegistry
+        _run_registry = WorkflowRunRegistry()
+    return _run_registry
+
+
+class WorkflowDefinitionPayload(BaseModel):
+    name: str
+    description: str = ""
+    version: str = "1.0"
+    budget: dict = {}
+    llm: dict = {}
+    params: dict = {}
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+
+class WorkflowStartDefinitionRequest(BaseModel):
+    session_id: str
+    definition_name: str
+    objective: str
+    params: dict = {}
+
+
+class WorkflowApproveRequest(BaseModel):
+    run_id: str
+    approved: bool
+    edits: dict | None = None
+
+
+@router.post("/definitions")
+async def definitions_create(payload: WorkflowDefinitionPayload, request: Request):
+    """Create or overwrite a user workflow definition."""
+    from ...core.workflow.builtin import save_user_definition
+    from ...core.workflow.definition import WorkflowDefinition
+
+    definition = WorkflowDefinition.from_dict(payload.model_dump(), source="user")
+    errors = definition.validate()
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+    path = save_user_definition(definition, _definition_workspace())
+    return {"status": "ok", "name": definition.name, "path": str(path),
+            "nodes": len(definition.nodes), "edges": len(definition.edges)}
+
+
+@router.get("/definitions")
+async def definitions_list(request: Request):
+    """List all definitions (user shadows builtin, source marked)."""
+    from ...core.workflow.builtin import list_definitions
+    return {"status": "ok", "definitions": list_definitions(_definition_workspace())}
+
+
+@router.get("/definitions/{name}")
+async def definitions_get(name: str, request: Request):
+    """Fetch a definition by name."""
+    from ...core.workflow.builtin import load_definition
+    definition = load_definition(name, _definition_workspace())
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Definition '{name}' not found")
+    return {"status": "ok", "definition": definition.to_dict()}
+
+
+@router.delete("/definitions/{name}")
+async def definitions_delete(name: str, request: Request):
+    """Delete a user definition. Builtin definitions are read-only."""
+    from ...core.workflow.builtin import delete_user_definition, load_definition
+    definition = load_definition(name, _definition_workspace())
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Definition '{name}' not found")
+    if definition.source == "builtin":
+        raise HTTPException(status_code=422, detail="Builtin definitions are read-only; use /definitions/{name}/copy first")
+    if delete_user_definition(name, _definition_workspace()):
+        return {"status": "ok", "deleted": name}
+    raise HTTPException(status_code=500, detail="Failed to delete definition")
+
+
+@router.post("/definitions/{name}/copy")
+async def definitions_copy(name: str, request: Request):
+    """Copy a definition (typically a builtin) into the user directory."""
+    import json as _json
+    from ...core.workflow.builtin import load_definition, save_user_definition
+    from ...core.workflow.definition import WorkflowDefinition
+
+    definition = load_definition(name, _definition_workspace())
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Definition '{name}' not found")
+    user_copy = WorkflowDefinition.from_dict(
+        _json.loads(definition.to_json()), source="user",
+    )
+    path = save_user_definition(user_copy, _definition_workspace())
+    return {"status": "ok", "name": user_copy.name, "path": str(path)}
+
+
+@router.get("/definitions/{name}/graph")
+async def definitions_graph(name: str, request: Request):
+    """Return nodes + edges for the WorkflowDAG frontend (typed nodes)."""
+    from ...core.workflow.builtin import load_definition
+    definition = load_definition(name, _definition_workspace())
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Definition '{name}' not found")
+    nodes = [{"id": n.id, "label": n.label or n.id, "type": n.type} for n in definition.nodes]
+    edges = [{"source": e.source, "target": e.target} for e in definition.edges]
+    return {"status": "ok", "name": definition.name,
+            "description": definition.description, "nodes": nodes, "edges": edges}
+
+
+@router.post("/start-definition")
+async def start_definition(req: WorkflowStartDefinitionRequest, request: Request):
+    """Start a modular workflow definition run."""
+    from ...core.workflow.builtin import load_definition
+    from ...core.workflow.executor import WorkflowRunner
+    from ...core.workflow.node_types import register_builtin_tool_executors
+
+    definition = load_definition(req.definition_name, _definition_workspace())
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Definition '{req.definition_name}' not found")
+
+    store = _get_run_store()
+    registry = _get_run_registry()
+    register_builtin_tool_executors()
+    runner = WorkflowRunner(
+        definition=definition,
+        workspace=_definition_workspace(),
+        objective=req.objective,
+        store=store,
+        session_id=req.session_id,
+        params_override=req.params or None,
+    )
+    run_id = runner.start()
+    registry.put(runner)
+    snapshot = runner.status_snapshot()
+    return {"status": "ok", "run_id": run_id, "run": snapshot}
+
+
+@router.post("/approve")
+async def workflow_approve(req: WorkflowApproveRequest, request: Request):
+    """Respond to a pending approval gate (approve or reject + edits)."""
+    registry = _get_run_registry()
+    runner = registry.get(req.run_id)
+    if runner is None:
+        raise HTTPException(status_code=404, detail=f"Run '{req.run_id}' not active")
+    if not runner.approve(req.approved, req.edits):
+        raise HTTPException(status_code=409, detail="Run is not awaiting approval")
+    return {"status": "ok", "run_id": req.run_id, "run": runner.status_snapshot()}
+
+
+@router.get("/run/{run_id}/status")
+async def run_status(run_id: str):
+    """Run status: live snapshot if active, else persisted record."""
+    store = _get_run_store()
+    registry = _get_run_registry()
+    runner = registry.get(run_id)
+    if runner is not None:
+        return {"status": "ok", "run_id": run_id, "run": runner.status_snapshot()}
+    record = store.get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    return {"status": "ok", "run_id": run_id, "run": record}
+
+
+@router.get("/run/{run_id}")
+async def run_detail(run_id: str):
+    """Run detail: lifecycle + segments + node outputs + approvals."""
+    store = _get_run_store()
+    record = store.get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    return {
+        "status": "ok",
+        "run": record,
+        "segments": store.list_segments(run_id),
+        "node_outputs": store.list_node_outputs(run_id),
+        "approvals": [
+            store.get_approval(run_id, node_id) or {"run_id": run_id, "node_id": node_id}
+            for node_id in _approval_node_ids(store, run_id)
+        ],
+    }
+
+
+def _approval_node_ids(store: Any, run_id: str) -> list[str]:
+    import json
+    rows = store._ensure_conn().execute(
+        "SELECT node_id FROM approvals WHERE run_id = ? ORDER BY created_at", (run_id,),
+    ).fetchall()
+    return [row["node_id"] for row in rows]
+
+
+@router.get("/run/{run_id}/events")
+async def run_events(run_id: str, request: Request):
+    """SSE event history (polling-based, works after process restart)."""
+    store = _get_run_store()
+
+    async def _stream():
+        import asyncio as _asyncio
+        last_seq = 0
+        while True:
+            events = store.list_events(run_id, limit=500)
+            for event in reversed(events):
+                if event["seq"] <= last_seq:
+                    continue
+                last_seq = event["seq"]
+                yield f"event: {event['event_type']}\ndata: {json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+            record = store.get_run(run_id)
+            if record and record["status"] in ("completed", "failed", "cancelled"):
+                yield f"event: run_terminal\ndata: {json.dumps({'status': record['status']}, ensure_ascii=False)}\n\n"
+                return
+            try:
+                await _asyncio.wait_for(_asyncio.Future(), timeout=1.0)
+            except _asyncio.TimeoutError:
+                continue
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
+@router.delete("/run/{run_id}")
+async def run_delete(run_id: str):
+    """Delete run history (all related rows)."""
+    store = _get_run_store()
+    if store.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    registry = _get_run_registry()
+    registry.pop(run_id)
+    store.delete_run(run_id)
+    return {"status": "ok", "deleted": run_id}
+
+
 __all__ = ["router"]
