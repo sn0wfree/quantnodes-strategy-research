@@ -153,6 +153,9 @@ class ShowChartTool(BaseTool):
     # - 文件不存在/不可解析 → error + fix (用 run_backtest 的
     #   artifacts 引用或 list_files 确认路径)
     # - 数据为空 → error + 建议先 run_backtest
+    #
+    # ## 相关工具
+    # run_backtest: 产出 equity_curve.csv; show_report: HTML 报告
     # ─────────────────────────────────────────────────────────────
     """
 
@@ -277,6 +280,9 @@ class ShowReportTool(BaseTool):
     # ## 错误处理范式
     # - 参数缺失 → error + expected
     # - 产物缺失 → error + fix (先 run_backtest)
+    #
+    # ## 相关工具
+    # run_backtest: 产出 equity_curve.csv/metrics.json; show_chart: 图表
     # ─────────────────────────────────────────────────────────────
     """
 

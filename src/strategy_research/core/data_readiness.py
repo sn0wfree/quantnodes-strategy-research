@@ -139,8 +139,10 @@ def _check_assets(
             id="C1", name="资产覆盖", status="fail",
             detail=f"DB 缺少 {len(missing)} 只配置资产: {_fmt_list(missing)}",
             fix_hint=(
+                f"缺 {len(missing)} 只配置资产（{_fmt_list(missing[:5])}），"
+                f"回测将只覆盖 {len(want) - len(missing)}/{len(want)} 只："
                 f"get_market_data(codes={missing[:5]}, "
-                f"strategy_name='{strategy_name}') 补齐后重试"
+                f"strategy_name='<当前策略名>') 补齐后重试"
             ),
         ))
     else:
@@ -175,15 +177,24 @@ def _check_assets(
             short_front = all_min_s > start_date
             short_back = all_max_s < end_date
             if short_front or short_back:
+                gap_parts = []
+                if short_front:
+                    gap_parts.append(
+                        f"起始滞后（DB 自 {all_min_s} 起，配置要求自 {start_date} 起）"
+                    )
+                if short_back:
+                    gap_parts.append(
+                        f"结尾截断（DB 至 {all_max_s}，配置要求至 {end_date}）"
+                    )
+                gap = "；".join(gap_parts)
                 checks.append(ReadinessCheck(
                     id="C3", name="窗口/新鲜度", status="fail",
-                    detail=(
-                        f"DB 窗口 {all_min_s} ~ {all_max_s} vs 期望 {start_date} ~ {end_date} "
-                        f"({'起始滞后' if short_front else ''}{'；结尾截断' if short_back else ''})"
-                    ),
+                    detail=f"DB 窗口 {all_min_s} ~ {all_max_s} vs 期望 {start_date} ~ {end_date} ({gap})",
                     fix_hint=(
-                        f"get_market_data(start_date='{start_date}', end_date='{end_date}', "
-                        f"strategy_name='{strategy_name}') 补齐窗口"
+                        f"数据窗口不足（{gap}）：get_market_data("
+                        f"start_date='{start_date}', end_date='{end_date}', "
+                        f"strategy_name='<当前策略名>') 补齐；"
+                        f"或调整 config.yaml 的 data.start_date/end_date"
                     ),
                 ))
             else:
@@ -353,7 +364,7 @@ def _check_cleaning(
         return [ReadinessCheck(
             id="C7", name="行级质量", status="warn",
             detail="; ".join(issues),
-            fix_hint=f"clean_data(strategy_name='{strategy_name}', preset='standard') 清洗",
+            fix_hint="clean_data(strategy_name='<当前策略名>', preset='standard') 清洗",
         )]
     except Exception as exc:  # noqa: BLE001
         return [ReadinessCheck(

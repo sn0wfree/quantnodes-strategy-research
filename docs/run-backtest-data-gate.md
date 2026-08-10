@@ -64,6 +64,10 @@ check_data(strategy_name, source="config", codes=None, start_date=None, end_date
 - 无 codes 的 config → 覆盖类检查（C1/C3/C4/C5）跳过并 warn
 - 报告大小：门禁报告截断（≤2KB，列表前 10 + 等 N 项）；check_data 工具报告
   列表完整（单行截断），供 agent 决策
+- **fix_hint 风格**：`strategy_name` 一律用占位符 `'<当前策略名>'`（模板语义
+  明确，策略名在 agent 上下文中已知），并附「为什么」的缺口诊断（如
+  「DB 自 2022-12-09 起，配置要求自 2020-01-01 起」）——让 LLM 理解意图后
+  自主决策（拉数据 or 改 config），而非机械照抄参数
 
 ## 二、run_backtest 内置门禁
 

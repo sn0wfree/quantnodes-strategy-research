@@ -640,7 +640,7 @@ class DataPrepareStep(BaseTool):
         if df is None or df.empty:
             raise ToolError(
                 "数据为空: 在线获取失败且本地无该策略数据",
-                fix="get_market_data(codes=[...], strategy_name='<name>') 手动获取后重试",
+                fix="get_market_data(codes=[...], strategy_name='<当前策略名>') 手动获取后重试",
                 tool="run_backtest",
                 step="data_prepare",
             )
