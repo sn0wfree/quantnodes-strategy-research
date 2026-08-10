@@ -156,6 +156,9 @@ class ChatMessage(BaseModel):
     content: str
     images: Optional[list[str]] = None
     agent_id: Optional[str] = None
+    mode: Optional[str] = None          # "plan" | "build" (None = session default)
+    model: Optional[str] = None         # 会话级模型覆盖
+    thinking: Optional[str] = None      # "off" | "on" | "auto"
 
 
 class SendMessageResponse(BaseModel):
@@ -587,12 +590,19 @@ async def send_async(body: ChatMessage, request: Request):
     # in the server environment to enable run_command for the agent.
     import os
     _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
+    # Plan mode: single iteration (analysis only), no shell tools
+    _mode = body.mode or "build"
+    _max_iter_eff = 1 if _mode == "plan" else _max_iter
+    _allow_shell_eff = False if _mode == "plan" else _allow_shell
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
-        max_iterations=_max_iter,
-        allow_shell_tools=_allow_shell,
+        max_iterations=_max_iter_eff,
+        allow_shell_tools=_allow_shell_eff,
         persona=body.agent_id,
+        mode=_mode,
+        model=body.model,
+        thinking=body.thinking,
     )
 
     # Queue-full guard: SessionService returns {"error": "queue_full", ...}

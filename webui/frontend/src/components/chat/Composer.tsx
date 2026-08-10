@@ -4,9 +4,13 @@ import { useChatStore } from '../../stores/chat'
 import { useSessionStore } from '../../stores/session'
 import { usePersonaStore } from '../../stores/personas'
 import { useToastStore } from '../../stores/toast'
+import { useModeStore } from '../../stores/mode'
+import { useModelStore } from '../../stores/model'
+import { useThinkingPrefStore } from '../../stores/thinkingPref'
 import { api } from '../../api/client'
 import { uuid } from '../../utils/uuid'
 import { ComposerToolbar } from './ComposerToolbar'
+import { ComposerStatusBar } from './ComposerStatusBar'
 import { SlashCommandMenu } from './SlashCommandMenu'
 
 export function Composer() {
@@ -32,10 +36,21 @@ export function Composer() {
   const cancelAttempt = useChatStore((s) => s.cancelAttempt)
   const addToast = useToastStore((s) => s.addToast)
   const getSessionPersona = usePersonaStore((s) => s.getSessionPersona)
+  const mode = useModeStore((s) => s.mode)
+  const loadSessionMode = useModeStore((s) => s.loadSessionMode)
+  const getModelForSession = useModelStore((s) => s.getModelForSession)
+  const thinkingMode = useThinkingPrefStore((s) => s.thinkingMode)
 
   const isStreaming = streamingMessageId !== null
 
   const draftKey = currentSessionId ? `sr-draft-${currentSessionId}` : null
+
+  // Load persisted mode when switching sessions
+  useEffect(() => {
+    if (currentSessionId) {
+      loadSessionMode(currentSessionId)
+    }
+  }, [currentSessionId, loadSessionMode])
 
   // Restore draft when switching sessions
   useEffect(() => {
@@ -103,6 +118,9 @@ export function Composer() {
         content,
         images: messageImages.length > 0 ? messageImages : undefined,
         agent_id: persona && persona !== 'chat' ? persona : undefined,
+        mode,
+        model: currentSessionId ? getModelForSession(currentSessionId) : undefined,
+        thinking: thinkingMode,
       })
 
       // Store attempt_id for cancel support
@@ -146,7 +164,7 @@ export function Composer() {
     } finally {
       setSending(false)
     }
-  }, [text, images, currentSessionId, addMessage, setActiveAttempt, getSessionPersona, addToast])
+  }, [text, images, currentSessionId, addMessage, setActiveAttempt, getSessionPersona, addToast, mode, getModelForSession, thinkingMode])
 
   const handleCancel = useCallback(() => {
     cancelAttempt()
@@ -329,6 +347,9 @@ export function Composer() {
 
       {/* Toolbar: persona selector + markdown actions */}
       <ComposerToolbar sessionId={currentSessionId} onApplyMarkdown={applyMarkdown} />
+
+      {/* Status bar: mode toggle, model selector, thinking, context */}
+      <ComposerStatusBar sessionId={currentSessionId} />
 
       {/* Input area */}
       <div className="glass rounded-xl flex items-end gap-2 px-4 py-3">

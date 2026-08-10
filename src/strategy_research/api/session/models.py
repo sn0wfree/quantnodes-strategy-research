@@ -163,6 +163,9 @@ class Attempt:
     error: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
     persona: Optional[str] = None  # optional role/persona (researcher/strategist/...)
+    mode: str = "build"  # "plan" | "build"
+    model_override: Optional[str] = None  # session-level model override
+    thinking: str = "auto"  # "off" | "on" | "auto"
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the attempt to a dictionary.

@@ -123,6 +123,8 @@ class SessionService:
         system_prompt: Optional[str] = None,
         allow_shell_tools: bool = False,
         persona: str | None = None,
+        mode: str | None = None,
+        thinking: str | None = None,
     ) -> dict[str, str]:
         """Send a user message and enqueue background AgentLoop execution.
 
@@ -204,6 +206,9 @@ class SessionService:
             status=AttemptStatus.PENDING,
             created_at=_utc_now_iso(),
             persona=persona,
+            mode=mode or "build",
+            model_override=model,
+            thinking=thinking or "auto",
         )
         self.store.create_attempt(attempt)
         self.event_bus.emit(
@@ -249,6 +254,8 @@ class SessionService:
                 "max_iterations": max_iterations,
                 "system_prompt": system_prompt,
                 "allow_shell_tools": allow_shell_tools,
+                "mode": mode or "build",
+                "thinking": thinking or "auto",
             }
         )
         # Recompute queue_length now that we've enqueued (best-effort snapshot
@@ -458,6 +465,8 @@ class SessionService:
                         max_iterations=item.get("max_iterations", 1),
                         system_prompt=item.get("system_prompt"),
                         allow_shell_tools=item.get("allow_shell_tools", False),
+                        mode=item.get("mode", "build"),
+                        thinking=item.get("thinking", "auto"),
                     )
                 )
                 self._active_loops[attempt.attempt_id] = attempt_task
@@ -515,6 +524,8 @@ class SessionService:
         max_iterations: int,
         system_prompt: Optional[str],
         allow_shell_tools: bool,
+        mode: str = "build",
+        thinking: str = "auto",
     ) -> None:
         """Execute an Attempt: load history → run AgentLoop → persist result."""
         logger.info("[EXEC] start attempt=%s session=%s", attempt.attempt_id, session_id)
@@ -572,6 +583,8 @@ class SessionService:
                 system_prompt=system_prompt,
                 allow_shell_tools=allow_shell_tools,
                 persona=getattr(attempt, "persona", None),
+                mode=mode,
+                thinking=thinking,
                 cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
                 accumulated_parts=accumulated_parts,
             )
@@ -707,6 +720,8 @@ class SessionService:
         accumulated_parts: list[dict[str, Any]],
         cfg: LLMConfig,
         persona: Optional[str] = None,
+        mode: str = "build",
+        thinking: str = "auto",
     ) -> dict[str, Any]:
         """Build AgentLoop and run it. Returns ``{content, status, ...}``.
 
@@ -889,6 +904,37 @@ class SessionService:
         # Bootstrap workspace if incomplete
         _bootstrap_workspace(workspace_path)
 
+        # ── Plan mode: restrict to read-only tools ────────────────────
+        _PLAN_READONLY_TOOLS = {
+            "read_file", "list_files", "search_code", "search_file",
+            "get_file_info", "web_search", "web_fetch", "read_url",
+            "read_document", "think", "tool_help",
+            "list_goals", "get_goal_status",
+            "list_history", "git_diff", "factor_analysis",
+            "pattern_recognition", "list_skills", "load_skill",
+            "factor_cross_sectional_analysis", "factor_quintile_returns",
+            "factor_ic_decay", "factor_turnover",
+            "strategy_compare", "drawdown_analysis", "benchmark_comparison",
+        }
+        allowed_tools: list[str] | None = None
+        if mode == "plan":
+            allowed_tools = list(_PLAN_READONLY_TOOLS)
+
+        # ── Thinking parameter injection ──────────────────────────────
+        # Inject thinking instructions into system prompt based on mode
+        thinking_instructions = ""
+        if thinking == "off":
+            thinking_instructions = (
+                "\n\nIMPORTANT: Do NOT use thinking/reasoning blocks. "
+                "Respond directly with your analysis."
+            )
+        elif thinking == "on":
+            thinking_instructions = (
+                "\n\nIMPORTANT: Use extended thinking for complex analysis. "
+                "Show your reasoning process in <think> blocks."
+            )
+        # "auto" = no injection, let provider decide
+
         # Persona override: when a valid persona is requested, render its
         # system prompt and use it in place of the default chat prompt.
         # Unknown persona → fall back to the caller-provided/default chat
@@ -907,6 +953,10 @@ class SessionService:
                     final_prompt = persona_prompt
                     loop_role = persona
 
+        # Append thinking instructions to system prompt
+        if thinking_instructions and final_prompt is not None:
+            final_prompt = final_prompt + thinking_instructions
+
         agent = build_chat_agent_loop(
             config=cfg,
             session_id=attempt.session_id,
@@ -917,6 +967,7 @@ class SessionService:
             max_iterations=max_iterations,
             system_prompt_override=final_prompt,  # caller-provided wins
             allow_shell_tools=allow_shell_tools,
+            allowed_tools=allowed_tools,  # Plan mode: read-only tools
             enable_goal_injection=True,  # long-horizon: continue until goal criteria met
         )
 
