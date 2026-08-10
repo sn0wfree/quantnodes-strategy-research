@@ -242,3 +242,50 @@ export const image: SSEHandler = (data, ctx) => {
     }),
   )
 }
+
+/**
+ * goal_updated: backend emits a FULL snapshot after every goal
+ * mutation (chat tools / /goal command / REST). Two consumers:
+ * 1. metaHandlers.goalUpdated → right-panel GoalCard (setGoal)
+ * 2. THIS handler → chat stream GoalMessage card (addMessage)
+ *
+ * The message id comes from the backend payload (message_id), which
+ * is ALSO the id the projector persists — so live additions and DB
+ * reloads share the same key (addMessage Map.set overwrites → no
+ * duplicates on SSE replay).
+ */
+export const goalUpdatedMessage: SSEHandler = (data, ctx) => {
+  const { addMessage, sessionId } = ctx
+  const mid = data.message_id as string | undefined
+  const goalId = data.goal_id as string | undefined
+  if (!mid || !goalId || !sessionId) return
+
+  const criteria = Array.isArray(data.criteria)
+    ? (data.criteria as Array<{
+        criterion_id: string
+        text: string
+        status: string
+        evidence_count: number
+      }>)
+    : []
+
+  addMessage({
+    id: mid,
+    session_id: sessionId,
+    role: 'system',
+    parts: [],
+    created_at: Date.now() / 1000,
+    message_type: 'goal',
+    metadata: {
+      goal_id: goalId,
+      change_type: (data.change_type as string) || 'update',
+      objective: (data.objective as string) || '',
+      progress_percent: (data.progress_percent as number) ?? 0,
+      goal_status: (data.goal_status as string) || 'active',
+      criteria,
+      evidence_count: (data.evidence_count as number) ?? 0,
+      evidence_text: (data.evidence_text as string) || '',
+      recap: (data.recap as string) || '',
+    },
+  })
+}

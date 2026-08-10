@@ -6,6 +6,7 @@ import { useLayoutStore } from '../../stores/layout'
 import { useSessionStore } from '../../stores/session'
 import { MessageBubble } from './MessageBubble'
 import { AssistantMessage } from './AssistantMessage'
+import { GoalMessage } from './GoalMessage'
 import { EmptyState } from '../common/EmptyState'
 import { QueuePauseBanner } from './QueuePauseBanner'
 import { ContextUsageBar } from './ContextUsageBar'
@@ -181,6 +182,17 @@ export function MessageList() {
                   </div>
                 </div>
               </div>
+              </>
+            )
+          }
+
+          // Goal messages: system state snapshot card (change type +
+          // progress, collapsible criteria / evidence audit).
+          if (message.message_type === 'goal') {
+            return (
+              <>
+                {daySeparator}
+                <GoalMessage message={message} />
               </>
             )
           }

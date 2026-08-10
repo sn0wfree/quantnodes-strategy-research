@@ -20,8 +20,6 @@ import {
 import { agentStatus, agentLoop, dagUpdate, progress } from './agentHandlers'
 import {
   goalUpdated,
-  goalEvidenceAdded,
-  goalCompleted,
   sessionMetaUpdated,
 } from './metaHandlers'
 import {
@@ -93,8 +91,6 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   dag_update: dagUpdate,
   progress,
   goal_updated: goalUpdated,
-  goal_evidence_added: goalEvidenceAdded,
-  goal_completed: goalCompleted,
   session_meta_updated: sessionMetaUpdated,
   // Study task system (Phase 5 — StudyScheduler emits study_* via EventStore)
   study_queued: studyQueued,

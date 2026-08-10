@@ -1,5 +1,6 @@
-// goal store — covers setGoal/updateGoal/clearGoal and the
-// structuredClone invariant on updateGoal (nested fields).
+// goal store — setGoal / clearGoal. updateGoal was removed with the
+// incremental goal SSE handlers (full-snapshot goal_updated events
+// replace it — docs/goal-events-panel-link.md).
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useGoalStore } from '../stores/goal'
@@ -42,36 +43,4 @@ describe('useGoalStore', () => {
     expect(useGoalStore.getState().currentGoal).toBeNull()
   })
 
-  it('updateGoal mutates a deep clone (does not leak into the previous state)', () => {
-    const goal = fixture() as import('../stores/goal').Goal
-    useGoalStore.getState().setGoal(goal)
-    useGoalStore.getState().updateGoal((g) => {
-      g.criteria[0].status = 'covered'
-      g.progress_percent = 80
-    })
-    const after = useGoalStore.getState().currentGoal!
-    expect(after.criteria[0].status).toBe('covered')
-    expect(after.progress_percent).toBe(80)
-    // The originally-passed goal object is unchanged (structuredClone).
-    expect(goal.criteria[0].status).toBe('pending')
-    expect(goal.progress_percent).toBe(30)
-  })
-
-  it('updateGoal is a no-op when there is no current goal', () => {
-    let invoked = false
-    useGoalStore.getState().updateGoal(() => {
-      invoked = true
-    })
-    expect(invoked).toBe(false)
-    expect(useGoalStore.getState().currentGoal).toBeNull()
-  })
-
-  it('updateGoal isolates arrays so callers can append without leaking', () => {
-    useGoalStore.getState().setGoal(fixture())
-    useGoalStore.getState().updateGoal((g) => {
-      g.criteria.push({ criterion_id: 'c-2', text: 'dd < 20', status: 'pending', required: true })
-    })
-    const after = useGoalStore.getState().currentGoal!
-    expect(after.criteria).toHaveLength(2)
-  })
 })

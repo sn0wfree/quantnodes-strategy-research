@@ -107,7 +107,6 @@ export function useSSE(sessionId: string | null) {
         updateNodeStatus,
         setExecutionProgress: (p) => useWorkflowStore.getState().setExecutionProgress(p),
         setGoal: (g) => useGoalStore.getState().setGoal(g),
-        updateGoal: (u) => useGoalStore.getState().updateGoal(u),
         addToast,
         patchSessionMeta: (sid, patch) =>
           useSessionStore.setState((state) => ({

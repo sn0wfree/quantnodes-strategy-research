@@ -30,8 +30,6 @@ vi.mock('../../stores/session', () => ({
 import { useGoalStore } from '../stores/goal'
 import {
   goalUpdated,
-  goalEvidenceAdded,
-  goalCompleted,
   sessionMetaUpdated,
 } from '../hooks/sse/metaHandlers'
 
@@ -83,52 +81,6 @@ describe('goalUpdated', () => {
     // Give the dynamic import a tick.
     await new Promise((r) => setTimeout(r, 10))
     expect(mockSessionStore.loadSessionState).not.toHaveBeenCalled()
-  })
-})
-
-describe('goalEvidenceAdded', () => {
-  it('bumps evidence_count and applies a fresh progress_percent', () => {
-    useGoalStore.getState().setGoal({
-      goal_id: 'g-1',
-      session_id: 'sess-1',
-      status: 'active',
-      objective: 'x',
-      progress_percent: 30,
-      criteria: [],
-      evidence_count: 2,
-    })
-    goalEvidenceAdded(
-      { progress_percent: 60 },
-      { updateGoal: useGoalStore.getState().updateGoal } as never
-    )
-    const g = useGoalStore.getState().currentGoal!
-    expect(g.evidence_count).toBe(3)
-    expect(g.progress_percent).toBe(60)
-  })
-})
-
-describe('goalCompleted', () => {
-  it('updates status to "complete" and stores the recap', () => {
-    useGoalStore.getState().setGoal({
-      goal_id: 'g-1', session_id: 'sess-1', status: 'active',
-      objective: 'x', progress_percent: 0, criteria: [], evidence_count: 0,
-    })
-    goalCompleted(
-      { status: 'complete', recap: 'sharpe 1.4 achieved' },
-      { updateGoal: useGoalStore.getState().updateGoal } as never
-    )
-    const g = useGoalStore.getState().currentGoal!
-    expect(g.status).toBe('complete')
-    expect(g.recap).toBe('sharpe 1.4 achieved')
-  })
-
-  it('falls back to "complete" when status is absent', () => {
-    useGoalStore.getState().setGoal({
-      goal_id: 'g-1', session_id: 'sess-1', status: 'active',
-      objective: 'x', progress_percent: 0, criteria: [], evidence_count: 0,
-    })
-    goalCompleted({}, { updateGoal: useGoalStore.getState().updateGoal } as never)
-    expect(useGoalStore.getState().currentGoal!.status).toBe('complete')
   })
 })
 

@@ -83,9 +83,10 @@ class TestCompactFieldsExposed:
             assert has_default, f"Field {f.name} has no default"
 
     def test_field_count(self):
-        """Should have 22 fields (sanity check; Phase A added 6: L4-only
-        config, safety check, and history-filter knobs; +1 quality_decay)."""
-        assert len(dataclasses.fields(CompactConfig)) == 22
+        """Should have 23 fields (sanity check; Phase A added 6: L4-only
+        config, safety check, and history-filter knobs; +1 quality_decay;
+        +1 goal_evidence_truncate_chars)."""
+        assert len(dataclasses.fields(CompactConfig)) == 23
 
     def test_field_names_match_loader(self):
         """The fields in CompactConfig must match the loader expectations."""

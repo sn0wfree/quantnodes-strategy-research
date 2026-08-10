@@ -122,6 +122,10 @@ class EventType:
     # Todo / task tracking (opencode-style todo_write tool)
     TODO_UPDATED = "todo_updated"
 
+    # Goal state (full snapshot; persisted to messages as
+    # message_type='goal' — see projector._on_goal_updated)
+    GOAL_UPDATED = "goal_updated"
+
 
 # Set of all known event types (for validation)
 _ALL_EVENT_TYPES: Set[str] = set()

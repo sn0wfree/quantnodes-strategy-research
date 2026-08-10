@@ -831,65 +831,44 @@ def _goal_help() -> str:
 
 
 def _emit_goal_sse_event(event_bus: Any, session_id: str, subcmd: str) -> None:
-    """Emit goal SSE events after /goal command execution.
+    """Emit goal SSE event after /goal command execution.
 
-    Reads the current goal snapshot from GoalStore and emits the
-    corresponding ``goal_updated`` / ``goal_evidence_added`` /
-    ``goal_completed`` SSE event so the frontend GoalTab updates
-    immediately without waiting for the next poll cycle.
+    Reads the current goal snapshot from GoalStore and emits a single
+    full-snapshot ``goal_updated`` event (same payload builder as the
+    chat-tool path — core/goal/events.py) so the frontend panel and
+    the message-stream projector stay in sync.
     """
     from ...core.goal import GoalStore
+    from ...core.goal.events import (
+        CHANGE_TYPE_COMPLETE,
+        CHANGE_TYPE_CREATE,
+        CHANGE_TYPE_EVIDENCE,
+        build_goal_updated_payload,
+    )
 
     # Only emit for mutation commands
     if subcmd not in ("start", "create", "evidence", "ev", "complete", "done"):
         return
 
+    if subcmd in ("start", "create"):
+        change_type = CHANGE_TYPE_CREATE
+    elif subcmd in ("evidence", "ev"):
+        change_type = CHANGE_TYPE_EVIDENCE
+    else:
+        change_type = CHANGE_TYPE_COMPLETE
+
+    payload = None
     try:
         with GoalStore() as store:
-            goal = store.get_current_goal(session_id)
-            if goal is None:
-                return
-            snapshot = store.get_current_snapshot(session_id)
+            payload = build_goal_updated_payload(
+                session_id, store, change_type,
+            )
     except Exception:
         logger.debug("failed to read goal for SSE emit", exc_info=True)
         return
 
-    criteria_list = []
-    evidence_count = 0
-    if snapshot:
-        criteria_list = [
-            {
-                "criterion_id": c.get("criterion_id"),
-                "text": c.get("text"),
-                "status": c.get("status"),
-                "evidence_count": c.get("evidence_count", 0),
-            }
-            for c in snapshot.get("criteria", [])
-        ]
-        evidence_count = snapshot.get("evidence_count", 0)
-
-    if subcmd in ("start", "create"):
-        event_bus.emit(session_id, "goal_updated", {
-            "goal_id": goal.goal_id,
-            "session_id": session_id,
-            "status": goal.status.value,
-            "objective": goal.objective,
-            "progress_percent": goal.progress_percent,
-            "criteria": criteria_list,
-            "evidence_count": evidence_count,
-        })
-    elif subcmd in ("evidence", "ev"):
-        event_bus.emit(session_id, "goal_evidence_added", {
-            "goal_id": goal.goal_id,
-            "progress_percent": goal.progress_percent,
-            "evidence_count": evidence_count,
-        })
-    elif subcmd in ("complete", "done"):
-        event_bus.emit(session_id, "goal_completed", {
-            "goal_id": goal.goal_id,
-            "status": goal.status.value,
-            "recap": goal.recap,
-        })
+    if payload is not None:
+        event_bus.emit(session_id, "goal_updated", payload)
 
 
 def _emit_goal_response(

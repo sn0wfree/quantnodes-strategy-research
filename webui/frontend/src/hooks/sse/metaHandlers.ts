@@ -1,7 +1,8 @@
 import type { Goal } from '../../stores/goal'
 import type { SSEHandler } from './types'
+import { goalUpdatedMessage } from './messageHandlers'
 
-/** Backend goal_updated event payload (service.py / chat.py). */
+/** Backend goal_updated event payload (service.py / chat.py / goal.py). */
 export interface GoalUpdatedEvent {
   goal_id?: string
   session_id?: string
@@ -10,30 +11,27 @@ export interface GoalUpdatedEvent {
   progress_percent?: number
   criteria?: unknown[]
   evidence_count?: number
-}
-
-/** Backend goal_evidence_added event payload. */
-export interface GoalEvidenceAddedEvent {
-  goal_id?: string
-  progress_percent?: number
-}
-
-/** Backend goal_completed event payload. */
-export interface GoalCompletedEvent {
-  goal_id?: string
-  status?: string
   recap?: string
+  /** create | evidence | complete */
+  change_type?: string
 }
 
 /**
- * Goal SSE handlers — wired to backend goal_* events emitted from
- * service.py (_maybe_emit_goal_event) and chat.py (_emit_goal_sse_event).
+ * goal_updated — FULL snapshot event emitted after every goal mutation
+ * (chat tools / /goal command / REST endpoints; payload built by
+ * core/goal/events.build_goal_updated_payload).
+ *
+ * Two consumers:
+ * 1. HERE: right-panel GoalCard via setGoal (full overwrite — the
+ *    snapshot is the authoritative state, no incremental drift).
+ * 2. messageHandlers.goalUpdatedMessage: chat-stream GoalMessage card.
  *
  * goalUpdated also triggers loadSessionState to sync the workflow store
  * (DAG panel) when the workflow is empty, so the right panel reflects
  * the goal immediately after creation.
  */
-export const goalUpdated: SSEHandler = (data, { setGoal }) => {
+export const goalUpdated: SSEHandler = (data, ctx) => {
+  const { setGoal } = ctx
   const goalData = data as GoalUpdatedEvent
   if (!goalData.goal_id) return
 
@@ -45,29 +43,16 @@ export const goalUpdated: SSEHandler = (data, { setGoal }) => {
     progress_percent: goalData.progress_percent || 0,
     criteria: (goalData.criteria ?? []) as Goal['criteria'],
     evidence_count: goalData.evidence_count || 0,
+    recap: goalData.recap,
   })
+
+  // Second channel: the same event also lands in the chat stream as
+  // a GoalMessage card (message_id shared with the persisted row).
+  goalUpdatedMessage(data, ctx)
 
   // Trigger loadSessionState to sync workflow store (DAG panel).
   // Only when workflow is empty to avoid overwriting an active workflow.
   _maybeSyncWorkflow(goalData.session_id)
-}
-
-export const goalEvidenceAdded: SSEHandler = (data, { updateGoal }) => {
-  const evData = data as GoalEvidenceAddedEvent
-  updateGoal((g) => {
-    g.evidence_count = (g.evidence_count || 0) + 1
-    if (evData.progress_percent !== undefined) {
-      g.progress_percent = evData.progress_percent
-    }
-  })
-}
-
-export const goalCompleted: SSEHandler = (data, { updateGoal }) => {
-  const compData = data as GoalCompletedEvent
-  updateGoal((g) => {
-    g.status = compData.status || 'complete'
-    if (compData.recap) g.recap = compData.recap
-  })
 }
 
 /**

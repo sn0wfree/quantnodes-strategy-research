@@ -23,6 +23,46 @@ from .event_v2 import EventType, EventV2, is_known_event_type
 
 logger = logging.getLogger(__name__)
 
+# change_type → UI/LLM-facing label for goal messages
+_GOAL_CHANGE_LABELS = {
+    "create": "创建目标",
+    "evidence": "添加证据",
+    "complete": "完成目标",
+}
+
+
+def _format_goal_content(data: dict[str, Any]) -> str:
+    """Build the LLM-facing content for a goal message.
+
+    Compact, self-explaining, prefixed so the model never mistakes it
+    for user input. The FULL snapshot lives in the message metadata;
+    this text only needs to keep the agent oriented (progress,
+    criteria status, latest evidence).
+    """
+    change = data.get("change_type", "")
+    label = _GOAL_CHANGE_LABELS.get(change, "目标更新")
+    objective = (data.get("objective") or "").strip()
+    status = data.get("goal_status") or "active"
+    progress = data.get("progress_percent") or 0
+    evidence_llm = (data.get("evidence_text_llm") or "").strip()
+
+    criteria = data.get("criteria") or []
+    criteria_brief = ", ".join(
+        f"{c.get('text', '')[:20]}({c.get('status', 'pending')})"
+        for c in criteria
+        if isinstance(c, dict)
+    ) or "无"
+
+    lines = [
+        "[目标状态] 系统生成的目标快照（非用户输入，供你跟踪研究目标进度）。",
+        f"变更: {label}",
+        f"目标: {objective!r} | 状态: {status} | 进度: {progress}%",
+        f"完成标准: [{criteria_brief}]",
+    ]
+    if evidence_llm:
+        lines.append(f"最新证据: {evidence_llm!r}")
+    return "\n".join(lines)
+
 
 # ── Projected state ────────────────────────────────────────────────
 
@@ -227,6 +267,12 @@ class Projector:
             # Compaction events create a compaction message (system)
             EventType.COMPACT: self._on_compact,
             EventType.COMPACT_ENDED: self._on_compact,
+            # Goal state events create a goal message (system). The
+            # event carries a FULL snapshot (see core/goal/events.py)
+            # so each goal message is self-contained: it enters the
+            # LLM context (role=system, compact content) and drives
+            # the UI (metadata holds the structured snapshot).
+            EventType.GOAL_UPDATED: self._on_goal_updated,
         }
         # Per-session in-memory projections, keyed by session_id. Only
         # used by project_incremental(); project() remains a pure
@@ -1195,6 +1241,51 @@ class Projector:
             return
 
         state.messages[msg_id] = marker
+
+    def _on_goal_updated(
+        self, event: EventV2, state: ProjectedSession,
+    ) -> None:
+        """Handle goal_updated event — add a goal state message.
+
+        The event carries a FULL snapshot (built by
+        core/goal/events.build_goal_updated_payload). We persist one
+        self-contained ``message_type='goal'`` message per event:
+        - role=system + compact content → enters the LLM context so
+          the agent tracks goal evolution (docs/goal-events-panel-link.md)
+        - metadata holds the structured snapshot → UI rendering + audit
+        - id is derived from the event id → replay is idempotent
+          (updates in place, never duplicates)
+        """
+        data = event.data or {}
+        if not data.get("goal_id"):
+            return
+        # Prefer the stable id produced by build_goal_updated_payload
+        # (shared with the frontend SSE handler, so live additions and
+        # DB reloads use the same key → Map.set / INSERT OR REPLACE
+        # are naturally idempotent); fall back to the event id.
+        msg_id = data.get("message_id") or f"goal-{event.id[:8]}"
+
+        content = _format_goal_content(data)
+        message = ProjectedMessage(
+            id=msg_id,
+            session_id=event.aggregate_id,
+            role="system",
+            content=content,
+            message_type="goal",
+            created_at=event.time_created,
+            seq=len(state.messages) + 1,
+            metadata=dict(data),
+        )
+
+        # Idempotent on replay: refresh content/metadata instead of
+        # duplicating the message.
+        existing = state.messages.get(msg_id)
+        if existing is not None:
+            existing.content = content
+            existing.metadata = dict(data)
+            return
+
+        state.messages[msg_id] = message
 
 
 __all__ = [

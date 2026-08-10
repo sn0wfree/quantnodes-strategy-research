@@ -38,8 +38,6 @@ export type SSEEventType =
   | 'error'
   | 'session_meta_updated'
   | 'goal_updated'
-  | 'goal_evidence_added'
-  | 'goal_completed'
   | 'attempt.started'
   | 'queue_paused'
   | 'queue_state'
@@ -84,7 +82,7 @@ export const EVENT_TYPES: SSEEventType[] = [
   'agent_status', 'agent_loop', 'agent_done', 'assistant_message',
   'dag_update', 'progress', 'message_received', 'error',
   'session_meta_updated',
-  'goal_updated', 'goal_evidence_added', 'goal_completed',
+  'goal_updated',
   'compact',
   'llm_usage', 'session_total_tokens',
   'attempt.started', 'queue_paused', 'queue_state',
@@ -152,7 +150,6 @@ export interface SSEContext {
   setExecutionProgress: (p: number) => void
   // Goal store
   setGoal: (g: Goal | null) => void
-  updateGoal: (updater: (g: Goal) => void) => void
   // Toast store
   addToast: (kind: 'error' | 'info' | 'success', msg: string) => void
   // Session store meta update (auth-side session list patching)

@@ -7,6 +7,7 @@ import {
   toolProgress,
   toolResult,
   assistantMessage,
+  goalUpdatedMessage,
 } from '../hooks/sse/messageHandlers'
 import { useChatStore } from '../stores/chat'
 import type { SSEContext } from '../hooks/sse/types'
@@ -213,6 +214,62 @@ describe('assistantMessage', () => {
 
   it('no-ops without content or messageId', () => {
     assistantMessage({}, ctx())
+    expect(useChatStore.getState().messages.size).toBe(0)
+  })
+})
+describe('goalUpdatedMessage', () => {
+  beforeEach(() => {
+    useChatStore.setState({ messages: new Map(), streamingMessageId: null })
+  })
+
+  it('adds a goal message card to the stream', () => {
+    goalUpdatedMessage(
+      {
+        message_id: 'goal-abc123',
+        goal_id: 'g-1',
+        session_id: 'sess-1',
+        objective: 'find alpha',
+        progress_percent: 45,
+        change_type: 'evidence',
+        evidence_count: 3,
+        evidence_text: '截面 IC = 0.045 (2023-01-01 至 2023-12-31)',
+        criteria: [
+          { criterion_id: 'c1', text: 'Sharpe > 1', status: 'covered', evidence_count: 2 },
+        ],
+      },
+      ctx()
+    )
+    const m = useChatStore.getState().messages.get('goal-abc123')
+    expect(m).toBeDefined()
+    expect(m!.message_type).toBe('goal')
+    expect(m!.role).toBe('system')
+    expect(m!.metadata?.goal_id).toBe('g-1')
+    expect(m!.metadata?.change_type).toBe('evidence')
+    expect(m!.metadata?.progress_percent).toBe(45)
+    expect(m!.metadata?.evidence_text).toContain('0.045')
+    expect(m!.metadata?.criteria).toHaveLength(1)
+  })
+
+  it('overwrites on the same message_id (SSE replay idempotency)', () => {
+    const payload = {
+      message_id: 'goal-abc123',
+      goal_id: 'g-1',
+      session_id: 'sess-1',
+      objective: 'first',
+      progress_percent: 10,
+      change_type: 'create',
+      evidence_count: 0,
+    }
+    goalUpdatedMessage(payload, ctx())
+    goalUpdatedMessage({ ...payload, objective: 'second', progress_percent: 60 }, ctx())
+    const messages = useChatStore.getState().messages
+    expect(messages.size).toBe(1)
+    expect(messages.get('goal-abc123')!.metadata?.objective).toBe('second')
+  })
+
+  it('no-ops without message_id / goal_id / session', () => {
+    goalUpdatedMessage({ goal_id: 'g-1' }, ctx())
+    goalUpdatedMessage({ message_id: 'goal-x' }, ctx())
     expect(useChatStore.getState().messages.size).toBe(0)
   })
 })

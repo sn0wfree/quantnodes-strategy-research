@@ -10,7 +10,7 @@ enableMapSet()
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'compaction'
 
-export type MessageType = 'user' | 'assistant' | 'tool' | 'compaction' | 'error'
+export type MessageType = 'user' | 'assistant' | 'tool' | 'compaction' | 'error' | 'goal'
 
 export interface TextPart {
   type: 'text'
@@ -112,6 +112,23 @@ export interface Message {
       confidence: number
       detail: string
     }
+    /** Goal state snapshot (message_type='goal'). Populated by the
+     *  goal_updated SSE handler / projector; drives the GoalMessage
+     *  card in the chat stream (docs/goal-events-panel-link.md). */
+    goal_id?: string
+    change_type?: 'create' | 'evidence' | 'complete' | string
+    objective?: string
+    progress_percent?: number
+    goal_status?: string
+    criteria?: Array<{
+      criterion_id: string
+      text: string
+      status: string
+      evidence_count: number
+    }>
+    evidence_count?: number
+    evidence_text?: string
+    recap?: string
   }
 }
 

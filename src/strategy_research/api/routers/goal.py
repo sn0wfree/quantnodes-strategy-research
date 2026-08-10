@@ -43,6 +43,10 @@ async def goal_start(req: GoalStartRequest, request: Request):
     try:
         from ...core.goal import GoalStore, RiskTier
         from ...core.goal.context import default_goal_criteria
+        from ...core.goal.events import (
+            CHANGE_TYPE_CREATE,
+            build_goal_updated_payload,
+        )
 
         db_path = getattr(request.app.state, "goal_db_path", None)
         criteria = req.criteria or default_goal_criteria()
@@ -54,6 +58,11 @@ async def goal_start(req: GoalStartRequest, request: Request):
                 objective=req.objective,
                 criteria=criteria,
                 risk_tier=risk_tier,
+            )
+            # Full-snapshot SSE so the chat panel + message stream
+            # update immediately (same event as the chat-tool path).
+            _emit_goal_updated(
+                request, store, req.session_id, CHANGE_TYPE_CREATE,
             )
         return {"status": "ok", "goal_id": goal.goal_id}
     except Exception as e:
@@ -140,6 +149,10 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
     """添加 evidence。"""
     try:
         from ...core.goal import EvidenceInput, GoalStore
+        from ...core.goal.events import (
+            CHANGE_TYPE_EVIDENCE,
+            build_goal_updated_payload,
+        )
 
         db_path = getattr(request.app.state, "goal_db_path", None)
         evidence_input = EvidenceInput(
@@ -158,6 +171,10 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
                 expected_goal_id=current.goal_id,
                 evidence=evidence_input,
             )
+            _emit_goal_updated(
+                request, store, req.session_id, CHANGE_TYPE_EVIDENCE,
+                evidence_text=req.evidence,
+            )
         return {
             "status": "ok",
             "goal_id": current.goal_id,
@@ -173,6 +190,7 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
 async def goal_complete(req: GoalCompleteRequest, request: Request):
     """完成 goal。"""
     from ...core.goal import GoalStatus, GoalStore, StaleGoalError
+    from ...core.goal.events import CHANGE_TYPE_COMPLETE
 
     try:
         db_path = getattr(request.app.state, "goal_db_path", None)
@@ -195,6 +213,9 @@ async def goal_complete(req: GoalCompleteRequest, request: Request):
                 status=target_status,
                 recap=req.summary,
             )
+            _emit_goal_updated(
+                request, store, req.session_id, CHANGE_TYPE_COMPLETE,
+            )
         return {
             "status": "ok",
             "goal_id": updated.goal_id,
@@ -208,3 +229,41 @@ async def goal_complete(req: GoalCompleteRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _emit_goal_updated(
+    request: Request,
+    store,
+    session_id: str,
+    change_type: str,
+    *,
+    evidence_text: Optional[str] = None,
+) -> None:
+    """Emit the full-snapshot ``goal_updated`` event on the session bus.
+
+    Best-effort: the mutation has already committed; a failure here
+    only loses the live push (the projector / next loadSessionState
+    will still surface the new state).
+    """
+    try:
+        from ...core.goal.events import build_goal_updated_payload
+        from .chat import _get_session_service
+
+        service = _get_session_service()
+        bus = getattr(service, "event_bus", None)
+        if bus is None:
+            return
+        payload = build_goal_updated_payload(
+            session_id,
+            store,
+            change_type,
+            evidence_text=evidence_text,
+        )
+        if payload is not None:
+            bus.emit(session_id, "goal_updated", payload)
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "goal SSE emit failed for %s", session_id, exc_info=True
+        )

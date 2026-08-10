@@ -198,6 +198,14 @@ class CompactConfig:
     # See docs/compaction-history-filter.md for the opencode-aligned rationale.
     keep_all_compactions_in_history: bool = False
 
+    # ── Goal event messages ────────────────────────────────────────
+    # goal_* SSE events are persisted as message_type='goal' messages
+    # and DO enter the LLM context (agent tracks goal evolution). The
+    # evidence text in the LLM-facing `content` is truncated to this
+    # many characters to bound context cost; the full text always
+    # lives in the message metadata (UI / audit).
+    goal_evidence_truncate_chars: int = 100
+
 
 # ── Token estimation ──────────────────────────────────────────────
 

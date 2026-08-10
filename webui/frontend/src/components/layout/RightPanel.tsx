@@ -1,7 +1,5 @@
 import { useMemo } from 'react'
-import { useLayoutStore } from '../../stores/layout'
 import { useGoalStore } from '../../stores/goal'
-import { useGoalPolling } from '../../hooks/useGoalPolling'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
 import {
@@ -17,11 +15,9 @@ import type { GoalTabGoal } from '../goal/GoalTab'
  * token usage, and goal + performance curve.
  */
 export function RightPanel() {
-  const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
-
-  // Poll goal status while the panel is open (no backend goal_* SSE)
-  useGoalPolling(rightPanelVisible)
-
+  // Goal state is SSE-driven (full-snapshot goal_updated events) plus
+  // loadSessionState recovery on session switch / page load — no
+  // polling (docs/goal-events-panel-link.md).
   // Goal state
   const currentGoal = useGoalStore((s) => s.currentGoal)
 

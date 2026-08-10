@@ -765,18 +765,25 @@ class SessionService:
         def _maybe_emit_goal_event(
             event_bus: Any, session_id: str, data: dict[str, Any]
         ) -> None:
-            """Detect goal tool results and emit goal SSE events.
+            """Detect goal tool results and emit the full-snapshot goal event.
 
             When create_goal / add_evidence / complete_goal tools execute,
-            their JSON results carry goal state.  This helper parses the
-            result and emits the corresponding ``goal_updated`` /
-            ``goal_evidence_added`` / ``goal_completed`` SSE event so the
-            frontend GoalTab / CriteriaList update in real-time.
+            emit ONE full-snapshot ``goal_updated`` SSE event (built by
+            core/goal/events.build_goal_updated_payload). The event
+            drives the frontend panel AND is persisted by the projector
+            as a message_type='goal' message that enters the LLM context
+            (see docs/goal-events-panel-link.md).
             """
             import json as _json
 
             tool_name = data.get("name", "")
-            if tool_name not in ("create_goal", "add_evidence", "complete_goal"):
+            change_type_map = {
+                "create_goal": "create",
+                "add_evidence": "evidence",
+                "complete_goal": "complete",
+            }
+            change_type = change_type_map.get(tool_name)
+            if change_type is None:
                 return
 
             result_raw = data.get("result", "")
@@ -792,26 +799,28 @@ class SessionService:
             if not isinstance(result, dict) or result.get("status") != "ok":
                 return
 
-            if tool_name == "create_goal":
-                event_bus.emit(session_id, "goal_updated", {
-                    "goal_id": result.get("goal_id", ""),
-                    "session_id": session_id,
-                    "status": result.get("goal_status", "active"),
-                    "objective": result.get("objective", ""),
-                    "progress_percent": result.get("progress_percent", 0),
-                })
-            elif tool_name == "add_evidence":
-                event_bus.emit(session_id, "goal_evidence_added", {
-                    "goal_id": result.get("goal_id", ""),
-                    "evidence_id": result.get("evidence_id", ""),
-                    "progress_percent": result.get("progress_percent", 0),
-                })
-            elif tool_name == "complete_goal":
-                event_bus.emit(session_id, "goal_completed", {
-                    "goal_id": result.get("goal_id", ""),
-                    "status": result.get("goal_status", "complete"),
-                    "recap": result.get("recap", ""),
-                })
+            from ...core.goal import GoalStore
+            from ...core.goal.events import build_goal_updated_payload
+
+            truncate = 100
+            if cfg is not None and cfg.compact_config is not None:
+                truncate = cfg.compact_config.goal_evidence_truncate_chars
+
+            payload = None
+            try:
+                with GoalStore() as store:
+                    payload = build_goal_updated_payload(
+                        session_id,
+                        store,
+                        change_type,
+                        truncate_chars=truncate,
+                        evidence_text=result.get("text") if change_type == "evidence" else None,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning("goal event build failed", exc_info=True)
+
+            if payload is not None:
+                event_bus.emit(session_id, "goal_updated", payload)
 
         def event_callback(event_type: str, data: dict[str, Any]) -> None:
             """AgentLoop on_event adapter for the B4 event-sourced path.
@@ -1437,6 +1446,19 @@ class SessionService:
                     reason="auto",
                 )
                 history_with_groups.append((comp.to_llm_message(), None))
+                continue
+
+            # Goal messages: role=system state snapshot that the agent
+            # MUST see (it tracks goal evolution — docs/goal-events-
+            # panel-link.md). Kept verbatim as a system message with a
+            # self-explaining [目标状态] prefix; never folded into the
+            # user/assistant conversation. Messages covered by
+            # compaction (seq <= boundary) are dropped by the filter
+            # above, so old goal snapshots leave the context naturally.
+            if message_type == "goal":
+                history_with_groups.append(
+                    ({"role": "system", "content": content or ""}, None)
+                )
                 continue
 
             if role == "tool":
