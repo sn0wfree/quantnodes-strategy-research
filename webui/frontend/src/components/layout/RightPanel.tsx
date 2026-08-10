@@ -3,6 +3,7 @@ import { useGoalStore } from '../../stores/goal'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
 import {
+  extractEquityCurve,
   extractLatestBacktestMetrics,
   extractLatestPanelItem,
 } from '../../utils/equityCurve'
@@ -38,6 +39,14 @@ export function RightPanel() {
     [sessionMessages],
   )
 
+  // Full equity curve decoded from line chart parts — PanelRenderCard
+  // renders it directly (recharts) when present, before the metrics
+  // fallback (Tier B P7).
+  const curve = useMemo(
+    () => extractEquityCurve(sessionMessages),
+    [sessionMessages],
+  )
+
   // Metrics fallback for the performance card (Tier B P7): before any
   // renderable exists, the most recent run_backtest tool_call result
   // still gives total_return / sharpe / max_drawdown.
@@ -68,10 +77,10 @@ export function RightPanel() {
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-900 p-3">
       <TokenCard />
-      {/* 目标 & 进度 — 被动跟踪本 session goal 执行情况 */}
-      <GoalCard goal={goalTabGoal} curve={null} metrics={null} />
+      {/* 目标 & 进度 — 被动跟踪本 session goal 执行情况（仅 GoalTab） */}
+      <GoalCard goal={goalTabGoal} />
       {/* 表现曲线 — 由 chat agent 决定显示什么 (show_chart / show_report) */}
-      <PanelRenderCard item={panelItem} metrics={metrics} />
+      <PanelRenderCard item={panelItem} metrics={metrics} curve={curve} />
     </div>
   )
 }

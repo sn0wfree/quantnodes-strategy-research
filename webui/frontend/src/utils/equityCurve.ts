@@ -37,9 +37,9 @@ export interface PanelRenderable {
 
 /**
  * Metrics extracted from a ``run_backtest`` tool_call result. Used
- * by EquityCurveCard's metrics-only fallback when no chart parts
- * are available (the backend AgentLoop does not currently emit
- * `chart` SSE events, so the curve is always empty in practice).
+ * by PanelRenderCard's metrics-only fallback (inlined from the
+ * former EquityCurveCard) when no chart parts are available and no
+ * equity curve has been decoded.
  */
 export interface BacktestMetrics {
   total_return?: number
@@ -98,9 +98,9 @@ export function extractEquityCurve(messages: Message[]): EquityCurve | null {
 
 /**
  * Pick the latest ``run_backtest`` tool_call result and decode its
- * metrics. Used as the metrics-only fallback in EquityCurveCard when
- * no chart parts are available (the AgentLoop does not currently emit
- * ``chart`` SSE events; see projector.py:985-994).
+ * metrics. Used as the metrics-only fallback in PanelRenderCard
+ * (inlined from the former EquityCurveCard) when no chart parts and
+ * no equity curve are available (see docs/right-panel-agent-driven.md).
  *
  * The tool result payload is the JSON string returned by
  * ``builtin_tools.RunBacktestTool.execute``:

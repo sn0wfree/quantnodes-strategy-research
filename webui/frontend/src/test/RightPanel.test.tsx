@@ -61,7 +61,10 @@ describe('RightPanel (merged panel)', () => {
     render(<RightPanel />)
     expect(screen.getByText('Token 使用情况')).toBeTruthy()
     expect(screen.getByText('目标 & 进度')).toBeTruthy()
-    expect(screen.getAllByText('表现曲线').length).toBeGreaterThanOrEqual(1)
+    // 表现曲线 must appear exactly once (no duplicate from inline
+    // EquityCurveCard in GoalCard anymore).
+    expect(screen.getByText('表现曲线')).toBeTruthy()
+    expect(screen.queryAllByText('表现曲线').length).toBe(1)
   })
 
   it('token card shows usage percent and message count', () => {

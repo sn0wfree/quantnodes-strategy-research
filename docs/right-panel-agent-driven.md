@@ -49,10 +49,14 @@ agent ──► show_chart(source_file, chart_type, title)
 - `HtmlBlock.tsx`：sandbox iframe srcdoc 渲染（sandbox="" 禁脚本，不用 dangerouslySetInnerHTML）
 - `ChartBlock.tsx` 导出共享 `ChartRenderer`（面板复用）
 - `utils/equityCurve.ts` 加 `extractLatestPanelItem(messages)`：取最近一个 chart/html part
-- `PanelRenderCard.tsx`：「表现曲线」卡 = 最近展示物（chart → recharts / html → iframe）；
-  无展示物时 fallback 到最近回测指标（保留 Tier B P7 行为）
+- `PanelRenderCard.tsx`：「表现曲线」卡的唯一容器；直接持有：
+  - chart part → `ChartRenderer`
+  - html part → sandbox iframe
+  - 无展示物但有 `run_backtest` 指标 → 指标行（total_return / sharpe / max_drawdown）
+  - 都无 → "暂无回测净值数据" 占位
+- `GoalCard.tsx`：纯 GoalTab 容器，不再内嵌 EquityCurveCard（消除标题重复）
 - SSE `html` handler（`messageHandlers.ts`，走 attachBlockPart 模式）
-- 「目标 & 进度」卡不动（被动跟踪，见 `docs/goal-events-panel-link.md`）
+- 「目标 & 进度」卡只渲染 GoalTab（被动跟踪，见 `docs/goal-events-panel-link.md`）
 
 ### 5. 安全
 - 路径穿越防护：`_resolve_workspace_file` 用 `resolve().is_relative_to(workspace)` 校验
@@ -71,3 +75,23 @@ agent ──► show_chart(source_file, chart_type, title)
 - 前端 `PanelRenderCard.test.tsx`（8 个）：extractLatestPanelItem 选择逻辑、chart/html 渲染、
   sandbox iframe、metrics fallback
 - vitest 716/716、tsc 0 错误、pytest 子集零新增失败
+
+## 变更记录
+
+### 2026-08-10 — GoalCard 拆分 + EquityCurveCard 内联
+- **症状**：右侧面板出现两个相同的「表现曲线」标题
+  - 第 1 个：GoalCard 内部嵌套的 EquityCurveCard（曲线/metrics）
+  - 第 2 个：PanelRenderCard fallback 调用的 EquityCurveCard
+- **修复**：
+  1. `GoalCard` 改为纯 GoalTab 容器（去掉 `curve` / `metrics` props，去掉内嵌
+     EquityCurveCard / 分隔线）
+  2. 把 EquityCurveCard 的曲线/指标 fallback 逻辑全部内联进 `PanelRenderCard`，
+     PanelRenderCard 直接渲染 recharts LineChart + 指标行 + 占位
+  3. `RightPanel` 接线更新：`GoalCard` 不再传 `curve={null} metrics={null}`
+  4. `RightPanel.test.tsx` 标题断言收紧：`getAllByText(≥1)` → `getByText(唯一)`
+  5. `utils/equityCurve.ts` 注释微调：`BacktestMetrics` / `extractLatestBacktestMetrics`
+     现在服务于 `PanelRenderCard` 而非 `EquityCurveCard`
+- **保留**：`EquityCurveCard.tsx` 作为废弃文件保留（不再被 import，git 历史可读；
+  `extractEquityCurve` / `decodePoints` 仍保留为未来可用工具，目前无调用方）
+- **Backend 不动**：投影 / 事件 / 工具 / SSE 均无变更
+- **验证**：vitest 全过、tsc 0 errors
