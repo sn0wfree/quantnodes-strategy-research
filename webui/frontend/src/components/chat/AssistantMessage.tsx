@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { Bot } from 'lucide-react'
-import type { Message, MessagePart, ToolCallPart, AgentPart } from '../../stores/chat'
+import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { useSystemStore } from '../../stores/system'
 import { useSessionStore } from '../../stores/session'

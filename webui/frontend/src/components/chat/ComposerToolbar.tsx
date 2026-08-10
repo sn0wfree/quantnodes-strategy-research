@@ -9,7 +9,6 @@ import {
   Link2,
   Quote,
   ChevronDown,
-  ChevronUp,
   Bot,
 } from 'lucide-react'
 import { usePersonaStore } from '../../stores/personas'

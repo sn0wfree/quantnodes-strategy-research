@@ -1,7 +1,7 @@
 // TodoPanel (opencode-style session-todo-dock) — bottom panel above the
 // composer with a collapsible header and a checkbox list.
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { TodoPanel } from '../components/chat/TodoPanel'
 import { useTodoStore } from '../stores/todo'

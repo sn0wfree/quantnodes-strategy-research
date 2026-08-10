@@ -13,7 +13,7 @@ import {
 } from '../hooks/sse/subagentHandlers'
 import { useChatStore } from '../stores/chat'
 import type { SSEContext } from '../hooks/sse/types'
-import type { AgentPart, MessagePart } from '../stores/chat'
+import type { AgentPart } from '../stores/chat'
 
 function ctx(overrides: Partial<SSEContext> = {}): SSEContext {
   const store = useChatStore.getState()

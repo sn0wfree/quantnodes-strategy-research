@@ -3,7 +3,7 @@ import {
   CheckCircle, XCircle, Loader2, ChevronRight,
   Clock, Bot,
 } from 'lucide-react'
-import type { AgentPart, ToolCallPart } from '../../stores/chat'
+import type { AgentPart } from '../../stores/chat'
 import { ToolCallBlock } from './ToolCallBlock'
 import { StreamingText } from './StreamingText'
 import { MarkdownRenderer } from './MarkdownRenderer'

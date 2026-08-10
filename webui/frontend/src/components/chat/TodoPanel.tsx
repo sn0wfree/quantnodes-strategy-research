@@ -1,6 +1,6 @@
 import { ChevronDown, Check } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { useTodoStore, type TodoItem, type TodoStatus } from '../../stores/todo'
+import { useTodoStore, type TodoItem } from '../../stores/todo'
 
 /**
  * Todo panel — opencode-style session-todo-dock.
