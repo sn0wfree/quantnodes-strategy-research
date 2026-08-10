@@ -62,6 +62,11 @@ logger = logging.getLogger(__name__)
 _TOOL_MAX_RETRIES = 2
 _TOOL_RETRY_DELAY = 2.0
 
+# SSE tool_result 的 result 字段大小上限（字符）。完整 result 供前端解析
+# （run_backtest metrics → 右侧面板）；超大输出（如 read_file 大文件）截断
+# 防撑爆 SSE/DB。preview 字段始终为 200 字符截断（兼容旧消费方）。
+_TOOL_RESULT_MAX = 50_000
+
 
 # ── Cached GoalStore (goal-snapshot injection) ─────────────────────
 # Constructing a GoalStore per loop iteration leaked one SQLite
@@ -1189,14 +1194,19 @@ class AgentLoop:
             else:
                 self._circuit_breaker.record_success(tc.name)
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
+        # result 字段发完整 output（上限保护防大文件撑爆 SSE/DB）:
+        # 前端 ToolCallBlock / 右侧面板 (extractLatestBacktestMetrics) 需要
+        # 解析完整 JSON（如 run_backtest 的 metrics）；preview 保持 200 截断
+        # 兼容旧消费方。projector 持久化 event.data.result → DB 同样完整。
+        output_full = (output if isinstance(output, str) else str(output))[:_TOOL_RESULT_MAX]
         self._emit("tool_result", {
             "tool": tc.name,
             "id": tc.id,                # frontend reads data.id
             "call_id": tc.id,           # backward compat
             "status": status_str,
             "ok": not is_error,          # backward compat
-            "result": output_preview,    # frontend reads data.result
-            "preview": output_preview,   # backward compat
+            "result": output_full,       # frontend reads data.result (完整)
+            "preview": output_preview,   # backward compat (截断)
             "elapsed_ms": elapsed_ms,
         })
 
@@ -1424,13 +1434,14 @@ class AgentLoop:
                 self._circuit_breaker.record_success(tc.name)
 
         output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
+        output_full = (output if isinstance(output, str) else str(output))[:_TOOL_RESULT_MAX]
         self._emit("tool_result", {
             "tool": tc.name,
             "id": tc.id,
             "call_id": tc.id,
             "status": status_str,
             "ok": not is_error,
-            "result": output_preview,
+            "result": output_full,
             "preview": output_preview,
             "elapsed_ms": elapsed_ms,
         })

@@ -52,3 +52,29 @@ describe('ToolCallBlock', () => {
     expect(spinner).toBeTruthy()
   })
 })
+describe('ToolCallBlock — run_backtest summary', () => {
+  const rbTc: ToolCallPart = {
+    type: 'tool_call',
+    id: 'tc-rb',
+    name: 'run_backtest',
+    arguments: JSON.stringify({ strategy_name: 'a_share_momentum_v4' }),
+    status: 'done',
+    result: JSON.stringify({
+      status: 'ok',
+      run: 'run_0002',
+      metrics: {
+        ann_return: 0.1276,
+        sharpe: 0.9185,
+        max_drawdown: -0.14,
+        calmar: 0.9,
+      },
+    }),
+  }
+
+  it('summarizes nested metrics (ann_return/sharpe/max_drawdown)', () => {
+    render(<ToolCallBlock toolCall={rbTc} />)
+    expect(screen.getByText(/Sharpe=0\.92/)).toBeTruthy()
+    expect(screen.getByText(/MaxDD=-14\.00%/)).toBeTruthy()
+    expect(screen.getByText(/年化=12\.76%/)).toBeTruthy()
+  })
+})

@@ -120,10 +120,16 @@ function summarizeResult(toolName: string, result: string | unknown): string {
     if (rows !== undefined) return `已导入 ${rows} 行`
   }
   if (toolName === 'run_backtest') {
+    // run_backtest 返回 {status, run, strategy, metrics: {...}} — 指标在
+    // 嵌套 metrics 内（metrics 缺失时回退到顶层容错）。
+    const m = (obj.metrics ?? obj) as Record<string, unknown>
     const parts: string[] = []
-    if (obj.sharpe !== undefined) parts.push(`Sharpe=${Number(obj.sharpe).toFixed(2)}`)
-    if (obj.calmar !== undefined) parts.push(`Calmar=${Number(obj.calmar).toFixed(2)}`)
-    if (obj.max_dd !== undefined) parts.push(`MaxDD=${Number(obj.max_dd).toFixed(2)}`)
+    if (m.sharpe !== undefined) parts.push(`Sharpe=${Number(m.sharpe).toFixed(2)}`)
+    if (m.calmar !== undefined) parts.push(`Calmar=${Number(m.calmar).toFixed(2)}`)
+    if (m.max_drawdown !== undefined)
+      parts.push(`MaxDD=${(Number(m.max_drawdown) * 100).toFixed(2)}%`)
+    if (m.ann_return !== undefined)
+      parts.push(`年化=${(Number(m.ann_return) * 100).toFixed(2)}%`)
     return parts.join(', ')
   }
   if (toolName.startsWith('factor_')) {

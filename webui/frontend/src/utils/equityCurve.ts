@@ -155,10 +155,12 @@ export function extractLatestBacktestMetrics(
       }
 
       const bm: BacktestMetrics = {
-        total_return: pick('total_return'),
+        // run_backtest 返回 extended_metrics 键（ann_return/ann_vol/...），
+        // 映射到展示模型（ann_return → total_return / annual_return）。
+        total_return: pick('ann_return') ?? pick('total_return'),
         sharpe: pick('sharpe'),
         max_drawdown: pick('max_drawdown'),
-        annual_return: pick('annual_return'),
+        annual_return: pick('ann_return') ?? pick('annual_return'),
         win_rate: pick('win_rate'),
         run: typeof parsed.run === 'string' ? parsed.run : undefined,
         strategy:

@@ -166,3 +166,42 @@ describe('extractLatestBacktestMetrics', () => {
     expect(extractLatestBacktestMetrics(messages)).toBeNull()
   })
 })
+describe('extractLatestBacktestMetrics — run_backtest v1.2.0 shape', () => {
+  it('maps extended_metrics keys (ann_return) into the display model', () => {
+    const result = JSON.stringify({
+      status: 'ok',
+      run: 'run_0002',
+      strategy: 'a_share_momentum_v4',
+      metrics: {
+        ann_return: 0.12758626373180193,
+        ann_vol: 0.1389137544534479,
+        sharpe: 0.9184566656756659,
+        max_drawdown: -0.14,
+        calmar: 0.9,
+        sortino: 1.1,
+        win_rate: 0.42,
+      },
+    })
+    const messages: Message[] = [
+      makeMsg(1, [
+        {
+          type: 'tool_call',
+          id: 't1',
+          name: 'run_backtest',
+          arguments: '{"strategy_name":"a_share_momentum_v4"}',
+          status: 'done',
+          result,
+        },
+      ]),
+    ]
+    const m = extractLatestBacktestMetrics(messages)
+    expect(m).not.toBeNull()
+    expect(m!.total_return).toBeCloseTo(0.1276, 4)
+    expect(m!.annual_return).toBeCloseTo(0.1276, 4)
+    expect(m!.sharpe).toBeCloseTo(0.9185, 4)
+    expect(m!.max_drawdown).toBeCloseTo(-0.14)
+    expect(m!.win_rate).toBeCloseTo(0.42)
+    expect(m!.run).toBe('run_0002')
+    expect(m!.strategy).toBe('a_share_momentum_v4')
+  })
+})
