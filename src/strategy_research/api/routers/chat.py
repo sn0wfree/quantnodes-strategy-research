@@ -1761,6 +1761,10 @@ async def list_personas(request: Request = None):
         "anti_overfit_analyst": ("反过拟合", "过拟合诊断与稳健性检验"),
         "backtest_diagnostics": ("回测诊断", "回测结果核查与诊断"),
         "critic": ("评审", "对结论与策略进行批判性审查"),
+        "workflow_orchestrator": (
+            "编排助手",
+            "DAG 编排专用：把任务拆解为节点并通过 submit_dag_step 提交；固定用于 dag:{name} 会话",
+        ),
     }
     persona = PromptBuilderFactory.list_roles()
     personas = []

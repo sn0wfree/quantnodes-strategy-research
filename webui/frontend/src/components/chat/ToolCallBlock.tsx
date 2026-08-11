@@ -5,6 +5,7 @@ import {
   Code, FileText, FolderOpen, Pencil, Search, Globe,
   Play, BarChart3, Database, GitCompare, TrendingDown,
   Download, Wrench, Layers, BookOpen, Calculator, AlertTriangle,
+  Network,
 } from 'lucide-react'
 import type { ToolCallPart } from '../../stores/chat'
 import { MarkdownRenderer } from './MarkdownRenderer'
@@ -63,6 +64,7 @@ const TOOL_ICONS: Record<string, typeof Code> = {
   git_diff: GitCompare,
   list_history: Clock,
   download: Download,
+  submit_dag_step: Network,
 }
 
 const STATUS_CONFIG = {
@@ -131,6 +133,19 @@ function summarizeResult(toolName: string, result: string | unknown): string {
     if (m.ann_return !== undefined)
       parts.push(`年化=${(Number(m.ann_return) * 100).toFixed(2)}%`)
     return parts.join(', ')
+  }
+  if (toolName === 'submit_dag_step') {
+    if (obj.applied === true) {
+      const nodes = typeof obj.nodes === 'number' ? obj.nodes : undefined
+      const edges = typeof obj.edges === 'number' ? obj.edges : undefined
+      const diff = typeof obj.diff === 'string' ? obj.diff : undefined
+      if (nodes !== undefined && edges !== undefined)
+        return `已应用 · ${nodes} 节点 / ${edges} 连线`
+      if (diff) return `已应用 · ${diff}`
+      return '已应用'
+    }
+    const errors = obj.errors as unknown[]
+    if (Array.isArray(errors)) return `${errors.length} 个错误`
   }
   if (toolName.startsWith('factor_')) {
     const parts: string[] = []

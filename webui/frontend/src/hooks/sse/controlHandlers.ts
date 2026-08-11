@@ -82,13 +82,28 @@ export const compact: SSEHandler = (data, ctx) => {
  * expanding thinking blocks.
  */
 function clearAllStreamingParts(ctx: Parameters<SSEHandler>[1]): void {
+  // Iterate the live messages and clear isStreaming on every part via
+  // the store's `updateMessage` action (which runs inside immer's
+  // `set` so the part object is a mutable draft). Direct assignment
+  // throws TypeError because the part is a frozen object from immer's
+  // auto-freeze — this function is the safety net for disconnect /
+  // cancel / error paths where the terminal event never arrives.
   for (const msg of ctx.state.getMessages()) {
     if (msg.role !== 'assistant') continue
+    let touched = false
     for (const part of msg.parts) {
       if ((part as { isStreaming?: boolean }).isStreaming) {
         ;(part as { isStreaming?: boolean }).isStreaming = false
+        touched = true
       }
     }
+    if (!touched) continue
+    const id = msg.id
+    ctx.updateMessage(id, (draft) => {
+      for (const part of draft.parts) {
+        ;(part as { isStreaming?: boolean }).isStreaming = false
+      }
+    })
   }
 }
 
