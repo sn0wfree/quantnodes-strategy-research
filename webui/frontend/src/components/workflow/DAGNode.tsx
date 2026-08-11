@@ -85,7 +85,10 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
       </div>
 
       {/* Label */}
-      <div className="text-sm font-medium dag-card-title truncate">
+      <div
+        className="text-sm font-semibold truncate dag-card-title"
+        style={{ color: nodeData.agentColor ?? 'var(--dag-card-title)' }}
+      >
         {nodeData.label}
       </div>
 
@@ -93,7 +96,10 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
       {nodeData.agentName && (
         <div className="mt-1.5 flex items-center gap-1">
           {nodeData.type && (
-            <span className="rounded dag-card-type px-1 py-px text-[10px] font-mono">
+            <span
+              className="rounded dag-card-type px-1 py-px text-[10px] font-mono"
+              style={{ color: nodeData.agentColor ?? 'var(--dag-card-type-fg)' }}
+            >
               {nodeData.type}
             </span>
           )}
