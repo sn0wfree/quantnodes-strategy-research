@@ -117,10 +117,24 @@ export function WorkflowDAG({
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
           maxZoom={2}
-          defaultEdgeOptions={{ type: 'dagEdge' }}
+          defaultEdgeOptions={{ type: 'dagEdge', markerEnd: 'url(#dag-arrow)' }}
           style={{ width: '100%', height: '100%' }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1e293b" />
+          <defs>
+            <marker
+              id="dag-arrow"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+            </marker>
+          </defs>
+          <Background variant={BackgroundVariant.Dots} gap={26} size={1.2} color="#1e293b" />
+          <Background variant={BackgroundVariant.Lines} gap={130} size={0.6} color="#16233a" />
           <Controls className="!bg-slate-800 !border-slate-700 !rounded-lg" />
           <MiniMap
             nodeColor={(n) => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   addEdge,
@@ -117,6 +118,7 @@ const CONFIG_FIELDS: Record<string, Array<{ key: string; label: string; type: 't
 }
 
 const DRAG_DATA_KEY = 'application/x-workflow-node-type'
+const ARROW_MARKER = 'url(#dag-arrow)'
 
 interface WorkflowEditorProps {
   nodes: DefinitionNode[]
@@ -153,7 +155,7 @@ export function WorkflowEditor({ nodes, edges, onSave, saving, saveRef }: Workfl
 function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: WorkflowEditorProps) {
   const [rfNodes, setRfNodes, onNodesChangeRaw] = useNodesState(nodes.map(buildRfNode))
   const [rfEdges, setRfEdges, onEdgesChangeRaw] = useEdgesState<Edge>(
-    edges.map((e, i) => ({ id: `e-${i}`, source: e.source, target: e.target, type: 'dagEdge' }) as Edge),
+    edges.map((e, i) => ({ id: `e-${i}`, source: e.source, target: e.target, type: 'dagEdge', markerEnd: ARROW_MARKER }) as Edge),
   )
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -240,7 +242,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!conn.source || !conn.target || conn.source === conn.target) return
-      setRfEdges((eds) => addEdge({ ...conn, type: 'dagEdge' }, eds))
+      setRfEdges((eds) => addEdge({ ...conn, type: 'dagEdge', markerEnd: ARROW_MARKER }, eds))
       pushHistory()
     },
     [setRfEdges, pushHistory],
@@ -427,13 +429,19 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
       </aside>
 
       {/* Canvas */}
-      <div className="relative min-w-0 flex-1">
+      <div className="relative min-w-0 flex-1 bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/60">
         {rfNodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-            <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/60 px-6 py-5 text-center">
-              <div className="text-xs text-slate-300">空画布</div>
-              <div className="mt-1 text-[11px] text-slate-500">
-                从左侧节点库拖拽或点击添加节点，从节点右侧把手拖到目标左侧把手连线
+            <div className="rounded-2xl border border-dashed border-slate-600/50 bg-slate-900/50 px-8 py-7 text-center backdrop-blur-sm">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 shadow-lg">
+                <Plus className="h-5 w-5 text-primary-400" />
+              </div>
+              <div className="text-sm text-slate-200">空画布</div>
+              <div className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                从左侧节点库<strong className="text-slate-400">点击</strong>或<strong className="text-slate-400">拖拽</strong>添加节点
+              </div>
+              <div className="mt-1 text-[10px] text-slate-600">
+                从节点右侧把手拖到目标左侧把手连线 · Delete 删除 · Ctrl+Z 撤销
               </div>
             </div>
           </div>
@@ -457,16 +465,33 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
           deleteKeyCode={['Delete', 'Backspace']}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#334155" gap={24} />
+          <defs>
+            <marker
+              id="dag-arrow"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+            </marker>
+          </defs>
+          <Background variant={BackgroundVariant.Dots} gap={26} size={1.2} color="#1e293b" />
+          <Background variant={BackgroundVariant.Lines} gap={130} size={0.6} color="#16233a" />
           <Controls />
-          <MiniMap pannable zoomable className="!bg-slate-900" />
+          <MiniMap pannable zoomable className="!bg-slate-900" nodeColor={(n) => {
+            const d = n.data as DAGNodeData
+            return d.agentColor ?? '#475569'
+          }} />
         </ReactFlow>
-        <div className="absolute bottom-4 left-3 z-10 flex gap-1">
+        <div className="absolute bottom-4 left-3 z-10 flex gap-1.5">
           <button
             onClick={undo}
             disabled={!canUndo}
             title="撤销 (Ctrl+Z)"
-            className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-md backdrop-blur-sm hover:bg-slate-800 disabled:opacity-40"
           >
             <Undo2 className="h-3 w-3" /> 撤销
           </button>
@@ -474,7 +499,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
             onClick={redo}
             disabled={!canRedo}
             title="重做 (Ctrl+Shift+Z)"
-            className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-md backdrop-blur-sm hover:bg-slate-800 disabled:opacity-40"
           >
             <Redo2 className="h-3 w-3" /> 重做
           </button>
@@ -482,7 +507,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
             onClick={autoLayout}
             disabled={rfNodes.length === 0}
             title="dagre 自动布局"
-            className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-md backdrop-blur-sm hover:bg-slate-800 disabled:opacity-40"
           >
             <LayoutGrid className="h-3 w-3" /> 自动布局
           </button>

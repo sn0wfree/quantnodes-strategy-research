@@ -437,3 +437,73 @@ pre,
   background: color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
+
+/* ── Workflow canvas beautification ──────────────────────────── */
+
+@keyframes edge-flow {
+  to { stroke-dashoffset: -24; }
+}
+.dag-edge-flowing {
+  animation: edge-flow 1.2s linear infinite;
+}
+
+/* Node cards: soft gradient + lift on hover + selection glow */
+.dag-node-card {
+  background: linear-gradient(160deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.95));
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(51, 65, 85, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+.dag-node-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(100, 116, 139, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.dag-node-card.dag-node-selected {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--primary) 65%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 18px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+/* React Flow chrome: glass controls + rounded minimap */
+.react-flow__controls {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+}
+.react-flow__controls button {
+  background: rgba(15, 23, 42, 0.85);
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+  color: #94a3b8;
+}
+.react-flow__controls button:hover {
+  background: rgba(30, 41, 59, 0.95);
+  color: #e2e8f0;
+}
+.react-flow__minimap {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.react-flow__edge-path {
+  transition: stroke 160ms ease, stroke-width 160ms ease;
+}
+.react-flow__handle {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 3px !important;
+  border: 2px solid #0f172a !important;
+  box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.4);
+  transition: box-shadow 160ms ease, background 160ms ease;
+}
+.react-flow__handle:hover {
+  box-shadow: 0 0 0 1px var(--primary), 0 0 8px color-mix(in srgb, var(--primary) 50%, transparent);
+  background: var(--primary) !important;
+}

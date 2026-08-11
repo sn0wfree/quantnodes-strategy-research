@@ -16,6 +16,7 @@ export const DAGEdge = memo(function DAGEdge({
   targetPosition,
   data,
   selected,
+  markerEnd,
 }: EdgeProps) {
   const edgeData = (data || {}) as unknown as DAGEdgeData
   const [edgePath] = getSmoothStepPath({
@@ -25,7 +26,7 @@ export const DAGEdge = memo(function DAGEdge({
     targetY,
     sourcePosition,
     targetPosition,
-    borderRadius: 8,
+    borderRadius: 10,
   })
 
   const isAnimated = edgeData.animated
@@ -35,11 +36,13 @@ export const DAGEdge = memo(function DAGEdge({
     <BaseEdge
       id={id}
       path={edgePath}
+      markerEnd={markerEnd}
+      className={isAnimated ? 'dag-edge-flowing' : undefined}
       style={{
-        stroke: isActive ? '#3b82f6' : '#475569',
-        strokeWidth: isActive ? 2 : 1.5,
-        strokeDasharray: isAnimated ? '6 3' : undefined,
-        filter: isActive ? 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.3))' : undefined,
+        stroke: isActive ? '#38bdf8' : '#475569',
+        strokeWidth: isActive ? 2.2 : 1.5,
+        strokeDasharray: isAnimated ? '7 4' : undefined,
+        filter: isActive ? 'drop-shadow(0 0 5px rgba(56, 189, 248, 0.45))' : undefined,
       }}
     />
   )
