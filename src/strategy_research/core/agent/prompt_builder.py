@@ -317,6 +317,7 @@ class PromptBuilderFactory:
         "attribution_analyst": StaticFilePromptBuilder("attribution_analyst"),
         "anti_overfit_analyst": StaticFilePromptBuilder("anti_overfit_analyst"),
         "backtest_diagnostics": StaticFilePromptBuilder("backtest_diagnostics"),
+        "workflow_orchestrator": StaticFilePromptBuilder("workflow_orchestrator"),
         "critic": StaticFilePromptBuilder("critic"),
     }
 

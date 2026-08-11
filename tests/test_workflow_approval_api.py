@@ -87,6 +87,10 @@ def _patch_loop_factory(tmp_path: Path, fake=None):
 
     def patched_start(self):
         self.loop_factory = fake
+        # Restore immediately after the single injection point so later
+        # tests (e.g. segment-loop) run the real start. Re-invoking
+        # _patch_loop_factory re-arms the hook per test.
+        executor_mod.WorkflowRunner.start = original
         return original(self)
 
     executor_mod.WorkflowRunner.start = patched_start

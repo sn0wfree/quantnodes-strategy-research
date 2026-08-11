@@ -337,6 +337,104 @@ class WorkflowApproveRequest(BaseModel):
     edits: dict | None = None
 
 
+# ── Orchestrator chat session + auto-save drafts ─────────────────────
+# The orchestration chat reuses the chat session system with
+# session_id = "dag:{definition_name}". Messages persist in the session
+# DB; the canvas draft (uncommitted editor state) persists in the drafts
+# table below so a refresh restores the latest state.
+_DRAFT_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS drafts (
+    dag_id TEXT PRIMARY KEY,
+    nodes_json TEXT NOT NULL,
+    edges_json TEXT NOT NULL,
+    updated_at REAL NOT NULL
+)
+"""
+
+
+class OrchestrateSessionRequest(BaseModel):
+    dag_id: str
+
+
+class DraftRequest(BaseModel):
+    dag_id: str
+    nodes: list[dict]
+    edges: list[dict]
+
+
+def _draft_db() -> Any:
+    import sqlite3
+    conn = sqlite3.connect(_definition_workspace() / "workflows.db")
+    conn.execute(_DRAFT_TABLE_DDL)
+    conn.commit()
+    return conn
+
+
+@router.post("/orchestrate/session")
+async def orchestrate_session(body: OrchestrateSessionRequest, request: Request):
+    """Get (or create) the DAG-bound chat session for a definition.
+
+    session_id = "dag:{dag_id}" — the agent loop for these sessions is
+    restricted to the submit_dag_step tool (see core/agent/chat_loop.py).
+    """
+    dag_id = body.dag_id.strip()
+    if not dag_id or "/" in dag_id or "\\" in dag_id:
+        raise HTTPException(status_code=400, detail="invalid dag_id")
+    session_id = f"dag:{dag_id}"
+    from .web_session import WebSessionCreate, create_session
+    try:
+        session = await create_session(WebSessionCreate(title=f"DAG 编排 · {dag_id}", id=session_id), request)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"session error: {exc}")
+    return {"status": "ok", "session_id": session["id"]}
+
+
+@router.put("/orchestrate/draft")
+async def draft_put(body: DraftRequest, request: Request):
+    """Upsert the canvas draft (auto-saved editor state)."""
+    conn = _draft_db()
+    try:
+        conn.execute(
+            "INSERT INTO drafts (dag_id, nodes_json, edges_json, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(dag_id) DO UPDATE SET nodes_json=excluded.nodes_json, "
+            "edges_json=excluded.edges_json, updated_at=excluded.updated_at",
+            (body.dag_id, json.dumps(body.nodes, ensure_ascii=False),
+             json.dumps(body.edges, ensure_ascii=False), time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "ok"}
+
+
+@router.get("/orchestrate/draft/{dag_id}")
+async def draft_get(dag_id: str):
+    """Return the saved canvas draft, or {dag: null} when absent."""
+    conn = _draft_db()
+    try:
+        row = conn.execute(
+            "SELECT nodes_json, edges_json FROM drafts WHERE dag_id = ?", (dag_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return {"dag": None}
+    return {"dag": {"nodes": json.loads(row[0]), "edges": json.loads(row[1])}}
+
+
+@router.delete("/orchestrate/draft/{dag_id}")
+async def draft_delete(dag_id: str):
+    """Clear the draft (after the definition is explicitly saved)."""
+    conn = _draft_db()
+    try:
+        conn.execute("DELETE FROM drafts WHERE dag_id = ?", (dag_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "ok", "cleared": dag_id}
+
+
 @router.post("/definitions")
 async def definitions_create(payload: WorkflowDefinitionPayload, request: Request):
     """Create or overwrite a user workflow definition."""

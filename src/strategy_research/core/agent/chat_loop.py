@@ -92,6 +92,23 @@ def build_chat_agent_loop(
         for shell_tool_name in ("run_command",):
             registry._tools.pop(shell_tool_name, None)
 
+    # DAG-orchestrator sessions (session_id prefix "dag:"): the LLM gets
+    # exactly one tool — submit_dag_step — nothing else ("其他都不干").
+    # It submits the full modified DAG each round; validation errors are
+    # returned inside the tool result and the agent loop feeds them back
+    # to the LLM for self-correction.
+    if session_id.startswith("dag:"):
+        from ..workflow.orchestrate_tool import SubmitDagStepTool
+
+        if registry is not None:
+            registry._tools.clear()
+        else:
+            from .tools import ToolRegistry
+            registry = ToolRegistry()
+        registry.register(SubmitDagStepTool())
+        if allowed_tools is None:
+            allowed_tools = ["submit_dag_step"]
+
     # System prompt via PromptBuilderFactory (P3: pass real workspace/tool_list)
     if system_prompt_override is not None:
         system_prompt: str | None = system_prompt_override

@@ -32,6 +32,7 @@ router = APIRouter()
 
 class WebSessionCreate(BaseModel):
     title: str = "新会话"
+    id: Optional[str] = None  # explicit id (DAG-orchestrator sessions: "dag:{name}")
 
 
 class WebSessionUpdate(BaseModel):
@@ -827,11 +828,24 @@ def auto_title_session(session_id: str, content: str, max_len: int = 30) -> Opti
 
 @router.post("")
 async def create_session(body: WebSessionCreate, request: Request):
-    """Create a new web session."""
+    """Create a new web session.
+
+    ``body.id`` is optional: DAG-orchestrator sessions pass an explicit
+    ``dag:{name}`` id (bound to the definition); normal sessions leave it
+    unset and get a server-generated uuid. If the id already exists, the
+    existing session is returned unchanged (idempotent upsert).
+    """
     user_id = getattr(request.state, "user_id", "anonymous")
-    session_id = str(uuid.uuid4())
+    session_id = body.id or str(uuid.uuid4())
     now = time.time()
     conn = _get_db()
+    existing = conn.execute(
+        "SELECT * FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    if existing is not None:
+        if existing["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return _row_to_session(existing)
     conn.execute(
         "INSERT INTO sessions (id, user_id, title, created_at, updated_at, "
         "starred, tags_json, message_count, archived) "
