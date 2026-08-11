@@ -15,7 +15,7 @@ const STATUS_CONFIG = {
   pending: {
     icon: Clock,
     borderColor: 'border-slate-600/70',
-    textColor: 'text-slate-400',
+    textColor: 'text-slate-400 dag-status-neutral',
     iconColor: 'text-slate-500',
     dotColor: 'bg-slate-500',
     label: '等待中',
@@ -23,7 +23,7 @@ const STATUS_CONFIG = {
   running: {
     icon: Loader2,
     borderColor: 'border-primary-500/80',
-    textColor: 'text-primary-300',
+    textColor: 'text-primary-300 dag-status-running',
     iconColor: 'text-primary-400',
     dotColor: 'bg-primary-400',
     label: '运行中',
@@ -31,7 +31,7 @@ const STATUS_CONFIG = {
   completed: {
     icon: CheckCircle,
     borderColor: 'border-emerald-500/70',
-    textColor: 'text-emerald-300',
+    textColor: 'text-emerald-300 dag-status-completed',
     iconColor: 'text-emerald-400',
     dotColor: 'bg-emerald-400',
     label: '已完成',
@@ -39,7 +39,7 @@ const STATUS_CONFIG = {
   failed: {
     icon: XCircle,
     borderColor: 'border-red-500/70',
-    textColor: 'text-red-300',
+    textColor: 'text-red-300 dag-status-failed',
     iconColor: 'text-red-400',
     dotColor: 'bg-red-400',
     label: '失败',
@@ -47,7 +47,7 @@ const STATUS_CONFIG = {
   skipped: {
     icon: AlertCircle,
     borderColor: 'border-slate-600/50',
-    textColor: 'text-slate-500',
+    textColor: 'text-slate-500 dag-status-skipped',
     iconColor: 'text-slate-600',
     dotColor: 'bg-slate-600',
     label: '已跳过',

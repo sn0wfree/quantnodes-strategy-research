@@ -17,7 +17,7 @@ export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
     return undefined
   })()
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[360px] bg-slate-900 border-l border-slate-800 z-20 flex flex-col shadow-2xl">
+    <div className="wf-panel-solid absolute right-0 top-0 bottom-0 w-[360px] border-l z-20 flex flex-col shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -27,7 +27,7 @@ export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
               style={{ backgroundColor: node.agentColor }}
             />
           )}
-          <h3 className="text-sm font-medium text-slate-100">{node.label}</h3>
+          <h3 className="wf-text-main text-sm font-medium">{node.label}</h3>
         </div>
         <button
           onClick={onClose}
@@ -47,21 +47,21 @@ export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
         {/* Agent */}
         {node.agentName && (
           <DetailSection title="Agent" icon={<Bot className="h-3.5 w-3.5" />}>
-            <span className="text-xs text-slate-300">{node.agentName}</span>
+            <span className="wf-text-sub text-xs">{node.agentName}</span>
           </DetailSection>
         )}
 
         {/* Type */}
         {node.type && (
           <DetailSection title="类型" icon={<Wrench className="h-3.5 w-3.5" />}>
-            <span className="text-xs text-slate-300 font-mono">{node.type}</span>
+            <span className="wf-text-sub text-xs font-mono">{node.type}</span>
           </DetailSection>
         )}
 
         {/* Prompt / Description (from extra data) */}
         {prompt && (
           <DetailSection title="Prompt" icon={<FileText className="h-3.5 w-3.5" />}>
-            <pre className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-800/50 rounded p-2 max-h-40 overflow-y-auto">
+            <pre className="wf-text-sub wf-input text-xs whitespace-pre-wrap rounded p-2 max-h-40 overflow-y-auto">
               {prompt}
             </pre>
           </DetailSection>
@@ -70,7 +70,7 @@ export function DAGNodeDetail({ node, onClose }: DAGNodeDetailProps) {
         {/* Conditions */}
         {conditions && (
           <DetailSection title="条件" icon={<Clock className="h-3.5 w-3.5" />}>
-            <span className="text-xs text-slate-300">
+            <span className="wf-text-sub text-xs">
               {JSON.stringify(conditions)}
             </span>
           </DetailSection>
@@ -93,7 +93,7 @@ function DetailSection({
     <div>
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="text-slate-500">{icon}</span>
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">{title}</span>
+        <span className="wf-text-sub text-[10px] uppercase tracking-wider">{title}</span>
       </div>
       {children}
     </div>

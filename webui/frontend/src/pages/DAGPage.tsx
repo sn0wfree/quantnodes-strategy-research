@@ -52,10 +52,10 @@ export function DAGPage() {
           </header>
 
           <Tabs.Root value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-            <Tabs.List className="flex flex-shrink-0 border-b border-slate-800 bg-slate-900/40 px-4">
+            <Tabs.List className="wf-panel flex flex-shrink-0 border-b px-4">
               <Tabs.Trigger
                 value="edit"
-                className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 text-sm text-slate-400 transition-colors
+                className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 wf-text-sub text-sm transition-colors
                   data-[state=active]:border-primary-500 data-[state=active]:text-slate-100"
               >
                 <PenTool className="h-4 w-4" />
@@ -63,7 +63,7 @@ export function DAGPage() {
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="agent"
-                className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 text-sm text-slate-400 transition-colors
+                className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 wf-text-sub text-sm transition-colors
                   data-[state=active]:border-primary-500 data-[state=active]:text-slate-100"
               >
                 <Bot className="h-4 w-4" />
@@ -112,8 +112,8 @@ export function DAGPage() {
                 {agentList.length === 0 ? (
                   <div className="mt-8 rounded-xl border border-dashed border-slate-800 px-4 py-12 text-center">
                     <Bot className="mx-auto h-10 w-10 text-slate-600" />
-                    <p className="mt-3 text-sm text-slate-400">暂无 Agent</p>
-                    <p className="mt-1 text-xs text-slate-600">
+                    <p className="wf-text-sub mt-3 text-sm">暂无 Agent</p>
+                    <p className="wf-text-sub mt-1 text-xs">
                       Agent 会在聊天或编排任务执行时自动创建
                     </p>
                   </div>
@@ -147,13 +147,13 @@ function SummaryStat({
   bg: string
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 shadow-soft transition-colors hover:border-slate-700">
+    <div className="wf-panel flex items-center gap-3 rounded-xl border px-4 py-3 shadow-soft transition-colors hover:border-slate-700">
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${bg}`}>
         {icon}
       </div>
       <div>
         <div className={`font-mono text-xl font-bold tabular-nums ${color}`}>{value}</div>
-        <div className="text-[10px] text-slate-500">{label}</div>
+        <div className="wf-text-sub text-[10px]">{label}</div>
       </div>
     </div>
   )

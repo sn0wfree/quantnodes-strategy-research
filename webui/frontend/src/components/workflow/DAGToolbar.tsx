@@ -34,11 +34,11 @@ export function DAGToolbar({
   onReset,
 }: DAGToolbarProps) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-4 py-2.5">
+    <div className="wf-panel flex items-center justify-between border-b px-4 py-2.5">
       {/* Left: name + status */}
       <div className="flex items-center gap-3">
         <Workflow className="h-4 w-4 text-primary-400" />
-        <span className="text-sm font-medium text-slate-200">{workflowName}</span>
+        <span className="wf-text-main text-sm font-medium">{workflowName}</span>
         <span className={`text-xs ${STATUS_COLOR[status]}`}>
           {STATUS_LABEL[status]}
         </span>

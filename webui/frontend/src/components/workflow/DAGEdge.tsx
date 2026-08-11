@@ -39,7 +39,7 @@ export const DAGEdge = memo(function DAGEdge({
       markerEnd={markerEnd}
       className={isAnimated ? 'dag-edge-flowing' : undefined}
       style={{
-        stroke: isActive ? '#38bdf8' : '#475569',
+        stroke: isActive ? '#38bdf8' : 'var(--edge-stroke)',
         strokeWidth: isActive ? 2.2 : 1.5,
         strokeDasharray: isAnimated ? '7 4' : undefined,
         filter: isActive ? 'drop-shadow(0 0 5px rgba(56, 189, 248, 0.45))' : undefined,

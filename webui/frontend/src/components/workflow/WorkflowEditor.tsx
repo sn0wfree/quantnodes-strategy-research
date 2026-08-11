@@ -385,17 +385,17 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
   return (
     <div className="flex h-full min-h-0">
       {/* Palette */}
-      <aside className="flex w-56 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-slate-800 bg-slate-900/60 p-2">
+      <aside className="wf-panel-solid flex w-56 shrink-0 flex-col gap-1.5 overflow-y-auto border-r p-2">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="wf-text-sub pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索节点…"
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2 pl-8 pr-2 text-xs text-slate-100 outline-none placeholder:text-slate-400 focus:border-primary-500"
+            className="wf-input w-full rounded-lg border py-2 pl-8 pr-2 text-xs outline-none focus:border-primary-500"
           />
         </div>
-        <div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">节点库</div>
+        <div className="wf-text-sub px-1 pt-1 text-[11px] font-medium uppercase tracking-wide">节点库</div>
         {palette.map((p) => {
           const Icon = p.icon
           return (
@@ -409,38 +409,38 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
               }}
               onDragEnd={() => { dragTypeRef.current = null }}
               onClick={() => addNode(p.type)}
-              className="group flex items-center gap-2.5 rounded-lg border border-slate-700/60 bg-slate-900 px-2.5 py-2 text-left transition-colors hover:border-slate-500 hover:bg-slate-800"
+              className="group flex items-center gap-2.5 rounded-lg border border-slate-700/60 bg-slate-900 px-2.5 py-2 text-left transition-colors hover:border-slate-500 hover:bg-slate-800 dark-mode-card"
               title={`${p.desc}\n点击添加，或拖拽到画布指定位置`}
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${p.color}22`, color: p.color, boxShadow: `inset 0 0 0 1px ${p.color}44` }}>
                 <Icon className="h-4 w-4" />
               </span>
               <span className="min-w-0">
-                <span className="block text-[13px] font-medium leading-tight text-slate-100">{p.label}</span>
-                <span className="mt-0.5 block truncate font-mono text-[11px] leading-tight text-slate-400">{p.type}</span>
+                <span className="block text-[13px] font-medium leading-tight text-slate-100 wf-card-title">{p.label}</span>
+                <span className="mt-0.5 block truncate font-mono text-[11px] leading-tight text-slate-400 wf-card-sub">{p.type}</span>
               </span>
-              <Plus className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-500 group-hover:text-slate-300" />
+              <Plus className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-500 group-hover:text-slate-300 wf-card-plus" />
             </button>
           )
         })}
-        <p className="px-1 pb-1 text-[11px] leading-relaxed text-slate-400">
+        <p className="wf-text-sub px-1 pb-1 text-[11px] leading-relaxed">
           点击添加节点，或拖拽到画布指定位置。Ctrl+Z 撤销，Ctrl+Shift+Z 重做，Delete 删除选中。
         </p>
       </aside>
 
       {/* Canvas */}
-      <div className="relative min-w-0 flex-1 bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/60">
+      <div className="relative min-w-0 flex-1" style={{ background: "var(--canvas-bg)" }}>
         {rfNodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-            <div className="rounded-2xl border border-dashed border-slate-500/60 bg-slate-900/60 px-9 py-8 text-center backdrop-blur-sm">
+            <div className="wf-panel rounded-2xl border border-dashed px-9 py-8 text-center backdrop-blur-sm">
               <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-slate-600 bg-slate-800/90 shadow-lg">
                 <Plus className="h-5 w-5 text-primary-400" />
               </div>
-              <div className="text-sm font-medium text-slate-100">空画布</div>
-              <div className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                从左侧节点库<strong className="font-medium text-slate-100">点击</strong>或<strong className="font-medium text-slate-100">拖拽</strong>添加节点
+              <div className="wf-text-main text-sm font-medium">空画布</div>
+              <div className="wf-text-sub mt-1.5 text-xs leading-relaxed">
+                从左侧节点库<strong className="wf-text-main font-medium">点击</strong>或<strong className="wf-text-main font-medium">拖拽</strong>添加节点
               </div>
-              <div className="mt-1 text-[11px] text-slate-400">
+              <div className="wf-text-sub mt-1 text-[11px]">
                 从节点右侧把手拖到目标左侧把手连线 · Delete 删除 · Ctrl+Z 撤销
               </div>
             </div>
@@ -475,13 +475,13 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
               markerHeight="7"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--marker-fill)" />
             </marker>
           </defs>
-          <Background variant={BackgroundVariant.Dots} gap={26} size={1.2} color="#1e293b" />
-          <Background variant={BackgroundVariant.Lines} gap={130} size={0.6} color="#16233a" />
+          <Background variant={BackgroundVariant.Dots} gap={26} size={1.2} color="var(--canvas-dot)" />
+          <Background variant={BackgroundVariant.Lines} gap={130} size={0.6} color="var(--canvas-line)" />
           <Controls />
-          <MiniMap pannable zoomable className="!bg-slate-900" nodeColor={(n) => {
+          <MiniMap pannable zoomable className="!bg-slate-900 wf-minimap" nodeColor={(n) => {
             const d = n.data as DAGNodeData
             return d.agentColor ?? '#475569'
           }} />
@@ -491,7 +491,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
             onClick={undo}
             disabled={!canUndo}
             title="撤销 (Ctrl+Z)"
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-md backdrop-blur-sm hover:bg-slate-800 disabled:opacity-40"
+            className="wf-panel wf-text-sub inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[10px] shadow-md backdrop-blur-sm hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
           >
             <Undo2 className="h-3 w-3" /> 撤销
           </button>
@@ -499,7 +499,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
             onClick={redo}
             disabled={!canRedo}
             title="重做 (Ctrl+Shift+Z)"
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-md backdrop-blur-sm hover:bg-slate-800 disabled:opacity-40"
+            className="wf-panel wf-text-sub inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[10px] shadow-md backdrop-blur-sm hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
           >
             <Redo2 className="h-3 w-3" /> 重做
           </button>
@@ -507,7 +507,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
             onClick={autoLayout}
             disabled={rfNodes.length === 0}
             title="dagre 自动布局"
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-md backdrop-blur-sm hover:bg-slate-800 disabled:opacity-40"
+            className="wf-panel wf-text-sub inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[10px] shadow-md backdrop-blur-sm hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
           >
             <LayoutGrid className="h-3 w-3" /> 自动布局
           </button>
@@ -515,30 +515,30 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
       </div>
 
       {/* Config panel */}
-      <aside className="flex w-72 shrink-0 flex-col border-l border-slate-800 bg-slate-900/60 p-3">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">节点配置</div>
+      <aside className="wf-panel-solid flex w-72 shrink-0 flex-col border-l p-3">
+        <div className="wf-text-sub mb-2 text-[11px] font-medium uppercase tracking-wide">节点配置</div>
         {selected && selectedData ? (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-[10px] text-slate-400">名称</label>
+              <label className="wf-text-sub mb-1 block text-[10px]">名称</label>
               <input
                 value={(selectedData.label as string) ?? ''}
                 onChange={(e) => updateLabel(selected.id, e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+                className="wf-input w-full rounded border px-2 py-1 text-xs outline-none focus:border-primary-500"
               />
             </div>
-            <div className="rounded bg-slate-950/60 px-2 py-1 text-[10px] text-slate-500">
-              id: <span className="text-slate-400">{selected.id}</span> · type:{' '}
-              <span className="text-slate-400">{selectedType}</span>
+            <div className="wf-input wf-text-sub rounded px-2 py-1 text-[10px]">
+              id: <span className="wf-text-main">{selected.id}</span> · type:{' '}
+              <span className="wf-text-main">{selectedType}</span>
             </div>
             {CONFIG_FIELDS[selectedType ?? '']?.map((f) => (
               <div key={f.key}>
-                <label className="mb-1 block text-[10px] text-slate-400">{f.label}</label>
+                <label className="wf-text-sub mb-1 block text-[10px]">{f.label}</label>
                 {f.type === 'select' ? (
                   <select
                     value={(selectedConfig[f.key] as string) ?? ''}
                     onChange={(e) => updateConfig(selected.id, { [f.key]: e.target.value })}
-                    className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+                    className="wf-input w-full rounded border px-2 py-1 text-xs outline-none focus:border-primary-500"
                   >
                     <option value="">—</option>
                     {f.options?.map((o) => (
@@ -551,7 +551,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
                     type={f.type === 'number' ? 'number' : 'text'}
                     placeholder={f.placeholder}
                     onChange={(e) => updateConfig(selected.id, { [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value })}
-                    className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+                    className="wf-input w-full rounded border px-2 py-1 text-xs outline-none focus:border-primary-500"
                   />
                 )}
               </div>
@@ -567,12 +567,12 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
             </button>
           </div>
         ) : (
-          <p className="text-xs leading-relaxed text-slate-400">
+          <p className="wf-text-sub text-xs leading-relaxed">
             点击画布节点查看/编辑配置。连线：从节点右侧把手拖到目标节点左侧把手。
           </p>
         )}
 
-        <div className="mt-auto space-y-1.5 border-t border-slate-800 pt-2">
+        <div className="wf-border mt-auto space-y-1.5 border-t pt-2">
           <button
             onClick={handleSave}
             disabled={saving}
@@ -580,7 +580,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
           >
             {saving ? '保存中...' : '保存定义'}
           </button>
-          <p className="text-[11px] leading-relaxed text-slate-400">校验规则：6 种节点类型、planner/evaluator/approval 各最多 1 个、无环。</p>
+          <p className="wf-text-sub text-[11px] leading-relaxed">校验规则：6 种节点类型、planner/evaluator/approval 各最多 1 个、无环。</p>
         </div>
       </aside>
     </div>

@@ -7,7 +7,7 @@ interface DAGProgressBarProps {
 
 export function DAGProgressBar({ progress, completed, total, elapsed }: DAGProgressBarProps) {
   return (
-    <div className="flex items-center gap-3 border-t border-slate-800 bg-slate-900/50 px-4 py-2">
+    <div className="wf-panel flex items-center gap-3 border-t px-4 py-2">
       {/* Progress bar */}
       <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
         <div
@@ -17,7 +17,7 @@ export function DAGProgressBar({ progress, completed, total, elapsed }: DAGProgr
       </div>
 
       {/* Stats */}
-      <div className="flex items-center gap-2 text-[11px] text-slate-500">
+      <div className="wf-text-sub flex items-center gap-2 text-[11px]">
         <span className="font-mono">
           {completed}/{total}
         </span>

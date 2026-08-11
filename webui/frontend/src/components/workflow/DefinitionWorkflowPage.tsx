@@ -15,12 +15,12 @@ import { EmptyState } from '../common/EmptyState'
 type RunStatus = 'pending' | 'running' | 'awaiting' | 'completed' | 'failed' | 'cancelled'
 
 const RUN_STATUS_LABELS: Record<RunStatus, { text: string; cls: string }> = {
-  pending: { text: '等待中', cls: 'bg-slate-800 text-slate-400' },
-  running: { text: '运行中', cls: 'bg-sky-900/60 text-sky-300' },
-  awaiting: { text: '等待审批', cls: 'bg-amber-900/60 text-amber-300' },
-  completed: { text: '已完成', cls: 'bg-emerald-900/60 text-emerald-400' },
-  failed: { text: '失败', cls: 'bg-rose-900/60 text-rose-300' },
-  cancelled: { text: '已取消', cls: 'bg-slate-800 text-slate-400' },
+  pending: { text: '等待中', cls: 'badge-neutral' },
+  running: { text: '运行中', cls: 'badge-running' },
+  awaiting: { text: '等待审批', cls: 'badge-awaiting' },
+  completed: { text: '已完成', cls: 'badge-completed' },
+  failed: { text: '失败', cls: 'badge-failed' },
+  cancelled: { text: '已取消', cls: 'badge-neutral' },
 }
 
 const GOAL_STATUS_LABELS: Record<string, string> = {
@@ -471,20 +471,20 @@ export function DefinitionWorkflowPage() {
       )}
 
       {/* ── Workflow info bar (canvas top-left) ─────────────── */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900/40 px-3 py-2">
+      <div className="wf-panel flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <FileClock className="h-4 w-4 text-primary-400" />
         {editing?.name === null ? (
           <input
             value={editingName}
             onChange={(e) => setEditingName(e.target.value)}
             placeholder="定义名称"
-            className="w-44 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-[13px] text-slate-100 outline-none focus:border-primary-500"
+            className="wf-input w-44 rounded border px-2 py-1.5 text-[13px] outline-none focus:border-primary-500"
           />
         ) : (
           <select
             value={editingName || ''}
             onChange={(e) => e.target.value && startEdit(e.target.value)}
-            className="max-w-56 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-[13px] text-slate-100 outline-none focus:border-primary-500"
+            className="wf-input max-w-56 rounded border px-2 py-1.5 text-[13px] outline-none focus:border-primary-500"
             title="切换工作流定义"
           >
             <option value="" disabled>
@@ -496,16 +496,14 @@ export function DefinitionWorkflowPage() {
           </select>
         )}
         {currentSource && (
-          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-            currentSource === 'builtin' ? 'bg-violet-900/60 text-violet-300' : 'bg-emerald-900/60 text-emerald-400'
-          }`}>
+          <span className={`badge-${currentSource === 'builtin' ? 'builtin' : 'user'} rounded px-1.5 py-0.5 text-[10px] font-medium`}>
             {currentSource === 'builtin' ? '内置' : '用户'}
           </span>
         )}
         {currentDesc && (
-          <span className="hidden truncate text-xs text-slate-400 md:inline">{currentDesc}</span>
+          <span className="wf-text-sub hidden truncate text-xs md:inline">{currentDesc}</span>
         )}
-        {savedAt && <span className="text-[10px] text-emerald-400">已保存 {savedAt}</span>}
+        {savedAt && <span className="badge-completed rounded px-1.5 py-0.5 text-[10px] font-medium">已保存 {savedAt}</span>}
 
         <div className="flex-1" />
 
@@ -556,7 +554,7 @@ export function DefinitionWorkflowPage() {
         {run && runStatus !== 'completed' && runStatus !== 'failed' && (
           <button
             onClick={resetRun}
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 hover:bg-slate-800"
+            className="wf-text-sub inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-slate-800"
           >
             <RefreshCw className="h-3 w-3" /> 停止追踪
           </button>
@@ -567,7 +565,7 @@ export function DefinitionWorkflowPage() {
       <div className="min-h-0 flex-1">
         {viewingGoal ? (
           <div className="flex h-full min-h-0 flex-col">
-            <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-900/50 px-3 py-1.5">
+            <div className="wf-panel flex items-center gap-2 border-b px-3 py-1.5">
               <button
                 onClick={closeViewing}
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-sky-300 hover:bg-slate-800"
@@ -575,11 +573,11 @@ export function DefinitionWorkflowPage() {
                 <ArrowLeft className="h-3 w-3" /> 返回编辑
               </button>
               <History className="h-3 w-3 text-slate-500" />
-              <span className="text-xs text-slate-300">回看：{viewingGoal.workflow_id}</span>
+              <span className="wf-text-main text-xs">回看：{viewingGoal.workflow_id}</span>
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                viewingGoal.goal_status === 'complete' ? 'bg-emerald-900/60 text-emerald-400'
-                  : viewingGoal.goal_status === 'active' ? 'bg-sky-900/60 text-sky-300'
-                    : 'bg-slate-800 text-slate-400'
+                viewingGoal.goal_status === 'complete' ? 'badge-completed'
+                  : viewingGoal.goal_status === 'active' ? 'badge-running'
+                    : 'badge-neutral'
               }`}>
                 {GOAL_STATUS_LABELS[viewingGoal.goal_status] ?? viewingGoal.goal_status}
               </span>
@@ -599,7 +597,7 @@ export function DefinitionWorkflowPage() {
                   恢复
                 </button>
               )}
-              <span className="truncate text-[11px] text-slate-400">{viewingGoal.objective}</span>
+              <span className="wf-text-sub truncate text-[11px]">{viewingGoal.objective}</span>
             </div>
             <div className="min-h-0 flex-1">
               {viewingGraph ? (
@@ -641,12 +639,12 @@ export function DefinitionWorkflowPage() {
 
       {/* ── Bottom run drawer ───────────────────────────────── */}
       {runOpen && (
-        <div className="border-t border-slate-800 bg-slate-900/80">
+        <div className="wf-panel border-t">
           <div className="flex items-center gap-3 px-4 pt-2">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">运行面板</div>
+            <div className="wf-text-sub text-[11px] font-medium uppercase tracking-wide">运行面板</div>
             <button
               onClick={() => setRunOpen(false)}
-              className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-800"
+              className="wf-text-sub ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] hover:bg-slate-800"
             >
               <ChevronDown className="h-3 w-3" /> 折叠
             </button>
@@ -658,10 +656,10 @@ export function DefinitionWorkflowPage() {
                 value={objective}
                 onChange={(e) => setObjective(e.target.value)}
                 placeholder="例：找出沪深300上 Sharpe > 1.5 的动量因子"
-                className="w-full resize-none rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-primary-500"
+                className="wf-input w-full resize-none rounded border px-2 py-1.5 text-xs outline-none focus:border-primary-500"
               />
               {!sessionId && (
-                <p className="mt-1 text-[10px] text-amber-500">需要先打开一个会话</p>
+                <p className="mt-1 text-[10px] text-amber-600">需要先打开一个会话</p>
               )}
             </div>
             <button
@@ -675,7 +673,7 @@ export function DefinitionWorkflowPage() {
             {run && (
               <button
                 onClick={resetRun}
-                className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800"
+                className="wf-text-sub inline-flex items-center gap-1 rounded border px-2 py-1.5 text-xs hover:bg-slate-800"
               >
                 <RefreshCw className="h-3 w-3" /> 停止追踪
               </button>
@@ -686,10 +684,10 @@ export function DefinitionWorkflowPage() {
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.cls}`}>
                 {statusMeta.text}
               </span>
-              <span className="text-slate-500">{run.run_id}</span>
-              <span className="text-slate-400">段：{run.segment_idx}/{run.segments_total}</span>
-              <span className="text-slate-400">重规划：{run.replan_count}/{run.replan_max}</span>
-              <span className="text-slate-400">已完成节点：{run.completed_nodes.length}</span>
+              <span className="wf-text-sub">{run.run_id}</span>
+              <span className="wf-text-sub">段：{run.segment_idx}/{run.segments_total}</span>
+              <span className="wf-text-sub">重规划：{run.replan_count}/{run.replan_max}</span>
+              <span className="wf-text-sub">已完成节点：{run.completed_nodes.length}</span>
               {run.failures.length > 0 && (
                 <span className="text-rose-400">失败：{run.failures.join('；')}</span>
               )}
@@ -698,16 +696,16 @@ export function DefinitionWorkflowPage() {
           {run && nodeOutputs.length > 0 && (
             <div className="flex gap-2 overflow-x-auto px-4 pb-2">
               {nodeOutputs.map((o) => (
-                <div key={o.node_id} className="w-52 shrink-0 rounded border border-slate-800 bg-slate-900 px-2 py-1.5">
+                <div key={o.node_id} className="wf-panel w-52 shrink-0 rounded border px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                       o.status === 'success' ? 'bg-emerald-400' : o.status === 'error' ? 'bg-rose-400' : 'bg-slate-500'
                     }`} />
-                    <span className="truncate text-[10px] text-slate-300">{o.node_id}</span>
-                    <span className="ml-auto text-[10px] text-slate-400">{o.elapsed_s}s</span>
+                    <span className="wf-text-main truncate text-[10px]">{o.node_id}</span>
+                    <span className="wf-text-sub ml-auto text-[10px]">{o.elapsed_s}s</span>
                   </div>
                   {o.summary && (
-                    <div className="mt-0.5 line-clamp-2 text-[9px] text-slate-500">{o.summary}</div>
+                    <div className="wf-text-sub mt-0.5 line-clamp-2 text-[9px]">{o.summary}</div>
                   )}
                 </div>
               ))}
@@ -715,10 +713,10 @@ export function DefinitionWorkflowPage() {
           )}
 
           {/* Run history */}
-          <div className="border-t border-slate-800">
+          <div className="wf-border border-t">
             <button
               onClick={() => setHistoryOpen((v) => !v)}
-              className="flex w-full items-center gap-2 px-4 py-1.5 text-[10px] text-slate-400 hover:bg-slate-800/60"
+              className="wf-text-sub flex w-full items-center gap-2 px-4 py-1.5 text-[10px] hover:bg-slate-800/60"
             >
               <History className="h-3 w-3" />
               运行记录 {history.length > 0 ? `(${history.length})` : ''}
@@ -728,17 +726,17 @@ export function DefinitionWorkflowPage() {
             {historyOpen && (
               <div className="max-h-40 overflow-y-auto px-4 pb-2">
                 {history.length === 0 ? (
-                  <p className="py-1 text-[11px] text-slate-600">暂无历史运行</p>
+                  <p className="wf-text-sub py-1 text-[11px]">暂无历史运行</p>
                 ) : (
                   <ul className="space-y-1">
                     {history.map((g) => (
                       <li key={g.goal_id}>
                         <button
                           onClick={() => openHistoryGoal(g)}
-                          className={`w-full rounded border px-2 py-1 text-left transition-colors ${
+                          className={`wf-panel w-full rounded border px-2 py-1 text-left transition-colors ${
                             viewingGoal?.goal_id === g.goal_id
                               ? 'border-sky-500/40 bg-sky-500/10'
-                              : 'border-slate-800 bg-slate-900 hover:border-slate-600'
+                              : 'hover:border-slate-600'
                           }`}
                         >
                           <div className="flex items-center gap-1.5">
@@ -751,10 +749,10 @@ export function DefinitionWorkflowPage() {
                             }`}>
                               {GOAL_STATUS_LABELS[g.goal_status] ?? g.goal_status}
                             </span>
-                            <span className="truncate text-[10px] text-slate-300">{g.objective}</span>
-                            <span className="ml-auto text-[9px] text-slate-600">{formatTime(g.created_at)}</span>
+                            <span className="wf-text-main truncate text-[10px]">{g.objective}</span>
+                            <span className="wf-text-sub ml-auto text-[9px]">{formatTime(g.created_at)}</span>
                           </div>
-                          <div className="mt-0.5 text-[9px] text-slate-600">{g.workflow_id}</div>
+                          <div className="wf-text-sub mt-0.5 text-[9px]">{g.workflow_id}</div>
                         </button>
                       </li>
                     ))}
@@ -770,11 +768,11 @@ export function DefinitionWorkflowPage() {
       {!runOpen && run && (
         <button
           onClick={() => setRunOpen(true)}
-          className="flex items-center gap-2 border-t border-slate-800 bg-slate-900/80 px-4 py-1.5 text-[10px] text-slate-400 hover:bg-slate-800"
+          className="wf-panel wf-text-sub flex items-center gap-2 border-t px-4 py-1.5 text-[10px] hover:bg-slate-800"
         >
           <ChevronUp className="h-3 w-3" />
           <span className={`rounded px-1 py-0.5 font-medium ${statusMeta.cls}`}>{statusMeta.text}</span>
-          <span className="text-slate-500">{run.run_id}</span>
+          <span className="wf-text-sub">{run.run_id}</span>
         </button>
       )}
 

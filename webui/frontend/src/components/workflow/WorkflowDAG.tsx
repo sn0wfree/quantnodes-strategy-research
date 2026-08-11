@@ -133,16 +133,16 @@ export function WorkflowDAG({
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
             </marker>
           </defs>
-          <Background variant={BackgroundVariant.Dots} gap={26} size={1.2} color="#1e293b" />
-          <Background variant={BackgroundVariant.Lines} gap={130} size={0.6} color="#16233a" />
-          <Controls className="!bg-slate-800 !border-slate-700 !rounded-lg" />
+          <Background variant={BackgroundVariant.Dots} gap={26} size={1.2} color="var(--canvas-dot)" />
+          <Background variant={BackgroundVariant.Lines} gap={130} size={0.6} color="var(--canvas-line)" />
+          <Controls className="!rounded-lg" />
           <MiniMap
             nodeColor={(n) => {
               const d = n.data as unknown as DAGNodeData
               return d.agentColor || '#475569'
             }}
             maskColor="rgba(0, 0, 0, 0.7)"
-            className="!bg-slate-900 !border-slate-700"
+            className="wf-minimap"
           />
         </ReactFlow>
 

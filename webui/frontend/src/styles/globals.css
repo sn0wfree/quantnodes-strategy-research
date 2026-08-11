@@ -507,3 +507,130 @@ pre,
   box-shadow: 0 0 0 1px var(--primary), 0 0 8px color-mix(in srgb, var(--primary) 50%, transparent);
   background: var(--primary) !important;
 }
+
+/* ── Workflow canvas dual-theme tokens ───────────────────────── */
+
+:root,
+[data-theme='dark'] {
+  --canvas-bg: linear-gradient(160deg, #0a0a12 0%, #0b1120 55%, #0f172a 100%);
+  --canvas-dot: #1e293b;
+  --canvas-line: #16233a;
+  --edge-stroke: #475569;
+  --marker-fill: #64748b;
+  --wf-panel: rgba(17, 24, 39, 0.88);
+  --wf-panel-solid: #111827;
+}
+
+[data-theme='light'] {
+  --canvas-bg: linear-gradient(160deg, #f6f6f0 0%, #fbfbf7 55%, #ffffff 100%);
+  --canvas-dot: #e3e3db;
+  --canvas-line: #efefe9;
+  --edge-stroke: #cbd5e1;
+  --marker-fill: #94a3b8;
+  --wf-panel: rgba(255, 255, 255, 0.92);
+  --wf-panel-solid: #ffffff;
+}
+
+/* Semantic panel/text helpers */
+.wf-panel { background: var(--wf-panel); border-color: var(--border); }
+.wf-panel-solid { background: var(--wf-panel-solid); border-color: var(--border); }
+.wf-text-main { color: var(--foreground); }
+.wf-text-sub { color: var(--muted-foreground); }
+.wf-border { border-color: var(--border); }
+.wf-input {
+  background: var(--input);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+.wf-input::placeholder { color: var(--muted-foreground); }
+
+/* Status / source badges (theme-aware) */
+.badge-builtin { background: rgba(167, 139, 250, 0.16); color: #a78bfa; }
+[data-theme='light'] .badge-builtin { background: #ede9fe; color: #6d28d9; }
+.badge-user { background: rgba(16, 185, 129, 0.16); color: #34d399; }
+[data-theme='light'] .badge-user { background: #d1fae5; color: #047857; }
+.badge-running { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; }
+[data-theme='light'] .badge-running { background: #e0f2fe; color: #0369a1; }
+.badge-awaiting { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+[data-theme='light'] .badge-awaiting { background: #fef3c7; color: #b45309; }
+.badge-completed { background: rgba(16, 185, 129, 0.16); color: #34d399; }
+[data-theme='light'] .badge-completed { background: #d1fae5; color: #047857; }
+.badge-failed { background: rgba(239, 68, 68, 0.16); color: #f87171; }
+[data-theme='light'] .badge-failed { background: #fee2e2; color: #b91c1c; }
+.badge-neutral { background: rgba(100, 116, 139, 0.16); color: #94a3b8; }
+[data-theme='light'] .badge-neutral { background: #eef1f5; color: #475569; }
+
+/* Light-theme node card overrides (dark defaults above stay) */
+[data-theme='light'] .dag-node-card {
+  background: linear-gradient(160deg, #ffffff 0%, #f7f7f2 100%);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(212, 212, 204, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+[data-theme='light'] .dag-node-card:hover {
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(163, 163, 155, 0.9);
+}
+[data-theme='light'] .dag-node-card.dag-node-selected {
+  box-shadow:
+    0 0 0 2px var(--primary),
+    0 6px 18px rgba(0, 0, 0, 0.12),
+    0 0 14px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+[data-theme='light'] .dag-node-card .text-primary-300 { color: #6d28d9; }
+[data-theme='light'] .dag-node-card .text-primary-400 { color: #7c3aed; }
+[data-theme='light'] .dag-node-card .text-emerald-300 { color: #047857; }
+[data-theme='light'] .dag-node-card .text-emerald-400 { color: #059669; }
+[data-theme='light'] .dag-node-card .text-red-300 { color: #b91c1c; }
+[data-theme='light'] .dag-node-card .text-red-400 { color: #dc2626; }
+[data-theme='light'] .dag-node-card .text-slate-400 { color: #64748b; }
+[data-theme='light'] .dag-node-card .text-slate-500 { color: #64748b; }
+[data-theme='light'] .dag-node-card .text-slate-100 { color: #0f172a; }
+[data-theme='light'] .dag-node-card .bg-slate-800\/90 { background: #eef1f5; }
+[data-theme='light'] .dag-node-card .bg-slate-800\/80 { background: #eef1f5; }
+
+/* Light-theme React Flow chrome */
+[data-theme='light'] .react-flow__controls {
+  border-color: rgba(212, 212, 204, 0.9);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+[data-theme='light'] .react-flow__controls button {
+  background: #ffffff;
+  border-bottom-color: #e5e5e0;
+  color: #475569;
+}
+[data-theme='light'] .react-flow__controls button:hover {
+  background: #f5f5f0;
+  color: #1a1a1a;
+}
+[data-theme='light'] .react-flow__minimap {
+  background: #ffffff;
+  border-color: rgba(212, 212, 204, 0.9);
+}
+[data-theme='light'] .react-flow__handle {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.5);
+}
+
+/* Light-theme palette cards (dark defaults are hard-coded in JSX) */
+[data-theme='light'] .dark-mode-card {
+  background: #ffffff;
+  border-color: rgba(212, 212, 204, 0.9);
+}
+[data-theme='light'] .dark-mode-card:hover {
+  background: #f5f5f0;
+  border-color: rgba(163, 163, 155, 0.9);
+}
+[data-theme='light'] .wf-card-title { color: #1a1a1a; }
+[data-theme='light'] .wf-card-sub { color: #64748b; }
+[data-theme='light'] .wf-card-plus { color: #94a3b8; }
+[data-theme='light'] .wf-minimap { background: #ffffff; }
+
+/* Light-theme DAGNode inner text (scoped to node cards) */
+[data-theme='light'] .dag-node-card .dag-status-running { color: #6d28d9; }
+[data-theme='light'] .dag-node-card .dag-status-completed { color: #047857; }
+[data-theme='light'] .dag-node-card .dag-status-failed { color: #b91c1c; }
+[data-theme='light'] .dag-node-card .dag-status-skipped { color: #64748b; }
+[data-theme='light'] .dag-node-card .dag-status-neutral { color: #64748b; }
