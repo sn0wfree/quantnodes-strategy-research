@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, Play, Plus, Save, Pencil, Trash2, Copy, RefreshCw, Loader2, FileJson,
-  Boxes, ListChecks, ChevronDown, ChevronUp,
+  Play, Plus, Save, RefreshCw, Loader2, FileJson,
+  ChevronDown, ChevronUp, History, FileClock, ArrowLeft,
 } from 'lucide-react'
 import { api, type DefinitionListItem, type DefinitionNode, type DefinitionEdge, type DefinitionRunSnapshot, type DefinitionNodeOutput, type DefinitionPayload } from '../../api/client'
 import { useSessionStore } from '../../stores/session'
-import { WorkflowEditor, NODE_PALETTE } from './WorkflowEditor'
+import { WorkflowEditor } from './WorkflowEditor'
+import { WorkflowDAG } from './WorkflowDAG'
+import type { DAGNodeData } from './DAGNode'
 import { ApprovalDialog } from './ApprovalDialog'
 import { ImportDefinitionDialog } from './ImportDefinitionDialog'
 import { EmptyState } from '../common/EmptyState'
@@ -22,8 +23,47 @@ const RUN_STATUS_LABELS: Record<RunStatus, { text: string; cls: string }> = {
   cancelled: { text: '已取消', cls: 'bg-slate-800 text-slate-400' },
 }
 
+const GOAL_STATUS_LABELS: Record<string, string> = {
+  active: '进行中',
+  complete: '已完成',
+  cancelled: '已取消',
+  in_review: '审核中',
+}
+
+interface HistoryGoal {
+  goal_id: string
+  workflow_id: string
+  objective: string
+  goal_status: string
+  created_at: string
+}
+
+function mapAgentStatus(s: string): DAGNodeData['status'] {
+  switch (s) {
+    case 'success': return 'completed'
+    case 'failed': return 'failed'
+    case 'skipped': return 'skipped'
+    case 'running': return 'running'
+    default: return 'pending'
+  }
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  } catch {
+    return '—'
+  }
+}
+
+// ── Dify-style orchestration editor body ──────────────────────
+// Top-left workflow info bar (name dropdown + actions), node
+// palette on the left, canvas in the middle, node config on the
+// right, run drawer (with goal history playback) at the bottom.
+
 export function DefinitionWorkflowPage() {
-  const navigate = useNavigate()
   const sessionId = useSessionStore((s) => s.currentSessionId)
 
   const [definitions, setDefinitions] = useState<DefinitionListItem[]>([])
@@ -33,7 +73,6 @@ export function DefinitionWorkflowPage() {
   const [savedAt, setSavedAt] = useState('')
   const [error, setError] = useState('')
 
-  const [sidebarTab, setSidebarTab] = useState<'palette' | 'defs'>('palette')
   const [runOpen, setRunOpen] = useState(false)
   const [objective, setObjective] = useState('')
   const [starting, setStarting] = useState(false)
@@ -46,6 +85,17 @@ export function DefinitionWorkflowPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const sseRef = useRef<EventSource | null>(null)
+  const saveRef = useRef<(() => void) | null>(null)
+
+  // ── Run history (goal playback) ──────────────────────────────
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<HistoryGoal[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [viewingGoal, setViewingGoal] = useState<HistoryGoal | null>(null)
+  const [viewingGraph, setViewingGraph] = useState<{ nodes: DAGNodeData[]; edges: Array<{ source: string; target: string }> } | null>(null)
+  const [viewingStatus, setViewingStatus] = useState<'idle' | 'running' | 'paused' | 'completed' | 'failed'>('idle')
+  const [viewingProgress, setViewingProgress] = useState(0)
+  const viewingSseRef = useRef<EventSource | null>(null)
 
   const loadDefinitions = useCallback(async () => {
     try {
@@ -56,12 +106,36 @@ export function DefinitionWorkflowPage() {
     }
   }, [])
 
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true)
+    try {
+      const r = await api.goal.list({ limit: 100 })
+      setHistory(
+        (r.goals ?? [])
+          .filter((g) => Boolean(g.workflow_id))
+          .map((g) => ({
+            goal_id: g.goal_id,
+            workflow_id: g.workflow_id as string,
+            objective: g.objective,
+            goal_status: g.goal_status,
+            created_at: g.created_at,
+          })),
+      )
+    } catch {
+      // Non-critical — history list can be absent
+    } finally {
+      setLoadingHistory(false)
+    }
+  }, [])
+
   useEffect(() => {
     void loadDefinitions()
-  }, [loadDefinitions])
+    void loadHistory()
+  }, [loadDefinitions, loadHistory])
 
   useEffect(() => () => {
     sseRef.current?.close()
+    viewingSseRef.current?.close()
   }, [])
 
   const closeSSE = useCallback(() => {
@@ -72,6 +146,7 @@ export function DefinitionWorkflowPage() {
   // ── Editing ─────────────────────────────────────────────────
 
   const startEdit = async (name: string) => {
+    closeViewing()
     setError('')
     try {
       const r = await api.definitions.get(name)
@@ -89,6 +164,7 @@ export function DefinitionWorkflowPage() {
   }
 
   const startNew = () => {
+    closeViewing()
     setEditing({ name: null, nodes: [], edges: [] })
     setEditingName('')
     setSavedAt('')
@@ -104,14 +180,8 @@ export function DefinitionWorkflowPage() {
         setError('请输入定义名称')
         return
       }
-      await api.definitions.save({
-        name,
-        description: '',
-        nodes,
-        edges,
-      })
+      await api.definitions.save({ name, description: '', nodes, edges })
       await loadDefinitions()
-      // stay in edit mode; name may have been assigned on first save
       setEditing((prev) => (prev ? { ...prev, name } : prev))
       setEditingName(name)
       setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
@@ -119,27 +189,6 @@ export function DefinitionWorkflowPage() {
       setError((err as Error).message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const copyDefinition = async (name: string) => {
-    setError('')
-    try {
-      await api.definitions.copy(name)
-      await loadDefinitions()
-    } catch (err) {
-      setError((err as Error).message)
-    }
-  }
-
-  const deleteDefinition = async (name: string) => {
-    setError('')
-    try {
-      await api.definitions.remove(name)
-      if (editing?.name === name) setEditing(null)
-      await loadDefinitions()
-    } catch (err) {
-      setError((err as Error).message)
     }
   }
 
@@ -225,9 +274,7 @@ export function DefinitionWorkflowPage() {
         setRun(snap)
         setRunStatus(snap.status as RunStatus)
         if (snap.status === 'awaiting') {
-          setApprovalPreview(
-            `完成节点：${snap.completed_nodes.join('、') || '—'}`,
-          )
+          setApprovalPreview(`完成节点：${snap.completed_nodes.join('、') || '—'}`)
           setApprovalOpen(true)
         } else {
           setApprovalOpen(false)
@@ -252,10 +299,7 @@ export function DefinitionWorkflowPage() {
       closeSSE()
       refresh()
     })
-    source.onerror = () => {
-      // polling SSE reconnects on its own; refresh state anyway
-      refresh()
-    }
+    source.onerror = () => refresh()
   }
 
   const respondApproval = async (approved: boolean, edits?: string) => {
@@ -288,49 +332,220 @@ export function DefinitionWorkflowPage() {
     setRunOpen(false)
   }
 
+  // ── Goal history playback ───────────────────────────────────
+
+  const closeViewing = useCallback(() => {
+    viewingSseRef.current?.close()
+    viewingSseRef.current = null
+    setViewingGoal(null)
+    setViewingGraph(null)
+    setViewingStatus('idle')
+    setViewingProgress(0)
+  }, [])
+
+  const openHistoryGoal = async (g: HistoryGoal) => {
+    setError('')
+    try {
+      const r = await api.workflow.graph(g.workflow_id)
+      setViewingGoal(g)
+      setViewingGraph({
+        nodes: r.nodes.map((n) => ({
+          label: n.label,
+          status: 'pending' as const,
+          agentName: n.id,
+        })),
+        edges: r.edges,
+      })
+      setViewingStatus('idle')
+      setViewingProgress(0)
+      const st = await api.workflow.status(g.goal_id)
+      if (st.status === 'ok' && st.progress) {
+        const p = st.progress
+        setViewingStatus(p.paused ? 'paused' : p.status === 'completed' ? 'completed' : p.status === 'error' ? 'failed' : 'running')
+        const total = Number(p.agents_total ?? 0)
+        const done = Number(p.agents_completed ?? 0)
+        if (total > 0) setViewingProgress(Math.round((done / total) * 100))
+        if (p.agent_statuses) {
+          setViewingGraph((g2) => {
+            if (!g2) return g2
+            return {
+              ...g2,
+              nodes: g2.nodes.map((n) => {
+                const st2 = p.agent_statuses![n.agentName ?? '']
+                return st2 ? { ...n, status: mapAgentStatus(st2) } : n
+              }),
+            }
+          })
+        }
+        if (p.status === 'running' || p.paused) connectViewingSSE(g.goal_id)
+      } else if (g.goal_status === 'complete') {
+        setViewingStatus('completed')
+      }
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  const connectViewingSSE = (gid: string) => {
+    viewingSseRef.current?.close()
+    const source = new EventSource(`/api/goal/workflow/events?goal_id=${encodeURIComponent(gid)}`)
+    viewingSseRef.current = source
+
+    const applyProgress = (data: Record<string, any>) => {
+      if (data.status === 'running' || data.status === 'paused') {
+        setViewingStatus(data.paused ? 'paused' : 'running')
+      } else if (data.status === 'completed') {
+        setViewingStatus('completed')
+      } else if (data.status === 'error') {
+        setViewingStatus('failed')
+      }
+      const total = Number(data.agents_total ?? 0)
+      const done = Number(data.agents_completed ?? 0)
+      if (total > 0) setViewingProgress(Math.round((done / total) * 100))
+      if (data.agent_statuses) {
+        setViewingGraph((g) => {
+          if (!g) return g
+          return {
+            ...g,
+            nodes: g.nodes.map((n) => {
+              const st = data.agent_statuses[n.agentName ?? '']
+              return st ? { ...n, status: mapAgentStatus(st) } : n
+            }),
+          }
+        })
+      }
+    }
+
+    source.addEventListener('progress', (e) => {
+      try { applyProgress(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
+    })
+    source.addEventListener('dag_update', (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data) as { node_id?: string; status?: string }
+        if (!d.node_id) return
+        setViewingGraph((g) => {
+          if (!g) return g
+          return {
+            ...g,
+            nodes: g.nodes.map((n) =>
+              n.agentName === d.node_id && d.status ? { ...n, status: mapAgentStatus(d.status) } : n,
+            ),
+          }
+        })
+      } catch { /* ignore */ }
+    })
+    source.onerror = () => source.close()
+  }
+
+  const onPauseViewing = async () => {
+    if (!viewingGoal) return
+    try {
+      await api.workflow.pause(viewingGoal.goal_id)
+      setViewingStatus('paused')
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  const onResumeViewing = async () => {
+    if (!viewingGoal) return
+    try {
+      await api.workflow.resume(viewingGoal.goal_id)
+      setViewingStatus('running')
+      connectViewingSSE(viewingGoal.goal_id)
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
   const statusMeta = RUN_STATUS_LABELS[runStatus]
+  const currentSource = definitions.find((d) => d.name === editingName)?.source
+  const currentDesc = definitions.find((d) => d.name === editingName)?.description ?? ''
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
-      {/* Top bar */}
-      <header className="flex items-center gap-3 border-b border-slate-800 bg-slate-900/80 px-4 py-2.5">
-        <button
-          onClick={() => navigate(-1)}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-sm text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" /> 返回
-        </button>
-        <div className="flex min-w-0 items-center gap-2">
-          {editing ? (
-            <>
-              <input
-                value={editingName}
-                onChange={(e) => setEditingName(e.target.value)}
-                placeholder="定义名称"
-                className="w-40 rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-slate-200 outline-none hover:border-slate-700 focus:border-primary-500"
-              />
-              {editing.name && (
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                  definitions.find((d) => d.name === editing.name)?.source === 'builtin'
-                    ? 'bg-violet-900/60 text-violet-300'
-                    : 'bg-emerald-900/60 text-emerald-400'
-                }`}>
-                  {definitions.find((d) => d.name === editing.name)?.source === 'builtin' ? '内置' : '用户'}
-                </span>
-              )}
-              {savedAt && <span className="text-[10px] text-emerald-400">已保存 {savedAt}</span>}
-            </>
-          ) : (
-            <h1 className="text-sm font-medium text-slate-200">工作流编辑器</h1>
-          )}
+    <div className="flex h-full min-h-0 flex-col">
+      {error && (
+        <div className="mx-4 mt-2 rounded border border-rose-800 bg-rose-950/50 px-3 py-1.5 text-xs text-rose-300">
+          {error}
         </div>
+      )}
+
+      {/* ── Workflow info bar (canvas top-left) ─────────────── */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900/40 px-3 py-2">
+        <FileClock className="h-4 w-4 text-primary-400" />
+        {editing?.name === null ? (
+          <input
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            placeholder="定义名称"
+            className="w-44 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+          />
+        ) : (
+          <select
+            value={editingName || ''}
+            onChange={(e) => e.target.value && startEdit(e.target.value)}
+            className="max-w-56 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+            title="切换工作流定义"
+          >
+            <option value="" disabled>
+              {editingName ? editingName : '选择工作流…'}
+            </option>
+            {definitions.map((d) => (
+              <option key={d.name} value={d.name}>{d.name}</option>
+            ))}
+          </select>
+        )}
+        {currentSource && (
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+            currentSource === 'builtin' ? 'bg-violet-900/60 text-violet-300' : 'bg-emerald-900/60 text-emerald-400'
+          }`}>
+            {currentSource === 'builtin' ? '内置' : '用户'}
+          </span>
+        )}
+        {currentDesc && (
+          <span className="hidden truncate text-[11px] text-slate-500 md:inline">{currentDesc}</span>
+        )}
+        {savedAt && <span className="text-[10px] text-emerald-400">已保存 {savedAt}</span>}
+
+        <div className="flex-1" />
+
         {run && (
-          <span className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.cls}`}>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.cls}`}>
             {statusMeta.text}
           </span>
         )}
-        <div className="flex-1" />
-        {editing?.name && run && runStatus === 'awaiting' && (
+        <button
+          onClick={startNew}
+          className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+        >
+          <Plus className="h-3 w-3" /> 新建
+        </button>
+        <button
+          onClick={() => setImportOpen(true)}
+          className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+        >
+          <FileJson className="h-3 w-3" /> 导入
+        </button>
+        {editing && (
+          <button
+            onClick={() => saveRef.current?.()}
+            disabled={saving}
+            className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2.5 py-1 text-xs text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            <Save className="h-3 w-3" /> {saving ? '保存中…' : '保存'}
+          </button>
+        )}
+        {editing && (
+          <button
+            onClick={() => setRunOpen(true)}
+            disabled={!editing.name || !sessionId}
+            title={!sessionId ? '需要先打开一个会话' : '启动运行'}
+            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-500 disabled:opacity-40"
+          >
+            <Play className="h-3 w-3" /> 运行
+          </button>
+        )}
+        {run && runStatus === 'awaiting' && (
           <button
             onClick={() => setApprovalOpen(true)}
             className="rounded bg-amber-600 px-2 py-1 text-xs text-white hover:bg-amber-500"
@@ -346,166 +561,85 @@ export function DefinitionWorkflowPage() {
             <RefreshCw className="h-3 w-3" /> 停止追踪
           </button>
         )}
-        {editing && (
-          <button
-            onClick={() => setRunOpen(true)}
-            disabled={!editing.name || !sessionId}
-            title={!sessionId ? '需要先打开一个会话' : '启动运行'}
-            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-40"
-          >
-            <Play className="h-3 w-3" /> 运行
-          </button>
-        )}
-      </header>
-
-      {error && (
-        <div className="mx-4 mt-2 rounded border border-rose-800 bg-rose-950/50 px-3 py-1.5 text-xs text-rose-300">
-          {error}
-        </div>
-      )}
-
-      <div className="flex min-h-0 flex-1">
-        {/* Sidebar with tabs */}
-        <aside className="flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-900/50">
-          <div className="flex border-b border-slate-800">
-            <button
-              onClick={() => setSidebarTab('palette')}
-              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs ${
-                sidebarTab === 'palette' ? 'border-b-2 border-primary-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              <Boxes className="h-3.5 w-3.5" /> 节点库
-            </button>
-            <button
-              onClick={() => setSidebarTab('defs')}
-              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs ${
-                sidebarTab === 'defs' ? 'border-b-2 border-primary-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              <ListChecks className="h-3.5 w-3.5" /> 定义库
-            </button>
-          </div>
-
-          {sidebarTab === 'palette' ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              <p className="mb-2 text-[10px] leading-relaxed text-slate-600">
-                点击或拖拽到画布添加节点，从节点右侧把手拖到目标左侧把手连线。
-              </p>
-              <div className="space-y-1">
-                {NODE_PALETTE.map((p) => {
-                  const Icon = p.icon
-                  return (
-                    <div key={p.type} className="rounded border border-slate-800 bg-slate-900 px-2 py-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-5 w-5 items-center justify-center rounded" style={{ backgroundColor: `${p.color}22`, color: p.color }}>
-                          <Icon className="h-3 w-3" />
-                        </span>
-                        <span className="text-xs text-slate-200">{p.label}</span>
-                        <span className="ml-auto text-[9px] text-slate-600">{p.type}</span>
-                      </div>
-                      <div className="mt-0.5 pl-7 text-[10px] text-slate-500">{p.desc}</div>
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="mt-3 flex gap-1.5">
-                <button
-                  onClick={startNew}
-                  className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-indigo-600 px-2 py-1.5 text-xs text-white hover:bg-indigo-500"
-                >
-                  <Plus className="h-3 w-3" /> 新建定义
-                </button>
-                <button
-                  onClick={() => setImportOpen(true)}
-                  className="inline-flex items-center justify-center gap-1 rounded border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
-                >
-                  <FileJson className="h-3 w-3" /> 导入
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              <div className="mb-1.5 text-[10px] uppercase text-slate-500">定义列表</div>
-              {definitions.length === 0 ? (
-                <p className="text-xs text-slate-600">暂无定义</p>
-              ) : (
-                <ul className="space-y-1">
-                  {definitions.map((d) => (
-                    <li key={d.name}>
-                      <div
-                        onClick={() => startEdit(d.name)}
-                        className={`group cursor-pointer rounded border px-2 py-1.5 ${
-                          editing?.name === d.name
-                            ? 'border-sky-500/40 bg-sky-500/10'
-                            : 'border-slate-800 bg-slate-900 hover:border-slate-600'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                            d.source === 'builtin' ? 'bg-violet-900/60 text-violet-300' : 'bg-emerald-900/60 text-emerald-400'
-                          }`}>
-                            {d.source === 'builtin' ? '内置' : '用户'}
-                          </span>
-                          <span className="truncate text-xs text-slate-200">{d.name}</span>
-                          <span className="ml-auto text-[9px] text-slate-600">{d.node_count} 节点</span>
-                        </div>
-                        {d.description && (
-                          <div className="mt-0.5 truncate text-[10px] text-slate-500">{d.description}</div>
-                        )}
-                        <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); startEdit(d.name) }}
-                            className="rounded px-1 py-0.5 text-[9px] text-sky-300 hover:bg-slate-800" title="编辑"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); copyDefinition(d.name) }}
-                            className="rounded px-1 py-0.5 text-[9px] text-slate-400 hover:bg-slate-800" title="复制到用户"
-                          >
-                            <Copy className="h-3 w-3" />
-                          </button>
-                          {d.source === 'user' && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); deleteDefinition(d.name) }}
-                              className="rounded px-1 py-0.5 text-[9px] text-rose-400 hover:bg-slate-800" title="删除"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </aside>
-
-        {/* Main */}
-        <main className="min-w-0 flex-1">
-          {editing ? (
-            <WorkflowEditor
-              key={editing.name ?? `new-${editingName}`}
-              nodes={editing.nodes}
-              edges={editing.edges}
-              onSave={saveDefinition}
-              saving={saving}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <EmptyState
-                icon={<Save className="h-10 w-10" />}
-                title="编辑或新建工作流定义"
-                description="从左侧「定义库」选择定义进入编辑，或点击「新建定义」从零搭建（拖拽式画布）"
-              />
-            </div>
-          )}
-        </main>
       </div>
 
-      {/* Bottom run drawer */}
+      {/* ── Main: editor canvas or goal playback ────────────── */}
+      <div className="min-h-0 flex-1">
+        {viewingGoal ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-900/50 px-3 py-1.5">
+              <button
+                onClick={closeViewing}
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-sky-300 hover:bg-slate-800"
+              >
+                <ArrowLeft className="h-3 w-3" /> 返回编辑
+              </button>
+              <History className="h-3 w-3 text-slate-500" />
+              <span className="text-xs text-slate-300">回看：{viewingGoal.workflow_id}</span>
+              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                viewingGoal.goal_status === 'complete' ? 'bg-emerald-900/60 text-emerald-400'
+                  : viewingGoal.goal_status === 'active' ? 'bg-sky-900/60 text-sky-300'
+                    : 'bg-slate-800 text-slate-400'
+              }`}>
+                {GOAL_STATUS_LABELS[viewingGoal.goal_status] ?? viewingGoal.goal_status}
+              </span>
+              {viewingStatus === 'running' && (
+                <button
+                  onClick={onPauseViewing}
+                  className="rounded bg-amber-600 px-2 py-0.5 text-[11px] text-white hover:bg-amber-500"
+                >
+                  暂停
+                </button>
+              )}
+              {viewingStatus === 'paused' && (
+                <button
+                  onClick={onResumeViewing}
+                  className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] text-white hover:bg-emerald-500"
+                >
+                  恢复
+                </button>
+              )}
+              <span className="text-[10px] text-slate-500">{viewingGoal.objective}</span>
+            </div>
+            <div className="min-h-0 flex-1">
+              {viewingGraph ? (
+                <WorkflowDAG
+                  workflowName={viewingGoal.workflow_id}
+                  nodes={viewingGraph.nodes}
+                  edges={viewingGraph.edges}
+                  status={viewingStatus}
+                  progress={viewingProgress}
+                  completed={viewingGraph.nodes.filter((n) => n.status === 'completed').length}
+                  total={viewingGraph.nodes.length}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <EmptyState icon={<History className="h-10 w-10" />} title="加载中…" description="" />
+                </div>
+              )}
+            </div>
+          </div>
+        ) : editing ? (
+          <WorkflowEditor
+            key={editing.name ?? `new-${editingName}`}
+            nodes={editing.nodes}
+            edges={editing.edges}
+            onSave={saveDefinition}
+            saving={saving}
+            saveRef={saveRef}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <EmptyState
+              icon={<Save className="h-10 w-10" />}
+              title="选择或新建工作流"
+              description="从左上角下拉选择定义，或点击「新建」从零搭建（拖拽式画布）"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ── Bottom run drawer ───────────────────────────────── */}
       {runOpen && (
         <div className="border-t border-slate-800 bg-slate-900/80">
           <div className="flex items-center gap-3 px-4 pt-2">
@@ -559,13 +693,6 @@ export function DefinitionWorkflowPage() {
               {run.failures.length > 0 && (
                 <span className="text-rose-400">失败：{run.failures.join('；')}</span>
               )}
-              <button
-                onClick={() => setRunOpen(false)}
-                className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-800"
-              >
-                节点输出 {nodeOutputs.length > 0 ? `(${nodeOutputs.length})` : ''}
-                <ChevronDown className="h-3 w-3" />
-              </button>
             </div>
           )}
           {run && nodeOutputs.length > 0 && (
@@ -586,6 +713,56 @@ export function DefinitionWorkflowPage() {
               ))}
             </div>
           )}
+
+          {/* Run history */}
+          <div className="border-t border-slate-800">
+            <button
+              onClick={() => setHistoryOpen((v) => !v)}
+              className="flex w-full items-center gap-2 px-4 py-1.5 text-[10px] text-slate-400 hover:bg-slate-800/60"
+            >
+              <History className="h-3 w-3" />
+              运行记录 {history.length > 0 ? `(${history.length})` : ''}
+              {loadingHistory && <RefreshCw className="h-3 w-3 animate-spin" />}
+              {historyOpen ? <ChevronDown className="h-3 w-3 ml-auto" /> : <ChevronUp className="h-3 w-3 ml-auto" />}
+            </button>
+            {historyOpen && (
+              <div className="max-h-40 overflow-y-auto px-4 pb-2">
+                {history.length === 0 ? (
+                  <p className="py-1 text-[11px] text-slate-600">暂无历史运行</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {history.map((g) => (
+                      <li key={g.goal_id}>
+                        <button
+                          onClick={() => openHistoryGoal(g)}
+                          className={`w-full rounded border px-2 py-1 text-left transition-colors ${
+                            viewingGoal?.goal_id === g.goal_id
+                              ? 'border-sky-500/40 bg-sky-500/10'
+                              : 'border-slate-800 bg-slate-900 hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
+                              g.goal_status === 'complete'
+                                ? 'bg-emerald-900/50 text-emerald-400'
+                                : g.goal_status === 'active'
+                                  ? 'bg-sky-900/50 text-sky-300'
+                                  : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {GOAL_STATUS_LABELS[g.goal_status] ?? g.goal_status}
+                            </span>
+                            <span className="truncate text-[10px] text-slate-300">{g.objective}</span>
+                            <span className="ml-auto text-[9px] text-slate-600">{formatTime(g.created_at)}</span>
+                          </div>
+                          <div className="mt-0.5 text-[9px] text-slate-600">{g.workflow_id}</div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

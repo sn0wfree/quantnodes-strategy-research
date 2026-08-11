@@ -1,4 +1,6 @@
-// DefinitionWorkflowPage tests — list, edit mode, save, run, approval flow.
+// DefinitionWorkflowPage tests — Dify-style editor body:
+// info bar (name dropdown/new/import/save/run), canvas, run drawer,
+// goal history playback.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
@@ -46,6 +48,24 @@ vi.mock('../api/client', async () => {
         detail: vi.fn(async () => ({ status: 'ok', run: {}, segments: [], node_outputs: [], approvals: [] })),
         remove: vi.fn(async () => ({ status: 'ok', deleted: 'wf_test1' })),
       },
+      goal: {
+        list: vi.fn(async () => ({
+          status: 'ok',
+          goals: [
+            { goal_id: 'g-hist', session_id: 'sess-1', goal_status: 'complete', objective: '历史目标',
+              workflow_id: 'plan_execute_auto', created_at: '2026-08-01T10:00:00' },
+          ],
+        })),
+      },
+      workflow: {
+        graph: vi.fn(async () => ({
+          status: 'ok', name: 'plan_execute_auto',
+          nodes: [{ id: 'planner', label: '生成计划' }], edges: [],
+        })),
+        status: vi.fn(async () => ({ status: 'not_found', goal_id: 'g-hist' })),
+        pause: vi.fn(async () => ({ status: 'ok' })),
+        resume: vi.fn(async () => ({ status: 'ok' })),
+      },
     },
     ApiError: class extends Error {},
   }
@@ -62,6 +82,7 @@ vi.mock('lucide-react', () => {
     ArrowRight: Stub, FileJson: Stub,
     Boxes: Stub, ListChecks: Stub, ChevronDown: Stub, ChevronUp: Stub,
     Search: Stub, LayoutGrid: Stub, Undo2: Stub, Redo2: Stub,
+    History: Stub, FileClock: Stub, Workflow: Stub, Pause: Stub, RotateCcw: Stub,
   }
 })
 
@@ -75,6 +96,7 @@ vi.mock('@xyflow/react', async () => {
     Background: () => null,
     Controls: () => null,
     MiniMap: () => null,
+    BackgroundVariant: { Dots: 'dots' },
     addEdge: (conn: unknown, edges: unknown[]) => [...edges, conn],
     useReactFlow: () => ({
       screenToFlowPosition: (p: { x: number; y: number }) => p,
@@ -101,78 +123,63 @@ import { useSessionStore } from '../stores/session'
 beforeEach(() => {
   useSessionStore.setState({ currentSessionId: 'sess-1' })
   vi.mocked(api.definitions.list).mockClear()
+  vi.mocked(api.definitions.get).mockClear()
   vi.mocked(api.definitions.save).mockClear()
   vi.mocked(api.definitionRuns.start).mockClear()
+  vi.mocked(api.goal.list).mockClear()
+  vi.mocked(api.workflow.graph).mockClear()
+  vi.mocked(api.workflow.status).mockClear()
 })
 
-describe('DefinitionWorkflowPage', () => {
-  const openDefsTab = async () => {
-    fireEvent.click(screen.getByRole('button', { name: '定义库' }))
-    await waitFor(() => expect(screen.getByText('plan_execute_auto')).toBeTruthy())
-  }
-
-  it('switches between 节点库 and 定义库 tabs', async () => {
+describe('DefinitionWorkflowPage (Dify-style info bar)', () => {
+  it('shows empty state with the workflow dropdown listing definitions', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    // Default tab is the node palette
-    expect(screen.getByText('节点库')).toBeTruthy()
-    expect(screen.getByText('子 Agent')).toBeTruthy()
-    await openDefsTab()
-    // Back to palette
-    fireEvent.click(screen.getByText('节点库'))
-    expect(screen.getByText('子 Agent')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    const select = screen.getByTitle('切换工作流定义') as HTMLSelectElement
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(
+      expect.arrayContaining(['plan_execute_auto', 'my_flow']),
+    )
   })
 
-  it('loads and lists definitions with source badges', async () => {
+  it('switches workflow via the dropdown and enters edit mode', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    expect(screen.getByText('my_flow')).toBeTruthy()
-    expect(screen.getAllByText(/内置|用户/).length).toBeGreaterThan(0)
-  })
-
-  it('enters edit mode and saves a definition', async () => {
-    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    fireEvent.click(screen.getByText('my_flow'))
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    fireEvent.change(screen.getByTitle('切换工作流定义'), { target: { value: 'my_flow' } })
     await waitFor(() => expect(api.definitions.get).toHaveBeenCalledWith('my_flow'))
-    // Editor visible with the save button
-    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
-    fireEvent.click(screen.getByText('保存定义'))
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
+    // empty canvas placeholder inside the editor
+    expect(screen.getByText('空画布')).toBeTruthy()
+  })
+
+  it('saves via the info-bar 保存 button and stays in edit mode', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    fireEvent.change(screen.getByTitle('切换工作流定义'), { target: { value: 'my_flow' } })
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
+    fireEvent.click(screen.getByText('保存'))
     await waitFor(() => expect(api.definitions.save).toHaveBeenCalled())
     const payload = vi.mocked(api.definitions.save).mock.calls[0][0]
     expect(payload).toHaveProperty('name', 'my_flow')
-    expect(payload).toHaveProperty('nodes')
-  })
-
-  it('stays in edit mode after saving (shows 已保存 hint)', async () => {
-    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    fireEvent.click(screen.getByText('my_flow'))
-    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
-    fireEvent.click(screen.getByText('保存定义'))
-    await waitFor(() => expect(api.definitions.save).toHaveBeenCalled())
-    // still in the editor, not kicked back to the empty state
     await waitFor(() => expect(screen.getByText(/已保存/)).toBeTruthy())
-    expect(screen.getByText('保存定义')).toBeTruthy()
   })
 
-  it('opens a fresh canvas for a new definition and clears it when switching', async () => {
+  it('creates a new definition with a name input, then saves', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    fireEvent.click(screen.getByText('my_flow'))
-    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
-    // Empty canvas placeholder
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    fireEvent.click(screen.getByText('新建'))
+    await waitFor(() => expect(screen.getByPlaceholderText('定义名称')).toBeTruthy())
     expect(screen.getByText('空画布')).toBeTruthy()
-    // New definition resets the editor to an empty canvas as well
-    fireEvent.click(screen.getByRole('button', { name: '节点库' }))
-    fireEvent.click(screen.getByText('新建定义'))
-    expect(screen.getByText('空画布')).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText('定义名称'), { target: { value: 'brand_new' } })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(api.definitions.save).toHaveBeenCalled())
+    expect(vi.mocked(api.definitions.save).mock.calls[0][0].name).toBe('brand_new')
   })
 
   it('adds a node from the palette and clears the empty canvas hint', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    fireEvent.click(screen.getByText('my_flow'))
-    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    fireEvent.change(screen.getByTitle('切换工作流定义'), { target: { value: 'my_flow' } })
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
     expect(screen.getByText('空画布')).toBeTruthy()
     fireEvent.click(screen.getByText('生成计划'))
     await waitFor(() => expect(screen.queryByText('空画布')).not.toBeInTheDocument())
@@ -180,21 +187,19 @@ describe('DefinitionWorkflowPage', () => {
 
   it('filters the palette by search', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    fireEvent.click(screen.getByText('my_flow'))
-    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
-    const search = screen.getByPlaceholderText('搜索节点…')
-    fireEvent.change(search, { target: { value: '生成计划' } })
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    fireEvent.change(screen.getByTitle('切换工作流定义'), { target: { value: 'my_flow' } })
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('搜索节点…'), { target: { value: '生成计划' } })
     expect(screen.getByText('生成计划')).toBeTruthy()
     expect(screen.queryByText('子 Agent')).not.toBeInTheDocument()
   })
 
   it('starts a run from the run drawer', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await openDefsTab()
-    fireEvent.click(screen.getByText('plan_execute_auto'))
-    await waitFor(() => expect(screen.getByText('保存定义')).toBeTruthy())
-    // Open the bottom run drawer via the top bar 运行 button
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    fireEvent.change(screen.getByTitle('切换工作流定义'), { target: { value: 'plan_execute_auto' } })
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
     fireEvent.click(screen.getByText('运行'))
     await waitFor(() => expect(screen.getByText('启动运行')).toBeTruthy())
     const objective = screen.getByPlaceholderText(/例：找出沪深300/)
@@ -206,6 +211,32 @@ describe('DefinitionWorkflowPage', () => {
     expect(args[1]).toBe('plan_execute_auto')
     expect(args[2]).toBe('研究动量')
     await waitFor(() => expect(screen.getByText('wf_test1')).toBeTruthy())
+  })
+})
+
+describe('Run history playback', () => {
+  it('lists goals and opens a read-only playback view, then returns to editor', async () => {
+    render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
+    // enter edit mode first so the editor exists beneath playback
+    fireEvent.change(screen.getByTitle('切换工作流定义'), { target: { value: 'my_flow' } })
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
+    fireEvent.click(screen.getByText('运行'))
+    await waitFor(() => expect(screen.getByText('启动运行')).toBeTruthy())
+
+    // expand run history and open the goal
+    fireEvent.click(screen.getByText(/运行记录/))
+    await waitFor(() => expect(screen.getByText('历史目标')).toBeTruthy())
+    fireEvent.click(screen.getByText('历史目标'))
+    await waitFor(() => expect(api.workflow.graph).toHaveBeenCalledWith('plan_execute_auto'))
+    await waitFor(() => expect(api.workflow.status).toHaveBeenCalledWith('g-hist'))
+    // playback header with 返回编辑
+    await waitFor(() => expect(screen.getByText(/回看：plan_execute_auto/)).toBeTruthy())
+    expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
+
+    // back to the editor canvas
+    fireEvent.click(screen.getByText('返回编辑'))
+    await waitFor(() => expect(screen.getByText('空画布')).toBeTruthy())
   })
 })
 
@@ -269,20 +300,20 @@ describe('JSON import', () => {
 
   it('imports JSON into the canvas (edit without saving)', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('子 Agent')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
     await openImportDialog()
     const ta = screen.getByPlaceholderText(/my_workflow/)
     fireEvent.change(ta, { target: { value: GOOD_JSON } })
     fireEvent.click(screen.getByText('导入到画布（不保存）'))
-    // Editor opens with the imported definition name (no save API call)
-    await waitFor(() => expect(screen.getByDisplayValue('imported_flow')).toBeTruthy())
-    expect(screen.getByText('保存定义')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('保存')).toBeTruthy())
+    // imported nodes loaded into the canvas: empty hint is gone
+    expect(screen.queryByText('空画布')).not.toBeInTheDocument()
     expect(api.definitions.save).not.toHaveBeenCalled()
   })
 
   it('validates and saves JSON via API', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('子 Agent')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
     await openImportDialog()
     const ta = screen.getByPlaceholderText(/my_workflow/)
     fireEvent.change(ta, { target: { value: GOOD_JSON } })
@@ -296,7 +327,7 @@ describe('JSON import', () => {
 
   it('rejects invalid JSON with an error message', async () => {
     render(<MemoryRouter><DefinitionWorkflowPage /></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText('子 Agent')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('选择或新建工作流')).toBeTruthy())
     await openImportDialog()
     const ta = screen.getByPlaceholderText(/my_workflow/)
     fireEvent.change(ta, { target: { value: '{not json' } })

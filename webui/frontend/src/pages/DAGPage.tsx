@@ -1,24 +1,16 @@
 import { useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
-import { Network, Bot, Zap, CheckCircle, Clock, Moon, Sun } from 'lucide-react'
+import { Network, Bot, Zap, CheckCircle, Clock, Moon, Sun, PenTool } from 'lucide-react'
 import { IconNav } from '../components/layout/IconNav'
-import { WorkflowDAG } from '../components/workflow/WorkflowDAG'
 import { AgentItem } from '../components/agent/AgentItem'
-import { useWorkflowStore } from '../stores/workflow'
 import { useAgentStore } from '../stores/agents'
 import { useThemeStore } from '../stores/theme'
+import { DefinitionWorkflowPage } from '../components/workflow/DefinitionWorkflowPage'
 
 export function DAGPage() {
-  const [tab, setTab] = useState('dag')
+  const [tab, setTab] = useState('edit')
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggleTheme)
-
-  const dagNodes = useWorkflowStore((s) => s.dagNodes)
-  const dagEdges = useWorkflowStore((s) => s.dagEdges)
-  const executionProgress = useWorkflowStore((s) => s.executionProgress)
-  const presets = useWorkflowStore((s) => s.presets)
-  const currentPresetId = useWorkflowStore((s) => s.currentPresetId)
-  const currentPreset = presets.find((p) => p.id === currentPresetId)
 
   const agents = useAgentStore((s) => s.agents)
   const agentList = Array.from(agents.values()).sort(
@@ -47,7 +39,7 @@ export function DAGPage() {
               <span className="text-primary-400"><Network className="h-4 w-4" /></span>
               <h1 className="truncate text-sm font-semibold tracking-tight text-slate-100">编排</h1>
               <span className="hidden truncate font-mono text-[10px] text-slate-500 md:inline">
-                DAG 工作流 + Agent 运行监控
+                工作流设计 · 运行 · 历史 · Agent 监控
               </span>
             </div>
             <button
@@ -62,11 +54,11 @@ export function DAGPage() {
           <Tabs.Root value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
             <Tabs.List className="flex flex-shrink-0 border-b border-slate-800 bg-slate-900/40 px-4">
               <Tabs.Trigger
-                value="dag"
+                value="edit"
                 className="flex items-center gap-2 border-b-2 border-transparent px-5 py-2.5 text-sm text-slate-400 transition-colors
                   data-[state=active]:border-primary-500 data-[state=active]:text-slate-100"
               >
-                <Network className="h-4 w-4" />
+                <PenTool className="h-4 w-4" />
                 编排
               </Tabs.Trigger>
               <Tabs.Trigger
@@ -79,19 +71,8 @@ export function DAGPage() {
               </Tabs.Trigger>
             </Tabs.List>
 
-            <Tabs.Content value="dag" className="min-h-0 flex-1 overflow-hidden">
-              <WorkflowDAG
-                workflowName={currentPreset?.name || '未命名工作流'}
-                nodes={dagNodes.map((n) => ({
-                  ...n,
-                  status: n.status ?? 'pending',
-                  agentColor: n.status === 'running' ? '#f59e0b' : undefined,
-                }))}
-                edges={dagEdges}
-                progress={executionProgress}
-                completed={dagNodes.filter((n) => n.status === 'completed').length}
-                total={dagNodes.length}
-              />
+            <Tabs.Content value="edit" className="min-h-0 flex-1 overflow-hidden">
+              <DefinitionWorkflowPage />
             </Tabs.Content>
 
             <Tabs.Content value="agent" className="min-h-0 flex-1 overflow-y-auto">

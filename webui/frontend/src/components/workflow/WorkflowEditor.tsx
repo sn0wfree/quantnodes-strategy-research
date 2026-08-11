@@ -123,6 +123,7 @@ interface WorkflowEditorProps {
   edges: DefinitionEdge[]
   onSave: (nodes: DefinitionNode[], edges: DefinitionEdge[]) => void
   saving?: boolean
+  saveRef?: React.MutableRefObject<(() => void) | null>
 }
 
 function buildRfNode(n: DefinitionNode): Node {
@@ -141,15 +142,15 @@ function buildRfNode(n: DefinitionNode): Node {
   }
 }
 
-export function WorkflowEditor({ nodes, edges, onSave, saving }: WorkflowEditorProps) {
+export function WorkflowEditor({ nodes, edges, onSave, saving, saveRef }: WorkflowEditorProps) {
   return (
     <ReactFlowProvider>
-      <WorkflowEditorInner nodes={nodes} edges={edges} onSave={onSave} saving={saving} />
+      <WorkflowEditorInner nodes={nodes} edges={edges} onSave={onSave} saving={saving} saveRef={saveRef} />
     </ReactFlowProvider>
   )
 }
 
-function WorkflowEditorInner({ nodes, edges, onSave, saving }: WorkflowEditorProps) {
+function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: WorkflowEditorProps) {
   const [rfNodes, setRfNodes, onNodesChangeRaw] = useNodesState(nodes.map(buildRfNode))
   const [rfEdges, setRfEdges, onEdgesChangeRaw] = useEdgesState<Edge>(
     edges.map((e, i) => ({ id: `e-${i}`, source: e.source, target: e.target, type: 'dagEdge' }) as Edge),
@@ -355,6 +356,14 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving }: WorkflowEditorPro
     const defEdges: DefinitionEdge[] = rfEdges.map((e) => ({ source: e.source, target: e.target }))
     onSave(defNodes, defEdges)
   }
+
+  // Expose save to the page-level info bar (top-left workflow config bar)
+  useEffect(() => {
+    if (saveRef) saveRef.current = handleSave
+    return () => {
+      if (saveRef) saveRef.current = null
+    }
+  }, [saveRef, rfNodes, rfEdges, onSave])
 
   const selected = rfNodes.find((n) => n.id === selectedId)
   const selectedData = selected?.data as DAGNodeData | undefined

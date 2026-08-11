@@ -4,8 +4,6 @@ import { LoginPage } from './components/auth/LoginPage'
 import { RegisterPage } from './components/auth/RegisterPage'
 import { StudyDetailPage } from './components/study/StudyDetailPage'
 import { RunDetailPage } from './components/run/RunDetailPage'
-import { WorkflowPage } from './components/workflow/WorkflowPage'
-import { DefinitionWorkflowPage } from './components/workflow/DefinitionWorkflowPage'
 import { AppShell } from './components/layout/AppShell'
 import { MonitorPage } from './pages/MonitorPage'
 import { DAGPage } from './pages/DAGPage'
@@ -56,19 +54,11 @@ export default function App() {
         />
         <Route
           path="/workflow"
-          element={
-            <AuthGuard>
-              <WorkflowPage />
-            </AuthGuard>
-          }
+          element={<Navigate to="/dag" replace />}
         />
         <Route
           path="/workflow-definition"
-          element={
-            <AuthGuard>
-              <DefinitionWorkflowPage />
-            </AuthGuard>
-          }
+          element={<Navigate to="/dag" replace />}
         />
         <Route
           path="/monitor"

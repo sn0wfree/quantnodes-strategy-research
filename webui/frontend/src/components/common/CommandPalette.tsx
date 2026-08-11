@@ -50,21 +50,12 @@ export function CommandPalette() {
     {
       id: 'view-dag',
       label: '打开编排页',
-      description: 'DAG 工作流编排 + Agent 运行监控',
+      description: '工作流设计（拖拽画布）· 运行 · 历史回看 · Agent 监控',
       category: 'view',
       icon: Workflow,
       shortcut: '⌘W',
       action: () => { navigate('/dag'); setOpen(false) },
-      keywords: ['dag', 'workflow', '图', '编排'],
-    },
-    {
-      id: 'view-workflow-definition',
-      label: '打开工作流编辑器',
-      description: '模块化 DAG 工作流：拖拽搭建 + 运行 + 人工审批',
-      category: 'view',
-      icon: Workflow,
-      action: () => { navigate('/workflow-definition'); setOpen(false) },
-      keywords: ['workflow', 'definition', '编辑', '拖拽', '审批', '模块化'],
+      keywords: ['dag', 'workflow', '图', '编排', 'definition', '编辑', '拖拽', '审批', '模块化'],
     },
     {
       id: 'view-toggle',
