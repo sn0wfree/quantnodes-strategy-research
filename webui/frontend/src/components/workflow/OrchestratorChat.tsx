@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Loader2, MessageSquareText, Minus, Send, Sparkles, Square } from 'lucide-react'
 import { api } from '../../api/client'
-import { diffSummary, sanitizeSpec, validateDag, type DagSpec } from './dagSpec'
+import { sanitizeSpec, type DagSpec } from './dagSpec'
 
 interface OrchToolCall {
   id: string
@@ -136,18 +136,8 @@ export function OrchestratorChat({ dagId, getSnapshot, onApplyDag }: Orchestrato
         if (!applied || !call.args) return m
         try {
           const spec = sanitizeSpec(JSON.parse(call.args).dag as DagSpec)
-          const vErrors = validateDag(spec.nodes, spec.edges)
-          if (vErrors.length > 0) {
-            call.status = 'error'
-            call.result = JSON.stringify({ applied: false, errors: vErrors })
-            return { ...m }
-          }
           onApplyDag(spec)
-          const summary = diffSummary({
-            addedNodes: spec.nodes, removedNodes: [], updatedNodes: [],
-            addedEdges: spec.edges, removedEdges: [],
-          })
-          call.result = JSON.stringify({ applied: true, diff: summary })
+          call.result = JSON.stringify({ applied: true, diff: `合并应用：${spec.nodes.length} 节点 / ${spec.edges.length} 连线` })
           return { ...m, toolCalls: [...m.toolCalls] }
         } catch {
           return m

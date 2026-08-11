@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateDag, diffDag, diffSummary, sanitizeSpec, type DagSpec } from '../components/workflow/dagSpec'
+import { validateDag, diffDag, diffSummary, sanitizeSpec, mergeDagStep, type DagSpec } from '../components/workflow/dagSpec'
 
 const llm = (id: string) => ({ id, type: 'llm_agent', label: id, config: { role: 'researcher' } })
 
@@ -127,5 +127,52 @@ describe('sanitizeSpec', () => {
       edges: [{ source: 'a', target: 'ghost' }, { source: 'a', target: 'a' }],
     })
     expect(s.edges).toEqual([])
+  })
+
+  it('tolerates non-array nodes/edges (LLM sends "")', () => {
+    const s = sanitizeSpec({ nodes: [], edges: '' as never })
+    expect(s.nodes).toEqual([])
+    expect(s.edges).toEqual([])
+  })
+})
+
+describe('mergeDagStep', () => {
+  const canvas: DagSpec = {
+    nodes: [llm('a'), llm('b')],
+    edges: [{ source: 'a', target: 'b' }],
+  }
+
+  it('keeps canvas nodes and appends new ones', () => {
+    const step: DagSpec = {
+      nodes: [{ id: 'c', type: 'tool', label: 'C', config: { tool: 'x' } }],
+      edges: [{ source: 'b', target: 'c' }],
+    }
+    const merged = mergeDagStep(canvas, step)
+    expect(merged.nodes.map((n) => n.id).sort()).toEqual(['a', 'b', 'c'])
+    expect(merged.edges).toEqual([
+      { source: 'a', target: 'b' },
+      { source: 'b', target: 'c' },
+    ])
+  })
+
+  it('overrides nodes submitted by the step', () => {
+    const step: DagSpec = {
+      nodes: [{ id: 'a', type: 'planner', label: '改过的A' }],
+      edges: [],
+    }
+    const merged = mergeDagStep(canvas, step)
+    const a = merged.nodes.find((n) => n.id === 'a')
+    expect(a?.type).toBe('planner')
+    expect(a?.label).toBe('改过的A')
+    expect(merged.nodes).toHaveLength(2)
+  })
+
+  it('dedupes edges', () => {
+    const step: DagSpec = {
+      nodes: [],
+      edges: [{ source: 'a', target: 'b' }],
+    }
+    const merged = mergeDagStep(canvas, step)
+    expect(merged.edges).toHaveLength(1)
   })
 })

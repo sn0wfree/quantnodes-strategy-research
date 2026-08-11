@@ -162,11 +162,13 @@ function sanitizeId(raw: string, taken: Set<string>): string {
 }
 
 /** Clean an LLM-produced spec: sanitize/dedupe ids, fill default labels,
- *  inject agent colors, filter config keys per type, drop unknown types. */
+ *  inject agent colors, filter config keys per type, drop unknown types.
+ *  Tolerates the LLM sending non-array nodes/edges (e.g. ""). */
 export function sanitizeSpec(spec: DagSpec): DagSpec {
   const taken = new Set<string>()
   const nodes: DagSpecNode[] = []
-  for (const n of spec.nodes ?? []) {
+  const rawNodes = Array.isArray(spec?.nodes) ? spec.nodes : []
+  for (const n of rawNodes) {
     const meta = NODE_PALETTE.find((p) => p.type === n.type)
     if (!meta) continue
     const id = sanitizeId(n.id || `${n.type}_node`, taken)
@@ -181,9 +183,35 @@ export function sanitizeSpec(spec: DagSpec): DagSpec {
     nodes.push({ id, type: n.type, label, config })
   }
   const edges: DagSpecEdge[] = []
-  for (const e of spec.edges ?? []) {
+  const rawEdges = Array.isArray(spec?.edges) ? spec.edges : []
+  for (const e of rawEdges) {
     if (taken.has(e.source) && taken.has(e.target) && e.source !== e.target) {
       edges.push(e)
+    }
+  }
+  return { nodes, edges }
+}
+
+/** Merge an LLM step into the current canvas: the LLM usually submits
+ *  only the part it touched this round (one edit per round), so nodes
+ *  already on the canvas are kept unless the spec overrides them, and
+ *  edges are deduped. Returns the merged spec plus the per-part diff. */
+export function mergeDagStep(current: DagSpec, step: DagSpec): DagSpec {
+  const nodes: DagSpecNode[] = []
+  const curMap = new Map(current.nodes.map((n) => [n.id, n]))
+  for (const n of current.nodes) {
+    const override = step.nodes.find((s) => s.id === n.id)
+    nodes.push(override ? { ...override } : { ...n })
+  }
+  for (const s of step.nodes) {
+    if (!curMap.has(s.id)) nodes.push({ ...s })
+  }
+  const key = new Set(current.edges.map(edgeKey))
+  const edges = [...current.edges]
+  for (const e of step.edges) {
+    if (!key.has(edgeKey(e))) {
+      edges.push(e)
+      key.add(edgeKey(e))
     }
   }
   return { nodes, edges }

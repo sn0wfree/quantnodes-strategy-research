@@ -20,7 +20,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { api } from '../../api/client'
 import { OrchestratorChat } from './OrchestratorChat'
-import { sanitizeSpec, validateDag, type DagSpec } from './dagSpec'
+import { sanitizeSpec, validateDag, mergeDagStep, type DagSpec } from './dagSpec'
 import { TYPE_META, NODE_PALETTE, CONFIG_FIELDS, type PaletteItem } from './nodeTypes'
 import { Trash2, Plus, Search, LayoutGrid, Undo2, Redo2 } from 'lucide-react'
 import { DAGNode, type DAGNodeData } from './DAGNode'
@@ -306,12 +306,27 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef, dagId }: W
     }
   }, [rfNodes, rfEdges, saveDraft])
 
+  const getSnapshot = useCallback(
+    (): DagSpec => ({
+      nodes: rfNodes.map((n) => {
+        const d = n.data as DAGNodeData
+        return { id: n.id, type: d.type ?? 'llm_agent', label: d.label ?? '', config: (d.config as Record<string, unknown>) ?? {} }
+      }),
+      edges: rfEdges.map((e) => ({ source: e.source, target: e.target })),
+    }),
+    [rfNodes, rfEdges],
+  )
+
   const applyDag = useCallback(
     (spec: DagSpec) => {
       const clean = sanitizeSpec(spec)
-      const errors = validateDag(clean.nodes, clean.edges)
+      // Merge semantics: the LLM submits only what it touched this round
+      // (one edit per round); canvas nodes/edges are kept and overridden
+      // rather than replaced wholesale.
+      const merged = mergeDagStep(getSnapshot(), clean)
+      const errors = validateDag(merged.nodes, merged.edges)
       if (errors.length > 0) return { ok: false as const, errors }
-      const rawNodes: Node[] = clean.nodes.map((n) => {
+      const rawNodes: Node[] = merged.nodes.map((n) => {
         const meta = TYPE_META[n.type]
         return {
           id: n.id,
@@ -327,13 +342,13 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef, dagId }: W
           } as DAGNodeData,
         }
       })
-      const rawEdges: Edge[] = clean.edges.map((e, i) => ({
+      const rawEdges: Edge[] = merged.edges.map((e, i) => ({
         id: `e-${i}`, source: e.source, target: e.target, type: 'dagEdge', markerEnd: ARROW_MARKER,
       }))
       pushHistory()
       const { nodes: laidOut } = layoutWithDagre(
         rawNodes.map((n) => ({ id: n.id, ...(n.data as DAGNodeData) })),
-        clean.edges.map((e) => ({ source: e.source, target: e.target })),
+        merged.edges.map((e) => ({ source: e.source, target: e.target })),
         { nodeType: 'dagNode', edgeType: 'dagEdge' },
       )
       setRfNodes(laidOut.length > 0 ? laidOut : rawNodes)
@@ -342,18 +357,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef, dagId }: W
       void saveDraft()
       return { ok: true as const }
     },
-    [pushHistory, saveDraft, setRfEdges, setRfNodes],
-  )
-
-  const getSnapshot = useCallback(
-    (): DagSpec => ({
-      nodes: rfNodes.map((n) => {
-        const d = n.data as DAGNodeData
-        return { id: n.id, type: d.type ?? 'llm_agent', label: d.label ?? '', config: (d.config as Record<string, unknown>) ?? {} }
-      }),
-      edges: rfEdges.map((e) => ({ source: e.source, target: e.target })),
-    }),
-    [rfNodes, rfEdges],
+    [getSnapshot, pushHistory, saveDraft, setRfEdges, setRfNodes],
   )
 
   const selected = rfNodes.find((n) => n.id === selectedId)
