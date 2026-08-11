@@ -1,6 +1,6 @@
 import { Pause, Play } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 
 /**
  * Banner shown above the message list when the per-session queue is paused
@@ -10,7 +10,7 @@ import { useSessionStore } from '../../stores/session'
 export function QueuePauseBanner() {
   const resumeQueue = useChatStore((s) => s.resumeQueue)
   const queueLengths = useChatStore((s) => s.queueLengths)
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const handleResume = () => {
     void resumeQueue()
   }

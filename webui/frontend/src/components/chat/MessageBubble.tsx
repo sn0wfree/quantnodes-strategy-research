@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Pencil, Check, X } from 'lucide-react'
 import type { Message, MessagePart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { useToastStore } from '../../stores/toast'
 import { api } from '../../api/client'
 import { formatTime } from '../../utils/time'
@@ -42,7 +42,7 @@ export function MessageBubble({ message, layout }: MessageBubbleProps) {
   const [draft, setDraft] = useState<string>(textOf(message.parts))
   const [sending, setSending] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const addToast = useToastStore((s) => s.addToast)
 
   const startEdit = () => {

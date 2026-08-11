@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { useChatStore } from '../../stores/chat'
 import { useSystemStore } from '../../stores/system'
 import { api } from '../../api/client'
@@ -46,7 +46,7 @@ function formatTokens(n: number): string {
 const autoCompactedSessions = new Set<string>()
 
 export function ContextUsageBar() {
-  const sessionId = useSessionStore((s) => s.currentSessionId)
+  const sessionId = useChatSessionId()
   const tokensUsed = useChatStore((s) => s.tokensUsed.get(sessionId ?? '') ?? 0)
   const messages = useChatStore((s) => s.messages)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)

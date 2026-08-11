@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { usePersonaStore } from '../../stores/personas'
 import { useToastStore } from '../../stores/toast'
 import { api } from '../../api/client'
@@ -12,7 +12,7 @@ const SUGGESTIONS = [
 ]
 
 export function QuickStartChips() {
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const getSessionPersona = usePersonaStore((s) => s.getSessionPersona)
   const addToast = useToastStore((s) => s.addToast)
 

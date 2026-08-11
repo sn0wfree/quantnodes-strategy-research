@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { RefreshCw, Copy, ThumbsUp, ThumbsDown } from 'lucide-react'
 import type { Message } from '../../stores/chat'
 import { useChatStore } from '../../stores/chat'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { useToastStore } from '../../stores/toast'
 import { api } from '../../api/client'
 
@@ -32,7 +32,7 @@ function buildMarkdown(message: Message): string {
 
 export function MessageActions({ message, alwaysVisible = false }: MessageActionsProps) {
   const addToast = useToastStore((s) => s.addToast)
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const messages = useChatStore((s) => s.messages)
   const [vote, setVote] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null

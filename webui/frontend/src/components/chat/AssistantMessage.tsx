@@ -3,7 +3,7 @@ import { Bot } from 'lucide-react'
 import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { useSystemStore } from '../../stores/system'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { useToastStore } from '../../stores/toast'
 import { api } from '../../api/client'
 import {
@@ -277,7 +277,7 @@ export function AssistantMessage({
 }: AssistantMessageProps) {
   const provider = useSystemStore((s) => s.llm.provider)
   const readPartText = useReadPartText()
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const messages = useChatStore((s) => s.messages)
   const addToast = useToastStore((s) => s.addToast)
 

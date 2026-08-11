@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, Image as ImageIcon, X, Square } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { usePersonaStore } from '../../stores/personas'
 import { useToastStore } from '../../stores/toast'
 import { useModeStore } from '../../stores/mode'
@@ -29,7 +29,7 @@ export function Composer() {
   const [pendingAutoSend, setPendingAutoSend] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const addMessage = useChatStore((s) => s.addMessage)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const setActiveAttempt = useChatStore((s) => s.setActiveAttempt)

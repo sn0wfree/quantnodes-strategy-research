@@ -3,7 +3,7 @@ import { Virtuoso } from 'react-virtuoso'
 import type { VirtuosoHandle } from 'react-virtuoso'
 import { useChatStore } from '../../stores/chat'
 import { useLayoutStore } from '../../stores/layout'
-import { useSessionStore } from '../../stores/session'
+import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { MessageBubble } from './MessageBubble'
 import { AssistantMessage } from './AssistantMessage'
 import { GoalMessage } from './GoalMessage'
@@ -23,7 +23,7 @@ export function MessageList() {
   const queuePaused = useChatStore((s) => s.queuePaused)
   const hasMore = useChatStore((s) => s.hasMore)
   const loadMoreMessages = useChatStore((s) => s.loadMoreMessages)
-  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useChatSessionId()
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   const messageList = Array.from(messages.values()).sort((a, b) => a.created_at - b.created_at)
