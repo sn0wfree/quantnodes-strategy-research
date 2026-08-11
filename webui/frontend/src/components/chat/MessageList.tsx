@@ -26,7 +26,9 @@ export function MessageList() {
   const currentSessionId = useChatSessionId()
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
-  const messageList = Array.from(messages.values()).sort((a, b) => a.created_at - b.created_at)
+  const messageList = Array.from(messages.values())
+  .filter((m) => !currentSessionId || m.session_id === currentSessionId)
+  .sort((a, b) => a.created_at - b.created_at)
   const isQueuePaused = currentSessionId
     ? queuePaused.get(currentSessionId) ?? false
     : false
@@ -207,7 +209,11 @@ export function MessageList() {
             return (
               <>
                 {daySeparator}
-                <MessageBubble message={message} layout={chatLayout} />
+                <MessageBubble
+                  message={message}
+                  layout={chatLayout}
+                  hideCodeTail={message.session_id.startsWith('dag:')}
+                />
               </>
             )
           }

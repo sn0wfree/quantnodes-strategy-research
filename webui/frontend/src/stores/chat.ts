@@ -290,14 +290,15 @@ export const useChatStore = create<ChatState>()(
         state.streamingText += delta
       }),
     setActiveAttempt: (attemptId) => set({ activeAttemptId: attemptId }),
-    cancelAttempt: async () => {
+    cancelAttempt: async (sessionId?: string) => {
       const { activeAttemptId } = get()
-      const sessionId = useSessionStore.getState().currentSessionId
-      if (!sessionId) return
+      const sid =
+        sessionId ?? useSessionStore.getState().currentSessionId
+      if (!sid) return
 
       try {
         await api.post('/chat/cancel', {
-          session_id: sessionId,
+          session_id: sid,
           attempt_id: activeAttemptId,
         })
       } catch (err) {
@@ -311,13 +312,14 @@ export const useChatStore = create<ChatState>()(
         state.activeAttemptId = null
       })
     },
-    resumeQueue: async () => {
-      const sessionId = useSessionStore.getState().currentSessionId
-      if (!sessionId) return
+    resumeQueue: async (sessionId?: string) => {
+      const sid =
+        sessionId ?? useSessionStore.getState().currentSessionId
+      if (!sid) return
       try {
-        await api.post('/chat/queue/resume', { session_id: sessionId })
+        await api.post('/chat/queue/resume', { session_id: sid })
         set((state) => {
-          state.queuePaused.set(sessionId, false)
+          state.queuePaused.set(sid, false)
         })
       } catch (err) {
         console.error('Resume queue failed:', err)

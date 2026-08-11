@@ -10,13 +10,25 @@ import { formatTime } from '../../utils/time'
 interface MessageBubbleProps {
   message: Message
   layout: ChatLayout
+  /** Hide a trailing fenced ```json ... ``` block (e.g. the canvas DAG
+   *  snapshot the orchestrator appends to each user message). */
+  hideCodeTail?: boolean
 }
 
 type TextLike = string
 
-function PartContent({ part }: { part: MessagePart }) {
+/** Strip a single trailing fenced code block (any language tag) from a
+ *  multi-line text. Returns the input untouched when no fence is found. */
+function trimTrailingCodeFence(s: string): string {
+  // Match an optional fence opener at end, requiring a preceding newline
+  // so an opening ``` in the middle of the body is not affected.
+  return s.replace(/\n```[a-zA-Z0-9_+\-]*\n[\s\S]*?```\s*$/, '')
+}
+
+function PartContent({ part, hideCodeTail }: { part: MessagePart; hideCodeTail?: boolean }) {
   if (part.type === 'text') {
-    return <span className="whitespace-pre-wrap">{part.text}</span>
+    const text = hideCodeTail ? trimTrailingCodeFence(part.text) : part.text
+    return <span className="whitespace-pre-wrap">{text}</span>
   }
   if (part.type === 'image') {
     return (
@@ -37,7 +49,7 @@ function textOf(parts: MessagePart[]): string {
     .join('\n')
 }
 
-export function MessageBubble({ message, layout }: MessageBubbleProps) {
+export function MessageBubble({ message, layout, hideCodeTail }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<string>(textOf(message.parts))
   const [sending, setSending] = useState(false)
@@ -128,7 +140,7 @@ export function MessageBubble({ message, layout }: MessageBubbleProps) {
         ) : (
           <div className="pr-8 text-sm text-slate-200 leading-relaxed">
             {parts.map((part, i) => (
-              <PartContent key={i} part={part} />
+              <PartContent key={i} part={part} hideCodeTail={hideCodeTail} />
             ))}
           </div>
         )}
@@ -145,7 +157,7 @@ export function MessageBubble({ message, layout }: MessageBubbleProps) {
         ) : (
           <div className="rounded-2xl rounded-br-md bg-gradient-to-br from-primary-500 to-accent-400 px-4 py-2.5 text-sm text-white shadow-glow">
             {parts.map((part, i) => (
-              <PartContent key={i} part={part} />
+              <PartContent key={i} part={part} hideCodeTail={hideCodeTail} />
             ))}
           </div>
         )}

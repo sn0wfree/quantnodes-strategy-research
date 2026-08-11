@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useSSE } from '../../hooks/useSSE'
 import { useSessionStore } from '../../stores/session'
@@ -86,7 +87,14 @@ export function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useSSE(currentSessionId)
+  const location = useLocation()
+  // Route-level SSE isolation: /dag renders its own orchestrator session,
+  // so AppShell must NOT also subscribe to the main chat session — that
+  // would create two EventSources writing into the same global chatStore
+  // and double the status indicator. The orchestrator panel mounts its
+  // own useSSE(sessionId='dag:xxx') inside /dag.
+  const isDagRoute = location.pathname.startsWith('/dag')
+  useSSE(isDagRoute ? null : currentSessionId)
 
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanelVisible)
