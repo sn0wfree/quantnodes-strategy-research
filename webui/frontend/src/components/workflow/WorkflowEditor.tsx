@@ -132,6 +132,7 @@ function buildRfNode(n: DefinitionNode): Node {
   const meta = TYPE_META[n.type] as PaletteItem | undefined
   return {
     id: n.id,
+    type: 'dagNode',
     position: { x: 100 + Math.random() * 120, y: 100 + Math.random() * 120 },
     data: {
       label: (n.label || meta?.label) ?? n.id,
@@ -255,6 +256,7 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
       const id = `${type}_${Math.random().toString(36).slice(2, 6)}`
       const node: Node = {
         id,
+        type: 'dagNode',
         position: position ?? { x: 100 + Math.random() * 200, y: 150 + Math.random() * 150 },
         data: {
           label: meta.label,
