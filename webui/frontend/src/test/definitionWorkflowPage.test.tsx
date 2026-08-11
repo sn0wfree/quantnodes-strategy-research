@@ -73,18 +73,27 @@ vi.mock('../api/client', async () => {
 
 vi.mock('lucide-react', () => {
   const Stub = () => null
-  return {
-    ArrowLeft: Stub, Play: Stub, Plus: Stub, Save: Stub, Pencil: Stub,
-    Trash2: Stub, Copy: Stub, RefreshCw: Stub, Loader2: Stub,
-    Bot: Stub, CalendarCheck: Stub, ClipboardList: Stub, Gauge: Stub,
-    Code2: Stub, Wrench: Stub, Check: Stub, X: Stub,
-    Clock: Stub, CheckCircle: Stub, XCircle: Stub, AlertCircle: Stub,
-    ArrowRight: Stub, FileJson: Stub,
-    Boxes: Stub, ListChecks: Stub, ChevronDown: Stub, ChevronUp: Stub,
-    Search: Stub, LayoutGrid: Stub, Undo2: Stub, Redo2: Stub,
-    History: Stub, FileClock: Stub, Workflow: Stub, Pause: Stub, RotateCcw: Stub,
-    MessageSquareText: Stub, Sparkles: Stub, Send: Stub, Square: Stub, Minus: Stub,
-  }
+  return new Proxy(
+    {
+      ArrowLeft: Stub, Play: Stub, Plus: Stub, Save: Stub, Pencil: Stub,
+      Trash2: Stub, Copy: Stub, RefreshCw: Stub, Loader2: Stub,
+      Bot: Stub, CalendarCheck: Stub, ClipboardList: Stub, Gauge: Stub,
+      Code2: Stub, Wrench: Stub, Check: Stub, X: Stub,
+      Clock: Stub, CheckCircle: Stub, XCircle: Stub, AlertCircle: Stub,
+      ArrowRight: Stub, FileJson: Stub,
+      Boxes: Stub, ListChecks: Stub, ChevronDown: Stub, ChevronUp: Stub,
+      Search: Stub, LayoutGrid: Stub, Undo2: Stub, Redo2: Stub,
+      History: Stub, FileClock: Stub, Workflow: Stub, Pause: Stub, RotateCcw: Stub,
+      MessageSquareText: Stub, Sparkles: Stub, Send: Stub, Square: Stub, Minus: Stub,
+      Hammer: Stub, Brain: Stub,
+    },
+    {
+      get(target, prop) {
+        if (prop in target) return (target as Record<string | symbol, unknown>)[prop]
+        return Stub
+      },
+    },
+  )
 })
 
 vi.mock('@xyflow/react', async () => {
