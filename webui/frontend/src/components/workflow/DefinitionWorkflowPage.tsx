@@ -478,13 +478,13 @@ export function DefinitionWorkflowPage() {
             value={editingName}
             onChange={(e) => setEditingName(e.target.value)}
             placeholder="定义名称"
-            className="w-44 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+            className="w-44 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-[13px] text-slate-100 outline-none focus:border-primary-500"
           />
         ) : (
           <select
             value={editingName || ''}
             onChange={(e) => e.target.value && startEdit(e.target.value)}
-            className="max-w-56 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+            className="max-w-56 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-[13px] text-slate-100 outline-none focus:border-primary-500"
             title="切换工作流定义"
           >
             <option value="" disabled>
@@ -503,7 +503,7 @@ export function DefinitionWorkflowPage() {
           </span>
         )}
         {currentDesc && (
-          <span className="hidden truncate text-[11px] text-slate-500 md:inline">{currentDesc}</span>
+          <span className="hidden truncate text-xs text-slate-400 md:inline">{currentDesc}</span>
         )}
         {savedAt && <span className="text-[10px] text-emerald-400">已保存 {savedAt}</span>}
 
@@ -599,7 +599,7 @@ export function DefinitionWorkflowPage() {
                   恢复
                 </button>
               )}
-              <span className="text-[10px] text-slate-500">{viewingGoal.objective}</span>
+              <span className="truncate text-[11px] text-slate-400">{viewingGoal.objective}</span>
             </div>
             <div className="min-h-0 flex-1">
               {viewingGraph ? (
@@ -643,7 +643,7 @@ export function DefinitionWorkflowPage() {
       {runOpen && (
         <div className="border-t border-slate-800 bg-slate-900/80">
           <div className="flex items-center gap-3 px-4 pt-2">
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">运行面板</div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">运行面板</div>
             <button
               onClick={() => setRunOpen(false)}
               className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-800"
@@ -683,7 +683,7 @@ export function DefinitionWorkflowPage() {
           </div>
           {run && (
             <div className="flex flex-wrap items-center gap-3 px-4 pb-2 text-[11px]">
-              <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${statusMeta.cls}`}>
+              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.cls}`}>
                 {statusMeta.text}
               </span>
               <span className="text-slate-500">{run.run_id}</span>
@@ -704,7 +704,7 @@ export function DefinitionWorkflowPage() {
                       o.status === 'success' ? 'bg-emerald-400' : o.status === 'error' ? 'bg-rose-400' : 'bg-slate-500'
                     }`} />
                     <span className="truncate text-[10px] text-slate-300">{o.node_id}</span>
-                    <span className="ml-auto text-[9px] text-slate-600">{o.elapsed_s}s</span>
+                    <span className="ml-auto text-[10px] text-slate-400">{o.elapsed_s}s</span>
                   </div>
                   {o.summary && (
                     <div className="mt-0.5 line-clamp-2 text-[9px] text-slate-500">{o.summary}</div>

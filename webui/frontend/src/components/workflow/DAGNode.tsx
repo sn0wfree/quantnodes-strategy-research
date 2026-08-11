@@ -95,11 +95,11 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
       {nodeData.agentName && (
         <div className="mt-1.5 flex items-center gap-1">
           {nodeData.type && (
-            <span className="rounded bg-slate-800/80 px-1 py-px text-[9px] font-mono text-slate-400">
+            <span className="rounded bg-slate-800/90 px-1 py-px text-[10px] font-mono text-slate-300">
               {nodeData.type}
             </span>
           )}
-          <span className="truncate text-[10px] text-slate-500">{nodeData.agentName}</span>
+          <span className="truncate text-[11px] text-slate-400">{nodeData.agentName}</span>
         </div>
       )}
 
