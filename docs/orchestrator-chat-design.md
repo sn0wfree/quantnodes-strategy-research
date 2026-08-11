@@ -1,12 +1,23 @@
 # 编排助手设计（Orchestrator Chat Design）
 
-> 状态：定稿（2026-08-11，v2：增量循环 + DAG 绑定会话 + 草稿自动保存）
-> 前置：`docs/workflow-module-design.md`（DAG 定义 6 节点类型 + definitions API）、DAG 编辑器（`webui/frontend/src/components/workflow/WorkflowEditor.tsx`）、chat 会话体系（`routers/chat.py` + `SessionService` + `useSSE` 协议）
-> 决策（v2 变更）：
-> - ~~无状态专用端点~~ → **DAG 绑定的特殊 chat 会话**（`session_id = "dag:{definition_name}"`）：完整 agent loop + 完整上下文持久化，验证失败自动回传 LLM 自修复
-> - **增量循环**：LLM 每轮只修改 DAG 的一处，前端逐步应用，自动循环直到 `agent_done`
-> - **前端携带方案**：每轮用户消息尾部附当前画布 DAG 快照 JSON（画布是内存编辑态，服务端无法自取）
-> - **草稿自动保存**（刷新恢复）：后端 `drafts` 表 + 三端点，画布变化 debounce 2s 落盘、循环每步应用后立即落盘、保存定义成功后清除
+> 状态：定稿（2026-08-11，v3：复用 chat 会话体系 + 路由级 SSE 隔离）
+> 前置：`docs/workflow-module-design.md`（DAG 定义 6 节点类型 + definitions API）、DAG 编辑器（`webui/frontend/src/components/workflow/WorkflowEditor.tsx`）、chat 会话体系（`routers/chat.py` + `core/agent/chat_loop.py` + `useSSE` 协议）
+> 决策历史：
+> - **v1**：一次性 SSE 端点生成完整 DAG。废弃。
+> - **v2**：~~无状态专用端点~~ → **DAG 绑定的特殊 chat 会话**（`session_id = "dag:{definition_name}"`）：完整 agent loop + 完整上下文持久化，验证失败自动回传 LLM 自修复；增量循环；前端携带 DAG 快照；草稿自动保存。
+> - **v3**（本次）：
+>   - ~~自研 `OrchestratorChat` 420 行~~ → **复用 chat 全套**（`Composer`/`MessageList`/`ToolCallBlock`/`StreamingText`/`useSSE` + 全局 `chatStore.messages`），`OrchestratorChat` 退化为 ~110 行薄壳
+>   - **路由级 SSE 隔离**：`AppShell` 在 `/dag` 路由时把 `currentSessionId` 设为 null（`useSSE` 不订阅 chat 流），编排薄壳单独订阅 `dag:{id}` ——**始终 1 条 EventSource**
+>   - **ChatSessionContext** 注入：8 个 chat 组件从"读全局 currentSessionId"改为"读 Context，回落全局"——向后兼容（无 Provider 行为不变），同时为未来"主 chat + 编排同屏"铺路
+>   - **副作用唯一出口**：`useDagStepApply` hook 用 `useChatStore.subscribe` 监听 `submit_dag_step` 工具完成 → applyDag + 自动存草稿。SSE handler 层零改动（10 个 handler 模块继续零 store import）。
+>   - **修正 1**：`MessageList.tsx:29` 加 `session_id` 过滤（升 P0）——否则编排消息会污染主 chat 视图；同时修既存缺口（三处过滤行为不一致统一）。
+>   - **修缺陷 1**：`OrchestratorChat` 用错 `es.onmessage`（应是 `addEventListener`）导致 SSE 全部死代码——薄壳化后用正确 API 自然修掉。
+>   - **修缺陷 2**：`controlHandlers.clearAllStreamingParts` 在 immer 冻结对象外直接赋值会抛 TypeError（断线/取消/错误时防御失效）——改用 `updateMessage` 在 draft 内操作。
+>   - **修缺陷 3**：文档 §3.2 修正："实现落点在 `core/agent/chat_loop.py:95-110`（按 `session_id.startswith('dag:')`），不在 `SessionService`。"
+>   - **侧边栏隐藏 `dag:` 会话** + **persona 选择器在编排 session 锁定为 `workflow_orchestrator`**（保留按钮置灰）—— 防"切到研究员后 prompt 错乱"。
+>   - **`Composer.readOnly?: 'image'|'all'`**：编排薄壳传 `'image'`，禁用附件按钮、slash command、拖拽上传。
+>   - **`ToolCallBlock` 给 `submit_dag_step` 加图标/结果摘要**（`applied ? "已应用 · N 节点 / M 连线" : "N 个错误"`）。
+>   - **`chat.py` `labels` 补 `workflow_orchestrator` 条目**——主 chat 受益（不再裸 id）。
 
 ## 一、目标与边界
 
@@ -59,7 +70,7 @@
 - 返回（工具结果，回传 LLM）：
   - 通过：`{"applied": true, "nodes": n, "edges": m, "diff": "新增 X、移除 Y…"}`
   - 失败：`{"applied": false, "errors": ["…"]}`（错误逐条可读，LLM 据此修正）
-- 工具挂载：`SessionService` 按 `session_id` 前缀 `dag:` 路由到编排工具集（仅此一个工具，不挂 read_file/web_search 等）
+- 工具挂载：**实现落点在 `core/agent/chat_loop.py:95-110`**（按 `session_id.startswith("dag:")` 路由到编排工具集），**不在 `SessionService`**。`SessionService` 只透传 session_id 到 `build_chat_agent_loop`。会话级工具白名单无独立存储，靠 session_id 前缀路由（最轻）。
 
 ### 3.3 会话
 

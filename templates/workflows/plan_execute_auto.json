@@ -1,0 +1,18 @@
+{
+  "name": "plan_execute_auto",
+  "description": "全自动目标驱动研究：planner 生成计划 → 动态步骤执行 → evaluator 评估，失败自动重规划（max_segments=3 硬上限）",
+  "version": "1.0",
+  "budget": {"token": null, "turn": null, "time_seconds": 3600},
+  "params": {
+    "planner": {"max_steps": 6},
+    "exec": {"max_segments": 3, "node_timeout_seconds": 300, "node_max_retries": 2},
+    "summary": {"max_chars": 300}
+  },
+  "nodes": [
+    {"id": "planner", "type": "planner", "label": "生成研究计划", "config": {"max_steps": 6}},
+    {"id": "evaluator", "type": "evaluator", "label": "评估进度", "config": {}}
+  ],
+  "edges": [
+    {"source": "planner", "target": "evaluator"}
+  ]
+}
