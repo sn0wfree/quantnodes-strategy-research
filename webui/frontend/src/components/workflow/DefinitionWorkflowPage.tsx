@@ -58,6 +58,21 @@ function formatTime(iso: string): string {
   }
 }
 
+// Legacy engine agents have functional ids (researcher, backtest…), no
+// node types — map id patterns to the palette type colors so playback
+// nodes aren't flat grey.
+const LEGACY_AGENT_COLOR_HINTS: Array<[RegExp, string]> = [
+  [/planner|plan/i, '#a78bfa'],
+  [/evaluat|risk|controller|check|audit|decide|quality|review/i, '#34d399'],
+  [/backtest|report|data|market|scan|stress|benchmark|factor|attribution/i, '#fb923c'],
+  [/researcher|analyst|strategist|writer|construction|scanner|regime/i, '#38bdf8'],
+]
+
+function legacyAgentColor(id: string): string | undefined {
+  const hit = LEGACY_AGENT_COLOR_HINTS.find(([re]) => re.test(id))
+  return hit?.[1]
+}
+
 // ── Dify-style orchestration editor body ──────────────────────
 // Top-left workflow info bar (name dropdown + actions), node
 // palette on the left, canvas in the middle, node config on the
@@ -353,6 +368,10 @@ export function DefinitionWorkflowPage() {
           label: n.label,
           status: 'pending' as const,
           agentName: n.id,
+          type: (n as { type?: string }).type,
+          agentColor: (n as { type?: string }).type
+            ? undefined
+            : legacyAgentColor(n.id),
         })),
         edges: r.edges,
       })

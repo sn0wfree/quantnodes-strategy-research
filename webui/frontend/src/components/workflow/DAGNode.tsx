@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { useThemeStore } from '../../stores/theme'
 
 export interface DAGNodeData {
   label: string
@@ -54,6 +55,22 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
   const config = STATUS_CONFIG[nodeData.status || 'pending']
   const Icon = config.icon
   const isRunning = nodeData.status === 'running'
+  const theme = useThemeStore((s) => s.theme)
+
+  // Light theme needs darker variants of the type colors to keep
+  // ≥4.5:1 contrast on white cards; dark theme keeps the originals.
+  const LIGHT_AGENT_COLORS: Record<string, string> = {
+    llm_agent: '#0369a1',
+    planner: '#6d28d9',
+    evaluator: '#047857',
+    approval: '#b45309',
+    python: '#be185d',
+    tool: '#c2410c',
+  }
+  const titleColor =
+    theme === 'light' && nodeData.type && LIGHT_AGENT_COLORS[nodeData.type]
+      ? LIGHT_AGENT_COLORS[nodeData.type]
+      : (nodeData.agentColor ?? 'var(--dag-card-title)')
 
   return (
     <div
@@ -87,7 +104,7 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
       {/* Label */}
       <div
         className="text-sm font-semibold truncate dag-card-title"
-        style={{ color: nodeData.agentColor ?? 'var(--dag-card-title)' }}
+        style={{ color: titleColor }}
       >
         {nodeData.label}
       </div>
@@ -98,7 +115,7 @@ export const DAGNode = memo(function DAGNode({ data, selected }: NodeProps) {
           {nodeData.type && (
             <span
               className="rounded dag-card-type px-1 py-px text-[10px] font-mono"
-              style={{ color: nodeData.agentColor ?? 'var(--dag-card-type-fg)' }}
+              style={{ color: titleColor }}
             >
               {nodeData.type}
             </span>
