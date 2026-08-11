@@ -195,3 +195,28 @@ workspace/
 #### 错误处理
 - **重试按钮**: 错误状态 hover 显示 RefreshCw 图标
 - **错误高亮**: 红色边框 + 红色背景
+
+---
+
+### 前端开发模式（端口说明）
+
+| 入口 | 地址 | 用途 |
+|------|------|------|
+| 部署轨 | `http://127.0.0.1:8783` | 后端托管构建版前端（`webui/static`），日常访问一律走这里 |
+| 开发轨 | `http://localhost:5173` | Vite dev server，改前端代码热更新调试用 |
+
+**开发模式启动：**
+```bash
+# 1. 启动后端（API 服务，8783）
+cd /home/ll/Public/strategy-research
+python -m strategy_research serve --host 127.0.0.1 --port 8783
+
+# 2. 启动前端 dev server（5173，/api 代理到后端 8783）
+cd webui/frontend
+npm run dev
+```
+
+**说明：**
+- 5173 是 Vite 默认端口，仅开发调试用；`/api` 请求由 vite proxy 转发到 `127.0.0.1:8783`
+- 后端端口变更时无需改代码：`API_TARGET=http://127.0.0.1:9000 npm run dev`
+- 构建产物输出到 `webui/static/`，由后端在 8783 统一托管（`vite.config.ts` → `build.outDir`）
