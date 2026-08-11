@@ -83,6 +83,7 @@ vi.mock('lucide-react', () => {
     Boxes: Stub, ListChecks: Stub, ChevronDown: Stub, ChevronUp: Stub,
     Search: Stub, LayoutGrid: Stub, Undo2: Stub, Redo2: Stub,
     History: Stub, FileClock: Stub, Workflow: Stub, Pause: Stub, RotateCcw: Stub,
+    MessageSquareText: Stub, Sparkles: Stub, Send: Stub, Square: Stub, Minus: Stub,
   }
 })
 

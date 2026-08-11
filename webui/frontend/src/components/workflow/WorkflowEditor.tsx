@@ -18,104 +18,15 @@ import {
   type OnEdgesChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import {
-  Bot,
-  CalendarCheck,
-  ClipboardList,
-  Gauge,
-  Code2,
-  Wrench,
-  Trash2,
-  Plus,
-  Search,
-  LayoutGrid,
-  Undo2,
-  Redo2,
-} from 'lucide-react'
+import { api } from '../../api/client'
+import { OrchestratorChat } from './OrchestratorChat'
+import { sanitizeSpec, validateDag, type DagSpec } from './dagSpec'
+import { TYPE_META, NODE_PALETTE, CONFIG_FIELDS, type PaletteItem } from './nodeTypes'
+import { Trash2, Plus, Search, LayoutGrid, Undo2, Redo2 } from 'lucide-react'
 import { DAGNode, type DAGNodeData } from './DAGNode'
 import { DAGEdge } from './DAGEdge'
 import { layoutWithDagre } from './layout'
 import type { DefinitionEdge, DefinitionNode } from '../../api/client'
-
-// ── Node palette (mirrors backend NODE_METADATA) ───────────────
-
-export const NODE_PALETTE = [
-  {
-    type: 'llm_agent',
-    label: '子 Agent',
-    icon: Bot,
-    color: '#38bdf8',
-    desc: '完整 chat 子 agent（角色+提示词+工具）',
-    defaults: { role: 'researcher' },
-  },
-  {
-    type: 'planner',
-    label: '生成计划',
-    icon: ClipboardList,
-    color: '#a78bfa',
-    desc: '目标 → 3-8 步研究子图',
-    defaults: { max_steps: 6 },
-  },
-  {
-    type: 'evaluator',
-    label: '评估进度',
-    icon: Gauge,
-    color: '#34d399',
-    desc: 'continue / replan / stop 决策',
-    defaults: {},
-  },
-  {
-    type: 'approval',
-    label: '人工确认',
-    icon: CalendarCheck,
-    color: '#fbbf24',
-    desc: '暂停等待用户审批（图切点）',
-    defaults: {},
-  },
-  {
-    type: 'python',
-    label: 'Python 函数',
-    icon: Code2,
-    color: '#f472b6',
-    desc: '调用注册的 Python 函数',
-    defaults: { function: '' },
-  },
-  {
-    type: 'tool',
-    label: '调用工具',
-    icon: Wrench,
-    color: '#fb923c',
-    desc: '直接调用注册工具（run_backtest 等）',
-    defaults: { tool: 'run_backtest' },
-  },
-] as const
-
-export type PaletteItem = (typeof NODE_PALETTE)[number]
-
-const TYPE_META = Object.fromEntries(NODE_PALETTE.map((p) => [p.type, p])) as Record<string, PaletteItem>
-
-const CONFIG_FIELDS: Record<string, Array<{ key: string; label: string; type: 'text' | 'select' | 'number'; options?: string[]; placeholder?: string }>> = {
-  llm_agent: [
-    { key: 'role', label: '角色', type: 'select',
-      options: ['researcher', 'data_quality', 'factor_analyst', 'strategist', 'backtest_diagnostics', 'critic'] },
-    { key: 'prompt_text', label: '附加指令', type: 'text', placeholder: '节点专属任务指令' },
-    { key: 'max_iterations', label: '迭代上限', type: 'number' },
-  ],
-  planner: [
-    { key: 'max_steps', label: '计划步数 (3-8)', type: 'number' },
-  ],
-  evaluator: [],
-  approval: [
-    { key: 'timeout', label: '超时秒 (空=永久等待)', type: 'number' },
-  ],
-  python: [
-    { key: 'function', label: '函数名', type: 'text', placeholder: '已注册的 Python 函数' },
-  ],
-  tool: [
-    { key: 'tool', label: '工具名', type: 'select',
-      options: ['run_backtest', 'get_market_data', 'check_data', 'clean_data', 'compute_factor', 'factor_analysis', 'search_symbol'] },
-  ],
-}
 
 const DRAG_DATA_KEY = 'application/x-workflow-node-type'
 const ARROW_MARKER = 'url(#dag-arrow)'
@@ -126,6 +37,8 @@ interface WorkflowEditorProps {
   onSave: (nodes: DefinitionNode[], edges: DefinitionEdge[]) => void
   saving?: boolean
   saveRef?: React.MutableRefObject<(() => void) | null>
+  /** DAG-bound orchestrator session id (definition name or new:{name}). */
+  dagId?: string
 }
 
 function buildRfNode(n: DefinitionNode): Node {
@@ -145,15 +58,15 @@ function buildRfNode(n: DefinitionNode): Node {
   }
 }
 
-export function WorkflowEditor({ nodes, edges, onSave, saving, saveRef }: WorkflowEditorProps) {
+export function WorkflowEditor({ nodes, edges, onSave, saving, saveRef, dagId }: WorkflowEditorProps) {
   return (
     <ReactFlowProvider>
-      <WorkflowEditorInner nodes={nodes} edges={edges} onSave={onSave} saving={saving} saveRef={saveRef} />
+      <WorkflowEditorInner nodes={nodes} edges={edges} onSave={onSave} saving={saving} saveRef={saveRef} dagId={dagId} />
     </ReactFlowProvider>
   )
 }
 
-function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: WorkflowEditorProps) {
+function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef, dagId }: WorkflowEditorProps) {
   const [rfNodes, setRfNodes, onNodesChangeRaw] = useNodesState(nodes.map(buildRfNode))
   const [rfEdges, setRfEdges, onEdgesChangeRaw] = useEdgesState<Edge>(
     edges.map((e, i) => ({ id: `e-${i}`, source: e.source, target: e.target, type: 'dagEdge', markerEnd: ARROW_MARKER }) as Edge),
@@ -369,6 +282,80 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
     }
   }, [saveRef, rfNodes, rfEdges, onSave])
 
+  // ── orchestration chat: applyDag + auto-save draft ─────────────
+  const saveDraft = useCallback(async () => {
+    if (!dagId || rfNodes.length === 0) return
+    const draftNodes = rfNodes.map((n) => {
+      const d = n.data as DAGNodeData
+      return { id: n.id, type: d.type ?? 'llm_agent', label: d.label ?? '', config: (d.config as object) ?? {} }
+    })
+    const draftEdges = rfEdges.map((e) => ({ source: e.source, target: e.target }))
+    try {
+      await api.orchestrate.saveDraft(dagId, draftNodes, draftEdges)
+    } catch {
+      // autosave is best-effort
+    }
+  }, [dagId, rfNodes, rfEdges])
+
+  const draftTimer = useRef<number | null>(null)
+  useEffect(() => {
+    if (draftTimer.current) window.clearTimeout(draftTimer.current)
+    draftTimer.current = window.setTimeout(() => void saveDraft(), 2000)
+    return () => {
+      if (draftTimer.current) window.clearTimeout(draftTimer.current)
+    }
+  }, [rfNodes, rfEdges, saveDraft])
+
+  const applyDag = useCallback(
+    (spec: DagSpec) => {
+      const clean = sanitizeSpec(spec)
+      const errors = validateDag(clean.nodes, clean.edges)
+      if (errors.length > 0) return { ok: false as const, errors }
+      const rawNodes: Node[] = clean.nodes.map((n) => {
+        const meta = TYPE_META[n.type]
+        return {
+          id: n.id,
+          type: 'dagNode',
+          position: { x: 100 + Math.random() * 120, y: 100 + Math.random() * 120 },
+          data: {
+            label: n.label ?? meta?.label ?? n.id,
+            status: 'pending' as const,
+            agentName: n.id,
+            type: n.type,
+            agentColor: meta?.color,
+            config: n.config ?? {},
+          } as DAGNodeData,
+        }
+      })
+      const rawEdges: Edge[] = clean.edges.map((e, i) => ({
+        id: `e-${i}`, source: e.source, target: e.target, type: 'dagEdge', markerEnd: ARROW_MARKER,
+      }))
+      pushHistory()
+      const { nodes: laidOut } = layoutWithDagre(
+        rawNodes.map((n) => ({ id: n.id, ...(n.data as DAGNodeData) })),
+        clean.edges.map((e) => ({ source: e.source, target: e.target })),
+        { nodeType: 'dagNode', edgeType: 'dagEdge' },
+      )
+      setRfNodes(laidOut.length > 0 ? laidOut : rawNodes)
+      setRfEdges(rawEdges)
+      // persist immediately so a refresh right after this step restores it
+      void saveDraft()
+      return { ok: true as const }
+    },
+    [pushHistory, saveDraft, setRfEdges, setRfNodes],
+  )
+
+  const getSnapshot = useCallback(
+    (): DagSpec => ({
+      nodes: rfNodes.map((n) => {
+        const d = n.data as DAGNodeData
+        return { id: n.id, type: d.type ?? 'llm_agent', label: d.label ?? '', config: (d.config as Record<string, unknown>) ?? {} }
+      }),
+      edges: rfEdges.map((e) => ({ source: e.source, target: e.target })),
+    }),
+    [rfNodes, rfEdges],
+  )
+
   const selected = rfNodes.find((n) => n.id === selectedId)
   const selectedData = selected?.data as DAGNodeData | undefined
   const selectedType = selectedData?.type as string | undefined
@@ -386,6 +373,11 @@ function WorkflowEditorInner({ nodes, edges, onSave, saving, saveRef }: Workflow
 
   return (
     <div className="flex h-full min-h-0">
+      {/* Orchestration chat */}
+      {dagId && (
+        <OrchestratorChat dagId={dagId} getSnapshot={getSnapshot} onApplyDag={(spec) => void applyDag(spec)} />
+      )}
+
       {/* Palette */}
       <aside className="wf-panel-solid flex w-56 shrink-0 flex-col gap-1.5 overflow-y-auto border-r p-2">
         <div className="relative">

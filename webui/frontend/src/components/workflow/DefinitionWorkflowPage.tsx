@@ -173,6 +173,21 @@ export function DefinitionWorkflowPage() {
       })
       setEditingName(d.name)
       setSavedAt('')
+      // Restore the auto-saved draft (uncommitted editor state) if any —
+      // the orchestrator chat persisted it step by step.
+      try {
+        const draft = await api.orchestrate.getDraft(d.name)
+        if (draft.dag) {
+          setEditing({
+            name: d.name,
+            nodes: (draft.dag.nodes as DefinitionNode[]) ?? [],
+            edges: (draft.dag.edges as DefinitionEdge[]) ?? [],
+          })
+          setSavedAt('（已恢复未保存的编辑）')
+        }
+      } catch {
+        // draft restore is best-effort
+      }
     } catch (err) {
       setError((err as Error).message)
     }
@@ -200,6 +215,16 @@ export function DefinitionWorkflowPage() {
       setEditing((prev) => (prev ? { ...prev, name } : prev))
       setEditingName(name)
       setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
+      // Explicit save makes the draft obsolete — clear it (including the
+      // uncommitted new:{name} draft key when renaming).
+      try {
+        await api.orchestrate.clearDraft(name)
+        if (name !== editingName.trim()) {
+          await api.orchestrate.clearDraft(`new-${editingName.trim()}`)
+        }
+      } catch {
+        // best-effort
+      }
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -644,6 +669,7 @@ export function DefinitionWorkflowPage() {
             onSave={saveDefinition}
             saving={saving}
             saveRef={saveRef}
+            dagId={editing.name ?? `new-${editingName}`}
           />
         ) : (
           <div className="flex h-full items-center justify-center">

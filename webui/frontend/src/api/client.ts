@@ -348,6 +348,42 @@ class APIClient {
       ),
   }
 
+  // ── Orchestration chat (DAG-bound session + auto-save drafts) ──
+  orchestrate = {
+    session: (dagId: string) =>
+      this.post<{ status: string; session_id: string }>(
+        '/goal/workflow/orchestrate/session',
+        { dag_id: dagId },
+      ),
+
+    saveDraft: (dagId: string, nodes: unknown[], edges: unknown[]) =>
+      this.put<{ status: string }>('/goal/workflow/orchestrate/draft', {
+        dag_id: dagId,
+        nodes,
+        edges,
+      }),
+
+    getDraft: (dagId: string) =>
+      this.get<{ dag: { nodes: unknown[]; edges: unknown[] } | null }>(
+        `/goal/workflow/orchestrate/draft/${encodeURIComponent(dagId)}`,
+      ),
+
+    clearDraft: (dagId: string) =>
+      this.delete<{ status: string; cleared: string }>(
+        `/goal/workflow/orchestrate/draft/${encodeURIComponent(dagId)}`,
+      ),
+  }
+
+  sendOrchestrate = (sessionId: string, content: string) =>
+    this.post<{ message_id: string; event_id: string; queue_length?: number }>(
+      '/chat/send_async',
+      {
+        session_id: sessionId,
+        content,
+        agent_id: 'workflow_orchestrator',
+      },
+    )
+
   definitionRuns = {
     start: (sessionId: string, definitionName: string, objective: string, params?: Record<string, unknown>) =>
       this.post<DefinitionRunStartResponse>('/goal/workflow/start-definition', {
