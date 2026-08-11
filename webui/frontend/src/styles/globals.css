@@ -447,28 +447,32 @@ pre,
   animation: edge-flow 1.2s linear infinite;
 }
 
-/* Node cards: soft gradient + lift on hover + selection glow */
+/* Node cards: token-driven (dark default; light overrides below) */
 .dag-node-card {
-  background: linear-gradient(160deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.95));
-  box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(51, 65, 85, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--dag-card-bg);
+  box-shadow: var(--dag-card-shadow);
+  color: var(--dag-card-title);
   transition: box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
 }
 .dag-node-card:hover {
   transform: translateY(-1px);
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(100, 116, 139, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--dag-card-hover-shadow);
 }
 .dag-node-card.dag-node-selected {
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--primary) 65%, transparent),
-    0 8px 24px rgba(0, 0, 0, 0.5),
-    0 0 18px color-mix(in srgb, var(--primary) 25%, transparent);
+  box-shadow: var(--dag-card-selected-shadow);
 }
+.dag-node-card .dag-card-title { color: var(--dag-card-title); }
+.dag-node-card .dag-card-sub { color: var(--dag-card-sub); }
+.dag-node-card .dag-card-type {
+  background: var(--dag-card-type-bg);
+  color: var(--dag-card-type-fg);
+}
+.dag-node-card .dag-status-pending { color: var(--dag-card-status-pending); }
+.dag-node-card .dag-status-running { color: var(--dag-card-status-running); }
+.dag-node-card .dag-status-completed { color: var(--dag-card-status-completed); }
+.dag-node-card .dag-status-failed { color: var(--dag-card-status-failed); }
+.dag-node-card .dag-status-skipped { color: var(--dag-card-status-skipped); }
+.dag-node-card .dag-status-neutral { color: var(--dag-card-status-pending); }
 
 /* React Flow chrome: glass controls + rounded minimap */
 .react-flow__controls {
@@ -560,36 +564,6 @@ pre,
 .badge-neutral { background: rgba(100, 116, 139, 0.16); color: #94a3b8; }
 [data-theme='light'] .badge-neutral { background: #eef1f5; color: #475569; }
 
-/* Light-theme node card overrides (dark defaults above stay) */
-[data-theme='light'] .dag-node-card {
-  background: linear-gradient(160deg, #ffffff 0%, #f7f7f2 100%);
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.06),
-    0 0 0 1px rgba(212, 212, 204, 0.9),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-[data-theme='light'] .dag-node-card:hover {
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.1),
-    0 0 0 1px rgba(163, 163, 155, 0.9);
-}
-[data-theme='light'] .dag-node-card.dag-node-selected {
-  box-shadow:
-    0 0 0 2px var(--primary),
-    0 6px 18px rgba(0, 0, 0, 0.12),
-    0 0 14px color-mix(in srgb, var(--primary) 35%, transparent);
-}
-[data-theme='light'] .dag-node-card .text-primary-300 { color: #6d28d9; }
-[data-theme='light'] .dag-node-card .text-primary-400 { color: #7c3aed; }
-[data-theme='light'] .dag-node-card .text-emerald-300 { color: #047857; }
-[data-theme='light'] .dag-node-card .text-emerald-400 { color: #059669; }
-[data-theme='light'] .dag-node-card .text-red-300 { color: #b91c1c; }
-[data-theme='light'] .dag-node-card .text-red-400 { color: #dc2626; }
-[data-theme='light'] .dag-node-card .text-slate-400 { color: #64748b; }
-[data-theme='light'] .dag-node-card .text-slate-500 { color: #64748b; }
-[data-theme='light'] .dag-node-card .text-slate-100 { color: #0f172a; }
-[data-theme='light'] .dag-node-card .bg-slate-800\/90 { background: #eef1f5; }
-[data-theme='light'] .dag-node-card .bg-slate-800\/80 { background: #eef1f5; }
 
 /* Light-theme React Flow chrome */
 [data-theme='light'] .react-flow__controls {
@@ -628,9 +602,52 @@ pre,
 [data-theme='light'] .wf-card-plus { color: #94a3b8; }
 [data-theme='light'] .wf-minimap { background: #ffffff; }
 
-/* Light-theme DAGNode inner text (scoped to node cards) */
-[data-theme='light'] .dag-node-card .dag-status-running { color: #6d28d9; }
-[data-theme='light'] .dag-node-card .dag-status-completed { color: #047857; }
-[data-theme='light'] .dag-node-card .dag-status-failed { color: #b91c1c; }
-[data-theme='light'] .dag-node-card .dag-status-skipped { color: #64748b; }
-[data-theme='light'] .dag-node-card .dag-status-neutral { color: #64748b; }
+/* ── DAG node card tokens (single source of truth, both themes) ── */
+:root,
+[data-theme='dark'] {
+  --dag-card-bg: linear-gradient(160deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.95));
+  --dag-card-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(51, 65, 85, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --dag-card-hover-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(100, 116, 139, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --dag-card-selected-shadow:
+    0 0 0 2px color-mix(in srgb, var(--primary) 65%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 18px color-mix(in srgb, var(--primary) 25%, transparent);
+  --dag-card-title: #f1f5f9;
+  --dag-card-sub: #94a3b8;
+  --dag-card-type-bg: rgba(15, 23, 42, 0.7);
+  --dag-card-type-fg: #cbd5e1;
+  --dag-card-status-pending: #94a3b8;
+  --dag-card-status-running: #a78bfa;
+  --dag-card-status-completed: #34d399;
+  --dag-card-status-failed: #f87171;
+  --dag-card-status-skipped: #64748b;
+}
+[data-theme='light'] {
+  --dag-card-bg: linear-gradient(160deg, #ffffff 0%, #f7f7f2 100%);
+  --dag-card-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(212, 212, 204, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --dag-card-hover-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(163, 163, 155, 0.9);
+  --dag-card-selected-shadow:
+    0 0 0 2px var(--primary),
+    0 6px 18px rgba(0, 0, 0, 0.12),
+    0 0 14px color-mix(in srgb, var(--primary) 35%, transparent);
+  --dag-card-title: #0f172a;
+  --dag-card-sub: #64748b;
+  --dag-card-type-bg: #eef1f5;
+  --dag-card-type-fg: #334155;
+  --dag-card-status-pending: #64748b;
+  --dag-card-status-running: #6d28d9;
+  --dag-card-status-completed: #047857;
+  --dag-card-status-failed: #b91c1c;
+  --dag-card-status-skipped: #64748b;
+}
