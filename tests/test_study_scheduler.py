@@ -78,7 +78,7 @@ def _setup(store, goal_store, **overrides):
         criteria=default_goal_criteria(),
     )
     kw = dict(
-        session_id="sess-st", goal_id=goal.goal_id, objective="研究动量",
+        owner_session_id="sess-st", goal_id=goal.goal_id, objective="研究动量",
         workspace_path="/tmp/ws", strategy_name="rot_alpha",
         behavior="improving",
         metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
@@ -157,24 +157,45 @@ def test_submit_completes_store_updates(store, goal_store, monkeypatch):
     assert g.status.value == "complete"
 
 
-def test_concurrent_session_blocks_until_released(store, goal_store, monkeypatch):
+def test_same_study_key_blocks_until_released(store, goal_store, monkeypatch):
+    """v2 single identity: the mutex key is the study's own session_id
+    (== study_id). Holding that key blocks re-entry of the same study;
+    chat sessions (different keys) are never blocked."""
     _patch_round(monkeypatch)
     goal, study = _setup(store, goal_store)
     svc = FakeSessionService()
-    svc.mark_session_processing("sess-st", processing=True)  # chat busy
+    svc.mark_session_processing(study.study_id, processing=True)  # key held
     sched = StudyScheduler(store, session_service=svc)
 
     async def main():
         await sched.submit(study)
-        # Study should NOT have entered running while chat is busy.
+        # Study should NOT have entered running while its key is held.
         await asyncio.sleep(0.05)
         cur = store.get_study(study.study_id)
         assert cur.execution_status == StudyStatus.QUEUED, cur.execution_status
-        # Now release chat — study should proceed.
-        svc.mark_session_processing("sess-st", processing=False)
+        # Release the key — study should proceed.
+        svc.mark_session_processing(study.study_id, processing=False)
         cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
         assert cur is not None
         assert cur.execution_status == StudyStatus.COMPLETE
+        await sched.shutdown()
+
+    asyncio.run(main())
+
+
+def test_chat_key_does_not_block_study(store, goal_store, monkeypatch):
+    """v2 single identity: a busy chat session (different key) never
+    blocks a study — the keys are disjoint."""
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    svc.mark_session_processing("chat-sess", processing=True)  # chat busy
+    sched = StudyScheduler(store, session_service=svc)
+
+    async def main():
+        await sched.submit(study)
+        cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
+        assert cur is not None and cur.execution_status == StudyStatus.COMPLETE
         await sched.shutdown()
 
     asyncio.run(main())

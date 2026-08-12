@@ -242,12 +242,11 @@ class StudyStore:
     def create_study(
         self,
         *,
-        session_id: str,
+        owner_session_id: str,
         goal_id: str | None,
         objective: str,
         workspace_path: str,
         strategy_name: str,
-        owner_session_id: str | None = None,
         executor_type: str = "autoresearch",
         metric_targets: list[dict] | None = None,
         budget_token: int | None = None,
@@ -264,17 +263,22 @@ class StudyStore:
     ) -> StudyRecord:
         """Insert a new study row (status=queued).
 
+        v2 single-identity: ``session_id`` column IS the ``study_id``
+        (execution identity + event channel + goal isolation domain); the
+        creator's chat session is kept in ``owner_session_id`` for
+        ownership lookups and IDOR checks.
+
         Caller is responsible for creating the goal ledger row (via
-        ``GoalStore.replace_goal``) and passing the returned
-        ``goal_id`` here so the study links to it.
+        ``GoalStore.replace_goal(session_id=study_id, supersede=False)``)
+        and linking it back with ``update_goal_id``.
 
         ``monitor_interval_seconds``: when set, after the study reaches
         COMPLETE the executor transitions to MONITORING and re-checks
         metric_targets every N seconds. None disables monitoring.
         """
 
-        if not session_id.strip():
-            raise ValueError("session_id must not be empty")
+        if not owner_session_id.strip():
+            raise ValueError("owner_session_id must not be empty")
         if not objective.strip():
             raise ValueError("objective must not be empty")
         if not workspace_path.strip():
@@ -306,21 +310,11 @@ class StudyStore:
         study_id = _id("study")
         now = _now_iso()
         targets_json = _json_dumps(metric_targets or [])
-        owner = owner_session_id or session_id
+        owner = owner_session_id
 
         _dlog("store", "create_study id=%s session=%s goal=%s strategy=%s executor=%s",
-              study_id, session_id, goal_id, strategy_name, executor_type)
+              study_id, study_id, goal_id, strategy_name, executor_type)
         with self._write_transaction():
-            # Cancel any existing active studies for this session so only
-            # one is "current" (mirrors GoalStore.replace_goal's supersede).
-            placeholders = ",".join("?" for _ in ACTIVE_EXECUTION_STATUSES)
-            active_vals = [s.value for s in ACTIVE_EXECUTION_STATUSES]
-            self._conn.execute(
-                f"UPDATE studies SET execution_status=?, completed_at=?, updated_at=? "
-                f"WHERE session_id=? AND execution_status IN ({placeholders})",
-                [StudyStatus.CANCELLED.value,
-                 now, now, session_id, *active_vals],
-            )
             self._conn.execute(
                 """
                 INSERT INTO studies (
@@ -340,7 +334,7 @@ class StudyStore:
                 """,
                 (
                     study_id,
-                    session_id,
+                    study_id,
                     owner,
                     goal_id,
                     objective,
@@ -367,23 +361,24 @@ class StudyStore:
         row = self._conn.execute(
             "SELECT * FROM studies WHERE study_id = ?", (study_id,)
         ).fetchone()
-        logger.info("study created: %s (session=%s goal=%s)", study_id, session_id, goal_id)
+        logger.info("study created: %s (session=%s goal=%s)", study_id, study_id, goal_id)
         return self._study_from_row(row)
 
     @_synchronized
-    def update_session_id(self, study_id: str, session_id: str) -> StudyRecord | None:
-        """v2: rebind a study to its micro session ("study:{id}").
+    def update_goal_id(self, study_id: str, goal_id: str) -> StudyRecord | None:
+        """v2: link a study to its goal after the goal ledger row is created.
 
-        The creator's chat session is preserved in ``owner_session_id``
-        (set at create_study time) so goal-ledger writes keep routing to
-        the user's session while events flow on the micro session.
+        The study row is created first (single-identity session_id =
+        study_id); the goal is created afterwards with
+        ``replace_goal(session_id=study_id, supersede=False)`` and linked
+        back here.
         """
         now = _now_iso()
         with self._write_transaction():
             self._conn.execute(
-                "UPDATE studies SET session_id = ?, updated_at = ? "
+                "UPDATE studies SET goal_id = ?, updated_at = ? "
                 "WHERE study_id = ?",
-                (session_id, now, study_id),
+                (goal_id, now, study_id),
             )
         row = self._conn.execute(
             "SELECT * FROM studies WHERE study_id = ?", (study_id,)
@@ -556,7 +551,7 @@ class StudyStore:
             count = int(row[0]) if row else 0
             # Directives are cascaded via FK ON DELETE CASCADE.
             self._conn.execute(
-                "DELETE FROM studies WHERE session_id = ?", (session_id,)
+                "DELETE FROM studies WHERE owner_session_id = ?", (session_id,)
             )
         return count
 

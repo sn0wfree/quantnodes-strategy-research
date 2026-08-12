@@ -169,21 +169,16 @@ async def study_start(req: StudyStartRequest, request: Request):
         from ...core.goal.context import default_goal_criteria
         from ...core.study import StudyStore, StudyStatus, default_metric_targets
 
-        goal_store = GoalStore()
-        goal = goal_store.replace_goal(
-            session_id=req.session_id,
-            objective=req.objective,
-            criteria=default_goal_criteria(),
-        )
         targets = (
             [t.model_dump() for t in req.metric_targets]
             if req.metric_targets else default_metric_targets()
         )
+        # v2 single identity: the study row is created first so its
+        # session_id (== study_id) can be the goal's isolation domain.
         with StudyStore() as store:
             study = store.create_study(
-                session_id=req.session_id,
                 owner_session_id=req.session_id,
-                goal_id=goal.goal_id,
+                goal_id=None,
                 objective=req.objective,
                 workspace_path=req.workspace_path,
                 strategy_name=req.strategy_name,
@@ -198,27 +193,21 @@ async def study_start(req: StudyStartRequest, request: Request):
                 behavior=req.behavior,
                 monitor_interval_seconds=req.monitor_interval_seconds,
             )
+            # Goal ledger under the study's own identity: parallel studies
+            # never supersede each other's goals (supersede=False).
+            goal_store = GoalStore()
+            goal = goal_store.replace_goal(
+                session_id=study.study_id,
+                objective=req.objective,
+                criteria=default_goal_criteria(),
+                supersede=False,
+            )
+            study = store.update_goal_id(study.study_id, goal.goal_id)
 
         # Phase 3: Start GoalWorkflowRunner instead of scheduler
         # AEGIS: executor_type="autoresearch" uses AutoresearchRunner (round-based)
         # executor_type="workflow" uses GoalWorkflowRunner (single DAG)
         if req.executor_type == "autoresearch":
-            # v2 micro session: study:{id} — event isolation per study
-            # (same pattern as dag:{name} orchestration sessions). Idempotent;
-            # created with the real request user_id so ownership checks pass.
-            from .web_session import WebSessionCreate, create_session
-
-            micro_session = f"study:{study.study_id}"
-            await create_session(
-                WebSessionCreate(
-                    id=micro_session,
-                    title=f"Study · {req.objective[:40]}",
-                ),
-                request,
-            )
-            with StudyStore() as store:
-                study = store.update_session_id(study.study_id, micro_session)
-
             # Use scheduler → AutoresearchRunner (AEGIS-powered round loop)
             sched = _get_study_scheduler()
             import asyncio
@@ -228,7 +217,7 @@ async def study_start(req: StudyStartRequest, request: Request):
                 "status": "ok",
                 "study_id": study.study_id,
                 "goal_id": study.goal_id,
-                "session_id": micro_session,
+                "session_id": study.study_id,
                 "execution_status": StudyStatus.QUEUED.value,
                 "executor_type": "autoresearch",
             }
@@ -410,8 +399,9 @@ async def study_status(
             study = store.get_study(study_id)
             if study is None:
                 return {"status": "no_study", "session_id": session_id}
-            # Defense in depth: the study must belong to this session.
-            if study.session_id != session_id:
+            # Defense in depth: the study must belong to this session
+            # (v2 single identity: ownership is the owner_session_id).
+            if study.owner_session_id != session_id:
                 raise HTTPException(
                     status_code=403, detail="Study does not belong to this session",
                 )
@@ -476,7 +466,7 @@ async def study_summary(request: Request, study_id: str):
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
         # Security: enforce session ownership (study -> session lookup).
-        _verify_study_ownership(request, study.session_id)
+        _verify_study_ownership(request, study.owner_session_id)
 
         # Recent rounds (last 5)
         recent_rounds = store.list_rounds(study_id, limit=5)
@@ -560,18 +550,23 @@ def _build_scoreboard(journal_entries: list) -> list[dict]:
 
 
 def _verify_study_ownership(request: Request, session_id: str) -> None:
-    """Enforce IDOR for any study-derived endpoint (study_id → session_id)."""
+    """Enforce IDOR for any study-derived endpoint (study_id → owner session)."""
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", None) or "anonymous"
     _fetch_session_owned(_get_db(), session_id, user_id)
 
 
 def _study_session_id(study_id: str) -> str | None:
-    """Look up a study's parent session_id; returns None if not found."""
+    """Look up a study's OWNER session (creator chat session) for IDOR.
+
+    v2 single identity: the study's ``session_id`` column equals the
+    study_id (no sessions row exists for it) — ownership is verified via
+    ``owner_session_id`` (the creator's chat session, which has a row).
+    """
     from ...core.study import StudyStore
     with StudyStore() as store:
         study = store.get_study(study_id)
-    return study.session_id if study else None
+    return study.owner_session_id if study else None
 
 
 @router.post("/{study_id}/pause")
@@ -688,7 +683,7 @@ async def study_directives_list(request: Request, study_id: str):
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
         # Security: enforce session ownership.
-        _verify_study_ownership(request, study.session_id)
+        _verify_study_ownership(request, study.owner_session_id)
         # Pull all (pending + consumed). Direct access on store.conn —
         # acceptable for the audit-only endpoint.
         with store._lock:  # noqa: SLF001 — internal but stable

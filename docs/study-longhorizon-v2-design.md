@@ -212,8 +212,12 @@ sessions 行存在，因此无需为 study 创建会话行。
 ### 5.3 与 chat 的协作
 
 - study 不占用 chat session 处理槽（单身份天然解耦）
-- `mark_session_processing(study_id)` 保留调用（兼容代码路径），但 session
-  key 与任何 chat 会话不同，**实际不再产生互斥**——无需额外锁
+- **互斥机制保留**：`_run_one_study_locked` 的 `is_session_processing` +
+  `mark_session_processing` 逻辑不动——单身份后互斥键 = `study_id`：同一
+  study 防重入（重复 submit / recover 并发时第二个等待）；与 chat 会话
+  不同键，互不阻塞（隔离与互斥同时成立）
+- `mark_session_processing(study_id)` 保留调用（兼容代码路径），实际不
+  影响任何 chat 会话
 
 ---
 

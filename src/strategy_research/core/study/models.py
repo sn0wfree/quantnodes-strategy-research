@@ -77,14 +77,14 @@ class StudyRecord:
     """
 
     study_id: str
-    session_id: str  # v2: micro session "study:{id}" — execution identity + event channel
+    session_id: str  # v2 单身份：= study_id（执行身份 + 事件频道 + goal 隔离域）
     goal_id: str | None
     objective: str
     executor_type: str  # 'autoresearch' | 'workflow'
     workspace_path: str
     strategy_name: str
-    # 创建者 chat 会话 — 纯归属查询用途（get_active_study/list_studies 按它
-    # 查）。不参与账本校验（goal 写路径已解耦，决策 D）；旧数据回填=session_id。
+    # 创建者 chat 会话 — 归属查询（get_active_study/list_studies）与 IDOR
+    # 校验（_verify_study_ownership）用途；旧数据回填=session_id。
     owner_session_id: str | None = None
     metric_targets: list[dict] = field(default_factory=list)
     budget_token: int | None = None

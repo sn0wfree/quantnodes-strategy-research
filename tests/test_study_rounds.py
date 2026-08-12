@@ -23,7 +23,7 @@ def store():
 @pytest.fixture
 def study(store):
     return store.create_study(
-        session_id="test-sess",
+        owner_session_id="test-sess",
         goal_id="goal_123",
         objective="test",
         workspace_path="/tmp/ws",
@@ -71,7 +71,8 @@ class TestStudyRoundsCRUD:
     def test_round_goal_id_populated(self, store, study):
         record = store.append_round(study.study_id, 1, "run_0001")
         assert record.goal_id == "goal_123"
-        assert record.session_id == "test-sess"
+        # v2 single identity: session_id column == study_id
+        assert record.session_id == study.study_id
 
     def test_round_with_evidence_ids(self, store, study):
         record = store.append_round(

@@ -99,7 +99,7 @@ def _setup_with_goal(store: StudyStore, goal_store: GoalStore, **overrides):
         criteria=default_goal_criteria(),
     )
     kw = dict(
-        session_id="sess-st",
+        owner_session_id="sess-st",
         goal_id=goal.goal_id,
         objective="研究动量",
         workspace_path="/tmp/ws",
@@ -365,7 +365,7 @@ class TestDirectiveInjection:
         # out after one round — it should run round 1, then round 2, etc.
         from strategy_research.core.study import StudyStatus
         study = store.create_study(
-            session_id="sess-st",
+            owner_session_id="sess-st",
             goal_id=None,
             objective="研究动量",
             workspace_path="/tmp/ws",

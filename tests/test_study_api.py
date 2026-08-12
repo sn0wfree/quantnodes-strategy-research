@@ -217,7 +217,7 @@ async def test_summary_returns_strategy_and_round_fields(_app_env, tmp_path, mon
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         study = store.create_study(
-            session_id="sess-1",
+            owner_session_id="sess-1",
             goal_id=None,
             objective="test objective",
             workspace_path=str(_app_env),
@@ -260,7 +260,7 @@ def _seed_study(_app_env, tmp_path, monkeypatch, *, objective="test objective",
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         study = store.create_study(
-            session_id="sess-1",
+            owner_session_id="sess-1",
             goal_id=goal_id,
             objective=objective,
             workspace_path=str(_app_env),
@@ -422,12 +422,12 @@ async def test_list_filter_by_session_id(_app_env, tmp_path, monkeypatch):
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s_a = store.create_study(
-            session_id="sess-A", goal_id=None, objective="A obj",
+            owner_session_id="sess-A", goal_id=None, objective="A obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
         store.create_study(
-            session_id="sess-B", goal_id=None, objective="B obj",
+            owner_session_id="sess-B", goal_id=None, objective="B obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -442,7 +442,8 @@ async def test_list_filter_by_session_id(_app_env, tmp_path, monkeypatch):
         data = r.json()
         assert len(data["studies"]) == 1
         assert data["studies"][0]["study_id"] == study_a_id
-        assert data["studies"][0]["session_id"] == "sess-A"
+        # v2 single identity: session_id == study_id
+        assert data["studies"][0]["session_id"] == study_a_id
 
 
 @pytest.mark.asyncio
@@ -455,12 +456,12 @@ async def test_list_filter_by_status_returns_matching_only(
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s_queued = store.create_study(
-            session_id="sess-1", goal_id=None, objective="queued obj",
+            owner_session_id="sess-1", goal_id=None, objective="queued obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
         s_running = store.create_study(
-            session_id="sess-1", goal_id=None, objective="running obj",
+            owner_session_id="sess-1", goal_id=None, objective="running obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -499,7 +500,7 @@ async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
     with StudyStore(db_path=db_path) as store:
         for i in range(5):
             store.create_study(
-                session_id=f"sess-{i}", goal_id=None,
+                owner_session_id=f"sess-{i}", goal_id=None,
                 objective=f"obj {i}",
                 workspace_path=str(_app_env), strategy_name="demo",
                 executor_type="autoresearch", max_rounds=3,
@@ -618,7 +619,7 @@ async def test_status_returns_active_study_for_session(_app_env, tmp_path, monke
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=None, objective="找 alpha",
+            owner_session_id="sess-1", goal_id=None, objective="找 alpha",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=5,
         )
@@ -648,7 +649,7 @@ async def test_status_returns_study_by_id(_app_env, tmp_path, monkeypatch):
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-other", goal_id=None, objective="其他 session",
+            owner_session_id="sess-other", goal_id=None, objective="其他 session",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -688,7 +689,7 @@ async def test_status_includes_goal_snapshot_when_goal_linked(_app_env, tmp_path
 
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=goal_id, objective="with goal",
+            owner_session_id="sess-1", goal_id=goal_id, objective="with goal",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -720,7 +721,7 @@ async def test_resume_interrupted_study_calls_resume_interrupted(
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=None, objective="interrupted obj",
+            owner_session_id="sess-1", goal_id=None, objective="interrupted obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -754,7 +755,7 @@ async def test_resume_interrupted_failure_returns_400(_app_env, tmp_path, monkey
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=None, objective="interrupted",
+            owner_session_id="sess-1", goal_id=None, objective="interrupted",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )

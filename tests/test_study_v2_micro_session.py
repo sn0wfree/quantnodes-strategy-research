@@ -73,7 +73,7 @@ def _setup(store, goal_store, session="sess-st", **overrides):
         criteria=default_goal_criteria(),
     )
     kw = dict(
-        session_id=session, owner_session_id=session, goal_id=goal.goal_id,
+        owner_session_id=session, goal_id=goal.goal_id,
         objective="研究动量", workspace_path="/tmp/ws",
         strategy_name="rot_alpha", behavior="improving",
         metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
@@ -87,27 +87,67 @@ def _setup(store, goal_store, session="sess-st", **overrides):
 # ── store: owner_session_id / micro-session rebind ────────────────────
 
 
-def test_create_study_defaults_owner_to_session(store, goal_store):
+def test_create_study_single_identity(store, goal_store):
+    """v2 single identity: session_id column == study_id; owner = chat."""
     goal, study = _setup(store, goal_store)
+    assert study.session_id == study.study_id
     assert study.owner_session_id == "sess-st"
-    assert study.session_id == "sess-st"
-
-
-def test_update_session_id_rebinds_and_keeps_owner(store, goal_store):
-    goal, study = _setup(store, goal_store)
-    micro = f"study:{study.study_id}"
-    rebound = store.update_session_id(study.study_id, micro)
-    assert rebound is not None
-    assert rebound.session_id == micro
-    assert rebound.owner_session_id == "sess-st"
-    # reload from DB: rebind persists
     reloaded = store.get_study(study.study_id)
-    assert reloaded.session_id == micro
-    assert reloaded.owner_session_id == "sess-st"
+    assert reloaded.session_id == study.study_id
 
 
-def test_update_session_id_unknown_study(store):
-    assert store.update_session_id("study-nope", "study:nope") is None
+def test_update_goal_id_links_goal(store, goal_store):
+    """Timing sequence: create_study(goal_id=None) → replace_goal →
+    update_goal_id links the ledger row."""
+    goal, study = _setup(store, goal_store)
+    assert study.goal_id == goal.goal_id  # _setup passes goal_id directly
+    # standalone: goal_id=None then link later
+    g2, s2 = _setup(store, goal_store, goal_id=None)
+    assert s2.goal_id is None
+    linked = store.update_goal_id(s2.study_id, "goal_later")
+    assert linked is not None and linked.goal_id == "goal_later"
+    assert store.get_study(s2.study_id).goal_id == "goal_later"
+
+
+def test_goal_binds_study_id_domain(store, goal_store):
+    """A study goal is created under the study_id domain (supersede=False):
+    a second study under the same owner does NOT supersede the first."""
+    from strategy_research.core.goal.context import default_goal_criteria
+
+    g1, s1 = _setup(store, goal_store, session="chat_abc", goal_id=None)
+    goal1 = goal_store.replace_goal(
+        session_id=s1.study_id, objective="研究A",
+        criteria=default_goal_criteria(), supersede=False,
+    )
+    store.update_goal_id(s1.study_id, goal1.goal_id)
+
+    g2, s2 = _setup(store, goal_store, session="chat_abc", goal_id=None)
+    goal2 = goal_store.replace_goal(
+        session_id=s2.study_id, objective="研究B",
+        criteria=default_goal_criteria(), supersede=False,
+    )
+    store.update_goal_id(s2.study_id, goal2.goal_id)
+
+    # Both goals stay ACTIVE — no cross-study supersede, no unique-index hit
+    assert goal_store.get_goal(goal1.goal_id).status.value == "active"
+    assert goal_store.get_goal(goal2.goal_id).status.value == "active"
+
+
+def test_chat_goal_supersede_semantics_kept(store, goal_store):
+    """chat semantics untouched: same-session replace_goal (default
+    supersede=True) still invalidates the previous active goal."""
+    from strategy_research.core.goal.context import default_goal_criteria
+
+    g1 = goal_store.replace_goal(
+        session_id="chat_abc", objective="旧目标",
+        criteria=default_goal_criteria(),
+    )
+    g2 = goal_store.replace_goal(
+        session_id="chat_abc", objective="新目标",
+        criteria=default_goal_criteria(),
+    )
+    assert goal_store.get_goal(g1.goal_id).status.value == "superseded"
+    assert goal_store.get_goal(g2.goal_id).status.value == "active"
 
 
 def test_legacy_db_migration_backfills_owner(tmp_path):
@@ -154,48 +194,50 @@ def test_legacy_db_migration_backfills_owner(tmp_path):
     assert row.owner_session_id == "chat-sess"
 
 
-# ── v2 decision D: owner-session queries + micro-session accounting ────
+# ── v2 single identity: owner-session queries + study_id accounting ────
 
 
-def test_get_active_study_matches_owner_not_micro_session(store, goal_store):
-    """After micro-session rebind, "my active study" lookups use the owner
-    chat session (v1 semantics preserved)."""
+def test_get_active_study_matches_owner_not_study_id(store, goal_store):
+    """'My active study' lookups use the owner chat session; the study's
+    own session_id (== study_id) is the event channel, not a query key."""
     goal, study = _setup(store, goal_store, session="chat_abc")
-    micro = f"study:{study.study_id}"
-    store.update_session_id(study.study_id, micro)
 
     by_owner = store.get_active_study("chat_abc")
     assert by_owner is not None and by_owner.study_id == study.study_id
-    # The micro session itself does not answer "my studies" queries.
-    assert store.get_active_study(micro) is None
+    # The study_id as a session key does not answer "my studies" queries.
+    assert store.get_active_study(study.study_id) is None
 
 
 def test_list_studies_matches_owner(store, goal_store):
     goal, study = _setup(store, goal_store, session="chat_abc")
-    store.update_session_id(study.study_id, f"study:{study.study_id}")
     rows = store.list_studies(session_id="chat_abc")
     assert [r.study_id for r in rows] == [study.study_id]
-    assert store.list_studies(session_id=f"study:{study.study_id}") == []
+    assert store.list_studies(session_id=study.study_id) == []
 
 
-def test_micro_session_goal_accounting_passes(store, goal_store):
-    """Decision D: a study writing to its goal ledger with its MICRO
-    session id succeeds (goal write guard no longer checks session), and
-    evidence persists under the goal's own session."""
+def test_study_id_goal_accounting_passes(store, goal_store):
+    """Decision D: a study writing to its goal ledger with its own
+    session_id (== study_id) succeeds; evidence persists under the goal's
+    own session (the study's domain)."""
     from strategy_research.core.goal import EvidenceInput
+    from strategy_research.core.goal.context import default_goal_criteria
 
     goal, study = _setup(store, goal_store, session="chat_abc")
-    micro = f"study:{study.study_id}"
-    store.update_session_id(study.study_id, micro)
+    study_id = study.study_id
+    # Build the goal under the study's own domain like study_start does.
+    goal2 = goal_store.replace_goal(
+        session_id=study_id, objective="研究动量",
+        criteria=default_goal_criteria(), supersede=False,
+    )
+    store.update_goal_id(study_id, goal2.goal_id)
 
-    criterion = goal_store.list_criteria(goal.goal_id)[0]
-    for c in goal_store.list_criteria(goal.goal_id):
+    for c in goal_store.list_criteria(goal2.goal_id):
         if not c.required:
             continue
         goal_store.append_evidence(
-            session_id=micro,                      # micro session writer
-            goal_id=goal.goal_id,
-            expected_goal_id=goal.goal_id,
+            session_id=study_id,               # study's own identity writes
+            goal_id=goal2.goal_id,
+            expected_goal_id=goal2.goal_id,
             evidence=EvidenceInput(
                 text="达标", criterion_id=c.criterion_id,
                 evidence_type="acceptance", run_id="run_0001",
@@ -203,15 +245,15 @@ def test_micro_session_goal_accounting_passes(store, goal_store):
             ),
         )
     goal_store.complete_lite(
-        session_id=micro,
-        goal_id=goal.goal_id,
-        expected_goal_id=goal.goal_id,
+        session_id=study_id,
+        goal_id=goal2.goal_id,
+        expected_goal_id=goal2.goal_id,
         recap="研究达标",
     )
-    completed = goal_store.get_goal(goal.goal_id)
+    completed = goal_store.get_goal(goal2.goal_id)
     assert completed.status.value == "complete"
-    for ev in goal_store.list_evidence(goal.goal_id):
-        assert ev.session_id == "chat_abc"  # persisted under the goal's session
+    for ev in goal_store.list_evidence(goal2.goal_id):
+        assert ev.session_id == study_id  # persisted under the goal's session
 
 
 # ── scheduler: true parallelism + semaphore cap ───────────────────────

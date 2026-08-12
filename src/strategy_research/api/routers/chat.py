@@ -739,7 +739,7 @@ def _goal_start(args: str, session_id: str, store: Any) -> str:
     # Create a study record (manual executor, not submitted to scheduler)
     with StudyStore() as study_store:
         study = study_store.create_study(
-            session_id=session_id, goal_id=goal.goal_id,
+            owner_session_id=session_id, goal_id=goal.goal_id,
             objective=objective, workspace_path=_default_workspace(),
             strategy_name="manual", executor_type="manual",
             metric_targets=[],
@@ -1144,7 +1144,7 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
         )
         with StudyStore() as store:
             study = store.create_study(
-                session_id=session_id, goal_id=goal.goal_id,
+                owner_session_id=session_id, goal_id=goal.goal_id,
                 objective=objective, workspace_path=ws, strategy_name=strategy,
                 metric_targets=targets,
                 budget_token=None, budget_turn=flags["budget_turn"],

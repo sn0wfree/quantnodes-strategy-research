@@ -46,7 +46,7 @@ def study(stores):
         criteria=["calmar >= 0.5"],
     )
     return study_store.create_study(
-        session_id="test-sess",
+        owner_session_id="test-sess",
         goal_id=goal.goal_id,
         objective="test",
         workspace_path="/tmp/ws",
@@ -115,7 +115,7 @@ class TestRunnerAEGIS:
         # Create study with max_rounds=2
         with StudyStore() as s:
             study2 = s.create_study(
-                session_id="test-sess2", goal_id="goal2",
+                owner_session_id="test-sess2", goal_id="goal2",
                 objective="test", workspace_path="/tmp/ws",
                 strategy_name="demo",
                 metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
@@ -144,7 +144,7 @@ class TestRunnerAEGIS:
         study_store, goal_store = stores
         with StudyStore() as s:
             study2 = s.create_study(
-                session_id="test-sess3", goal_id="goal3",
+                owner_session_id="test-sess3", goal_id="goal3",
                 objective="test", workspace_path="/tmp/ws",
                 strategy_name="demo",
                 metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
