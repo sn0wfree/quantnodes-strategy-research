@@ -348,3 +348,23 @@ class TestEventV2Predicates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── study events registered (v2 design §16.2) ───────────────────────
+
+
+def test_study_events_registered():
+    from strategy_research.api.session.event_v2 import is_known_event_type
+    for name in (
+        "study_queued", "study_started", "study_paused", "study_resumed",
+        "study_cancelled", "study_early_stopped", "study_completed",
+        "study_failed", "study_executor_stopped", "study_interrupted",
+        "study_round", "study_round_rejected", "study_phase",
+        "study_review", "study_todos_updated", "study_evidence",
+        "study_progress", "study_budget_limited",
+        "study_monitoring_started", "study_monitor_check",
+        "study_monitor_check_failed", "study_drift_detected",
+        "study_knowledge_check", "study_knowledge_update",
+        "study_knowledge_compacted", "study_directives_consumed",
+    ):
+        assert is_known_event_type(name), f"{name} not registered"

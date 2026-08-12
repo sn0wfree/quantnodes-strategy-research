@@ -51,6 +51,8 @@ class ShutdownReason:
     REPEATED_DEVIATION = "repeated_deviation"
     REVIEW_FAILED = "review_failed"
     DISCARD_STREAK = "stagnation_discard_streak"
+    # v2 monitor (design §15)
+    NEEDS_REFRESH = "needs_refresh"
 
 
 # ── metric target comparison (reused from executor.py) ──────────────
@@ -176,7 +178,20 @@ class AutoresearchRunner:
         self._emit(session, "study_started", {"study_id": sid, "round": self.study.current_round})
         reason = ShutdownReason.ERROR
         try:
+            # v2 §15.2 recover: a MONITORING study restarts directly into
+            # the monitor phase (no research rounds).
+            if self.study.execution_status == StudyStatus.MONITORING:
+                reason = await self._monitor_phase()
+                return reason
             reason = await self._run_loop()
+            # v2 §15.2: on E2 completion with monitoring enabled, enter the
+            # post-completion monitor phase (rounds stop; periodic re-checks).
+            # Runs in-sequence so the scheduler's control token and semaphore
+            # stay alive for pause/resume/cancel during monitoring.
+            if reason == ShutdownReason.TARGETS_MET and (
+                self.study.monitor_interval_seconds or 0
+            ) > 0:
+                reason = await self._monitor_phase()
         except Exception as exc:
             _dlog("runner", "run() FAILED: study=%s error=%s", sid, exc)
             logger.exception("study %s failed: %s", sid, exc)
@@ -211,6 +226,7 @@ class AutoresearchRunner:
         while True:
             if self.control.cancelled:
                 self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
+                self._emit(session, "study_cancelled", {"study_id": sid})
                 return ShutdownReason.CANCELLED
 
             if self.control.paused:
@@ -259,8 +275,8 @@ class AutoresearchRunner:
                 "metrics": metrics, "verdict": verdict,
             })
 
-            # ── shutdown: targets met ──────────────────────────────
-            if self.study.metric_targets and meets_metric_targets(metrics, self.study.metric_targets):
+            # ── shutdown: targets met (E2: targets ∧ keep ∧ gates pass) ──
+            if result.get("e2_passed"):
                 self._complete_goal(result)
                 self._mark_terminal(StudyStatus.COMPLETE, last_metrics=metrics, reason=ShutdownReason.TARGETS_MET)
                 self._emit(session, "study_completed", {
@@ -273,6 +289,9 @@ class AutoresearchRunner:
             if self._budget_exceeded():
                 self._mark_terminal(StudyStatus.BUDGET_LIMITED, last_metrics=metrics,
                                     last_error=self._budget_summary(), reason=ShutdownReason.BUDGET)
+                self._emit(session, "study_budget_limited", {
+                    "study_id": sid, "used": self._budget_summary(),
+                })
                 return ShutdownReason.BUDGET
 
             # ── shutdown: stagnation ───────────────────────────────
@@ -347,6 +366,181 @@ class AutoresearchRunner:
             cooldown = self._round_cooldown()
             _dlog("loop", "cooldown %.1fs before round %d", cooldown, round_num + 1)
             await asyncio.sleep(cooldown)
+
+    # ── v2 monitor phase (design §15) ──────────────────────────────
+
+    async def _monitor_phase(self) -> str:
+        """Post-completion monitoring: periodic re-check + auto repair.
+
+        Every ``monitor_interval_seconds`` the last keep run is re-backtested
+        (no LLM) and compared to ``metric_targets`` only (gates are
+        research-phase constraints, §15.2). Drift → NEEDS_REFRESH + up to
+        3 full repair rounds; success returns to MONITORING, failure stays
+        needs_refresh. Cancelled/paused handled via the shared control token.
+        """
+        sid = self.study.study_id
+        session = self.study.session_id
+        interval = self.study.monitor_interval_seconds or 0
+        self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
+        self._emit(session, "study_monitoring_started", {
+            "study_id": sid, "interval_seconds": interval,
+        })
+        _dlog("monitor", "monitoring started study=%s interval=%ss", sid, interval)
+        while True:
+            if self.control.cancelled:
+                self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
+                self._emit(session, "study_cancelled", {"study_id": sid})
+                return ShutdownReason.CANCELLED
+            if self.control.paused:
+                self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
+                self._emit(session, "study_paused", {
+                    "study_id": sid, "round": self.study.current_round,
+                })
+                await self._wait_until_resumed()
+                self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
+                self._emit(session, "study_resumed", {
+                    "study_id": sid, "round": self.study.current_round,
+                })
+
+            await self._monitor_sleep(interval)
+            try:
+                check = await asyncio.to_thread(self._run_monitor_check)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("monitor check %s failed: %s", sid, exc)
+                self._emit(session, "study_monitor_check_failed", {
+                    "study_id": sid, "error": str(exc),
+                })
+                continue
+
+            drift = not check["meets_targets"]
+            self.study_store.update_monitor_check(
+                sid, last_check_at=check["now_iso"], drift=drift,
+            )
+            self.study_store.update_last_metrics(
+                sid, check["metrics"] or {}, check.get("verdict", "monitor"),
+            )
+            self._emit(session, "study_monitor_check", {
+                "study_id": sid,
+                "metrics": check["metrics"],
+                "meets_targets": check["meets_targets"],
+                "drift": drift,
+                "drift_count": self.study.monitor_drift_count + (1 if drift else 0),
+            })
+            if not drift:
+                continue
+
+            # ── drift → needs_refresh + auto repair rounds ─────────
+            self.study_store.update_execution_status(
+                sid, StudyStatus.NEEDS_REFRESH,
+                last_error=f"monitor drift: {check['reason']}",
+            )
+            self._emit(session, "study_drift_detected", {
+                "study_id": sid, "metrics": check["metrics"],
+                "reason": check["reason"],
+            })
+            if await self._monitor_repair_rounds():
+                self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
+                self._emit(session, "study_monitoring_started", {
+                    "study_id": sid, "interval_seconds": interval,
+                    "repaired": True,
+                })
+                continue
+            _dlog("monitor", "repair exhausted, staying needs_refresh study=%s", sid)
+            return ShutdownReason.NEEDS_REFRESH
+
+    async def _monitor_repair_rounds(self) -> bool:
+        """Up to 3 full repair rounds; True when an E2 pass restores the study."""
+        sid = self.study.study_id
+        session = self.study.session_id
+        path = Path(self.study.workspace_path)
+        from strategy_research.core.study import state_store as ss
+        state = ss.load(path, sid)
+        base_round = state.last_completed_round or self.study.current_round or 0
+        for attempt in range(3):
+            if self._budget_exceeded():
+                self.study_store.update_execution_status(
+                    sid, StudyStatus.NEEDS_REFRESH,
+                    last_error=f"budget_limited: {self._budget_summary()}",
+                )
+                self._emit(session, "study_budget_limited", {
+                    "study_id": sid, "used": self._budget_summary(),
+                })
+                return False
+            round_num = base_round + attempt + 1
+            _dlog("monitor", "repair round %d study=%s", round_num, sid)
+            self._round_start_clock = time.perf_counter()
+            previous_summary = self._maybe_load_previous_summary(self.study)
+            result = await asyncio.to_thread(
+                self._run_one_round, round_num, previous_summary, None,
+            )
+            self._account_round_budget(result)
+            if result.get("aborted"):
+                continue
+            metrics = result.get("metrics", {})
+            verdict = result.get("verdict", "discard")
+            self.study_store.update_round_heartbeat(sid, round_num)
+            self.study_store.update_last_metrics(sid, metrics, verdict)
+            self._emit(session, "study_round", {
+                "study_id": sid, "round": round_num,
+                "run": result.get("run_name", ""),
+                "metrics": metrics, "verdict": verdict,
+            })
+            if result.get("e2_passed"):
+                _dlog("monitor", "repair round %d passed, back to MONITORING", round_num)
+                return True
+        return False
+
+    def _run_monitor_check(self) -> dict:
+        """Single monitor check: re-backtest the last keep run, compare to
+        ``metric_targets`` (no LLM, no gates). """
+        from datetime import datetime, timezone
+        from strategy_research.core.backtest import run_backtest_script
+        from strategy_research.core.study import state_store as ss
+
+        sid = self.study.study_id
+        path = Path(self.study.workspace_path).resolve()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        root = ss.study_root(path, sid)
+        state = ss.load(path, sid)
+        strategy_dir = None
+        if state.last_keep_run_dir:
+            candidate = root / state.last_keep_run_dir
+            if (candidate / "strategy.py").exists():
+                strategy_dir = candidate
+        result = run_backtest_script(
+            workspace_path=path,
+            strategy_name=self.study.strategy_name,
+            action="monitor",
+            description="post-completion monitoring re-check",
+            run_dir=root / "monitor",
+            strategy_dir=strategy_dir,
+            results_tsv=root / "results.tsv",
+        )
+        if not result.get("success"):
+            # backtest failure surfaces as drift
+            return {
+                "metrics": {},
+                "verdict": "error",
+                "meets_targets": False,
+                "reason": f"backtest failed: {result.get('error', 'unknown')}",
+                "now_iso": now_iso,
+            }
+        metrics = result.get("metrics", {}) or {}
+        ok = not self.study.metric_targets or meets_metric_targets(
+            metrics, self.study.metric_targets,
+        )
+        return {
+            "metrics": metrics,
+            "verdict": "monitor",
+            "meets_targets": ok,
+            "reason": "" if ok else "metric_targets no longer met",
+            "now_iso": now_iso,
+        }
+
+    async def _monitor_sleep(self, interval: float) -> None:
+        """Sleep between monitor checks. Tests override this to skip the wait."""
+        if interval > 0:
+            await asyncio.sleep(interval)
 
     def _run_one_round(
         self,
@@ -459,6 +653,9 @@ class AutoresearchRunner:
             current_state["factor_failures"] = previous_summary["factor_failures"]
 
         # Phase 1: researcher
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
+        })
         researcher_result = run_researcher_phase(
             path, strategy, current_state, run_dir,
             session_id=session, run_name=run_name,
@@ -468,6 +665,9 @@ class AutoresearchRunner:
             keep_recent=self.study.keep_recent, round_num=round_num,
             runs_dir=runs_dir,
         )
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
+        })
         researcher_output = researcher_result["researcher_output"]
 
         # AEGIS: Novelty Gate
@@ -483,6 +683,9 @@ class AutoresearchRunner:
                     "reason": "novelty_rejected"}
 
         # Phase 2: execution
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "execution", "status": "started",
+        })
         exec_result = run_execution_phase(
             path, strategy, current_state, researcher_output, run_dir,
             session_id=session, run_name=run_name,
@@ -491,14 +694,23 @@ class AutoresearchRunner:
             results_tsv=results_tsv,
             round_num=round_num,
         )
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "execution", "status": "done",
+        })
         metrics = exec_result["metrics"]
         strategist_output = exec_result["strategist_output"]
 
         # Phase 3: evaluation
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "evaluation", "status": "started",
+        })
         eval_result = run_evaluation_phase(
             path, strategy, exec_result["backtest_result"], metrics, run_dir,
             behavior=self.study.behavior, max_retries=3,
         )
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
+        })
         verdict = eval_result["verdict"]
 
         # ── guidance gates hard check (design §13.3): before verdict ──
@@ -512,6 +724,14 @@ class AutoresearchRunner:
             if violations:
                 gate_violations = violations
                 verdict = "discard"
+
+        # E2 completion semantics (§15.2): targets ∧ keep ∧ gates pass
+        e2_passed = bool(
+            self.study.metric_targets
+            and meets_metric_targets(metrics, self.study.metric_targets)
+            and verdict == "keep"
+            and not gate_violations
+        )
 
         # disk: results.tsv (round column) + summary
         self._update_results_tsv(
@@ -627,6 +847,10 @@ class AutoresearchRunner:
         except Exception as exc:  # noqa: BLE001 — file-first; DB is mirror
             logger.warning("append_round failed (mirror): %s", exc)
 
+        # ── goal ledger: keep-round evidence + criteria progress (E1) ──
+        if verdict == "keep" and self.study.goal_id:
+            self._record_keep_evidence(round_num, run_name, metrics)
+
         # ── v2 review cycle (phase 2: review + collect + todos) ─────
         review_stop = self._run_review_cycle(
             round_num, manifest, state, verdict, hypothesis,
@@ -642,6 +866,7 @@ class AutoresearchRunner:
             "manifest": manifest,
             "state": state,
             "review_stop": review_stop,
+            "e2_passed": e2_passed,
         }
 
     # ── v2 review cycle (design §10) ────────────────────────────────
@@ -837,6 +1062,42 @@ class AutoresearchRunner:
         except Exception as exc:  # noqa: BLE001
             logger.warning("collector failed: %s", exc)
             return 0
+
+    def _record_keep_evidence(self, round_num: int, run_name: str, metrics: dict) -> None:
+        """E1: keep rounds append goal evidence + emit progress (design §16.3)."""
+        sid = self.study.study_id
+        session = self.study.session_id
+        try:
+            from strategy_research.core.goal import EvidenceInput
+            ev = self._goal_store.append_evidence(
+                session_id=session,
+                goal_id=self.study.goal_id,
+                expected_goal_id=self.study.goal_id,
+                evidence=EvidenceInput(
+                    text=(
+                        f"Study round {round_num} keep — {run_name}: "
+                        f"Calmar={metrics.get('calmar')} Sharpe={metrics.get('sharpe')} "
+                        f"MaxDD={metrics.get('max_dd')}"
+                    ),
+                    evidence_type="study_keep", run_id=run_name,
+                    source_provider="study", source_type="round_keep",
+                ),
+            )
+            self._emit(session, "study_evidence", {
+                "study_id": sid, "evidence_id": ev.evidence_id,
+                "run": run_name,
+            })
+            criteria = self._goal_store.list_criteria(self.study.goal_id)
+            evidence = self._goal_store.list_evidence(self.study.goal_id)
+            seen = {e.criterion_id for e in evidence if e.criterion_id}
+            covered = sum(1 for c in criteria if c.criterion_id in seen)
+            total = len(criteria)
+            self._emit(session, "study_progress", {
+                "study_id": sid, "covered": covered, "total": total,
+                "percent": round(covered / total * 100) if total else 100,
+            })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("study %s keep evidence failed: %s", sid, exc)
 
     def _verdict_reason(self, eval_result: dict, strategist_output: Any) -> str:
         """Extract the verdict reason from decision/attribution output."""

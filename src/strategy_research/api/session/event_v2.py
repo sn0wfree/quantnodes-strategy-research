@@ -127,6 +127,34 @@ class EventType:
     # message_type='goal' — see projector._on_goal_updated)
     GOAL_UPDATED = "goal_updated"
 
+    # Study lifecycle (v2 design §16 — 5 groups)
+    STUDY_QUEUED = "study_queued"
+    STUDY_STARTED = "study_started"
+    STUDY_PAUSED = "study_paused"
+    STUDY_RESUMED = "study_resumed"
+    STUDY_CANCELLED = "study_cancelled"
+    STUDY_EARLY_STOPPED = "study_early_stopped"
+    STUDY_COMPLETED = "study_completed"
+    STUDY_FAILED = "study_failed"
+    STUDY_EXECUTOR_STOPPED = "study_executor_stopped"
+    STUDY_INTERRUPTED = "study_interrupted"
+    STUDY_ROUND = "study_round"
+    STUDY_ROUND_REJECTED = "study_round_rejected"
+    STUDY_PHASE = "study_phase"
+    STUDY_REVIEW = "study_review"
+    STUDY_TODOS_UPDATED = "study_todos_updated"
+    STUDY_EVIDENCE = "study_evidence"
+    STUDY_PROGRESS = "study_progress"
+    STUDY_BUDGET_LIMITED = "study_budget_limited"
+    STUDY_MONITORING_STARTED = "study_monitoring_started"
+    STUDY_MONITOR_CHECK = "study_monitor_check"
+    STUDY_MONITOR_CHECK_FAILED = "study_monitor_check_failed"
+    STUDY_DRIFT_DETECTED = "study_drift_detected"
+    STUDY_KNOWLEDGE_CHECK = "study_knowledge_check"
+    STUDY_KNOWLEDGE_UPDATE = "study_knowledge_update"
+    STUDY_KNOWLEDGE_COMPACTED = "study_knowledge_compacted"
+    STUDY_DIRECTIVES_CONSUMED = "study_directives_consumed"
+
 
 # Set of all known event types (for validation)
 _ALL_EVENT_TYPES: Set[str] = set()

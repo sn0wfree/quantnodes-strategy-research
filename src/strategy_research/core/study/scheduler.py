@@ -84,7 +84,10 @@ class StudyScheduler:
         # but if submit() is called on a recovered RUNNING study, we do
         # not downgrade it here — only fresh submits pass through).
         # INTERRUPTED studies are reset to QUEUED so the runner picks them up.
-        if study.execution_status not in (StudyStatus.RUNNING, StudyStatus.INTERRUPTED):
+        # MONITORING studies stay MONITORING (v2 §15.2 recover → monitor task).
+        if study.execution_status not in (
+            StudyStatus.RUNNING, StudyStatus.INTERRUPTED, StudyStatus.MONITORING,
+        ):
             self.store.update_execution_status(
                 study.study_id, StudyStatus.QUEUED,
             )
@@ -181,6 +184,11 @@ class StudyScheduler:
                     "reason": "interrupted by server restart",
                 })
                 recoverable.append(s)
+                continue
+            if s.execution_status == StudyStatus.MONITORING:
+                # v2 §15.2 recover: rebuild the monitor task, no research rounds.
+                recoverable.append(s)
+                await self.submit(s)
                 continue
             # QUEUED: re-enqueue so the consumer picks it up
             recoverable.append(s)
@@ -285,9 +293,12 @@ class StudyScheduler:
         )
         self._active_executors[study_id] = executor
         _dlog("sched", "marking RUNNING study=%s", study_id)
-        self.store.update_execution_status(
-            study_id, StudyStatus.RUNNING,
-        )
+        # v2 §15.2: a recovered MONITORING study keeps its status; the runner
+        # skips research rounds and enters the monitor phase directly.
+        if study.execution_status != StudyStatus.MONITORING:
+            self.store.update_execution_status(
+                study_id, StudyStatus.RUNNING,
+            )
         self._emit_event(study.session_id, "study_started", {
             "study_id": study_id, "round": study.current_round,
         })

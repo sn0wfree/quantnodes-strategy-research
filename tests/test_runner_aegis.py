@@ -95,6 +95,7 @@ class TestRunnerAEGIS:
                 "round": round_num, "run_name": f"run_{round_num:04d}",
                 "metrics": {"calmar": 0.6, "sharpe": 0.4},
                 "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False},
                 "agent_outputs": {},
                 "summary": {"round": round_num, "metrics": {"calmar": 0.6}},
@@ -213,6 +214,7 @@ class TestRunnerAEGIS:
             return {
                 "round": round_num, "run_name": f"run_{round_num:04d}",
                 "metrics": {"calmar": 0.6, "sharpe": 0.4}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False},
                 "agent_outputs": {}, "summary": {"round": round_num},
                 "backtest_error": None, "passed_now": {"calmar", "sharpe"},

@@ -89,7 +89,7 @@ def _setup(store, goal_store, **overrides):
     return goal, study
 
 
-def _patch_round(monkeypatch, metrics=None, rounds_counter=None):
+def _patch_round(monkeypatch, metrics=None, rounds_counter=None, e2_passed=True):
     """Stub AutoresearchExecutor._run_one_round + cooldown + summary load."""
 
     def _round(self, r, prev, directives_text=None):
@@ -99,6 +99,7 @@ def _patch_round(monkeypatch, metrics=None, rounds_counter=None):
         return {
             "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
             "metrics": m, "verdict": "keep",
+            "e2_passed": e2_passed,
             "decision": {"stagnation_triggered": False, "reason": "",
                          "to_dict": lambda: {"stagnation_triggered": False}},
             "agent_outputs": {k: {"ok": True} for k in
@@ -207,7 +208,7 @@ def test_chat_key_does_not_block_study(store, goal_store, monkeypatch):
 def test_cancel_via_scheduler(store, goal_store, monkeypatch):
     rounds = {"n": 0}
     _patch_round(monkeypatch, metrics={"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
-                 rounds_counter=rounds)
+                 rounds_counter=rounds, e2_passed=False)
     goal, study = _setup(store, goal_store,
         metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
         max_rounds=None,

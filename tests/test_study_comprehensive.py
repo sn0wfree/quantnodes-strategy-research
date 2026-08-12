@@ -963,6 +963,7 @@ class TestSchedulerEmitter:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1031,6 +1032,7 @@ class TestSchedulerRecover:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1079,6 +1081,7 @@ class TestSchedulerRecover:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1360,6 +1363,7 @@ class TestRunnerGoalStoreClose:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1408,7 +1412,8 @@ class TestSchedulerShutdown:
         def _round(self, r, prev, directives_text=None):
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
-                "metrics": {"calmar": 0.1}, "verdict": "discard",
+                "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": False,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {},
