@@ -9,14 +9,12 @@ Focuses on:
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from strategy_research.core.goal import GoalStore
 from strategy_research.core.hypothesis import HypothesisRegistry, HypothesisStore
-
 
 # ─── Fixtures ─────────────────────────────────────────────────────────
 
@@ -155,23 +153,24 @@ class TestGoalHypothesisRoundTrip:
 
 
 # ============================================================
-# JSON migration: edge cases not yet covered
+# No JSON migration (v2 design §14.2: JSON left in place, never read)
 # ============================================================
 
 
-class TestMigrationEdgeCases:
-    def test_empty_list(self, tmp_path):
-        """JSON containing empty list → empty DB, .bak is created."""
+class TestNoMigrationEdgeCases:
+    def test_empty_list_not_imported(self, tmp_path):
+        """Legacy JSON next to the DB is never imported, even when empty."""
         json_path = tmp_path / "hypotheses.json"
         json_path.write_text("[]", encoding="utf-8")
 
         store = HypothesisStore(db_path=tmp_path / "h.db")
         assert len(store.list()) == 0
-        assert (tmp_path / "hypotheses.json.bak").exists()
+        assert json_path.exists()
+        assert not (tmp_path / "hypotheses.json.bak").exists()
         store.close()
 
-    def test_top_level_object(self, tmp_path):
-        """JSON containing a dict (not list) → empty DB, not crashed."""
+    def test_top_level_object_ignored(self, tmp_path):
+        """JSON containing a dict (not list) → ignored, not crashed."""
         json_path = tmp_path / "hypotheses.json"
         json_path.write_text('{"key": "value"}', encoding="utf-8")
 
@@ -179,8 +178,8 @@ class TestMigrationEdgeCases:
         assert len(store.list()) == 0
         store.close()
 
-    def test_top_level_string(self, tmp_path):
-        """JSON containing a string at top level → silently skipped."""
+    def test_top_level_string_ignored(self, tmp_path):
+        """JSON containing a string at top level → ignored."""
         json_path = tmp_path / "hypotheses.json"
         json_path.write_text('"just a string"', encoding="utf-8")
 
@@ -188,33 +187,25 @@ class TestMigrationEdgeCases:
         assert len(store.list()) == 0
         store.close()
 
-    def test_mixed_valid_and_malformed(self, tmp_path):
-        """Some valid + some malformed entries → valid are imported, malformed skipped."""
+    def test_valid_records_not_imported(self, tmp_path):
+        """Valid records in the legacy JSON are NOT imported (design §14.2)."""
         json_path = tmp_path / "hypotheses.json"
         data = [
             {"hypothesis_id": "hyp_valid1", "title": "OK1", "thesis": "t",
              "status": "exploring", "created_at": "2026-01-01T00:00:00Z",
              "updated_at": "2026-01-01T00:00:00Z"},
             "this is not a dict",
-            {"hypothesis_id": "hyp_invalid_status", "title": "Bad", "thesis": "t",
-             "status": "totally_not_a_valid_status",
-             "created_at": "2026-01-01T00:00:00Z",
-             "updated_at": "2026-01-01T00:00:00Z"},
             42,
-            {"hypothesis_id": "hyp_valid2", "title": "OK2", "thesis": "t",
-             "status": "testing", "created_at": "2026-01-02T00:00:00Z",
-             "updated_at": "2026-01-02T00:00:00Z"},
         ]
         json_path.write_text(json.dumps(data), encoding="utf-8")
 
         store = HypothesisStore(db_path=tmp_path / "h.db")
-        ids = {h.hypothesis_id for h in store.list()}
-        assert "hyp_valid1" in ids
-        assert "hyp_valid2" in ids
+        assert store.list() == []
+        assert json_path.exists()  # left in place, untouched
         store.close()
 
-    def test_duplicate_ids_last_wins(self, tmp_path):
-        """Two entries with same ID — INSERT OR REPLACE so last wins."""
+    def test_duplicate_ids_irrelevant(self, tmp_path):
+        """No import means duplicate IDs in the JSON have no effect."""
         json_path = tmp_path / "hypotheses.json"
         data = [
             {"hypothesis_id": "hyp_dup", "title": "First", "thesis": "t1",
@@ -227,14 +218,11 @@ class TestMigrationEdgeCases:
         json_path.write_text(json.dumps(data), encoding="utf-8")
 
         store = HypothesisStore(db_path=tmp_path / "h.db")
-        hyp = store.get("hyp_dup")
-        assert hyp is not None
-        assert hyp.title == "Second"
-        assert hyp.thesis == "t2"
+        assert store.get("hyp_dup") is None
         store.close()
 
-    def test_fts_index_consistent_after_migration(self, tmp_path):
-        """After migration, FTS search returns the imported records."""
+    def test_fts_index_untouched(self, tmp_path):
+        """No migration → FTS search only sees SQLite-created records."""
         json_path = tmp_path / "hypotheses.json"
         data = [
             {"hypothesis_id": "hyp_fts1", "title": "Momentum angle",
@@ -246,27 +234,20 @@ class TestMigrationEdgeCases:
         json_path.write_text(json.dumps(data), encoding="utf-8")
 
         store = HypothesisStore(db_path=tmp_path / "h.db")
-        results = store.search(query="momentum")
-        ids = {h.hypothesis_id for h in results}
-        assert "hyp_fts1" in ids
+        assert store.search(query="momentum") == []
         store.close()
 
-    def test_archived_json_is_safe_to_re_migrate(self, tmp_path):
-        """After migration the .bak file is left; subsequent init does not re-import."""
+    def test_json_untouched_across_reinit(self, tmp_path):
+        """Subsequent inits never touch the legacy JSON file."""
         json_path = tmp_path / "hypotheses.json"
-        data = [
-            {"hypothesis_id": "hyp_a", "title": "A", "thesis": "t",
-             "status": "exploring",
-             "created_at": "2026-01-01T00:00:00Z",
-             "updated_at": "2026-01-01T00:00:00Z"},
-        ]
-        json_path.write_text(json.dumps(data), encoding="utf-8")
+        json_path.write_text('[]', encoding="utf-8")
+        before = json_path.read_text(encoding="utf-8")
 
         s1 = HypothesisStore(db_path=tmp_path / "h.db")
-        assert s1.get("hyp_a") is not None
+        s1.create(title="via sqlite", thesis="t")
         s1.close()
 
-        # Re-init from same DB — should not try to migrate from .bak
         s2 = HypothesisStore(db_path=tmp_path / "h.db")
-        assert len(s2.list()) == 1
+        assert len(s2.list()) == 1  # only the SQLite-created record
+        assert json_path.read_text(encoding="utf-8") == before
         s2.close()

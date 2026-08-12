@@ -72,3 +72,15 @@ def _purge_llm_env(monkeypatch):
 
     import strategy_research.core.llm.config as _cfg
     monkeypatch.setattr(_cfg, "_try_load_dotenv", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _purge_hypothesis_sqlite_env(monkeypatch):
+    """Keep tests in JSON mode unless they explicitly opt into SQLite.
+
+    ``create_app`` sets ``HYPOTHESIS_USE_SQLITE`` (v2 design §14.2 default-on),
+    and some test modules call ``create_app()`` at import time — without this,
+    every ``HypothesisRegistry()`` would silently switch to the host SQLite DB
+    (~/.quantnodes-research/hypotheses.db) for the rest of the session.
+    """
+    monkeypatch.delenv("HYPOTHESIS_USE_SQLITE", raising=False)

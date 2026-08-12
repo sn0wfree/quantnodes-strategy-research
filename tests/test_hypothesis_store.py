@@ -268,14 +268,13 @@ class TestRelationships:
 
 
 # ============================================================
-# JSON → SQLite migration
+# No JSON migration (v2 design §14.2: JSON left in place, never read)
 # ============================================================
 
 
-class TestJsonMigration:
-    def test_migrate_from_json_file(self, tmp_path: Path):
-        """Existing JSON file should be imported into SQLite on first init."""
-        # Write a legacy JSON file in the same dir as the future DB
+class TestNoJsonMigration:
+    def test_json_file_not_imported(self, tmp_path: Path):
+        """Legacy JSON next to the DB is left untouched, not imported."""
         json_path = tmp_path / "hypotheses.json"
         legacy = [
             {
@@ -287,76 +286,28 @@ class TestJsonMigration:
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
             },
-            {
-                "hypothesis_id": "hyp_legacy_2",
-                "title": "Legacy 2",
-                "thesis": "Legacy thesis 2",
-                "status": "testing",
-                "created_at": "2026-01-02T00:00:00Z",
-                "updated_at": "2026-01-02T00:00:00Z",
-            },
         ]
         json_path.write_text(json.dumps(legacy), encoding="utf-8")
 
-        # Init store — should import JSON
         db_path = tmp_path / "hypotheses.db"
         store = HypothesisStore(db_path=db_path)
 
-        assert store.get("hyp_legacy_1") is not None
-        assert store.get("hyp_legacy_2") is not None
-
-        # JSON file should be renamed to .bak
-        bak_path = tmp_path / "hypotheses.json.bak"
-        assert bak_path.exists()
-        assert not json_path.exists()
-
-        store.close()
-
-    def test_no_migration_when_db_has_data(self, tmp_path: Path):
-        """If DB already has data, migration should not run."""
-        db_path = tmp_path / "hypotheses.db"
-        # First init — empty DB
-        store1 = HypothesisStore(db_path=db_path)
-        store1.create(title="existing", thesis="t")
-        store1.close()
-
-        # Place a JSON file that should NOT be migrated
-        json_path = tmp_path / "hypotheses.json"
-        json_path.write_text(
-            json.dumps([{
-                "hypothesis_id": "hyp_legacy",
-                "title": "Legacy",
-                "thesis": "Should not migrate",
-                "status": "exploring",
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
-            }]),
-            encoding="utf-8",
-        )
-
-        # Re-init — DB already has data, so JSON should be left alone
-        store2 = HypothesisStore(db_path=db_path)
-        assert store2.get("hyp_legacy") is None  # not migrated
-        assert json_path.exists()  # not renamed
-        assert len(store2.list()) == 1  # only the existing one
-
-        store2.close()
-
-    def test_no_json_file_no_migration(self, tmp_path: Path):
-        """Without a JSON file, init should just create an empty DB."""
-        db_path = tmp_path / "hypotheses.db"
-        store = HypothesisStore(db_path=db_path)
+        # JSON content is NOT imported into SQLite
+        assert store.get("hyp_legacy_1") is None
         assert len(store.list()) == 0
+        # JSON file is preserved in place (no rename, no .bak)
+        assert json_path.exists()
+        assert not (tmp_path / "hypotheses.json.bak").exists()
+
         store.close()
 
-    def test_malformed_json_does_not_crash(self, tmp_path: Path):
-        """Malformed JSON should be silently skipped."""
+    def test_malformed_json_next_to_db_is_ignored(self, tmp_path: Path):
+        """A malformed legacy JSON must not break SQLite init."""
         json_path = tmp_path / "hypotheses.json"
         json_path.write_text("{invalid json", encoding="utf-8")
 
         db_path = tmp_path / "hypotheses.db"
         store = HypothesisStore(db_path=db_path)
-        # Should not crash, should have empty store
         assert len(store.list()) == 0
         store.close()
 

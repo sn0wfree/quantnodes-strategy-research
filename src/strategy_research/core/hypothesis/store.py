@@ -8,8 +8,8 @@ Schema:
   hypothesis_relations  — graph edges (parent, related, contradicts)
   hypothesis_goals      — M:N relationship to research goals
 
-Migration: On first startup, existing JSON files are migrated to SQLite.
-The original JSON file is renamed with .bak suffix after migration.
+Migration (v2 design §14.2): the legacy JSON file is intentionally NOT
+imported; it is left in place but never read.
 """
 
 from __future__ import annotations
@@ -40,20 +40,6 @@ _DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "hypotheses.db"
 _ENV_PATH = "QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH"
 
 
-def _json_fallback_path(db_path: Path | None = None) -> Path:
-    """Return the path to the legacy JSON file for migration.
-
-    Looks at the same directory as the SQLite DB by default, so tests can
-    use tmp_path directories without polluting ~/.quantnodes-research/.
-    """
-    env_db = os.environ.get(_ENV_PATH, "").strip()
-    if env_db:
-        return Path(env_db).expanduser().parent / "hypotheses.json"
-    if db_path is not None:
-        return db_path.parent / "hypotheses.json"
-    return Path.home() / ".quantnodes-research" / "hypotheses.json"
-
-
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -65,7 +51,6 @@ def default_db_path() -> Path:
         1. QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH env var
         2. ~/.quantnodes-research/hypotheses.db (default)
     """
-    import os
     raw_path = os.environ.get(_ENV_PATH, "").strip()
     if raw_path:
         return Path(raw_path).expanduser()
@@ -96,7 +81,6 @@ class HypothesisStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
-        self._migrate_from_json()
 
     # ── Schema & migration ─────────────────────────────────────
 
@@ -147,45 +131,6 @@ class HypothesisStore:
                 """
             )
             self._conn.commit()
-
-    def _migrate_from_json(self) -> None:
-        """One-time migration from JSON file to SQLite.
-
-        If a hypotheses.json exists and the SQLite DB is empty, import all
-        records and rename the JSON file with .bak suffix.
-        """
-        json_path = _json_fallback_path(self.db_path)
-        if not json_path.exists():
-            return
-        # Check if DB already has data
-        with self._lock:
-            row = self._conn.execute("SELECT COUNT(*) AS n FROM hypotheses").fetchone()
-            if row["n"] > 0:
-                return
-            try:
-                raw = json.loads(json_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.warning("JSON migration skipped: %s", exc)
-                return
-            if not isinstance(raw, list):
-                return
-            for item in raw:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    hyp = Hypothesis.from_dict(item)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("Skipping malformed hypothesis: %s", exc)
-                    continue
-                self._insert_raw(hyp)
-            try:
-                json_path.rename(json_path.with_suffix(".json.bak"))
-                logger.info(
-                    "Migrated %d hypotheses from JSON to SQLite; JSON archived.",
-                    len(raw),
-                )
-            except OSError as exc:
-                logger.warning("Could not rename JSON file: %s", exc)
 
     def _insert_raw(self, hyp: Hypothesis) -> None:
         """Insert a hypothesis without validation. Used by migration."""

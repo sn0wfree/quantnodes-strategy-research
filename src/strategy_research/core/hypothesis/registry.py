@@ -171,6 +171,37 @@ class Hypothesis:
         )
 
 
+def _rank_search(
+    hypotheses: list["Hypothesis"],
+    *,
+    query: str,
+    status: str | None,
+    limit: int,
+) -> list["Hypothesis"]:
+    """Filter and score hypotheses by text tokens + status (JSON semantics).
+
+    Shared by both storage backends so registry.search behaves identically
+    in JSON and SQLite mode: any token overlap qualifies (OR semantics),
+    results are ordered by score then most recently updated.
+    """
+    status_filter = _validate_status(status) if status else None
+    query_tokens = _tokenize(query)
+    scored: list[tuple[int, Hypothesis]] = []
+    for hyp in hypotheses:
+        if status_filter and hyp.status != status_filter:
+            continue
+        haystack = json.dumps(hyp.to_dict(), ensure_ascii=False, sort_keys=True)
+        if not query_tokens:
+            score = 1
+        else:
+            hay_tokens = _tokenize(haystack)
+            score = len(query_tokens & hay_tokens)
+        if score > 0:
+            scored.append((score, hyp))
+    scored.sort(key=lambda item: (item[0], item[1].updated_at), reverse=True)
+    return [hyp for _, hyp in scored[: max(1, min(int(limit), 100))]]
+
+
 class HypothesisRegistry:
     """File-backed registry for research hypotheses.
 
@@ -215,6 +246,16 @@ class HypothesisRegistry:
         goal_id: str | None = None,
     ) -> Hypothesis:
         """Create and persist a new hypothesis."""
+        if self._store is not None:
+            return self._store.create(
+                title=title, thesis=thesis, status=status, universe=universe,
+                signal_definition=signal_definition,
+                data_sources=data_sources, skills=skills,
+                invalidation_notes=invalidation_notes,
+                parent_hypothesis_id=parent_hypothesis_id,
+                related_ids=related_ids, contradicts_ids=contradicts_ids,
+                goal_id=goal_id,
+            )
         title = title.strip()
         thesis = thesis.strip()
         if not title:
@@ -268,6 +309,19 @@ class HypothesisRegistry:
         P3-C: parent_hypothesis_id / related_ids / contradicts_ids / goal_id
               can be set or cleared (None clears).
         """
+        if self._store is not None:
+            updated = self._store.update(
+                hypothesis_id, title=title, thesis=thesis, status=status,
+                universe=universe, signal_definition=signal_definition,
+                data_sources=data_sources, skills=skills,
+                invalidation_notes=invalidation_notes,
+                parent_hypothesis_id=parent_hypothesis_id,
+                related_ids=related_ids, contradicts_ids=contradicts_ids,
+                goal_id=goal_id,
+            )
+            if updated is None:
+                raise KeyError(f"hypothesis not found: {hypothesis_id}")
+            return updated
         records = self.list()
         hyp = self._find_required(records, hypothesis_id)
         if title is not None:
@@ -313,6 +367,14 @@ class HypothesisRegistry:
         """Link a run card or backtest artifact to a hypothesis."""
         if not run_card_path and not backtest_run_dir:
             raise ValueError("run_card_path or backtest_run_dir is required")
+        if self._store is not None:
+            updated = self._store.link_backtest(
+                hypothesis_id, run_card_path=run_card_path,
+                backtest_run_dir=backtest_run_dir, metrics=metrics, notes=notes,
+            )
+            if updated is None:
+                raise KeyError(f"hypothesis not found: {hypothesis_id}")
+            return updated
         records = self.list()
         hyp = self._find_required(records, hypothesis_id)
         hyp.run_cards.append({
@@ -341,6 +403,11 @@ class HypothesisRegistry:
         Inherits parent's universe, data_sources, and skills. Sets
         parent_hypothesis_id on the new hypothesis.
         """
+        if self._store is not None:
+            return self._store.derive(
+                parent_id=parent_id, title=title, thesis=thesis,
+                signal_definition=signal_definition,
+            )
         records = self.list()
         parent = self._find_required(records, parent_id)
         now = _utc_now()
@@ -363,6 +430,11 @@ class HypothesisRegistry:
 
     def link(self, hyp_id: str, related_id: str) -> Hypothesis:
         """Mark two hypotheses as related (bidirectional)."""
+        if self._store is not None:
+            updated = self._store.link(hyp_id, related_id)
+            if updated is None:
+                raise KeyError(f"hypothesis not found: {hyp_id or related_id}")
+            return updated
         records = self.list()
         hyp_a = self._find_required(records, hyp_id)
         hyp_b = self._find_required(records, related_id)
@@ -376,6 +448,11 @@ class HypothesisRegistry:
 
     def unlink(self, hyp_id: str, related_id: str) -> Hypothesis:
         """Remove bidirectional related link."""
+        if self._store is not None:
+            updated = self._store.unlink(hyp_id, related_id)
+            if updated is None:
+                raise KeyError(f"hypothesis not found: {hyp_id}")
+            return updated
         records = self.list()
         hyp_a = self._find_required(records, hyp_id)
         hyp_b = self._find_required(records, related_id)
@@ -387,6 +464,11 @@ class HypothesisRegistry:
 
     def contradicts(self, hyp_id: str, other_id: str, notes: str = "") -> Hypothesis:
         """Mark two hypotheses as contradicting (one-way from hyp_id's perspective)."""
+        if self._store is not None:
+            updated = self._store.contradicts(hyp_id, other_id, notes=notes)
+            if updated is None:
+                raise KeyError(f"hypothesis not found: {hyp_id or other_id}")
+            return updated
         records = self.list()
         hyp_a = self._find_required(records, hyp_id)
         self._find_required(records, other_id)
@@ -403,6 +485,11 @@ class HypothesisRegistry:
 
     def link_goal(self, hyp_id: str, goal_id: str) -> Hypothesis:
         """Associate a hypothesis with a research goal."""
+        if self._store is not None:
+            updated = self._store.link_goal(hyp_id, goal_id)
+            if updated is None:
+                raise KeyError(f"hypothesis not found: {hyp_id}")
+            return updated
         records = self.list()
         hyp = self._find_required(records, hyp_id)
         hyp.goal_id = goal_id
@@ -412,14 +499,22 @@ class HypothesisRegistry:
 
     def list_by_goal(self, goal_id: str) -> list[Hypothesis]:
         """Return all hypotheses linked to a given goal."""
+        if self._store is not None:
+            return self._store.list_by_goal(goal_id)
         return [h for h in self.list() if h.goal_id == goal_id]
 
     def list_children(self, parent_id: str) -> list[Hypothesis]:
         """Return all child hypotheses of a parent."""
+        if self._store is not None:
+            return self._store.list_children(parent_id)
         return [h for h in self.list() if h.parent_hypothesis_id == parent_id]
 
     def list_contradictions(self, hyp_id: str) -> list[Hypothesis]:
         """Return all hypotheses that this one contradicts."""
+        if self._store is not None:
+            if self._store.get(hyp_id) is None:
+                raise KeyError(f"hypothesis not found: {hyp_id}")
+            return self._store.list_contradictions(hyp_id)
         records = self.list()
         hyp = self._find_required(records, hyp_id)
         by_id = {h.hypothesis_id: h for h in records}
@@ -443,25 +538,22 @@ class HypothesisRegistry:
         Returns:
             Matching hypotheses ordered by score then most recently updated.
         """
-        status_filter = _validate_status(status) if status else None
-        query_tokens = _tokenize(query)
-        scored: list[tuple[int, Hypothesis]] = []
-        for hyp in self.list():
-            if status_filter and hyp.status != status_filter:
-                continue
-            haystack = json.dumps(hyp.to_dict(), ensure_ascii=False, sort_keys=True)
-            if not query_tokens:
-                score = 1
-            else:
-                hay_tokens = _tokenize(haystack)
-                score = len(query_tokens & hay_tokens)
-            if score > 0:
-                scored.append((score, hyp))
-        scored.sort(key=lambda item: (item[0], item[1].updated_at), reverse=True)
-        return [hyp for _, hyp in scored[: max(1, min(int(limit), 100))]]
+        if self._store is not None:
+            # JSON-mode semantics shared across backends (§14.2: behave
+            # identically); FTS5 stays available on HypothesisStore directly.
+            return _rank_search(
+                self._store.list(limit=10000),
+                query=query, status=status, limit=limit,
+            )
+        return _rank_search(self.list(), query=query, status=status, limit=limit)
 
     def list(self) -> list[Hypothesis]:
         """Load all hypotheses from storage."""
+        if self._store is not None:
+            return sorted(
+                self._store.list(limit=10000),
+                key=lambda h: h.created_at,
+            )
         if not self.path.exists():
             return []
         try:
@@ -474,6 +566,8 @@ class HypothesisRegistry:
 
     def get(self, hypothesis_id: str) -> Hypothesis | None:
         """Return a hypothesis by id or None if missing."""
+        if self._store is not None:
+            return self._store.get(hypothesis_id)
         for hyp in self.list():
             if hyp.hypothesis_id == hypothesis_id:
                 return hyp

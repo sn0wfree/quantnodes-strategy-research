@@ -38,6 +38,8 @@ def create_app(
     # 配置应用日志级别 - 确保 info 级别日志可见。
     # SR_LOG_LEVEL=DEBUG 可开启 [DIAG] 诊断日志（流式 chunk、cfg、agent
     # result 等），用于排查 SSE/LLM 链路问题；默认 INFO 不显。
+    # v2 §14.2: hypotheses 默认走 SQLite（旧 JSON 不迁移、不读取）。
+    os.environ.setdefault("HYPOTHESIS_USE_SQLITE", "1")
     log_level_name = os.environ.get("SR_LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
     logging.basicConfig(
@@ -140,7 +142,21 @@ def create_app(
     app.add_middleware(AuthMiddleware)
 
     # Register routers
-    from .routers import admin, auth, chat, goal, hypothesis, memory, permission, run, session, study, validation, web_session, workflow
+    from .routers import (
+        admin,
+        auth,
+        chat,
+        goal,
+        hypothesis,
+        memory,
+        permission,
+        run,
+        session,
+        study,
+        validation,
+        web_session,
+        workflow,
+    )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
