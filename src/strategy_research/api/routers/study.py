@@ -875,6 +875,25 @@ async def study_journal(request: Request, study_id: str):
     return {"status": "ok", "study_id": study_id, "journal": content}
 
 
+@router.get("/{study_id}/guidance")
+async def study_guidance(request: Request, study_id: str):
+    """v2: guidance.md content + parsed gates (design §13.4)."""
+    from ...core.study import guidance as gd
+    study = _owned_study(request, study_id)
+    g = gd.load_guidance(Path(study.workspace_path), study_id)
+    if g.source is None:
+        raise HTTPException(status_code=404, detail="guidance not found")
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "source": str(g.source),
+        "task_scope": g.task_scope,
+        "gates": [gate.to_dict() for gate in g.gates],
+        "body": g.body,
+        "text": g.source.read_text(encoding="utf-8"),
+    }
+
+
 @router.get("/{study_id}/rounds/{round_num}/summary_md")
 async def study_round_summary_md(request: Request, study_id: str, round_num: int):
     """v2: single-round summary.md content."""

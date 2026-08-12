@@ -1024,6 +1024,8 @@ def _study_help() -> str:
         "            [--budget-turn N] [--budget-time S] [--max-rounds N]\n"
         "            [--monitor-interval S]   (Phase 3: post-completion drift check)\n"
         "            [--behavior static|varying|improving]\n"
+        "            [--guidance-file REL]   workspace-relative markdown body\n"
+        "            [--gates-file REL]      workspace-relative YAML frontmatter\n"
         "  Create a study. The active session's goal ledger is created.\n"
         "/study status   — current study for this session\n"
         "/study list [status=queued|running|monitoring|complete|cancelled]\n"
@@ -1042,6 +1044,7 @@ def _parse_study_flags(rest: list[str]) -> dict:
         "metric_targets": None, "executor_type": "autoresearch",
         "budget_turn": None, "budget_time_seconds": None, "max_rounds": None,
         "behavior": None, "monitor_interval_seconds": None,
+        "guidance_file": None, "gates_file": None,
     }
     i = 0
     while i < len(rest):
@@ -1079,6 +1082,10 @@ def _parse_study_flags(rest: list[str]) -> dict:
             elif key in ("executor", "executor_type"):
                 if val in ("autoresearch", "workflow"):
                     flags["executor_type"] = val
+            elif key in ("guidance-file",):
+                flags["guidance_file"] = val
+            elif key in ("gates-file",):
+                flags["gates_file"] = val
             i += 2
         else:
             i += 1
@@ -1153,6 +1160,19 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
                 max_rounds=flags["max_rounds"], behavior=flags["behavior"],
                 monitor_interval_seconds=flags["monitor_interval_seconds"],
             )
+
+        # v2 §17.1: --guidance-file / --gates-file → single guidance.md
+        from pathlib import Path
+        from ...core.study import guidance as gd
+        guidance_text = gd.compose_guidance_text(
+            Path(ws),
+            guidance_file=flags["guidance_file"],
+            gates_file=flags["gates_file"],
+        )
+        if guidance_text:
+            gdir = Path(ws) / "study" / study.study_id
+            gdir.mkdir(parents=True, exist_ok=True)
+            (gdir / "guidance.md").write_text(guidance_text, encoding="utf-8")
 
         # Phase 3: Build GoalWorkflowConfig for the 9-agent preset
         from ...core.goal.workflow import (
@@ -1246,7 +1266,7 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
             # workflow → GoalWorkflowRunner (single DAG)
             _study_pending_submits.append((study, config, goal.goal_id, objective, ws))
 
-    except ValueError as e:
+    except (ValueError, FileNotFoundError) as e:
         return f"Cannot create study: {e}"
     return (
         f"Study created: {study.study_id[:12]}...\n"

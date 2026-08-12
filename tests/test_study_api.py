@@ -846,3 +846,55 @@ async def test_start_accepts_plain_strategy_name(_app_env, monkeypatch):
     async with _api_client() as client:
         r = await client.post("/api/study/start", json=body)
         assert r.status_code == 200
+
+
+# ── v2 guidance endpoint (§13.4) ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_guidance_endpoint_task_file(_app_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+    study_id = _seed_study(_app_env, tmp_path, monkeypatch)
+    gdir = _app_env / "study" / study_id
+    gdir.mkdir(parents=True)
+    (gdir / "guidance.md").write_text(
+        "---\n"
+        "gates:\n"
+        "  - {id: risk-max-dd, metric: max_dd, op: '>=', value: -0.15}\n"
+        "---\n"
+        "# 研究指引\n\n禁止 MaxDD 低于 -0.15\n",
+        encoding="utf-8",
+    )
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/{study_id}/guidance")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["task_scope"] is True
+        assert data["gates"][0]["id"] == "risk-max-dd"
+        assert data["gates"][0]["value"] == -0.15
+        assert "禁止 MaxDD" in data["body"]
+        assert "禁止 MaxDD" in data["text"]
+
+
+@pytest.mark.asyncio
+async def test_guidance_endpoint_global_fallback_and_404(_app_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+    study_id = _seed_study(_app_env, tmp_path, monkeypatch)
+
+    # no guidance anywhere → 404
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/{study_id}/guidance")
+        assert r.status_code == 404
+
+    # global template only → 200 with task_scope=False
+    gdir = _app_env / "study"
+    gdir.mkdir(parents=True)
+    (gdir / "guidance.md").write_text("global template body\n", encoding="utf-8")
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/{study_id}/guidance")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["task_scope"] is False
+        assert "global template body" in data["body"]

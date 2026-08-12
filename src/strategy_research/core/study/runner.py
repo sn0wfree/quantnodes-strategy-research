@@ -447,6 +447,13 @@ class AutoresearchRunner:
         if scoreboard_ctx:
             current_state["lever_scoreboard"] = scoreboard_ctx
 
+        # v2 guidance: human decision points injected every round (§13.2)
+        from strategy_research.core.study import guidance as gd
+        guidance = gd.load_guidance(path, sid)
+        guidance_section = gd.render_guidance_section(guidance)
+        if guidance_section:
+            current_state["human_guidance"] = guidance_section
+
         # Inject factor failures from previous round
         if previous_summary and previous_summary.get("factor_failures"):
             current_state["factor_failures"] = previous_summary["factor_failures"]
@@ -493,6 +500,18 @@ class AutoresearchRunner:
             behavior=self.study.behavior, max_retries=3,
         )
         verdict = eval_result["verdict"]
+
+        # ── guidance gates hard check (design §13.3): before verdict ──
+        gate_violations: list[dict] = []
+        if guidance.gates:
+            violations, skipped = gd.check_violations(guidance.gates, metrics)
+            for gid in skipped:
+                logger.warning(
+                    "guidance gate %s skipped (metric missing): %s", gid, metrics,
+                )
+            if violations:
+                gate_violations = violations
+                verdict = "discard"
 
         # disk: results.tsv (round column) + summary
         self._update_results_tsv(
@@ -545,6 +564,9 @@ class AutoresearchRunner:
 
         # ── v2 artifacts (phase 1): manifest + summary.md + journal.md ──
         verdict_reason = self._verdict_reason(eval_result, strategist_output)
+        if gate_violations:
+            gate_reason = "guidance gates: " + ",".join(v["id"] for v in gate_violations)
+            verdict_reason = f"{verdict_reason} | {gate_reason}" if verdict_reason else gate_reason
         strategy_changes = (
             strategist_output.get("changes")
             if isinstance(strategist_output, dict) else None
@@ -563,7 +585,7 @@ class AutoresearchRunner:
             baseline_metrics=state.baseline_best or None,
             verdict=verdict,
             verdict_reason=verdict_reason,
-            gates=None,
+            gates=gate_violations or None,
             budget={
                 "turns_used": self._total_used_turns,
                 "time_used_s": round(self._total_used_time, 1),
