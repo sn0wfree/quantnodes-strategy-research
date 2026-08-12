@@ -20,12 +20,26 @@ from pathlib import Path
 # ── reviewer output parsing ────────────────────────────────────────────
 
 
-def parse_review_output(raw: str) -> dict:
-    """Parse the reviewer's JSON (tolerate markdown fences)."""
+def parse_review_output(raw: str) -> dict | list:
+    """Parse JSON output (tolerate markdown fences).
+
+    Reviewer outputs a dict; collector outputs an array of entries — both
+    shapes are returned as-is.
+    """
     text = (raw or "").strip()
+    # 1. whole-text JSON fast path
+    try:
+        data = json.loads(text)
+        if isinstance(data, (dict, list)):
+            return data
+    except (ValueError, TypeError):
+        pass
+    # 2. markdown fences; bare array before bare dict so a collector array
+    #    is not shadowed by its first embedded object
     for pattern in (
         r"```json\s*\n?(.*?)\n?\s*```",
         r"```\s*\n?(.*?)\n?\s*```",
+        r"(\[.*\])",
         r"(\{.*\})",
     ):
         m = re.search(pattern, text, re.DOTALL)
@@ -33,7 +47,7 @@ def parse_review_output(raw: str) -> dict:
             continue
         try:
             data = json.loads(m.group(1))
-            if isinstance(data, dict):
+            if isinstance(data, (dict, list)):
                 return data
         except (ValueError, TypeError):
             continue

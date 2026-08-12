@@ -28,6 +28,30 @@ def test_parse_review_json_and_fence():
     assert rl.parse_review_output("") == {}
 
 
+def test_parse_collector_array():
+    """Collector outputs a JSON array of entries — parsed as a list."""
+    raw = json.dumps([
+        {"topic": "动量崩盘研究", "source_url": "https://a",
+         "summary": "s", "idea": "i", "relevance": "high",
+         "collected_at": "2026-08-12"},
+    ])
+    out = rl.parse_review_output(raw)
+    assert isinstance(out, list)
+    assert out[0]["topic"] == "动量崩盘研究"
+    fenced = "```json\n" + raw + "\n```"
+    out2 = rl.parse_review_output(fenced)
+    assert isinstance(out2, list)
+    assert out2[0]["topic"] == "动量崩盘研究"
+    # collector 输出 → append_knowledge 完整落条目（非"未命名"占位）
+    import tempfile
+    from pathlib import Path
+    p = Path(tempfile.mkdtemp()) / "knowledge.md"
+    n = rl.append_knowledge(p, out, "目标")
+    assert n == 1
+    text = p.read_text(encoding="utf-8")
+    assert "动量崩盘研究" in text and "https://a" in text
+
+
 def test_normalize_review_tolerates_bad_fields():
     r = rl.normalize_review({
         "deviation": "bogus", "info_gap": 1,
