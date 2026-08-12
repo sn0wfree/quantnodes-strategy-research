@@ -172,21 +172,23 @@ strategist 白名单**含 run_backtest**（role_factory.py:41），agent 可在 
 4. **§7.2 backtest 行号**：strategy_dir 硬编码在 L275；run_backtest_from_yaml
    L388/400/433 三处——实施时对照
 
-## 7. M1 预研结论（微 session + 并行，含变体 3 修订）
+## 7. M1 预研结论（单身份 + 并行，定稿）
 
-- `create_study`（store.py:228）生成 study_id 后回填 `studies.session_id =
-  "study:{id}"`；`create_session(study:{id}, ...)` 幂等（§2）✅ 无阻塞
-- **变体 3 定稿**（用户确认）：微 session 保留为执行身份 + 事件频道；新增
-  `owner_session_id` 列仅作**归属查询**用途（`get_active_study` /
-  `list_studies` 改按 owner_session_id 查询，v1「按会话查我的 study」语义
-  保留）；账本写入经 goal `_require_mutable_goal` 解耦（删 session 匹配 +
-  current 检查，保留 expected_goal_id/status 校验）后接受任何执行身份——
-  runner 账本写入零改动，evidence 落库强制 goal.session_id（goal/store.py:790）
-- 查询适配点：`study/store.py:489` get_active_study、`:503` list_studies 的
-  `WHERE session_id` → `WHERE owner_session_id`
-- scheduler 并行改造（设计 §5.2）：`_session_loop` 消费队列 create_task 不
-  等待 + 全局 semaphore（SR_STUDY_MAX_CONCURRENT=3）；`_active_tasks` /
-  `_dispatch_tasks` 登记；`mark_session_processing('study:{id}')` 调用保留
-  （无实际互斥，service.py:78 按 session key 隔离）
+- **单身份设计**（§4）：`studies.session_id` = `study_id`（create_study 内部
+  一次写入，无回填/无前缀/无 sessions 行）。SSE/EventBus 按 session_id 字符
+  串键路由、不查 sessions 表（chat.py:1782 sse_buffer / events.py:83
+  _subscribers / bridge_v2.py:63）→ 微会话行无存在必要
+- `owner_session_id` = 创建者 chat 会话（归属查询 + IDOR 校验）；
+  `get_active_study` / `list_studies` / `delete_session_studies` 按
+  owner_session_id 查询（study/store.py:489/503/546）
+- **goal 统一流程**：`replace_goal(session_id=<隔离域>, supersede: bool=True)`；
+  chat 传 supersede=True（1:1 v1 语义）；study 传 supersede=False +
+  session_id=study_id（多 study 并行隔离）；唯一索引
+  `idx_goals_one_current_per_session` 保留（域内 1 active 硬保证）
+- goal 写路径已解耦（`_require_mutable_goal` 删 session 匹配 + current 检查，
+  保留 expected_goal_id/status）——runner 传 study_id 落账通过；
+  evidence 落库强制 goal.session_id（goal/store.py:790）
+- scheduler 并行（§5.2）：`_session_loop` create_task 不等待 + 全局
+  semaphore（SR_STUDY_MAX_CONCURRENT=3）+ `_active_tasks`/`_dispatch_tasks`
 - **测试影响**：`test_goal_account_usage.py:203`（wrong_session_id 期望拒绝）
-  是唯一依赖 session 强校验的现有测试 → 更新为期望通过
+  已更新为期望通过；`create_study` 删 session_id 参数 → 测试调用点全量直改

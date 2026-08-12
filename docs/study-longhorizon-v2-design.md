@@ -9,7 +9,7 @@
 1. [背景与目标](#1-背景与目标)
 2. [架构总览](#2-架构总览)
 3. [核心概念模型](#3-核心概念模型)
-4. [微 session 设计](#4-微-session-设计)
+4. [单身份设计（study_id = 会话身份）](#4-单身份设计study_id--会话身份)
 5. [并行调度](#5-并行调度)
 6. [study 自治目录](#6-study-自治目录)
 7. [引擎路径参数化](#7-引擎路径参数化)
@@ -96,7 +96,7 @@
 
 | 概念 | 层级 | 定义 |
 |---|---|---|
-| **study** | 任务 | 一次长程研发任务；`study:{id}` 微 session |
+| **study** | 任务 | 一次长程研发任务；`session_id` = `study_id`（单身份，§4） |
 | **round** | 任务层 | 一次完整研究迭代：继承→9-agent→回测→评估→verdict→交接；`rounds/round_NNNN/` |
 | **run** | 引擎层 | 一次回测执行单元 + 完整产物；`round_NNNN/run_XXXX/`（每轮内独立编号） |
 | **review** | 任务层 | 轮间综合评审：偏离度 + info_gap + todo_updates |
@@ -152,34 +152,38 @@ best_metrics / last_keep_run_dir / continuous_deviation），DB 仅镜像
 
 ---
 
-## 4. 微 session 设计
+## 4. 单身份设计（study_id = 会话身份）
 
 ### 4.1 动机
 
 v1 中 study 绑定用户 chat session（session_id），导致：事件/权限与 chat 纠缠、
-同 session 多 study 需互斥、SSE 无法按任务隔离。v2 为每个 study 生成独立
-session id：`study:{study_id}`——与 `dag:{name}` 编排会话同构（复用既有
-`create_session(WebSessionCreate(id=...))` 模式，见 `api/routers/workflow.py`）。
+同 session 多 study 需互斥、SSE 无法按任务隔离。v2 采用**单身份设计**：
+`studies.session_id` 直接 = `study_id`（`_id("study")` 生成，形如
+`study_7f2d9a`）——**不引入微 session 概念、不建 sessions 行、无前缀拼接**。
 
-### 4.2 设计（变体 3：微 session 即执行身份与事件频道）
+**关键事实（M0 证实）**：SSE/EventBus 按 session_id 字符串键路由
+（`sse_buffer`/`_subscribers`），**不查询 sessions 表**——事件频道不要求
+sessions 行存在，因此无需为 study 创建会话行。
+
+### 4.2 设计（单身份）
 
 | 项 | 设计 |
 |---|---|
-| session id | `studies.session_id` = `study:{study_id}`（create_study 后回填）——**执行身份 + 事件频道合一** |
-| owner_session_id | = 创建者 chat 会话——**纯归属查询用途**（`get_active_study`/`list_studies` 按它查，v1 的「按会话查我的 study」语义保留），**不参与账本校验** |
-| session 创建 | `study_start` 后调用 `create_session(WebSessionCreate(id=f"study:{id}", title=...))`（幂等，带真实 user_id → IDOR 校验通过） |
-| 事件隔离 | study 事件 emit 到 `study:{id}` 的 EventStore aggregate（scheduler/runner 直接使用 study.session_id，零派生） |
-| SSE | 前端详情页 `useSSE('study:{id}')`（下期前端）；连接自带 event_log 重放（last_event_id） |
-| 与 chat 互斥 | 天然解耦：`_processing_sessions` 按 session key，study session 与 chat session 不同 key；`mark_session_processing(study:{id})` 不再阻塞任何 chat 会话 |
-| 账本写入 | goal 写路径 **session 解耦**（§8.5 决策 D）：`_require_mutable_goal` 不再校验 session 匹配——runner 传微 session 即可通过；evidence 落库强制 goal.session_id、journal/evidence 查询按 goal_id，前端展示无感 |
+| session id | `studies.session_id` = `study_id`（create_study 内部一次写入，无回填、无前缀、无额外行）——**执行身份 + 事件频道 + goal 隔离域 三合一** |
+| owner_session_id | = 创建者 chat 会话——**归属用途**：`get_active_study`/`list_studies` 按它查（v1「按会话查我的研究」语义保留）+ **IDOR 校验**（`_verify_study_ownership` 按 owner 查 sessions 表） |
+| 事件隔离 | study 事件 emit 到 `session_id`（=study_id）频道——scheduler/runner 直接使用 `study.session_id`，零改动 |
+| SSE | 前端详情页 `useSSE(study_id)`（下期前端）；连接自带 event_log 重放（last_event_id）；不依赖 sessions 行 |
+| 与 chat 互斥 | 天然解耦：`_processing_sessions` 按 session key；chat 会话与 study_id 键不同，无互斥 |
+| 账本写入 | goal 写路径 **session 解耦**（§8.5 E0）：`_require_mutable_goal` 不校验 session——runner 传 study_id 即可通过；evidence 落库强制 goal.session_id、journal/evidence 查询按 goal_id |
+| 与 chat 隔离 | study 的 goal 挂 study_id 域 → **chat agent 上下文（`get_current_goal_context` 按 chat 会话查）不感知 study 的 goal**——期望隔离 |
 | 记录 | study 不写 chat messages（directive 仍走 `study_directives` 表） |
 
 ### 4.3 兼容性
 
 - 旧 study（v1，session_id=chat 会话）：owner_session_id 回填=chat 会话 →
-  `get_active_study`/`list_studies` 按 owner 查询后 v1 语义自动保留；v1 记录
-  只读展示，不保证 v2 新功能（manifest/评审等）
-- `SessionSidebar` 需过滤 `study:` 前缀（下期前端）
+  `get_active_study`/`list_studies` 按 owner 查询后 v1 语义自动保留；事件
+  仍发 chat 会话（旧行为）；v1 记录只读展示，不保证 v2 新功能
+- 前端无需过滤会话列表（无微会话行，StudyTab 按 owner 查询）
 
 ---
 
@@ -207,8 +211,8 @@ session id：`study:{study_id}`——与 `dag:{name}` 编排会话同构（复�
 
 ### 5.3 与 chat 的协作
 
-- study 不占用 chat session 处理槽（微 session 天然解耦）
-- `mark_session_processing('study:{id}')` 保留调用（兼容代码路径），但 session
+- study 不占用 chat session 处理槽（单身份天然解耦）
+- `mark_session_processing(study_id)` 保留调用（兼容代码路径），但 session
   key 与任何 chat 会话不同，**实际不再产生互斥**——无需额外锁
 
 ---
@@ -390,14 +394,16 @@ v1 的 goal 账本闭环保留（代码已在 `runner.py`）：`_register_hypoth
 
 | 项 | 设计 | 决策 |
 |---|---|---|
-| E0 写路径 session 解耦 | **goal `_require_mutable_goal` 删除 session 匹配 + current 检查**（保留 expected_goal_id / status 状态机校验）——账本接受任何执行身份（微 session），`session_id` 参数退化为记录用途；`replace_goal` supersede（创建语义）与 `get_current_goal`（查询层）保留 | 决策 D：治本（study 侧零字段、零切换，微 session 直接落账） |
+| E0 统一 goal 流程 | **一条 replace_goal 流程**，调用方传参数得不同行为：`session_id`=隔离域（chat 会话 / study_id）+ `supersede: bool=True`（同域旧 active 是否作废）。chat 传 `supersede=True`（1:1，v1 不变）；study 传 `supersede=False`（study_id 域 1 study 1 goal，多 study 并行互不干扰）。`_require_mutable_goal` 已解耦（保留 expected_goal_id / status 状态机校验） | 决策 D + Q2：唯一索引 `idx_goals_one_current_per_session` 保留（域内 1 active 硬保证；study_id 域天然 1:1） |
 | E1 只落 keep 账 | **evidence + goal 完成**严格 keep 口径（discard 轮即使指标达标也不落账）；**hypothesis 每轮注册**（researcher 阶段、verdict 前——否决轮作为负面证据保留）；archive_rejected 否决轮归档 | **D2=是（keep 口径）** |
 | E2 达标判定口径 | 达标 = meets_metric_targets ∧ verdict=keep ∧ 硬校验通过，三者同时才触发 goal 完成 | **D1=否（硬校验否决时不 complete，继续迭代）** |
-| E3 journal 并存 | 账本 journal（goal 视角）与文件级 journal.md（任务视角）**并存不合并**，prompt 注入两段并列；journal 行 session_id=微 session（元数据），查询按 goal_id | — |
+| E3 journal 并存 | 账本 journal（goal 视角）与文件级 journal.md（任务视角）**并存不合并**，prompt 注入两段并列；journal 行 session_id=study_id（元数据），查询按 goal_id | — |
 
 **已知边界（已评估）**：goal 写路径不再校验 session——防护 = goal_id 不可枚举
-+ `expected_goal_id` 匹配 + API 层 IDOR（`_fetch_session_owned`）；chat `/goal`
-建新 goal 会 supersede study 的 goal（v1 同行为，非回归）。
++ `expected_goal_id` 匹配 + API 层 IDOR（`_fetch_session_owned` 按 owner 校验）；
+chat `/goal` 建新 goal 会 supersede 同 chat 域的旧 goal（v1 行为保持）；
+chat agent 上下文不感知 study 的 goal（`get_current_goal_context` 按 chat
+会话查，study 的 goal 隔离在 study_id 域——期望隔离）。
 
 ---
 
@@ -918,7 +924,8 @@ v2 新增（决策 **D9=路径方式**，chat 传大段 YAML/markdown 不友好�
 
 | 术语 | 定义 |
 |---|---|
-| 微 session | `study:{study_id}` 独立会话（事件/权限隔离） |
+| 单身份 | `studies.session_id` = `study_id`（执行身份 + 事件频道 + goal 隔离域三合一，§4） |
+| owner_session_id | 创建者 chat 会话（归属查询 / IDOR 校验） |
 | adopted_run | 下一轮继承源（最近 keep run 或 baseline） |
 | inherited_from | manifest 记录的实际继承来源 |
 | keep 口径 | 指标统计只含 verdict=keep 的 run |
