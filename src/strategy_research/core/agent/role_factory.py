@@ -31,6 +31,9 @@ _ROLE_PROMPT_FILES = {
     # planner 生成研究计划子图; evaluator 评估进度并决策.
     "planner": "planner.md",
     "evaluator": "evaluator.md",
+    # Study v2: inter-round review + knowledge collection (design §10-11)
+    "study_reviewer": "study_reviewer.md",
+    "study_collector": "study_collector.md",
 }
 
 # 角色对应的工具白名单 (用 build_default_registry() 注册的 9 个工具名)
@@ -47,6 +50,8 @@ _ROLE_TOOL_WHITELIST = {
     "critic":                ["read_file", "list_history"],
     "planner":               ["read_file", "web_search", "read_url", "list_goals", "get_market_data"],
     "evaluator":             ["read_file", "list_history", "factor_analysis"],
+    "study_reviewer":        ["read_file"],
+    "study_collector":       ["read_file", "web_search", "read_url", "list_history"],
 }
 
 

@@ -10,6 +10,7 @@ injected between phases.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -20,6 +21,11 @@ from .models import StudyRecord, StudyStatus
 from .store import StudyStore
 
 logger = logging.getLogger(__name__)
+
+# v2 review-cycle tuning (design §10/§11)
+SR_STUDY_MAX_DEVIATION = 3          # consecutive high deviations → stop
+SR_STUDY_COLLECT_INTERVAL = 5       # force info collection every K rounds
+SR_STUDY_MAX_DISCARD = 5            # consecutive discards → stagnation stop
 
 
 def _dlog(module: str, msg: str, *args) -> None:
@@ -41,6 +47,10 @@ class ShutdownReason:
     ERROR = "error"
     EARLY_STOPPED = "early_stopped"
     NOVELTY_REJECTED = "novelty_rejected"
+    # v2 review cycle (design §10.2/§10.3)
+    REPEATED_DEVIATION = "repeated_deviation"
+    REVIEW_FAILED = "review_failed"
+    DISCARD_STREAK = "stagnation_discard_streak"
 
 
 # ── metric target comparison (reused from executor.py) ──────────────
@@ -272,6 +282,41 @@ class AutoresearchRunner:
                                     last_error="stagnation", reason=ShutdownReason.STAGNATION)
                 return ShutdownReason.STAGNATION
 
+            # ── shutdown: v2 review cycle stop (repeated deviation /
+            #    review failure / discard streak) ────────────────────
+            review_stop = result.get("review_stop")
+            if review_stop:
+                if review_stop == ShutdownReason.REPEATED_DEVIATION:
+                    self._mark_terminal(
+                        StudyStatus.ERROR, last_metrics=metrics,
+                        last_error="repeated deviation (3x high)",
+                        reason=ShutdownReason.REPEATED_DEVIATION,
+                    )
+                else:
+                    self._mark_terminal(
+                        StudyStatus.ERROR, last_metrics=metrics,
+                        last_error=review_stop, reason=review_stop,
+                    )
+                self._emit(session, "study_early_stopped", {
+                    "study_id": sid, "round": round_num, "reason": review_stop,
+                })
+                return review_stop
+
+            # ── shutdown: discard streak (design §8.2) ─────────────
+            from strategy_research.core.study import state_store as _ss
+            _st = _ss.load(Path(self.study.workspace_path), sid)
+            if _st.discard_streak >= SR_STUDY_MAX_DISCARD:
+                self._mark_terminal(
+                    StudyStatus.ERROR, last_metrics=metrics,
+                    last_error=f"discard_streak={_st.discard_streak}",
+                    reason=ShutdownReason.DISCARD_STREAK,
+                )
+                self._emit(session, "study_early_stopped", {
+                    "study_id": sid, "round": round_num,
+                    "reason": ShutdownReason.DISCARD_STREAK,
+                })
+                return ShutdownReason.DISCARD_STREAK
+
             # ── shutdown: max_rounds ───────────────────────────────
             if self.study.max_rounds is not None and round_num >= self.study.max_rounds:
                 self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
@@ -326,10 +371,9 @@ class AutoresearchRunner:
         from strategy_research.core.autoresearch import (
             run_researcher_phase, run_execution_phase, run_evaluation_phase,
         )
-        from strategy_research.core.study import (
-            round_manifest as rm,
-            state_store as ss,
-        )
+        from strategy_research.core.study import review_loop as rl
+        from strategy_research.core.study import round_manifest as rm
+        from strategy_research.core.study import state_store as ss
 
         sid = self.study.study_id
         session = self.study.session_id
@@ -338,6 +382,25 @@ class AutoresearchRunner:
         metric_targets = self.study.metric_targets
         root = ss.study_root(path, sid)
         state = ss.load(path, sid)
+
+        # ── v2 round-start knowledge gap check (design §11.1) ─────
+        knowledge_path = root / "knowledge.md"
+        knowledge_text = (
+            knowledge_path.read_text(encoding="utf-8")
+            if knowledge_path.exists() else ""
+        )
+        next_focus = ""
+        if state.last_review:
+            next_focus = str(state.last_review.get("next_focus") or "")
+        gap_topics = rl.gap_check(
+            self.study.objective, next_focus, knowledge_text,
+        )
+        if gap_topics:
+            self._collect_knowledge(gap_topics)
+        self._emit(session, "study_knowledge_check", {
+            "study_id": sid, "round": round_num,
+            "gap_topics": gap_topics, "collected": bool(gap_topics),
+        })
 
         # ── round dir + inherited strategy copy ─────────────────────
         rounds_dir = root / "rounds"
@@ -542,6 +605,11 @@ class AutoresearchRunner:
         except Exception as exc:  # noqa: BLE001 — file-first; DB is mirror
             logger.warning("append_round failed (mirror): %s", exc)
 
+        # ── v2 review cycle (phase 2: review + collect + todos) ─────
+        review_stop = self._run_review_cycle(
+            round_num, manifest, state, verdict, hypothesis,
+        )
+
         return {
             "round": round_num, "run_name": run_name, "run_dir": run_dir,
             "metrics": metrics, "verdict": verdict,
@@ -551,7 +619,202 @@ class AutoresearchRunner:
             "passed_now": passed_now,
             "manifest": manifest,
             "state": state,
+            "review_stop": review_stop,
         }
+
+    # ── v2 review cycle (design §10) ────────────────────────────────
+
+    def _run_review_cycle(
+        self,
+        round_num: int,
+        manifest: dict,
+        state: Any,
+        verdict: str,
+        hypothesis: str,
+    ) -> str | None:
+        """Inter-round review: deviation tracking, info collection, todos.
+
+        Runs synchronously inside the round (occupies the semaphore slot,
+        design §10.2). Returns a stop reason when the study must halt
+        (repeated high deviation / repeated review failure), else None.
+        """
+        from strategy_research.core.agent.role_factory import (
+            run_agent_via_llm, should_use_real_llm,
+        )
+        from strategy_research.core.study import review_loop as rl
+        from strategy_research.core.study import round_manifest as rm
+        from strategy_research.core.study import state_store as ss
+
+        sid = self.study.study_id
+        session = self.study.session_id
+        path = Path(self.study.workspace_path).resolve()
+        root = ss.study_root(path, sid)
+        todos_path = root / "todos.md"
+        knowledge_path = root / "knowledge.md"
+        archive_path = root / "knowledge-archive.md"
+
+        # ── ① reviewer ─────────────────────────────────────────────
+        knowledge_text = (
+            knowledge_path.read_text(encoding="utf-8")
+            if knowledge_path.exists() else ""
+        )
+        review_input = (
+            f"objective: {self.study.objective}\n"
+            f"metric_targets: {json.dumps(self.study.metric_targets, ensure_ascii=False)}\n"
+            f"round: {round_num}\n"
+            f"verdict: {verdict}\n"
+            f"hypothesis: {hypothesis}\n"
+            f"manifest: {json.dumps(manifest, ensure_ascii=False, default=str)[:4000]}\n"
+            f"last_review: {json.dumps(state.last_review, ensure_ascii=False, default=str)}\n"
+            f"continuous_deviation: {state.continuous_deviation}\n"
+            f"todos:\n{todos_path.read_text(encoding='utf-8') if todos_path.exists() else ''}\n"
+            f"knowledge (recent):\n{knowledge_text[-3000:]}\n"
+        )
+        use_real = self.study.behavior is None and should_use_real_llm()
+        raw_review = ""
+        try:
+            if use_real:
+                raw_review = run_agent_via_llm(
+                    role="study_reviewer",
+                    workspace_path=path,
+                    strategy_name=self.study.strategy_name,
+                    task=review_input,
+                    max_iterations=3,
+                )
+            else:
+                raw_review = json.dumps({
+                    "deviation": "low", "deviation_reason": "stub",
+                    "info_gap": False, "topics": [],
+                    "todo_updates": [], "next_focus": "",
+                })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("study_reviewer failed: %s", exc)
+            state.review_fail_count += 1
+            ss.save(path, sid, state)
+            if state.review_fail_count >= 2:
+                return ShutdownReason.REVIEW_FAILED
+            return None
+
+        review = rl.normalize_review(rl.parse_review_output(raw_review))
+        if not raw_review.strip() or not review.get("next_focus"):
+            # empty/failed review output → skip (design §10.3)
+            state.review_fail_count += 1
+            ss.save(path, sid, state)
+            if state.review_fail_count >= 2:
+                return ShutdownReason.REVIEW_FAILED
+            return None
+        state.review_fail_count = 0
+
+        # ── ② information collection ───────────────────────────────
+        collected = 0
+        if rl.should_collect(
+            info_gap=review["info_gap"],
+            round_num=round_num,
+            last_collect_round=state.last_collect_round,
+            collect_interval=SR_STUDY_COLLECT_INTERVAL,
+        ):
+            topics = review["topics"] or [self.study.objective[:80]]
+            collected = self._collect_knowledge(topics)
+
+        # ── ③ todos application ────────────────────────────────────
+        applied = rl.apply_todos(
+            todos_path, review["todo_updates"], self.study.objective,
+        )
+        if applied:
+            self._emit(session, "study_todos_updated", {
+                "study_id": sid, "updates": review["todo_updates"],
+            })
+
+        # ── ④ deviation state + stop guard ─────────────────────────
+        if review["deviation"] == "high":
+            state.continuous_deviation += 1
+        else:
+            state.continuous_deviation = 0
+        state.last_review = {
+            "round": round_num, **review,
+        }
+        ss.save(path, sid, state)
+        self._emit(session, "study_review", {
+            "study_id": sid, "round": round_num,
+            "deviation": review["deviation"], "info_gap": review["info_gap"],
+        })
+
+        # ── ⑤ manifest phase 2: review overlay + DB mirror ─────────
+        manifest = rm.overlay_review(manifest, review)
+        rm.save_manifest(manifest, path, sid, round_num)
+        try:
+            self.study_store.update_round(sid, round_num, review)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("update_round failed (mirror): %s", exc)
+
+        # knowledge compaction (plan B rule prescreen; design §11.3)
+        try:
+            compacted = rl.maybe_compact(
+                knowledge_path, archive_path=archive_path,
+            )
+            if compacted:
+                self._emit(session, "study_knowledge_compacted", {
+                    "study_id": sid, **compacted,
+                })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("knowledge compaction failed: %s", exc)
+
+        # ── ⑥ stop guard: overlay recorded even on the stop round ─
+        if state.continuous_deviation >= SR_STUDY_MAX_DEVIATION:
+            return ShutdownReason.REPEATED_DEVIATION
+        return None
+
+    def _collect_knowledge(self, topics: list[str]) -> int:
+        """v2: run the collector agent and append to knowledge.md.
+
+        Returns the number of appended entries (0 on stub/failure).
+        """
+        from strategy_research.core.agent.role_factory import (
+            run_agent_via_llm, should_use_real_llm,
+        )
+        from strategy_research.core.study import review_loop as rl
+        from strategy_research.core.study import state_store as ss
+
+        sid = self.study.study_id
+        path = Path(self.study.workspace_path).resolve()
+        root = ss.study_root(path, sid)
+        knowledge_path = root / "knowledge.md"
+        knowledge_text = (
+            knowledge_path.read_text(encoding="utf-8")
+            if knowledge_path.exists() else ""
+        )
+        try:
+            if self.study.behavior is None and should_use_real_llm():
+                raw_entries = run_agent_via_llm(
+                    role="study_collector",
+                    workspace_path=path,
+                    strategy_name=self.study.strategy_name,
+                    task=(
+                        f"objective: {self.study.objective}\n"
+                        f"topics: {json.dumps(topics, ensure_ascii=False)}\n"
+                        f"existing knowledge:\n{knowledge_text[-2000:]}\n"
+                    ),
+                    max_iterations=3,
+                )
+                entries = rl.parse_review_output(raw_entries)
+                if isinstance(entries, dict):
+                    entries = [entries]
+            else:
+                entries = []
+            collected = rl.append_knowledge(
+                knowledge_path, entries, self.study.objective,
+            )
+            state = ss.load(path, sid)
+            state.last_collect_round = state.last_completed_round or 0
+            ss.save(path, sid, state)
+            if collected:
+                self._emit(sid, "study_knowledge_update", {
+                    "study_id": sid, "entries_added": collected,
+                })
+            return collected
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("collector failed: %s", exc)
+            return 0
 
     def _verdict_reason(self, eval_result: dict, strategist_output: Any) -> str:
         """Extract the verdict reason from decision/attribution output."""
