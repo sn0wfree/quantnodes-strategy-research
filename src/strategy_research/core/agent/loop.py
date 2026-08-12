@@ -192,6 +192,12 @@ class AgentLoop:
         readonly: bool = False,
         session_id: str | None = None,
         strategy_name: str | None = None,
+        # ── v2 path parameterization (study scenario) ────────────────
+        strategy_dir: Path | None = None,
+        runs_dir: Path | None = None,
+        results_tsv: Path | None = None,
+        write_roots: tuple[str, ...] | None = None,
+        read_roots: tuple[str, ...] | None = None,
         enable_goal_injection: bool = True,
         enable_hypothesis_auto_create: bool = True,
         hooks: CompositeHook | None = None,
@@ -215,6 +221,11 @@ class AgentLoop:
         self.auto_git_commit = auto_git_commit
         self.session_id = session_id
         self.strategy_name = strategy_name
+        self.strategy_dir = strategy_dir
+        self.runs_dir = runs_dir
+        self.results_tsv = results_tsv
+        self.write_roots = write_roots
+        self.read_roots = read_roots
         self.enable_goal_injection = enable_goal_injection
         self.enable_hypothesis_auto_create = enable_hypothesis_auto_create
         self._hooks = hooks
@@ -1132,6 +1143,11 @@ class AgentLoop:
         kwargs["ctx"] = ToolContext(
             workspace=self.workspace,
             session_id=self.session_id,
+            strategy_dir=self.strategy_dir,
+            runs_dir=self.runs_dir,
+            results_tsv=self.results_tsv,
+            write_roots=self.write_roots,
+            read_roots=self.read_roots,
             emit_progress=_progress_callback,
             emit_event=self._emit,
             message_id=getattr(self, "_current_message_id", None),
@@ -1368,6 +1384,11 @@ class AgentLoop:
         kwargs["ctx"] = ToolContext(
             workspace=self.workspace,
             session_id=self.session_id,
+            strategy_dir=self.strategy_dir,
+            runs_dir=self.runs_dir,
+            results_tsv=self.results_tsv,
+            write_roots=self.write_roots,
+            read_roots=self.read_roots,
             emit_progress=_progress_callback,
             emit_event=self._emit,
             message_id=getattr(self, "_current_message_id", None),

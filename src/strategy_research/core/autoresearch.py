@@ -129,27 +129,37 @@ def save_agent_record(
 def read_current_state(
     workspace_path: Path,
     strategy_name: str,
+    strategy_file: Path | None = None,
+    results_tsv: Path | None = None,
 ) -> dict[str, Any]:
     """读取当前状态 (strategy.py + results.tsv)。
 
     Args:
         workspace_path: 工作区路径
         strategy_name: 策略名称
+        strategy_file: strategy.py 位置。默认
+            ``workspace/strategies/<name>/strategy.py``；study 场景传当轮
+            run 目录内的策略快照。
+        results_tsv: results.tsv 位置。默认
+            ``workspace/strategies/<name>/runs/results.tsv``；study 场景传
+            ``study/<id>/results.tsv``。
 
     Returns:
         当前状态字典
     """
     strategy_dir = workspace_path / "strategies" / strategy_name
+    if strategy_file is None:
+        strategy_file = strategy_dir / "strategy.py"
+    if results_tsv is None:
+        results_tsv = strategy_dir / "runs" / "results.tsv"
 
     # 读取 strategy.py
-    strategy_py_path = strategy_dir / "strategy.py"
-    strategy_py = strategy_py_path.read_text(encoding="utf-8") if strategy_py_path.exists() else ""
+    strategy_py = strategy_file.read_text(encoding="utf-8") if strategy_file.exists() else ""
 
     # 读取 results.tsv
-    results_path = strategy_dir / "runs" / "results.tsv"
     lines = []
-    if results_path.exists():
-        content = results_path.read_text(encoding="utf-8").strip()
+    if results_tsv.exists():
+        content = results_tsv.read_text(encoding="utf-8").strip()
         if content:
             lines = content.split("\n")
 
@@ -922,6 +932,11 @@ def spawn_agent(
     *,
     behavior: str | None = None,
     max_iterations: int = 8,
+    strategy_dir: Path | None = None,
+    runs_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    write_roots: tuple[str, ...] | None = None,
+    read_roots: tuple[str, ...] | None = None,
 ) -> str:
     """Spawn a single agent (real LLM or stub) and return JSON text.
 
@@ -956,6 +971,11 @@ def spawn_agent(
                 task="\n".join(task_lines),
                 previous_outputs=previous_outputs,
                 max_iterations=max_iterations,
+                strategy_dir=strategy_dir,
+                runs_dir=runs_dir,
+                results_tsv=results_tsv,
+                write_roots=write_roots,
+                read_roots=read_roots,
             )
         except Exception as exc:
             # 真 LLM 失败 → 退到 stub, 不让主循环崩
@@ -1710,10 +1730,22 @@ def run_research_round(
 # refactored to call these (yet).  The runner uses them directly.
 
 
-def _create_run_dir(workspace_path: Path, strategy_name: str) -> tuple[Path, str, Path]:
-    """Create the run directory for a round. Returns (runs_dir, run_name, run_dir)."""
-    strategy_dir = workspace_path / "strategies" / strategy_name
-    runs_dir = strategy_dir / "runs"
+def _create_run_dir(
+    workspace_path: Path,
+    strategy_name: str,
+    runs_dir: Path | None = None,
+) -> tuple[Path, str, Path]:
+    """Create the run directory for a round. Returns (runs_dir, run_name, run_dir).
+
+    v2: ``runs_dir`` overrides the default ``workspace/strategies/<name>/runs``
+    (study scenario: ``study/<id>/rounds/round_NNNN`` — run numbering is
+    per-round; recovered rounds continue at max+1).
+    """
+    if runs_dir is None:
+        strategy_dir = workspace_path / "strategies" / strategy_name
+        runs_dir = strategy_dir / "runs"
+    else:
+        runs_dir = Path(runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
     existing_nums: list[int] = []
     if runs_dir.exists():
@@ -1738,6 +1770,11 @@ def _make_spawn_fn(
     behavior: str | None = None,
     max_retries: int = 3,
     inter_agent_sleep: float = 0.0,
+    strategy_dir: Path | None = None,
+    runs_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    write_roots: tuple[str, ...] | None = None,
+    read_roots: tuple[str, ...] | None = None,
 ):
     """Create the _spawn closure for agent execution."""
     def _spawn(name: str, prevs: list) -> dict:
@@ -1745,6 +1782,11 @@ def _make_spawn_fn(
             lambda: spawn_agent(
                 name, path, strategy_name, current_state, prevs,
                 behavior=behavior,
+                strategy_dir=strategy_dir,
+                runs_dir=runs_dir,
+                results_tsv=results_tsv,
+                write_roots=write_roots,
+                read_roots=read_roots,
             ),
             name,
             max_retries=max_retries,
@@ -1769,6 +1811,7 @@ def run_researcher_phase(
     lazy_detection_interval: int = 10,
     keep_recent: int = 10,
     round_num: int = 1,
+    runs_dir: Path | None = None,
 ) -> dict:
     """Phase 1: run researcher agent + lazy detection + hypothesis registration.
 
@@ -1785,8 +1828,11 @@ def run_researcher_phase(
     )
 
     path = Path(workspace_path).resolve()
-    strategy_dir = path / "strategies" / strategy_name
-    runs_dir = strategy_dir / "runs"
+    if runs_dir is None:
+        strategy_dir = path / "strategies" / strategy_name
+        runs_dir = strategy_dir / "runs"
+    else:
+        runs_dir = Path(runs_dir)
 
     # Lazy detection
     if should_run_lazy_detection(round_num, lazy_detection_interval):

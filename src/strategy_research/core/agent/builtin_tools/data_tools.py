@@ -698,7 +698,8 @@ class CheckDataTool(BaseTool):
         workspace = ctx.workspace
         cfg = None
         if source == "config":
-            cfg_path = workspace / "strategies" / strategy_name / "config.yaml"
+            base = ctx.strategy_dir if ctx.strategy_dir is not None else workspace / "strategies" / strategy_name
+            cfg_path = base / "config.yaml"
             if cfg_path.exists():
                 from ...config_runner import load_yaml_config
 

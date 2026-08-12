@@ -517,19 +517,39 @@ class AutoresearchRunner:
     # ── results.tsv ────────────────────────────────────────────────
 
     @staticmethod
-    def _update_results_tsv(runs_dir: Path, run_name: str, verdict: str) -> None:
-        results_path = runs_dir / "results.tsv"
+    def _update_results_tsv(
+        runs_dir: Path,
+        run_name: str,
+        verdict: str,
+        *,
+        round_num: int | None = None,
+        results_tsv: Path | None = None,
+    ) -> None:
+        """In-place verdict update with (round, run) composite matching.
+
+        v2: run ids repeat per round (round_NNNN/run_0001…), so rows are
+        matched by round (trailing column 13) + run name; legacy CLI rows
+        (no round column) fall back to run-name matching.
+        """
+        results_path = results_tsv or (runs_dir / "results.tsv")
         if not results_path.exists():
             return
         content = results_path.read_text(encoding="utf-8")
         lines = content.strip().split("\n")
         for i in range(len(lines) - 1, 0, -1):
-            if lines[i].startswith(run_name + "\t") or lines[i].startswith(run_name + " "):
-                parts = lines[i].split("\t")
-                if len(parts) >= 12:
-                    parts[11] = verdict
-                    lines[i] = "\t".join(parts)
-                break
+            parts = lines[i].split("\t")
+            if len(parts) < 12:
+                continue
+            row_run = parts[0]
+            row_round = parts[13] if len(parts) >= 14 else ""
+            if row_run != run_name:
+                continue
+            if round_num is not None and row_round != str(round_num):
+                continue
+            if len(parts) >= 12:
+                parts[11] = verdict
+                lines[i] = "\t".join(parts)
+            break
         results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # ── misc ───────────────────────────────────────────────────────

@@ -54,6 +54,14 @@ class ToolContext:
 
     workspace: Optional[Path] = None
     session_id: Optional[str] = None
+    # ── v2 path parameterization (study scenario) ──────────────────
+    # Overrides for the default workspace/strategies/<name> layout.
+    # Tools fall back to the legacy derivation when these are None.
+    strategy_dir: Optional[Path] = None      # strategy.py/config.yaml source dir
+    runs_dir: Optional[Path] = None          # run parent dir (results.tsv sibling)
+    results_tsv: Optional[Path] = None       # results.tsv location
+    write_roots: Optional[tuple[str, ...]] = None  # PathWhitelist write roots override
+    read_roots: Optional[tuple[str, ...]] = None   # PathWhitelist read roots override
     emit_progress: Optional[Callable[[dict], None]] = None
     # Emit an SSE event to the frontend (wired to AgentLoop._emit).
     # Used by display tools (show_chart / show_report) to push

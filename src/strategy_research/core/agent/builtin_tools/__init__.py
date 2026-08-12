@@ -152,7 +152,13 @@ class ReadFileTool(BaseTool):
                 tool="read_file",
             )
 
-        wl = PathWhitelist(workspace=workspace)
+        # v2: ctx roots override the default white-list roots
+        # (study scenario: agents may write/read under study/<id>/)
+        wl = PathWhitelist(
+            workspace=workspace,
+            write_roots=ctx.write_roots,
+            read_roots=ctx.read_roots,
+        )
         try:
             resolved = wl.resolve_read(path)
         except PathValidationError as exc:
@@ -391,7 +397,13 @@ class WriteFileTool(BaseTool):
                     tool="write_file",
                 )
 
-        wl = PathWhitelist(workspace=workspace)
+        # v2: ctx roots override the default white-list roots
+        # (study scenario: agents may write/read under study/<id>/)
+        wl = PathWhitelist(
+            workspace=workspace,
+            write_roots=ctx.write_roots,
+            read_roots=ctx.read_roots,
+        )
         try:
             resolved = wl.resolve_write(path)
         except PathValidationError as exc:
@@ -542,10 +554,14 @@ class RunBacktestTool(BaseTool):
             return json.dumps(out, ensure_ascii=False)
 
         run_name = out.get("run", "")
+        # v2: artifact paths honor ctx.runs_dir (study scenario); legacy
+        # fallback keeps runs/<strategy>/<run> for CLI/tool-driven flows.
+        runs_root = ctx.runs_dir if ctx.runs_dir is not None \
+            else workspace / "runs" / strategy_name
         artifacts = {
-            "equity_curve": f"runs/{strategy_name}/{run_name}/equity_curve.csv",
-            "metrics": f"runs/{strategy_name}/{run_name}/metrics.json",
-            "run_card": f"runs/{strategy_name}/{run_name}/run_card.json",
+            "equity_curve": f"{runs_root}/{run_name}/equity_curve.csv",
+            "metrics": f"{runs_root}/{run_name}/metrics.json",
+            "run_card": f"{runs_root}/{run_name}/run_card.json",
         }
         return json.dumps({
             "status": "ok",
@@ -586,7 +602,10 @@ class ConfigLoadStep(BaseTool):
         if yaml_path is not None:
             yaml_path = str(workspace / yaml_path)
         else:
-            yaml_path = str(workspace / "strategies" / strategy_name / "config.yaml")
+            # v2: ctx.strategy_dir overrides the legacy strategies/<name> layout
+            base = ctx.strategy_dir if ctx.strategy_dir is not None \
+                else workspace / "strategies" / strategy_name
+            yaml_path = str(base / "config.yaml")
 
         if not Path(yaml_path).exists():
             raise ToolError(
@@ -716,6 +735,10 @@ class EngineRunStep(BaseTool):
                 yaml_path=yaml_path,
                 action=action,
                 description=description,
+                # v2: pass through study-scoped layout overrides
+                strategy_dir=ctx.strategy_dir,
+                results_tsv=ctx.results_tsv,
+                runs_dir=ctx.runs_dir,
             )
         except Exception as exc:  # noqa: BLE001
             raise ToolError(
@@ -1115,7 +1138,11 @@ class ListHistoryTool(BaseTool):
 
         results_path: Path | None = None
         if strategy_name:
-            cand = workspace / "strategies" / strategy_name / "runs" / "results.tsv"
+            # v2: ctx.results_tsv overrides the legacy strategy runs layout
+            if ctx.results_tsv is not None:
+                cand = Path(ctx.results_tsv)
+            else:
+                cand = workspace / "strategies" / strategy_name / "runs" / "results.tsv"
             if cand.exists():
                 results_path = cand
         else:
@@ -2527,7 +2554,7 @@ class DrawdownAnalysis(BaseTool):
         top_n = int(top_n)
 
         # Find latest run
-        runs_dir = workspace / "strategies" / strategy_name / "runs"
+        runs_dir = ctx.runs_dir if ctx.runs_dir is not None else workspace / "strategies" / strategy_name / "runs"
         if not runs_dir.exists():
             return err_actionable(f"runs directory not found: {runs_dir}", tool="drawdown_analysis")
 
@@ -2696,7 +2723,7 @@ class BenchmarkComparison(BaseTool):
             return err_actionable("missing 'benchmark_code'", tool="benchmark_comparison")
 
         # Get strategy equity from latest run
-        runs_dir = workspace / "strategies" / strategy_name / "runs"
+        runs_dir = ctx.runs_dir if ctx.runs_dir is not None else workspace / "strategies" / strategy_name / "runs"
         if not runs_dir.exists():
             return err_actionable(f"runs directory not found: {runs_dir}", tool="benchmark_comparison")
 

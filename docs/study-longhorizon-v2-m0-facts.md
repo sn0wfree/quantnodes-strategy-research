@@ -172,6 +172,25 @@ strategist 白名单**含 run_backtest**（role_factory.py:41），agent 可在 
 4. **§7.2 backtest 行号**：strategy_dir 硬编码在 L275；run_backtest_from_yaml
    L388/400/433 三处——实施时对照
 
+## 6.1 M2 实施记录（2026-08 完成）
+
+- backtest.py：`update_results_tsv` 尾部 round 列 + `results_tsv` 参数；
+  `run_backtest_script` 加 strategy_dir/results_tsv/round_num（自定义 run_dir
+  自动 mkdir）；`run_backtest_from_yaml` 加 strategy_dir/results_tsv/runs_dir
+- autoresearch.py：`read_current_state` 拆 strategy_file/results_tsv 双参数；
+  `_create_run_dir` 加 runs_dir（轮内 max+1 编号）；`run_researcher_phase`
+  加 runs_dir
+- 注入链：ToolContext 加 strategy_dir/runs_dir/results_tsv/write_roots/
+  read_roots → AgentLoop → loop.py 构造透传 → build_agent_loop/
+  run_agent_via_llm/spawn_agent/_make_spawn_fn 全链透传
+- 工具层：T1 ConfigLoadStep、T2 artifacts、T3 EngineRunStep、T4 list_history、
+  T5 drawdown_analysis、T6 benchmark_comparison、T7 check_data、T8 show_report
+  全部回退 ctx 字段；**T9 show_chart 确认无硬编码**（source_file 引用）；
+  WriteFileTool/ReadFileTool 白名单 roots 注入
+- runner：`_update_results_tsv` 改 (round, run) 复合匹配 + results_tsv 参数
+- 测试：`tests/test_study_v2_path_params.py` 11 个（round 列/自定义布局/
+  双参数/轮内编号/复合匹配/白名单注入）
+
 ## 7. M1 预研结论（单身份 + 并行，定稿）
 
 - **单身份设计**（§4）：`studies.session_id` = `study_id`（create_study 内部

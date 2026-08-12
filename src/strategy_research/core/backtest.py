@@ -169,9 +169,22 @@ def save_run_metrics(run_dir: Path, metrics: dict) -> None:
         json.dump(_clean_nan(metrics), f, indent=2, ensure_ascii=False)
 
 
-def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None:
-    """更新 results.tsv。"""
-    results_path = strategy_dir / "runs" / "results.tsv"
+def update_results_tsv(
+    strategy_dir: Path,
+    run_name: str,
+    metrics: dict,
+    *,
+    round_num: int | None = None,
+    results_tsv: Path | None = None,
+) -> None:
+    """Update results.tsv.
+
+    v2: ``round`` column appended LAST (index 13) so existing column
+    indices (calmar=3, status=11) stay stable; CLI rows leave it empty.
+    ``results_tsv`` overrides the default location (``strategy_dir/runs/
+    results.tsv``) for study scenarios.
+    """
+    results_path = results_tsv or (strategy_dir / "runs" / "results.tsv")
 
     if results_path.exists():
         with open(results_path, "r", encoding="utf-8") as f:
@@ -181,7 +194,7 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
         lines = [
             "run\tcommit\taction\tcalmar\tsharpe\tmax_dd\t"
             "ann_return\tturnover\tfactors_added\tfactors_removed\t"
-            "params_changed\tstatus\tdescription\n"
+            "params_changed\tstatus\tdescription\tround\n"
         ]
 
     row = "\t".join([
@@ -199,6 +212,7 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
         str(metrics.get("params_changed", 0)),
         metrics.get("status", "pending"),
         metrics.get("description", ""),
+        str(round_num) if round_num is not None else "",
     ]) + "\n"
 
     lines.append(row)
@@ -261,6 +275,9 @@ def run_backtest_script(
     description: str = "",
     timeout: int = 300,
     run_dir: Path | None = None,
+    strategy_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    round_num: int | None = None,
 ) -> dict:
     """运行策略脚本回测并保存结果。
 
@@ -271,8 +288,15 @@ def run_backtest_script(
         description: 描述
         timeout: 超时时间 (秒)
         run_dir: 可选的 run 目录路径。如果提供,则使用此目录而不是创建新目录。
+        strategy_dir: 策略/执行目录（strategy.py/config.yaml 源）。默认
+            ``workspace/strategies/<name>``；study 场景传 run 目录。
+        results_tsv: results.tsv 落点。默认 ``strategy_dir/runs/results.tsv``。
+        round_num: study 轮号（写入 results.tsv 的 round 列）。
     """
-    strategy_dir = workspace_path / "strategies" / strategy_name
+    if strategy_dir is None:
+        strategy_dir = workspace_path / "strategies" / strategy_name
+    else:
+        strategy_dir = Path(strategy_dir)
     if not strategy_dir.exists():
         return {"success": False, "run": "", "metrics": {}, "error": f"策略目录不存在: {strategy_dir}"}
 
@@ -281,6 +305,9 @@ def run_backtest_script(
         run_dir = create_run_dir(strategy_dir, run_name)
     else:
         run_name = run_dir.name
+        # v2: caller-provided run dirs (study layout) may not exist yet
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
 
     save_run_snapshot(strategy_dir, run_dir)
 
@@ -322,7 +349,10 @@ def run_backtest_script(
     })
 
     save_run_metrics(run_dir, metrics)
-    update_results_tsv(strategy_dir, run_name, metrics)
+    update_results_tsv(
+        strategy_dir, run_name, metrics,
+        round_num=round_num, results_tsv=results_tsv,
+    )
 
     save_backtest_result(
         workspace_path=workspace_path,
@@ -382,10 +412,22 @@ def run_backtest_from_yaml(
     yaml_path: str | None = None,
     action: str = "manual",
     description: str = "",
+    strategy_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    runs_dir: Path | None = None,
+    round_num: int | None = None,
 ) -> dict:
-    """从 YAML 配置运行回测。"""
+    """从 YAML 配置运行回测。
+
+    v2: ``strategy_dir`` / ``results_tsv`` / ``runs_dir`` override the
+    default ``workspace/strategies/<name>`` layout for study scenarios.
+    """
+    if strategy_dir is None:
+        strategy_dir = workspace_path / "strategies" / strategy_name
+    else:
+        strategy_dir = Path(strategy_dir)
     if yaml_path is None:
-        yaml_path = workspace_path / "strategies" / strategy_name / "config.yaml"
+        yaml_path = strategy_dir / "config.yaml"
     else:
         yaml_path = Path(yaml_path)
 
@@ -397,9 +439,13 @@ def run_backtest_from_yaml(
         result = run_from_yaml(str(yaml_path), workspace_path)
 
         # 保存结果
-        strategy_dir = workspace_path / "strategies" / strategy_name
-        run_name = get_next_run_name(strategy_dir)
-        run_dir = create_run_dir(strategy_dir, run_name)
+        if runs_dir is None:
+            runs_dir = strategy_dir / "runs"
+        else:
+            runs_dir = Path(runs_dir)
+        run_name = get_next_run_name(runs_dir)
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         save_run_snapshot(strategy_dir, run_dir)
 
@@ -430,7 +476,10 @@ def run_backtest_from_yaml(
         metrics["warnings"] = list(getattr(result, "warnings", None) or [])
 
         save_run_metrics(run_dir, metrics)
-        update_results_tsv(strategy_dir, run_name, metrics)
+        update_results_tsv(
+            strategy_dir, run_name, metrics,
+            round_num=round_num, results_tsv=results_tsv,
+        )
 
         # 保存到 DuckDB
         save_backtest_result(

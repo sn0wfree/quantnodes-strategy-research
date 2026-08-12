@@ -91,6 +91,11 @@ def build_agent_loop(
     enable_claim_validation: bool = False,
     strict_claim_validation: bool = False,
     tools_override: list[str] | None = None,
+    strategy_dir: Path | None = None,
+    runs_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    write_roots: tuple[str, ...] | None = None,
+    read_roots: tuple[str, ...] | None = None,
 ) -> "AgentLoop | None":  # noqa: F821
     """为 role 构造 AgentLoop.
 
@@ -130,6 +135,10 @@ def build_agent_loop(
         allowed_tools=whitelist,
         session_manager=session_manager,
         strategy_name=strategy_name,
+        strategy_dir=strategy_dir,
+        runs_dir=runs_dir,
+        results_tsv=results_tsv,
+        write_roots=write_roots,
         auto_git_commit=False,  # git commit 由 autoresearch 主循环统一控制
         enable_claim_validation=enable_claim_validation,
         strict_claim_validation=strict_claim_validation,
@@ -148,6 +157,11 @@ def run_agent_via_llm(
     session_manager: Any | None = None,
     max_iterations: int = 8,
     tools_override: list[str] | None = None,
+    strategy_dir: Path | None = None,
+    runs_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    write_roots: tuple[str, ...] | None = None,
+    read_roots: tuple[str, ...] | None = None,
 ) -> str:
     """调用 AgentLoop.run() 完成 role 任务, 返回 JSON 字符串.
 
@@ -177,6 +191,11 @@ def run_agent_via_llm(
         session_manager=session_manager,
         max_iterations=max_iterations,
         tools_override=tools_override,
+        strategy_dir=strategy_dir,
+        runs_dir=runs_dir,
+        results_tsv=results_tsv,
+        write_roots=write_roots,
+        read_roots=read_roots,
     )
     if loop is None:
         raise RuntimeError(f"无法构造 AgentLoop for role={role!r} (prompt 不存在)")

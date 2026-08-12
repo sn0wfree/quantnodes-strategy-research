@@ -321,7 +321,10 @@ class ShowReportTool(BaseTool):
                 tool="show_report",
             )
 
-        run_dir = (ctx.workspace / "runs" / strategy_name / run).resolve()
+        # v2: ctx.runs_dir overrides the legacy runs/<strategy> layout
+        runs_root = ctx.runs_dir if ctx.runs_dir is not None \
+            else ctx.workspace / "runs" / strategy_name
+        run_dir = (runs_root / run).resolve()
         workspace_root = Path(ctx.workspace).resolve()
         if not run_dir.is_relative_to(workspace_root):
             return err_actionable(
