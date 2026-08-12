@@ -1133,18 +1133,23 @@ class GoalStore:
         goal_id: str,
         expected_goal_id: str,
     ) -> GoalRecord:
+        """Validate a goal is writable (stale + status guards only).
+
+        v2 (decision D): the session is NOT part of the write guard — any
+        executor identity (e.g. a study's micro session "study:{id}") may
+        write to a goal it holds the goal_id/expected_goal_id for. Session
+        remains a record field (query convenience); IDOR protection lives
+        at the API layer (_fetch_session_owned).
+        """
         if expected_goal_id != goal_id:
             raise StaleGoalError("expected_goal_id does not match target goal")
         session_id = normalize_required_text(session_id, "session_id")
         goal_id = normalize_required_text(goal_id, "goal_id")
         goal = self.get_goal(goal_id)
-        if goal is None or goal.session_id != session_id:
-            raise StaleGoalError("goal is not available for this session")
+        if goal is None:
+            raise StaleGoalError("goal not found")
         if goal.status not in _CURRENT_STATUSES:
             raise StaleGoalError(f"goal status {goal.status.value!r} is not mutable")
-        current = self.get_current_goal(session_id)
-        if current is None or current.goal_id != goal_id:
-            raise StaleGoalError("goal is not current for this session")
         return goal
 
     @staticmethod

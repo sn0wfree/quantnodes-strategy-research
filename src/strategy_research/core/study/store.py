@@ -487,12 +487,16 @@ class StudyStore:
 
     @_synchronized
     def get_active_study(self, session_id: str) -> StudyRecord | None:
-        """Return the session's currently-running/queued/paused study, if any."""
+        """Return the owner session's currently-running/queued/paused study.
+
+        v2: matched against ``owner_session_id`` (creator chat session) —
+        ``session_id`` is the micro session "study:{id}" (event channel).
+        """
 
         placeholders = ",".join("?" for _ in ACTIVE_EXECUTION_STATUSES)
         statuses = [s.value for s in ACTIVE_EXECUTION_STATUSES]
         row = self._conn.execute(
-            f"SELECT * FROM studies WHERE session_id = ? "
+            f"SELECT * FROM studies WHERE owner_session_id = ? "
             f"AND execution_status IN ({placeholders}) "
             f"ORDER BY created_at DESC LIMIT 1",
             (session_id, *statuses),
@@ -506,12 +510,12 @@ class StudyStore:
         status: StudyStatus | None = None,
         limit: int = 100,
     ) -> list[StudyRecord]:
-        """List studies, optionally filtered; newest first."""
+        """List studies, optionally filtered by owner session; newest first."""
 
         query = "SELECT * FROM studies WHERE 1=1"
         params: list[Any] = []
         if session_id:
-            query += " AND session_id = ?"
+            query += " AND owner_session_id = ?"
             params.append(session_id)
         if status:
             query += " AND execution_status = ?"
@@ -540,13 +544,13 @@ class StudyStore:
 
     @_synchronized
     def delete_session_studies(self, session_id: str) -> int:
-        """Delete all study rows for a session. Returns the count removed."""
+        """Delete all study rows owned by a session. Returns the count removed."""
 
         if not session_id.strip():
             raise ValueError("session_id must not be empty")
         with self._write_transaction():
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM studies WHERE session_id = ?",
+                "SELECT COUNT(*) FROM studies WHERE owner_session_id = ?",
                 (session_id,),
             ).fetchone()
             count = int(row[0]) if row else 0

@@ -154,6 +154,66 @@ def test_legacy_db_migration_backfills_owner(tmp_path):
     assert row.owner_session_id == "chat-sess"
 
 
+# ── v2 decision D: owner-session queries + micro-session accounting ────
+
+
+def test_get_active_study_matches_owner_not_micro_session(store, goal_store):
+    """After micro-session rebind, "my active study" lookups use the owner
+    chat session (v1 semantics preserved)."""
+    goal, study = _setup(store, goal_store, session="chat_abc")
+    micro = f"study:{study.study_id}"
+    store.update_session_id(study.study_id, micro)
+
+    by_owner = store.get_active_study("chat_abc")
+    assert by_owner is not None and by_owner.study_id == study.study_id
+    # The micro session itself does not answer "my studies" queries.
+    assert store.get_active_study(micro) is None
+
+
+def test_list_studies_matches_owner(store, goal_store):
+    goal, study = _setup(store, goal_store, session="chat_abc")
+    store.update_session_id(study.study_id, f"study:{study.study_id}")
+    rows = store.list_studies(session_id="chat_abc")
+    assert [r.study_id for r in rows] == [study.study_id]
+    assert store.list_studies(session_id=f"study:{study.study_id}") == []
+
+
+def test_micro_session_goal_accounting_passes(store, goal_store):
+    """Decision D: a study writing to its goal ledger with its MICRO
+    session id succeeds (goal write guard no longer checks session), and
+    evidence persists under the goal's own session."""
+    from strategy_research.core.goal import EvidenceInput
+
+    goal, study = _setup(store, goal_store, session="chat_abc")
+    micro = f"study:{study.study_id}"
+    store.update_session_id(study.study_id, micro)
+
+    criterion = goal_store.list_criteria(goal.goal_id)[0]
+    for c in goal_store.list_criteria(goal.goal_id):
+        if not c.required:
+            continue
+        goal_store.append_evidence(
+            session_id=micro,                      # micro session writer
+            goal_id=goal.goal_id,
+            expected_goal_id=goal.goal_id,
+            evidence=EvidenceInput(
+                text="达标", criterion_id=c.criterion_id,
+                evidence_type="acceptance", run_id="run_0001",
+                source_provider="study", source_type="metric_targets_met",
+            ),
+        )
+    goal_store.complete_lite(
+        session_id=micro,
+        goal_id=goal.goal_id,
+        expected_goal_id=goal.goal_id,
+        recap="研究达标",
+    )
+    completed = goal_store.get_goal(goal.goal_id)
+    assert completed.status.value == "complete"
+    for ev in goal_store.list_evidence(goal.goal_id):
+        assert ev.session_id == "chat_abc"  # persisted under the goal's session
+
+
 # ── scheduler: true parallelism + semaphore cap ───────────────────────
 
 
