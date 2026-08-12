@@ -83,6 +83,10 @@ class StudyRecord:
     executor_type: str  # 'autoresearch' | 'workflow'
     workspace_path: str
     strategy_name: str
+    # 创建者会话（用户 chat session）；v2 微 session 化后 session_id =
+    # "study:{id}" 仅用于事件路由，账本写入（goal evidence/journal）用
+    # owner_session_id；旧数据为 None 时回退 session_id。
+    owner_session_id: str | None = None
     metric_targets: list[dict] = field(default_factory=list)
     budget_token: int | None = None
     budget_turn: int | None = None

@@ -179,6 +179,17 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_studies_status "
                 "ON studies(execution_status)"
             )
+            # v2 migration: owner_session_id — creator chat session kept for
+            # goal-ledger writes while session_id may become "study:{id}".
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(studies)")]
+            if "owner_session_id" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE studies ADD COLUMN owner_session_id TEXT"
+                )
+                self._conn.execute(
+                    "UPDATE studies SET owner_session_id = session_id "
+                    "WHERE owner_session_id IS NULL"
+                )
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS study_directives (
@@ -221,6 +232,9 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_study_rounds_study "
                 "ON study_rounds(study_id, round_num)"
             )
+            # Release any implicit transaction (migration UPDATE above)
+            # so other connections (GoalStore, same DB file) can write.
+            self._conn.commit()
 
     # ── writes ───────────────────────────────────────────────────────
 
@@ -233,6 +247,7 @@ class StudyStore:
         objective: str,
         workspace_path: str,
         strategy_name: str,
+        owner_session_id: str | None = None,
         executor_type: str = "autoresearch",
         metric_targets: list[dict] | None = None,
         budget_token: int | None = None,
@@ -291,6 +306,7 @@ class StudyStore:
         study_id = _id("study")
         now = _now_iso()
         targets_json = _json_dumps(metric_targets or [])
+        owner = owner_session_id or session_id
 
         _dlog("store", "create_study id=%s session=%s goal=%s strategy=%s executor=%s",
               study_id, session_id, goal_id, strategy_name, executor_type)
@@ -308,7 +324,7 @@ class StudyStore:
             self._conn.execute(
                 """
                 INSERT INTO studies (
-                    study_id, session_id, goal_id, objective,
+                    study_id, session_id, owner_session_id, goal_id, objective,
                     executor_type, workspace_path, strategy_name,
                     metric_targets,
                     budget_token, budget_turn, budget_time_seconds,
@@ -320,11 +336,12 @@ class StudyStore:
                     monitor_interval_seconds, last_monitor_check_at,
                     monitor_drift_count
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
                 """,
                 (
                     study_id,
                     session_id,
+                    owner,
                     goal_id,
                     objective,
                     executor_type,
@@ -352,6 +369,26 @@ class StudyStore:
         ).fetchone()
         logger.info("study created: %s (session=%s goal=%s)", study_id, session_id, goal_id)
         return self._study_from_row(row)
+
+    @_synchronized
+    def update_session_id(self, study_id: str, session_id: str) -> StudyRecord | None:
+        """v2: rebind a study to its micro session ("study:{id}").
+
+        The creator's chat session is preserved in ``owner_session_id``
+        (set at create_study time) so goal-ledger writes keep routing to
+        the user's session while events flow on the micro session.
+        """
+        now = _now_iso()
+        with self._write_transaction():
+            self._conn.execute(
+                "UPDATE studies SET session_id = ?, updated_at = ? "
+                "WHERE study_id = ?",
+                (session_id, now, study_id),
+            )
+        row = self._conn.execute(
+            "SELECT * FROM studies WHERE study_id = ?", (study_id,)
+        ).fetchone()
+        return self._study_from_row(row) if row else None
 
     @_synchronized
     def update_execution_status(
@@ -804,6 +841,7 @@ class StudyStore:
         return StudyRecord(
             study_id=row["study_id"],
             session_id=row["session_id"],
+            owner_session_id=row["owner_session_id"] or row["session_id"],
             goal_id=row["goal_id"],
             objective=row["objective"],
             executor_type=row["executor_type"],

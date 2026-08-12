@@ -182,6 +182,7 @@ async def study_start(req: StudyStartRequest, request: Request):
         with StudyStore() as store:
             study = store.create_study(
                 session_id=req.session_id,
+                owner_session_id=req.session_id,
                 goal_id=goal.goal_id,
                 objective=req.objective,
                 workspace_path=req.workspace_path,
@@ -202,6 +203,22 @@ async def study_start(req: StudyStartRequest, request: Request):
         # AEGIS: executor_type="autoresearch" uses AutoresearchRunner (round-based)
         # executor_type="workflow" uses GoalWorkflowRunner (single DAG)
         if req.executor_type == "autoresearch":
+            # v2 micro session: study:{id} — event isolation per study
+            # (same pattern as dag:{name} orchestration sessions). Idempotent;
+            # created with the real request user_id so ownership checks pass.
+            from .web_session import WebSessionCreate, create_session
+
+            micro_session = f"study:{study.study_id}"
+            await create_session(
+                WebSessionCreate(
+                    id=micro_session,
+                    title=f"Study · {req.objective[:40]}",
+                ),
+                request,
+            )
+            with StudyStore() as store:
+                study = store.update_session_id(study.study_id, micro_session)
+
             # Use scheduler → AutoresearchRunner (AEGIS-powered round loop)
             sched = _get_study_scheduler()
             import asyncio
@@ -211,6 +228,7 @@ async def study_start(req: StudyStartRequest, request: Request):
                 "status": "ok",
                 "study_id": study.study_id,
                 "goal_id": study.goal_id,
+                "session_id": micro_session,
                 "execution_status": StudyStatus.QUEUED.value,
                 "executor_type": "autoresearch",
             }

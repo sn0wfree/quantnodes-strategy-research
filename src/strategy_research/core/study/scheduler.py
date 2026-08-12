@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from .runner import AutoresearchRunner, ControlToken, NullEmitter
@@ -25,6 +26,10 @@ from .models import StudyRecord, StudyStatus
 from .store import StudyStore
 
 logger = logging.getLogger(__name__)
+
+# v2: global concurrency cap across ALL studies (per-process semaphore).
+# Study directories are autonomous (study/<id>/), so no per-strategy locks.
+SR_STUDY_MAX_CONCURRENT = int(os.environ.get("SR_STUDY_MAX_CONCURRENT", "3"))
 
 
 def _dlog(module: str, msg: str, *args) -> None:
@@ -63,6 +68,10 @@ class StudyScheduler:
         # Per-session queue + consumer
         self._session_queues: dict[str, asyncio.Queue] = {}
         self._session_consumers: dict[str, asyncio.Task] = {}
+        # v2: fire-and-forget dispatch tasks (session_loop → _run_one_study)
+        self._dispatch_tasks: dict[str, asyncio.Task] = {}
+        # v2: global concurrency semaphore (SR_STUDY_MAX_CONCURRENT)
+        self._semaphore = asyncio.Semaphore(max(1, SR_STUDY_MAX_CONCURRENT))
         self._shutdown = False
 
     # ── public: submit ─────────────────────────────────────────────
@@ -191,11 +200,14 @@ class StudyScheduler:
             tok.cancelled = True
         for _sid, task in list(self._active_tasks.items()):
             task.cancel()
+        for _sid, task in list(self._dispatch_tasks.items()):
+            task.cancel()
         for _sid, task in list(self._session_consumers.items()):
             task.cancel()
         # give tasks a moment to unwind
         await asyncio.sleep(0)
         self._active_tasks.clear()
+        self._dispatch_tasks.clear()
         self._session_consumers.clear()
 
     # ── internals ──────────────────────────────────────────────────
@@ -210,7 +222,7 @@ class StudyScheduler:
         )
 
     async def _session_loop(self, session_id: str) -> None:
-        """Drain the session's study queue one at a time."""
+        """Drain the session's study queue, dispatching studies in parallel."""
         q = self._session_queues.get(session_id)
         logger.info("study session_loop start session=%s", session_id)
         while not self._shutdown and q is not None:
@@ -221,13 +233,29 @@ class StudyScheduler:
             if study_id is None:
                 break
             logger.info("study session_loop got study=%s", study_id)
-            await self._run_one_study(study_id)
+            # v2: true parallelism — do NOT await the study to completion;
+            # the global semaphore inside _run_one_study caps concurrency.
+            task = asyncio.create_task(self._run_one_study(study_id))
+            self._dispatch_tasks[study_id] = task
+            task.add_done_callback(
+                lambda t, sid=study_id: self._dispatch_tasks.pop(sid, None)
+            )
         # queue drained — drop it (next submit recreates)
         self._session_queues.pop(session_id, None)
         logger.info("study session_loop exit session=%s", session_id)
 
     async def _run_one_study(self, study_id: str) -> None:
         _dlog("sched", "_run_one_study start study=%s", study_id)
+        # Global concurrency cap: holds the slot for the whole study
+        # lifetime (rounds + cooldown + review), per design §5.2.
+        await self._semaphore.acquire()
+        try:
+            await self._run_one_study_locked(study_id)
+        finally:
+            self._semaphore.release()
+
+    async def _run_one_study_locked(self, study_id: str) -> None:
+        _dlog("sched", "_run_one_study_locked study=%s", study_id)
         study = self.store.get_study(study_id)
         if study is None:
             _dlog("sched", "_run_one_study: study not found %s", study_id)
