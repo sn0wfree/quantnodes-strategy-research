@@ -187,7 +187,13 @@ class AutoresearchRunner:
 
         # Load previous summary for cross-round context
         previous_summary = self._maybe_load_previous_summary(self.study)
-        if previous_summary and previous_summary.get("metrics"):
+        # v2: best score comes from state.json (keep-only, design §8.4)
+        from strategy_research.core.study import state_store as ss
+        state = ss.load(Path(self.study.workspace_path), sid)
+        best_calmar = (state.best_metrics or {}).get("calmar")
+        if best_calmar is not None:
+            self._best_score = float(best_calmar)
+        elif previous_summary and previous_summary.get("metrics"):
             self._best_score = previous_summary["metrics"].get("calmar", 0.0)
 
         round_num = self.study.current_round
@@ -303,7 +309,13 @@ class AutoresearchRunner:
         previous_summary: dict | None,
         directive_text: str | None,
     ) -> dict:
-        """Execute one round: phases + AEGIS hooks.
+        """Execute one round: phases + AEGIS hooks + v2 artifacts.
+
+        v2 (design §8.1): per-round autonomous directory under
+        ``study/<id>/rounds/round_NNNN/``; the round starts from the
+        adopted run (last keep run, else baseline) copied into the round's
+        first run dir; three artifacts (manifest/summary.md/journal.md)
+        land at round end (phase 1); state.json is the authority.
 
         Overridable for tests to stub round execution.
         """
@@ -314,16 +326,55 @@ class AutoresearchRunner:
         from strategy_research.core.autoresearch import (
             run_researcher_phase, run_execution_phase, run_evaluation_phase,
         )
+        from strategy_research.core.study import (
+            round_manifest as rm,
+            state_store as ss,
+        )
 
         sid = self.study.study_id
         session = self.study.session_id
         path = Path(self.study.workspace_path).resolve()
         strategy = self.study.strategy_name
         metric_targets = self.study.metric_targets
+        root = ss.study_root(path, sid)
+        state = ss.load(path, sid)
 
-        # read state + create run dir
-        current_state = read_current_state(path, strategy)
-        runs_dir, run_name, run_dir = _create_run_dir(path, strategy)
+        # ── round dir + inherited strategy copy ─────────────────────
+        rounds_dir = root / "rounds"
+        round_dir = rm.round_dir(path, sid, round_num)
+        round_dir.mkdir(parents=True, exist_ok=True)
+
+        runs_dir, run_name, run_dir = _create_run_dir(
+            path, strategy, runs_dir=round_dir,
+        )
+        # inheritance: last keep run (or baseline) → this round's strategy
+        adopted = rm.resolve_adopted_run_for_start(state.last_keep_run_dir)
+        inherited_from = adopted
+        src_strategy = (root / adopted / "strategy.py") if adopted != "baseline" \
+            else root / "baseline" / "strategy.py"
+        dst_strategy = run_dir / "strategy.py"
+        if src_strategy.exists():
+            dst_strategy.write_text(
+                src_strategy.read_text(encoding="utf-8"), encoding="utf-8",
+            )
+        src_cfg = root / adopted / "config.yaml" if adopted != "baseline" \
+            else root / "baseline" / "config.yaml"
+        if src_cfg.exists():
+            (run_dir / "config.yaml").write_text(
+                src_cfg.read_text(encoding="utf-8"), encoding="utf-8",
+            )
+
+        results_tsv = root / "results.tsv"
+
+        # read state (study layout: strategy in run dir, tsv at study root)
+        current_state = read_current_state(
+            path, strategy,
+            strategy_file=dst_strategy,
+            results_tsv=results_tsv,
+        )
+        current_state["study_strategy_path"] = str(
+            round_dir.relative_to(path) / run_name / "strategy.py"
+        )
 
         # AEGIS: inject journal + scoreboard context
         journal_ctx = self._build_journal_context()
@@ -345,6 +396,7 @@ class AutoresearchRunner:
             directives=directive_text,
             lazy_detection_interval=self.study.lazy_detection_interval,
             keep_recent=self.study.keep_recent, round_num=round_num,
+            runs_dir=runs_dir,
         )
         researcher_output = researcher_result["researcher_output"]
 
@@ -365,6 +417,9 @@ class AutoresearchRunner:
             path, strategy, current_state, researcher_output, run_dir,
             session_id=session, run_name=run_name,
             behavior=self.study.behavior, max_retries=3,
+            strategy_dir=run_dir,
+            results_tsv=results_tsv,
+            round_num=round_num,
         )
         metrics = exec_result["metrics"]
         strategist_output = exec_result["strategist_output"]
@@ -376,8 +431,11 @@ class AutoresearchRunner:
         )
         verdict = eval_result["verdict"]
 
-        # disk: results.tsv + summary
-        self._update_results_tsv(runs_dir, run_name, verdict)
+        # disk: results.tsv (round column) + summary
+        self._update_results_tsv(
+            runs_dir, run_name, verdict,
+            round_num=round_num, results_tsv=results_tsv,
+        )
         agent_outputs = {
             "researcher": researcher_output,
             **{k: exec_result.get(k) for k in (
@@ -422,6 +480,68 @@ class AutoresearchRunner:
             self._scoreboard = LeverScoreboard()
         self._scoreboard.update([lever], attribution, gating_outcome, round_num, round_num)
 
+        # ── v2 artifacts (phase 1): manifest + summary.md + journal.md ──
+        verdict_reason = self._verdict_reason(eval_result, strategist_output)
+        strategy_changes = (
+            strategist_output.get("changes")
+            if isinstance(strategist_output, dict) else None
+        )
+        manifest = rm.build_manifest(
+            round_num=round_num,
+            inherited_from=inherited_from,
+            adopted_run=state.last_keep_run_dir,
+            run_name=run_name,
+            hypothesis=hypothesis,
+            levers=[lever],
+            predicted_affected=predicted_affected,
+            strategy_changes=strategy_changes,
+            metrics=metrics,
+            prev_metrics=summary.get("performance_change") or None,
+            baseline_metrics=state.baseline_best or None,
+            verdict=verdict,
+            verdict_reason=verdict_reason,
+            gates=None,
+            budget={
+                "turns_used": self._total_used_turns,
+                "time_used_s": round(self._total_used_time, 1),
+                "total": {
+                    "turns": self.study.budget_turn,
+                    "time_s": self.study.budget_time_seconds,
+                },
+            },
+        )
+        rm.save_manifest(manifest, path, sid, round_num)
+        summary_md = rm.render_round_markdown(manifest, self.study.objective)
+        (rm.summary_path(path, sid, round_num)).write_text(
+            summary_md, encoding="utf-8",
+        )
+        rm.append_journal_md(path, sid, manifest, self.study.objective)
+
+        # ── state.json update (authority; DB mirrors later in _run_loop) ──
+        state.last_completed_round = round_num
+        if verdict == "keep":
+            state.last_keep_run_dir = f"rounds/round_{round_num:04d}/{run_name}"
+            state.discard_streak = 0
+            for key in ("calmar", "sharpe", "max_dd"):
+                if key in metrics and isinstance(metrics.get(key), (int, float)):
+                    if (state.best_metrics.get(key, float("-inf")) or float("-inf")) < metrics[key]:
+                        state.best_metrics[key] = metrics[key]
+        else:
+            state.discard_streak += 1
+        state.budget_used_turns = self._total_used_turns
+        state.budget_used_time_s = round(self._total_used_time, 1)
+        ss.save(path, sid, state)
+
+        # DB mirror: study_rounds row (phase 1 body)
+        try:
+            self.study_store.append_round(
+                sid, round_num, run_name,
+                metrics=metrics, verdict=verdict,
+                config_changes=strategy_changes,
+            )
+        except Exception as exc:  # noqa: BLE001 — file-first; DB is mirror
+            logger.warning("append_round failed (mirror): %s", exc)
+
         return {
             "round": round_num, "run_name": run_name, "run_dir": run_dir,
             "metrics": metrics, "verdict": verdict,
@@ -429,7 +549,22 @@ class AutoresearchRunner:
             "agent_outputs": agent_outputs, "summary": summary,
             "backtest_error": exec_result.get("backtest_error"),
             "passed_now": passed_now,
+            "manifest": manifest,
+            "state": state,
         }
+
+    def _verdict_reason(self, eval_result: dict, strategist_output: Any) -> str:
+        """Extract the verdict reason from decision/attribution output."""
+        decision = eval_result.get("decision")
+        if decision is not None:
+            reason = getattr(decision, "reason", None) or \
+                (decision.get("reason", "") if isinstance(decision, dict) else "")
+            if reason:
+                return str(reason)
+        aoa = eval_result.get("aoa_llm_verdict")
+        if isinstance(aoa, dict) and aoa.get("decision") == "discard":
+            return str(aoa.get("reason", "anti-overfit rejection"))
+        return ""
 
     # ── AEGIS helpers ──────────────────────────────────────────────
 

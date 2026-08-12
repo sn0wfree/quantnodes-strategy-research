@@ -131,6 +131,7 @@ class StudyRoundRecord:
     evidence_ids: list[str] = field(default_factory=list)
     config_changes: dict | None = None
     agent_output: str | None = None
+    review: dict | None = None   # v2 phase-2 overlay (manifest review section)
     created_at: str = ""
 
 

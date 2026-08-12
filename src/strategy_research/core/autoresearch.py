@@ -1878,6 +1878,9 @@ def run_execution_phase(
     behavior: str | None = None,
     max_retries: int = 3,
     inter_agent_sleep: float = 0.0,
+    strategy_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    round_num: int | None = None,
 ) -> dict:
     """Phase 2: data_quality → factor_analyst → strategist → portfolio → backtest.
 
@@ -1910,6 +1913,9 @@ def run_execution_phase(
         action=strat.get("action", "unknown"),
         description=strat.get("hypothesis", ""),
         run_dir=run_dir,
+        strategy_dir=strategy_dir,
+        results_tsv=results_tsv,
+        round_num=round_num,
     )
 
     backtest_error: str | None = None

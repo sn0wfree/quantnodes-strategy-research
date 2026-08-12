@@ -232,6 +232,12 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_study_rounds_study "
                 "ON study_rounds(study_id, round_num)"
             )
+            # v2: review section (phase-2 overlay) on round records
+            round_cols = [r[1] for r in self._conn.execute("PRAGMA table_info(study_rounds)")]
+            if "review_json" not in round_cols:
+                self._conn.execute(
+                    "ALTER TABLE study_rounds ADD COLUMN review_json TEXT"
+                )
             # Release any implicit transaction (migration UPDATE above)
             # so other connections (GoalStore, same DB file) can write.
             self._conn.commit()
@@ -766,6 +772,28 @@ class StudyStore:
         )
 
     @_synchronized
+    def update_round(
+        self,
+        study_id: str,
+        round_num: int,
+        review: dict,
+    ) -> "StudyRoundRecord | None":
+        """v2 phase-2 overlay: attach the review section to a round record.
+
+        Complements ``append_round`` (phase-1 body); payload mirrors the
+        manifest's ``review`` section (design §9.4/§20.4).
+        """
+        from .models import StudyRoundRecord
+        now = _now_iso()
+        with self._write_transaction():
+            self._conn.execute(
+                "UPDATE study_rounds SET review_json = ?, created_at = ? "
+                "WHERE study_id = ? AND round_num = ?",
+                (_json_dumps(review), now, study_id, round_num),
+            )
+        return self.get_round(study_id, round_num)
+
+    @_synchronized
     def list_rounds(
         self, study_id: str, limit: int = 50
     ) -> list["StudyRoundRecord"]:
@@ -803,6 +831,8 @@ class StudyStore:
             evidence_ids=_json_loads(row["evidence_ids_json"], []),
             config_changes=_json_loads(row["config_changes_json"], None),
             agent_output=row["agent_output"],
+            review=_json_loads(row["review_json"], None)
+            if "review_json" in row.keys() else None,
             created_at=row["created_at"],
         )
 

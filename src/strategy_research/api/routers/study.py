@@ -40,6 +40,102 @@ def _create_minimal_strategy(strat_dir: Path, strategy_name: str) -> None:
         )
 
 
+_RESULTS_TSV_HEADER = (
+    "run\tcommit\taction\tcalmar\tsharpe\tmax_dd\t"
+    "ann_return\tturnover\tfactors_added\tfactors_removed\t"
+    "params_changed\tstatus\tdescription\tround\n"
+)
+
+_TODOS_TEMPLATE = (
+    "# 任务子任务清单（评审维护）\n"
+    "\n"
+    "## 待办\n"
+    "\n"
+    "## 进行中\n"
+    "\n"
+    "## 已放弃\n"
+    "\n"
+)
+
+_KNOWLEDGE_TEMPLATE = (
+    "# 知识储备与 Idea 池\n"
+    "<!-- 外部信息收集沉淀 · 追加式 · 每轮注入近期条目 -->\n"
+    "\n"
+)
+
+_STUDY_GUIDANCE_TEMPLATE = """\
+# 研究指引（每轮自动注入）
+
+## 决策规则（人类判断点）
+<!-- 在此定义硬性规则；enforce:true 的 gate 走 frontmatter -->
+
+## 偏好
+- 因子表达式保持可解释性；优先验证与任务目标直接相关的因子。
+
+## 任务文档说明（需要时用 read_file 按需读取）
+- `study/{study_id}/journal.md`：全任务轮次归档（追加式，一行式摘要）。
+- `study/{study_id}/rounds/round_NNNN/summary.md`：单轮详细总结。
+- `study/{study_id}/todos.md`：任务子任务清单。
+- `study/{study_id}/knowledge.md`：外部信息储备。
+- 每轮产物默认已注入上下文，仅在信息不足时按需读取。
+"""
+
+
+def _init_study_dir(
+    ws: Path,
+    study_id: str,
+    strategy_name: str,
+    objective: str,
+    guidance_md: str | None = None,
+) -> dict:
+    """v2 bootstrap: autonomous study directory (design §6.2).
+
+    Creates baseline/strategy.py, results.tsv header, guidance.md,
+    todos.md, knowledge.md and state.json.
+    """
+    from ...core.study.state_store import init as init_state
+
+    root = ws / "study" / study_id
+    (root / "baseline").mkdir(parents=True, exist_ok=True)
+    (root / "rounds").mkdir(parents=True, exist_ok=True)
+
+    # baseline strategy: existing strategy copied, else minimal template
+    baseline_py = root / "baseline" / "strategy.py"
+    src = ws / "strategies" / strategy_name / "strategy.py"
+    if src.exists():
+        baseline_py.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        _create_minimal_strategy(root / "baseline", strategy_name)
+
+    # results.tsv header (round column last)
+    tsv = root / "results.tsv"
+    if not tsv.exists():
+        tsv.write_text(_RESULTS_TSV_HEADER, encoding="utf-8")
+
+    # guidance.md: request override > built-in template
+    guidance = root / "guidance.md"
+    if guidance_md:
+        guidance.write_text(guidance_md, encoding="utf-8")
+    elif not guidance.exists():
+        guidance.write_text(
+            _STUDY_GUIDANCE_TEMPLATE.format(study_id=study_id),
+            encoding="utf-8",
+        )
+
+    # todos.md / knowledge.md templates
+    todos = root / "todos.md"
+    if not todos.exists():
+        todos.write_text(_TODOS_TEMPLATE, encoding="utf-8")
+    knowledge = root / "knowledge.md"
+    if not knowledge.exists():
+        knowledge.write_text(_KNOWLEDGE_TEMPLATE, encoding="utf-8")
+
+    # state.json
+    init_state(ws, study_id)
+
+    return {"root": str(root), "results_tsv": str(tsv)}
+
+
 # ── scheduler cache (mirrors chat._session_service_cache pattern) ───
 
 
@@ -111,6 +207,7 @@ class StudyStartRequest(BaseModel):
     lazy_detection_interval: int = 10
     keep_recent: int = 10
     monitor_interval_seconds: Optional[int] = None
+    guidance_md: Optional[str] = None  # v2: per-task guidance override (§13)
 
 
 class DirectiveRequest(BaseModel):
@@ -203,6 +300,17 @@ async def study_start(req: StudyStartRequest, request: Request):
                 supersede=False,
             )
             study = store.update_goal_id(study.study_id, goal.goal_id)
+
+        # v2 bootstrap: autonomous study directory (baseline strategy,
+        # results.tsv, guidance.md, todos.md, knowledge.md, state.json)
+        if req.executor_type == "autoresearch":
+            _init_study_dir(
+                ws_resolved,
+                study.study_id,
+                req.strategy_name,
+                req.objective,
+                guidance_md=req.guidance_md,
+            )
 
         # Phase 3: Start GoalWorkflowRunner instead of scheduler
         # AEGIS: executor_type="autoresearch" uses AutoresearchRunner (round-based)
@@ -710,4 +818,75 @@ async def study_directives_list(request: Request, study_id: str):
             }
             for r in rows
         ],
+    }
+
+# ── v2 artifacts endpoints (design §17) ────────────────────────────────
+
+
+def _owned_study(request: Request, study_id: str):
+    """Fetch a study with IDOR enforcement (owner-session based)."""
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="study not found")
+        _verify_study_ownership(request, study.owner_session_id)
+        return study
+
+
+@router.get("/{study_id}/rounds")
+async def study_rounds_list(
+    request: Request, study_id: str,
+    offset: int = 0, limit: int = 20,
+):
+    """v2: paginated round history (study_rounds table)."""
+    from ...core.study import StudyStore
+    _owned_study(request, study_id)
+    with StudyStore() as store:
+        rows = store.list_rounds(study_id, limit=offset + limit)
+    page = rows[offset:offset + limit]
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "total": len(rows),
+        "offset": offset,
+        "limit": limit,
+        "rounds": [
+            {
+                "round": r.round_num,
+                "run_name": r.run_name,
+                "verdict": r.verdict,
+                "metrics": r.metrics,
+                "review": r.review,
+                "created_at": r.created_at,
+            }
+            for r in page
+        ],
+    }
+
+
+@router.get("/{study_id}/journal")
+async def study_journal(request: Request, study_id: str):
+    """v2: journal.md content (append-only archive, single source)."""
+    from ...core.study import state_store as ss
+    study = _owned_study(request, study_id)
+    p = ss.journal_path(Path(study.workspace_path), study_id)
+    content = p.read_text(encoding="utf-8") if p.exists() else ""
+    return {"status": "ok", "study_id": study_id, "journal": content}
+
+
+@router.get("/{study_id}/rounds/{round_num}/summary_md")
+async def study_round_summary_md(request: Request, study_id: str, round_num: int):
+    """v2: single-round summary.md content."""
+    from ...core.study import round_manifest as rm
+    from ...core.study import state_store as ss
+    study = _owned_study(request, study_id)
+    p = rm.summary_path(Path(study.workspace_path), study_id, round_num)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="round summary not found")
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "round": round_num,
+        "summary_md": p.read_text(encoding="utf-8"),
     }

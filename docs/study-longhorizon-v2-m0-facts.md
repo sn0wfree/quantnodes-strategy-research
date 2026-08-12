@@ -191,6 +191,32 @@ strategist 白名单**含 run_backtest**（role_factory.py:41），agent 可在 
 - 测试：`tests/test_study_v2_path_params.py` 11 个（round 列/自定义布局/
   双参数/轮内编号/复合匹配/白名单注入）
 
+## 6.2 M3 实施记录（2026-08 完成）
+
+- 新增 `core/study/state_store.py`：state.json 原子读写（tmp+rename），
+  字段：last_completed_round/best_metrics(keep)/last_keep_run_dir/
+  discard_streak/budget_used/last_collect_round/last_review 等；缺失/损坏
+  回退默认（§3.2 恢复兜底）
+- 新增 `core/study/round_manifest.py`：manifest 两段式（build_manifest 第一段
+  + overlay_review 第二段）、summary.md 模板渲染、journal.md 追加（discard
+  行带否决标记）、继承链决策（resolve_adopted_run：keep 更新/回滚/streak
+  停止）
+- `run_execution_phase` 透传 strategy_dir/results_tsv/round_num → 
+  run_backtest_script；`study_rounds` 加 review_json 列 + `update_round`
+  （评审第二段 overlay）；StudyRoundRecord 加 review 字段
+- study_start：`_init_study_dir` 引导（baseline 复制或最小模板 + results.tsv
+  表头 + guidance.md 模板/覆盖 + todos.md/knowledge.md + state.json）；
+  StudyStartRequest 加 guidance_md
+- runner `_run_one_round` 改造：轮首 state 读取 → round_N 目录 → 继承复制
+  （last_keep_run_dir/baseline → run_XXXX/strategy.py）→ 双参数
+  read_current_state → 三阶段（study 布局参数）→ 三产物第一段（manifest/
+  summary.md/journal.md）→ state.json 更新（keep/回滚/best/budget）→
+  append_round DB 镜像；`_run_loop` best 初始化改从 state.json
+- 端点：`GET /study/{id}/rounds`（分页）、`/journal`、`/rounds/{round}/
+  summary_md`（IDOR 按 owner）
+- 测试：`tests/test_study_v2_round_artifacts.py` 10 个（state/manifest/
+  journal/继承链/update_round/引导/e2e 产物）
+
 ## 7. M1 预研结论（单身份 + 并行，定稿）
 
 - **单身份设计**（§4）：`studies.session_id` = `study_id`（create_study 内部
