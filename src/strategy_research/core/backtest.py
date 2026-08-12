@@ -134,15 +134,17 @@ def create_run_dir(strategy_dir: Path, run_name: str) -> Path:
 
 def save_run_snapshot(strategy_dir: Path, run_dir: Path) -> None:
     """保存策略快照。"""
+    # Study 场景 strategy_dir == run_dir（v2 每轮独立目录）：跳过自复制
+    same_dir = run_dir.resolve() == strategy_dir.resolve()
     src = strategy_dir / "strategy.py"
     dst = run_dir / "strategy.py"
-    if src.exists():
+    if src.exists() and not same_dir:
         shutil.copy2(src, dst)
 
     # 也保存 config.yaml
     config_src = strategy_dir / "config.yaml"
     config_dst = run_dir / "config.yaml"
-    if config_src.exists():
+    if config_src.exists() and not same_dir:
         shutil.copy2(config_src, config_dst)
 
 
