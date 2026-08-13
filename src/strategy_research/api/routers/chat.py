@@ -1065,46 +1065,45 @@ def _parse_study_flags(rest: list[str]) -> dict:
     while i < len(rest):
         tok = rest[i]
         if tok.startswith("--") and i + 1 < len(rest):
-            key, val = tok[2:], rest[i + 1]
-            if key in ("workspace", "workspace_path"):
-                flags["workspace_path"] = val
-            elif key in ("strategy", "strategy_name"):
-                flags["strategy_name"] = val
-            elif key == "metric":
-                flags["metric_targets"] = _parse_metric_targets(val)
-            elif key in ("budget-turn",):
-                try:
-                    flags["budget_turn"] = int(val)
-                except ValueError:
-                    pass
-            elif key in ("budget-time",):
-                try:
-                    flags["budget_time_seconds"] = int(val)
-                except ValueError:
-                    pass
-            elif key in ("max-rounds",):
-                try:
-                    flags["max_rounds"] = int(val)
-                except ValueError:
-                    pass
-            elif key in ("monitor-interval",):
-                try:
-                    flags["monitor_interval_seconds"] = int(val)
-                except ValueError:
-                    pass
-            elif key == "behavior":
-                flags["behavior"] = val
-            elif key in ("executor", "executor_type"):
-                if val in ("autoresearch", "workflow"):
-                    flags["executor_type"] = val
-            elif key in ("guidance-file",):
-                flags["guidance_file"] = val
-            elif key in ("gates-file",):
-                flags["gates_file"] = val
+            _apply_study_flag(flags, tok[2:], rest[i + 1])
             i += 2
         else:
             i += 1
     return flags
+
+
+def _apply_study_flag(flags: dict, key: str, val: str) -> None:
+    """Apply a single ``--key value`` pair to the flags dict."""
+    if key in ("workspace", "workspace_path"):
+        flags["workspace_path"] = val
+    elif key in ("strategy", "strategy_name"):
+        flags["strategy_name"] = val
+    elif key == "metric":
+        flags["metric_targets"] = _parse_metric_targets(val)
+    elif key in ("budget-turn", "budget-time", "max-rounds", "monitor-interval"):
+        _set_int_flag(flags, {
+            "budget-turn": "budget_turn",
+            "budget-time": "budget_time_seconds",
+            "max-rounds": "max_rounds",
+            "monitor-interval": "monitor_interval_seconds",
+        }[key], val)
+    elif key == "behavior":
+        flags["behavior"] = val
+    elif key in ("executor", "executor_type"):
+        if val in ("autoresearch", "workflow"):
+            flags["executor_type"] = val
+    elif key in ("guidance-file",):
+        flags["guidance_file"] = val
+    elif key in ("gates-file",):
+        flags["gates_file"] = val
+
+
+def _set_int_flag(flags: dict, dst: str, val: str) -> None:
+    """Set an int flag; ignore unparseable values."""
+    try:
+        flags[dst] = int(val)
+    except ValueError:
+        pass
 
 
 def _parse_metric_targets(spec: str) -> list[dict] | None:

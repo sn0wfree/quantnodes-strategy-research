@@ -56,19 +56,12 @@ def create_app(
     from ..core.agent.loop import register_compaction_persister
     from .routers.web_session import persist_message
     register_compaction_persister(persist_message)
-    # Resolve from environment if not explicitly provided (supports uvicorn --reload factory mode)
-    if workspace_path is None:
-        env = os.environ.get("SR_WORKSPACE_PATH")
-        workspace_path = Path(env) if env else None
-    if goal_db_path is None:
-        goal_db_path = os.environ.get("SR_GOAL_DB_PATH")
-    if hypotheses_path is None:
-        hypotheses_path = os.environ.get("SR_HYPOTHESES_PATH")
-    if static_dir is None:
-        static_dir = os.environ.get("STATIC_DIR")
-    if cors_origins is None:
-        cors_str = os.environ.get("CORS_ORIGINS")
-        cors_origins = cors_str.split(",") if cors_str else None
+
+    workspace_path, goal_db_path, hypotheses_path, static_dir, cors_origins = (
+        _resolve_app_env(
+            workspace_path, goal_db_path, hypotheses_path, static_dir, cors_origins
+        )
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -196,38 +189,7 @@ def create_app(
     # Serve static files if available
     static_path = Path(static_dir) if static_dir else Path(__file__).parent.parent.parent.parent / "webui" / "static"
     if static_path.exists():
-        # Mount assets directory
-        assets_path = static_path / "assets"
-        if assets_path.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
-
-        # Serve index.html for all non-API routes (SPA fallback)
-        @app.get("/", include_in_schema=False)
-        async def serve_index():
-            return FileResponse(static_path / "index.html")
-
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_spa(full_path: str):
-            # Don't intercept API routes
-            if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not found")
-
-            # Resolve + contain the path inside the static dir (blocks
-            # path traversal via ".." / encoded segments).
-            try:
-                resolved = (static_path / full_path).resolve()
-                resolved.relative_to(static_path.resolve())
-            except (ValueError, OSError):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not found")
-
-            if resolved.is_file():
-                return FileResponse(resolved)
-            # Fallback to index.html (SPA routing)
-            return FileResponse(static_path / "index.html")
-
-        logger.info("Serving static files from %s", static_path)
+        _mount_static_files(app, static_path)
     else:
         @app.get("/")
         async def root():
@@ -238,6 +200,64 @@ def create_app(
             }
 
     return app
+
+
+def _resolve_app_env(
+    workspace_path: Optional[Path],
+    goal_db_path: Optional[str],
+    hypotheses_path: Optional[str],
+    static_dir: Optional[str],
+    cors_origins: Optional[list],
+) -> tuple:
+    """Resolve config values from environment when not explicitly provided."""
+    if workspace_path is None:
+        env = os.environ.get("SR_WORKSPACE_PATH")
+        workspace_path = Path(env) if env else None
+    if goal_db_path is None:
+        goal_db_path = os.environ.get("SR_GOAL_DB_PATH")
+    if hypotheses_path is None:
+        hypotheses_path = os.environ.get("SR_HYPOTHESES_PATH")
+    if static_dir is None:
+        static_dir = os.environ.get("STATIC_DIR")
+    if cors_origins is None:
+        cors_str = os.environ.get("CORS_ORIGINS")
+        cors_origins = cors_str.split(",") if cors_str else None
+    return workspace_path, goal_db_path, hypotheses_path, static_dir, cors_origins
+
+
+def _mount_static_files(app: FastAPI, static_path: Path) -> None:
+    """Mount static assets + SPA fallback routes."""
+    assets_path = static_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+    # Serve index.html for all non-API routes (SPA fallback)
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse(static_path / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # Don't intercept API routes
+        if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Resolve + contain the path inside the static dir (blocks
+        # path traversal via ".." / encoded segments).
+        try:
+            resolved = (static_path / full_path).resolve()
+            resolved.relative_to(static_path.resolve())
+        except (ValueError, OSError):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
+
+        if resolved.is_file():
+            return FileResponse(resolved)
+        # Fallback to index.html (SPA routing)
+        return FileResponse(static_path / "index.html")
+
+    logger.info("Serving static files from %s", static_path)
 
 
 def configure_from_env():
