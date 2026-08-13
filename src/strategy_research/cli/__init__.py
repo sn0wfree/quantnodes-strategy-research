@@ -521,15 +521,6 @@ def cmd_import(args: argparse.Namespace) -> int:
         print(f"❌ 不是有效的工作区: {path}")
         return 1
 
-    from strategy_research.core.data_import import (
-        import_akshare,
-        import_csv_ohlcv,
-        import_fred,
-        import_from_source,
-        import_ifind,
-        import_parquet_ohlcv,
-        import_tushare,
-    )
     from strategy_research.core.db import init_db
 
     # 确保 DuckDB 初始化
@@ -540,9 +531,6 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     # 本地文件源
     if source == "sample":
-        # generate_sample_data still returns close-only panel; full OHLCV
-        # path is TBD (see TODO(toolsets)).  Tell user to use the API
-        # sources (tushare/akshare/...) or the online fetch in run_backtest.
         print(
             "❌ 'sample' source temporarily unavailable: generate_sample_data "
             "returns close-only data. Use tushare/akshare source or run "
@@ -550,93 +538,12 @@ def cmd_import(args: argparse.Namespace) -> int:
         )
         return 1
 
-    elif source == "csv":
-        if not args.file:
-            print("❌ 请指定 --file 参数")
-            return 1
-        try:
-            success = import_csv_ohlcv(
-                path, strategy_name, args.file,
-                date_column=args.date_column,
-                asset_column=args.asset_column,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            print(f"❌ CSV 导入失败: {e}")
-            return 1
-
-    elif source == "parquet":
-        if not args.file:
-            print("❌ 请指定 --file 参数")
-            return 1
-        try:
-            success = import_parquet_ohlcv(
-                path, strategy_name, args.file,
-                date_column=args.date_column,
-                asset_column=args.asset_column,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            print(f"❌ Parquet 导入失败: {e}")
-            return 1
-
-    # API 数据源
-    elif source == "tushare":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数 (如: 000001.SZ,600519.SH)")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_tushare(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
-    elif source == "ifind":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_ifind(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
+    if source in ("csv", "parquet"):
+        success = _import_local_file(source, args, path, strategy_name)
+    elif source in ("tushare", "ifind", "akshare", "auto"):
+        success = _import_api_source(source, args, path, strategy_name)
     elif source == "fred":
-        if not args.codes:
-            # 默认导入核心系列
-            from strategy_research.core.data_source.fred_loader import CORE_SERIES
-            codes = CORE_SERIES
-            print(f"📡 导入 FRED 核心系列 ({len(codes)} 个)...")
-        else:
-            codes = [c.strip() for c in args.codes.split(",")]
-        success = import_fred(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
-    elif source == "akshare":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_akshare(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
-    elif source == "auto":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_from_source(
-            path, strategy_name, "auto", codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
+        success = _import_fred(args, path, strategy_name)
     else:
         print(f"❌ 未知数据源: {source}")
         print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
@@ -654,6 +561,71 @@ def cmd_import(args: argparse.Namespace) -> int:
     else:
         print("\n❌ 数据导入失败")
         return 1
+
+
+def _import_local_file(source: str, args, path: Path, strategy_name: str) -> bool:
+    """Import from a local csv/parquet file."""
+    if not args.file:
+        print("❌ 请指定 --file 参数")
+        return False
+    try:
+        if source == "csv":
+            from strategy_research.core.data_import import import_csv_ohlcv
+            return import_csv_ohlcv(
+                path, strategy_name, args.file,
+                date_column=args.date_column,
+                asset_column=args.asset_column,
+            )
+        from strategy_research.core.data_import import import_parquet_ohlcv
+        return import_parquet_ohlcv(
+            path, strategy_name, args.file,
+            date_column=args.date_column,
+            asset_column=args.asset_column,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ 数据导入失败: {e}")
+        return False
+
+
+def _import_api_source(source: str, args, path: Path, strategy_name: str) -> bool:
+    """Import from a codes-based API source (tushare/ifind/akshare/auto)."""
+    if not args.codes:
+        print("❌ 请指定 --codes 参数 (如: 000001.SZ,600519.SH)")
+        return False
+    codes = [c.strip() for c in args.codes.split(",")]
+    from strategy_research.core.data_import import (
+        import_akshare,
+        import_from_source,
+        import_ifind,
+        import_tushare,
+    )
+    importer = {
+        "tushare": import_tushare,
+        "ifind": import_ifind,
+        "akshare": import_akshare,
+        "auto": import_from_source,
+    }[source]
+    if source == "auto":
+        return importer(path, strategy_name, "auto", codes,
+                        args.start_date, args.end_date, incremental=args.incremental)
+    return importer(path, strategy_name, codes,
+                    args.start_date, args.end_date, incremental=args.incremental)
+
+
+def _import_fred(args, path: Path, strategy_name: str) -> bool:
+    """Import FRED series (core series when --codes is omitted)."""
+    if not args.codes:
+        from strategy_research.core.data_source.fred_loader import CORE_SERIES
+        codes = CORE_SERIES
+        print(f"📡 导入 FRED 核心系列 ({len(codes)} 个)...")
+    else:
+        codes = [c.strip() for c in args.codes.split(",")]
+    from strategy_research.core.data_import import import_fred
+    return import_fred(
+        path, strategy_name, codes,
+        args.start_date, args.end_date,
+        incremental=args.incremental,
+    )
 
 
 
@@ -996,7 +968,7 @@ def _dispatch_session(args, parsers) -> int:
     elif args.session_command == "delete":
         return cmd_session_delete(args)
     else:
-        session_parser.print_help()
+        parsers["session"].print_help()
         return 0
 
 
@@ -1009,7 +981,7 @@ def _dispatch_skills(args, parsers) -> int:
     elif args.skills_command == "search":
         return cmd_skills_search(args)
     else:
-        skills_parser.print_help()
+        parsers["skills"].print_help()
         return 0
 
 
@@ -1024,7 +996,7 @@ def _dispatch_swarm(args, parsers) -> int:
     elif args.swarm_command == "cancel":
         return cmd_swarm_cancel(args)
     else:
-        swarm_parser.print_help()
+        parsers["swarm"].print_help()
         return 0
 
 
@@ -1035,7 +1007,7 @@ def _dispatch_mcp(args, parsers) -> int:
     elif args.mcp_command == "list-tools":
         return cmd_mcp_list_tools(args)
     else:
-        mcp_parser.print_help()
+        parsers["mcp"].print_help()
         return 0
 
 
@@ -1140,7 +1112,7 @@ def _dispatch_api(args, parsers) -> int:
     if args.api_command == "serve":
         return cmd_api_serve(args)
     else:
-        api_parser.print_help()
+        parsers["api"].print_help()
         return 0
 
 
@@ -1149,7 +1121,7 @@ def _dispatch_webui(args, parsers) -> int:
     if args.webui_command == "serve":
         return cmd_webui_serve(args)
     else:
-        webui_parser.print_help()
+        parsers["webui"].print_help()
         return 0
 
 
@@ -1160,7 +1132,7 @@ def _dispatch_compact(args, parsers) -> int:
 
         return cmd_compact_show(args)
     else:
-        compact_parser.print_help()
+        parsers["compact"].print_help()
         return 0
 
 
