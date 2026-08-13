@@ -2,6 +2,13 @@
 
 Exposes strategy-research tools via MCP protocol for external AI tools.
 All tools are research-only (no trading/order execution).
+
+Reuse: tools whose MCP contract matches the agent ``BaseTool`` surface
+(web_search / read_url / read_document / list_data_sources / search_symbol /
+run_backtest / compute_factor) are wrapped from the shared agent registry
+via ``_wrap_base_tool`` — no duplicated handler logic. MCP-only tools
+(goal / hypothesis / memory / session / swarm / list_skills / load_skill /
+get_market_data) keep their own MCP-specific contracts.
 """
 
 from __future__ import annotations
@@ -10,6 +17,9 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Callable
+
+from ..agent.builtin_tools.utils import tool_err
+from ..agent.tools import BaseTool, ToolContext, _schema_from_signature
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +164,51 @@ class MCPTool:
             "description": self.description,
             "inputSchema": self.parameters,
         }
+
+
+def _wrap_base_tool(
+    tool: BaseTool,
+    *,
+    param_map: dict[str, str] | None = None,
+    include_workspace: bool = False,
+) -> MCPTool:
+    """Wrap an agent ``BaseTool`` as an MCP tool.
+
+    The MCP schema is derived from the tool's signature-based OpenAI
+    function schema. ``param_map`` renames MCP params to agent params
+    (MCP name → agent name); ``include_workspace`` adds a ``workspace``
+    param that is routed into ``ToolContext`` instead of the tool kwargs.
+    """
+    # Use the non-strict signature schema: strict (OpenAI structured
+    # outputs) forces ALL params into `required`, which is wrong for MCP.
+    fn_def = {"description": tool.description, "parameters": _schema_from_signature(tool)}
+    parameters = fn_def["parameters"] or {}
+    properties = dict(parameters.get("properties", {}))
+    required = list(parameters.get("required", []))
+
+    if param_map:
+        properties = {param_map.get(k, k): v for k, v in properties.items()}
+        required = [param_map.get(n, n) for n in required]
+    if include_workspace and "workspace" not in properties:
+        properties["workspace"] = {"type": "string", "description": "工作区路径（必填）"}
+        required.append("workspace")
+
+    def handler(**kwargs: Any) -> str:
+        workspace = kwargs.pop("workspace", None)
+        ctx = ToolContext(workspace=Path(workspace).resolve() if workspace else None)
+        if param_map:
+            kwargs = {param_map.get(k, k): v for k, v in kwargs.items()}
+        try:
+            return tool.invoke({"ctx": ctx, **kwargs})
+        except Exception as exc:  # noqa: BLE001
+            return tool_err(str(exc))
+
+    return MCPTool(
+        name=tool.name,
+        description=fn_def.get("description") or tool.description,
+        parameters={"type": "object", "properties": properties, "required": required},
+        handler=handler,
+    )
 
 
 class MCPServer:
@@ -443,33 +498,15 @@ class MCPServer:
         ))
 
     def _register_backtest_tools(self) -> None:
-        def run_backtest(workspace: str = "", strategy: str = "", **kwargs: Any) -> str:
-            # Phase B: 真接 core.backtest.run_backtest_script (替代旧 stub)
-            if not workspace or not strategy:
-                return json.dumps({
-                    "status": "error",
-                    "error": "workspace 和 strategy 都是必需参数",
-                }, ensure_ascii=False)
-            try:
-                from ..backtest import run_backtest_script
-                ws_path = Path(workspace).resolve()
-                result = run_backtest_script(
-                    workspace_path=ws_path,
-                    strategy_name=strategy,
-                    action="mcp",
-                    description="MCP-triggered backtest",
-                    timeout=300,
-                )
-                return json.dumps({
-                    "status": "ok" if result.get("success") else "error",
-                    "workspace": workspace,
-                    "strategy": strategy,
-                    "run": result.get("run", ""),
-                    "metrics": result.get("metrics", {}),
-                    "error": result.get("error"),
-                }, ensure_ascii=False, default=str)
-            except Exception as exc:
-                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
+        # Agent registry's 4-step orchestrated run_backtest (config_load →
+        # data_prepare → data_gate → engine_run); MCP params map 1:1.
+        from ..agent.builtin_tools.backtest_tools import RunBacktestTool
+
+        self.register(_wrap_base_tool(
+            RunBacktestTool(),
+            param_map={"strategy": "strategy_name"},
+            include_workspace=True,
+        ))
 
         def validate_run(run_dir: str = "", market: str = "a_share", **kwargs: Any) -> str:
             # Phase B: 真接 core.validation.runner (替代旧 stub)
@@ -506,19 +543,6 @@ class MCPServer:
                 return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
         self.register(MCPTool(
-            name="run_backtest",
-            description="执行回测（真接 core.backtest.run_backtest_script）",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "workspace": {"type": "string", "description": "工作区路径"},
-                    "strategy": {"type": "string", "description": "策略名称"},
-                },
-                "required": ["workspace", "strategy"],
-            },
-            handler=run_backtest,
-        ))
-        self.register(MCPTool(
             name="validate_run",
             description="验证回测结果（Monte Carlo + Bootstrap + Walk-Forward）",
             parameters={
@@ -533,54 +557,13 @@ class MCPServer:
         ))
 
     def _register_factor_tools(self) -> None:
-        def compute_factor(expression: str = "", workspace: str = "", asset: str = "", **kwargs: Any) -> str:
-            # Phase B: 真接 core.compute_factor + core.db.load_price_data
-            if not workspace or not asset:
-                return json.dumps({
-                    "status": "error",
-                    "error": "workspace 和 asset 都是必需参数",
-                }, ensure_ascii=False)
-            try:
-                from ..compute_factor import compute_factor as _compute
-                from ..db import load_price_data
+        # Agent registry's compute_factor (expression → factor_code).
+        from ..agent.builtin_tools.factor_tools import ComputeFactorTool
 
-                ws_path = Path(workspace).resolve()
-                prices = load_price_data(ws_path, asset)
-                if prices is None or len(prices) == 0:
-                    return json.dumps({
-                        "status": "error",
-                        "error": f"无法从 {workspace} 加载 {asset} 的价格数据",
-                    }, ensure_ascii=False)
-
-                result = _compute(expression, prices, factor_name=asset)
-                # 转成 list 以便 JSON 序列化
-                return json.dumps({
-                    "status": "ok",
-                    "expression": expression,
-                    "asset": asset,
-                    "factor_name": result.name,
-                    "n_total": len(result),
-                    "n_non_null": int(result.notna().sum()),
-                    "first_date": str(result.index[0]) if len(result) > 0 else None,
-                    "last_date": str(result.index[-1]) if len(result) > 0 else None,
-                    "preview": result.dropna().head(5).to_list(),
-                }, ensure_ascii=False, default=str)
-            except Exception as exc:
-                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
-
-        self.register(MCPTool(
-            name="compute_factor",
-            description="计算因子值（真接 core.compute_factor + DuckDB）",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "expression": {"type": "string", "description": "因子表达式 (DSL)"},
-                    "workspace": {"type": "string", "description": "工作区路径"},
-                    "asset": {"type": "string", "description": "标的代码"},
-                },
-                "required": ["expression", "workspace", "asset"],
-            },
-            handler=compute_factor,
+        self.register(_wrap_base_tool(
+            ComputeFactorTool(),
+            param_map={"expression": "factor_code"},
+            include_workspace=True,
         ))
 
     def _register_memory_tools(self) -> None:
@@ -693,57 +676,14 @@ class MCPServer:
         ))
 
     def _register_web_tools(self) -> None:
-        def web_search_tool(query: str = "", max_results: int = 10, **kwargs: Any) -> str:
-            from ..web.search import web_search
-            return web_search(query=query, max_results=max_results)
+        from ..agent.builtin_tools.web_tools import (
+            ReadDocumentTool,
+            ReadUrlTool,
+            WebSearchTool,
+        )
 
-        def read_url_tool(url: str = "", max_chars: int = 10000, **kwargs: Any) -> str:
-            from ..web.fetch import read_url
-            return read_url(url=url, max_chars=max_chars)
-
-        def read_document_tool(path: str = "", max_pages: int = 50, **kwargs: Any) -> str:
-            from ..web.pdf import read_document
-            return read_document(path=path, max_pages=max_pages)
-
-        self.register(MCPTool(
-            name="web_search",
-            description="使用 DuckDuckGo 搜索互联网（无需 API key）",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "搜索关键词"},
-                    "max_results": {"type": "integer", "description": "最大结果数（默认 10）", "default": 10},
-                },
-                "required": ["query"],
-            },
-            handler=web_search_tool,
-        ))
-        self.register(MCPTool(
-            name="read_url",
-            description="抓取网页内容并转换为 Markdown",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "要抓取的 URL"},
-                    "max_chars": {"type": "integer", "description": "最大字符数（默认 10000）", "default": 10000},
-                },
-                "required": ["url"],
-            },
-            handler=read_url_tool,
-        ))
-        self.register(MCPTool(
-            name="read_document",
-            description="从 PDF 文件中提取文本内容",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "PDF 文件路径"},
-                    "max_pages": {"type": "integer", "description": "最大页数（默认 50）", "default": 50},
-                },
-                "required": ["path"],
-            },
-            handler=read_document_tool,
-        ))
+        for tool in (WebSearchTool(), ReadUrlTool(), ReadDocumentTool()):
+            self.register(_wrap_base_tool(tool))
 
     def _register_data_tools(self) -> None:
         def get_market_data(
@@ -759,68 +699,6 @@ class MCPServer:
             return _handle_get_market_data(
                 codes, start_date, end_date, interval, source, max_rows, force_refresh
             )
-
-        def list_data_sources(**kwargs: Any) -> str:
-            from ..data_source.registry import LOADER_REGISTRY, _ensure_registered
-            _ensure_registered()
-            sources = []
-            for name, cls in LOADER_REGISTRY.items():
-                try:
-                    instance = cls()
-                    available = instance.is_available()
-                    markets = list(getattr(instance, "markets", set()))
-                    requires_auth = getattr(instance, "requires_auth", False)
-                except Exception:
-                    available = False
-                    markets = []
-                    requires_auth = False
-                sources.append({
-                    "name": name,
-                    "available": available,
-                    "markets": markets,
-                    "requires_auth": requires_auth,
-                })
-            return json.dumps({
-                "status": "ok",
-                "n_sources": len(sources),
-                "sources": sources,
-            }, ensure_ascii=False)
-
-        def search_symbol(
-            query: str = "",
-            market: str = "a_share",
-            limit: int = 10,
-            **kwargs: Any,
-        ) -> str:
-            if not query:
-                return json.dumps({"status": "error", "error": "query is required"}, ensure_ascii=False)
-            try:
-                import akshare as ak
-                df = ak.stock_zh_a_spot_em()
-                if df is None or df.empty:
-                    return json.dumps({"status": "ok", "results": [], "query": query}, ensure_ascii=False)
-                mask = (
-                    df["代码"].str.contains(query, case=False, na=False)
-                    | df["名称"].str.contains(query, case=False, na=False)
-                )
-                matched = df[mask].head(limit)
-                results = []
-                for _, row in matched.iterrows():
-                    results.append({
-                        "code": row.get("代码", ""),
-                        "name": row.get("名称", ""),
-                        "market": "a_share",
-                    })
-                return json.dumps({
-                    "status": "ok",
-                    "results": results,
-                    "query": query,
-                    "n_results": len(results),
-                }, ensure_ascii=False)
-            except ImportError:
-                return json.dumps({"status": "error", "error": "akshare not installed"}, ensure_ascii=False)
-            except Exception as exc:
-                return json.dumps({"status": "error", "error": f"search failed: {exc}"}, ensure_ascii=False)
 
         self.register(MCPTool(
             name="get_market_data",
@@ -839,26 +717,12 @@ class MCPServer:
             },
             handler=get_market_data,
         ))
-        self.register(MCPTool(
-            name="list_data_sources",
-            description="列出所有可用数据源及其状态",
-            parameters={"type": "object", "properties": {}},
-            handler=list_data_sources,
-        ))
-        self.register(MCPTool(
-            name="search_symbol",
-            description="按名称或代码搜索股票/基金",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "搜索关键词（名称或代码）"},
-                    "market": {"type": "string", "description": "市场过滤（默认 a_share）", "default": "a_share"},
-                    "limit": {"type": "integer", "description": "最大结果数（默认 10）", "default": 10},
-                },
-                "required": ["query"],
-            },
-            handler=search_symbol,
-        ))
+
+        # Agent-registry tools with matching MCP contracts (no duplication)
+        from ..agent.builtin_tools.data_tools import ListDataSourcesTool, SearchSymbolTool
+
+        self.register(_wrap_base_tool(ListDataSourcesTool()))
+        self.register(_wrap_base_tool(SearchSymbolTool()))
 
     def _register_swarm_execution_tools(self) -> None:
         from ..swarm.run_store import RunStore
