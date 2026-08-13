@@ -1508,6 +1508,36 @@ def _build_tool_indexes(
     return tool_to_assistant_idx, tc_to_tool_idx
 
 
+def _defer_or_drop_tool_message(
+    i: int,
+    msg,
+    ctx: _HistoryConvertContext,
+    emitted_tool_msg_idxs: set[int],
+    emitted_assistant_idxs: set[int],
+) -> list:
+    """Handle a role="tool" message: skip, defer, or drop as orphan.
+
+    Tool messages are emitted as part of their assistant:
+    1. Already emitted alongside its assistant → skip
+    2. Assistant comes later in the list → defer (paired then)
+    3. Assistant not in this history slice (orphan) → drop with log
+    """
+    if i in emitted_tool_msg_idxs:
+        return []
+    tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
+    if not tc_id:
+        return []
+    assistant_idx = ctx.tool_to_assistant_idx.get(tc_id)
+    if assistant_idx is None or assistant_idx in emitted_assistant_idxs:
+        if assistant_idx is None:
+            logger.debug(
+                "[HIST] orphan tool dropped: tc_id=%s msg_id=%s",
+                tc_id, msg.message_id,
+            )
+        return []
+    return []  # Defer: assistant is later, will be paired then
+
+
 def _convert_one_history_message(
     i: int,
     msg,
@@ -1557,24 +1587,9 @@ def _convert_one_history_message(
         return [({"role": "system", "content": content or ""}, None)]
 
     if role == "tool":
-        # Tool messages are emitted as part of their assistant:
-        # 1. Already emitted alongside its assistant → skip
-        # 2. Assistant comes later in the list → defer (paired then)
-        # 3. Assistant not in this history slice (orphan) → drop with log
-        if i in emitted_tool_msg_idxs:
-            return []
-        tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
-        if not tc_id:
-            return []
-        assistant_idx = ctx.tool_to_assistant_idx.get(tc_id)
-        if assistant_idx is None or assistant_idx in emitted_assistant_idxs:
-            if assistant_idx is None:
-                logger.debug(
-                    "[HIST] orphan tool dropped: tc_id=%s msg_id=%s",
-                    tc_id, msg.message_id,
-                )
-            return []
-        return []  # Defer: assistant is later, will be paired then
+        return _defer_or_drop_tool_message(
+            i, msg, ctx, emitted_tool_msg_idxs, emitted_assistant_idxs
+        )
 
     if role not in ("user", "assistant"):
         return []
@@ -1758,71 +1773,106 @@ def _accumulate_part(
     error and the chunk is dropped.
     """
     if event_type == "text.started":
-        text_id = data.get("text_id")
-        if not text_id:
-            logger.warning("text.started without text_id")
-            return
-        # Idempotent: SSE replay / duplicate emission. If a text part
-        # with this id already exists, treat as a no-op.
-        for p in reversed(parts):
-            if p.get("type") == "text" and p.get("id") == text_id:
-                return
-        parts.append({"type": "text", "id": text_id, "text": ""})
+        _accumulate_text_started(parts, data)
     elif event_type == "text_delta":
-        text_id = data.get("text_id")
-        text = data.get("text", "")
-        if not text_id:
-            logger.warning("text_delta without text_id, dropping chunk")
-            return
-        for p in reversed(parts):
-            if p.get("type") == "text" and p.get("id") == text_id:
-                p["text"] += text
-                break
-        else:
-            # Orphan: text.started hasn't arrived yet (replay / late join).
-            logger.warning("text_delta with orphan text_id=%s, pushing new", text_id)
-            parts.append({"type": "text", "id": text_id, "text": text})
+        _accumulate_text_delta(parts, data)
     elif event_type == "text.ended":
-        text_id = data.get("text_id")
-        final_text = data.get("text", "")
-        if not text_id:
-            logger.warning("text.ended without text_id")
-            return
-        for p in reversed(parts):
-            if p.get("type") == "text" and p.get("id") == text_id:
-                p["text"] = final_text
-                break
+        _accumulate_text_ended(parts, data)
     elif event_type == "tool_call":
-        raw_args = data.get("arguments")
-        args_str = (
-            raw_args
-            if isinstance(raw_args, str)
-            else json.dumps(raw_args, ensure_ascii=False) if raw_args is not None else None
-        )
-        parts.append(
-            {
-                "type": "tool_call",
-                "id": data.get("id") or data.get("call_id"),
-                "name": data.get("name") or data.get("tool"),
-                "arguments": args_str,
-            }
-        )
+        parts.append(_build_tool_call_part(data))
     elif event_type == "tool_result":
-        tool_call_id = data.get("id") or data.get("call_id")
-        for p in reversed(parts):
-            if p.get("type") == "tool_call" and p.get("id") == tool_call_id:
-                p["result"] = data.get("result") or data.get("preview")
-                p["status"] = data.get("status", "done")
-                break
+        _accumulate_tool_result(parts, data)
     elif event_type == "thinking_delta":
-        delta = data.get("delta", "")
-        if parts and parts[-1].get("type") == "thinking":
-            parts[-1]["text"] += delta
-        else:
-            parts.append({"type": "thinking", "text": delta})
+        _accumulate_thinking_delta(parts, data)
     elif event_type == "thinking_done":
         if parts and parts[-1].get("type") == "thinking":
             parts[-1]["status"] = "done"
+
+
+def _accumulate_text_started(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Push a new text part (idempotent by text_id)."""
+    text_id = data.get("text_id")
+    if not text_id:
+        logger.warning("text.started without text_id")
+        return
+    for p in reversed(parts):
+        if p.get("type") == "text" and p.get("id") == text_id:
+            return
+    parts.append({"type": "text", "id": text_id, "text": ""})
+
+
+def _accumulate_text_delta(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Append delta text to the matching text part (or create orphan)."""
+    text_id = data.get("text_id")
+    text = data.get("text", "")
+    if not text_id:
+        logger.warning("text_delta without text_id, dropping chunk")
+        return
+    for p in reversed(parts):
+        if p.get("type") == "text" and p.get("id") == text_id:
+            p["text"] += text
+            break
+    else:
+        logger.warning("text_delta with orphan text_id=%s, pushing new", text_id)
+        parts.append({"type": "text", "id": text_id, "text": text})
+
+
+def _accumulate_text_ended(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Override the matching text part with the final text."""
+    text_id = data.get("text_id")
+    final_text = data.get("text", "")
+    if not text_id:
+        logger.warning("text.ended without text_id")
+        return
+    for p in reversed(parts):
+        if p.get("type") == "text" and p.get("id") == text_id:
+            p["text"] = final_text
+            break
+
+
+def _build_tool_call_part(data: dict[str, Any]) -> dict[str, Any]:
+    """Build a tool_call part from an SSE event payload."""
+    raw_args = data.get("arguments")
+    args_str = (
+        raw_args
+        if isinstance(raw_args, str)
+        else json.dumps(raw_args, ensure_ascii=False) if raw_args is not None else None
+    )
+    return {
+        "type": "tool_call",
+        "id": data.get("id") or data.get("call_id"),
+        "name": data.get("name") or data.get("tool"),
+        "arguments": args_str,
+    }
+
+
+def _accumulate_tool_result(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Attach a tool result to the matching tool_call part."""
+    tool_call_id = data.get("id") or data.get("call_id")
+    for p in reversed(parts):
+        if p.get("type") == "tool_call" and p.get("id") == tool_call_id:
+            p["result"] = data.get("result") or data.get("preview")
+            p["status"] = data.get("status", "done")
+            break
+
+
+def _accumulate_thinking_delta(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Append a thinking delta to the last thinking part (or create one)."""
+    delta = data.get("delta", "")
+    if parts and parts[-1].get("type") == "thinking":
+        parts[-1]["text"] += delta
+    else:
+        parts.append({"type": "thinking", "text": delta})
 
 
 def _utc_now_iso() -> str:
