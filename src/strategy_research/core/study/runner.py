@@ -213,6 +213,79 @@ class AutoresearchRunner:
 
     # ── main loop ──────────────────────────────────────────────────
 
+    def _check_stop_conditions(
+        self,
+        result: dict,
+        metrics: dict,
+        verdict: str,
+        round_num: int,
+        session: str,
+        sid: str,
+    ) -> str | None:
+        """Check post-round shutdown conditions; returns stop reason or None."""
+        from strategy_research.core.study import state_store as _ss
+
+        # targets met (E2: targets ∧ keep ∧ gates pass)
+        if result.get("e2_passed"):
+            self._complete_goal(result)
+            self._mark_terminal(StudyStatus.COMPLETE, last_metrics=metrics, reason=ShutdownReason.TARGETS_MET)
+            self._emit(session, "study_completed", {
+                "study_id": sid, "goal_id": self.study.goal_id,
+                "metrics": metrics, "round": round_num, "recap": verdict,
+            })
+            return ShutdownReason.TARGETS_MET
+
+        # budget
+        if self._budget_exceeded():
+            self._mark_terminal(StudyStatus.BUDGET_LIMITED, last_metrics=metrics,
+                                last_error=self._budget_summary(), reason=ShutdownReason.BUDGET)
+            self._emit(session, "study_budget_limited", {
+                "study_id": sid, "used": self._budget_summary(),
+            })
+            return ShutdownReason.BUDGET
+
+        # stagnation
+        decision = result.get("decision")
+        if decision and isinstance(decision, dict) and decision.get("stagnation_triggered"):
+            self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
+                                last_error="stagnation", reason=ShutdownReason.STAGNATION)
+            return ShutdownReason.STAGNATION
+
+        # v2 review cycle stop (repeated deviation / review failure)
+        review_stop = result.get("review_stop")
+        if review_stop:
+            if review_stop == ShutdownReason.REPEATED_DEVIATION:
+                self._mark_terminal(
+                    StudyStatus.ERROR, last_metrics=metrics,
+                    last_error="repeated deviation (3x high)",
+                    reason=ShutdownReason.REPEATED_DEVIATION,
+                )
+            else:
+                self._mark_terminal(
+                    StudyStatus.ERROR, last_metrics=metrics,
+                    last_error=review_stop, reason=review_stop,
+                )
+            self._emit(session, "study_early_stopped", {
+                "study_id": sid, "round": round_num, "reason": review_stop,
+            })
+            return review_stop
+
+        # discard streak (design §8.2)
+        _st = _ss.load(Path(self.study.workspace_path), sid)
+        if _st.discard_streak >= SR_STUDY_MAX_DISCARD:
+            self._mark_terminal(
+                StudyStatus.ERROR, last_metrics=metrics,
+                last_error=f"discard_streak={_st.discard_streak}",
+                reason=ShutdownReason.DISCARD_STREAK,
+            )
+            self._emit(session, "study_early_stopped", {
+                "study_id": sid, "round": round_num,
+                "reason": ShutdownReason.DISCARD_STREAK,
+            })
+            return ShutdownReason.DISCARD_STREAK
+
+        return None
+
     async def _run_loop(self) -> str:
         sid = self.study.study_id
         session = self.study.session_id
@@ -282,66 +355,12 @@ class AutoresearchRunner:
                 "metrics": metrics, "verdict": verdict,
             })
 
-            # ── shutdown: targets met (E2: targets ∧ keep ∧ gates pass) ──
-            if result.get("e2_passed"):
-                self._complete_goal(result)
-                self._mark_terminal(StudyStatus.COMPLETE, last_metrics=metrics, reason=ShutdownReason.TARGETS_MET)
-                self._emit(session, "study_completed", {
-                    "study_id": sid, "goal_id": self.study.goal_id,
-                    "metrics": metrics, "round": round_num, "recap": verdict,
-                })
-                return ShutdownReason.TARGETS_MET
-
-            # ── shutdown: budget ───────────────────────────────────
-            if self._budget_exceeded():
-                self._mark_terminal(StudyStatus.BUDGET_LIMITED, last_metrics=metrics,
-                                    last_error=self._budget_summary(), reason=ShutdownReason.BUDGET)
-                self._emit(session, "study_budget_limited", {
-                    "study_id": sid, "used": self._budget_summary(),
-                })
-                return ShutdownReason.BUDGET
-
-            # ── shutdown: stagnation ───────────────────────────────
-            decision = result.get("decision")
-            if decision and isinstance(decision, dict) and decision.get("stagnation_triggered"):
-                self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
-                                    last_error="stagnation", reason=ShutdownReason.STAGNATION)
-                return ShutdownReason.STAGNATION
-
-            # ── shutdown: v2 review cycle stop (repeated deviation /
-            #    review failure / discard streak) ────────────────────
-            review_stop = result.get("review_stop")
-            if review_stop:
-                if review_stop == ShutdownReason.REPEATED_DEVIATION:
-                    self._mark_terminal(
-                        StudyStatus.ERROR, last_metrics=metrics,
-                        last_error="repeated deviation (3x high)",
-                        reason=ShutdownReason.REPEATED_DEVIATION,
-                    )
-                else:
-                    self._mark_terminal(
-                        StudyStatus.ERROR, last_metrics=metrics,
-                        last_error=review_stop, reason=review_stop,
-                    )
-                self._emit(session, "study_early_stopped", {
-                    "study_id": sid, "round": round_num, "reason": review_stop,
-                })
-                return review_stop
-
-            # ── shutdown: discard streak (design §8.2) ─────────────
-            from strategy_research.core.study import state_store as _ss
-            _st = _ss.load(Path(self.study.workspace_path), sid)
-            if _st.discard_streak >= SR_STUDY_MAX_DISCARD:
-                self._mark_terminal(
-                    StudyStatus.ERROR, last_metrics=metrics,
-                    last_error=f"discard_streak={_st.discard_streak}",
-                    reason=ShutdownReason.DISCARD_STREAK,
-                )
-                self._emit(session, "study_early_stopped", {
-                    "study_id": sid, "round": round_num,
-                    "reason": ShutdownReason.DISCARD_STREAK,
-                })
-                return ShutdownReason.DISCARD_STREAK
+            # ── shutdown conditions (targets/budget/stagnation/review/discard) ──
+            stop_reason = self._check_stop_conditions(
+                result, metrics, verdict, round_num, session, sid
+            )
+            if stop_reason is not None:
+                return stop_reason
 
             # ── shutdown: max_rounds ───────────────────────────────
             if self.study.max_rounds is not None and round_num >= self.study.max_rounds:
@@ -682,12 +701,7 @@ class AutoresearchRunner:
         # AEGIS: Novelty Gate
         hypothesis = researcher_output.get("hypothesis", "")
         predicted_affected = researcher_output.get("predicted_affected") or [t["name"] for t in metric_targets]
-        is_novel, novelty_reason = self._check_novelty(hypothesis, predicted_affected)
-        if not is_novel:
-            self._archive_rejected(round_num, hypothesis, "novelty", novelty_reason)
-            self._emit(session, "study_round_rejected", {
-                "study_id": sid, "round": round_num, "reason": "novelty", "detail": novelty_reason,
-            })
+        if not self._novelty_gate(round_num, hypothesis, predicted_affected):
             return {"round": round_num, "run_name": run_name, "aborted": True,
                     "reason": "novelty_rejected"}
 
@@ -723,16 +737,9 @@ class AutoresearchRunner:
         verdict = eval_result["verdict"]
 
         # ── guidance gates hard check (design §13.3): before verdict ──
-        gate_violations: list[dict] = []
-        if guidance.gates:
-            violations, skipped = gd.check_violations(guidance.gates, metrics)
-            for gid in skipped:
-                logger.warning(
-                    "guidance gate %s skipped (metric missing): %s", gid, metrics,
-                )
-            if violations:
-                gate_violations = violations
-                verdict = "discard"
+        gate_violations = self._check_guidance_gates(guidance, metrics)
+        if gate_violations:
+            verdict = "discard"
 
         # E2 completion semantics (§15.2): targets ∧ keep ∧ gates pass
         e2_passed = bool(
@@ -762,28 +769,17 @@ class AutoresearchRunner:
         summary["acceptance_decision"] = eval_result["decision"].to_dict()
         save_run_summary(run_dir, summary)
 
-        # AEGIS: Attribution
+        # AEGIS: Attribution + Journal + Regression Gate
         passed_now = _metric_pass_set(metrics, metric_targets)
         from .attribution import classify_attribution
         attribution = classify_attribution(predicted_affected, self._prev_passed, passed_now)
 
-        # AEGIS: Journal + Regression Gate
         lever = strategist_output.get("action", "unknown") if isinstance(strategist_output, dict) else "unknown"
         gating_outcome = "accepted" if verdict == "keep" else "reverted"
-        self._goal_store.append_journal_entry(
-            self.study.goal_id, session, round_num, hypothesis, hypothesis[:60],
-            levers=[lever], predicted_affected=predicted_affected,
-            changeset=strategist_output.get("changes") if isinstance(strategist_output, dict) else None,
+        self._record_journal_and_regression(
+            round_num, hypothesis, predicted_affected, lever,
+            strategist_output, gating_outcome, attribution,
         )
-        self._goal_store.fill_journal_attribution(
-            self.study.goal_id, session, round_num, gating_outcome, attribution,
-        )
-        passes, regressed = self._check_regression(attribution)
-        if not passes:
-            self._archive_rejected(round_num, hypothesis, "regression", str(regressed))
-            self._emit(session, "study_round_rejected", {
-                "study_id": sid, "round": round_num, "reason": "regression", "regressed": regressed,
-            })
 
         # AEGIS: Scoreboard
         from ..goal.scoreboard import LeverScoreboard
@@ -832,29 +828,9 @@ class AutoresearchRunner:
         rm.append_journal_md(path, sid, manifest, self.study.objective)
 
         # ── state.json update (authority; DB mirrors later in _run_loop) ──
-        state.last_completed_round = round_num
-        if verdict == "keep":
-            state.last_keep_run_dir = f"rounds/round_{round_num:04d}/{run_name}"
-            state.discard_streak = 0
-            for key in ("calmar", "sharpe", "max_dd"):
-                if key in metrics and isinstance(metrics.get(key), (int, float)):
-                    if (state.best_metrics.get(key, float("-inf")) or float("-inf")) < metrics[key]:
-                        state.best_metrics[key] = metrics[key]
-        else:
-            state.discard_streak += 1
-        state.budget_used_turns = self._total_used_turns
-        state.budget_used_time_s = round(self._total_used_time, 1)
-        ss.save(path, sid, state)
-
-        # DB mirror: study_rounds row (phase 1 body)
-        try:
-            self.study_store.append_round(
-                sid, round_num, run_name,
-                metrics=metrics, verdict=verdict,
-                config_changes=strategy_changes,
-            )
-        except Exception as exc:  # noqa: BLE001 — file-first; DB is mirror
-            logger.warning("append_round failed (mirror): %s", exc)
+        self._update_round_state(
+            path, sid, round_num, run_name, verdict, metrics, state, strategy_changes,
+        )
 
         # ── goal ledger: keep-round evidence + criteria progress (E1) ──
         if verdict == "keep" and self.study.goal_id:
@@ -879,6 +855,100 @@ class AutoresearchRunner:
         }
 
     # ── v2 review cycle (design §10) ────────────────────────────────
+
+    def _check_guidance_gates(self, guidance: Any, metrics: dict) -> list[dict]:
+        """Hard-check guidance gates; returns violating gate dicts (empty = pass)."""
+        from strategy_research.core.study import guidance as gd
+
+        violations: list[dict] = []
+        if not guidance.gates:
+            return violations
+        found, skipped = gd.check_violations(guidance.gates, metrics)
+        for gid in skipped:
+            logger.warning(
+                "guidance gate %s skipped (metric missing): %s", gid, metrics,
+            )
+        return found if found else violations
+
+    def _novelty_gate(
+        self, round_num: int, hypothesis: str, predicted_affected: list
+    ) -> bool:
+        """Run the AEGIS novelty gate; returns True when the round proceeds."""
+        is_novel, novelty_reason = self._check_novelty(hypothesis, predicted_affected)
+        if is_novel:
+            return True
+        self._archive_rejected(round_num, hypothesis, "novelty", novelty_reason)
+        self._emit(self.study.session_id, "study_round_rejected", {
+            "study_id": self.study.study_id, "round": round_num,
+            "reason": "novelty", "detail": novelty_reason,
+        })
+        return False
+
+    def _record_journal_and_regression(
+        self,
+        round_num: int,
+        hypothesis: str,
+        predicted_affected: list,
+        lever: str,
+        strategist_output,
+        gating_outcome: str,
+        attribution,
+    ) -> None:
+        """AEGIS: append journal entry + run the regression gate."""
+        session = self.study.session_id
+        self._goal_store.append_journal_entry(
+            self.study.goal_id, session, round_num, hypothesis, hypothesis[:60],
+            levers=[lever], predicted_affected=predicted_affected,
+            changeset=strategist_output.get("changes") if isinstance(strategist_output, dict) else None,
+        )
+        self._goal_store.fill_journal_attribution(
+            self.study.goal_id, session, round_num, gating_outcome, attribution,
+        )
+        passes, regressed = self._check_regression(attribution)
+        if not passes:
+            self._archive_rejected(round_num, hypothesis, "regression", str(regressed))
+            self._emit(session, "study_round_rejected", {
+                "study_id": self.study.study_id, "round": round_num,
+                "reason": "regression", "regressed": regressed,
+            })
+
+    def _update_round_state(
+        self,
+        path: Path,
+        sid: str,
+        round_num: int,
+        run_name: str,
+        verdict: str,
+        metrics: dict,
+        state: Any,
+        strategy_changes,
+    ) -> None:
+        """Persist state.json + DB mirror for the completed round."""
+        from strategy_research.core.study import state_store as ss
+
+        state.last_completed_round = round_num
+        if verdict == "keep":
+            state.last_keep_run_dir = f"rounds/round_{round_num:04d}/{run_name}"
+            state.discard_streak = 0
+            for key in ("calmar", "sharpe", "max_dd"):
+                if key in metrics and isinstance(metrics.get(key), (int, float)):
+                    if (state.best_metrics.get(key, float("-inf")) or float("-inf")) < metrics[key]:
+                        state.best_metrics[key] = metrics[key]
+        else:
+            state.discard_streak += 1
+        state.budget_used_turns = self._total_used_turns
+        state.budget_used_time_s = round(self._total_used_time, 1)
+        ss.save(path, sid, state)
+
+        # DB mirror: study_rounds row (phase 1 body)
+        try:
+            self.study_store.append_round(
+                sid, round_num, run_name,
+                metrics=metrics, verdict=verdict,
+                config_changes=strategy_changes,
+            )
+        except Exception as exc:  # noqa: BLE001 — file-first; DB is mirror
+            logger.warning("append_round failed (mirror): %s", exc)
 
     def _run_review_cycle(
         self,
