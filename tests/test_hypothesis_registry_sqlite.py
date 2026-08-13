@@ -1,9 +1,9 @@
-"""M5: HypothesisRegistry SQLite-mode wiring tests (design §14).
+"""M5: HypothesisRegistry SQLite-backing tests (design §14, P2).
 
-Verifies that the 14 registry methods behave identically when backed by
-HypothesisStore (db_path) vs the legacy JSON file mode — same KeyError
-semantics, list ordering, search scoring (OR token semantics), and
-relationship graph behavior.
+P2: the legacy JSON-file backend was removed — HypothesisRegistry is a
+thin facade over HypothesisStore. These tests pin the registry's public
+behavior (KeyError semantics, list ordering, search scoring — OR token
+semantics, relationship graph behavior).
 """
 
 from __future__ import annotations
@@ -14,11 +14,6 @@ from pathlib import Path
 import pytest
 
 from strategy_research.core.hypothesis import Hypothesis, HypothesisRegistry
-
-
-@pytest.fixture
-def json_reg(tmp_path: Path) -> HypothesisRegistry:
-    return HypothesisRegistry(path=tmp_path / "hyps.json")
 
 
 @pytest.fixture
@@ -213,12 +208,11 @@ class TestGraphConsistency:
         assert {c.hypothesis_id for c in children} == {c1.hypothesis_id, c2.hypothesis_id}
 
 
-# ─── env-var mode + create_app default ──────────────────────────────
+# ─── storage-path resolution ───────────────────────────────────
 
 
-class TestModeSelection:
-    def test_env_var_enables_sqlite(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("HYPOTHESIS_USE_SQLITE", "1")
+class TestStoragePathResolution:
+    def test_db_env_var(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv(
             "QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH",
             str(tmp_path / "env.db"),
@@ -227,15 +221,23 @@ class TestModeSelection:
         assert reg._store is not None
         h = reg.create(title="env", thesis="t")
         assert reg.get(h.hypothesis_id) is not None
+        assert (tmp_path / "env.db").exists()
 
-    def test_create_app_defaults_to_sqlite(self, monkeypatch):
+    def test_legacy_env_alias(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(
+            "QUANTNODES_RESEARCH_HYPOTHESES_PATH",
+            str(tmp_path / "legacy.db"),
+        )
+        reg = HypothesisRegistry()
+        assert reg.path == tmp_path / "legacy.db"
+        reg.create(title="l", thesis="t")
+        assert (tmp_path / "legacy.db").exists()
+
+    def test_create_app_still_works(self, monkeypatch):
         monkeypatch.delenv("HYPOTHESIS_USE_SQLITE", raising=False)
         from strategy_research.api.app import create_app
         app = create_app()
         assert app is not None
-        assert (
-            __import__("os").environ.get("HYPOTHESIS_USE_SQLITE") == "1"
-        )
 
 
 # ─── concurrency through the registry (SQLite branch) ───────────────

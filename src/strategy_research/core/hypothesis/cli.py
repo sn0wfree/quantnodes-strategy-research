@@ -155,7 +155,7 @@ def add_hypothesis_subparsers(subparsers: Any) -> None:
     common.add_argument(
         "--path",
         default=None,
-        help=f"hypotheses.json 路径 (默认 {default_hypotheses_path()})",
+        help=f"hypotheses 存储文件路径 (默认 {default_hypotheses_path()})",
     )
 
     # create

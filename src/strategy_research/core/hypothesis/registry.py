@@ -35,7 +35,6 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
     "rejected": set(),  # terminal
 }
 
-_ENV_PATH = "QUANTNODES_RESEARCH_HYPOTHESES_PATH"
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]")
 
 
@@ -69,16 +68,21 @@ def _apply_status(hyp: Any, status: str) -> None:
 
 
 def default_hypotheses_path() -> Path:
-    """Return the configured hypotheses JSON path.
+    """Return the configured hypotheses storage path.
 
-    Returns:
-        Env override path when ``QUANTNODES_RESEARCH_HYPOTHESES_PATH`` is set,
-        otherwise ``~/.quantnodes-research/hypotheses.json``.
+    Resolution order:
+        1. ``QUANTNODES_RESEARCH_HYPOTHESES_PATH`` env var (legacy alias)
+        2. ``QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH`` env var
+        3. ``~/.quantnodes-research/hypotheses.db`` (default)
+
+    The storage is SQLite (P2); the legacy JSON file backend was removed
+    and any existing ``hypotheses.json`` is left in place but never read.
     """
-    override = os.environ.get(_ENV_PATH, "").strip()
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".quantnodes-research" / "hypotheses.json"
+    for env in ("QUANTNODES_RESEARCH_HYPOTHESES_PATH", "QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH"):
+        override = os.environ.get(env, "").strip()
+        if override:
+            return Path(override).expanduser()
+    return Path.home() / ".quantnodes-research" / "hypotheses.db"
 
 
 def _utc_now() -> str:
@@ -218,31 +222,30 @@ def _rank_search(
 
 
 class HypothesisRegistry:
-    """File-backed registry for research hypotheses.
+    """Research hypothesis registry (SQLite-backed).
 
-    P3-E: Optionally backed by SQLite (via HypothesisStore). If ``db_path``
-    is provided or ``HYPOTHESIS_USE_SQLITE`` env is set, delegates to
-    HypothesisStore. Otherwise falls back to the legacy JSON file storage.
+    P2: the legacy JSON-file backend was removed — all persistence goes
+    through ``HypothesisStore`` (FTS5 search, indexed graph queries,
+    concurrent access). ``path`` is kept as a backwards-compatible
+    constructor alias for the storage file; existing ``hypotheses.json``
+    files are left in place but never read (see ``store.py``).
     """
 
     def __init__(self, path: Path | None = None, db_path: Path | None = None) -> None:
         """Initialize the registry.
 
         Args:
-            path: Optional JSON storage path. Defaults to env override or
-                ``~/.quantnodes-research/hypotheses.json``.
-            db_path: Optional SQLite path. If provided, uses HypothesisStore.
+            path: Optional storage file path (SQLite). Defaults to env
+                override or ``~/.quantnodes-research/hypotheses.db``.
+            db_path: Optional explicit SQLite path (alias of ``path``).
         """
-        import os
-        self.path = path or default_hypotheses_path()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        from .store import HypothesisStore
 
-        # P3-E: SQLite-backed mode
-        if db_path is not None or os.environ.get("HYPOTHESIS_USE_SQLITE", "").strip():
-            from .store import HypothesisStore
-            self._store: HypothesisStore | None = HypothesisStore(db_path=db_path)
-        else:
-            self._store = None
+        if db_path is None and path is not None:
+            db_path = path
+        self.path = Path(db_path) if db_path is not None else default_hypotheses_path()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._store: HypothesisStore = HypothesisStore(db_path=self.path)
 
     def create(
         self,
@@ -261,45 +264,15 @@ class HypothesisRegistry:
         goal_id: str | None = None,
     ) -> Hypothesis:
         """Create and persist a new hypothesis."""
-        if self._store is not None:
-            return self._store.create(
-                title=title, thesis=thesis, status=status, universe=universe,
-                signal_definition=signal_definition,
-                data_sources=data_sources, skills=skills,
-                invalidation_notes=invalidation_notes,
-                parent_hypothesis_id=parent_hypothesis_id,
-                related_ids=related_ids, contradicts_ids=contradicts_ids,
-                goal_id=goal_id,
-            )
-        title = title.strip()
-        thesis = thesis.strip()
-        if not title:
-            raise ValueError("title is required")
-        if not thesis:
-            raise ValueError("thesis is required")
-
-        records = self.list()
-        now = _utc_now()
-        hyp = Hypothesis(
-            hypothesis_id=_new_hypothesis_id(title, now, {h.hypothesis_id for h in records}),
-            title=title,
-            thesis=thesis,
-            status=_validate_status(status),
-            universe=universe.strip(),
-            signal_definition=signal_definition.strip(),
-            data_sources=_coerce_str_list(data_sources),
-            skills=_coerce_str_list(skills),
-            invalidation_notes=invalidation_notes.strip(),
+        return self._store.create(
+            title=title, thesis=thesis, status=status, universe=universe,
+            signal_definition=signal_definition,
+            data_sources=data_sources, skills=skills,
+            invalidation_notes=invalidation_notes,
             parent_hypothesis_id=parent_hypothesis_id,
-            related_ids=_coerce_str_list(related_ids),
-            contradicts_ids=_coerce_str_list(contradicts_ids),
+            related_ids=related_ids, contradicts_ids=contradicts_ids,
             goal_id=goal_id,
-            created_at=now,
-            updated_at=now,
         )
-        records.append(hyp)
-        self._save(records)
-        return hyp
 
     def update(
         self,
@@ -324,45 +297,18 @@ class HypothesisRegistry:
         P3-C: parent_hypothesis_id / related_ids / contradicts_ids / goal_id
               can be set or cleared (None clears).
         """
-        if self._store is not None:
-            updated = self._store.update(
-                hypothesis_id, title=title, thesis=thesis, status=status,
-                universe=universe, signal_definition=signal_definition,
-                data_sources=data_sources, skills=skills,
-                invalidation_notes=invalidation_notes,
-                parent_hypothesis_id=parent_hypothesis_id,
-                related_ids=related_ids, contradicts_ids=contradicts_ids,
-                goal_id=goal_id,
-            )
-            if updated is None:
-                raise KeyError(f"hypothesis not found: {hypothesis_id}")
-            return updated
-        records = self.list()
-        hyp = self._find_required(records, hypothesis_id)
-        _apply_scalar_fields(hyp, {
-            "title": title,
-            "thesis": thesis,
-            "universe": universe,
-            "signal_definition": signal_definition,
-            "invalidation_notes": invalidation_notes,
-        })
-        if status is not None:
-            _apply_status(hyp, status)
-        if data_sources is not None:
-            hyp.data_sources = _coerce_str_list(data_sources)
-        if skills is not None:
-            hyp.skills = _coerce_str_list(skills)
-        if parent_hypothesis_id is not None:
-            hyp.parent_hypothesis_id = parent_hypothesis_id or None
-        if related_ids is not None:
-            hyp.related_ids = _coerce_str_list(related_ids)
-        if contradicts_ids is not None:
-            hyp.contradicts_ids = _coerce_str_list(contradicts_ids)
-        if goal_id is not None:
-            hyp.goal_id = goal_id or None
-        hyp.updated_at = _utc_now()
-        self._save(records)
-        return hyp
+        updated = self._store.update(
+            hypothesis_id, title=title, thesis=thesis, status=status,
+            universe=universe, signal_definition=signal_definition,
+            data_sources=data_sources, skills=skills,
+            invalidation_notes=invalidation_notes,
+            parent_hypothesis_id=parent_hypothesis_id,
+            related_ids=related_ids, contradicts_ids=contradicts_ids,
+            goal_id=goal_id,
+        )
+        if updated is None:
+            raise KeyError(f"hypothesis not found: {hypothesis_id}")
+        return updated
 
     def link_backtest(
         self,
@@ -376,26 +322,13 @@ class HypothesisRegistry:
         """Link a run card or backtest artifact to a hypothesis."""
         if not run_card_path and not backtest_run_dir:
             raise ValueError("run_card_path or backtest_run_dir is required")
-        if self._store is not None:
-            updated = self._store.link_backtest(
-                hypothesis_id, run_card_path=run_card_path,
-                backtest_run_dir=backtest_run_dir, metrics=metrics, notes=notes,
-            )
-            if updated is None:
-                raise KeyError(f"hypothesis not found: {hypothesis_id}")
-            return updated
-        records = self.list()
-        hyp = self._find_required(records, hypothesis_id)
-        hyp.run_cards.append({
-            "run_card_path": run_card_path,
-            "backtest_run_dir": backtest_run_dir,
-            "metrics": metrics or {},
-            "notes": notes,
-            "linked_at": _utc_now(),
-        })
-        hyp.updated_at = _utc_now()
-        self._save(records)
-        return hyp
+        updated = self._store.link_backtest(
+            hypothesis_id, run_card_path=run_card_path,
+            backtest_run_dir=backtest_run_dir, metrics=metrics, notes=notes,
+        )
+        if updated is None:
+            raise KeyError(f"hypothesis not found: {hypothesis_id}")
+        return updated
 
     # ── P3-C: Relationship graph operations ─────────────────────
 
@@ -412,122 +345,52 @@ class HypothesisRegistry:
         Inherits parent's universe, data_sources, and skills. Sets
         parent_hypothesis_id on the new hypothesis.
         """
-        if self._store is not None:
-            return self._store.derive(
-                parent_id=parent_id, title=title, thesis=thesis,
-                signal_definition=signal_definition,
-            )
-        records = self.list()
-        parent = self._find_required(records, parent_id)
-        now = _utc_now()
-        hyp = Hypothesis(
-            hypothesis_id=_new_hypothesis_id(title, now, {h.hypothesis_id for h in records}),
-            title=title.strip(),
-            thesis=thesis.strip(),
-            status="exploring",
-            universe=parent.universe,
-            signal_definition=signal_definition.strip() or parent.signal_definition,
-            data_sources=list(parent.data_sources),
-            skills=list(parent.skills),
-            parent_hypothesis_id=parent_id,
-            created_at=now,
-            updated_at=now,
+        return self._store.derive(
+            parent_id=parent_id, title=title, thesis=thesis,
+            signal_definition=signal_definition,
         )
-        records.append(hyp)
-        self._save(records)
-        return hyp
 
     def link(self, hyp_id: str, related_id: str) -> Hypothesis:
         """Mark two hypotheses as related (bidirectional)."""
-        if self._store is not None:
-            updated = self._store.link(hyp_id, related_id)
-            if updated is None:
-                raise KeyError(f"hypothesis not found: {hyp_id or related_id}")
-            return updated
-        records = self.list()
-        hyp_a = self._find_required(records, hyp_id)
-        hyp_b = self._find_required(records, related_id)
-        if related_id not in hyp_a.related_ids:
-            hyp_a.related_ids.append(related_id)
-        if hyp_id not in hyp_b.related_ids:
-            hyp_b.related_ids.append(hyp_id)
-        hyp_a.updated_at = hyp_b.updated_at = _utc_now()
-        self._save(records)
-        return hyp_a
+        updated = self._store.link(hyp_id, related_id)
+        if updated is None:
+            raise KeyError(f"hypothesis not found: {hyp_id or related_id}")
+        return updated
 
     def unlink(self, hyp_id: str, related_id: str) -> Hypothesis:
         """Remove bidirectional related link."""
-        if self._store is not None:
-            updated = self._store.unlink(hyp_id, related_id)
-            if updated is None:
-                raise KeyError(f"hypothesis not found: {hyp_id}")
-            return updated
-        records = self.list()
-        hyp_a = self._find_required(records, hyp_id)
-        hyp_b = self._find_required(records, related_id)
-        hyp_a.related_ids = [x for x in hyp_a.related_ids if x != related_id]
-        hyp_b.related_ids = [x for x in hyp_b.related_ids if x != hyp_id]
-        hyp_a.updated_at = hyp_b.updated_at = _utc_now()
-        self._save(records)
-        return hyp_a
+        updated = self._store.unlink(hyp_id, related_id)
+        if updated is None:
+            raise KeyError(f"hypothesis not found: {hyp_id}")
+        return updated
 
     def contradicts(self, hyp_id: str, other_id: str, notes: str = "") -> Hypothesis:
         """Mark two hypotheses as contradicting (one-way from hyp_id's perspective)."""
-        if self._store is not None:
-            updated = self._store.contradicts(hyp_id, other_id, notes=notes)
-            if updated is None:
-                raise KeyError(f"hypothesis not found: {hyp_id or other_id}")
-            return updated
-        records = self.list()
-        hyp_a = self._find_required(records, hyp_id)
-        self._find_required(records, other_id)
-        if other_id not in hyp_a.contradicts_ids:
-            hyp_a.contradicts_ids.append(other_id)
-        hyp_a.invalidation_notes = (
-            f"{hyp_a.invalidation_notes}\nContradicts {other_id}: {notes}"
-            if hyp_a.invalidation_notes
-            else f"Contradicts {other_id}: {notes}"
-        ).strip()
-        hyp_a.updated_at = _utc_now()
-        self._save(records)
-        return hyp_a
+        updated = self._store.contradicts(hyp_id, other_id, notes=notes)
+        if updated is None:
+            raise KeyError(f"hypothesis not found: {hyp_id or other_id}")
+        return updated
 
     def link_goal(self, hyp_id: str, goal_id: str) -> Hypothesis:
         """Associate a hypothesis with a research goal."""
-        if self._store is not None:
-            updated = self._store.link_goal(hyp_id, goal_id)
-            if updated is None:
-                raise KeyError(f"hypothesis not found: {hyp_id}")
-            return updated
-        records = self.list()
-        hyp = self._find_required(records, hyp_id)
-        hyp.goal_id = goal_id
-        hyp.updated_at = _utc_now()
-        self._save(records)
-        return hyp
+        updated = self._store.link_goal(hyp_id, goal_id)
+        if updated is None:
+            raise KeyError(f"hypothesis not found: {hyp_id}")
+        return updated
 
     def list_by_goal(self, goal_id: str) -> list[Hypothesis]:
         """Return all hypotheses linked to a given goal."""
-        if self._store is not None:
-            return self._store.list_by_goal(goal_id)
-        return [h for h in self.list() if h.goal_id == goal_id]
+        return self._store.list_by_goal(goal_id)
 
     def list_children(self, parent_id: str) -> list[Hypothesis]:
         """Return all child hypotheses of a parent."""
-        if self._store is not None:
-            return self._store.list_children(parent_id)
-        return [h for h in self.list() if h.parent_hypothesis_id == parent_id]
+        return self._store.list_children(parent_id)
 
     def list_contradictions(self, hyp_id: str) -> list[Hypothesis]:
         """Return all hypotheses that this one contradicts."""
-        if self._store is not None:
-            if self._store.get(hyp_id) is None:
-                raise KeyError(f"hypothesis not found: {hyp_id}")
-            return self._store.list_contradictions(hyp_id)
-        records = self.list()
-        hyp = self._find_required(records, hyp_id)
-        by_id = {h.hypothesis_id: h for h in records}
-        return [by_id[cid] for cid in hyp.contradicts_ids if cid in by_id]
+        if self._store.get(hyp_id) is None:
+            raise KeyError(f"hypothesis not found: {hyp_id}")
+        return self._store.list_contradictions(hyp_id)
 
     def search(
         self,
@@ -547,53 +410,18 @@ class HypothesisRegistry:
         Returns:
             Matching hypotheses ordered by score then most recently updated.
         """
-        if self._store is not None:
-            # JSON-mode semantics shared across backends (§14.2: behave
-            # identically); FTS5 stays available on HypothesisStore directly.
-            return _rank_search(
-                self._store.list(limit=10000),
-                query=query, status=status, limit=limit,
-            )
-        return _rank_search(self.list(), query=query, status=status, limit=limit)
+        return _rank_search(
+            self._store.list(limit=10000),
+            query=query, status=status, limit=limit,
+        )
 
     def list(self) -> list[Hypothesis]:
-        """Load all hypotheses from storage."""
-        if self._store is not None:
-            return sorted(
-                self._store.list(limit=10000),
-                key=lambda h: h.created_at,
-            )
-        if not self.path.exists():
-            return []
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid hypotheses storage JSON: {self.path}") from exc
-        if not isinstance(raw, list):
-            raise ValueError("hypotheses storage must contain a JSON list")
-        return [Hypothesis.from_dict(item) for item in raw if isinstance(item, dict)]
+        """Load all hypotheses from storage (oldest first)."""
+        return sorted(
+            self._store.list(limit=10000),
+            key=lambda h: h.created_at,
+        )
 
     def get(self, hypothesis_id: str) -> Hypothesis | None:
         """Return a hypothesis by id or None if missing."""
-        if self._store is not None:
-            return self._store.get(hypothesis_id)
-        for hyp in self.list():
-            if hyp.hypothesis_id == hypothesis_id:
-                return hyp
-        return None
-
-    def _save(self, records: list[Hypothesis]) -> None:
-        payload = [hyp.to_dict() for hyp in sorted(records, key=lambda h: h.created_at)]
-        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        tmp_path.replace(self.path)
-
-    @staticmethod
-    def _find_required(records: list[Hypothesis], hypothesis_id: str) -> Hypothesis:
-        for hyp in records:
-            if hyp.hypothesis_id == hypothesis_id:
-                return hyp
-        raise KeyError(f"hypothesis not found: {hypothesis_id}")
+        return self._store.get(hypothesis_id)
