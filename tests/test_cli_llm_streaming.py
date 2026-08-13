@@ -21,6 +21,12 @@ from strategy_research.core.llm.errors import LLMError, LLMTimeoutError
 from strategy_research.core.llm.parser import StreamChunk
 
 
+@pytest.fixture(autouse=True)
+def _isolate_session_db(tmp_path, monkeypatch):
+    """Isolate the unified session DB (TUI flow persists to cwd by default)."""
+    monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
+
+
 def _chunk(content: str, *, finish: str | None = None) -> StreamChunk:
     return StreamChunk(delta_content=content, finish_reason=finish)
 
@@ -647,11 +653,18 @@ async def test_chat_session_dispatches_plain_text_to_llm():
     # ``from .loop import AgentLoop``) — patching loop.AgentLoop is a no-op
     # once chat_loop has already been imported by earlier tests.
     with mock.patch("strategy_research.core.agent.chat_loop.AgentLoop") as MockLoop, \
-         mock.patch("strategy_research.core.agent.builtin_tools.build_default_registry", return_value=None):
-        instance = mock.MagicMock()
-        instance.arun = mock.AsyncMock(return_value=fake_result)
-        MockLoop.return_value = instance
-        rc = await s.dispatch("hi there")
+         mock.patch("strategy_research.core.agent.builtin_tools.build_default_registry", return_value=None), \
+         mock.patch(
+             # Force the degraded in-memory path: with the shared session
+             # DB unavailable, the assistant reply lands in ctx.history
+             # (the legacy behavior this test pins).
+             "strategy_research.core.agent.memory_manager.get_default_memory_manager",
+             side_effect=RuntimeError("no mm in test"),
+         ):
+            instance = mock.MagicMock()
+            instance.arun = mock.AsyncMock(return_value=fake_result)
+            MockLoop.return_value = instance
+            rc = await s.dispatch("hi there")
 
     assert rc == 0
     # Assistant reply appended.

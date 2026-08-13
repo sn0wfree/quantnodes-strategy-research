@@ -13,13 +13,10 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from strategy_research.core.agent.event_store import EventStore
-
 if TYPE_CHECKING:
     from ...core.permission import PermissionGateway
 
 from ..session.service import SessionService
-from ..session.store import SessionStore
 from ..sse_buffer import sse_buffer
 from ._task_utils import log_task_exception
 
@@ -130,21 +127,23 @@ def _safe_payload(args: dict) -> dict:
 def _get_session_service() -> SessionService:
     """Return the process-wide singleton SessionService for the DB.
 
-    Uses EventStore for triple-write:
+    The DI container is the single construction point: ``create_app``
+    attaches it and pre-seeds this cache; the lazy fallback here (only
+    reached in tests/scripts without an app) builds a fresh container
+    with the same production wiring:
+
     1. event_log (persistent source of truth)
     2. SSE push (via sse_pusher callback → SSEEventBuffer)
     3. messages + message_parts tables via Projector.flush (flush_to_messages=True)
     """
-    from ..session.bridge_v2 import attach_eventstore_to_sse
+    from ..container import build_container
     from .web_session import _get_db_path
 
-    db_path = _get_db_path()
+    db_path = str(_get_db_path())
     service = _session_service_cache.get(db_path)
     if service is None:
-        store = SessionStore(db_path=db_path)
-        es = EventStore(db_path=db_path, flush_to_messages=True)
-        attach_eventstore_to_sse(es)
-        service = SessionService(store=store, event_bus=es)
+        container = build_container(db_path=db_path)
+        service = container.session_service
         _session_service_cache[db_path] = service
     return service
 

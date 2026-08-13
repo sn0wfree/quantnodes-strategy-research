@@ -69,15 +69,11 @@ def create_app(
         - Schedule model catalog refresh 5s after startup so the user
           sees fresh metadata without blocking first response.
 
-        The SessionService + EventStore are created lazily on first
-        request via ``routers.chat._get_session_service`` (singleton
-        keyed by DB path), so there is no startup-time EventStore to
-        initialize here. The previous ``from .routers.chat import
-        _event_store`` referenced a dead module-level instance that
-        has been removed; the real EventStore is created per-DB inside
-        ``_get_session_service``.
+        The SessionService + EventStore are created eagerly by the DI
+        container (``build_container``) at app creation; routers resolve
+        them via ``api.dependencies`` (container-backed).
         """
-        logger.info("[STARTUP] SessionService ready (lazy init on first request)")
+        logger.info("[STARTUP] SessionService ready (DI container)")
 
         task = asyncio.create_task(_refresh_model_catalog_async())
         try:
@@ -100,6 +96,22 @@ def create_app(
     app.state.workspace_path = workspace_path
     app.state.goal_db_path = goal_db_path
     app.state.hypotheses_path = hypotheses_path
+
+    # ── DI container: single construction point for API services ─────
+    # Wire the container eagerly so all routers share one SessionService
+    # / SessionStore / EventStore (queue/cancel state, SSE bridges).
+    # The legacy routers/chat.py singleton cache is pre-seeded with the
+    # container's services so both access paths stay identical.
+    from .container import attach_container, build_container, services_from_container
+    from .routers.chat import _session_service_cache
+    from .routers.web_session import _get_db_path
+
+    container = build_container(workspace_path=workspace_path, db_path=Path(_get_db_path()))
+    attach_container(app, container)
+    for key, svc in services_from_container(container).items():
+        setattr(app.state, key, svc)
+    _session_service_cache[str(container.db_path)] = container.session_service
+    logger.info("[STARTUP] DI container attached (db=%s)", container.db_path)
 
     # Initialize DuckDB on startup
     if workspace_path:

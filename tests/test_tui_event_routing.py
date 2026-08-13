@@ -12,7 +12,12 @@ from unittest import mock
 import pytest
 
 from strategy_research.cli.tui.app import ResearchApp
-from strategy_research.cli.tui.widgets.tools_rail import TimelineEntry
+
+
+@pytest.fixture(autouse=True)
+def _isolate_session_db(tmp_path, monkeypatch):
+    """Isolate the unified session DB (TUI flow persists to cwd by default)."""
+    monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
 
 
 class _CaptureSink:
@@ -239,7 +244,13 @@ class TestSessionRunAgentLoop:
         # invisible to the already-cached module binding.
         with mock.patch(
             "strategy_research.core.agent.chat_loop.AgentLoop"
-        ) as MockLoop:
+        ) as MockLoop, mock.patch(
+            # Force the degraded in-memory path (shared session DB
+            # unavailable) so history stays None and the reply lands in
+            # ctx.history — the behavior this test pins.
+            "strategy_research.core.agent.memory_manager.get_default_memory_manager",
+            side_effect=RuntimeError("no mm in test"),
+        ):
             instance = mock.MagicMock()
             instance.arun = mock.AsyncMock(return_value=fake_result)
             MockLoop.return_value = instance

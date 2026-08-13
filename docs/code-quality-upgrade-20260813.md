@@ -60,10 +60,11 @@
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| P0 | 清 7 个 ruff 错误（C901×4: FactorTurnover/DrawdownAnalysis/BenchmarkComparison execute + service.py:_run_with_agent(24)；F401×3）；`_ok`/`_err` 收敛 | 未开始 |
-| P1 | 拆 `builtin_tools/__init__.py` 为 domain 模块；MCP server 适配 `ToolRegistry`；删旧 coercion | 未开始 |
-| P2 | 新建 `core/storage/`（连接/迁移/事务/行映射）；迁移 goal/study/hypothesis stores；HypothesisRegistry 删 JSON 后端；会话库统一（不含事件总线） | 未开始 |
-| P3 | DI 真接线；9-agent 配置抽工厂；slash handler 移出 chat.py；持久层并入 api/session/store.py；AgentLoop async 为主 | 未开始 |
+| P0 | 清 7 个 ruff 错误（C901×4 + F401×3）；`_ok`/`_err` 收敛 | ✅ 完成 |
+| P1 | 拆 `builtin_tools/__init__.py` 为 8 个域模块；MCP server 包装 `ToolRegistry`（删 7 个重复工具）；废弃旧 coercion | ✅ 完成 |
+| P2 | `core/storage/sqlite.py` 共享层，goal/study/hypothesis stores 迁移；HypothesisRegistry 删 JSON 后端 | ✅ 完成 |
+| P2 | 统一会话库（退役 sessions.db） | ⏸ 推迟：`SessionDB`（id INTEGER/timestamp/metadata_json）与统一库 schema（id TEXT/user_id NOT NULL）根本冲突，同文件互踩 DDL；需数据迁移 + 6+ 测试改写。与事件总线同款风险决策，记为债单 |
+| P3 | DI 真接线；9-agent 配置抽工厂；slash handler 移出 chat.py；持久层并入 api/session/store.py；AgentLoop async 为主 | 进行中 |
 | P4 | 指标键名统一 + engine CLI bug；alpha zoo 单一事实源；stub agent 移测试；删死代码 | 未开始 |
 | P5 | 更新文档（本文档 + architecture-review.md）；CI 加 ruff；全量测试 | 未开始 |
 

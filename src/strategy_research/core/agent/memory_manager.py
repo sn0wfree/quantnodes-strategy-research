@@ -134,39 +134,57 @@ class SQLiteStore:
             )
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
+            # Note: foreign_keys intentionally NOT enabled here — the
+            # EventStore writes event_log rows for sessions that may not
+            # have a `sessions` row yet; FK enforcement is owned by the
+            # web_session connection where the unified schema is managed.
             self._init_schema(self._conn)
         return self._conn
 
     @staticmethod
     def _init_schema(conn: sqlite3.Connection) -> None:
+        """Create tables with the unified session DB schema.
+
+        Mirrors ``api.routers.web_session._ensure_schema`` so the two
+        creation orders (SQLiteStore first vs web_session first) produce
+        the same schema — the historical DDL divergence made whichever
+        created ``sessions``/``messages`` first silently win (e.g. a
+        ``user_id``-less variant breaking web_session inserts).
+        """
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT 'anonymous',
+                title TEXT NOT NULL DEFAULT '新会话',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                starred INTEGER NOT NULL DEFAULT 0,
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                message_count INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL,
-                content TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
                 created_at REAL NOT NULL,
                 metadata_json TEXT,
-                message_type TEXT DEFAULT 'assistant',
-                seq INTEGER DEFAULT 0
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                message_count INTEGER DEFAULT 0,
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                starred INTEGER DEFAULT 0,
-                tags_json TEXT,
-                archived INTEGER DEFAULT 0
-            )
-            """
-        )
+        # Columns added by either schema owner (idempotent ALTERs).
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if "seq" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN seq INTEGER NOT NULL DEFAULT 0")
+        if "message_type" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'assistant'")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)"
         )
@@ -239,20 +257,21 @@ class SQLiteStore:
         ts = time.time()
         meta_json = json.dumps(metadata, ensure_ascii=False) if metadata else None
         try:
+            # Parent row first — foreign_keys=ON enforces the FK.
+            conn.execute(
+                """INSERT INTO sessions (id, user_id, created_at, updated_at, message_count)
+                VALUES (?, 'anonymous', ?, ?, 1)
+                ON CONFLICT(id) DO UPDATE SET
+                    message_count = message_count + 1,
+                    updated_at = excluded.updated_at""",
+                (session_id, ts, ts),
+            )
             conn.execute(
                 """INSERT INTO messages
                 (id, session_id, role, content, created_at, metadata_json,
                  message_type, seq)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (msg_id, session_id, role, content, ts, meta_json, message_type, seq),
-            )
-            conn.execute(
-                """INSERT INTO sessions (id, created_at, updated_at, message_count)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(id) DO UPDATE SET
-                    message_count = message_count + 1,
-                    updated_at = excluded.updated_at""",
-                (session_id, ts, ts),
             )
             conn.commit()
             return msg_id

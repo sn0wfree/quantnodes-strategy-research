@@ -940,18 +940,26 @@ async def delete_session(session_id: str, request: Request):
     conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
-    _invalidate_projection(session_id)
+    _invalidate_projection(session_id, request)
     return {"status": "ok", "deleted_id": session_id}
 
 
-def _invalidate_projection(session_id: str) -> None:
+def _invalidate_projection(session_id: str, request: Request | None = None) -> None:
     """Drop the projector's in-memory state for a deleted session.
 
-    The projector cache lives on the EventBusV2 held by the process-wide
-    SessionService (owned by routers/chat.py). Lazy import avoids a
-    web_session → chat module cycle.
+    The projector cache lives on the EventStore held by the process-wide
+    SessionService. Prefers the DI container (attached by ``create_app``);
+    falls back to the process-wide service cache for tests/scripts.
     """
     try:
+        if request is not None:
+            container = getattr(request.app.state, "_container", None)
+            if container is not None:
+                bus = container.session_service.event_bus
+                invalidate = getattr(bus, "invalidate", None)
+                if callable(invalidate):
+                    invalidate(session_id)
+                return
         from .chat import _session_service_cache
         for service in _session_service_cache.values():
             bus = getattr(service, "event_bus", None)

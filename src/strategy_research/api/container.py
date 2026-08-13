@@ -1,54 +1,19 @@
-"""Lightweight DI container for the strategy-research API (Phase 3.2).
+"""Lightweight DI container for the strategy-research API.
 
-TODO(architecture): planned-but-unwired. docs/architecture-review.md
-§3.2 claims "✅ Lightweight DI container", but ``create_app`` never
-calls ``attach_container`` and no router resolves services through it
-today — production wiring still uses the private factory in
-``routers/chat.py::_get_session_service``. This module is exercised
-only by tests. To activate: call ``attach_container`` in
-``api/app.py::create_app`` and switch routers to the dependency
-providers in :mod:`api.dependencies`.
+Single construction point for the long-lived API services:
 
-Before Phase 3.2, the FastAPI app and ``SessionService`` relied on:
-- Module-level singletons (``_event_bus = EventBus()``)
-- Implicit ordering of ``from X import Y`` (event_bus must be created
-  before SessionService)
-- Hidden state stored on ``app.state`` ad-hoc
+    container = build_container()
+    attach_container(app, container)      # called by api/app.py::create_app
 
-This container makes the wiring explicit:
+Routers resolve services via :mod:`api.dependencies` (container-backed,
+falling back to direct construction when no container is attached, e.g.
+unit tests or scripts). ``create_app`` additionally pre-seeds the legacy
+``routers/chat.py`` singleton cache with the container's services so both
+access paths share the same instances.
 
-    container = build_container(
-        workspace_path=Path("/ws"),
-        db_path=Path("/ws/app.db"),
-    )
-    app.state.container = container
-
-Routers then resolve services via :mod:`api.dependencies`, which in turn
-read from ``app.state.container`` (falling back to direct instantiation
-if no container is set, preserving backward compat).
-
-Public API
-----------
-    AppContainer
-        Immutable dataclass holding all long-lived services.
-
-    build_container(*, workspace_path, db_path, ...) -> AppContainer
-        Factory that constructs every service with explicit dependencies.
-
-    attach_container(app, container)
-        Attach the container to ``app.state`` for FastAPI Depends access.
-
-    get_container(request) -> AppContainer
-        FastAPI dependency that returns the active container.
-
-    reset_container(app)
-        Detach + clear (for tests).
-
-Why a container (vs. just app.state keys)?
-    * Explicit, typed configuration (no stringly-typed keys).
-    * One place to construct every service (test seam: swap a fake
-      container for the production one).
-    * Keeps construction in a single function — easier to reason about.
+The container wires the production event-sourced path: ``SessionStore`` +
+``EventStore`` (event_log + SSE push + projector flush) bound to the
+unified session DB path (``resolve_session_db_path``).
 """
 
 from __future__ import annotations
@@ -61,8 +26,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from fastapi import Request
 
 if TYPE_CHECKING:
-    from .session.event_bus_v2 import EventBusV2
-    from .session.events import EventBus
+    from ..core.agent.event_store import EventStore
     from .session.service import SessionService
     from .session.store import SessionStore
 
@@ -78,18 +42,16 @@ class AppContainer:
 
     Attributes:
         workspace_path: User's workspace directory (for project files).
-        db_path: SQLite database path (sessions / messages).
-        event_bus: Legacy EventBus (SSE delivery).
-        event_bus_v2: Triple-write EventBusV2.
+        db_path: Unified session SQLite database path.
         session_store: SessionStore bound to db_path.
-        session_service: SessionService wired with event_bus_v2.
+        event_store: EventStore (event_log + SSE push + projector flush).
+        session_service: SessionService wired with the event store.
     """
 
     workspace_path: Path | None
     db_path: Path
-    event_bus: "EventBus"
-    event_bus_v2: "EventBusV2"
     session_store: "SessionStore"
+    event_store: "EventStore"
     session_service: "SessionService"
 
 
@@ -100,67 +62,47 @@ def build_container(
     *,
     workspace_path: Path | str | None = None,
     db_path: Path | str | None = None,
-    event_bus_factory: Callable[[], "EventBus"] | None = None,
-    event_bus_v2_factory: Callable[["EventBus", Path], "EventBusV2"] | None = None,
-    session_service_factory: Callable[["SessionStore", "EventBus"], "SessionService"] | None = None,
     session_store_factory: Callable[[Path], "SessionStore"] | None = None,
+    event_store_factory: Callable[[Path], "EventStore"] | None = None,
+    session_service_factory: Callable[["SessionStore", "EventStore"], "SessionService"] | None = None,
 ) -> AppContainer:
     """Construct the application container.
 
     Args:
         workspace_path: Workspace directory (used for project files).
-        db_path: SQLite database path. Defaults to ``workspace_path/quantnodes_strategy_research_user.db``
-                 if not given.
+        db_path: SQLite database path. Defaults to
+            ``core.agent.memory_manager.resolve_session_db_path`` (the
+            unified session DB).
         *_factory: Optional factory overrides for testing. Each receives
-                   the standard constructor args and must return a compatible
-                   instance.
+            the standard constructor args and must return a compatible
+            instance.
 
     Returns:
         Fully constructed AppContainer with all services wired.
-
-    Note:
-        No I/O happens in this function beyond SQLite file creation
-        (via SessionStore). Safe to call at app startup.
     """
-    from .session.bridge import attach_eventbus_to_sse
-    from .session.event_bus_v2 import EventBusV2
-    from .session.events import EventBus
+    from ..core.agent.event_store import EventStore
+    from ..core.agent.memory_manager import resolve_session_db_path
+    from .session.bridge_v2 import attach_eventstore_to_sse
     from .session.service import SessionService
     from .session.store import SessionStore
 
-    # Default factories
-    if event_bus_factory is None:
-        event_bus_factory = EventBus
-    if event_bus_v2_factory is None:
-        event_bus_v2_factory = EventBusV2
-    if session_store_factory is None:
-        session_store_factory = SessionStore
-    if session_service_factory is None:
-        session_service_factory = SessionService
-
-    # Resolve db_path
     if db_path is None:
-        ws_path = Path(workspace_path) if workspace_path else Path.home() / ".quantnodes"
-        db_path = ws_path / "quantnodes_strategy_research_user.db"
+        db_path = resolve_session_db_path()
     db_path = Path(db_path)
 
     # Construct services in dependency order
-    event_bus = event_bus_factory()
-    # Attach SSE bridge (idempotent — guard via attribute)
-    if not getattr(event_bus, "_sse_attached", False):
-        attach_eventbus_to_sse(event_bus)
-        event_bus._sse_attached = True  # type: ignore[attr-defined]
-
-    event_bus_v2 = event_bus_v2_factory(event_bus, db_path)
-    session_store = session_store_factory(db_path)
-    session_service = session_service_factory(session_store, event_bus_v2)
+    session_store = (session_store_factory or SessionStore)(db_path)
+    event_store = (event_store_factory or (lambda p: EventStore(p, flush_to_messages=True)))(db_path)
+    # SSE bridge (idempotent — guarded per instance)
+    if not getattr(event_store, "_sse_bridge_attached", False):
+        attach_eventstore_to_sse(event_store)
+    session_service = (session_service_factory or SessionService)(session_store, event_store)
 
     return AppContainer(
         workspace_path=Path(workspace_path) if workspace_path else None,
         db_path=db_path,
-        event_bus=event_bus,
-        event_bus_v2=event_bus_v2,
         session_store=session_store,
+        event_store=event_store,
         session_service=session_service,
     )
 
@@ -199,27 +141,22 @@ def reset_container(app: Any) -> None:
         delattr(app.state, _STATE_KEY_CONTAINER)
 
 
-# ── Adapter for the existing dependencies.py module ────────────────
-#
-# api/dependencies.py reads from app.state keys (``_event_bus``, etc.).
-# After Phase 3.2, it can also pull from app.state._container if one
-# is attached. This keeps backward compatibility while allowing the
-# container to be the canonical source.
+# ── Adapter for app.state bulk-assignment ────────────────────────────
 
 
 def services_from_container(container: AppContainer) -> dict[str, Any]:
     """Return the dict of services a container provides.
 
-    Useful for bulk-assignment to ``app.state`` so the legacy
-    ``api/dependencies`` keys remain populated:
+    Useful for bulk-assignment to ``app.state`` so legacy accessors
+    (``routers/chat.py::_get_session_service``) stay populated:
 
         for key, svc in services_from_container(container).items():
             setattr(app.state, key, svc)
     """
     return {
-        "_event_bus": container.event_bus,
-        "_event_bus_v2": container.event_bus_v2,
         "_session_service": container.session_service,
+        "_session_store": container.session_store,
+        "_event_store": container.event_store,
     }
 
 
