@@ -17,14 +17,9 @@ EXPECTED_LABELS: list[tuple[str, str]] = [
     ("src/strategy_research/core/hooks/adapter.py", "composite.AgentHook"),
     ("src/strategy_research/core/swarm/runtime.py", "GroundingProvider never read"),
     # ── api (B8..B16) ──
-    ("src/strategy_research/api/routers/web_session.py", "parts_json dropped by v2"),
-    ("src/strategy_research/api/session/store.py", "keep list_attempts_by_status"),  # append_message
-    ("src/strategy_research/api/session/store.py", "production callers"),  # get_session_metadata (shared hint)
-    ("src/strategy_research/api/session/store.py", "use list_attempts_by_status"),  # list_attempts
     ("src/strategy_research/api/routers/goal.py", "silently dropped by handler"),
     ("src/strategy_research/core/agent/compact.py", "L1 path removed"),
     ("src/strategy_research/core/agent/compact.py", "0 production callers"),
-    ("src/strategy_research/api/routers/session.py", "0 callers for /api/session/start"),
     ("src/strategy_research/api/routers/strategy.py", "0 callers for the two endpoints"),
     ("src/strategy_research/api/routers/memory.py", "legacy, test-only"),
     ("src/strategy_research/api/session/events.py", "ring buffer not consumed"),

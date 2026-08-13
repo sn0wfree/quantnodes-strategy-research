@@ -427,16 +427,9 @@ class TestValidationRouter:
         assert resp.status_code == 400
 
 
+
 # ============================================================
-# session router
-# ============================================================
-
-
-class TestSessionRouter:
-    def test_session_list(self, client):
-        resp = client.get("/api/session/list?workspace_path=/tmp")
-        assert resp.status_code == 200
-
+# memory router
 
 # ============================================================
 # memory router

@@ -170,16 +170,6 @@ def _get_study_scheduler():
     return sched
 
 
-def _warm_study_scheduler_for_backend(sched: "StudyScheduler") -> None:
-    """Back-door wiring for `_handle_study_command` + lifespan startup.
-
-    The chat slash command needs a scheduler bound to the FastAPI event
-    loop BEFORE the scheduler could lazily create its consumer tasks on
-    a previous, torn-down loop. Callers must invoke ``_get_study_scheduler``
-    again on a live loop to refresh locally, but startup warming ensures
-    the loop a single _consumer lives on matches the final loop.
-    """
-
 
 # ── request bodies ──────────────────────────────────────────────────
 

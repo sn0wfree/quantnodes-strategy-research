@@ -231,34 +231,9 @@ class TestSessionStoreAttemptCRUD(unittest.TestCase):
         result = self.store.get_attempt("s2", "a1")
         self.assertIsNone(result)
 
-    def test_list_attempts(self) -> None:
-        for i in range(3):
-            a = _make_attempt(attempt_id=f"a{i}", session_id="s1")
-            self.store.create_attempt(a)
-        results = self.store.list_attempts("s1")
-        self.assertEqual(len(results), 3)
-        self.assertEqual(results[0].attempt_id, "a2")
-        self.assertEqual(results[2].attempt_id, "a0")
 
-    def test_list_attempts_empty(self) -> None:
-        results = self.store.list_attempts("s1")
-        self.assertEqual(results, [])
 
-    def test_list_attempts_limit(self) -> None:
-        for i in range(5):
-            a = _make_attempt(attempt_id=f"a{i}", session_id="s1")
-            self.store.create_attempt(a)
-        results = self.store.list_attempts("s1", limit=2)
-        self.assertEqual(len(results), 2)
 
-    def test_list_attempts_other_session_excluded(self) -> None:
-        a1 = _make_attempt(attempt_id="a1", session_id="s1")
-        a2 = _make_attempt(attempt_id="a2", session_id="s2")
-        self.store.create_attempt(a1)
-        self.store.create_attempt(a2)
-        results = self.store.list_attempts("s1")
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].attempt_id, "a1")
 
     def test_attempt_without_react_trace(self) -> None:
         attempt = Attempt(

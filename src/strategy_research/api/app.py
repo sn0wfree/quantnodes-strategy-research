@@ -155,7 +155,6 @@ def create_app(
         memory,
         permission,
         run,
-        session,
         study,
         validation,
         web_session,
@@ -172,7 +171,6 @@ def create_app(
     app.include_router(study.router, prefix="/api/study", tags=["study"])
     app.include_router(hypothesis.router, prefix="/api/hypothesis", tags=["hypothesis"])
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
-    app.include_router(session.router, prefix="/api/session", tags=["session"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
 

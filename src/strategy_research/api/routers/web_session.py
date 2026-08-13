@@ -993,39 +993,6 @@ def delete_messages(session_id: str, message_ids: list[str]) -> None:
         logger.error("delete_messages failed for session %s: %s", session_id, exc)
 
 
-def update_message_content(
-    message_id: str,
-    content: str,
-    parts: Optional[list[dict[str, Any]]] = None,
-) -> None:
-    """Update a message's content (and optional parts).
-
-    DELETE-CANDIDATE v0.6: FIXME broken; no callers; parts_json dropped by v2.
-    FIXME(broken): no callers exist, and the ``parts is not None``
-    branch writes to ``parts_json`` — a column dropped by the
-    version-2 migration — so it would silently fail (caught + logged)
-    and leave ``content`` un-updated too. Do not wire anything to this
-    function until it is rewritten against the current
-    messages/message_parts schema (or event-sourced projection).
-    """
-    """Update a message's content and optionally its parts."""
-    try:
-        conn = _get_db()
-        parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
-        if parts is not None:
-            conn.execute(
-                "UPDATE messages SET content = ?, parts_json = ? WHERE id = ?",
-                (content, parts_json, message_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE messages SET content = ? WHERE id = ?",
-                (content, message_id),
-            )
-        conn.commit()
-    except Exception as exc:
-        logger.error("update_message_content failed for message %s: %s", message_id, exc)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Messages endpoint
