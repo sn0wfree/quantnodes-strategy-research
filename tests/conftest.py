@@ -113,6 +113,25 @@ def _isolate_workspace_env():
             os.environ[k] = v
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _default_session_workspace(tmp_path_factory):
+    """Default ``SR_WORKSPACE_PATH`` to a session temp dir.
+
+    Code paths that fall back to the current working directory (TUI/CLI
+    chat flow, memory manager) otherwise write to the repo-root
+    ``.quantnodes_strategy_research_session.db``, shared across the whole
+    test session — cross-test message pollution produced order-dependent
+    failures (e.g. ``test_tui_event_routing`` expecting an empty
+    history). Tests that need a specific workspace override it per-test;
+    ``_isolate_workspace_env`` restores this default afterwards.
+    """
+    workspace = tmp_path_factory.mktemp("session_workspace")
+    mp = pytest.MonkeyPatch()
+    mp.setenv("SR_WORKSPACE_PATH", str(workspace))
+    yield
+    mp.undo()
+
+
 @pytest.fixture(autouse=True)
 def _restore_logging_state():
     """Undo process-wide logging side effects of ``create_app()``.
