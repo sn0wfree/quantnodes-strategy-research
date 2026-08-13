@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   core_commands。
 - **`test_init_e2e`**：同时 patch `_auto_onboard.run_onboarding`（模块级
   绑定，patch `onboard.run_onboarding` 对其无效）。
+- **`test_webui_visual`**：适配新版前端——聊天/DAG 路由（`/chat`、`/dag`）、
+  整页截图替代失效的元素选择器、DAG 可视化类改为 skip（被
+  `test_webui_catalog` 的 `catalog_dag-*` 覆盖）；视觉基线刷新。
 
 ## [0.6.0] - 2026-07-28
 

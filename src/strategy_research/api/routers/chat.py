@@ -13,11 +13,12 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from strategy_research.core.agent.event_store import EventStore
+
 from ..session.service import SessionService
 from ..session.store import SessionStore
 from ..sse_buffer import sse_buffer
 from ._task_utils import log_task_exception
-from strategy_research.core.agent.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,8 @@ def _get_permission_gateway(request: Request | None = None) -> "PermissionGatewa
     def _push_sse(tool_call_id, decision, args):
         # Lazy import — sse_buffer is a heavy module.
         try:
-            from ...api.sse_buffer import sse_buffer  # local import
             from ...api.session.event_v2 import EventType
+            from ...api.sse_buffer import sse_buffer  # local import
 
             session_id = args.get("__session_id__") or ""
             if not session_id:
@@ -131,8 +132,8 @@ def _get_session_service() -> SessionService:
     2. SSE push (via sse_pusher callback → SSEEventBuffer)
     3. messages + message_parts tables via Projector.flush (flush_to_messages=True)
     """
-    from .web_session import _get_db_path
     from ..session.bridge_v2 import attach_eventstore_to_sse
+    from .web_session import _get_db_path
 
     db_path = _get_db_path()
     service = _session_service_cache.get(db_path)
@@ -654,8 +655,7 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     B5: All persistence via EventStore → projector.flush(). No direct
     persist_message / sse_buffer.push calls.
     """
-    from ...core.goal import EvidenceInput, GoalStatus, GoalStore
-    from ...core.goal.context import default_goal_criteria
+    from ...core.goal import GoalStore
 
     session_id = body.session_id
     content = body.content.strip()
@@ -928,7 +928,6 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
     started / delta / ended). State changes happen via the study router
     helpers so the scheduler emits study_* events upstream too.
     """
-    import shlex
     import uuid
 
     session_id = body.session_id
@@ -1127,7 +1126,7 @@ def _default_workspace() -> str:
 
 
 def _study_start_cmd(rest: list[str], session_id: str) -> str:
-    from ...core.study import StudyStore, StudyStatus, default_metric_targets
+    from ...core.study import StudyStatus, StudyStore, default_metric_targets
 
     # Check for active study first (one task per session)
     with StudyStore() as _chk:
@@ -1175,6 +1174,7 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
 
         # v2 §17.1: --guidance-file / --gates-file → single guidance.md
         from pathlib import Path
+
         from ...core.study import guidance as gd
         guidance_text = gd.compose_guidance_text(
             Path(ws),
@@ -1187,11 +1187,14 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
             (gdir / "guidance.md").write_text(guidance_text, encoding="utf-8")
 
         # Phase 3: Build GoalWorkflowConfig for the 9-agent preset
-        from ...core.goal.workflow import (
-            GoalWorkflowConfig, GoalWorkflowGoalConfig, GoalAgentConfig,
-            CompletionConfig,
-        )
         from pathlib import Path
+
+        from ...core.goal.workflow import (
+            CompletionConfig,
+            GoalAgentConfig,
+            GoalWorkflowConfig,
+            GoalWorkflowGoalConfig,
+        )
 
         # Create a config that maps study parameters to the workflow
         agent_configs = [
@@ -1300,8 +1303,9 @@ async def _start_workflow_runner(
     config, session_id, goal_id, objective, workspace, session_service,
 ) -> None:
     """Start a GoalWorkflowRunner for a /study start command."""
-    from ...core.goal.workflow import GoalWorkflowRunner
     from pathlib import Path
+
+    from ...core.goal.workflow import GoalWorkflowRunner
 
     runner = GoalWorkflowRunner(
         config=config,
@@ -1320,7 +1324,6 @@ def _is_flag_value(tokens, t) -> bool:
 
 
 def _study_status_cmd(session_id: str) -> str:
-    from .study import _get_study_scheduler  # for access consistency
     from ...core.study import StudyStore
     with StudyStore() as store:
         study = store.get_active_study(session_id)
@@ -1346,7 +1349,7 @@ def _study_status_cmd(session_id: str) -> str:
 
 
 def _study_list_cmd(rest: list[str]) -> str:
-    from ...core.study import StudyStore, StudyStatus
+    from ...core.study import StudyStatus, StudyStore
     status = None
     for tok in rest:
         if tok.startswith("status=") or tok.startswith("s="):

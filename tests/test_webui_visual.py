@@ -35,9 +35,7 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("SR_RUN_BROWSER_TESTS", "0") != "1",
     reason="Browser E2E; set SR_RUN_BROWSER_TESTS=1 (or run via e2e.yml)",
 )
-from PIL import Image
-from playwright.sync_api import Browser, BrowserContext, Page, expect
-
+from playwright.sync_api import Browser, BrowserContext, Page
 
 # Path setup for visual_diff import
 TESTS_DIR = Path(__file__).parent
@@ -165,8 +163,9 @@ class TestMessageBubble:
         page = context.new_page()
         try:
             # 注册 + 创建 session (通过 API 注入 token)
-            import requests
             import uuid as _uuid
+
+            import requests
 
             api = requests.Session()
             api.base_url = app_url  # type: ignore[attr-defined]
@@ -197,7 +196,8 @@ class TestMessageBubble:
                 }""",
                 {"token": token},
             )
-            page.goto(f"{app_url}/")
+            # Chat 页路由是 /chat（/ 是 Dashboard）
+            page.goto(f"{app_url}/chat")
             page.wait_for_selector("header", timeout=10_000)
             page.wait_for_function(
                 "() => typeof window.__sessionStore !== 'undefined'", timeout=5000
@@ -220,7 +220,7 @@ class TestMessageBubble:
             # 发消息 + 等待 SSE 完整结束
             page.locator("textarea[placeholder*='输入消息']").click()
             page.locator("textarea[placeholder*='输入消息']").type("什么是 alpha?")
-            page.locator("button.bg-primary-600").last.click()
+            page.locator('button[title="发送 (Enter)"]').last.click()
             page.wait_for_function(
                 "() => window.__chatStore?.getState().streamingMessageId === null",
                 timeout=15_000,
@@ -233,24 +233,20 @@ class TestMessageBubble:
             page.close()
 
     def test_message_bubble_baseline(self, chat_page: Page):
-        """完整聊天区（用户气泡 + 助手气泡）截图。"""
-        # 截取消息列表区域
-        message_list = chat_page.locator("[data-testid='message-list'], .flex-1").first
-        if message_list.count() == 0:
-            # 用 viewport 截图作为 fallback
-            actual = _screenshot_page(chat_page, "message_bubble")
-        else:
-            actual = _screenshot_element(chat_page, message_list, "message_bubble")
+        """完整聊天区（用户气泡 + 助手气泡）截图。
 
+        新版 MessageList 无 data-testid；旧 ``.flex-1`` 选择器会命中
+        隐藏的布局元素导致 element-screenshot 超时 —— 用整页截图。
+        """
+        actual = _screenshot_page(chat_page, "message_bubble")
         _assert_or_update(actual, "message_bubble", max_diff_ratio=0.01)
 
     def test_user_bubble_only(self, chat_page: Page):
         """仅用户气泡 — 验证主色调、圆角、右对齐。"""
         # 等消息列表稳定
         chat_page.wait_for_selector("text=什么是 alpha?", timeout=5000)
-        # 找到 user 消息气泡（右对齐，bg-primary-600）
-        user_bubble = chat_page.locator(".bg-primary-600").first
-        actual = _screenshot_element(chat_page, user_bubble, "user_bubble")
+        # 整页截图（旧 .bg-primary-600 会命中隐藏操作按钮，改用整页）
+        actual = _screenshot_page(chat_page, "user_bubble")
         _assert_or_update(actual, "user_bubble", max_diff_ratio=0.01)
 
     def test_assistant_message_with_markdown(self, chat_page: Page):
@@ -261,16 +257,14 @@ class TestMessageBubble:
         )
         chat_page.wait_for_timeout(300)  # 等 Markdown 字体稳定
 
-        # 助手消息区域 (含 Bot avatar + Agent label + markdown)
-        assistant_block = chat_page.locator("text=Agent").locator("..").locator("..")
-        if assistant_block.count() == 0:
-            actual = _screenshot_page(chat_page, "assistant_message")
-        else:
-            actual = _screenshot_element(chat_page, assistant_block.first, "assistant_message")
-
+        actual = _screenshot_page(chat_page, "assistant_message")
         _assert_or_update(actual, "assistant_message", max_diff_ratio=0.01)
 
 
+@pytest.mark.skip(
+    reason="DAG 页已改版为定义管理页（DefinitionWorkflowPage），旧 __workflowStore "
+           "dagNodes 注入不再被消费；DAG 视觉由 test_webui_catalog 的 catalog_dag-* 覆盖"
+)
 class TestDAGVisualization:
     """DAG 可视化 — React Flow 节点 + 边。
 
@@ -346,8 +340,9 @@ class TestDAGVisualization:
         """登录后注入空 DAG store — 各 test 自己再注入 state。"""
         page = context.new_page()
         try:
-            import requests
             import uuid as _uuid
+
+            import requests
 
             api = requests.Session()
             api.base_url = app_url  # type: ignore[attr-defined]
@@ -369,7 +364,8 @@ class TestDAGVisualization:
                 }""",
                 {"token": token},
             )
-            page.goto(f"{app_url}/")
+            # DAG 页路由是 /dag
+            page.goto(f"{app_url}/dag")
             page.wait_for_selector("header", timeout=10_000)
             page.wait_for_function(
                 "() => typeof window.__workflowStore !== 'undefined'", timeout=5000
@@ -472,8 +468,9 @@ class TestCommandPalette:
     """Cmd+K 调色板弹出视觉。"""
 
     def test_command_palette_baseline(self, context: BrowserContext, app_url: str):
-        import requests
         import uuid as _uuid
+
+        import requests
 
         api = requests.Session()
         api.base_url = app_url  # type: ignore[attr-defined]
@@ -497,7 +494,7 @@ class TestCommandPalette:
                 }""",
                 {"token": token},
             )
-            page.goto(f"{app_url}/")
+            page.goto(f"{app_url}/chat")
             page.wait_for_selector("header", timeout=10_000)
 
             # 按 Cmd+K (Mac) / Ctrl+K (others) 调出 command palette
@@ -533,8 +530,9 @@ class TestEmptyStates:
         self, context: BrowserContext, app_url: str
     ) -> Iterator[Page]:
         """通用 fixture: 注册 + 注入 token + 跳转到 home。"""
-        import requests
         import uuid as _uuid
+
+        import requests
 
         api = requests.Session()
         api.base_url = app_url  # type: ignore[attr-defined]
@@ -558,7 +556,7 @@ class TestEmptyStates:
                 }""",
                 {"token": token},
             )
-            page.goto(f"{app_url}/")
+            page.goto(f"{app_url}/chat")
             page.wait_for_selector("header", timeout=10_000)
             yield page
         finally:

@@ -6,7 +6,7 @@ already-populated.
 """
 from __future__ import annotations
 
-from typing import Iterable, List
+from typing import Iterable
 from unittest import mock
 
 import pytest
@@ -331,7 +331,8 @@ async def test_stream_chat_to_tui_renders_error_line_on_llm_failure():
 @pytest.mark.asyncio
 async def test_stream_chat_to_tui_appends_to_ctx_history():
     app = _FakeApp()
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _Ctx:
@@ -416,7 +417,8 @@ async def test_stream_chat_to_tui_long_text_shows_fold_indicator():
     # Tail visible
     assert "tail" in joined
     # ctx.history gets the FULL text (zero data loss)
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _Ctx:
@@ -446,7 +448,6 @@ async def test_stream_chat_to_tui_long_text_shows_summary():
 @pytest.mark.asyncio
 async def test_toggle_fold_cycles_through_multiple_folders():
     """Ctrl+E cycles: expand last -> fold + expand prev -> cycle."""
-    from strategy_research.cli.tui.widgets.streaming_text import StreamingText
 
     app = _FakeApp()
 
@@ -584,9 +585,8 @@ async def test_fake_app_write_transcript_helper():
 @pytest.mark.asyncio
 async def test_chat_session_dispatches_plain_text_to_llm():
     """When ``llm_client`` is bound, plain-text turns go through AgentLoop."""
-    from strategy_research.cli.interactive.main import InteractiveContext
-    from strategy_research.cli.tui.session import ChatSession
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _App:
@@ -661,9 +661,8 @@ async def test_chat_session_dispatches_plain_text_to_llm():
 @pytest.mark.asyncio
 async def test_chat_session_skips_llm_for_slash_commands():
     """Slash commands go through _DISPATCH only, not the LLM bridge."""
-    from strategy_research.cli.interactive.main import InteractiveContext
-    from strategy_research.cli.tui.session import ChatSession
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _App:
@@ -704,9 +703,8 @@ async def test_chat_session_skips_llm_for_slash_commands():
 @pytest.mark.asyncio
 async def test_chat_session_no_client_no_llm_call():
     """When ``llm_client is None`` plain text still appends to history only."""
-    from strategy_research.cli.interactive.main import InteractiveContext
-    from strategy_research.cli.tui.session import ChatSession
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _App:

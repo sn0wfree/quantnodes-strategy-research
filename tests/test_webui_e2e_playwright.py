@@ -18,7 +18,6 @@
 pytest_plugins = ["conftest_e2e"]
 
 import os
-import time
 import uuid
 from typing import Iterator
 
@@ -38,7 +37,6 @@ from playwright.sync_api import (
     Page,
     expect,
 )
-
 
 # ────────────────────────── Helpers ──────────────────────────
 

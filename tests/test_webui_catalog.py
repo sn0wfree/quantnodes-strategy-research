@@ -30,7 +30,6 @@ pytestmark = pytest.mark.skipif(
 )
 from playwright.sync_api import BrowserContext, Page
 
-
 # Path setup for visual_diff import
 TESTS_DIR = Path(__file__).parent
 sys.path.insert(0, str(TESTS_DIR))

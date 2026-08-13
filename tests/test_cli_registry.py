@@ -48,6 +48,7 @@ class TestRegistryBasics(unittest.TestCase):
         # Re-import to repopulate the global registry after reset.
         # Since core_commands registers on import, we have to re-import.
         import importlib
+
         import strategy_research.cli.commands.core_commands as cc
         importlib.reload(cc)
 
@@ -63,6 +64,7 @@ class TestRegistryBasics(unittest.TestCase):
         self.assertEqual(len(registered_commands()), 0)
         # Re-register
         import importlib
+
         import strategy_research.cli.commands.core_commands as cc
         importlib.reload(cc)
         self.assertGreater(len(registered_commands()), 0)
@@ -150,6 +152,7 @@ class TestWireCommands(unittest.TestCase):
     def setUp(self):
         reset_registry()
         import importlib
+
         import strategy_research.cli.commands.core_commands as cc
         importlib.reload(cc)
 
