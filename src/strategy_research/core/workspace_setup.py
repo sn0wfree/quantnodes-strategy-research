@@ -82,6 +82,10 @@ def smart_init_workspace_templates(
         if rel.parts and rel.parts[0] in _EXCLUDED_TOP_DIRS:
             continue
 
+        # Skip Python bytecode caches (__pycache__/*.pyc).
+        if any(part == "__pycache__" for part in rel.parts):
+            continue
+
         dst_path = ws_templates / rel
 
         if src_path.is_dir():

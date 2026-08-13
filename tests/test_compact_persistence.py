@@ -197,9 +197,12 @@ class TestCompactMessages4Tuple:
 
     def test_summary_max_tokens_uses_opencode_formula(self):
         """max_tokens = min(model_max_output, summary_output_tokens)."""
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ] * 3
+        # Alternating user/assistant turns, large enough that head
+        # selection is non-empty and L4 fires.
+        msgs = []
+        for i in range(15):
+            msgs.append({"role": "user", "content": f"msg {i} " * 1000})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 1000})
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock(content="summary")
         cfg = CompactConfig(tail_turns=1)
@@ -215,9 +218,12 @@ class TestCompactMessages4Tuple:
 
     def test_summary_max_tokens_caps_at_4096(self):
         """When model output > 4096, max_tokens = 4096."""
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ] * 3
+        # Alternating user/assistant turns, large enough that head
+        # selection is non-empty and L4 fires.
+        msgs = []
+        for i in range(15):
+            msgs.append({"role": "user", "content": f"msg {i} " * 1000})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 1000})
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock(content="summary")
         cfg = CompactConfig(tail_turns=1)

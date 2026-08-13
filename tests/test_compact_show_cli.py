@@ -47,7 +47,7 @@ class TestCompactShow:
             cmd_compact_show()
         output = buf.getvalue()
         assert "0.9" in output  # microcompact_ratio
-        assert "0.95" in output  # llm_summarize_ratio
+        assert "0.8" in output  # llm_summarize_ratio (opencode-aligned default)
         assert "0.99" in output  # hard_truncate_ratio / overflow_ratio
 
     def test_output_shows_opencode_defaults(self):

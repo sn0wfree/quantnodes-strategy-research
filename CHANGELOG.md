@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   搜索而非 cwd，导致 serve 进程永远读不到工作区 `.env`。
 - `chat.md` 提示词：移除「不要执行 shell 命令」禁令，改为指引经
   `run_command` 在工作区内执行。
+- `workspace_setup.smart_init_workspace_templates`：排除 `__pycache__`，
+  不再把编译缓存 `.pyc` 复制进用户工作区。
+
+### Tests
+- 工具测试迁移 v2 调用（`execute(ctx=ToolContext(...), ...)`）：
+  `test_tools_integration.py`（20）、`test_goal_e2e.py`（15）。
+- `test_persona_threading.py` / `test_iteration_budget_wiring.py`：
+  attempts 表补齐 `mode/model_override/thinking` 列、`_Body` 补齐
+  `mode/model/thinking` 字段（web_session v5 迁移后同步）。
+- `test_workspace_setup.py`：文件计数改为动态计算（模板目录实扫）。
+- compact 测试同步新默认（`llm_summarize_ratio=0.80`）与 L4 触发条件
+  （消息需超出 recent 保留预算、user/assistant 交替）。
+- `test_common_prompts.py`：`study_collector`/`study_reviewer`/
+  `workflow_orchestrator` 补 common 层引用。
+- swarm worker / projector / run_backtest 测试同步 v2 行为
+  （ctx 注入、compaction 标记保留原消息、结构化错误 envelope）。
 
 ## [0.6.0] - 2026-07-28
 

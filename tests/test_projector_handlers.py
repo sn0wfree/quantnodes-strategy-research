@@ -276,12 +276,16 @@ class TestProjectorOnCompactMarker(unittest.TestCase):
         self.assertEqual(msg.content, "updated")
 
 
-class TestProjectorOnCompactFullReplacement(unittest.TestCase):
+class TestProjectorOnCompactMarker(unittest.TestCase):
+    """opencode-aligned compaction: original messages are KEPT and a
+    compaction marker (system/compaction) is appended; the compressed
+    ``messages`` list only informs the ``compacted_until_seq`` boundary."""
+
     def setUp(self) -> None:
         self.proj = Projector(Path("/tmp/test.db"))
         self.state = ProjectedSession(session_id="s1")
 
-    def test_replaces_messages_with_compressed(self) -> None:
+    def test_keeps_original_messages_and_adds_marker(self) -> None:
         for i in range(3):
             e = _make_event(EventType.MESSAGE_RECEIVED, {"message_id": f"m{i}", "content": f"msg{i}"}, seq=i + 1)
             self.proj._on_message_received(e, self.state)
@@ -294,13 +298,18 @@ class TestProjectorOnCompactFullReplacement(unittest.TestCase):
             ],
         }, seq=10)
         self.proj._on_compact(e, self.state)
+        # Marker appended; all originals kept.
         self.assertEqual(len(self.state.messages), 4)
-        self.assertNotIn("m0", self.state.messages)
+        self.assertIn("m0", self.state.messages)
+        self.assertIn("m1", self.state.messages)
         self.assertIn("m2", self.state.messages)
-        self.assertIn("cm1", self.state.messages)
-        self.assertIn("cm2", self.state.messages)
+        marker = [m for m in self.state.messages.values() if m.message_type == "compaction"]
+        self.assertEqual(len(marker), 1)
+        self.assertEqual(marker[0].content, "replaced")
+        self.assertEqual(marker[0].role, "system")
+        self.assertIn("compacted_until_seq", marker[0].metadata)
 
-    def test_preserves_order(self) -> None:
+    def test_preserves_order_with_marker_appended(self) -> None:
         for i in range(2):
             e = _make_event(EventType.MESSAGE_RECEIVED, {"message_id": f"m{i}", "content": f"msg{i}"}, seq=i + 1)
             self.proj._on_message_received(e, self.state)
@@ -310,9 +319,10 @@ class TestProjectorOnCompactFullReplacement(unittest.TestCase):
         }, seq=10)
         self.proj._on_compact(e, self.state)
         ordered = self.state.messages_in_order()
-        self.assertEqual(ordered[0].id, "cm1")
-        self.assertEqual(ordered[1].message_type, "compaction")
-        self.assertEqual(ordered[2].id, "m1")
+        self.assertEqual(ordered[0].id, "m0")
+        self.assertEqual(ordered[1].id, "m1")
+        self.assertEqual(ordered[2].message_type, "compaction")
+        self.assertEqual(ordered[2].content, "replaced")
 
 
 if __name__ == "__main__":

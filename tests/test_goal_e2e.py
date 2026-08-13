@@ -27,6 +27,7 @@ from strategy_research.core.agent.builtin_tools import (
     FactorICDecay,
 )
 from strategy_research.core.agent.builtin_tools.data_tools import ImportDataTool
+from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.config_runner import load_data
 
 
@@ -77,7 +78,7 @@ def real_market_data(workspace: Path) -> dict:
 @pytest.fixture
 def populated_workspace(workspace: Path, real_market_data: dict) -> Path:
     tool = ImportDataTool()
-    result = json.loads(tool.execute(workspace=workspace, data=real_market_data))
+    result = json.loads(tool.execute(ctx=ToolContext(workspace=workspace), data=real_market_data))
     assert result["status"] == "ok"
     return workspace
 
@@ -216,7 +217,7 @@ class TestFactorAnalysisGoalE2E:
 
         ic_tool = FactorCrossSectionalAnalysis()
         ic_result = json.loads(ic_tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert ic_result["status"] == "ok"
@@ -231,7 +232,7 @@ class TestFactorAnalysisGoalE2E:
 
         quintile_tool = FactorQuintileReturns()
         quintile_result = json.loads(quintile_tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert quintile_result["status"] == "ok"
@@ -246,7 +247,7 @@ class TestFactorAnalysisGoalE2E:
 
         decay_tool = FactorICDecay()
         decay_result = json.loads(decay_tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert decay_result["status"] == "ok"
@@ -271,7 +272,7 @@ class TestFactorAnalysisGoalE2E:
 class TestDataPipelineE2E:
     def test_import_then_load_data(self, workspace: Path, real_market_data: dict):
         tool = ImportDataTool()
-        result = json.loads(tool.execute(workspace=workspace, data=real_market_data))
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=workspace), data=real_market_data))
         assert result["status"] == "ok"
         cfg = {
             "strategy": {"name": "default"},

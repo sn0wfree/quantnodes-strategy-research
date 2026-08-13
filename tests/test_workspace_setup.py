@@ -27,12 +27,31 @@ from strategy_research.core.workspace_setup import (
 # ── Expected counts (computed against current package) ───────────
 
 # 5 top-level files (README, config.yaml, prepare.py, program.md, strategy.py)
-# 27 .skills/*.md files
-# 9 .prompts/*.md files (EXCLUDED)
 _EXPECTED_TOP_LEVEL_FILES = {
     "README.md", "config.yaml", "prepare.py", "program.md", "strategy.py",
 }
-_EXPECTED_SKILLS_COUNT = 27
+
+
+def _actual_skills_count() -> int:
+    """Derive the .skills/*.md count from the package (grows over time)."""
+    skills_dir = _TEMPLATES_DIR / ".skills"
+    return len(list(skills_dir.glob("*.md"))) if skills_dir.is_dir() else 0
+
+
+def _expected_total() -> int:
+    """Expected scaffold size: every package template file the walk copies
+    (top-level + .skills/ + workflows/, excluding .prompts/ + __pycache__)."""
+    total = 0
+    for src_path in sorted(_TEMPLATES_DIR.rglob("*")):
+        if src_path.is_dir():
+            continue
+        rel = src_path.relative_to(_TEMPLATES_DIR)
+        if rel.parts and rel.parts[0] in _EXCLUDED_TOP_DIRS:
+            continue
+        if any(part == "__pycache__" for part in rel.parts):
+            continue
+        total += 1
+    return total
 
 
 # ── 1. Empty workspace → all package templates copied ────────────
@@ -50,14 +69,12 @@ class TestSmartScaffoldBasic:
         """All 27 .skills files are copied."""
         report = smart_init_workspace_templates(tmp_path)
         skills_copied = [p for p in report["copied"] if p.startswith(".skills/")]
-        assert len(skills_copied) == _EXPECTED_SKILLS_COUNT
+        assert len(skills_copied) == _actual_skills_count()
 
     def test_total_file_count(self, tmp_path: Path):
-        """Top + skills = 32 files (no .prompts)."""
+        """Top + skills + workflows = all package template files (no .prompts)."""
         report = smart_init_workspace_templates(tmp_path)
-        assert len(report["copied"]) == (
-            len(_EXPECTED_TOP_LEVEL_FILES) + _EXPECTED_SKILLS_COUNT
-        )
+        assert len(report["copied"]) == _expected_total()
         assert report["skipped"] == []
         assert report["errors"] == []
 
@@ -77,9 +94,7 @@ class TestSmartScaffoldIdempotent:
         assert "strategy.py" in report["skipped"]
         # All other files are skipped too
         assert len(report["copied"]) == 0
-        assert len(report["skipped"]) == (
-            len(_EXPECTED_TOP_LEVEL_FILES) + _EXPECTED_SKILLS_COUNT
-        )
+        assert len(report["skipped"]) == _expected_total()
 
     def test_partial_workspace_only_copies_missing(self, tmp_path: Path):
         """Partial workspace → only missing files copied."""
@@ -89,10 +104,8 @@ class TestSmartScaffoldIdempotent:
         report = smart_init_workspace_templates(tmp_path)
         assert "strategy.py" in report["skipped"]
         assert "config.yaml" in report["copied"]
-        # 32 total - 1 existing = 31 copied
-        assert len(report["copied"]) == (
-            len(_EXPECTED_TOP_LEVEL_FILES) + _EXPECTED_SKILLS_COUNT - 1
-        )
+        # All template files minus the one pre-existing user file
+        assert len(report["copied"]) == _expected_total() - 1
 
 
 # ── 3. Exclusion — .prompts/ never copied ────────────────────────

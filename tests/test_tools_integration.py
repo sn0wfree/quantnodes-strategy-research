@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 
 from strategy_research.core.db import init_db, get_connection
+from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.agent.builtin_tools import (
     FactorCrossSectionalAnalysis,
     FactorICDecay,
@@ -89,7 +90,7 @@ def populated_workspace(workspace: Path, real_market_data: dict) -> Path:
     """Workspace with real market data imported."""
     import_tool = ImportDataTool()
     result = json.loads(import_tool.execute(
-        workspace=workspace,
+        ctx=ToolContext(workspace=workspace),
         data=real_market_data,
     ))
     assert result["status"] == "ok"
@@ -104,7 +105,7 @@ class TestImportAndAnalysis:
         """Test importing data for 10 A-share stocks."""
         import_tool = ImportDataTool()
         result = json.loads(import_tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             data=real_market_data,
         ))
         assert result["status"] == "ok"
@@ -132,7 +133,7 @@ class TestImportAndAnalysis:
         """Test factor analysis with real market data."""
         tool = FactorAnalysisTool()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -144,7 +145,7 @@ class TestImportAndAnalysis:
         """Test cross-sectional IC analysis with real data."""
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -157,7 +158,7 @@ class TestImportAndAnalysis:
         """Test IC decay analysis with real data."""
         tool = FactorICDecay()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -168,7 +169,7 @@ class TestImportAndAnalysis:
         """Test quintile returns analysis with real data."""
         tool = FactorQuintileReturns()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -180,7 +181,7 @@ class TestImportAndAnalysis:
         """Test factor turnover analysis with real data."""
         tool = FactorTurnover()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -191,7 +192,7 @@ class TestImportAndAnalysis:
         """Test pattern recognition with real data."""
         tool = PatternRecognitionTool()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             asset="000001.SZ",
         ))
         assert result["status"] == "ok"
@@ -208,7 +209,7 @@ class TestFactorExpressions:
         """Test momentum factor (20-day return)."""
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -218,7 +219,7 @@ class TestFactorExpressions:
         """Test volatility factor."""
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_std(ts_return(close, 1), 20)",
         ))
         assert result["status"] == "ok"
@@ -227,7 +228,7 @@ class TestFactorExpressions:
         """Test mean reversion factor."""
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="close / ts_mean(close, 20) - 1",
         ))
         assert result["status"] == "ok"
@@ -236,7 +237,7 @@ class TestFactorExpressions:
         """Test volume-price correlation factor."""
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_corr(close, volume, 20)",
         ))
         assert result["status"] == "ok"
@@ -245,7 +246,7 @@ class TestFactorExpressions:
         """Test rank-based factor."""
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=populated_workspace,
+            ctx=ToolContext(workspace=populated_workspace),
             factor_code="ts_rank(close, 20)",
         ))
         assert result["status"] == "ok"
@@ -258,7 +259,7 @@ class TestDataSourceTools:
     def test_list_data_sources(self):
         """Test listing available data sources."""
         tool = ListDataSourcesTool()
-        result = json.loads(tool.execute())
+        result = json.loads(tool.execute(ctx=ToolContext(workspace=None)))
         assert result["status"] == "ok"
         assert "sources" in result
         assert len(result["sources"]) > 0
@@ -268,26 +269,23 @@ class TestDataSourceTools:
         assert len(available) > 0
 
     def test_get_market_data_validation(self):
-        """Test input validation for get_market_data."""
+        """Test input validation for get_market_data (v2 signatures)."""
         tool = GetMarketDataTool()
-        
-        # Missing codes
+        ctx = ToolContext(workspace=None)
+
+        # Missing required args → v2 必选参数缺失由框架层抛 TypeError
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ctx, start_date="2023-01-01", end_date="2023-01-31")
+        with pytest.raises(TypeError):
+            tool.execute(ctx=ctx, codes=["000001.SZ"])
+
+        # Empty codes → value validation error
         result = json.loads(tool.execute(
-            start_date="2023-01-01",
-            end_date="2023-01-31",
-        ))
-        assert result["status"] == "error"
-        
-        # Empty codes
-        result = json.loads(tool.execute(
+            ctx=ctx,
             codes=[],
             start_date="2023-01-01",
             end_date="2023-01-31",
         ))
-        assert result["status"] == "error"
-        
-        # Missing dates
-        result = json.loads(tool.execute(codes=["000001.SZ"]))
         assert result["status"] == "error"
 
 
@@ -311,20 +309,30 @@ class TestRegistryIntegration:
             assert name in r.tool_names, f"Missing tool: {name}"
 
     def test_tool_descriptions_complete(self):
-        """Test that all tools have complete descriptions."""
+        """Test that all tools have complete descriptions.
+
+        v2: description is a short one-liner (detailed docs live in the
+        execute docstring / tool card), so only non-empty is enforced.
+        """
         r = build_default_registry()
         for name in r.tool_names:
             tool = r.get(name)
             assert tool.description, f"{name} has empty description"
-            assert len(tool.description) > 30, f"{name} description too short"
+            assert len(tool.description) > 10, f"{name} description too short"
 
     def test_tool_parameters_valid(self):
-        """Test that all tools have valid parameter schemas."""
+        """Test that all tools have valid parameter schemas.
+
+        v2: schemas derive from the execute() signature via
+        to_openai_schema(); the legacy `parameters` dict is not populated
+        for migrated tools.
+        """
         r = build_default_registry()
         for name in r.tool_names:
             tool = r.get(name)
-            assert tool.parameters.get("type") == "object", f"{name} missing object type"
-            assert "properties" in tool.parameters, f"{name} missing properties"
+            schema = tool.to_openai_schema()["function"]["parameters"]
+            assert schema.get("type") == "object", f"{name} missing object type"
+            assert "properties" in schema, f"{name} missing properties"
 
 
 # ── Performance: Large Dataset Tests ─────────────────────────────────
@@ -356,7 +364,7 @@ class TestPerformance:
             data[code] = stock_data
         
         import_tool = ImportDataTool()
-        result = json.loads(import_tool.execute(workspace=workspace, data=data))
+        result = json.loads(import_tool.execute(ctx=ToolContext(workspace=workspace), data=data))
         assert result["status"] == "ok"
         assert result["imported"] == 50000  # 50 stocks * 1000 days
 
@@ -385,12 +393,12 @@ class TestPerformance:
             data[code] = stock_data
         
         import_tool = ImportDataTool()
-        import_tool.execute(workspace=workspace, data=data)
+        import_tool.execute(ctx=ToolContext(workspace=workspace), data=data)
         
         # Run analysis
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(
-            workspace=workspace,
+            ctx=ToolContext(workspace=workspace),
             factor_code="ts_return(close, 20)",
         ))
         assert result["status"] == "ok"

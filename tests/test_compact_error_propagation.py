@@ -163,10 +163,12 @@ class TestMaybeCompactRollsBack:
         messages are returned (not original)."""
         # Properly alternated user/assistant turns so L4 produces a
         # smaller message set (the safety check requires a user role).
+        # Messages are large enough to overflow the recent-preserve
+        # budget (8k tokens) so head selection is non-empty and L4 fires.
         msgs = []
         for i in range(25):
-            msgs.append({"role": "user", "content": f"msg {i} " * 30})
-            msgs.append({"role": "assistant", "content": f"reply {i} " * 30})
+            msgs.append({"role": "user", "content": f"msg {i} " * 500})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 500})
 
         loop = self._make_loop(msgs)
         mock_llm = MagicMock()

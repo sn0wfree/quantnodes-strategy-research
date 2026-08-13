@@ -504,7 +504,9 @@ class TestSwarmWorkerToolContext:
         tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
         assert '"workspace": "ws"' in tool_msg[-1]["content"]
 
-    def test_no_ctx_but_ctx_requiring_tool_is_wrapped_error(self):
+    def test_no_ctx_but_ctx_requiring_tool_receives_none(self):
+        """v2 dispatch passes ctx=None (not TypeError) when the worker has
+        no tool_context — the tool can detect the missing context itself."""
         from strategy_research.core.agent.tools import BaseTool
 
         class CtxTool(BaseTool):
@@ -514,7 +516,7 @@ class TestSwarmWorkerToolContext:
             is_readonly = True
 
             def execute(self, ctx, **kwargs):
-                return json.dumps({"status": "ok"})
+                return json.dumps({"status": "ok", "ctx_is_none": ctx is None})
 
         registry = ToolRegistry()
         registry.register(CtxTool())
@@ -528,11 +530,12 @@ class TestSwarmWorkerToolContext:
             system_prompt="x",
         )
         result = worker.run("t")
-        # No ctx injected → tool.invoke wraps the TypeError as an error result
+        # No ctx injected → the tool receives ctx=None and reports it
         tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
-        assert "missing 1 required positional argument: 'ctx'" in tool_msg[-1]["content"]
+        assert '"ctx_is_none": true' in tool_msg[-1]["content"]
 
-    def test_legacy_kwargs_tool_unaffected_by_tool_context(self):
+    def test_legacy_kwargs_tool_receives_injected_ctx(self):
+        """v2 dispatch injects ctx into legacy **kwargs tools too."""
         from strategy_research.core.agent.tools import BaseTool, ToolContext
 
         class KwargsTool(BaseTool):
@@ -559,4 +562,4 @@ class TestSwarmWorkerToolContext:
         result = worker.run("t")
         assert result.status == WorkerStatus.COMPLETED
         tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
-        assert '"saw_ctx": false' in tool_msg[-1]["content"]
+        assert '"saw_ctx": true' in tool_msg[-1]["content"]
