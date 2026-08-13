@@ -382,23 +382,7 @@ class AgentLoop:
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
-                        idx = tc_delta.get("index", 0)
-                        while len(accumulated_tool_calls) <= idx:
-                            accumulated_tool_calls.append({
-                                "id": tc_delta.get("id", ""),
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            })
-                        tc = accumulated_tool_calls[idx]
-                        if tc_delta.get("id"):
-                            tc["id"] = tc_delta["id"]
-                        if tc_delta.get("type"):
-                            tc["type"] = tc_delta["type"]
-                        func_delta = tc_delta.get("function", {})
-                        if func_delta.get("name"):
-                            tc["function"]["name"] = func_delta["name"]
-                        if func_delta.get("arguments"):
-                            tc["function"]["arguments"] += func_delta["arguments"]
+                        self._accumulate_tool_call(accumulated_tool_calls, tc_delta)
 
                 if chunk.usage:
                     usage = chunk.usage
@@ -436,6 +420,29 @@ class AgentLoop:
             raw_response["usage"] = usage
 
         return self.client.parse_response(raw_response)
+
+    @staticmethod
+    def _accumulate_tool_call(
+        accumulated: list[dict[str, Any]], tc_delta: dict[str, Any]
+    ) -> None:
+        """Merge a streaming tool-call delta into the accumulated list."""
+        idx = tc_delta.get("index", 0)
+        while len(accumulated) <= idx:
+            accumulated.append({
+                "id": tc_delta.get("id", ""),
+                "type": "function",
+                "function": {"name": "", "arguments": ""},
+            })
+        tc = accumulated[idx]
+        if tc_delta.get("id"):
+            tc["id"] = tc_delta["id"]
+        if tc_delta.get("type"):
+            tc["type"] = tc_delta["type"]
+        func_delta = tc_delta.get("function", {})
+        if func_delta.get("name"):
+            tc["function"]["name"] = func_delta["name"]
+        if func_delta.get("arguments"):
+            tc["function"]["arguments"] += func_delta["arguments"]
 
     # ── Async helpers ─────────────────────────────
 
@@ -510,23 +517,7 @@ class AgentLoop:
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
-                        idx = tc_delta.get("index", 0)
-                        while len(accumulated_tool_calls) <= idx:
-                            accumulated_tool_calls.append({
-                                "id": tc_delta.get("id", ""),
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            })
-                        tc_entry = accumulated_tool_calls[idx]
-                        if tc_delta.get("id"):
-                            tc_entry["id"] = tc_delta["id"]
-                        if tc_delta.get("type"):
-                            tc_entry["type"] = tc_delta["type"]
-                        func_delta = tc_delta.get("function", {})
-                        if func_delta.get("name"):
-                            tc_entry["function"]["name"] = func_delta["name"]
-                        if func_delta.get("arguments"):
-                            tc_entry["function"]["arguments"] += func_delta["arguments"]
+                        self._accumulate_tool_call(accumulated_tool_calls, tc_delta)
 
                 if chunk.usage:
                     usage = chunk.usage

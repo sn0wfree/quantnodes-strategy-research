@@ -57,6 +57,13 @@ def _backoff_delay(attempt: int, base: float) -> float:
     return min(base * (2 ** attempt), 60.0)
 
 
+def _jitter_backoff(attempt: int, base: float) -> float:
+    """Exponential backoff with jitter, capped at 60s."""
+    delay = _backoff_delay(attempt, base)
+    jitter = random.uniform(0.7, 1.3)
+    return min(delay * jitter, 60.0)
+
+
 def _parse_retry_after(header_value: str) -> float | None:
     """Parse Retry-After header (seconds or HTTP-date). Returns seconds or None."""
     if not header_value:
@@ -333,7 +340,7 @@ class OpenAICompatClient:
             ) from exc
         return parse_chat_response(raw, adapter=adapter)
 
-    def stream(
+    def stream(  # noqa: C901
         self,
         messages: list[dict[str, Any]],
         *,
@@ -410,9 +417,7 @@ class OpenAICompatClient:
                         f"stream timed out after {self.config.timeout_s}s "
                         f"({self.config.max_retries} attempts)"
                     ) from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "stream timeout (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -421,9 +426,7 @@ class OpenAICompatClient:
             except httpx.TransportError as exc:
                 if started or attempt == self.config.max_retries - 1:
                     raise LLMError(f"stream transport error: {exc}") from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "stream transport error (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -435,7 +438,7 @@ class OpenAICompatClient:
             _raise_for_status(last_response, self.config.provider)
         raise LLMError("stream max retries exhausted")
 
-    async def astream(
+    async def astream(  # noqa: C901
         self,
         messages: list[dict[str, Any]],
         *,
@@ -520,9 +523,7 @@ class OpenAICompatClient:
                         f"stream timed out after {self.config.timeout_s}s "
                         f"({self.config.max_retries} attempts)"
                     ) from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "astream timeout (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -531,9 +532,7 @@ class OpenAICompatClient:
             except httpx.TransportError as exc:
                 if started or attempt == self.config.max_retries - 1:
                     raise LLMError(f"stream transport error: {exc}") from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "astream transport error (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
