@@ -660,8 +660,8 @@ def cmd_import(args: argparse.Namespace) -> int:
 # Main CLI
 # ============================================================
 
-def main() -> int:
-    """CLI entry point."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the top-level CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="quantnodes-research",
         description="通用策略自动研究框架",
@@ -926,6 +926,21 @@ def main() -> int:
     # registered via cli.commands.core_commands on import.
     _wire(subparsers)
 
+    return parser, {
+        "session": session_parser,
+        "skills": skills_parser,
+        "swarm": swarm_parser,
+        "mcp": mcp_parser,
+        "api": api_parser,
+        "webui": webui_parser,
+        "compact": compact_parser,
+    }
+
+
+def main() -> int:
+    """CLI entry point."""
+    parser, subparsers = _build_parser()
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -941,151 +956,218 @@ def main() -> int:
     if getattr(args, "handler", None) is not None:
         return args.handler(args)
 
-    if args.command == "session":
-        if args.session_command == "stats":
-            return cmd_session_stats(args)
-        elif args.session_command == "list":
-            return cmd_session_list(args)
-        elif args.session_command == "show":
-            return cmd_session_show(args)
-        elif args.session_command == "search":
-            return cmd_session_search(args)
-        elif args.session_command == "delete":
-            return cmd_session_delete(args)
-        else:
-            session_parser.print_help()
-            return 0
-    elif args.command == "skills":
-        if args.skills_command == "list":
-            return cmd_skills_list(args)
-        elif args.skills_command == "show":
-            return cmd_skills_show(args)
-        elif args.skills_command == "search":
-            return cmd_skills_search(args)
-        else:
-            skills_parser.print_help()
-            return 0
-    elif args.command == "swarm":
-        if args.swarm_command == "list":
-            return cmd_swarm_list(args)
-        elif args.swarm_command == "inspect":
-            return cmd_swarm_inspect(args)
-        elif args.swarm_command == "run":
-            return cmd_swarm_run(args)
-        elif args.swarm_command == "cancel":
-            return cmd_swarm_cancel(args)
-        else:
-            swarm_parser.print_help()
-            return 0
-    elif args.command == "mcp":
-        if args.mcp_command == "serve":
-            return cmd_mcp_serve(args)
-        elif args.mcp_command == "list-tools":
-            return cmd_mcp_list_tools(args)
-        else:
-            mcp_parser.print_help()
-            return 0
-    elif args.command == "export":
-        from .commands.export import cmd_export
+    dispatcher = {
+        "session": _dispatch_session,
+        "skills": _dispatch_skills,
+        "swarm": _dispatch_swarm,
+        "mcp": _dispatch_mcp,
+        "export": _dispatch_export,
+        "schedule": _dispatch_schedule,
+        "goal": _dispatch_goal,
+        "hypothesis": _dispatch_hypothesis,
+        "validate-run": _dispatch_validate_run,
+        "engine": _dispatch_engine,
+        "accept": _dispatch_accept,
+        "api": _dispatch_api,
+        "webui": _dispatch_webui,
+        "compact": _dispatch_compact,
+        "serve": _dispatch_serve,
+    }
+    handler_fn = dispatcher.get(args.command)
+    if handler_fn is not None:
+        return handler_fn(args, subparsers)
 
-        return cmd_export(args)
-    elif args.command == "schedule":
-        from strategy_research.core.scheduled_research.cli import (
-            cmd_schedule_cancel,
-            cmd_schedule_create,
-            cmd_schedule_delete,
-            cmd_schedule_list,
-            cmd_schedule_run,
-            cmd_schedule_show,
-            cmd_schedule_start,
-        )
-        if args.schedule_command == "create":
-            return cmd_schedule_create(args)
-        elif args.schedule_command == "list":
-            return cmd_schedule_list(args)
-        elif args.schedule_command == "show":
-            return cmd_schedule_show(args)
-        elif args.schedule_command == "cancel":
-            return cmd_schedule_cancel(args)
-        elif args.schedule_command == "delete":
-            return cmd_schedule_delete(args)
-        elif args.schedule_command == "run":
-            return cmd_schedule_run(args)
-        elif args.schedule_command == "start":
-            return cmd_schedule_start(args)
-        else:
-            return 0
-    elif args.command == "goal":
-        from strategy_research.core.goal.cli import (
-            cmd_goal_audit,
-            cmd_goal_cancel,
-            cmd_goal_complete,
-            cmd_goal_evidence,
-            cmd_goal_list,
-            cmd_goal_start,
-            cmd_goal_status,
-        )
-        return {
-            "start": cmd_goal_start,
-            "status": cmd_goal_status,
-            "evidence": cmd_goal_evidence,
-            "audit": cmd_goal_audit,
-            "complete": cmd_goal_complete,
-            "list": cmd_goal_list,
-            "cancel": cmd_goal_cancel,
-        }.get(args.goal_command, lambda a: 1)(args)
-    elif args.command == "hypothesis":
-        from strategy_research.core.hypothesis.cli import (
-            cmd_hypothesis_create,
-            cmd_hypothesis_link,
-            cmd_hypothesis_list,
-            cmd_hypothesis_search,
-            cmd_hypothesis_show,
-            cmd_hypothesis_update,
-        )
-        return {
-            "create": cmd_hypothesis_create,
-            "list": cmd_hypothesis_list,
-            "show": cmd_hypothesis_show,
-            "update": cmd_hypothesis_update,
-            "search": cmd_hypothesis_search,
-            "link": cmd_hypothesis_link,
-        }.get(args.hypothesis_command, lambda a: 1)(args)
-    elif args.command == "validate-run":
-        from strategy_research.core.validation.cli import cmd_validate_run
-        return cmd_validate_run(args)
-    elif args.command == "engine":
-        from strategy_research.core.engine.cli import dispatch_engine
-        return dispatch_engine(args)
-    elif args.command == "accept":
-        from strategy_research.core.strategy_acceptance.cli import cmd_accept
-        return cmd_accept(args)
-    elif args.command == "api":
-        if args.api_command == "serve":
-            return cmd_api_serve(args)
-        else:
-            api_parser.print_help()
-            return 0
-    elif args.command == "webui":
-        if args.webui_command == "serve":
-            return cmd_webui_serve(args)
-        else:
-            webui_parser.print_help()
-            return 0
-    elif args.command == "compact":
-        if getattr(args, "compact_command", None) == "show":
-            from .commands.compact_show import cmd_compact_show
+    parser.print_help()
+    return 0
 
-            return cmd_compact_show(args)
-        else:
-            compact_parser.print_help()
-            return 0
-    elif args.command == "serve":
-        # Top-level alias — same as `webui serve`
+
+# ── Legacy subcommand dispatch helpers ─────────────────────
+
+def _dispatch_session(args, parsers) -> int:
+    """Dispatch the session subcommand."""
+    if args.session_command == "stats":
+        return cmd_session_stats(args)
+    elif args.session_command == "list":
+        return cmd_session_list(args)
+    elif args.session_command == "show":
+        return cmd_session_show(args)
+    elif args.session_command == "search":
+        return cmd_session_search(args)
+    elif args.session_command == "delete":
+        return cmd_session_delete(args)
+    else:
+        session_parser.print_help()
+        return 0
+
+
+def _dispatch_skills(args, parsers) -> int:
+    """Dispatch the skills subcommand."""
+    if args.skills_command == "list":
+        return cmd_skills_list(args)
+    elif args.skills_command == "show":
+        return cmd_skills_show(args)
+    elif args.skills_command == "search":
+        return cmd_skills_search(args)
+    else:
+        skills_parser.print_help()
+        return 0
+
+
+def _dispatch_swarm(args, parsers) -> int:
+    """Dispatch the swarm subcommand."""
+    if args.swarm_command == "list":
+        return cmd_swarm_list(args)
+    elif args.swarm_command == "inspect":
+        return cmd_swarm_inspect(args)
+    elif args.swarm_command == "run":
+        return cmd_swarm_run(args)
+    elif args.swarm_command == "cancel":
+        return cmd_swarm_cancel(args)
+    else:
+        swarm_parser.print_help()
+        return 0
+
+
+def _dispatch_mcp(args, parsers) -> int:
+    """Dispatch the mcp subcommand."""
+    if args.mcp_command == "serve":
+        return cmd_mcp_serve(args)
+    elif args.mcp_command == "list-tools":
+        return cmd_mcp_list_tools(args)
+    else:
+        mcp_parser.print_help()
+        return 0
+
+
+def _dispatch_export(args, parsers) -> int:
+    """Dispatch the export subcommand."""
+    from .commands.export import cmd_export
+
+    return cmd_export(args)
+
+
+def _dispatch_schedule(args, parsers) -> int:
+    """Dispatch the schedule subcommand."""
+    from strategy_research.core.scheduled_research.cli import (
+        cmd_schedule_cancel,
+        cmd_schedule_create,
+        cmd_schedule_delete,
+        cmd_schedule_list,
+        cmd_schedule_run,
+        cmd_schedule_show,
+        cmd_schedule_start,
+    )
+    if args.schedule_command == "create":
+        return cmd_schedule_create(args)
+    elif args.schedule_command == "list":
+        return cmd_schedule_list(args)
+    elif args.schedule_command == "show":
+        return cmd_schedule_show(args)
+    elif args.schedule_command == "cancel":
+        return cmd_schedule_cancel(args)
+    elif args.schedule_command == "delete":
+        return cmd_schedule_delete(args)
+    elif args.schedule_command == "run":
+        return cmd_schedule_run(args)
+    elif args.schedule_command == "start":
+        return cmd_schedule_start(args)
+    else:
+        return 0
+
+
+def _dispatch_goal(args, parsers) -> int:
+    """Dispatch the goal subcommand."""
+    from strategy_research.core.goal.cli import (
+        cmd_goal_audit,
+        cmd_goal_cancel,
+        cmd_goal_complete,
+        cmd_goal_evidence,
+        cmd_goal_list,
+        cmd_goal_start,
+        cmd_goal_status,
+    )
+    return {
+        "start": cmd_goal_start,
+        "status": cmd_goal_status,
+        "evidence": cmd_goal_evidence,
+        "audit": cmd_goal_audit,
+        "complete": cmd_goal_complete,
+        "list": cmd_goal_list,
+        "cancel": cmd_goal_cancel,
+    }.get(args.goal_command, lambda a: 1)(args)
+
+
+def _dispatch_hypothesis(args, parsers) -> int:
+    """Dispatch the hypothesis subcommand."""
+    from strategy_research.core.hypothesis.cli import (
+        cmd_hypothesis_create,
+        cmd_hypothesis_link,
+        cmd_hypothesis_list,
+        cmd_hypothesis_search,
+        cmd_hypothesis_show,
+        cmd_hypothesis_update,
+    )
+    return {
+        "create": cmd_hypothesis_create,
+        "list": cmd_hypothesis_list,
+        "show": cmd_hypothesis_show,
+        "update": cmd_hypothesis_update,
+        "search": cmd_hypothesis_search,
+        "link": cmd_hypothesis_link,
+    }.get(args.hypothesis_command, lambda a: 1)(args)
+
+
+def _dispatch_validate_run(args, parsers) -> int:
+    """Dispatch the validate-run subcommand."""
+    from strategy_research.core.validation.cli import cmd_validate_run
+    return cmd_validate_run(args)
+
+
+def _dispatch_engine(args, parsers) -> int:
+    """Dispatch the engine subcommand."""
+    from strategy_research.core.engine.cli import dispatch_engine
+    return dispatch_engine(args)
+
+
+def _dispatch_accept(args, parsers) -> int:
+    """Dispatch the accept subcommand."""
+    from strategy_research.core.strategy_acceptance.cli import cmd_accept
+    return cmd_accept(args)
+
+
+def _dispatch_api(args, parsers) -> int:
+    """Dispatch the api subcommand."""
+    if args.api_command == "serve":
+        return cmd_api_serve(args)
+    else:
+        api_parser.print_help()
+        return 0
+
+
+def _dispatch_webui(args, parsers) -> int:
+    """Dispatch the webui subcommand."""
+    if args.webui_command == "serve":
         return cmd_webui_serve(args)
     else:
-        parser.print_help()
+        webui_parser.print_help()
         return 0
+
+
+def _dispatch_compact(args, parsers) -> int:
+    """Dispatch the compact subcommand."""
+    if getattr(args, "compact_command", None) == "show":
+        from .commands.compact_show import cmd_compact_show
+
+        return cmd_compact_show(args)
+    else:
+        compact_parser.print_help()
+        return 0
+
+
+def _dispatch_serve(args, parsers) -> int:
+    """Dispatch the serve subcommand."""
+    # Top-level alias — same as `webui serve`
+    return cmd_webui_serve(args)
 
 
 if __name__ == "__main__":
