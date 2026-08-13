@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -342,15 +343,38 @@ class FactorStrategy:
         nav_history: pd.Series,
     ) -> dict[str, float]:
         """计算权重."""
+        # 1. 计算因子值
+        factor_values = self._compute_factor_values(date, price_panel)
+
+        # 2. 计算综合分数 — 取每个因子在当前 date 的横截面值
+        scores = self._compute_scores(date, price_panel, factor_values)
+
+        # 3. 选择 top_n
+        # 防御：因子失败/无数据的资产 score 为 0/NaN，绝不能当作"最优"被选中
+        # （0 > 真实资产的负分 → 幽灵资产混入权重 → NaN 毒化）。无效分数先剔除。
+        scores = scores.replace([np.inf, -np.inf], np.nan)
+        eligible = scores.dropna()
+        if eligible.empty:
+            # 所有因子都无有效分数（数据不足/全部失败）——返回空权重，
+            # 引擎保持净值不动，绝不产出 NaN。
+            return {}
+        top_n = self.params.get("top_n", 10)
+        selected = eligible.nlargest(top_n).index.tolist()
+
+        # 4. 计算权重
+        return self._compute_weights_for_selected(date, price_panel, selected)
+
+    def _compute_factor_values(
+        self, date: pd.Timestamp, price_panel: pd.DataFrame
+    ) -> dict[str, Any]:
+        """Compute per-factor values (expression / single alpha / combined)."""
         from .alpha_zoo_adapter import AlphaZooAdapter
-        from .compute_factor import FactorComputeError, compute_factor
         from .tools.data_transforms import (
             is_wide_close_format,
             long_to_wide_ohlcv_per_asset,
         )
 
-        # 1. 计算因子值
-        factor_values = {}
+        factor_values: dict[str, Any] = {}
         alpha_zoo = None  # lazy init
 
         # Expression factors need real per-asset OHLCV.  Load once from
@@ -360,7 +384,6 @@ class FactorStrategy:
             long_ohlcv = self._load_long_ohlcv(date)
             if long_ohlcv.empty:
                 # fail-fast: expression factors with no data is a bug
-                # (caller passed price_panel that we cannot match against)
                 if is_wide_close_format(price_panel):
                     raise RuntimeError(
                         "FactorStrategy.compute_weights received multi-asset "
@@ -370,7 +393,6 @@ class FactorStrategy:
                         "or use alpha_id / alpha_ids factors instead of "
                         "expression 'code' factors."
                     )
-                # No DB data, no helpful panel: cannot evaluate expressions.
                 raise RuntimeError(
                     f"No OHLCV data in DuckDB for strategy "
                     f"{self.strategy_name!r} up to {date}; cannot evaluate "
@@ -386,33 +408,9 @@ class FactorStrategy:
             # 方式 1: 表达式因子
             code = factor.get("code", "")
             if code:
-                if ohlcv_panels is None:
-                    print(
-                        f"⚠️  因子 {name} 跳过: expression factor requires "
-                        "workspace_path and strategy_name; provide them via "
-                        "create_strategy(cfg, workspace_path=...)"
-                    )
-                    continue
-                # wide(T, N) per-asset factor result, indexed by date
-                wide = pd.DataFrame(
-                    index=price_panel.index,
-                    columns=price_panel.columns,
-                    dtype=float,
+                self._compute_expression_factor(
+                    name, code, date, price_panel, ohlcv_panels, factor_values
                 )
-                for asset in price_panel.columns:
-                    asset_df = ohlcv_panels.get(asset)
-                    if asset_df is None:
-                        continue
-                    try:
-                        s = compute_factor(code, asset_df.loc[:date])
-                        wide[asset] = s.reindex(price_panel.index)
-                    except FactorComputeError as e:
-                        print(f"⚠️  因子 {name} 在 {asset} 失败: {e}")
-                        self._record_factor_failure(name, asset, e)
-                    except Exception as e:
-                        print(f"⚠️  因子 {name} 在 {asset} 异常: {e}")
-                        self._record_factor_failure(name, asset, e)
-                factor_values[name] = wide
                 continue
 
             # 方式 2: 单个 Alpha Zoo 因子
@@ -435,59 +433,97 @@ class FactorStrategy:
                     alpha_zoo = AlphaZooAdapter()
                 combination = factor.get("combination", "equal")
                 try:
-                    # 计算多个 Alpha，然后按方法组合
                     df_batch = alpha_zoo.compute_batch(alpha_ids, price_panel.loc[:date])
                     if df_batch.empty:
                         continue
-                    if combination == "equal":
-                        combined = df_batch.mean(axis=1)
-                    elif combination == "ic_weighted":
-                        # 简单等权（IC 加权需另算权重）
+                    if combination in ("equal", "ic_weighted"):
                         combined = df_batch.mean(axis=1)
                     else:
                         combined = df_batch.mean(axis=1)
-                    # 转为 wide 形式（index=date, columns=assets）
                     combined_wide = combined.unstack()
                     factor_values[name] = combined_wide
                 except Exception as e:
                     print(f"⚠️  Alpha Zoo 组合 {alpha_ids} 计算失败: {e}")
                     self._record_factor_failure(name, ",".join(alpha_ids)[:80], e)
 
-        # 2. 计算综合分数 — 取每个因子在当前 date 的横截面值
+        return factor_values
+
+    def _compute_expression_factor(
+        self,
+        name: str,
+        code: str,
+        date: pd.Timestamp,
+        price_panel: pd.DataFrame,
+        ohlcv_panels: dict[str, pd.DataFrame] | None,
+        factor_values: dict[str, Any],
+    ) -> None:
+        """Evaluate an expression factor per-asset into a wide DataFrame."""
+        from .compute_factor import FactorComputeError, compute_factor
+
+        if ohlcv_panels is None:
+            print(
+                f"⚠️  因子 {name} 跳过: expression factor requires "
+                "workspace_path and strategy_name; provide them via "
+                "create_strategy(cfg, workspace_path=...)"
+            )
+            return
+        # wide(T, N) per-asset factor result, indexed by date
+        wide = pd.DataFrame(
+            index=price_panel.index,
+            columns=price_panel.columns,
+            dtype=float,
+        )
+        for asset in price_panel.columns:
+            asset_df = ohlcv_panels.get(asset)
+            if asset_df is None:
+                continue
+            try:
+                s = compute_factor(code, asset_df.loc[:date])
+                wide[asset] = s.reindex(price_panel.index)
+            except FactorComputeError as e:
+                print(f"⚠️  因子 {name} 在 {asset} 失败: {e}")
+                self._record_factor_failure(name, asset, e)
+            except Exception as e:
+                print(f"⚠️  因子 {name} 在 {asset} 异常: {e}")
+                self._record_factor_failure(name, asset, e)
+        factor_values[name] = wide
+
+    def _compute_scores(
+        self,
+        date: pd.Timestamp,
+        price_panel: pd.DataFrame,
+        factor_values: dict[str, Any],
+    ) -> pd.Series:
+        """Blend per-factor cross-sections into a combined score series."""
         scores = pd.Series(0.0, index=price_panel.columns)
         for factor in self.factors:
             name = factor.get("name", "unknown")
             weight = factor.get("weight", 1.0)
-            if name in factor_values:
-                fv = factor_values[name]
-                # 取当前 date 的横截面（per-asset）
-                if isinstance(fv, pd.DataFrame):
-                    # wide DataFrame (T,N) → 取当前 date 一行
-                    if date in fv.index:
-                        current = fv.loc[date]
-                    else:
-                        # date 不在索引里（如 expression 因子返回空 Series），fallback 到最后一行
-                        current = fv.iloc[-1] if len(fv) > 0 else pd.Series(0.0, index=price_panel.columns)
+            if name not in factor_values:
+                continue
+            fv = factor_values[name]
+            # 取当前 date 的横截面（per-asset）
+            if isinstance(fv, pd.DataFrame):
+                # wide DataFrame (T,N) → 取当前 date 一行
+                if date in fv.index:
+                    current = fv.loc[date]
                 else:
-                    # Series（单资产情况）
-                    current = fv
-                # 对齐到 price_panel 的列
-                aligned = current.reindex(price_panel.columns, fill_value=0)
-                scores = scores.add(aligned * weight, fill_value=0)
+                    current = fv.iloc[-1] if len(fv) > 0 else pd.Series(0.0, index=price_panel.columns)
+            else:
+                # Series（单资产情况）
+                current = fv
+            # 对齐到 price_panel 的列
+            aligned = current.reindex(price_panel.columns, fill_value=0)
+            scores = scores.add(aligned * weight, fill_value=0)
+        return scores
 
-        # 3. 选择 top_n
-        # 防御：因子失败/无数据的资产 score 为 0/NaN，绝不能当作"最优"被选中
-        # （0 > 真实资产的负分 → 幽灵资产混入权重 → NaN 毒化）。无效分数先剔除。
-        scores = scores.replace([np.inf, -np.inf], np.nan)
-        eligible = scores.dropna()
-        if eligible.empty:
-            # 所有因子都无有效分数（数据不足/全部失败）——返回空权重，
-            # 引擎保持净值不动，绝不产出 NaN。
-            return {}
-        top_n = self.params.get("top_n", 10)
-        selected = eligible.nlargest(top_n).index.tolist()
-
-        # 4. 计算权重
+    def _compute_weights_for_selected(
+        self,
+        date: pd.Timestamp,
+        price_panel: pd.DataFrame,
+        selected: list[str],
+    ) -> dict[str, float]:
+        """Compute weights for the selected assets."""
         weight_method = self.params.get("weight_method", "inverse_vol")
         if weight_method == "inverse_vol":
             lookback = self.params.get("vol_lookback", 60)
@@ -495,15 +531,11 @@ class FactorStrategy:
             valid_vols = vols.dropna()
             if valid_vols.empty:
                 # 波动率全部无效（历史不足/停牌）——退化为等权
-                weights = {c: 1.0 / len(selected) for c in selected}
-            else:
-                inv_vol = 1.0 / valid_vols.clip(lower=0.01)
-                weights = (inv_vol / inv_vol.sum()).to_dict()
-        else:
-            # 等权
-            weights = {c: 1.0 / len(selected) for c in selected}
-
-        return weights
+                return {c: 1.0 / len(selected) for c in selected}
+            inv_vol = 1.0 / valid_vols.clip(lower=0.01)
+            return (inv_vol / inv_vol.sum()).to_dict()
+        # 等权
+        return {c: 1.0 / len(selected) for c in selected}
 
     def on_risk_check(
         self,
