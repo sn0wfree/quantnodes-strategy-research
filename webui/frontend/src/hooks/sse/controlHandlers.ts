@@ -108,10 +108,17 @@ function clearAllStreamingParts(ctx: Parameters<SSEHandler>[1]): void {
 }
 
 /** agent_done: AgentLoop finished — clear streaming state. */
-export const agentDone: SSEHandler = (_data, ctx) => {
+export const agentDone: SSEHandler = (data, ctx) => {
   clearAllStreamingParts(ctx)
   ctx.setStreamingMessage(null)
   ctx.setActiveAttempt(null)
+  // The orchestrator flags attempts that ended with a question to the
+  // user (backend runs a continuation guard; this flag survives only
+  // when the guard gave up). The orchestrator panel surfaces a
+  // "keep going" action from it.
+  if (ctx.sessionId) {
+    ctx.setAskedUser(ctx.sessionId, Boolean((data as { asked_user?: boolean }).asked_user))
+  }
 }
 
 /** error: backend surfaced a fatal error — toast + clear streaming. */

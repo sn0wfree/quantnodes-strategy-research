@@ -155,6 +155,14 @@ interface ChatState {
   pendingPermission: import('../hooks/sse/permissionHandlers').PermissionRequest | null
   /** Per-session flag: true when the consumer queue was paused after cancel. */
   queuePaused: Map<string, boolean>
+  /**
+   * Per-session flag: true when the last finished attempt ended with the
+   * agent asking the user a question instead of completing the task
+   * (backend agent_done.asked_user). The DAG orchestrator surfaces a
+   * "continue" action from this.
+   */
+  askedUserSessions: Map<string, boolean>
+  setAskedUser: (sessionId: string, asked: boolean) => void
   /** Per-session current queue length snapshot. */
   queueLengths: Map<string, number>
   /**
@@ -236,6 +244,7 @@ export const useChatStore = create<ChatState>()(
     streamingText: '',
     activeAttemptId: null,
     queuePaused: new Map(),
+    askedUserSessions: new Map(),
     queueLengths: new Map(),
     tokensUsed: new Map(),
     totalTokensSeen: new Map(),
@@ -290,6 +299,12 @@ export const useChatStore = create<ChatState>()(
         state.streamingText += delta
       }),
     setActiveAttempt: (attemptId) => set({ activeAttemptId: attemptId }),
+    setAskedUser: (sessionId, asked) =>
+      set((state) => {
+        const next = new Map(state.askedUserSessions)
+        next.set(sessionId, asked)
+        return { askedUserSessions: next }
+      }),
     cancelAttempt: async (sessionId?: string) => {
       const { activeAttemptId } = get()
       const sid =

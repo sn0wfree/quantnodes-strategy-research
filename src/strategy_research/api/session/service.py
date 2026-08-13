@@ -610,7 +610,6 @@ class SessionService:
             attempt.metrics = result_dict.get("metrics")
             attempt.message_id = result_dict.get("message_id") or attempt.message_id
             self.store.update_attempt(attempt)
-
             # Persist message with the Attempt's message_id
             # (this is the SAME id SSE events carry, so they can find it).
             assistant_content = answer or "".join(
@@ -670,6 +669,7 @@ class SessionService:
                     "error": attempt.error,
                     "run_dir": attempt.run_dir,
                     "message_id": attempt.message_id,
+                    "asked_user": bool(result_dict.get("asked_user")),
                 },
             )
 
@@ -677,7 +677,11 @@ class SessionService:
             self.event_bus.emit(
                 session_id,
                 "agent_done",
-                {"message_id": attempt.message_id, "status": attempt.status.value},
+                {
+                    "message_id": attempt.message_id,
+                    "status": attempt.status.value,
+                    "asked_user": bool(result_dict.get("asked_user")),
+                },
             )
         except asyncio.CancelledError:
             attempt.mark_failed(error="cancelled")
@@ -981,11 +985,48 @@ class SessionService:
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).
-        try:
-            loop_result = await agent.arun(attempt.prompt, history=history)
-        except Exception as exc:
-            logger.exception("AgentLoop.arun failed")
-            return {"status": "failed", "reason": str(exc), "content": ""}
+        # DAG-orchestrator continuation guard: when the LLM ends a turn with
+        # a question instead of driving the DAG loop (AgentLoop breaks on any
+        # turn without tool calls), inject a "keep going" turn and rerun —
+        # bounded by SR_ORCHESTRATOR_MAX_CONTINUES (default 10) so a
+        # pathological loop always terminates normally.
+        from strategy_research.core.workflow.orchestrate_guard import (
+            continue_instruction,
+            looks_like_question,
+            max_continues,
+        )
+
+        is_dag_session = attempt.session_id.startswith("dag:")
+        retries = 0
+        asked_user = False
+        guard_cap = max_continues() if is_dag_session else 0
+        while True:
+            try:
+                loop_result = await agent.arun(attempt.prompt, history=history)
+            except Exception as exc:
+                logger.exception("AgentLoop.arun failed")
+                return {"status": "failed", "reason": str(exc), "content": ""}
+
+            _final_answer = loop_result.answer or ""
+            asked_user = (
+                is_dag_session
+                and loop_result.tool_calls_made == 0
+                and looks_like_question(_final_answer)
+            )
+            if not asked_user or retries >= guard_cap:
+                break
+            logger.info(
+                "[DAG-GUARD] orchestrator answered with a question (retry %d/%d), continuing",
+                retries + 1,
+                guard_cap,
+            )
+            # Feed the LLM its own answer plus the continuation instruction
+            # as history so the next attempt sees the full conversation.
+            history = list(history) + [
+                {"role": "assistant", "content": _final_answer},
+                {"role": "user", "content": continue_instruction()},
+            ]
+            retries += 1
 
         logger.debug(
             "[DIAG] AgentLoop result: answer=%.200r finished_reason=%s error=%s iterations=%d tool_calls=%d",
@@ -1003,6 +1044,8 @@ class SessionService:
             "iterations": loop_result.iterations,
             "tool_calls_made": loop_result.tool_calls_made,
             "finished_reason": loop_result.finished_reason,
+            "asked_user": asked_user,
+            "continuations": retries,
             "error": loop_result.error,
             "metrics": {
                 "input_tokens": usage_state["input"],

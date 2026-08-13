@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { MessageSquareText, Minus, Sparkles } from 'lucide-react'
+import { MessageSquareText, Minus, Play, Sparkles } from 'lucide-react'
 import { useSSE } from '../../hooks/useSSE'
 import { useDagStepApply } from '../../hooks/useDagStepApply'
 import { ChatSessionProvider } from '../../contexts/ChatSessionContext'
@@ -68,6 +68,32 @@ export function OrchestratorChat({ dagId, getSnapshot, onApplyDag }: Orchestrato
   // calls in this session and apply them to the canvas. Idempotent.
   useDagStepApply(onApplyDag)
 
+  // Stale "asked user" flag: a new attempt clears it; the backend
+  // sets it again on the next question-ending agent_done.
+  const [askedUser, setAskedUser] = useState(false)
+  useEffect(() => {
+    return useChatStore.subscribe((state) => {
+      const flagged = !!state.askedUserSessions.get(sessionId)
+      const running = state.activeAttemptId !== null
+      if (running) {
+        if (flagged) state.setAskedUser(sessionId, false)
+        setAskedUser(false)
+      } else {
+        setAskedUser(flagged)
+      }
+    })
+  }, [sessionId])
+
+  const continuePush = useCallback(async () => {
+    useChatStore.getState().setAskedUser(sessionId, false)
+    setAskedUser(false)
+    await api.post('/chat/send_async', {
+      session_id: sessionId,
+      content: '请继续，自主完成剩余部分，不需要询问我。',
+      agent_id: 'workflow_orchestrator',
+    })
+  }, [sessionId])
+
   const composeMessage = useCallback(
     (raw: string) => raw + snapshotMarkdown(getSnapshot()),
     [getSnapshot],
@@ -111,6 +137,19 @@ export function OrchestratorChat({ dagId, getSnapshot, onApplyDag }: Orchestrato
 
       <ChatSessionProvider sessionId={sessionId}>
         <MessageList />
+        {askedUser && (
+          <div className="flex items-center gap-2 border-b border-primary-800/50 bg-primary-950/30 px-3 py-1.5">
+            <span className="text-[11px] text-primary-300">助手想询问你</span>
+            <button
+              onClick={continuePush}
+              title="让助手继续推进，不询问你"
+              className="ml-auto flex items-center gap-1 rounded-md bg-primary-600/80 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-primary-500"
+            >
+              <Play className="h-3 w-3" />
+              继续推进
+            </button>
+          </div>
+        )}
         <Composer
           composeMessage={composeMessage}
           readOnly="image"

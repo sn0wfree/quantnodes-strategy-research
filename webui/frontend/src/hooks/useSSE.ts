@@ -93,6 +93,7 @@ export function useSSE(sessionId: string | null) {
         setTokensUsed,
         markTotalTokensSeen,
         setActiveAttempt: (id) => useChatStore.getState().setActiveAttempt(id),
+        setAskedUser: (sid, asked) => useChatStore.getState().setAskedUser(sid, asked),
         setLastCompaction: (c) => useChatStore.getState().setLastCompaction(c),
         accumulatePartText,
         clearPartAccum,

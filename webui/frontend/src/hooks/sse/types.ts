@@ -128,6 +128,7 @@ export interface SSEContext {
   setTokensUsed: (sessionId: string, tokens: number) => void
   markTotalTokensSeen: (sessionId: string) => void
   setActiveAttempt: (id: string | null) => void
+  setAskedUser: (sessionId: string, asked: boolean) => void
   setLastCompaction: (c: { layer: string; timestamp: number } | null) => void
   // Per-part streaming preview buffer (opencode-style). text_delta
   // and thinking_delta write into this so the first character of a
