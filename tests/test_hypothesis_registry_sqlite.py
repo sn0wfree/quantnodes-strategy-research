@@ -47,7 +47,7 @@ class TestCrudConsistency:
         assert updated.status == "testing"
         # exploring → validated is illegal in both modes
         h2 = sql_reg.create(title="t2", thesis="x2")
-        with pytest.raises(ValueError, match="invalid transition"):
+        with pytest.raises(ValueError, match="invalid hypothesis transition"):
             sql_reg.update(h2.hypothesis_id, status="validated")
     def test_update_unknown_id_raises_keyerror(self, sql_reg: HypothesisRegistry):
         with pytest.raises(KeyError, match="not found"):

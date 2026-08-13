@@ -142,10 +142,11 @@ def cmd_goal_audit(args: argparse.Namespace) -> int:
     # Write audit row directly via raw SQL (no status change)
     from datetime import datetime, timezone
 
-    from .store import _id, _json_dumps
-    audit_id = _id("audit")
+    from ..storage.sqlite import json_dumps, new_id, write_transaction
+
+    audit_id = new_id("audit")
     now = datetime.now(timezone.utc).isoformat()
-    with store._write_transaction():
+    with write_transaction(store._conn):
         store._conn.execute(
             """
             INSERT INTO goal_audits (
@@ -159,7 +160,7 @@ def cmd_goal_audit(args: argparse.Namespace) -> int:
                 current.goal_id,
                 session_id,
                 args.result,
-                _json_dumps(
+                json_dumps(
                     [{"criterion_id": criterion_id, "result": args.result,
                       "evidence_ids": args.evidence or [], "notes": args.notes or ""}]
                 ),

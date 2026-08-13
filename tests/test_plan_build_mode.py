@@ -83,28 +83,23 @@ class TestPlanModeTools:
     """Plan mode restricts tools to read-only set."""
 
     def test_plan_readonly_tools_is_set(self):
-        from strategy_research.api.session.service import SessionService
-        import inspect
-        source = inspect.getsource(SessionService._run_with_agent)
-        assert "_PLAN_READONLY_TOOLS" in source
-        assert "read_file" in source
+        from strategy_research.api.session.service import _PLAN_READONLY_TOOLS
+        assert "read_file" in _PLAN_READONLY_TOOLS
+        assert "web_search" in _PLAN_READONLY_TOOLS
+        assert "run_backtest" not in _PLAN_READONLY_TOOLS
 
     def test_plan_mode_sets_allowed_tools(self):
         """When mode='plan', allowed_tools is set to readonly list."""
-        import inspect
-        from strategy_research.api.session.service import SessionService
-        source = inspect.getsource(SessionService._run_with_agent)
-        assert 'if mode == "plan":' in source
-        assert "allowed_tools = list(_PLAN_READONLY_TOOLS)" in source
+        from strategy_research.api.session.service import (
+            _PLAN_READONLY_TOOLS,
+            _plan_mode_allowed_tools,
+        )
+        assert set(_plan_mode_allowed_tools("plan")) == set(_PLAN_READONLY_TOOLS)
 
     def test_build_mode_no_tool_restriction(self):
         """When mode='build', allowed_tools stays None (all tools)."""
-        import inspect
-        from strategy_research.api.session.service import SessionService
-        source = inspect.getsource(SessionService._run_with_agent)
-        # The code should have: allowed_tools: list[str] | None = None
-        # and only set it when mode == "plan"
-        assert "allowed_tools: list[str] | None = None" in source
+        from strategy_research.api.session.service import _plan_mode_allowed_tools
+        assert _plan_mode_allowed_tools("build") is None
 
 
 # ── Thinking parameter injection ──────────────────────────────────
@@ -114,24 +109,17 @@ class TestThinkingInjection:
     """Thinking params are injected into system prompt."""
 
     def test_thinking_off_injects_instruction(self):
-        import inspect
-        from strategy_research.api.session.service import SessionService
-        source = inspect.getsource(SessionService._run_with_agent)
-        assert "Do NOT use thinking/reasoning blocks" in source
+        from strategy_research.api.session.service import _thinking_instructions
+        assert "Do NOT use thinking/reasoning blocks" in _thinking_instructions("off")
 
     def test_thinking_on_injects_instruction(self):
-        import inspect
-        from strategy_research.api.session.service import SessionService
-        source = inspect.getsource(SessionService._run_with_agent)
-        assert "Use extended thinking for complex analysis" in source
+        from strategy_research.api.session.service import _thinking_instructions
+        assert "Use extended thinking for complex analysis" in _thinking_instructions("on")
 
     def test_thinking_auto_no_injection(self):
         """Auto mode should not inject any instruction."""
-        import inspect
-        from strategy_research.api.session.service import SessionService
-        source = inspect.getsource(SessionService._run_with_agent)
-        # The auto branch should have a comment like "# auto = no injection"
-        assert "auto" in source
+        from strategy_research.api.session.service import _thinking_instructions
+        assert _thinking_instructions("auto") == ""
 
 
 # ── send_async passes new fields ──────────────────────────────────

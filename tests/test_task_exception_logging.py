@@ -95,8 +95,8 @@ def test_study_start_registers_done_callback_on_sched_submit(monkeypatch):
 def test_chat_flush_study_pending_submits_uses_callback():
     """chat.py:865 的 create_task 也接入了 callback。"""
     import inspect
-    import strategy_research.api.routers.chat as chat_router
-    src = inspect.getsource(chat_router)
+    import strategy_research.api.routers.slash_commands as slash_commands
+    src = inspect.getsource(slash_commands)
     # Find the section that creates the sched.submit task and assert it
     # registers the callback.
     assert "task.add_done_callback(log_task_exception)" in src

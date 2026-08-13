@@ -55,7 +55,7 @@ def _apply_status(hyp: Any, status: str) -> None:
         allowed = VALID_TRANSITIONS.get(hyp.status, set())
         if new_status not in allowed:
             raise ValueError(
-                f"invalid transition: {hyp.status} -> {new_status}. "
+                f"invalid hypothesis transition: {hyp.status} -> {new_status}. "
                 f"Allowed: {sorted(allowed) or '(terminal)'}"
             )
     hyp.status = new_status

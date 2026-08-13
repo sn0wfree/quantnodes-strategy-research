@@ -102,7 +102,7 @@ class TestCRUD:
     def test_update_enforces_transitions(self, store: HypothesisStore):
         h = store.create(title="t", thesis="thesis")
         # exploring → validated is illegal
-        with pytest.raises(ValueError, match="invalid transition"):
+        with pytest.raises(ValueError, match="invalid hypothesis transition"):
             store.update(h.hypothesis_id, status="validated")
 
     def test_delete_is_not_supported(self, store: HypothesisStore):
