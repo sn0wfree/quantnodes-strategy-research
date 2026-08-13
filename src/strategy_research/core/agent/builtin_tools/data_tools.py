@@ -24,6 +24,48 @@ def _err(message: str, **extra: Any) -> str:
     )
 
 
+def _summarize_fetch_result(data: dict) -> tuple[dict, dict, int]:
+    """Build compact per-code summary + 5-row preview; returns (summary, preview, total_rows).
+
+    The full rows must NOT enter the LLM prompt (context-overflow root
+    cause; see docs/context-overflow-fix.md).
+    """
+    summary: dict[str, Any] = {}
+    preview: dict[str, Any] = {}
+    total_rows = 0
+    for code, df in data.items():
+        if df is None or df.empty:
+            summary[code] = {"rows": 0, "status": "empty"}
+            continue
+        n_rows = len(df)
+        total_rows += n_rows
+        close = df["close"] if "close" in df.columns else None
+        volume = df["volume"] if "volume" in df.columns else None
+        s = {"rows": n_rows, "status": "ok"}
+        if close is not None and not close.empty:
+            s["first_close"] = float(close.iloc[0])
+            s["last_close"] = float(close.iloc[-1])
+            s["close_min"] = float(close.min())
+            s["close_max"] = float(close.max())
+        if volume is not None and not volume.empty:
+            s["avg_volume"] = float(volume.mean())
+        summary[code] = s
+        preview_rows = []
+        for _, row in df.head(5).iterrows():
+            rec: dict[str, Any] = {}
+            for col in df.columns:
+                val = row[col]
+                if hasattr(val, "isoformat"):
+                    rec[str(col)] = val.isoformat()
+                elif hasattr(val, "item"):
+                    rec[str(col)] = val.item()
+                else:
+                    rec[str(col)] = val
+            preview_rows.append(rec)
+        preview[code] = preview_rows
+    return summary, preview, total_rows
+
+
 # ── 1. GetMarketDataTool ────────────────────────────────────────
 
 
@@ -171,41 +213,7 @@ class GetMarketDataTool(BaseTool):
             # Build compact summary + small preview. The full rows must NOT
             # enter the LLM prompt (context-overflow root cause; see
             # docs/context-overflow-fix.md).
-            summary: dict[str, Any] = {}
-            preview: dict[str, Any] = {}
-            total_rows = 0
-            for code, df in data.items():
-                if df is None or df.empty:
-                    summary[code] = {"rows": 0, "status": "empty"}
-                    continue
-                n_rows = len(df)
-                total_rows += n_rows
-                # Per-code summary (stats only, not the rows themselves)
-                close = df["close"] if "close" in df.columns else None
-                volume = df["volume"] if "volume" in df.columns else None
-                s = {"rows": n_rows, "status": "ok"}
-                if close is not None and not close.empty:
-                    s["first_close"] = float(close.iloc[0])
-                    s["last_close"] = float(close.iloc[-1])
-                    s["close_min"] = float(close.min())
-                    s["close_max"] = float(close.max())
-                if volume is not None and not volume.empty:
-                    s["avg_volume"] = float(volume.mean())
-                summary[code] = s
-                # Small preview: first 5 rows (date + OHLCV)
-                preview_rows = []
-                for _, row in df.head(5).iterrows():
-                    rec: dict[str, Any] = {}
-                    for col in df.columns:
-                        val = row[col]
-                        if hasattr(val, "isoformat"):
-                            rec[str(col)] = val.isoformat()
-                        elif hasattr(val, "item"):
-                            rec[str(col)] = val.item()
-                        else:
-                            rec[str(col)] = val
-                    preview_rows.append(rec)
-                preview[code] = preview_rows
+            summary, preview, total_rows = _summarize_fetch_result(data)
 
             persisted_rows = 0
             if persist:
@@ -508,8 +516,6 @@ class ImportDataTool(BaseTool):
         try:
             from pathlib import Path
 
-            import pandas as pd
-
             from ...db import get_connection, init_db
 
             ws = Path(workspace)
@@ -539,61 +545,18 @@ class ImportDataTool(BaseTool):
                                 f"data[{code!r}] = [{{'trade_date': '2023-12-11', "
                                 "'close': 1544.555, ...}}, ...]"
                             ),
-                fix=(
-                    "call get_market_data(codes=['600519.SH'], "
-                    "start_date='2023-01-01', end_date='2023-12-31', "
-                    "persist=True) to fetch and persist into DuckDB in one step"
-                ),
-                tool="import_data",
-            )
+                            fix=(
+                                "call get_market_data(codes=['600519.SH'], "
+                                "start_date='2023-01-01', end_date='2023-12-31', "
+                                "persist=True) to fetch and persist into DuckDB in one step"
+                            ),
+                            tool="import_data",
+                        )
                     records = unwrapped
                     logger.debug("import_data: unwrapped data[%r]", code)
 
-                if not records:
-                    continue
-                df = pd.DataFrame(records)
-                if df.empty:
-                    continue
-
-                # Normalize column names
-                col_map = {}
-                for col in df.columns:
-                    cl = col.lower()
-                    if cl in ("trade_date", "tradedate", "datetime"):
-                        col_map[col] = "date"
-                    elif cl in ("code", "symbol", "ticker"):
-                        col_map[col] = "asset_code"
-                if col_map:
-                    df = df.rename(columns=col_map)
-
-                # Ensure required columns
-                if "asset_code" not in df.columns:
-                    df["asset_code"] = code
-                if "date" not in df.columns:
-                    return err_actionable(
-                        f"data[{code!r}] has no 'date' or 'trade_date' column",
-                        received=list(df.columns),
-                        expected="records with 'trade_date' (or 'date') + OHLCV fields",
-                        fix="ensure data comes from get_market_data, which produces "
-                            "{trade_date, open, high, low, close, volume} records",
-                        tool="import_data",
-                    )
-
-                # Fill missing OHLCV columns
-                for c in ("open", "high", "low", "close", "volume"):
-                    if c not in df.columns:
-                        df[c] = df["close"] if c != "volume" else 0.0
-
-                df["strategy_name"] = strategy_name
-                df = df[["strategy_name", "asset_code", "date", "open", "high", "low", "close", "volume"]]
-
-                conn.execute("""
-                    INSERT OR REPLACE INTO price_data
-                    (strategy_name, asset_code, date, open, high, low, close, volume)
-                    SELECT strategy_name, asset_code, date, open, high, low, close, volume
-                    FROM df
-                """)
-                total_rows += len(df)
+                rows = _persist_code_records(conn, code, records, strategy_name)
+                total_rows += rows
 
             conn.close()
             return _ok({
@@ -612,6 +575,53 @@ class ImportDataTool(BaseTool):
                 fix="verify data shape and workspace is writable",
                 tool="import_data",
             )
+
+
+def _persist_code_records(conn, code: str, records, strategy_name: str) -> int:
+    """Normalize + persist one code's records into price_data; returns rows written."""
+    import pandas as pd
+
+    if not records:
+        return 0
+    df = pd.DataFrame(records)
+    if df.empty:
+        return 0
+
+    # Normalize column names
+    col_map = {}
+    for col in df.columns:
+        cl = col.lower()
+        if cl in ("trade_date", "tradedate", "datetime"):
+            col_map[col] = "date"
+        elif cl in ("code", "symbol", "ticker"):
+            col_map[col] = "asset_code"
+    if col_map:
+        df = df.rename(columns=col_map)
+
+    # Ensure required columns
+    if "asset_code" not in df.columns:
+        df["asset_code"] = code
+    if "date" not in df.columns:
+        raise ValueError(
+            f"data[{code!r}] has no 'date' or 'trade_date' column; "
+            f"columns={list(df.columns)}"
+        )
+
+    # Fill missing OHLCV columns
+    for c in ("open", "high", "low", "close", "volume"):
+        if c not in df.columns:
+            df[c] = df["close"] if c != "volume" else 0.0
+
+    df["strategy_name"] = strategy_name
+    df = df[["strategy_name", "asset_code", "date", "open", "high", "low", "close", "volume"]]
+
+    conn.execute("""
+        INSERT OR REPLACE INTO price_data
+        (strategy_name, asset_code, date, open, high, low, close, volume)
+        SELECT strategy_name, asset_code, date, open, high, low, close, volume
+        FROM df
+    """)
+    return len(df)
 
 
 # ── 5. CheckDataTool ─────────────────────────────────────────────
