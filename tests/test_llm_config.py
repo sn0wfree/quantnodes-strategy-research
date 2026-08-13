@@ -38,6 +38,12 @@ from strategy_research.core.llm.config import (
     find_llm_config_path,
     load_api_key_from_env,
 )
+import strategy_research.core.llm.config as _cfg_mod
+
+# conftest._purge_llm_env replaces _try_load_dotenv with a no-op per test;
+# capture the original here (module import happens before any fixture runs)
+# so dotenv-loading tests can re-enable the real implementation.
+_ORIGINAL_TRY_LOAD_DOTENV = _cfg_mod._try_load_dotenv
 
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -340,3 +346,55 @@ class TestDotenvLoading:
         fake_llm_json.write_text(json.dumps({"llm": {}}))
         cfg = LLMConfig.load(load_dotenv=False)
         assert cfg.api_key == ""
+
+    def _restore_dotenv(self, monkeypatch) -> None:
+        """Re-enable the real _try_load_dotenv (neutralized by conftest)."""
+        monkeypatch.setattr(_cfg_mod, "_try_load_dotenv", _ORIGINAL_TRY_LOAD_DOTENV)
+
+    def test_cwd_dotenv_loaded_from_library_frame(self, monkeypatch, tmp_path):
+        """Regression: bare ``load_dotenv()`` searches from the library file's
+        location, not the process cwd, so a workspace ``.env`` was never
+        picked up in the serve process. The fix loads ``cwd/.env`` explicitly.
+        """
+        (tmp_path / ".env").write_text("SR_DOTENV_CWD_ONLY=1\n")
+        # Isolate from the host's ~/.quantnodes/.env (real API keys).
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("SR_DOTENV_CWD_ONLY", raising=False)
+        self._restore_dotenv(monkeypatch)
+        _ORIGINAL_TRY_LOAD_DOTENV()
+        assert os.environ.get("SR_DOTENV_CWD_ONLY") == "1"
+
+    def test_cwd_dotenv_does_not_override_process_env(self, monkeypatch, tmp_path):
+        """dotenv uses override=False: explicit process env vars always win."""
+        (tmp_path / ".env").write_text("SR_DOTENV_CWD_ONLY=from-file\n")
+        monkeypatch.setenv("SR_DOTENV_CWD_ONLY", "from-process-env")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        self._restore_dotenv(monkeypatch)
+        _ORIGINAL_TRY_LOAD_DOTENV()
+        assert os.environ["SR_DOTENV_CWD_ONLY"] == "from-process-env"
+
+    def test_quantnodes_dotenv_still_loaded(self, monkeypatch, tmp_path):
+        """The canonical ~/.quantnodes/.env load must keep working."""
+        qdir = tmp_path / ".quantnodes"
+        qdir.mkdir()
+        (qdir / ".env").write_text("SR_DOTENV_QUANTNODES=1\n")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)  # cwd has no .env — only quantnodes has it
+        self._restore_dotenv(monkeypatch)
+        _ORIGINAL_TRY_LOAD_DOTENV()
+        assert os.environ.get("SR_DOTENV_QUANTNODES") == "1"
+
+    def test_cwd_dotenv_takes_priority_over_quantnodes_env(self, monkeypatch, tmp_path):
+        """cwd .env is loaded before ~/.quantnodes/.env; with override=False
+        the earlier (cwd) value wins over a conflicting quantnodes value."""
+        (tmp_path / ".env").write_text("SR_DOTENV_BOTH=cwd\n")
+        qdir = tmp_path / ".quantnodes"
+        qdir.mkdir()
+        (qdir / ".env").write_text("SR_DOTENV_BOTH=quantnodes\n")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        self._restore_dotenv(monkeypatch)
+        _ORIGINAL_TRY_LOAD_DOTENV()
+        assert os.environ.get("SR_DOTENV_BOTH") == "cwd"

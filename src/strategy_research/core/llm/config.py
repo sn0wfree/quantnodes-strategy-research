@@ -309,7 +309,14 @@ def _try_load_dotenv() -> None:
         logger.debug("python-dotenv not installed; skipping .env load")
         return
     try:
-        _ld()  # load from cwd by default
+        _ld()  # find_dotenv from the caller frame (best-effort)
+        # Explicitly load cwd's .env: bare load_dotenv() searches from the
+        # library file's location, not the process cwd, so a workspace
+        # .env (e.g. qn-research/.env with SR_ALLOW_SHELL_TOOLS) would
+        # otherwise never be picked up in the serve process.
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            _ld(cwd_env)
         quantnodes_env = Path.home() / ".quantnodes" / ".env"
         if quantnodes_env.exists():
             _ld(quantnodes_env)

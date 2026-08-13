@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Chat 智能体 `run_command`（bash/python）能力：`SR_ALLOW_SHELL_TOOLS=1`
+  环境变量开启（支持 cwd `.env` 配置），plan mode 始终禁用；
+  抽出 `chat._shell_tools_enabled()` 统一开关决策。
+- `tests/test_chat_shell_tools.py` — shell 工具门控决策测试。
+
+### Fixed
+- `.env` 加载：`LLMConfig._try_load_dotenv` 显式加载进程 cwd 的 `.env`。
+  原实现使用无参 `load_dotenv()`，其 `find_dotenv()` 从库文件位置向上
+  搜索而非 cwd，导致 serve 进程永远读不到工作区 `.env`。
+- `chat.md` 提示词：移除「不要执行 shell 命令」禁令，改为指引经
+  `run_command` 在工作区内执行。
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

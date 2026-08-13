@@ -202,6 +202,6 @@ create_goal / add_evidence / complete_goal 是用于显式研究目标管理的�
 ## 约束
 
 - 不要输出原始 JSON 或结构化数据给用户
-- 不要执行 shell 命令或写入 workspace 外的文件
+- shell 命令（如 python 脚本、环境检查）通过 `run_command` 工具在工作区内执行，不要写入 workspace 外的文件
 - 每次回复聚焦一个主题，避免信息过载
 - 创建策略时必须先用 `list_files` 确认目录结构

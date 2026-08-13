@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import Any, Optional
 
@@ -21,6 +22,20 @@ from strategy_research.core.agent.event_store import EventStore
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _shell_tools_enabled(mode: str | None = None) -> bool:
+    """Whether the ``run_command`` shell tool should be offered to the agent.
+
+    Shell tools are opt-in: set ``SR_ALLOW_SHELL_TOOLS=1`` (accepts
+    1/true/yes, case-insensitive) in the server environment to enable
+    ``run_command``. Plan mode never exposes shell tools (analysis-only,
+    single iteration), regardless of the env var.
+    """
+    enabled = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in (
+        "1", "true", "yes",
+    )
+    return False if mode == "plan" else enabled
 
 # ── Shared EventStore + SessionService (singleton) ──────────────────────────
 # The EventStore is created per-DB-path inside _get_session_service()
@@ -586,14 +601,11 @@ async def send_async(body: ChatMessage, request: Request):
         _max_iter = _cfg.max_iterations
     except Exception:
         _max_iter = 50
-    # Shell tools are opt-in: off by default. Set SR_ALLOW_SHELL_TOOLS=1
-    # in the server environment to enable run_command for the agent.
-    import os
-    _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
-    # Plan mode: single iteration (analysis only), no shell tools
+    # Shell tools are opt-in (SR_ALLOW_SHELL_TOOLS=1); plan mode never
+    # exposes them (analysis-only, single iteration).
     _mode = body.mode or "build"
     _max_iter_eff = 1 if _mode == "plan" else _max_iter
-    _allow_shell_eff = False if _mode == "plan" else _allow_shell
+    _allow_shell_eff = _shell_tools_enabled(_mode)
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
@@ -1680,12 +1692,10 @@ async def send_sync(body: ChatMessage, request: Request):
     _fetch_session_owned(_get_db(), body.session_id, user_id)
 
     service = _get_session_service()
-    import os
-    _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
-        allow_shell_tools=_allow_shell,
+        allow_shell_tools=_shell_tools_enabled(),
     )
     if result.get("error") == "queue_full":
         raise HTTPException(status_code=429, detail=result)

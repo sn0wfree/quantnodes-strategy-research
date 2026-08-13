@@ -62,6 +62,16 @@ class TestShellExecBasic:
         assert "file1.txt" in result["stdout"]
         assert "file2.txt" in result["stdout"]
 
+    def test_python_c_prints_stdout(self, tool, tmp_workspace):
+        """Python invocation through run_command (the chat fix scenario)."""
+        result = json.loads(tool.execute(
+            ctx=ToolContext(workspace=str(tmp_workspace)),
+            command="python3 -c 'print(6*7)'",
+        ))
+        assert result["status"] == "ok"
+        assert result["stdout"].strip() == "42"
+        assert result["exit_code"] == 0
+
 
 # ── Exit codes ─────────────────────────────────────────────────────
 

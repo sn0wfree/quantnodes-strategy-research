@@ -167,8 +167,8 @@ class TestSendAsyncPassesFields:
         assert '_max_iter_eff = 1 if _mode == "plan"' in source
 
     def test_send_async_plan_mode_no_shell(self):
-        """Plan mode should disable shell tools."""
+        """Plan mode should disable shell tools (via _shell_tools_enabled)."""
         import inspect
         from strategy_research.api.routers.chat import send_async
         source = inspect.getsource(send_async)
-        assert '_allow_shell_eff = False if _mode == "plan"' in source
+        assert "_shell_tools_enabled(_mode)" in source

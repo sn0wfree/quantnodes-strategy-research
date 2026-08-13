@@ -69,3 +69,5 @@ webui/static/
 *.db
 .quantnodes_strategy_research_session.db*
 coverage/
+# 会话笔记/本地记忆（不提交）
+memory/
