@@ -16,14 +16,16 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
-import uuid
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ..storage.sqlite import (
+    connect,
+    resolve_db_path,
+    write_transaction,
+)
 from .registry import (
     VALID_TRANSITIONS,
     Hypothesis,
@@ -36,12 +38,7 @@ from .registry import (
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "hypotheses.db"
 _ENV_PATH = "QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH"
-
-
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 def _apply_scalar_fields(hyp: Any, fields: dict) -> None:
@@ -71,10 +68,7 @@ def default_db_path() -> Path:
         1. QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH env var
         2. ~/.quantnodes-research/hypotheses.db (default)
     """
-    raw_path = os.environ.get(_ENV_PATH, "").strip()
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return _DEFAULT_DB_PATH
+    return resolve_db_path("hypotheses.db", _ENV_PATH)
 
 
 class HypothesisStore:
@@ -93,13 +87,7 @@ class HypothesisStore:
         self.db_path = db_path or default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(
-            str(self.db_path),
-            check_same_thread=False,
-        )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn = connect(self.db_path)
         self._init_db()
 
     # ── Schema & migration ─────────────────────────────────────
@@ -186,17 +174,6 @@ class HypothesisStore:
             self._conn.commit()
 
     # ── Write transactions ─────────────────────────────────────
-
-    @contextmanager
-    def _write_transaction(self):
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield
-        except Exception:
-            self._conn.rollback()
-            raise
-        else:
-            self._conn.commit()
 
     def _row_to_hyp(self, row: sqlite3.Row) -> Hypothesis:
         return Hypothesis(
@@ -300,7 +277,7 @@ class HypothesisStore:
                 created_at=now,
                 updated_at=now,
             )
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp)
         return hyp
 
@@ -357,7 +334,7 @@ class HypothesisStore:
                 hyp.goal_id = goal_id or None
             hyp.updated_at = _utc_now()
 
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp)
         return hyp
 
@@ -384,7 +361,7 @@ class HypothesisStore:
             "linked_at": _utc_now(),
         })
         hyp.updated_at = _utc_now()
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._insert_raw(hyp)
         return hyp
 
@@ -475,12 +452,12 @@ class HypothesisStore:
         if related_id not in hyp_a.related_ids:
             hyp_a.related_ids.append(related_id)
             hyp_a.updated_at = _utc_now()
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp_a)
         if hyp_id not in hyp_b.related_ids:
             hyp_b.related_ids.append(hyp_id)
             hyp_b.updated_at = _utc_now()
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp_b)
         return hyp_a
 
@@ -492,12 +469,12 @@ class HypothesisStore:
             return None
         hyp_a.related_ids = [x for x in hyp_a.related_ids if x != related_id]
         hyp_a.updated_at = _utc_now()
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._insert_raw(hyp_a)
         if hyp_b is not None:
             hyp_b.related_ids = [x for x in hyp_b.related_ids if x != hyp_id]
             hyp_b.updated_at = _utc_now()
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp_b)
         return hyp_a
 
@@ -514,7 +491,7 @@ class HypothesisStore:
             else f"Contradicts {other_id}: {notes}"
         ).strip()
         hyp_a.updated_at = _utc_now()
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._insert_raw(hyp_a)
         return hyp_a
 

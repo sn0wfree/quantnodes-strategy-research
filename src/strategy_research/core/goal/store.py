@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import os
 import sqlite3
 import threading
-import uuid
-from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime, timezone
 from enum import Enum
-from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any
 
+from ..storage.sqlite import (
+    connect,
+    json_dumps,
+    json_loads,
+    new_id,
+    now_iso,
+    resolve_db_path,
+    set_user_version,
+    synchronized,
+    table_columns,
+    user_version,
+    write_transaction,
+)
 from .models import (
     AuditRow,
     EvidenceInput,
@@ -33,7 +40,6 @@ from .policy import normalize_required_text, reject_live_execution_objective
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "goals.db"
 _DB_PATH_ENV = "QUANTNODES_RESEARCH_GOAL_DB_PATH"
 
 _CURRENT_STATUSES = {
@@ -53,24 +59,6 @@ _COMPLETION_RESULTS = {
 }
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-def _json_dumps(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _json_loads(value: str | None, default: object) -> object:
-    if not value:
-        return default
-    return json.loads(value)
-
-
 def _default_db_path() -> Path:
     """Return the configured goal ledger database path.
 
@@ -78,10 +66,7 @@ def _default_db_path() -> Path:
         1. ``QUANTNODES_RESEARCH_GOAL_DB_PATH`` environment variable
         2. ``~/.quantnodes-research/goals.db`` (default)
     """
-    raw_path = os.environ.get(_DB_PATH_ENV, "").strip()
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return _DEFAULT_DB_PATH
+    return resolve_db_path("goals.db", _DB_PATH_ENV)
 
 
 def _to_json_dict(value: object) -> dict:
@@ -131,20 +116,6 @@ def _label_similarity(a: str, b: str) -> float:
     return len(tri_a & tri_b) / len(tri_a | tri_b)
 
 
-F = TypeVar("F", bound=Callable)
-
-
-def _synchronized(method: F) -> F:
-    """Serialize access to the shared SQLite connection."""
-
-    @wraps(method)
-    def wrapper(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        with self._lock:
-            return method(self, *args, **kwargs)
-
-    return wrapper  # type: ignore[return-value]
-
-
 class GoalStore:
     """SQLite-backed store for finance research goals."""
 
@@ -157,12 +128,7 @@ class GoalStore:
         """
         self.db_path = Path(db_path) if db_path is not None else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.execute("PRAGMA busy_timeout=5000")
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn = connect(self.db_path)
         self._lock = threading.RLock()
         self._init_db()
 
@@ -328,8 +294,8 @@ class GoalStore:
                 );
                 """
             )
-            if self._conn.execute("PRAGMA user_version").fetchone()[0] < 1:
-                self._conn.execute("PRAGMA user_version=1")
+            if user_version(self._conn) < 1:
+                set_user_version(self._conn, 1)
             self._conn.commit()
 
         # P3-B migration: add progress_percent and parent_goal_id columns if missing
@@ -337,10 +303,7 @@ class GoalStore:
 
     def _migrate_p3b(self) -> None:
         """Add progress_percent and parent_goal_id columns to existing goals table."""
-        cols = [
-            row["name"]
-            for row in self._conn.execute("PRAGMA table_info(goals)").fetchall()
-        ]
+        cols = table_columns(self._conn, "goals")
         if "progress_percent" not in cols:
             self._conn.execute(
                 "ALTER TABLE goals ADD COLUMN progress_percent REAL NOT NULL DEFAULT 0.0"
@@ -355,10 +318,7 @@ class GoalStore:
             )
 
         # P3-C: hypothesis_id on goal_evidence
-        ev_cols = [
-            row["name"]
-            for row in self._conn.execute("PRAGMA table_info(goal_evidence)").fetchall()
-        ]
+        ev_cols = table_columns(self._conn, "goal_evidence")
         if "hypothesis_id" not in ev_cols:
             self._conn.execute(
                 "ALTER TABLE goal_evidence ADD COLUMN hypothesis_id TEXT"
@@ -369,19 +329,7 @@ class GoalStore:
             )
         self._conn.commit()
 
-    @contextmanager
-    def _write_transaction(self):
-        """Open an immediate write transaction for cross-connection safety."""
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield
-        except Exception:
-            self._conn.rollback()
-            raise
-        else:
-            self._conn.commit()
-
-    @_synchronized
+    @synchronized
     def replace_goal(
         self,
         *,
@@ -447,13 +395,13 @@ class GoalStore:
             if value is not None and value <= 0:
                 raise ValueError(f"{name} must be positive")
 
-        now = _now_iso()
-        goal_id = _id("goal")
+        now = now_iso()
+        goal_id = new_id("goal")
         summary = ui_summary.strip() or objective[:80]
         current_values = [status.value for status in _CURRENT_STATUSES]
         placeholders = ",".join("?" for _ in current_values)
 
-        with self._write_transaction():
+        with write_transaction(self._conn):
             if supersede:
                 self._conn.execute(
                     f"""
@@ -500,7 +448,7 @@ class GoalStore:
                 )
                 VALUES (?, ?, ?, 'thesis', ?, 'active', ?, ?)
                 """,
-                (_id("claim"), goal_id, session_id, objective, now, now),
+                (new_id("claim"), goal_id, session_id, objective, now, now),
             )
             for index, text in enumerate(cleaned_criteria):
                 self._conn.execute(
@@ -512,7 +460,7 @@ class GoalStore:
                     VALUES (?, ?, ?, ?, 1, 'pending', ?, ?, ?)
                     """,
                     (
-                        _id("crit"),
+                        new_id("crit"),
                         goal_id,
                         session_id,
                         text,
@@ -527,7 +475,7 @@ class GoalStore:
             raise RuntimeError("created goal could not be reloaded")
         return goal
 
-    @_synchronized
+    @synchronized
     def update_goal(
         self,
         *,
@@ -553,7 +501,7 @@ class GoalStore:
             StaleGoalError: If the goal is stale or not current.
             ValueError: If the new objective is empty or unsafe.
         """
-        with self._write_transaction():
+        with write_transaction(self._conn):
             goal = self._require_mutable_goal(session_id, goal_id, expected_goal_id)
             session_id = goal.session_id
             goal_id = goal.goal_id
@@ -566,7 +514,7 @@ class GoalStore:
                 next_summary = ui_summary.strip() or next_objective[:80]
             elif objective is not None and goal.ui_summary == goal.objective[:80]:
                 next_summary = next_objective[:80]
-            now = _now_iso()
+            now = now_iso()
             self._conn.execute(
                 """
                 UPDATE goals
@@ -592,7 +540,7 @@ class GoalStore:
             raise RuntimeError("updated goal could not be reloaded")
         return updated
 
-    @_synchronized
+    @synchronized
     def get_goal(self, goal_id: str) -> GoalRecord | None:
         """Return a goal by id."""
         row = self._conn.execute(
@@ -601,7 +549,7 @@ class GoalStore:
         ).fetchone()
         return self._goal_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def get_current_goal(self, session_id: str) -> GoalRecord | None:
         """Return the current goal for a session."""
         current_values = [status.value for status in _CURRENT_STATUSES]
@@ -618,7 +566,7 @@ class GoalStore:
         ).fetchone()
         return self._goal_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def list_criteria(self, goal_id: str) -> list[GoalCriterion]:
         """Return criteria for a goal."""
         rows = self._conn.execute(
@@ -637,7 +585,7 @@ class GoalStore:
         ).fetchall()
         return [self._criterion_from_row(row) for row in rows]
 
-    @_synchronized
+    @synchronized
     def list_claims(self, goal_id: str) -> list[GoalClaim]:
         """Return claims for a goal."""
         rows = self._conn.execute(
@@ -650,7 +598,7 @@ class GoalStore:
         ).fetchall()
         return [self._claim_from_row(row) for row in rows]
 
-    @_synchronized
+    @synchronized
     def list_evidence(self, goal_id: str, limit: int | None = None) -> list[EvidenceRecord]:
         """Return evidence rows for a goal."""
         goal_id = normalize_required_text(goal_id, "goal_id")
@@ -680,7 +628,7 @@ class GoalStore:
         ).fetchall()
         return [self._evidence_from_row(row) for row in rows]
 
-    @_synchronized
+    @synchronized
     def count_evidence(self, goal_id: str) -> int:
         """Return the total evidence row count for a goal."""
         row = self._conn.execute(
@@ -689,7 +637,7 @@ class GoalStore:
         ).fetchone()
         return int(row[0]) if row else 0
 
-    @_synchronized
+    @synchronized
     def list_goals(
         self,
         session_id: str | None = None,
@@ -731,7 +679,7 @@ class GoalStore:
             Number of goal rows deleted.
         """
         session_id = normalize_required_text(session_id, "session_id")
-        with self._write_transaction():
+        with write_transaction(self._conn):
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM goals WHERE session_id = ?",
                 (session_id,),
@@ -747,7 +695,7 @@ class GoalStore:
                 self._conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
         return count
 
-    @_synchronized
+    @synchronized
     def get_current_snapshot(self, session_id: str) -> dict | None:
         """Return the current goal plus ledger rows for a session."""
         goal = self.get_current_goal(session_id)
@@ -755,7 +703,7 @@ class GoalStore:
             return None
         return self.get_goal_snapshot(goal.goal_id)
 
-    @_synchronized
+    @synchronized
     def get_goal_snapshot(self, goal_id: str, evidence_limit: int | None = 50) -> dict | None:
         """Return a JSON-safe goal snapshot."""
         goal = self.get_goal(goal_id)
@@ -770,7 +718,7 @@ class GoalStore:
             "evidence_count": self.count_evidence(goal.goal_id),
         }
 
-    @_synchronized
+    @synchronized
     def append_evidence(
         self,
         *,
@@ -794,8 +742,8 @@ class GoalStore:
             StaleGoalError: If the expected goal id does not match or goal is not current.
             ValueError: If evidence text is empty or references an unknown criterion.
         """
-        evidence_id = _id("ev")
-        with self._write_transaction():
+        evidence_id = new_id("ev")
+        with write_transaction(self._conn):
             goal = self._require_mutable_goal(session_id, goal_id, expected_goal_id)
             session_id = goal.session_id
             goal_id = goal.goal_id
@@ -807,7 +755,7 @@ class GoalStore:
             if evidence.claim_id is not None:
                 self._require_claim(goal.goal_id, evidence.claim_id)
 
-            now = _now_iso()
+            now = now_iso()
             freshness_status = "fresh" if evidence.data_as_of else "unknown"
             verification_status = self._verification_status(evidence)
             self._conn.execute(
@@ -836,11 +784,11 @@ class GoalStore:
                     evidence.source_provider,
                     evidence.source_type,
                     evidence.source_uri,
-                    _json_dumps(evidence.symbol_universe),
-                    _json_dumps(evidence.benchmark),
+                    json_dumps(evidence.symbol_universe),
+                    json_dumps(evidence.benchmark),
                     evidence.timeframe,
                     evidence.method,
-                    _json_dumps(evidence.assumptions),
+                    json_dumps(evidence.assumptions),
                     evidence.artifact_path,
                     evidence.artifact_hash,
                     now,
@@ -849,7 +797,7 @@ class GoalStore:
                     verification_status,
                     evidence.confidence,
                     evidence.caveat,
-                    _json_dumps(evidence.contradicts_claim_ids),
+                    json_dumps(evidence.contradicts_claim_ids),
                     evidence.hypothesis_id,
                     now,
                 ),
@@ -873,7 +821,7 @@ class GoalStore:
             raise RuntimeError("created evidence could not be reloaded")
         return record
 
-    @_synchronized
+    @synchronized
     def update_status(
         self,
         *,
@@ -885,14 +833,14 @@ class GoalStore:
         recap: str | None = None,
     ) -> GoalRecord:
         """Update a goal status with stale-goal and completion validation."""
-        with self._write_transaction():
+        with write_transaction(self._conn):
             goal = self._require_mutable_goal(session_id, goal_id, expected_goal_id)
             session_id = goal.session_id
             goal_id = goal.goal_id
             if status is GoalStatus.COMPLETE:
                 self._validate_completion_audit(goal, audit or [])
 
-            now = _now_iso()
+            now = now_iso()
             completed_at = now if status in {
                 GoalStatus.COMPLETE,
                 GoalStatus.BLOCKED,
@@ -919,11 +867,11 @@ class GoalStore:
                     VALUES (?, ?, ?, 'completion', ?, ?, ?)
                     """,
                     (
-                        _id("audit"),
+                        new_id("audit"),
                         goal_id,
                         session_id,
                         status.value,
-                        _json_dumps([row.__dict__ for row in audit]),
+                        json_dumps([row.__dict__ for row in audit]),
                         now,
                     ),
                 )
@@ -977,7 +925,7 @@ class GoalStore:
             StaleGoalError: If goal is not current or id mismatch.
             ValueError: If required criteria lack evidence.
         """
-        with self._write_transaction():
+        with write_transaction(self._conn):
             goal = self._require_mutable_goal(session_id, goal_id, expected_goal_id)
             session_id = goal.session_id
             goal_id = goal.goal_id
@@ -1000,7 +948,7 @@ class GoalStore:
                         "lacks evidence — cannot complete in lite mode"
                     )
 
-            now = _now_iso()
+            now = now_iso()
             self._conn.execute(
                 """
                 UPDATE goals
@@ -1021,11 +969,11 @@ class GoalStore:
                 VALUES (?, ?, ?, 'completion_lite', ?, ?, ?)
                 """,
                 (
-                    _id("audit"),
+                    new_id("audit"),
                     goal_id,
                     session_id,
                     GoalStatus.COMPLETE.value,
-                    _json_dumps([{
+                    json_dumps([{
                         "criterion_id": c.criterion_id,
                         "result": "satisfied",
                         "evidence_ids": [
@@ -1081,7 +1029,7 @@ class GoalStore:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Goal-complete hook failed: %s", exc)
 
-    @_synchronized
+    @synchronized
     def account_usage(
         self,
         *,
@@ -1096,7 +1044,7 @@ class GoalStore:
         if min(token_delta, time_delta_seconds, turn_delta) < 0:
             raise ValueError("usage deltas must be non-negative")
 
-        with self._write_transaction():
+        with write_transaction(self._conn):
             goal = self._require_mutable_goal(session_id, goal_id, expected_goal_id)
             session_id = goal.session_id
             goal_id = goal.goal_id
@@ -1112,7 +1060,7 @@ class GoalStore:
                 or (goal.turn_budget is not None and turns_used >= goal.turn_budget)
             )
             next_status = GoalStatus.BUDGET_LIMITED if crosses_budget else goal.status
-            now = _now_iso()
+            now = now_iso()
             self._conn.execute(
                 """
                 UPDATE goals
@@ -1303,7 +1251,7 @@ class GoalStore:
         pct = self._compute_progress(goal_id)
         self._conn.execute(
             "UPDATE goals SET progress_percent = ?, updated_at = ? WHERE goal_id = ?",
-            (pct, _now_iso(), goal_id),
+            (pct, now_iso(), goal_id),
         )
 
     def get_current_snapshot_by_id(self, goal_id: str) -> dict[str, Any] | None:
@@ -1331,7 +1279,7 @@ class GoalStore:
 
     # ── Sub-goal decomposition (P3-B) ────────────────────────
 
-    @_synchronized
+    @synchronized
     def decompose_goal(
         self,
         *,
@@ -1384,7 +1332,7 @@ class GoalStore:
             sub_goals.append(sub)
         return sub_goals
 
-    @_synchronized
+    @synchronized
     def list_sub_goals(self, parent_goal_id: str) -> list[GoalRecord]:
         """Return all sub-goals of a parent goal (any status)."""
         rows = self._conn.execute(
@@ -1420,7 +1368,7 @@ class GoalStore:
 
     # ── AEGIS: goal_journal CRUD ──────────────────────────────────────
 
-    @_synchronized
+    @synchronized
     def append_journal_entry(
         self,
         goal_id: str,
@@ -1435,9 +1383,9 @@ class GoalStore:
     ) -> "JournalEntry":
         """Append a journal entry for a round's hypothesis."""
         from .models import JournalEntry
-        now = _now_iso()
-        entry_id = _id("journal")
-        with self._write_transaction():
+        now = now_iso()
+        entry_id = new_id("journal")
+        with write_transaction(self._conn):
             self._conn.execute(
                 """
                 INSERT INTO goal_journal (
@@ -1451,9 +1399,9 @@ class GoalStore:
                 """,
                 (
                     entry_id, goal_id, session_id, round_num,
-                    hypothesis_id, label, _json_dumps(levers or []),
-                    _json_dumps(predicted_affected or []),
-                    _json_dumps(changeset) if changeset else None,
+                    hypothesis_id, label, json_dumps(levers or []),
+                    json_dumps(predicted_affected or []),
+                    json_dumps(changeset) if changeset else None,
                     retry_rationale, now, now,
                 ),
             )
@@ -1465,7 +1413,7 @@ class GoalStore:
             retry_rationale=retry_rationale, created_at=now, updated_at=now,
         )
 
-    @_synchronized
+    @synchronized
     def fill_journal_attribution(
         self,
         goal_id: str,
@@ -1475,8 +1423,8 @@ class GoalStore:
         attribution: dict,
     ) -> bool:
         """Update the latest journal entry for a round with attribution result."""
-        now = _now_iso()
-        with self._write_transaction():
+        now = now_iso()
+        with write_transaction(self._conn):
             cur = self._conn.execute(
                 """
                 UPDATE goal_journal
@@ -1484,12 +1432,12 @@ class GoalStore:
                 WHERE goal_id = ? AND session_id = ? AND round_num = ?
                   AND gating_outcome = 'pending'
                 """,
-                (outcome, _json_dumps(attribution), now,
+                (outcome, json_dumps(attribution), now,
                  goal_id, session_id, round_num),
             )
         return cur.rowcount > 0
 
-    @_synchronized
+    @synchronized
     def list_journal_entries(
         self, goal_id: str, limit: int = 50
     ) -> list["JournalEntry"]:
@@ -1501,7 +1449,7 @@ class GoalStore:
         ).fetchall()
         return [self._journal_from_row(r) for r in rows]
 
-    @_synchronized
+    @synchronized
     def get_latest_journal_entry(
         self, goal_id: str
     ) -> "JournalEntry | None":
@@ -1513,7 +1461,7 @@ class GoalStore:
         ).fetchone()
         return self._journal_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def check_novelty(
         self,
         goal_id: str,
@@ -1545,7 +1493,7 @@ class GoalStore:
                     return False, f"similar label: {entry.label[:40]}"
         return True, None
 
-    @_synchronized
+    @synchronized
     def check_regression(
         self,
         goal_id: str,
@@ -1562,7 +1510,7 @@ class GoalStore:
         ]
         return len(regressed) == 0, regressed
 
-    @_synchronized
+    @synchronized
     def archive_rejected_edit(
         self,
         goal_id: str,
@@ -1572,8 +1520,8 @@ class GoalStore:
         detail: str,
     ) -> bool:
         """Archive a rejected edit by setting archived_reason on the latest entry."""
-        now = _now_iso()
-        with self._write_transaction():
+        now = now_iso()
+        with write_transaction(self._conn):
             cur = self._conn.execute(
                 """
                 UPDATE goal_journal
@@ -1585,7 +1533,7 @@ class GoalStore:
             )
         return cur.rowcount > 0
 
-    @_synchronized
+    @synchronized
     def build_journal_context(
         self,
         goal_id: str,
@@ -1627,11 +1575,11 @@ class GoalStore:
             round_num=row["round_num"],
             hypothesis_id=row["hypothesis_id"],
             label=row["label"],
-            levers=list(_json_loads(row["levers_json"], [])),
-            predicted_affected=list(_json_loads(row["predicted_affected_json"], [])),
+            levers=list(json_loads(row["levers_json"], [])),
+            predicted_affected=list(json_loads(row["predicted_affected_json"], [])),
             gating_outcome=row["gating_outcome"],
-            gating_attribution=dict(_json_loads(row["gating_attribution_json"], {})),
-            changeset=_json_loads(row["changeset_json"], None),
+            gating_attribution=dict(json_loads(row["gating_attribution_json"], {})),
+            changeset=json_loads(row["changeset_json"], None),
             retry_rationale=row["retry_rationale"],
             archived_reason=row["archived_reason"],
             created_at=row["created_at"],
@@ -1708,11 +1656,11 @@ class GoalStore:
             source_provider=row["source_provider"],
             source_type=row["source_type"],
             source_uri=row["source_uri"],
-            symbol_universe=list(_json_loads(row["symbol_universe_json"], [])),
-            benchmark=list(_json_loads(row["benchmark_json"], [])),
+            symbol_universe=list(json_loads(row["symbol_universe_json"], [])),
+            benchmark=list(json_loads(row["benchmark_json"], [])),
             timeframe=row["timeframe"],
             method=row["method"],
-            assumptions=dict(_json_loads(row["assumptions_json"], {})),
+            assumptions=dict(json_loads(row["assumptions_json"], {})),
             artifact_path=row["artifact_path"],
             artifact_hash=row["artifact_hash"],
             retrieved_at=row["retrieved_at"],
@@ -1721,7 +1669,7 @@ class GoalStore:
             verification_status=row["verification_status"],
             confidence=row["confidence"],
             caveat=row["caveat"],
-            contradicts_claim_ids=list(_json_loads(row["contradicts_claim_ids_json"], [])),
+            contradicts_claim_ids=list(json_loads(row["contradicts_claim_ids_json"], [])),
             hypothesis_id=row["hypothesis_id"] if "hypothesis_id" in row.keys() else None,
             created_at=row["created_at"],
         )

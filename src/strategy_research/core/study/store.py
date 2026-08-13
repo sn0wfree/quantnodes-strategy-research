@@ -10,18 +10,22 @@ See ``docs/study-longhorizon-plan.md`` for the design.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import sqlite3
 import threading
-import uuid
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any
 
+from ..storage.sqlite import (
+    connect,
+    json_dumps,
+    json_loads,
+    new_id,
+    now_iso,
+    resolve_db_path,
+    synchronized,
+    write_transaction,
+)
 from .models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,
@@ -42,26 +46,7 @@ def _dlog(module: str, msg: str, *args) -> None:
 
 # Reuse the goal ledger DB by default so studies live next to the goals
 # they are bound to; override via the same env var.
-_DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "goals.db"
 _DB_PATH_ENV = "QUANTNODES_RESEARCH_GOAL_DB_PATH"
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-def _json_dumps(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _json_loads(value: str | None, default: object) -> object:
-    if not value:
-        return default
-    return json.loads(value)
 
 
 def _default_db_path() -> Path:
@@ -71,25 +56,7 @@ def _default_db_path() -> Path:
         1. ``QUANTNODES_RESEARCH_GOAL_DB_PATH`` environment variable
         2. ``~/.quantnodes-research/goals.db``
     """
-
-    raw_path = os.environ.get(_DB_PATH_ENV, "").strip()
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return _DEFAULT_DB_PATH
-
-
-F = TypeVar("F", bound=Callable)
-
-
-def _synchronized(method: F) -> F:
-    """Serialize access to the shared SQLite connection."""
-
-    @wraps(method)
-    def wrapper(self, *args, **kwargs):  # type: ignore[no-typed-def]
-        with self._lock:
-            return method(self, *args, **kwargs)
-
-    return wrapper  # type: ignore[return-value]
+    return resolve_db_path("goals.db", _DB_PATH_ENV)
 
 
 class StudyStore:
@@ -104,12 +71,7 @@ class StudyStore:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path) if db_path is not None else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.execute("PRAGMA busy_timeout=5000")
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn = connect(self.db_path)
         self._lock = threading.RLock()
         self._init_db()
 
@@ -245,7 +207,7 @@ class StudyStore:
 
     # ── writes ───────────────────────────────────────────────────────
 
-    @_synchronized
+    @synchronized
     def create_study(
         self,
         *,
@@ -314,14 +276,14 @@ class StudyStore:
             if value is not None and value <= 0:
                 raise ValueError(f"{name} must be positive when provided")
 
-        study_id = _id("study")
-        now = _now_iso()
-        targets_json = _json_dumps(metric_targets or [])
+        study_id = new_id("study")
+        now = now_iso()
+        targets_json = json_dumps(metric_targets or [])
         owner = owner_session_id
 
         _dlog("store", "create_study id=%s session=%s goal=%s strategy=%s executor=%s",
               study_id, study_id, goal_id, strategy_name, executor_type)
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._conn.execute(
                 """
                 INSERT INTO studies (
@@ -371,7 +333,7 @@ class StudyStore:
         logger.info("study created: %s (session=%s goal=%s)", study_id, study_id, goal_id)
         return self._study_from_row(row)
 
-    @_synchronized
+    @synchronized
     def update_goal_id(self, study_id: str, goal_id: str) -> StudyRecord | None:
         """v2: link a study to its goal after the goal ledger row is created.
 
@@ -380,8 +342,8 @@ class StudyStore:
         ``replace_goal(session_id=study_id, supersede=False)`` and linked
         back here.
         """
-        now = _now_iso()
-        with self._write_transaction():
+        now = now_iso()
+        with write_transaction(self._conn):
             self._conn.execute(
                 "UPDATE studies SET goal_id = ?, updated_at = ? "
                 "WHERE study_id = ?",
@@ -392,7 +354,7 @@ class StudyStore:
         ).fetchone()
         return self._study_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def update_execution_status(
         self,
         study_id: str,
@@ -413,7 +375,7 @@ class StudyStore:
               (last_error or "")[:60],
               "present" if last_metrics else "None")
 
-        now = _now_iso()
+        now = now_iso()
         terminals = {
             StudyStatus.COMPLETE,
             StudyStatus.CANCELLED,
@@ -433,7 +395,7 @@ class StudyStore:
             params.append(last_error)
         if last_metrics is not None:
             sets.append("last_metrics = ?")
-            params.append(_json_dumps(last_metrics))
+            params.append(json_dumps(last_metrics))
         if last_verdict is not None:
             sets.append("last_verdict = ?")
             params.append(last_verdict)
@@ -442,7 +404,7 @@ class StudyStore:
             params.append(completed_at)
         params.append(study_id)
 
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._conn.execute(
                 f"UPDATE studies SET {', '.join(sets)} WHERE study_id = ?",
                 params,
@@ -452,42 +414,42 @@ class StudyStore:
         ).fetchone()
         return self._study_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def update_round_heartbeat(self, study_id: str, current_round: int) -> None:
         """Bump the round counter + heartbeat timestamp (best-effort)."""
 
-        now = _now_iso()
-        with self._write_transaction():
+        now = now_iso()
+        with write_transaction(self._conn):
             self._conn.execute(
                 "UPDATE studies SET current_round = ?, heartbeat = ?, updated_at = ? "
                 "WHERE study_id = ?",
                 (current_round, now, now, study_id),
             )
 
-    @_synchronized
+    @synchronized
     def update_last_metrics(
         self, study_id: str, metrics: dict, verdict: str
     ) -> None:
         """Record the most recent round's metrics + keep/discard verdict."""
 
-        now = _now_iso()
-        with self._write_transaction():
+        now = now_iso()
+        with write_transaction(self._conn):
             self._conn.execute(
                 "UPDATE studies SET last_metrics = ?, last_verdict = ?, "
                 "heartbeat = ?, updated_at = ? WHERE study_id = ?",
-                (_json_dumps(metrics), verdict, now, now, study_id),
+                (json_dumps(metrics), verdict, now, now, study_id),
             )
 
     # ── reads ────────────────────────────────────────────────────────
 
-    @_synchronized
+    @synchronized
     def get_study(self, study_id: str) -> StudyRecord | None:
         row = self._conn.execute(
             "SELECT * FROM studies WHERE study_id = ?", (study_id,)
         ).fetchone()
         return self._study_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def get_active_study(self, session_id: str) -> StudyRecord | None:
         """Return the owner session's currently-running/queued/paused study.
 
@@ -505,7 +467,7 @@ class StudyStore:
         ).fetchone()
         return self._study_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def list_studies(
         self,
         session_id: str | None = None,
@@ -528,7 +490,7 @@ class StudyStore:
         rows = self._conn.execute(query, params).fetchall()
         return [self._study_from_row(row) for row in rows]
 
-    @_synchronized
+    @synchronized
     def list_active_studies(self) -> list[StudyRecord]:
         """Return all studies in a non-terminal execution status.
 
@@ -544,13 +506,13 @@ class StudyStore:
         ).fetchall()
         return [self._study_from_row(row) for row in rows]
 
-    @_synchronized
+    @synchronized
     def delete_session_studies(self, session_id: str) -> int:
         """Delete all study rows owned by a session. Returns the count removed."""
 
         if not session_id.strip():
             raise ValueError("session_id must not be empty")
-        with self._write_transaction():
+        with write_transaction(self._conn):
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM studies WHERE owner_session_id = ?",
                 (session_id,),
@@ -564,7 +526,7 @@ class StudyStore:
 
     # ── directives (Phase 2: mid-execution interaction) ─────────────
 
-    @_synchronized
+    @synchronized
     def add_directive(
         self,
         study_id: str,
@@ -586,9 +548,9 @@ class StudyStore:
         if study is None:
             raise ValueError(f"study not found: {study_id}")
 
-        directive_id = _id("dir")
-        now = _now_iso()
-        with self._write_transaction():
+        directive_id = new_id("dir")
+        now = now_iso()
+        with write_transaction(self._conn):
             self._conn.execute(
                 """
                 INSERT INTO study_directives (
@@ -608,7 +570,7 @@ class StudyStore:
             consumed_at=None,
         )
 
-    @_synchronized
+    @synchronized
     def list_pending_directives(
         self, study_id: str
     ) -> list[StudyDirective]:
@@ -635,7 +597,7 @@ class StudyStore:
             for row in rows
         ]
 
-    @_synchronized
+    @synchronized
     def mark_directives_consumed(
         self, study_id: str, directive_ids: list[str]
     ) -> int:
@@ -647,9 +609,9 @@ class StudyStore:
         """
         if not directive_ids:
             return 0
-        now = _now_iso()
+        now = now_iso()
         placeholders = ",".join("?" for _ in directive_ids)
-        with self._write_transaction():
+        with write_transaction(self._conn):
             cur = self._conn.execute(
                 f"UPDATE study_directives "
                 f"SET consumed_at = ? "
@@ -661,7 +623,7 @@ class StudyStore:
 
     # ── Phase 3: monitoring hooks ──────────────────────────────────
 
-    @_synchronized
+    @synchronized
     def update_monitor_check(
         self,
         study_id: str,
@@ -673,7 +635,7 @@ class StudyStore:
 
         Called by the monitor loop after each periodic check.
         """
-        with self._write_transaction():
+        with write_transaction(self._conn):
             if drift:
                 self._conn.execute(
                     "UPDATE studies "
@@ -695,7 +657,7 @@ class StudyStore:
         ).fetchone()
         return self._study_from_row(row) if row else None
 
-    @_synchronized
+    @synchronized
     def list_due_for_monitor_check(
         self,
         now_iso: str | None = None,
@@ -725,7 +687,7 @@ class StudyStore:
 
     # ── AEGIS: study_rounds CRUD ──────────────────────────────────────
 
-    @_synchronized
+    @synchronized
     def append_round(
         self,
         study_id: str,
@@ -739,15 +701,15 @@ class StudyStore:
     ) -> "StudyRoundRecord":
         """Append a round record to ``study_rounds``."""
         from .models import StudyRoundRecord
-        now = _now_iso()
-        round_id = _id("round")
+        now = now_iso()
+        round_id = new_id("round")
         row = self._conn.execute(
             "SELECT goal_id, session_id FROM studies WHERE study_id = ?",
             (study_id,),
         ).fetchone()
         goal_id = row["goal_id"] if row else None
         session_id = row["session_id"] if row else ""
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._conn.execute(
                 """
                 INSERT INTO study_rounds (
@@ -758,9 +720,9 @@ class StudyStore:
                 """,
                 (
                     round_id, study_id, goal_id, session_id, round_num,
-                    run_name, _json_dumps(metrics or {}), verdict,
-                    _json_dumps(evidence_ids or []),
-                    _json_dumps(config_changes) if config_changes else None,
+                    run_name, json_dumps(metrics or {}), verdict,
+                    json_dumps(evidence_ids or []),
+                    json_dumps(config_changes) if config_changes else None,
                     agent_output, now,
                 ),
             )
@@ -772,7 +734,7 @@ class StudyStore:
             agent_output=agent_output, created_at=now,
         )
 
-    @_synchronized
+    @synchronized
     def update_round(
         self,
         study_id: str,
@@ -784,16 +746,16 @@ class StudyStore:
         Complements ``append_round`` (phase-1 body); payload mirrors the
         manifest's ``review`` section (design §9.4/§20.4).
         """
-        now = _now_iso()
-        with self._write_transaction():
+        now = now_iso()
+        with write_transaction(self._conn):
             self._conn.execute(
                 "UPDATE study_rounds SET review_json = ?, created_at = ? "
                 "WHERE study_id = ? AND round_num = ?",
-                (_json_dumps(review), now, study_id, round_num),
+                (json_dumps(review), now, study_id, round_num),
             )
         return self.get_round(study_id, round_num)
 
-    @_synchronized
+    @synchronized
     def list_rounds(
         self, study_id: str, limit: int = 50
     ) -> list["StudyRoundRecord"]:
@@ -805,7 +767,7 @@ class StudyStore:
         ).fetchall()
         return [self._round_from_row(r) for r in rows]
 
-    @_synchronized
+    @synchronized
     def get_round(
         self, study_id: str, round_num: int
     ) -> "StudyRoundRecord | None":
@@ -825,36 +787,23 @@ class StudyStore:
             session_id=row["session_id"],
             round_num=row["round_num"],
             run_name=row["run_name"],
-            metrics=_json_loads(row["metrics_json"], {}),
+            metrics=json_loads(row["metrics_json"], {}),
             verdict=row["verdict"],
-            evidence_ids=_json_loads(row["evidence_ids_json"], []),
-            config_changes=_json_loads(row["config_changes_json"], None),
+            evidence_ids=json_loads(row["evidence_ids_json"], []),
+            config_changes=json_loads(row["config_changes_json"], None),
             agent_output=row["agent_output"],
-            review=_json_loads(row["review_json"], None)
+            review=json_loads(row["review_json"], None)
             if "review_json" in row.keys() else None,
             created_at=row["created_at"],
         )
 
     # ── internals ────────────────────────────────────────────────────
 
-    @contextmanager
-    def _write_transaction(self):
-        """Open an immediate write transaction for cross-connection safety."""
-
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield
-        except Exception:
-            self._conn.rollback()
-            raise
-        else:
-            self._conn.commit()
-
     @staticmethod
     def _study_from_row(row: sqlite3.Row) -> StudyRecord:
         """Materialize a ``StudyRecord`` from a SQLite row."""
 
-        targets_raw = _json_loads(row["metric_targets"], [])
+        targets_raw = json_loads(row["metric_targets"], [])
         # Normalize: tolerate either list[dict] or already-typed shapes.
         if isinstance(targets_raw, list):
             metric_targets = [
@@ -864,7 +813,7 @@ class StudyStore:
         else:
             metric_targets = []
 
-        metrics_raw = _json_loads(row["last_metrics"], None) if row["last_metrics"] else None
+        metrics_raw = json_loads(row["last_metrics"], None) if row["last_metrics"] else None
 
         return StudyRecord(
             study_id=row["study_id"],
