@@ -1,166 +1,24 @@
 """Tests for the shared tool utilities (utils.py).
 
 Covers:
-- safe_get_param: standard values, type coercion, unwrapping,
-  JSON stringification, missing keys
 - try_unwrap_list / try_unwrap_dict: explicit unwrap
 - err_actionable: structured error payloads
 - truncate: long values
+
+Note: the legacy ``safe_get_param`` name-driven coercion was removed in
+P1 (annotation-driven ``BaseTool._coerce_params`` is the single coercion
+path now; todo_tools migrated to inline json.loads + try_unwrap_list).
 """
 from __future__ import annotations
 
 import json
 
-import pytest
-
 from strategy_research.core.agent.builtin_tools.utils import (
     err_actionable,
-    safe_get_param,
     truncate,
     try_unwrap_dict,
     try_unwrap_list,
 )
-
-
-# ── safe_get_param: standard reads ────────────────────────────
-
-
-class TestSafeGetParamStandard:
-    def test_missing_returns_default(self):
-        assert safe_get_param({}, "x", str, default="hi") == "hi"
-
-    def test_none_returns_default(self):
-        assert safe_get_param({"x": None}, "x", str, default="hi") == "hi"
-
-    def test_existing_str(self):
-        assert safe_get_param({"x": "hi"}, "x", str) == "hi"
-
-    def test_existing_int(self):
-        assert safe_get_param({"x": 42}, "x", int) == 42
-
-    def test_existing_list(self):
-        assert safe_get_param({"x": [1, 2, 3]}, "x", list) == [1, 2, 3]
-
-    def test_existing_dict(self):
-        d = {"k": "v"}
-        assert safe_get_param({"x": d}, "x", dict) == d
-
-
-# ── safe_get_param: type coercion ────────────────────────────
-
-
-class TestSafeGetParamCoercion:
-    def test_int_from_float(self):
-        assert safe_get_param({"x": 5.0}, "x", int) == 5
-
-    def test_int_from_string(self):
-        assert safe_get_param({"x": "5"}, "x", int) == 5
-
-    def test_float_from_int(self):
-        assert safe_get_param({"x": 5}, "x", float) == 5.0
-
-    def test_float_from_string(self):
-        assert safe_get_param({"x": "5.5"}, "x", float) == 5.5
-
-    def test_str_from_int(self):
-        assert safe_get_param({"x": 42}, "x", str) == "42"
-
-    def test_str_from_float(self):
-        assert safe_get_param({"x": 1.5}, "x", str) == "1.5"
-
-    def test_str_from_bool(self):
-        assert safe_get_param({"x": True}, "x", str) == "True"
-
-    def test_list_from_tuple(self):
-        assert safe_get_param({"x": (1, 2, 3)}, "x", list) == [1, 2, 3]
-
-    def test_int_coerce_failure_raises(self):
-        with pytest.raises(TypeError) as exc:
-            safe_get_param({"x": "abc"}, "x", int)
-        assert "int" in str(exc.value)
-        assert "str" in str(exc.value)
-
-    def test_list_coerce_failure_raises(self):
-        with pytest.raises(TypeError):
-            safe_get_param({"x": 42}, "x", list)
-
-
-# ── safe_get_param: list unwrapping ───────────────────────────
-
-
-class TestSafeGetParamListUnwrap:
-    def test_unwrap_item(self):
-        assert safe_get_param({"x": {"item": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_data(self):
-        assert safe_get_param({"x": {"data": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_records(self):
-        assert safe_get_param({"x": {"records": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_bars(self):
-        assert safe_get_param({"x": {"bars": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_rows(self):
-        assert safe_get_param({"x": {"rows": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_ohlcv(self):
-        assert safe_get_param({"x": {"ohlcv": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_values(self):
-        assert safe_get_param({"x": {"values": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_result(self):
-        assert safe_get_param({"x": {"result": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_results(self):
-        assert safe_get_param({"x": {"results": [1, 2]}}, "x", list) == [1, 2]
-
-    def test_unwrap_dict_no_list_raises(self):
-        """Dict with no list inside cannot be coerced to list."""
-        with pytest.raises(TypeError):
-            safe_get_param({"x": {"foo": 1}}, "x", list)
-
-    def test_allow_unwrap_false(self):
-        """allow_unwrap=False disables auto-unwrap."""
-        with pytest.raises(TypeError):
-            safe_get_param(
-                {"x": {"item": [1, 2]}}, "x", list, allow_unwrap=False,
-            )
-
-
-# ── safe_get_param: dict unwrapping ───────────────────────────
-
-
-class TestSafeGetParamDictUnwrap:
-    def test_unwrap_item(self):
-        d = {"k": "v"}
-        assert safe_get_param({"x": {"item": d}}, "x", dict) == d
-
-    def test_unwrap_data(self):
-        d = {"k": "v"}
-        assert safe_get_param({"x": {"data": d}}, "x", dict) == d
-
-    def test_unwrap_args(self):
-        d = {"k": "v"}
-        assert safe_get_param({"x": {"args": d}}, "x", dict) == d
-
-
-# ── safe_get_param: JSON stringification ──────────────────────
-
-
-class TestSafeGetParamJSON:
-    def test_parse_json_list(self):
-        assert safe_get_param({"x": "[1, 2, 3]"}, "x", list) == [1, 2, 3]
-
-    def test_parse_json_dict(self):
-        assert safe_get_param({"x": '{"k": "v"}'}, "x", dict) == {"k": "v"}
-
-    def test_invalid_json_passes_through_to_type_check(self):
-        """Invalid JSON string for a list param → cannot parse → type error."""
-        with pytest.raises(TypeError):
-            safe_get_param({"x": "not json"}, "x", list)
-
 
 # ── try_unwrap_list / try_unwrap_dict ────────────────────────
 

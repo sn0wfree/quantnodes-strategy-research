@@ -16,7 +16,7 @@ import threading
 from typing import Any
 
 from ..tools import EFFECT_DB, BaseTool, ToolContext
-from .utils import err_actionable, safe_get_param
+from .utils import err_actionable, try_unwrap_list
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,17 @@ class TodoWriteTool(BaseTool):
         session_id = str(kwargs.get("session_id") or "default")
         emit_event = kwargs.get("emit_event")
 
-        raw = safe_get_param(kwargs, "todos", list)
+        raw = kwargs.get("todos")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                raw = None
+        if isinstance(raw, dict):
+            unwrapped = try_unwrap_list(raw)
+            if unwrapped is not None:
+                raw = unwrapped
+
         if raw is None:
             return err_actionable(
                 "missing required parameter 'todos'",

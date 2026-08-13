@@ -67,74 +67,6 @@ def tool_err(message: Any, **extra: Any) -> str:
     )
 
 
-def safe_get_param(
-    kwargs: dict,
-    name: str,
-    expected_type: type,
-    *,
-    default: Any = None,
-    allow_unwrap: bool = True,
-) -> Any:
-    """Defensive parameter reader.
-
-    Common LLM mistakes are auto-corrected:
-    1. Stringified JSON for list/dict params → ``json.loads``
-    2. List wrapped in single-key dict → unwrap
-    3. Dict wrapped in single-key dict → unwrap
-    4. int received as float (5.0) → coerce
-    5. None → returns default
-
-    Args:
-        kwargs: Tool's kwargs dict.
-        name: Parameter name.
-        expected_type: Expected Python type (``list``, ``dict``, ``str``,
-            ``int``, ``float``, ``bool``).
-        default: Default if name is missing or value is None.
-        allow_unwrap: Try to unwrap dict-wrapped values.
-
-    Returns:
-        The (possibly-coerced) value.
-
-    Raises:
-        TypeError: If the value cannot be coerced to ``expected_type``.
-            The error message includes the value and expected type.
-    """
-    val = kwargs.get(name, default)
-    if val is None:
-        return default
-
-    # ── String → JSON parse (LLM sometimes stringifies) ─────
-    if expected_type in (list, dict) and isinstance(val, str):
-        try:
-            val = json.loads(val)
-        except (json.JSONDecodeError, TypeError):
-            pass  # fall through to type check
-
-    # ── Unwrap dict-wrapped list ────────────────────────────
-    if allow_unwrap and isinstance(val, dict) and expected_type is list:
-        unwrapped = _try_unwrap_list(val)
-        if unwrapped is not None:
-            val = unwrapped
-
-    # ── Unwrap dict-wrapped dict ────────────────────────────
-    if allow_unwrap and isinstance(val, dict) and expected_type is dict:
-        unwrapped = _try_unwrap_dict(val)
-        if unwrapped is not None:
-            val = unwrapped
-
-    # ── Type check / coerce ────────────────────────────────
-    if not isinstance(val, expected_type):
-        coerced = _coerce(val, expected_type)
-        if coerced is not None:
-            val = coerced
-        else:
-            raise TypeError(
-                f"expected {expected_type.__name__}, got {type(val).__name__}"
-            )
-
-    return val
-
-
 def try_unwrap_list(value: Any) -> Optional[list]:
     """If value is a dict that wraps a single list, return the list.
 
@@ -246,65 +178,9 @@ def _try_unwrap_dict(d: dict) -> Optional[dict]:
     return None
 
 
-def _coerce(value: Any, expected_type: type) -> Any:
-    """Try to coerce ``value`` to ``expected_type``. Returns None on failure."""
-    handler = _COERCE_HANDLERS.get(expected_type)
-    if handler is None:
-        return None
-    return handler(value)
-
-
-def _coerce_int(value: Any) -> Any:
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return None
-    return None
-
-
-def _coerce_float(value: Any) -> Any:
-    if isinstance(value, int):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return None
-    return None
-
-
-def _coerce_str(value: Any) -> Any:
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    return None
-
-
-def _coerce_bool(value: Any) -> Any:
-    if isinstance(value, bool):
-        return value
-    return None
-
-
-def _coerce_list(value: Any) -> Any:
-    if isinstance(value, (tuple, set, frozenset)):
-        return list(value)
-    return None
-
-
-_COERCE_HANDLERS = {
-    int: _coerce_int,
-    float: _coerce_float,
-    str: _coerce_str,
-    bool: _coerce_bool,
-    list: _coerce_list,
-}
-
-
 __all__ = [
-    "safe_get_param",
+    "tool_ok",
+    "tool_err",
     "try_unwrap_list",
     "try_unwrap_dict",
     "err_actionable",
