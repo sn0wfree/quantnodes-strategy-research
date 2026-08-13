@@ -72,6 +72,109 @@ def _err(message: str, **extra: Any) -> str:
     )
 
 
+def _build_factor_panel(
+    df, assets: list, factor_code: str, min_bars: int = 20
+) -> dict:
+    """Compute the factor per asset into a date-indexed panel dict.
+
+    Assets with insufficient bars or failed factor computation are
+    skipped. Duplicated index rows are deduplicated (keep first).
+    """
+    from ...tools.data_transforms import long_to_single_asset_wide
+
+    factor_panel = {}
+    for asset_code in assets:
+        adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
+        if len(adf) < min_bars:
+            continue
+        try:
+            fv = compute_factor(factor_code, adf)
+            if hasattr(fv, 'index') and fv.index.duplicated().any():
+                fv = fv[~fv.index.duplicated(keep='first')]
+            factor_panel[asset_code] = fv
+        except Exception:
+            continue
+    return factor_panel
+
+
+def _build_ret_panel(df, assets, forward_days: int) -> dict:
+    """Build the forward-return panel (close pct_change shifted -forward_days)."""
+    from ...tools.data_transforms import long_to_single_asset_wide
+
+    ret_panel = {}
+    for asset_code in assets:
+        adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
+        ret_panel[asset_code] = adf["close"].pct_change(forward_days).shift(-forward_days)
+    return ret_panel
+
+
+def _compute_spearman_ic(f_df, r_df, common_dates) -> list:
+    """Compute daily cross-sectional Spearman IC values (list of floats)."""
+    import pandas as pd
+
+    ic_list = []
+    for dt in common_dates:
+        fv = f_df.loc[dt].dropna()
+        rv = r_df.loc[dt].dropna()
+        common = fv.index.intersection(rv.index)
+        if len(common) < 3:
+            continue
+        ic = fv[common].corr(rv[common], method="spearman")
+        if pd.notna(ic):
+            ic_list.append(ic)
+    return ic_list
+
+
+def _compute_quintile_returns(factor_df, ret_df, common_dates, n_groups: int) -> dict:
+    """Assign quintile groups per date and compute each group's return series."""
+    import pandas as pd
+
+    group_returns = {g: [] for g in range(n_groups)}
+    for dt in common_dates:
+        fv = factor_df.loc[dt].dropna()
+        rv = ret_df.loc[dt].dropna()
+        common = fv.index.intersection(rv.index)
+        if len(common) < n_groups * 2:
+            continue
+        fv_sorted = fv[common].sort_values()
+        n_per = len(fv_sorted) // n_groups
+        for g in range(n_groups):
+            start_idx = g * n_per
+            end_idx = start_idx + n_per if g < n_groups - 1 else len(fv_sorted)
+            group_assets = fv_sorted.index[start_idx:end_idx]
+            g_ret = rv[group_assets].mean()
+            if pd.notna(g_ret):
+                group_returns[g].append(float(g_ret))
+    return group_returns
+
+
+def _compute_daily_ic_series(factor_df, ret_df, common_dates):
+    """Compute daily cross-sectional Pearson/Spearman IC.
+
+    Returns ``(pearson_list, spearman_list, valid_dates)``.
+    """
+    import pandas as pd
+
+    ic_pearson_list = []
+    ic_spearman_list = []
+    valid_dates = []
+    for dt in common_dates:
+        fv = factor_df.loc[dt].dropna()
+        rv = ret_df.loc[dt].dropna()
+        common = fv.index.intersection(rv.index)
+        if len(common) < 3:
+            continue
+        f_vals = fv[common]
+        r_vals = rv[common]
+        pearson_ic = f_vals.corr(r_vals)
+        spearman_ic = f_vals.corr(r_vals, method="spearman")
+        if pd.notna(pearson_ic):
+            ic_pearson_list.append(pearson_ic)
+            ic_spearman_list.append(spearman_ic)
+            valid_dates.append(dt)
+    return ic_pearson_list, ic_spearman_list, valid_dates
+
+
 def _workspace_error(exc: ValueError, *, tool: str) -> str:
     """Convert _workspace_from_kwargs ValueError to actionable error."""
     return err_actionable(
@@ -1823,30 +1926,13 @@ class FactorCrossSectionalAnalysis(BaseTool):
 
         from ...tools.data_transforms import long_to_single_asset_wide
 
-        factor_panel = {}
-        for asset_code in assets:
-            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
-            if len(adf) < 20:
-                continue
-            try:
-                fv = compute_factor(factor_code, adf)
-                # Deduplicate index to avoid reindex errors
-                if hasattr(fv, 'index') and fv.index.duplicated().any():
-                    fv = fv[~fv.index.duplicated(keep='first')]
-                factor_panel[asset_code] = fv
-            except Exception:
-                continue
+        factor_panel = _build_factor_panel(df, assets, factor_code)
 
         if len(factor_panel) < 3:
             return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_cross_sectional_analysis")
 
         # Build forward return panel
-        from ...tools.data_transforms import long_to_single_asset_wide
-
-        ret_panel = {}
-        for asset_code in factor_panel:
-            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
-            ret_panel[asset_code] = adf["close"].pct_change(forward_days).shift(-forward_days)
+        ret_panel = _build_ret_panel(df, factor_panel, forward_days)
 
         # Compute daily cross-sectional IC
         factor_df = pd.DataFrame(factor_panel)
@@ -1855,23 +1941,9 @@ class FactorCrossSectionalAnalysis(BaseTool):
         factor_df = factor_df.loc[common_dates]
         ret_df = ret_df.loc[common_dates]
 
-        ic_pearson_list = []
-        ic_spearman_list = []
-        valid_dates = []
-        for dt in common_dates:
-            fv = factor_df.loc[dt].dropna()
-            rv = ret_df.loc[dt].dropna()
-            common = fv.index.intersection(rv.index)
-            if len(common) < 3:
-                continue
-            f_vals = fv[common]
-            r_vals = rv[common]
-            pearson_ic = f_vals.corr(r_vals)
-            spearman_ic = f_vals.corr(r_vals, method="spearman")
-            if pd.notna(pearson_ic):
-                ic_pearson_list.append(pearson_ic)
-                ic_spearman_list.append(spearman_ic)
-                valid_dates.append(dt)
+        ic_pearson_list, ic_spearman_list, valid_dates = _compute_daily_ic_series(
+            factor_df, ret_df, common_dates
+        )
 
         if len(ic_pearson_list) < 5:
             return err_actionable(f"too few valid IC observations ({len(ic_pearson_list)})", tool="factor_cross_sectional_analysis")
@@ -2002,27 +2074,10 @@ class FactorQuintileReturns(BaseTool):
         # Compute factor per asset
         from ...tools.data_transforms import long_to_single_asset_wide
 
-        factor_panel = {}
-        for asset_code in assets:
-            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
-            if len(adf) < 20:
-                continue
-            try:
-                fv = compute_factor(factor_code, adf)
-                # Deduplicate index to avoid reindex errors
-                if hasattr(fv, 'index') and fv.index.duplicated().any():
-                    fv = fv[~fv.index.duplicated(keep='first')]
-                factor_panel[asset_code] = fv
-            except Exception:
-                continue
+        factor_panel = _build_factor_panel(df, assets, factor_code)
 
         # Forward return panel
-        from ...tools.data_transforms import long_to_single_asset_wide
-
-        ret_panel = {}
-        for asset_code in factor_panel:
-            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
-            ret_panel[asset_code] = adf["close"].pct_change(holding_period).shift(-holding_period)
+        ret_panel = _build_ret_panel(df, factor_panel, holding_period)
 
         factor_df = pd.DataFrame(factor_panel)
         ret_df = pd.DataFrame(ret_panel)
@@ -2031,22 +2086,9 @@ class FactorQuintileReturns(BaseTool):
         ret_df = ret_df.loc[common_dates]
 
         # Assign quintile groups per date and compute group returns
-        group_returns = {g: [] for g in range(n_groups)}
-        for dt in common_dates:
-            fv = factor_df.loc[dt].dropna()
-            rv = ret_df.loc[dt].dropna()
-            common = fv.index.intersection(rv.index)
-            if len(common) < n_groups * 2:
-                continue
-            fv_sorted = fv[common].sort_values()
-            n_per = len(fv_sorted) // n_groups
-            for g in range(n_groups):
-                start_idx = g * n_per
-                end_idx = start_idx + n_per if g < n_groups - 1 else len(fv_sorted)
-                group_assets = fv_sorted.index[start_idx:end_idx]
-                g_ret = rv[group_assets].mean()
-                if pd.notna(g_ret):
-                    group_returns[g].append(float(g_ret))
+        group_returns = _compute_quintile_returns(
+            factor_df, ret_df, common_dates, n_groups
+        )
 
         result = {}
         for g in range(n_groups):
@@ -2176,19 +2218,7 @@ class FactorICDecay(BaseTool):
         # Compute factor per asset
         from ...tools.data_transforms import long_to_single_asset_wide
 
-        factor_panel = {}
-        for asset_code in assets:
-            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
-            if len(adf) < 20:
-                continue
-            try:
-                fv = compute_factor(factor_code, adf)
-                # Deduplicate index to avoid reindex errors
-                if hasattr(fv, 'index') and fv.index.duplicated().any():
-                    fv = fv[~fv.index.duplicated(keep='first')]
-                factor_panel[asset_code] = fv
-            except Exception:
-                continue
+        factor_panel = _build_factor_panel(df, assets, factor_code)
 
         if len(factor_panel) < 3:
             return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_ic_decay")
@@ -2198,28 +2228,14 @@ class FactorICDecay(BaseTool):
         # Compute IC at each horizon
         results = []
         for h in horizons:
-            from ...tools.data_transforms import long_to_single_asset_wide
-
-            ret_panel = {}
-            for asset_code in factor_panel:
-                adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="close")
-                ret_panel[asset_code] = adf["close"].pct_change(h).shift(-h)
+            ret_panel = _build_ret_panel(df, factor_panel, h)
 
             ret_df = pd.DataFrame(ret_panel)
             common_dates = factor_df.index.intersection(ret_df.index)
             f_df = factor_df.loc[common_dates]
             r_df = ret_df.loc[common_dates]
 
-            ic_list = []
-            for dt in common_dates:
-                fv = f_df.loc[dt].dropna()
-                rv = r_df.loc[dt].dropna()
-                common = fv.index.intersection(rv.index)
-                if len(common) < 3:
-                    continue
-                ic = fv[common].corr(rv[common], method="spearman")
-                if pd.notna(ic):
-                    ic_list.append(ic)
+            ic_list = _compute_spearman_ic(f_df, r_df, common_dates)
 
             if ic_list:
                 arr = np.array(ic_list)
@@ -2340,21 +2356,7 @@ class FactorTurnover(BaseTool):
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
         # Compute factor per asset
-        from ...tools.data_transforms import long_to_single_asset_wide
-
-        factor_panel = {}
-        for asset_code in assets:
-            adf = long_to_single_asset_wide(df, asset=asset_code, value_cols="ohlcv")
-            if len(adf) < 20:
-                continue
-            try:
-                fv = compute_factor(factor_code, adf)
-                # Deduplicate index to avoid reindex errors
-                if hasattr(fv, 'index') and fv.index.duplicated().any():
-                    fv = fv[~fv.index.duplicated(keep='first')]
-                factor_panel[asset_code] = fv
-            except Exception:
-                continue
+        factor_panel = _build_factor_panel(df, assets, factor_code)
 
         if len(factor_panel) < 3:
             return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_turnover")
