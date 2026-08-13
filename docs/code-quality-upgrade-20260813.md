@@ -63,10 +63,14 @@
 | P0 | 清 7 个 ruff 错误（C901×4 + F401×3）；`_ok`/`_err` 收敛 | ✅ 完成 |
 | P1 | 拆 `builtin_tools/__init__.py` 为 8 个域模块；MCP server 包装 `ToolRegistry`（删 7 个重复工具）；废弃旧 coercion | ✅ 完成 |
 | P2 | `core/storage/sqlite.py` 共享层，goal/study/hypothesis stores 迁移；HypothesisRegistry 删 JSON 后端 | ✅ 完成 |
-| P2 | 统一会话库（退役 sessions.db） | ⏸ 推迟：`SessionDB`（id INTEGER/timestamp/metadata_json）与统一库 schema（id TEXT/user_id NOT NULL）根本冲突，同文件互踩 DDL；需数据迁移 + 6+ 测试改写。与事件总线同款风险决策，记为债单 |
-| P3 | DI 真接线；9-agent 配置抽工厂；slash handler 移出 chat.py；持久层并入 api/session/store.py；AgentLoop async 为主 | 进行中 |
-| P4 | 指标键名统一 + engine CLI bug；alpha zoo 单一事实源；stub agent 移测试；删死代码 | 未开始 |
-| P5 | 更新文档（本文档 + architecture-review.md）；CI 加 ruff；全量测试 | 未开始 |
+| P2 | 统一会话库（退役 sessions.db） | ⏸ 推迟：schema 根本冲突（id INTEGER vs TEXT、user_id NOT NULL），需数据迁移 + 6+ 测试改写。与事件总线同款风险决策 |
+| P3 | DI 容器真接线（单一构造点 + 统一 session DB schema，修 DDL 分叉根因）；9-agent 配置抽工厂；slash 命令移出 chat.py（1900→921 行） | ✅ 完成 |
+| P3 | web_session.py 持久层并入 api/session/store.py；AgentLoop sync/async 去重 | ⏸ 推迟：机械搬运/大改，行为价值低、churn 高，宜作独立后续 |
+| P4 | engine CLI 键名 bug 修复（sharpe_ratio→sharpe 等）；删死代码（data_source/cache.py、slash_decorator.py） | ✅ 完成 |
+| P4 | 指标套件（calc_metrics/extended_metrics/portfolio_metrics）全量键名统一；alpha zoo `.py` 双事实源清理；stub agent 移测试；`run_research_round`/`study/executor.py` 退役 | ⏸ 推迟：均需大面积测试改写（test_study_executor 582 行等），宜作独立后续 |
+| P5 | CI 加 ruff 门禁；执行记录文档更新；全量测试收尾 | ✅ 完成 |
+
+**额外修复（P3 触发）**：`SQLiteStore` 与 `web_session` 的 sessions/messages DDL 分叉是真实隐患根因（谁先建表谁赢），已统一 schema + user_id 兼容插入 + FK 下先插父行；两个 TUI 流式测试原本依赖该 FK bug 的降级路径才通过，已改为显式 mock 降级。
 
 **完成标准**：每阶段 `ruff check src` 全绿 + 相关测试通过；阶段边界跑全量回归。
 
