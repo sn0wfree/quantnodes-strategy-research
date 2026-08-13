@@ -185,6 +185,190 @@ def _workspace_error(exc: ValueError, *, tool: str) -> str:
     )
 
 
+def _load_ohlcv(ctx: ToolContext, tool: str, start_date: str | None = None, end_date: str | None = None):
+    """Open the workspace DuckDB and load ohlcv rows in the optional date window.
+
+    Returns ``(ok, conn, prices_df, err_json)``; on failure ``conn``/``prices_df`` are ``None``.
+    """
+    if ctx.workspace is None:
+        return False, None, None, err_actionable(
+            "missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool=tool
+        )
+    try:
+        from ...db import get_connection
+
+        conn = get_connection(ctx.workspace)
+    except Exception as exc:
+        return False, None, None, err_actionable(f"db open failed: {exc}", tool=tool)
+    if conn is None:
+        return False, None, None, err_actionable("workspace has no DuckDB", tool=tool)
+    try:
+        query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
+        clauses = []
+        if start_date:
+            clauses.append(f"date >= '{start_date}'")
+        if end_date:
+            clauses.append(f"date <= '{end_date}'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY date, asset"
+        prices_df = conn.execute(query).fetch_df()
+    except Exception as exc:
+        return False, None, None, err_actionable(f"ohlcv query failed: {exc}", tool=tool)
+    if prices_df.empty:
+        return False, None, None, err_actionable("ohlcv table is empty", tool=tool)
+    return True, conn, prices_df, None
+
+
+def _resolve_asset_universe(prices_df, universe: str):
+    """Resolve the asset list from the universe spec ('all' or comma list)."""
+    all_assets = sorted(prices_df["asset"].unique())
+    if universe != "all":
+        return [a.strip() for a in universe.split(",")]
+    return all_assets
+
+
+def _load_factor_panel_data(
+    ctx: ToolContext,
+    tool: str,
+    factor_code: str,
+    universe: str = "all",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    min_assets: int = 3,
+):
+    """Load ohlcv, filter universe and compute the factor panel.
+
+    Returns ``(factor_panel, df)`` on success, or ``(None, err_json)`` on failure.
+    """
+    if not isinstance(factor_code, str) or not factor_code:
+        return None, err_actionable("missing or invalid 'factor_code'", tool=tool)
+    ok, _conn, prices_df, err = _load_ohlcv(ctx, tool, start_date, end_date)
+    if not ok:
+        return None, err
+    assets = _resolve_asset_universe(prices_df, universe)
+    df = prices_df[prices_df["asset"].isin(assets)].copy()
+    factor_panel = _build_factor_panel(df, assets, factor_code)
+    if len(factor_panel) < min_assets:
+        return None, err_actionable(
+            f"factor computation succeeded on < {min_assets} assets ({len(factor_panel)})", tool=tool
+        )
+    return factor_panel, df
+
+
+def _load_latest_run(ctx: ToolContext, tool: str, strategy_name: str):
+    """Locate the latest run dir for a strategy.
+
+    Returns ``latest_run`` (Path) on success, or an ``err_json`` string on failure.
+    """
+    if ctx.workspace is None:
+        return err_actionable(
+            "missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool=tool
+        )
+    workspace = ctx.workspace
+    if not strategy_name:
+        return err_actionable("missing 'strategy_name'", tool=tool)
+    runs_dir = ctx.runs_dir if ctx.runs_dir is not None else workspace / "strategies" / strategy_name / "runs"
+    if not runs_dir.exists():
+        return err_actionable(f"runs directory not found: {runs_dir}", tool=tool)
+    run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
+    if not run_dirs:
+        return err_actionable("no runs found", tool=tool)
+    return run_dirs[-1]
+
+
+def _read_equity_curve(run_dir: Path, use_log_fallback: bool = False):
+    """Read the equity series from a run dir's common csv formats.
+
+    Optionally falls back to parsing ``equity=`` values from run.log.
+    Returns a float ndarray, or ``None`` if no usable series was found.
+    """
+    import numpy as np
+    import pandas as pd
+
+    equity = None
+    for fname in ["equity.csv", "equity_curve.csv", "portfolio.csv", "nav.csv"]:
+        fpath = run_dir / fname
+        if fpath.exists():
+            try:
+                eq_df = pd.read_csv(fpath)
+                for col in ["equity", "nav", "portfolio_value", "value", "close"]:
+                    if col in eq_df.columns:
+                        equity = eq_df[col].values
+                        break
+                if equity is not None:
+                    break
+            except Exception:
+                continue
+
+    if equity is None and use_log_fallback:
+        log_path = run_dir / "run.log"
+        if log_path.exists():
+            try:
+                log_text = log_path.read_text(encoding="utf-8")
+                import re
+
+                eq_matches = re.findall(r"equity[=:]\s*([\d.]+)", log_text)
+                if eq_matches:
+                    equity = np.array([float(v) for v in eq_matches])
+            except Exception:
+                pass
+
+    if equity is None:
+        return None
+    return np.array(equity, dtype=float)
+
+
+def _load_benchmark_ohlcv(
+    ctx: ToolContext, tool: str, benchmark_code: str, start_date: str | None = None, end_date: str | None = None
+):
+    """Load the benchmark asset's close series from the workspace DuckDB.
+
+    Returns ``(ok, bench_df, err_json)``; on failure ``bench_df`` is ``None``.
+    """
+    if ctx.workspace is None:
+        return False, None, err_actionable(
+            "missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool=tool
+        )
+    try:
+        from ...db import get_connection
+
+        conn = get_connection(ctx.workspace)
+    except Exception as exc:
+        return False, None, err_actionable(f"db open failed: {exc}", tool=tool)
+    if conn is None:
+        return False, None, err_actionable("workspace has no DuckDB", tool=tool)
+    try:
+        query = f"SELECT date, close FROM ohlcv WHERE asset = '{benchmark_code}'"
+        if start_date:
+            query += f" AND date >= '{start_date}'"
+        if end_date:
+            query += f" AND date <= '{end_date}'"
+        query += " ORDER BY date"
+        bench_df = conn.execute(query).fetch_df()
+    except Exception as exc:
+        return False, None, err_actionable(f"benchmark query failed: {exc}", tool=tool)
+    if bench_df.empty:
+        return False, None, err_actionable(f"no data found for benchmark '{benchmark_code}'", tool=tool)
+    return True, bench_df, None
+
+
+def _load_latest_run_equity(
+    ctx: ToolContext, tool: str, strategy_name: str, min_points: int = 10, use_log_fallback: bool = True
+):
+    """Locate the latest run and read its equity series.
+
+    Returns ``(latest_run, equity)`` on success, or ``(None, err_json)`` on failure.
+    """
+    latest_run = _load_latest_run(ctx, tool, strategy_name)
+    if isinstance(latest_run, str):
+        return None, latest_run
+    equity = _read_equity_curve(latest_run, use_log_fallback=use_log_fallback)
+    if equity is None or len(equity) < min_points:
+        return None, err_actionable("could not find equity curve data in the latest run", tool=tool)
+    return latest_run, equity
+
+
 # ── 1. ReadFileTool ─────────────────────────────────────────────────
 
 
@@ -1924,8 +2108,6 @@ class FactorCrossSectionalAnalysis(BaseTool):
         # Compute factor per asset and build date×asset panel
         import pandas as pd
 
-        from ...tools.data_transforms import long_to_single_asset_wide
-
         factor_panel = _build_factor_panel(df, assets, factor_code)
 
         if len(factor_panel) < 3:
@@ -2072,8 +2254,6 @@ class FactorQuintileReturns(BaseTool):
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
         # Compute factor per asset
-        from ...tools.data_transforms import long_to_single_asset_wide
-
         factor_panel = _build_factor_panel(df, assets, factor_code)
 
         # Forward return panel
@@ -2216,8 +2396,6 @@ class FactorICDecay(BaseTool):
         df = prices_df[prices_df["asset"].isin(assets)].copy()
 
         # Compute factor per asset
-        from ...tools.data_transforms import long_to_single_asset_wide
-
         factor_panel = _build_factor_panel(df, assets, factor_code)
 
         if len(factor_panel) < 3:
@@ -2311,55 +2489,15 @@ class FactorTurnover(BaseTool):
         rebalance_freq: int = 5,
     ) -> str:
         import numpy as np
-
-        if ctx.workspace is None:
-            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="factor_turnover")
-        workspace = ctx.workspace
-
-        if not isinstance(factor_code, str) or not factor_code:
-            return err_actionable("missing or invalid 'factor_code'", tool="factor_turnover")
-        universe_str = universe
-        rebalance_freq = int(rebalance_freq)
-
-        try:
-            from ...db import get_connection
-            conn = get_connection(workspace)
-        except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="factor_turnover")
-        if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="factor_turnover")
-
-        try:
-            query = "SELECT date, asset, open, high, low, close, volume FROM ohlcv"
-            clauses = []
-            if start_date:
-                clauses.append(f"date >= '{start_date}'")
-            if end_date:
-                clauses.append(f"date <= '{end_date}'")
-            if clauses:
-                query += " WHERE " + " AND ".join(clauses)
-            query += " ORDER BY date, asset"
-            prices_df = conn.execute(query).fetch_df()
-        except Exception as exc:
-            return err_actionable(f"ohlcv query failed: {exc}", tool="factor_turnover")
-
-        if prices_df.empty:
-            return err_actionable("ohlcv table is empty", tool="factor_turnover")
-
-        all_assets = sorted(prices_df["asset"].unique())
-        if universe_str != "all":
-            assets = [a.strip() for a in universe_str.split(",")]
-        else:
-            assets = all_assets
-
         import pandas as pd
-        df = prices_df[prices_df["asset"].isin(assets)].copy()
 
-        # Compute factor per asset
-        factor_panel = _build_factor_panel(df, assets, factor_code)
-
-        if len(factor_panel) < 3:
-            return err_actionable(f"factor computation succeeded on < 3 assets ({len(factor_panel)})", tool="factor_turnover")
+        rebalance_freq = int(rebalance_freq)
+        loaded = _load_factor_panel_data(
+            ctx, "factor_turnover", factor_code, universe, start_date, end_date
+        )
+        if loaded[0] is None:
+            return loaded[1]
+        factor_panel, _df = loaded
 
         factor_df = pd.DataFrame(factor_panel)
 
@@ -2547,60 +2685,10 @@ class DrawdownAnalysis(BaseTool):
     ) -> str:
         import numpy as np
 
-        if ctx.workspace is None:
-            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="drawdown_analysis")
-        workspace = ctx.workspace
-        if not strategy_name:
-            return err_actionable("missing 'strategy_name'", tool="drawdown_analysis")
         top_n = int(top_n)
-
-        # Find latest run
-        runs_dir = ctx.runs_dir if ctx.runs_dir is not None else workspace / "strategies" / strategy_name / "runs"
-        if not runs_dir.exists():
-            return err_actionable(f"runs directory not found: {runs_dir}", tool="drawdown_analysis")
-
-        run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
-        if not run_dirs:
-            return err_actionable("no runs found", tool="drawdown_analysis")
-
-        latest_run = run_dirs[-1]
-
-        # Try to find equity curve in common formats
-        import pandas as pd
-        equity = None
-        for fname in ["equity.csv", "equity_curve.csv", "portfolio.csv", "nav.csv"]:
-            fpath = latest_run / fname
-            if fpath.exists():
-                try:
-                    eq_df = pd.read_csv(fpath)
-                    # Try common column names
-                    for col in ["equity", "nav", "portfolio_value", "value", "close"]:
-                        if col in eq_df.columns:
-                            equity = eq_df[col].values
-                            break
-                    if equity is not None:
-                        break
-                except Exception:
-                    continue
-
-        if equity is None:
-            # Try run.log for equity data
-            log_path = latest_run / "run.log"
-            if log_path.exists():
-                try:
-                    log_text = log_path.read_text(encoding="utf-8")
-                    # Look for equity values in log
-                    import re
-                    eq_matches = re.findall(r"equity[=:]\s*([\d.]+)", log_text)
-                    if eq_matches:
-                        equity = np.array([float(v) for v in eq_matches])
-                except Exception:
-                    pass
-
-        if equity is None or len(equity) < 10:
-            return err_actionable("could not find equity curve data in the latest run", tool="drawdown_analysis")
-
-        equity = np.array(equity, dtype=float)
+        latest_run, equity = _load_latest_run_equity(ctx, "drawdown_analysis", strategy_name)
+        if latest_run is None:
+            return equity
 
         # Compute drawdown series
         peak = np.maximum.accumulate(equity)
@@ -2714,67 +2802,20 @@ class BenchmarkComparison(BaseTool):
     ) -> str:
         import numpy as np
 
-        if ctx.workspace is None:
-            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="benchmark_comparison")
-        workspace = ctx.workspace
-        if not strategy_name:
-            return err_actionable("missing 'strategy_name'", tool="benchmark_comparison")
         if not benchmark_code:
             return err_actionable("missing 'benchmark_code'", tool="benchmark_comparison")
 
-        # Get strategy equity from latest run
-        runs_dir = ctx.runs_dir if ctx.runs_dir is not None else workspace / "strategies" / strategy_name / "runs"
-        if not runs_dir.exists():
-            return err_actionable(f"runs directory not found: {runs_dir}", tool="benchmark_comparison")
-
-        run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
-        if not run_dirs:
-            return err_actionable("no runs found", tool="benchmark_comparison")
-
-        latest_run = run_dirs[-1]
-
-        import pandas as pd
-        strategy_equity = None
-        for fname in ["equity.csv", "equity_curve.csv", "portfolio.csv", "nav.csv"]:
-            fpath = latest_run / fname
-            if fpath.exists():
-                try:
-                    eq_df = pd.read_csv(fpath)
-                    for col in ["equity", "nav", "portfolio_value", "value", "close"]:
-                        if col in eq_df.columns:
-                            strategy_equity = eq_df[col].values.astype(float)
-                            break
-                    if strategy_equity is not None:
-                        break
-                except Exception:
-                    continue
-
-        if strategy_equity is None or len(strategy_equity) < 10:
-            return err_actionable("could not find strategy equity curve", tool="benchmark_comparison")
+        latest_run, equity = _load_latest_run_equity(
+            ctx, "benchmark_comparison", strategy_name, use_log_fallback=False
+        )
+        if latest_run is None:
+            return equity
+        strategy_equity = np.asarray(equity, dtype=float)
 
         # Get benchmark prices from DuckDB
-        try:
-            from ...db import get_connection
-            conn = get_connection(workspace)
-        except Exception as exc:
-            return err_actionable(f"db open failed: {exc}", tool="benchmark_comparison")
-        if conn is None:
-            return err_actionable("workspace has no DuckDB", tool="benchmark_comparison")
-
-        try:
-            query = f"SELECT date, close FROM ohlcv WHERE asset = '{benchmark_code}'"
-            if start_date:
-                query += f" AND date >= '{start_date}'"
-            if end_date:
-                query += f" AND date <= '{end_date}'"
-            query += " ORDER BY date"
-            bench_df = conn.execute(query).fetch_df()
-        except Exception as exc:
-            return err_actionable(f"benchmark query failed: {exc}", tool="benchmark_comparison")
-
-        if bench_df.empty:
-            return err_actionable(f"no data found for benchmark '{benchmark_code}'", tool="benchmark_comparison")
-
+        ok, bench_df, err = _load_benchmark_ohlcv(ctx, "benchmark_comparison", benchmark_code, start_date, end_date)
+        if not ok:
+            return err
         bench_equity = bench_df["close"].values.astype(float)
 
         # Align lengths

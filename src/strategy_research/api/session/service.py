@@ -38,6 +38,166 @@ MAX_HISTORY_CHARS = 12000
 _QUEUE_LIMIT = 10
 
 
+def _build_attempt_metrics(usage_state: dict[str, int], loop_result: Any) -> dict:
+    """Build the attempt metrics payload from usage counters and loop result."""
+    metrics = {
+        "input_tokens": usage_state["input"],
+        "output_tokens": usage_state["output"],
+        "total_tokens": usage_state["input"] + usage_state["output"],
+    }
+    if loop_result.metrics.get("claim_validation"):
+        metrics["claim_validation"] = loop_result.metrics["claim_validation"]
+    return metrics
+
+
+def _emit_goal_event(
+    event_bus: Any, session_id: str, data: dict[str, Any], cfg: Optional[LLMConfig]
+) -> None:
+    """Detect goal tool results and emit the full-snapshot goal event.
+
+    When create_goal / add_evidence / complete_goal tools execute, emit ONE
+    full-snapshot ``goal_updated`` SSE event (built by
+    core/goal/events.build_goal_updated_payload). The event drives the
+    frontend panel AND is persisted by the projector as a
+    message_type='goal' message that enters the LLM context (see
+    docs/goal-events-panel-link.md).
+    """
+    import json as _json
+
+    tool_name = data.get("name", "")
+    change_type_map = {
+        "create_goal": "create",
+        "add_evidence": "evidence",
+        "complete_goal": "complete",
+    }
+    change_type = change_type_map.get(tool_name)
+    if change_type is None:
+        return
+
+    result_raw = data.get("result", "")
+    try:
+        result = _json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+    except (_json.JSONDecodeError, TypeError, ValueError):
+        return
+
+    if not isinstance(result, dict) or result.get("status") != "ok":
+        return
+
+    from ...core.goal import GoalStore
+    from ...core.goal.events import build_goal_updated_payload
+
+    truncate = 100
+    if cfg is not None and cfg.compact_config is not None:
+        truncate = cfg.compact_config.goal_evidence_truncate_chars
+
+    payload = None
+    try:
+        with GoalStore() as store:
+            payload = build_goal_updated_payload(
+                session_id,
+                store,
+                change_type,
+                truncate_chars=truncate,
+                evidence_text=result.get("text") if change_type == "evidence" else None,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("goal event build failed", exc_info=True)
+
+    if payload is not None:
+        event_bus.emit(session_id, "goal_updated", payload)
+
+
+class _LoopEventForwarder:
+    """AgentLoop on_event adapter for the B4 event-sourced path.
+
+    Two jobs per event:
+    1. Accumulate the part protocol (text/tool/thinking) into
+       ``accumulated_parts`` for the assistant message body.
+    2. Forward the event onto EventBusV2 (event_log + SSE); tool/usage
+       data ride along in ``event.data`` so the projector can merge them
+       into the message parts.
+
+    Also accumulates llm_usage tokens into attempt-local metrics so the
+    frontend can show context usage progress.
+    """
+
+    def __init__(
+        self,
+        service: "SessionService",
+        *,
+        attempt: Attempt,
+        accumulated_parts: list[dict[str, Any]],
+        event_bus: Any,
+        cfg: Optional[LLMConfig],
+    ) -> None:
+        self.service = service
+        self.attempt = attempt
+        self.accumulated_parts = accumulated_parts
+        self.event_bus = event_bus
+        self.cfg = cfg
+        self._usage_lock = threading.Lock()
+        self._usage_state: dict[str, int] = {"input": 0, "output": 0, "context_used": 0}
+
+    @property
+    def usage_state(self) -> dict[str, int]:
+        return self._usage_state
+
+    def __call__(self, event_type: str, data: dict[str, Any]) -> None:
+        # Accumulate parts for persistence
+        _accumulate_part(self.accumulated_parts, event_type, data)
+
+        # B4: tool result persistence is handled by EventBusV2 →
+        # projector.flush(). The tool_result event lands in event_log,
+        # the projector merges it into the assistant message's tool_call
+        # part, and flush writes the updated message to messages table.
+        # No direct DB write needed here.
+
+        # Track token usage so the frontend can show a context usage bar.
+        # llm_usage is emitted by AgentLoop after each LLM call (see
+        # core/agent/loop.py).
+        if event_type == "llm_usage" and isinstance(data, dict):
+            with self._usage_lock:
+                # OpenAI-compatible providers use input_tokens /
+                # output_tokens; some send prompt_tokens /
+                # completion_tokens. Accept both.
+                inc_in = int(data.get("input_tokens") or data.get("prompt_tokens") or 0)
+                inc_out = int(data.get("output_tokens") or data.get("completion_tokens") or 0)
+                self._usage_state["input"] += inc_in
+                self._usage_state["output"] += inc_out
+                # context_used = the size of the prompt actually sent to the
+                # model on the most recent LLM call. Overwrite (not
+                # accumulate) — a fresh call re-sends the whole context.
+                prompt_used = int(data.get("prompt_tokens") or data.get("input_tokens") or 0)
+                if prompt_used > 0:
+                    self._usage_state["context_used"] = prompt_used
+            total = self._usage_state["input"] + self._usage_state["output"]
+            # Emit a session_total_tokens event so the frontend has an
+            # authoritative figure (not the per-call delta).
+            self.event_bus.emit(
+                self.attempt.session_id,
+                "session_total_tokens",
+                {
+                    "input_tokens": self._usage_state["input"],
+                    "output_tokens": self._usage_state["output"],
+                    "total_tokens": total,
+                    "context_used": self._usage_state["context_used"],
+                    "message_id": self.attempt.message_id,
+                    "attempt_id": self.attempt.attempt_id,
+                },
+            )
+
+        # Add attempt/message context
+        data = dict(data)
+        data.setdefault("attempt_id", self.attempt.attempt_id)
+        data.setdefault("message_id", self.attempt.message_id)
+
+        # Detect goal tool results → emit goal SSE events for frontend
+        if event_type == "tool_result":
+            _emit_goal_event(self.event_bus, self.attempt.session_id, data, self.cfg)
+
+        self.event_bus.emit(self.attempt.session_id, event_type, data)
+
+
 def _bootstrap_workspace(workspace: Path) -> None:
     """Ensure workspace has the required directory structure.
 
@@ -56,6 +216,64 @@ def _bootstrap_workspace(workspace: Path) -> None:
             init_db(workspace)
         except Exception as exc:
             logger.warning("Failed to init DuckDB: %s", exc)
+
+
+# Read-only tools allowed in plan mode (agent may observe but not modify).
+_PLAN_READONLY_TOOLS = frozenset({
+    "read_file", "list_files", "search_code", "search_file",
+    "get_file_info", "web_search", "web_fetch", "read_url",
+    "read_document", "think", "tool_help",
+    "list_goals", "get_goal_status",
+    "list_history", "git_diff", "factor_analysis",
+    "pattern_recognition", "list_skills", "load_skill",
+    "factor_cross_sectional_analysis", "factor_quintile_returns",
+    "factor_ic_decay", "factor_turnover",
+    "strategy_compare", "drawdown_analysis", "benchmark_comparison",
+})
+
+
+def _plan_mode_allowed_tools(mode: str) -> Optional[list[str]]:
+    """Restrict to read-only tools in plan mode; otherwise no restriction."""
+    if mode == "plan":
+        return list(_PLAN_READONLY_TOOLS)
+    return None
+
+
+def _thinking_instructions(thinking: str) -> str:
+    """Build system-prompt instructions for the thinking mode.
+
+    "auto" = no injection, let the provider decide.
+    """
+    if thinking == "off":
+        return (
+            "\n\nIMPORTANT: Do NOT use thinking/reasoning blocks. "
+            "Respond directly with your analysis."
+        )
+    if thinking == "on":
+        return (
+            "\n\nIMPORTANT: Use extended thinking for complex analysis. "
+            "Show your reasoning process in <think> blocks."
+        )
+    return ""
+
+
+def _resolve_loop_prompt(system_prompt: Optional[str], persona: Optional[str]):
+    """Resolve the final system prompt and loop role.
+
+    Unknown persona → fall back to the caller-provided prompt (empty string
+    is treated as "no override").
+    """
+    final_prompt = system_prompt
+    loop_role = "chat"
+    if system_prompt is None and persona:
+        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
+
+        if persona in PromptBuilderFactory.list_roles():
+            persona_prompt = PromptBuilderFactory.get(persona).build_system_prompt(persona, {})
+            if persona_prompt:
+                final_prompt = persona_prompt
+                loop_role = persona
+    return final_prompt, loop_role
 
 
 class SessionService:
@@ -752,165 +970,16 @@ class SessionService:
         if cfg and model:
             cfg.model = model
 
-        # Build AgentLoop (Phase 6: factory unifies the 3 chat-mode call sites).
-        # Caller-provided system_prompt wins (passed via system_prompt_override);
-        # otherwise factory renders chat.md with the real workspace path (P3).
-        workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
-
-        # Bootstrap workspace if incomplete
-        _bootstrap_workspace(workspace_path)
-
-        # Event callback: forward AgentLoop events → EventBus.
-        # Each event carries message_id so SSE clients can correlate.
-        # Also accumulates llm_usage tokens into attempt-local metrics so
-        # the frontend can show context usage progress.
-        usage_lock = threading.Lock()
-        usage_state: dict[str, int] = {"input": 0, "output": 0, "context_used": 0}
-
-        def _maybe_emit_goal_event(
-            event_bus: Any, session_id: str, data: dict[str, Any]
-        ) -> None:
-            """Detect goal tool results and emit the full-snapshot goal event.
-
-            When create_goal / add_evidence / complete_goal tools execute,
-            emit ONE full-snapshot ``goal_updated`` SSE event (built by
-            core/goal/events.build_goal_updated_payload). The event
-            drives the frontend panel AND is persisted by the projector
-            as a message_type='goal' message that enters the LLM context
-            (see docs/goal-events-panel-link.md).
-            """
-            import json as _json
-
-            tool_name = data.get("name", "")
-            change_type_map = {
-                "create_goal": "create",
-                "add_evidence": "evidence",
-                "complete_goal": "complete",
-            }
-            change_type = change_type_map.get(tool_name)
-            if change_type is None:
-                return
-
-            result_raw = data.get("result", "")
-            try:
-                result = (
-                    _json.loads(result_raw)
-                    if isinstance(result_raw, str)
-                    else result_raw
-                )
-            except (_json.JSONDecodeError, TypeError, ValueError):
-                return
-
-            if not isinstance(result, dict) or result.get("status") != "ok":
-                return
-
-            from ...core.goal import GoalStore
-            from ...core.goal.events import build_goal_updated_payload
-
-            truncate = 100
-            if cfg is not None and cfg.compact_config is not None:
-                truncate = cfg.compact_config.goal_evidence_truncate_chars
-
-            payload = None
-            try:
-                with GoalStore() as store:
-                    payload = build_goal_updated_payload(
-                        session_id,
-                        store,
-                        change_type,
-                        truncate_chars=truncate,
-                        evidence_text=result.get("text") if change_type == "evidence" else None,
-                    )
-            except Exception:  # noqa: BLE001
-                logger.warning("goal event build failed", exc_info=True)
-
-            if payload is not None:
-                event_bus.emit(session_id, "goal_updated", payload)
-
-        def event_callback(event_type: str, data: dict[str, Any]) -> None:
-            """AgentLoop on_event adapter for the B4 event-sourced path.
-
-            Two jobs per event:
-            1. Accumulate the part protocol (text/tool/thinking) into
-               ``accumulated_parts`` for the assistant message body.
-            2. Forward the event onto EventBusV2 (event_log + SSE);
-               tool/usage data ride along in ``event.data`` so the
-               projector can merge them into the message parts.
-
-            Mirrors the legacy ``chat.py::_run_agent_loop_background``
-            on_event closure; keep both in sync until that path is
-            removed (see the TODO there).
-            """
-            # Accumulate parts for persistence
-            _accumulate_part(accumulated_parts, event_type, data)
-
-            # B4: tool result persistence is handled by EventBusV2 →
-            # projector.flush(). The tool_result event lands in event_log,
-            # the projector merges it into the assistant message's tool_call
-            # part, and flush writes the updated message to messages table.
-            # No direct DB write needed here.
-
-            # Track token usage so the frontend can show a context
-            # usage bar. llm_usage is emitted by AgentLoop after each
-            # LLM call (see core/agent/loop.py).
-            if event_type == "llm_usage" and isinstance(data, dict):
-                with usage_lock:
-                    # OpenAI-compatible providers use input_tokens /
-                    # output_tokens; some send prompt_tokens /
-                    # completion_tokens. Accept both.
-                    inc_in = int(
-                        data.get("input_tokens")
-                        or data.get("prompt_tokens")
-                        or 0
-                    )
-                    inc_out = int(
-                        data.get("output_tokens")
-                        or data.get("completion_tokens")
-                        or 0
-                    )
-                    usage_state["input"] += inc_in
-                    usage_state["output"] += inc_out
-                    # context_used = the size of the prompt actually sent
-                    # to the model on the most recent LLM call. This is the
-                    # current context-window occupancy (bounded; drops after
-                    # compaction), unlike total_tokens which is cumulative
-                    # spend. Overwrite (not accumulate) — a fresh call
-                    # re-sends the whole context.
-                    prompt_used = int(
-                        data.get("prompt_tokens")
-                        or data.get("input_tokens")
-                        or 0
-                    )
-                    if prompt_used > 0:
-                        usage_state["context_used"] = prompt_used
-                total = usage_state["input"] + usage_state["output"]
-                # Emit a session_total_tokens event so the frontend
-                # has an authoritative figure (not the per-call delta).
-                self.event_bus.emit(
-                    attempt.session_id,
-                    "session_total_tokens",
-                    {
-                        "input_tokens": usage_state["input"],
-                        "output_tokens": usage_state["output"],
-                        "total_tokens": total,
-                        "context_used": usage_state["context_used"],
-                        "message_id": attempt.message_id,
-                        "attempt_id": attempt.attempt_id,
-                    },
-                )
-
-            # Add attempt/message context
-            data = dict(data)
-            data.setdefault("attempt_id", attempt.attempt_id)
-            data.setdefault("message_id", attempt.message_id)
-
-            # Detect goal tool results → emit goal SSE events for frontend
-            if event_type == "tool_result":
-                _maybe_emit_goal_event(
-                    self.event_bus, attempt.session_id, data
-                )
-
-            self.event_bus.emit(attempt.session_id, event_type, data)
+        # Event callback: forward AgentLoop events → EventBus. Each event
+        # carries message_id so SSE clients can correlate; llm_usage tokens
+        # accumulate into attempt-local metrics (see _LoopEventForwarder).
+        forwarder = _LoopEventForwarder(
+            self,
+            attempt=attempt,
+            accumulated_parts=accumulated_parts,
+            event_bus=self.event_bus,
+            cfg=cfg,
+        )
 
         # Build AgentLoop (Phase 6: via shared factory)
         workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
@@ -919,53 +988,14 @@ class SessionService:
         _bootstrap_workspace(workspace_path)
 
         # ── Plan mode: restrict to read-only tools ────────────────────
-        _PLAN_READONLY_TOOLS = {
-            "read_file", "list_files", "search_code", "search_file",
-            "get_file_info", "web_search", "web_fetch", "read_url",
-            "read_document", "think", "tool_help",
-            "list_goals", "get_goal_status",
-            "list_history", "git_diff", "factor_analysis",
-            "pattern_recognition", "list_skills", "load_skill",
-            "factor_cross_sectional_analysis", "factor_quintile_returns",
-            "factor_ic_decay", "factor_turnover",
-            "strategy_compare", "drawdown_analysis", "benchmark_comparison",
-        }
-        allowed_tools: list[str] | None = None
-        if mode == "plan":
-            allowed_tools = list(_PLAN_READONLY_TOOLS)
+        allowed_tools = _plan_mode_allowed_tools(mode)
 
         # ── Thinking parameter injection ──────────────────────────────
-        # Inject thinking instructions into system prompt based on mode
-        thinking_instructions = ""
-        if thinking == "off":
-            thinking_instructions = (
-                "\n\nIMPORTANT: Do NOT use thinking/reasoning blocks. "
-                "Respond directly with your analysis."
-            )
-        elif thinking == "on":
-            thinking_instructions = (
-                "\n\nIMPORTANT: Use extended thinking for complex analysis. "
-                "Show your reasoning process in <think> blocks."
-            )
-        # "auto" = no injection, let provider decide
+        thinking_instructions = _thinking_instructions(thinking)
 
         # Persona override: when a valid persona is requested, render its
         # system prompt and use it in place of the default chat prompt.
-        # Unknown persona → fall back to the caller-provided/default chat
-        # prompt (empty string is treated as "no override").
-        final_prompt = system_prompt
-        loop_role = "chat"
-        if system_prompt is None and persona:
-            from strategy_research.core.agent.prompt_builder import (
-                PromptBuilderFactory,
-            )
-            if persona in PromptBuilderFactory.list_roles():
-                persona_prompt = PromptBuilderFactory.get(persona).build_system_prompt(
-                    persona, {}
-                )
-                if persona_prompt:
-                    final_prompt = persona_prompt
-                    loop_role = persona
+        final_prompt, loop_role = _resolve_loop_prompt(system_prompt, persona)
 
         # Append thinking instructions to system prompt
         if thinking_instructions and final_prompt is not None:
@@ -976,7 +1006,7 @@ class SessionService:
             session_id=attempt.session_id,
             role=loop_role,
             workspace=workspace_path,  # P3: real workspace path for {workspace}
-            on_event=event_callback,
+            on_event=forwarder,
             event_bus=self.event_bus,
             max_iterations=max_iterations,
             system_prompt_override=final_prompt,  # caller-provided wins
@@ -991,52 +1021,10 @@ class SessionService:
         # turn without tool calls), inject a "keep going" turn and rerun —
         # bounded by SR_ORCHESTRATOR_MAX_CONTINUES (default 10) so a
         # pathological loop always terminates normally.
-        from strategy_research.core.workflow.orchestrate_guard import (
-            continue_instruction,
-            looks_like_question,
-            max_continues,
-        )
-
-        is_dag_session = attempt.session_id.startswith("dag:")
-        retries = 0
-        asked_user = False
-        guard_cap = max_continues() if is_dag_session else 0
-        while True:
-            try:
-                loop_result = await agent.arun(attempt.prompt, history=history)
-            except Exception as exc:
-                logger.exception("AgentLoop.arun failed")
-                return {"status": "failed", "reason": str(exc), "content": ""}
-
-            _final_answer = loop_result.answer or ""
-            asked_user = (
-                is_dag_session
-                and loop_result.tool_calls_made == 0
-                and looks_like_question(_final_answer)
-            )
-            if not asked_user or retries >= guard_cap:
-                break
-            logger.info(
-                "[DAG-GUARD] orchestrator answered with a question (retry %d/%d), continuing",
-                retries + 1,
-                guard_cap,
-            )
-            # Feed the LLM its own answer plus the continuation instruction
-            # as history so the next attempt sees the full conversation.
-            history = list(history) + [
-                {"role": "assistant", "content": _final_answer},
-                {"role": "user", "content": continue_instruction()},
-            ]
-            retries += 1
-
-        logger.debug(
-            "[DIAG] AgentLoop result: answer=%.200r finished_reason=%s error=%s iterations=%d tool_calls=%d",
-            loop_result.answer[:200] if loop_result.answer else "",
-            loop_result.finished_reason,
-            loop_result.error,
-            loop_result.iterations,
-            loop_result.tool_calls_made,
-        )
+        try:
+            loop_result, asked_user, retries = await self._run_with_guard(agent, attempt, history)
+        except RuntimeError as exc:
+            return {"status": "failed", "reason": str(exc), "content": ""}
 
         return {
             "status": "success" if loop_result.answer else "empty",
@@ -1048,17 +1036,66 @@ class SessionService:
             "asked_user": asked_user,
             "continuations": retries,
             "error": loop_result.error,
-            "metrics": {
-                "input_tokens": usage_state["input"],
-                "output_tokens": usage_state["output"],
-                "total_tokens": usage_state["input"] + usage_state["output"],
-                **(
-                    {"claim_validation": loop_result.metrics.get("claim_validation")}
-                    if loop_result.metrics.get("claim_validation")
-                    else {}
-                ),
-            },
+            "metrics": _build_attempt_metrics(forwarder.usage_state, loop_result),
         }
+
+    async def _run_with_guard(self, agent: Any, attempt: Attempt, history: list[dict[str, Any]]):
+        """Run ``agent.arun`` with the DAG-orchestrator continuation guard.
+
+        When the LLM ends a turn with a question instead of driving the DAG
+        loop (AgentLoop breaks on any turn without tool calls), inject a
+        "keep going" turn and rerun — bounded by
+        ``SR_ORCHESTRATOR_MAX_CONTINUES`` (default 10) so a pathological loop
+        always terminates normally.
+
+        Returns ``(loop_result, asked_user, retries)`` on success; raises
+        ``RuntimeError`` on AgentLoop failure (caller converts to a failed
+        result dict).
+        """
+        from strategy_research.core.workflow.orchestrate_guard import (
+            continue_instruction,
+            looks_like_question,
+            max_continues,
+        )
+
+        is_dag_session = attempt.session_id.startswith("dag:")
+        retries = 0
+        guard_cap = max_continues() if is_dag_session else 0
+        while True:
+            try:
+                loop_result = await agent.arun(attempt.prompt, history=history)
+            except Exception as exc:
+                logger.exception("AgentLoop.arun failed")
+                raise RuntimeError(str(exc)) from exc
+
+            final_answer = loop_result.answer or ""
+            asked_user = (
+                is_dag_session
+                and loop_result.tool_calls_made == 0
+                and looks_like_question(final_answer)
+            )
+            if not asked_user or retries >= guard_cap:
+                logger.debug(
+                    "[DIAG] AgentLoop result: answer=%.200r finished_reason=%s error=%s iterations=%d tool_calls=%d",
+                    loop_result.answer[:200] if loop_result.answer else "",
+                    loop_result.finished_reason,
+                    loop_result.error,
+                    loop_result.iterations,
+                    loop_result.tool_calls_made,
+                )
+                return loop_result, asked_user, retries
+            logger.info(
+                "[DAG-GUARD] orchestrator answered with a question (retry %d/%d), continuing",
+                retries + 1,
+                guard_cap,
+            )
+            # Feed the LLM its own answer plus the continuation instruction
+            # as history so the next attempt sees the full conversation.
+            history = list(history) + [
+                {"role": "assistant", "content": final_answer},
+                {"role": "user", "content": continue_instruction()},
+            ]
+            retries += 1
 
     async def _run_test_script(
         self,
