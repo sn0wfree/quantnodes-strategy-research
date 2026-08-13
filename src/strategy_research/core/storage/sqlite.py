@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
