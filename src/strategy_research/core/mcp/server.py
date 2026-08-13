@@ -14,6 +14,124 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 
+def _serialize_value(val: Any) -> Any:
+    """Convert a pandas/numpy value to a JSON-safe scalar."""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    if hasattr(val, "item"):
+        return val.item()
+    return val
+
+
+def _df_to_records(rows: Any) -> list[dict]:
+    """Convert a DataFrame (with reset index) into JSON-safe record dicts."""
+    records = []
+    for _, row in rows.iterrows():
+        record = {}
+        for col in rows.columns:
+            record[col] = _serialize_value(row[col])
+        records.append(record)
+    return records
+
+
+def _package_fetch_result(data: dict, max_rows: int) -> tuple[dict, int, bool]:
+    """Convert fetched DataFrames into JSON-safe records with truncation."""
+    result_data = {}
+    total_rows = 0
+    truncated = False
+    for code, df in data.items():
+        if df is None or df.empty:
+            result_data[code] = []
+            continue
+        rows = df.tail(max_rows).reset_index()
+        n_rows = len(rows)
+        total_rows += n_rows
+        if n_rows > max_rows:
+            truncated = True
+        result_data[code] = _df_to_records(rows)
+    return result_data, total_rows, truncated
+
+
+def _handle_get_market_data(
+    codes: list[str] | None,
+    start_date: str,
+    end_date: str,
+    interval: str,
+    source: str | None,
+    max_rows: int,
+    force_refresh: bool,
+) -> str:
+    """Handle the get_market_data MCP tool call."""
+    from ..data_source.base import validate_date_range
+    from ..data_source.registry import NoAvailableSourceError
+
+    if not codes:
+        return json.dumps({"status": "error", "error": "codes is required"}, ensure_ascii=False)
+    if not start_date or not end_date:
+        return json.dumps({"status": "error", "error": "start_date and end_date are required"}, ensure_ascii=False)
+
+    try:
+        validate_date_range(start_date, end_date)
+    except ValueError as exc:
+        return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
+
+    try:
+        loader, effective_source = _resolve_market_loader(source, codes)
+        if loader is None:
+            return json.dumps({
+                "status": "error",
+                "error": f"source '{source}' is not available",
+            }, ensure_ascii=False)
+
+        data = loader.fetch(codes, start_date, end_date, interval=interval,
+                           force_refresh=force_refresh)
+
+        result_data, total_rows, truncated = _package_fetch_result(
+            data, max_rows
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "data": result_data,
+            "meta": {
+                "codes": codes,
+                "start_date": start_date,
+                "end_date": end_date,
+                "interval": interval,
+                "source": effective_source,
+                "total_rows": total_rows,
+                "max_rows_per_code": max_rows,
+                "truncated": truncated,
+            },
+        }, ensure_ascii=False, default=str)
+
+    except NoAvailableSourceError as exc:
+        return json.dumps({"status": "error", "error": f"no available data source: {exc}"}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"status": "error", "error": f"fetch failed: {exc}"}, ensure_ascii=False)
+
+
+def _resolve_market_loader(
+    source: str | None, codes: list[str]
+) -> tuple[Any | None, str]:
+    """Resolve the data loader for an explicit source or auto market detection.
+
+    Returns ``(loader, effective_source)``; ``(None, "")`` when an explicit
+    source is registered but unavailable.
+    """
+    from ..data_source.registry import LOADER_REGISTRY, resolve_loader
+    from ..data_source.utils import detect_market
+
+    if source and source in LOADER_REGISTRY:
+        loader = LOADER_REGISTRY[source]()
+        if not loader.is_available():
+            return None, ""
+        return loader, source
+    market = detect_market(codes[0])
+    loader = resolve_loader(market)
+    return loader, loader.name
+
+
 class MCPTool:
     """An MCP tool definition."""
 
@@ -638,82 +756,9 @@ class MCPServer:
             force_refresh: bool = False,
             **kwargs: Any,
         ) -> str:
-            from ..data_source.base import validate_date_range
-            from ..data_source.registry import (
-                LOADER_REGISTRY,
-                NoAvailableSourceError,
-                resolve_loader,
+            return _handle_get_market_data(
+                codes, start_date, end_date, interval, source, max_rows, force_refresh
             )
-            from ..data_source.utils import detect_market
-
-            if not codes:
-                return json.dumps({"status": "error", "error": "codes is required"}, ensure_ascii=False)
-            if not start_date or not end_date:
-                return json.dumps({"status": "error", "error": "start_date and end_date are required"}, ensure_ascii=False)
-            try:
-                validate_date_range(start_date, end_date)
-            except ValueError as exc:
-                return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
-
-            try:
-                if source and source in LOADER_REGISTRY:
-                    loader = LOADER_REGISTRY[source]()
-                    if not loader.is_available():
-                        return json.dumps({"status": "error", "error": f"source '{source}' is not available"}, ensure_ascii=False)
-                    effective_source = source
-                else:
-                    market = detect_market(codes[0])
-                    loader = resolve_loader(market)
-                    effective_source = loader.name
-
-                data = loader.fetch(codes, start_date, end_date, interval=interval,
-                                   force_refresh=force_refresh)
-
-                result_data = {}
-                total_rows = 0
-                truncated = False
-                for code, df in data.items():
-                    if df is None or df.empty:
-                        result_data[code] = []
-                        continue
-                    rows = df.tail(max_rows).reset_index()
-                    n_rows = len(rows)
-                    total_rows += n_rows
-                    if n_rows > max_rows:
-                        truncated = True
-                    records = []
-                    for _, row in rows.iterrows():
-                        record = {}
-                        for col in rows.columns:
-                            val = row[col]
-                            if hasattr(val, "isoformat"):
-                                record[col] = val.isoformat()
-                            elif hasattr(val, "item"):
-                                record[col] = val.item()
-                            else:
-                                record[col] = val
-                        records.append(record)
-                    result_data[code] = records
-
-                return json.dumps({
-                    "status": "ok",
-                    "data": result_data,
-                    "meta": {
-                        "codes": codes,
-                        "start_date": start_date,
-                        "end_date": end_date,
-                        "interval": interval,
-                        "source": effective_source,
-                        "total_rows": total_rows,
-                        "max_rows_per_code": max_rows,
-                        "truncated": truncated,
-                    },
-                }, ensure_ascii=False, default=str)
-
-            except NoAvailableSourceError as exc:
-                return json.dumps({"status": "error", "error": f"no available data source: {exc}"}, ensure_ascii=False)
-            except Exception as exc:
-                return json.dumps({"status": "error", "error": f"fetch failed: {exc}"}, ensure_ascii=False)
 
         def list_data_sources(**kwargs: Any) -> str:
             from ..data_source.registry import LOADER_REGISTRY, _ensure_registered
