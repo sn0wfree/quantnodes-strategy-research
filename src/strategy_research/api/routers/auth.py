@@ -20,6 +20,12 @@ class UserLogin(BaseModel):
     password: str
 
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    display_name: str | None = None
+
+
 class ChangePassword(BaseModel):
     old_password: str
     new_password: str
@@ -32,6 +38,12 @@ class TokenResponse(BaseModel):
 
 
 # ── Token helpers (signed HMAC tokens — see api/auth_tokens.py) ──
+
+
+def _registration_enabled() -> bool:
+    """Registration is opt-in (``SR_ALLOW_REGISTRATION=1``); off by default."""
+    import os
+    return os.environ.get("SR_ALLOW_REGISTRATION", "").lower() in ("1", "true", "yes")
 
 
 def _hash_password(password: str) -> str:
@@ -83,17 +95,38 @@ def _get_user_db():
 
 # ── Endpoints ────────────────────────────────────────────────
 
-# Registration endpoint — disabled (code kept for manual DB writes)
-# To register a user manually:
+# Registration endpoint — disabled by default (opt-in via
+# SR_ALLOW_REGISTRATION=1, used by E2E tests / single-user setups).
+# Manual DB insertion alternative:
 #   python3 -c "
 #   from strategy_research.api.user_db import get_user_db, hash_password
 #   db = get_user_db()
 #   db.create_user('myuser', 'My User', hash_password('mypassword'))
 #   "
 @router.post("/register", response_model=TokenResponse)
-async def register():
-    """Registration is disabled. Use manual DB insertion."""
-    raise HTTPException(status_code=403, detail="Registration is disabled")
+async def register(body: UserCreate):
+    """Register a new user (opt-in via SR_ALLOW_REGISTRATION=1)."""
+    if not _registration_enabled():
+        raise HTTPException(status_code=403, detail="Registration is disabled")
+
+    db = _get_user_db()
+    if db.get_user_by_username(body.username):
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    user = db.create_user(
+        body.username,
+        body.display_name or body.username,
+        _hash_password(body.password),
+    )
+    token = _create_token(user["id"])
+    return TokenResponse(
+        access_token=token,
+        user={
+            "id": user["id"],
+            "username": user["username"],
+            "display_name": user["display_name"],
+        },
+    )
 
 
 @router.post("/login", response_model=TokenResponse)

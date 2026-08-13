@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `workflow_orchestrator` 补 common 层引用。
 - swarm worker / projector / run_backtest 测试同步 v2 行为
   （ctx 注入、compaction 标记保留原消息、结构化错误 envelope）。
+- `auth.py`：注册端点恢复为可配置开关
+  （`SR_ALLOW_REGISTRATION=1` 开启，默认仍禁用；E2E 测试启用）。
+- `conftest_e2e.py`：前端构建检测 E2E hooks（`VITE_E2E=1`），缺失自动重建。
+- `test_webui_e2e_playwright.py`：适配 Chat 路由 `/chat`（`/` 现为 Dashboard）、
+  自动创建会话行为、发送按钮新选择器。
 
 ## [0.6.0] - 2026-07-28
 
