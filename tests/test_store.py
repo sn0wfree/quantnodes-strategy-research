@@ -97,6 +97,9 @@ def _setup_full_db(db_path: Path) -> None:
                 error TEXT,
                 message_id TEXT,
                 persona TEXT,
+                mode TEXT NOT NULL DEFAULT 'build',
+                model_override TEXT,
+                thinking TEXT NOT NULL DEFAULT 'auto',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
         """)

@@ -118,6 +118,81 @@ def test_malformed_dag_param():
     assert r["errors"]
 
 
+# ── structural robustness (LLM serializes nested values as strings) ──
+
+
+def test_string_node_element_readable_error():
+    """A bare-string nodes[] element must yield a readable error, not a
+    raw AttributeError ('str' object has no attribute 'get')."""
+    r = _submit(_dag(nodes=["check", "diagnose"], edges=[]))
+    assert r["applied"] is False
+    assert any("nodes[0] 必须是对象" in e for e in r["errors"])
+    assert "AttributeError" not in json.dumps(r)
+
+
+def test_string_edge_element_readable_error():
+    r = _submit(_dag(
+        nodes=[{"id": "a", "type": "tool", "label": "A", "config": {"tool": "x"}}],
+        edges=["a->b"],
+    ))
+    assert r["applied"] is False
+    assert any("edges[0] 必须是对象" in e for e in r["errors"])
+
+
+def test_string_config_normalized_to_dict():
+    """config serialized as a JSON string is salvaged, then validated."""
+    r = _submit(_dag(
+        nodes=[
+            {"id": "check", "type": "tool", "label": "数据检查",
+             "config": '{"tool": "check_data", "params": {"cols": ["close"]}}'},
+        ],
+        edges=[],
+    ))
+    assert r["applied"] is True
+
+
+def test_json_string_node_salvaged():
+    r = _submit(_dag(
+        nodes=[
+            '{"id": "approve", "type": "approval", "label": "人工审阅", '
+            '"config": {"message": "审阅诊断结论"}}',
+        ],
+        edges=[],
+    ))
+    assert r["applied"] is True
+
+
+def test_invalid_string_config_readable_error():
+    r = _submit(_dag(
+        nodes=[{"id": "a", "type": "tool", "label": "A", "config": "not-json{"}],
+        edges=[],
+    ))
+    assert r["applied"] is False
+    assert any("config 不是合法 JSON" in e for e in r["errors"])
+
+
+def test_non_object_config_readable_error():
+    r = _submit(_dag(
+        nodes=[{"id": "a", "type": "tool", "label": "A", "config": [1, 2]}],
+        edges=[],
+    ))
+    assert r["applied"] is False
+    assert any("config 必须是对象" in e for e in r["errors"])
+
+
+def test_deeply_malformed_payload_never_raises():
+    """Every structural oddity returns applied:false — never a raw crash."""
+    tool = SubmitDagStepTool()
+    for bad in (
+        {"nodes": [42], "edges": []},
+        {"nodes": [{"id": "a", "type": "tool", "label": "A", "config": None}], "edges": [{}]},
+        {"nodes": {"item": [{"id": "a", "type": "tool", "label": "A"}]}, "edges": []},
+    ):
+        r = json.loads(tool.execute(None, dag=bad))
+        assert r["applied"] is False
+        assert isinstance(r["errors"], list) and r["errors"]
+
+
 def test_prompt_builder_registered():
     from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
 
