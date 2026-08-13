@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
-  ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen, User,
-  Target, Activity, RotateCcw, BarChart3, BookOpen,
+  ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
+  Target, Activity, RotateCcw, BarChart3, BookOpen, Info,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyDirectivesResponse } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
@@ -264,24 +264,6 @@ export function StudyDetailPage() {
         />
       </div>
 
-      {/* Meta strip */}
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-800/60 bg-slate-900/40 px-4 py-2 text-[10px] text-slate-500">
-        <span className="inline-flex min-w-0 items-center gap-1.5 truncate" title={workspacePath}>
-          <User className="h-3 w-3 flex-shrink-0 text-slate-600" />
-          <span className="truncate">{workspacePath || '—'}</span>
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Clock className="h-3 w-3 text-slate-600" />
-          更新: {formatDateTime(summary.updated_at)}
-        </span>
-        {summary.completed_at && (
-          <span className="inline-flex items-center gap-1.5">
-            <Clock className="h-3 w-3 text-slate-600" />
-            完成: {formatDateTime(summary.completed_at)}
-          </span>
-        )}
-      </div>
-
       {/* Body */}
       <main className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="min-w-0 space-y-4 xl:col-span-2">
@@ -304,6 +286,43 @@ export function StudyDetailPage() {
         </div>
 
         <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
+          {/* Task info */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              <Info className="h-3 w-3" /> 任务信息
+            </div>
+            <div className="space-y-1.5 text-[10px]">
+              <div className="flex items-center gap-2">
+                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                  <FolderOpen className="h-3 w-3" /> 工作区
+                </span>
+                <span className="min-w-0 truncate font-mono text-slate-300" title={workspacePath}>
+                  {workspacePath || '—'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                  <Clock className="h-3 w-3" /> 创建
+                </span>
+                <span className="font-mono text-slate-300">{formatDateTime(summary.created_at)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                  <Clock className="h-3 w-3" /> 更新
+                </span>
+                <span className="font-mono text-slate-300">{formatDateTime(summary.updated_at)}</span>
+              </div>
+              {summary.completed_at && (
+                <div className="flex items-center gap-2">
+                  <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                    <Clock className="h-3 w-3" /> 完成
+                  </span>
+                  <span className="font-mono text-slate-300">{formatDateTime(summary.completed_at)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Directive input */}
           {(canPause || canResume) && (
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft space-y-2">

@@ -39,7 +39,7 @@ vi.mock('lucide-react', () => {
     ArrowRight: Stub, Search: Stub, MessageSquare: Stub,
     Settings: Stub, Workflow: Stub, BookOpen: Stub,
     Moon: Stub, Sun: Stub, Network: Stub, Sigma: Stub, Library: Stub, LogOut: Stub,
-    Circle: Stub, CheckCircle2: Stub, SlidersHorizontal: Stub,
+    Circle: Stub, CheckCircle2: Stub, SlidersHorizontal: Stub, Info: Stub,
   }
 })
 
