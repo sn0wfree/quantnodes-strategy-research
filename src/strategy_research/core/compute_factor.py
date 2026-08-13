@@ -902,36 +902,42 @@ def _tokenize(expr: str) -> list[Token]:
             continue
 
         # 运算符和标点
-        if ch == '(':
-            tokens.append(Token(TOKEN_LPAREN, ch))
-            i += 1
-        elif ch == ')':
-            tokens.append(Token(TOKEN_RPAREN, ch))
-            i += 1
-        elif ch == ',':
-            tokens.append(Token(TOKEN_COMMA, ch))
-            i += 1
-        elif ch == '+':
-            tokens.append(Token(TOKEN_PLUS, ch))
-            i += 1
-        elif ch == '-':
-            tokens.append(Token(TOKEN_MINUS, ch))
-            i += 1
-        elif ch == '*':
-            if i + 1 < n and expr[i + 1] == '*':
-                tokens.append(Token(TOKEN_POWER, '**'))
-                i += 2
-            else:
-                tokens.append(Token(TOKEN_STAR, ch))
-                i += 1
-        elif ch == '/':
-            tokens.append(Token(TOKEN_SLASH, ch))
-            i += 1
-        else:
-            raise ValueError(f"未知字符: {ch!r} (位置 {i})")
+        tok = _tokenize_operator(expr, i)
+        if tok is not None:
+            token, consumed = tok
+            tokens.append(token)
+            i += consumed
+            continue
+        raise ValueError(f"未知字符: {ch!r} (位置 {i})")
 
     tokens.append(Token(TOKEN_EOF, ""))
     return tokens
+
+
+def _tokenize_operator(expr: str, i: int) -> tuple[Token, int] | None:
+    """Tokenize a single operator/punctuation at position ``i``.
+
+    Returns ``(token, consumed_chars)`` or None if ``expr[i]`` is not
+    an operator character.
+    """
+    ch = expr[i]
+    n = len(expr)
+    single_map = {
+        '(': (TOKEN_LPAREN, ch),
+        ')': (TOKEN_RPAREN, ch),
+        ',': (TOKEN_COMMA, ch),
+        '+': (TOKEN_PLUS, ch),
+        '-': (TOKEN_MINUS, ch),
+        '/': (TOKEN_SLASH, ch),
+    }
+    if ch == '*':
+        if i + 1 < n and expr[i + 1] == '*':
+            return Token(TOKEN_POWER, '**'), 2
+        return Token(TOKEN_STAR, ch), 1
+    if ch in single_map:
+        tok_type, value = single_map[ch]
+        return Token(tok_type, value), 1
+    return None
 
 
 class _Parser:
