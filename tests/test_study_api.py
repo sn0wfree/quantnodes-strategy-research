@@ -183,6 +183,38 @@ async def test_status_unknown_session_returns_404(_app_env):
 
 
 @pytest.mark.asyncio
+async def test_summary_other_users_study_allowed(_app_env, tmp_path, monkeypatch):
+    """study-id-derived endpoints require login only, not owner-session
+    matching (personal research tool semantics — study data belongs to
+    the machine's workspace, and /list already exposes all studies)."""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        study = store.create_study(
+            owner_session_id="sess-1",  # owned by 'tester'
+            goal_id=None,
+            objective="tester's study",
+            workspace_path=str(_app_env),
+            strategy_name="demo_strategy",
+            executor_type="autoresearch",
+            max_rounds=5,
+        )
+        study_id = study.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer("bob"),  # different user
+    ) as client:
+        r = await client.get(f"/api/study/{study_id}/summary")
+        assert r.status_code == 200
+        assert r.json()["objective"] == "tester's study"
+
+
+@pytest.mark.asyncio
 async def test_status_other_users_session_returns_403(_app_env, tmp_path, monkeypatch):
     """A2: caller cannot read another user's session."""
     app = _build_asgi_app()

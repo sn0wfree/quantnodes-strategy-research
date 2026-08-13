@@ -573,9 +573,12 @@ async def study_summary(request: Request, study_id: str):
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
-        # Security: enforce session ownership (study -> session lookup).
-        _verify_study_ownership(request, study.owner_session_id)
 
+        # Access model: study-id-derived endpoints require authentication
+        # (middleware 401) but NOT owner-session matching — study data is
+        # scoped to this machine's workspace and the list endpoint already
+        # exposes all studies. Multi-tenant deployments should re-add
+        # owner-session IDOR here.
         # Recent rounds (last 5)
         recent_rounds = store.list_rounds(study_id, limit=5)
 
@@ -657,13 +660,6 @@ def _build_scoreboard(journal_entries: list) -> list[dict]:
 # ── POST /study/{study_id}/pause|resume|cancel ──────────────────────
 
 
-def _verify_study_ownership(request: Request, session_id: str) -> None:
-    """Enforce IDOR for any study-derived endpoint (study_id → owner session)."""
-    from .web_session import _fetch_session_owned, _get_db
-    user_id = getattr(request.state, "user_id", None) or "anonymous"
-    _fetch_session_owned(_get_db(), session_id, user_id)
-
-
 def _study_session_id(study_id: str) -> str | None:
     """Look up a study's OWNER session (creator chat session) for IDOR.
 
@@ -682,7 +678,6 @@ async def study_pause(request: Request, study_id: str):
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not active")
-    _verify_study_ownership(request, sid)
     sched = _get_study_scheduler()
     if not sched.pause(study_id):
         raise HTTPException(status_code=404, detail="study not active")
@@ -696,8 +691,6 @@ async def study_resume(request: Request, study_id: str):
     if sid is None:
         raise HTTPException(status_code=404, detail="study not found")
 
-    # Security: enforce session ownership.
-    _verify_study_ownership(request, sid)
     sched = _get_study_scheduler()
 
     # Check current status to decide resume path
@@ -724,7 +717,6 @@ async def study_cancel(request: Request, study_id: str):
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not active")
-    _verify_study_ownership(request, sid)
     sched = _get_study_scheduler()
     if not sched.cancel(study_id):
         raise HTTPException(status_code=404, detail="study not active")
@@ -742,11 +734,9 @@ async def study_directive(request: Request, study_id: str, req: DirectiveRequest
     consumes it and emits ``study_directives_consumed`` once the
     researcher agent has seen it.
     """
-    # Security: enforce session ownership before any DB mutation.
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not found")
-    _verify_study_ownership(request, sid)
 
     from ...core.study import StudyStore
     try:
@@ -790,8 +780,6 @@ async def study_directives_list(request: Request, study_id: str):
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
-        # Security: enforce session ownership.
-        _verify_study_ownership(request, study.owner_session_id)
         # Pull all (pending + consumed). Direct access on store.conn —
         # acceptable for the audit-only endpoint.
         with store._lock:  # noqa: SLF001 — internal but stable
@@ -830,7 +818,6 @@ def _owned_study(request: Request, study_id: str):
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
-        _verify_study_ownership(request, study.owner_session_id)
         return study
 
 
