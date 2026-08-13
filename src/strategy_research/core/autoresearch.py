@@ -430,75 +430,110 @@ def detect_lazy_behavior(
 
     recent_outputs = [h.get("output", {}) for h in history[-threshold:]]
 
-    if agent_name == "researcher":
-        # 检查 hypothesis 是否重复
-        recent_hypotheses = [h.get("hypothesis") for h in recent_outputs if h.get("hypothesis")]
-        if current_output.get("hypothesis") in recent_hypotheses:
-            lazy_score += 0.5
-            issues.append("hypothesis 与上轮相同")
-
-        # 检查 action 是否重复
-        recent_actions = [h.get("action") for h in recent_outputs if h.get("action")]
-        if current_output.get("action") in recent_actions:
-            lazy_score += 0.3
-            issues.append("action 与上轮相同")
-
-    elif agent_name == "factor_analyst":
-        # 检查 candidates 是否连续为空
-        recent_candidates = [h.get("candidates", []) for h in recent_outputs]
-        if all(len(c) == 0 for c in recent_candidates) and len(recent_candidates) >= threshold:
-            lazy_score += 0.3
-            issues.append(f"连续 {threshold} 轮无候选因子")
-
-        # 检查 rejected 因子是否相同
-        recent_rejected_names = [
-            [r.get("factor_name") for r in h.get("rejected", [])]
-            for h in recent_outputs
-        ]
-        current_rejected_names = [r.get("factor_name") for r in current_output.get("rejected", [])]
-        if recent_rejected_names and current_rejected_names:
-            if all(set(current_rejected_names) == set(r) for r in recent_rejected_names):
-                lazy_score += 0.2
-                issues.append("rejected 因子与上轮相同")
-
-    elif agent_name == "strategist":
-        # 检查 changes 是否连续为空
-        recent_changes = [h.get("changes", []) for h in recent_outputs]
-        if all(len(c) == 0 for c in recent_changes) and len(recent_changes) >= threshold:
-            lazy_score += 0.4
-            issues.append(f"连续 {threshold} 轮无 changes")
-
-        # 检查 action 是否连续相同
-        recent_actions = [h.get("action") for h in recent_outputs if h.get("action")]
-        if recent_actions and all(a == recent_actions[0] for a in recent_actions):
-            lazy_score += 0.3
-            issues.append("action 连续相同")
-
-    elif agent_name == "risk_controller":
-        # 检查 risk_rating 是否连续相同
-        recent_ratings = [h.get("risk_rating") for h in recent_outputs if h.get("risk_rating")]
-        if recent_ratings and all(r == recent_ratings[0] for r in recent_ratings):
-            lazy_score += 0.2
-            issues.append("risk_rating 连续相同")
-
-    elif agent_name == "anti_overfit_analyst":
-        # 检查 verdict 是否连续 discard
-        recent_verdicts = [h.get("verdict") for h in recent_outputs if h.get("verdict")]
-        if recent_verdicts and all(v == "discard" for v in recent_verdicts):
-            lazy_score += 0.4
-            issues.append(f"连续 {len(recent_verdicts)} 轮 verdict=discard")
-
-        # 检查 overfit_passed 是否连续 false
-        recent_overfit = [h.get("overfit_passed") for h in recent_outputs if "overfit_passed" in h]
-        if recent_overfit and all(not v for v in recent_overfit):
-            lazy_score += 0.3
-            issues.append("overfit_passed 连续 false")
+    detector = _LAZY_DETECTORS.get(agent_name)
+    if detector is not None:
+        lazy_score, issues = detector(current_output, recent_outputs, threshold)
 
     return {
         "lazy_score": min(lazy_score, 1.0),
         "issues": issues,
         "is_lazy": lazy_score >= 0.3,
     }
+
+
+def _detect_researcher_lazy(
+    current_output: dict[str, Any], recent_outputs: list, threshold: int
+) -> tuple[float, list[str]]:
+    """Laziness checks for the researcher agent."""
+    lazy_score = 0.0
+    issues: list[str] = []
+    recent_hypotheses = [h.get("hypothesis") for h in recent_outputs if h.get("hypothesis")]
+    if current_output.get("hypothesis") in recent_hypotheses:
+        lazy_score += 0.5
+        issues.append("hypothesis 与上轮相同")
+    recent_actions = [h.get("action") for h in recent_outputs if h.get("action")]
+    if current_output.get("action") in recent_actions:
+        lazy_score += 0.3
+        issues.append("action 与上轮相同")
+    return lazy_score, issues
+
+
+def _detect_factor_analyst_lazy(
+    current_output: dict[str, Any], recent_outputs: list, threshold: int
+) -> tuple[float, list[str]]:
+    """Laziness checks for the factor_analyst agent."""
+    lazy_score = 0.0
+    issues: list[str] = []
+    recent_candidates = [h.get("candidates", []) for h in recent_outputs]
+    if all(len(c) == 0 for c in recent_candidates) and len(recent_candidates) >= threshold:
+        lazy_score += 0.3
+        issues.append(f"连续 {threshold} 轮无候选因子")
+    recent_rejected_names = [
+        [r.get("factor_name") for r in h.get("rejected", [])]
+        for h in recent_outputs
+    ]
+    current_rejected_names = [r.get("factor_name") for r in current_output.get("rejected", [])]
+    if recent_rejected_names and current_rejected_names:
+        if all(set(current_rejected_names) == set(r) for r in recent_rejected_names):
+            lazy_score += 0.2
+            issues.append("rejected 因子与上轮相同")
+    return lazy_score, issues
+
+
+def _detect_strategist_lazy(
+    current_output: dict[str, Any], recent_outputs: list, threshold: int
+) -> tuple[float, list[str]]:
+    """Laziness checks for the strategist agent."""
+    lazy_score = 0.0
+    issues: list[str] = []
+    recent_changes = [h.get("changes", []) for h in recent_outputs]
+    if all(len(c) == 0 for c in recent_changes) and len(recent_changes) >= threshold:
+        lazy_score += 0.4
+        issues.append(f"连续 {threshold} 轮无 changes")
+    recent_actions = [h.get("action") for h in recent_outputs if h.get("action")]
+    if recent_actions and all(a == recent_actions[0] for a in recent_actions):
+        lazy_score += 0.3
+        issues.append("action 连续相同")
+    return lazy_score, issues
+
+
+def _detect_risk_controller_lazy(
+    current_output: dict[str, Any], recent_outputs: list, threshold: int
+) -> tuple[float, list[str]]:
+    """Laziness checks for the risk_controller agent."""
+    lazy_score = 0.0
+    issues: list[str] = []
+    recent_ratings = [h.get("risk_rating") for h in recent_outputs if h.get("risk_rating")]
+    if recent_ratings and all(r == recent_ratings[0] for r in recent_ratings):
+        lazy_score += 0.2
+        issues.append("risk_rating 连续相同")
+    return lazy_score, issues
+
+
+def _detect_anti_overfit_lazy(
+    current_output: dict[str, Any], recent_outputs: list, threshold: int
+) -> tuple[float, list[str]]:
+    """Laziness checks for the anti_overfit_analyst agent."""
+    lazy_score = 0.0
+    issues: list[str] = []
+    recent_verdicts = [h.get("verdict") for h in recent_outputs if h.get("verdict")]
+    if recent_verdicts and all(v == "discard" for v in recent_verdicts):
+        lazy_score += 0.4
+        issues.append(f"连续 {len(recent_verdicts)} 轮 verdict=discard")
+    recent_overfit = [h.get("overfit_passed") for h in recent_outputs if "overfit_passed" in h]
+    if recent_overfit and all(not v for v in recent_overfit):
+        lazy_score += 0.3
+        issues.append("overfit_passed 连续 false")
+    return lazy_score, issues
+
+
+_LAZY_DETECTORS = {
+    "researcher": _detect_researcher_lazy,
+    "factor_analyst": _detect_factor_analyst_lazy,
+    "strategist": _detect_strategist_lazy,
+    "risk_controller": _detect_risk_controller_lazy,
+    "anti_overfit_analyst": _detect_anti_overfit_lazy,
+}
 
 
 def save_laziness_report(
@@ -1002,280 +1037,317 @@ def _stub_agent_output(
     """
     round_num = current_state.get("total_runs", 0)
 
-    if agent_name == "researcher":
-        if behavior == "varying":
-            actions = ["search_external", "discover_local", "optimize_param", "remove_factor"]
-            directions = ["momentum", "volatility", "value", "quality", "size"]
-            idx = round_num % len(actions)
-            return json.dumps({
-                "action": actions[idx],
-                "hypothesis": f"第 {round_num + 1} 轮: 尝试 {directions[idx]} 因子 ({random.randint(1, 100)})",
-                "reason": f"基于上一轮结果探索 {directions[idx]} 维度",
-                "avoid_actions": ["discover_local"] if round_num > 2 else [],
-                "factor_direction": directions[idx],
-                "bias_check": {"leader_bias": "pass", "english_bias": "pass",
-                              "narrative_bias": "pass", "confirmation_bias": "pass",
-                              "recency_bias": "pass"},
-            })
-        elif behavior == "improving":
-            return json.dumps({
-                "action": "optimize_param",
-                "hypothesis": f"Round {round_num + 1}: 调整 top_n 参数",
-                "reason": "降低 top_n 增加集中度",
-                "avoid_actions": [],
-                "factor_direction": "momentum",
-                "bias_check": {"leader_bias": "pass", "english_bias": "pass",
-                              "narrative_bias": "pass", "confirmation_bias": "pass",
-                              "recency_bias": "pass"},
-            })
+    handler = _STUB_AGENT_HANDLERS.get(agent_name)
+    if handler is None:
+        return json.dumps({"error": f"Unknown agent: {agent_name}"})
+    return handler(round_num, previous_outputs, behavior)
+
+
+def _stub_researcher(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the researcher agent."""
+    if behavior == "varying":
+        actions = ["search_external", "discover_local", "optimize_param", "remove_factor"]
+        directions = ["momentum", "volatility", "value", "quality", "size"]
+        idx = round_num % len(actions)
         return json.dumps({
-            "action": "discover_local",
-            "hypothesis": "波动率因子可能有效",
-            "reason": "当前因子池缺少波动率维度",
-            "avoid_actions": [],
-            "factor_direction": "volatility",
+            "action": actions[idx],
+            "hypothesis": f"第 {round_num + 1} 轮: 尝试 {directions[idx]} 因子 ({random.randint(1, 100)})",
+            "reason": f"基于上一轮结果探索 {directions[idx]} 维度",
+            "avoid_actions": ["discover_local"] if round_num > 2 else [],
+            "factor_direction": directions[idx],
             "bias_check": {"leader_bias": "pass", "english_bias": "pass",
                           "narrative_bias": "pass", "confirmation_bias": "pass",
-                          "recency_bias": "pass"}
+                          "recency_bias": "pass"},
         })
-    elif agent_name == "data_quality":
+    if behavior == "improving":
         return json.dumps({
-            "passed": True,
-            "warnings": ["NaN 比例 0.02%"],
-            "data_fingerprint": "abc123",
-            "nan_ratio": 0.0002,
-            "missing_days": 0,
-            "price_anomalies": []
+            "action": "optimize_param",
+            "hypothesis": f"Round {round_num + 1}: 调整 top_n 参数",
+            "reason": "降低 top_n 增加集中度",
+            "avoid_actions": [],
+            "factor_direction": "momentum",
+            "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                          "narrative_bias": "pass", "confirmation_bias": "pass",
+                          "recency_bias": "pass"},
         })
-    elif agent_name == "factor_analyst":
-        if behavior == "varying":
-            factors_pool = [
-                [{"factor_name": "momentum_60d", "factor_code": "ts_return(close, 60)",
-                  "category": "momentum", "ic_mean": 0.045, "ir": 0.62, "overall_score": 0.68, "passed": True}],
-                [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
-                  "category": "momentum", "ic_mean": 0.052, "ir": 0.71, "overall_score": 0.75, "passed": True}],
-                [],
-                [{"factor_name": "reversal_10d", "factor_code": "-ts_return(close, 10)",
-                  "category": "reversal", "ic_mean": 0.038, "ir": 0.55, "overall_score": 0.62, "passed": True}],
-                [],
-                [{"factor_name": "momentum_120d", "factor_code": "ts_return(close, 120)",
-                  "category": "momentum", "ic_mean": 0.041, "ir": 0.58, "overall_score": 0.66, "passed": True}],
-            ]
-            candidates = factors_pool[round_num % len(factors_pool)]
-            return json.dumps({
-                "path_used": "local" if round_num % 2 == 0 else "alpha_zoo",
-                "candidates": candidates,
-                "rejected": [{"factor_name": f"bad_factor_{round_num}", "reason": "IC < 0.03"}],
-                "combination_method": "ic_weighted",
-                "recommendation": "建议集成新因子" if candidates else "无有效因子",
-            })
-        elif behavior == "improving":
-            if round_num >= 3:
-                return json.dumps({
-                    "path_used": "local",
-                    "candidates": [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
-                                    "category": "momentum", "ic_mean": 0.052, "ir": 0.71,
-                                    "overall_score": 0.75, "passed": True}],
-                    "rejected": [],
-                    "combination_method": "ic_weighted",
-                    "recommendation": "建议集成 vol_adj_mom",
-                })
-            else:
-                return json.dumps({
-                    "path_used": "local",
-                    "candidates": [],
-                    "rejected": [{"factor_name": "test", "reason": "IC too low"}],
-                    "combination_method": "ic_weighted",
-                    "recommendation": "无有效因子",
-                })
+    return json.dumps({
+        "action": "discover_local",
+        "hypothesis": "波动率因子可能有效",
+        "reason": "当前因子池缺少波动率维度",
+        "avoid_actions": [],
+        "factor_direction": "volatility",
+        "bias_check": {"leader_bias": "pass", "english_bias": "pass",
+                      "narrative_bias": "pass", "confirmation_bias": "pass",
+                      "recency_bias": "pass"}
+    })
+
+
+def _stub_data_quality(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the data_quality agent."""
+    return json.dumps({
+        "passed": True,
+        "warnings": ["NaN 比例 0.02%"],
+        "data_fingerprint": "abc123",
+        "nan_ratio": 0.0002,
+        "missing_days": 0,
+        "price_anomalies": []
+    })
+
+
+def _stub_factor_analyst(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the factor_analyst agent."""
+    if behavior == "varying":
+        factors_pool = [
+            [{"factor_name": "momentum_60d", "factor_code": "ts_return(close, 60)",
+              "category": "momentum", "ic_mean": 0.045, "ir": 0.62, "overall_score": 0.68, "passed": True}],
+            [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
+              "category": "momentum", "ic_mean": 0.052, "ir": 0.71, "overall_score": 0.75, "passed": True}],
+            [],
+            [{"factor_name": "reversal_10d", "factor_code": "-ts_return(close, 10)",
+              "category": "reversal", "ic_mean": 0.038, "ir": 0.55, "overall_score": 0.62, "passed": True}],
+            [],
+            [{"factor_name": "momentum_120d", "factor_code": "ts_return(close, 120)",
+              "category": "momentum", "ic_mean": 0.041, "ir": 0.58, "overall_score": 0.66, "passed": True}],
+        ]
+        candidates = factors_pool[round_num % len(factors_pool)]
+        return json.dumps({
+            "path_used": "local" if round_num % 2 == 0 else "alpha_zoo",
+            "candidates": candidates,
+            "rejected": [{"factor_name": f"bad_factor_{round_num}", "reason": "IC < 0.03"}],
+            "combination_method": "ic_weighted",
+            "recommendation": "建议集成新因子" if candidates else "无有效因子",
+        })
+    if behavior == "improving" and round_num >= 3:
         return json.dumps({
             "path_used": "local",
-            "candidates": [],
-            "rejected": [
-                {"factor_name": "ts_std_20d", "reason": "IC 0.018 < 0.03"}
-            ],
+            "candidates": [{"factor_name": "vol_adj_mom", "factor_code": "ts_return(close, 20)/ts_std(return, 20)",
+                            "category": "momentum", "ic_mean": 0.052, "ir": 0.71,
+                            "overall_score": 0.75, "passed": True}],
+            "rejected": [],
             "combination_method": "ic_weighted",
-            "recommendation": "无有效因子"
+            "recommendation": "建议集成 vol_adj_mom",
         })
-    elif agent_name == "strategist":
-        if behavior == "improving" and round_num >= 3:
-            return json.dumps({
-                "action": "integrate",
-                "changes": [{"param": "FACTOR_EXPRS", "old": [], "new": ["vol_adj_mom"]}],
-                "reason": "集成 vol_adj_mom 因子",
-                "expected_impact": "Calmar 提升",
-            })
+    return json.dumps({
+        "path_used": "local",
+        "candidates": [],
+        "rejected": [
+            {"factor_name": "ts_std_20d", "reason": "IC 0.018 < 0.03"}
+        ],
+        "combination_method": "ic_weighted",
+        "recommendation": "无有效因子"
+    })
+
+
+def _stub_strategist(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the strategist agent."""
+    if behavior == "improving" and round_num >= 3:
         return json.dumps({
-            "action": "optimize",
-            "changes": [],
-            "reason": "无新因子,保持现有策略",
-            "expected_impact": "无变化"
+            "action": "integrate",
+            "changes": [{"param": "FACTOR_EXPRS", "old": [], "new": ["vol_adj_mom"]}],
+            "reason": "集成 vol_adj_mom 因子",
+            "expected_impact": "Calmar 提升",
         })
-    elif agent_name == "portfolio_construction":
+    return json.dumps({
+        "action": "optimize",
+        "changes": [],
+        "reason": "无新因子,保持现有策略",
+        "expected_impact": "无变化"
+    })
+
+
+def _stub_portfolio_construction(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the portfolio_construction agent."""
+    return json.dumps({
+        "method": "equal",
+        "weights": {},
+        "risk_contributions": {},
+        "diversification_ratio": 1.0,
+        "portfolio_vol": 0.15
+    })
+
+
+def _stub_risk_controller(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the risk_controller agent."""
+    if behavior == "improving" and round_num >= 3:
         return json.dumps({
-            "method": "equal",
-            "weights": {},
-            "risk_contributions": {},
-            "diversification_ratio": 1.0,
-            "portfolio_vol": 0.15
-        })
-    elif agent_name == "risk_controller":
-        if behavior == "improving" and round_num >= 3:
-            return json.dumps({
-                "risk_passed": True,
-                "risk_rating": "Green",
-                "var_95": -0.018,
-                "cvar_95": -0.025,
-                "max_drawdown": -0.25,
-                "stress_results": {},
-                "tail_risk": {"kurtosis": 2.8, "skewness": -0.05}
-            })
-        return json.dumps({
-            "risk_passed": False,
-            "risk_rating": "Red",
-            "var_95": -0.021,
-            "cvar_95": -0.034,
-            "max_drawdown": -0.50,
+            "risk_passed": True,
+            "risk_rating": "Green",
+            "var_95": -0.018,
+            "cvar_95": -0.025,
+            "max_drawdown": -0.25,
             "stress_results": {},
-            "tail_risk": {"kurtosis": 3.2, "skewness": -0.15}
+            "tail_risk": {"kurtosis": 2.8, "skewness": -0.05}
         })
-    elif agent_name == "attribution_analyst":
-        if behavior == "improving" and round_num >= 3:
-            return json.dumps({
-                "alpha": 0.005 + round_num * 0.001,
-                "beta_mkt": 0.85,
-                "beta_smb": 0.05,
-                "beta_hml": -0.02,
-                "beta_mom": 0.08,
-                "sector_allocation": 0.002,
-                "stock_selection": 0.003 + round_num * 0.001,
-                "interaction": 0.001,
-                "bull_capture": 1.05,
-                "bear_capture": 0.85,
-                "r_squared": 0.90
-            })
+    return json.dumps({
+        "risk_passed": False,
+        "risk_rating": "Red",
+        "var_95": -0.021,
+        "cvar_95": -0.034,
+        "max_drawdown": -0.50,
+        "stress_results": {},
+        "tail_risk": {"kurtosis": 3.2, "skewness": -0.15}
+    })
+
+
+def _stub_attribution_analyst(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the attribution_analyst agent."""
+    if behavior == "improving" and round_num >= 3:
         return json.dumps({
-            "alpha": -0.0039,
-            "beta_mkt": 0.92,
+            "alpha": 0.005 + round_num * 0.001,
+            "beta_mkt": 0.85,
             "beta_smb": 0.05,
             "beta_hml": -0.02,
             "beta_mom": 0.08,
-            "sector_allocation": 0.001,
-            "stock_selection": -0.005,
+            "sector_allocation": 0.002,
+            "stock_selection": 0.003 + round_num * 0.001,
             "interaction": 0.001,
-            "bull_capture": 0.95,
-            "bear_capture": 1.12,
-            "r_squared": 0.88
+            "bull_capture": 1.05,
+            "bear_capture": 0.85,
+            "r_squared": 0.90
         })
-    elif agent_name == "anti_overfit_analyst":
-        metrics = {}
-        if previous_outputs:
-            last = previous_outputs[-1]
-            if isinstance(last, dict):
-                metrics = last
+    return json.dumps({
+        "alpha": -0.0039,
+        "beta_mkt": 0.92,
+        "beta_smb": 0.05,
+        "beta_hml": -0.02,
+        "beta_mom": 0.08,
+        "sector_allocation": 0.001,
+        "stock_selection": -0.005,
+        "interaction": 0.001,
+        "bull_capture": 0.95,
+        "bear_capture": 1.12,
+        "r_squared": 0.88
+    })
 
-        try:
-            calmar = float(metrics.get("calmar", 0.0)) if metrics else 0.0
-        except (ValueError, TypeError):
-            calmar = 0.0
-        try:
-            sharpe = float(metrics.get("sharpe", 0.0)) if metrics else 0.0
-        except (ValueError, TypeError):
-            sharpe = 0.0
-        try:
-            max_dd = float(metrics.get("max_dd", 0.0)) if metrics else 0.0
-        except (ValueError, TypeError):
-            max_dd = 0.0
 
-        weights = {
-            "start_dependency": 0.20,
-            "parameter_perturbation": 0.20,
-            "rebalance_offset": 0.15,
-            "ablation": 0.15,
-            "bootstrap": 0.15,
-            "monte_carlo": 0.15,
-        }
+def _stub_anti_overfit_analyst(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the anti_overfit_analyst agent."""
+    metrics = {}
+    if previous_outputs:
+        last = previous_outputs[-1]
+        if isinstance(last, dict):
+            metrics = last
 
-        try:
-            pass_threshold = float(os.environ.get("ANTI_OVERFIT_THRESHOLD", "0.5"))
-        except ValueError:
-            pass_threshold = 0.5
+    try:
+        calmar = float(metrics.get("calmar", 0.0)) if metrics else 0.0
+    except (ValueError, TypeError):
+        calmar = 0.0
+    try:
+        sharpe = float(metrics.get("sharpe", 0.0)) if metrics else 0.0
+    except (ValueError, TypeError):
+        sharpe = 0.0
+    try:
+        max_dd = float(metrics.get("max_dd", 0.0)) if metrics else 0.0
+    except (ValueError, TypeError):
+        max_dd = 0.0
 
-        methods_passed = {
-            "start_dependency": calmar >= 0.3,
-            "rebalance_offset": abs(max_dd) <= 0.5,
-            "parameter_perturbation": calmar >= 0.4,
-            "ablation": calmar > 0.0,
-            "bootstrap": sharpe >= 0.5,
-            "monte_carlo": calmar >= 0.5 and sharpe >= 0.4,
-        }
+    weights = {
+        "start_dependency": 0.20,
+        "parameter_perturbation": 0.20,
+        "rebalance_offset": 0.15,
+        "ablation": 0.15,
+        "bootstrap": 0.15,
+        "monte_carlo": 0.15,
+    }
 
-        weighted_score = sum(
-            weights[k] * (1 if v else 0)
-            for k, v in methods_passed.items()
+    try:
+        pass_threshold = float(os.environ.get("ANTI_OVERFIT_THRESHOLD", "0.5"))
+    except ValueError:
+        pass_threshold = 0.5
+
+    methods_passed = {
+        "start_dependency": calmar >= 0.3,
+        "rebalance_offset": abs(max_dd) <= 0.5,
+        "parameter_perturbation": calmar >= 0.4,
+        "ablation": calmar > 0.0,
+        "bootstrap": sharpe >= 0.5,
+        "monte_carlo": calmar >= 0.5 and sharpe >= 0.4,
+    }
+
+    weighted_score = sum(
+        weights[k] * (1 if v else 0)
+        for k, v in methods_passed.items()
+    )
+
+    if behavior == "improving" and round_num >= 4:
+        for k in methods_passed:
+            methods_passed[k] = True
+        weighted_score = 1.0
+        analysis = (
+            f"所有抗过拟合方法通过 "
+            f"(Calmar={calmar:.3f}, Sharpe={sharpe:.3f}, score={weighted_score:.2f})"
         )
-
-        if behavior == "improving" and round_num >= 4:
-            for k in methods_passed:
-                methods_passed[k] = True
-            weighted_score = 1.0
+    else:
+        if weighted_score >= pass_threshold:
             analysis = (
-                f"所有抗过拟合方法通过 "
-                f"(Calmar={calmar:.3f}, Sharpe={sharpe:.3f}, score={weighted_score:.2f})"
+                f"加权评分通过 "
+                f"({weighted_score:.2f}, Calmar={calmar:.3f}, Sharpe={sharpe:.3f})"
             )
         else:
-            if weighted_score >= pass_threshold:
-                analysis = (
-                    f"加权评分通过 "
-                    f"({weighted_score:.2f}, Calmar={calmar:.3f}, Sharpe={sharpe:.3f})"
-                )
-            else:
-                failed = [k for k, v in methods_passed.items() if not v]
-                analysis = (
-                    f"加权评分 {weighted_score:.2f} < {pass_threshold}, "
-                    f"失败: {', '.join(failed)}"
-                )
+            failed = [k for k, v in methods_passed.items() if not v]
+            analysis = (
+                f"加权评分 {weighted_score:.2f} < {pass_threshold}, "
+                f"失败: {', '.join(failed)}"
+            )
 
-        overfit_passed = weighted_score >= pass_threshold
-        verdict = "keep" if overfit_passed else "discard"
+    overfit_passed = weighted_score >= pass_threshold
+    verdict = "keep" if overfit_passed else "discard"
 
-        return json.dumps({
-            "verdict": verdict,
-            "overfit_passed": overfit_passed,
-            "weighted_score": round(weighted_score, 3),
-            "methods_passed": methods_passed,
-            "analysis": analysis,
-            "suggestions": [] if overfit_passed else ["调整因子参数", "增加训练数据"],
-        })
-    elif agent_name == "backtest_diagnostics":
-        return json.dumps({
-            "error_type": "none",
-            "severity": "info",
-            "symptom": "无异常",
-            "root_cause": "N/A",
-            "fix_suggestion": "N/A",
-            "confidence": 1.0
-        })
-    elif agent_name == "critic":
-        if behavior == "improving" and round_num >= 2:
-            approved = True
-        else:
-            approved = round_num >= 1
-        return json.dumps({
-            "approved": approved,
-            "risk_rating": "low" if approved else "high",
-            "concerns": [] if approved else ["过度拟合", "样本外未验证"],
-            "suggested_fixes": [] if approved else ["延长样本", "加入 walk-forward 验证"],
-            "confidence": 0.7 if approved else 0.4,
-            "review_dimensions": {
-                "risk": "pass" if approved else "fail",
-                "attribution": "pass",
-                "diagnostics": "pass" if approved else "fail",
-                "statistics": "pass",
-            },
-        })
+    return json.dumps({
+        "verdict": verdict,
+        "overfit_passed": overfit_passed,
+        "weighted_score": round(weighted_score, 3),
+        "methods_passed": methods_passed,
+        "analysis": analysis,
+        "suggestions": [] if overfit_passed else ["调整因子参数", "增加训练数据"],
+    })
+
+
+def _stub_backtest_diagnostics(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the backtest_diagnostics agent."""
+    return json.dumps({
+        "error_type": "none",
+        "severity": "info",
+        "symptom": "无异常",
+        "root_cause": "N/A",
+        "fix_suggestion": "N/A",
+        "confidence": 1.0
+    })
+
+
+def _stub_critic(round_num: int, previous_outputs: list, behavior: str) -> str:
+    """Stub output for the critic agent."""
+    if behavior == "improving" and round_num >= 2:
+        approved = True
     else:
-        return json.dumps({"error": f"Unknown agent: {agent_name}"})
+        approved = round_num >= 1
+    return json.dumps({
+        "approved": approved,
+        "risk_rating": "low" if approved else "high",
+        "concerns": [] if approved else ["过度拟合", "样本外未验证"],
+        "suggested_fixes": [] if approved else ["延长样本", "加入 walk-forward 验证"],
+        "confidence": 0.7 if approved else 0.4,
+        "review_dimensions": {
+            "risk": "pass" if approved else "fail",
+            "attribution": "pass",
+            "diagnostics": "pass" if approved else "fail",
+            "statistics": "pass",
+        },
+    })
+
+
+_STUB_AGENT_HANDLERS = {
+    "researcher": _stub_researcher,
+    "data_quality": _stub_data_quality,
+    "factor_analyst": _stub_factor_analyst,
+    "strategist": _stub_strategist,
+    "portfolio_construction": _stub_portfolio_construction,
+    "risk_controller": _stub_risk_controller,
+    "attribution_analyst": _stub_attribution_analyst,
+    "anti_overfit_analyst": _stub_anti_overfit_analyst,
+    "backtest_diagnostics": _stub_backtest_diagnostics,
+    "critic": _stub_critic,
+}
 
 
 # ── study single-round extraction ───────────────────────────────────
@@ -1394,6 +1466,58 @@ def _study_register_hypothesis(
 #   - ``behavior`` overrides the stub mode when an LLM key is absent.
 
 
+def _run_lazy_detection(
+    round_num: int,
+    lazy_detection_interval: int,
+    keep_recent: int,
+    runs_dir: Path,
+    run_dir: Path,
+) -> None:
+    """Run laziness detection for the round (pure sink, no steering)."""
+    from strategy_research.core.autoresearch import (
+        detect_lazy_behavior,
+        read_agent_history,
+        save_laziness_report,
+        should_run_lazy_detection,
+    )
+
+    if not should_run_lazy_detection(round_num, lazy_detection_interval):
+        return
+    lazy_results = []
+    for agent_name in (
+        "researcher", "factor_analyst", "strategist", "anti_overfit_analyst",
+    ):
+        history = read_agent_history(
+            runs_dir, agent_name, threshold=10,
+            current_round=round_num, keep_recent=keep_recent,
+        )
+        if history:
+            lazy_result = detect_lazy_behavior(
+                agent_name, history[-1].get("output", {}), history
+            )
+            lazy_results.append({"agent": agent_name, **lazy_result})
+    if lazy_results:
+        overall = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
+        save_laziness_report(run_dir, round_num, lazy_results, overall)
+
+
+def _patch_results_verdict(runs_dir: Path, run_name: str, verdict: str) -> None:
+    """Flip the pending row for ``run_name`` in results.tsv to the verdict."""
+    results_path = runs_dir / "results.tsv"
+    if not results_path.exists():
+        return
+    content = results_path.read_text(encoding="utf-8")
+    lines = content.strip().split("\n")
+    for i in range(len(lines) - 1, 0, -1):
+        if lines[i].startswith(run_name + "\t") or lines[i].startswith(run_name + " "):
+            parts = lines[i].split("\t")
+            if len(parts) >= 12:
+                parts[11] = verdict
+                lines[i] = "\t".join(parts)
+            break
+    results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run_research_round(
     workspace_path: Path,
     strategy_name: str,
@@ -1455,15 +1579,11 @@ def run_research_round(
     # Local imports keep the module import graph light for callers that
     # only need the helpers above.
     from strategy_research.core.autoresearch import (
-        detect_lazy_behavior,
         generate_run_summary,
-        read_agent_history,
         read_current_state,
         retry_agent_spawn,
         save_agent_record,
-        save_laziness_report,
         save_run_summary,
-        should_run_lazy_detection,
     )
     from strategy_research.core.backtest import run_backtest_script
     from strategy_research.core.strategy_acceptance import (
@@ -1499,23 +1619,9 @@ def run_research_round(
     # ── Lazy detection (every Nth round) ────────────────────────────
     # Pure sink: the report is written for inspection but does not steer
     # the round itself.
-    if should_run_lazy_detection(round_num, lazy_detection_interval):
-        lazy_results = []
-        for agent_name in (
-            "researcher", "factor_analyst", "strategist", "anti_overfit_analyst",
-        ):
-            history = read_agent_history(
-                runs_dir, agent_name, threshold=10,
-                current_round=round_num, keep_recent=keep_recent,
-            )
-            if history:
-                lazy_result = detect_lazy_behavior(
-                    agent_name, history[-1].get("output", {}), history
-                )
-                lazy_results.append({"agent": agent_name, **lazy_result})
-        if lazy_results:
-            overall = sum(r.get("lazy_score", 0) for r in lazy_results) / len(lazy_results)
-            save_laziness_report(run_dir, round_num, lazy_results, overall)
+    _run_lazy_detection(
+        round_num, lazy_detection_interval, keep_recent, runs_dir, run_dir
+    )
 
     def _spawn(name: str, prevs: list) -> dict:
         # retry_agent_spawn parses raw output internally and returns a dict.
@@ -1663,18 +1769,7 @@ def run_research_round(
     # Update results.tsv status (the backtest wrote a 'pending' row; flip
     # it to the final keep/discard verdict on this run's line, matching
     # the CLI's Step 6 in-place patch).
-    results_path = runs_dir / "results.tsv"
-    if results_path.exists():
-        content = results_path.read_text(encoding="utf-8")
-        lines = content.strip().split("\n")
-        for i in range(len(lines) - 1, 0, -1):
-            if lines[i].startswith(run_name + "\t") or lines[i].startswith(run_name + " "):
-                parts = lines[i].split("\t")
-                if len(parts) >= 12:
-                    parts[11] = verdict
-                    lines[i] = "\t".join(parts)
-                break
-        results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _patch_results_verdict(runs_dir, run_name, verdict)
 
     agent_outputs = {
         "researcher": researcher_output,
