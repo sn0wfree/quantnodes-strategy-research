@@ -41,6 +41,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test_webui_e2e_playwright.py`：适配 Chat 路由 `/chat`（`/` 现为 Dashboard）、
   自动创建会话行为、发送按钮新选择器。
 
+### Fixed（测试套件顺序污染——全套 391 失败归零）
+- **浏览器测试默认跳过**（`SR_RUN_BROWSER_TESTS=1` 开启，e2e.yml 显式设置）：
+  Playwright sync API 会在主线程保留运行中的 asyncio loop，导致后续所有
+  async 测试报 ``Runner.run() cannot be called from a running event loop``
+  （波及 300+ 测试）。
+- **`sse_buffer.push`**：无当前 event loop 时（主线程被
+  `asyncio.set_event_loop(None)` 分离）直接 `evt.set()`，不再因
+  `get_event_loop()` 抛错而静默吞掉通知。
+- **`test_event_log_schema`**：tearDown 还原 `SR_WORKSPACE_PATH`
+  （泄漏后整套 session DB 被重定向到共享临时库 → 级联 `database is locked`）。
+- **conftest 隔离**：每测试快照/还原 `SR_WORKSPACE_PATH`/`SR_SESSIONS_DB`/
+  `HYPOTHESIS_USE_SQLITE`/`STATIC_DIR`；清理 SessionService 缓存 +
+  MemoryManager 单例 + 主线程 SQLite 连接 + logging 级别 + asyncio loop 绑定。
+- **`test_hypothesis_registry_sqlite` 后的日志污染**：`create_app()` 会把
+  `strategy_research` 命名空间日志级别设为 INFO，过滤后续测试的 DEBUG
+  断言（`assertLogs`）——conftest 测试后还原日志级别。
+- **`test_chat_loop` 后的 AgentLoop mock 失效**：`chat_loop` 模块级绑定
+  `AgentLoop`，patch `loop.AgentLoop` 对已 import 的 `chat_loop` 无效——
+  `test_cli_llm_streaming` 改为 patch `chat_loop.AgentLoop`。
+- **`test_cli_registry` 清空全局命令表**：`reset_registry()` 后未重注册核心
+  命令，后续 `init` 等 CLI 分发全部失效——模块级 setup/teardown 重载
+  core_commands。
+- **`test_init_e2e`**：同时 patch `_auto_onboard.run_onboarding`（模块级
+  绑定，patch `onboard.run_onboarding` 对其无效）。
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

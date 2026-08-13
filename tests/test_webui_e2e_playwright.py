@@ -17,12 +17,21 @@
 # so they don't pollute the rest of the test suite.
 pytest_plugins = ["conftest_e2e"]
 
+import os
 import time
 import uuid
 from typing import Iterator
 
 import pytest
 import requests
+
+# Browser E2E is opt-in (run via e2e.yml / SR_RUN_BROWSER_TESTS=1): the
+# Playwright sync API keeps a running asyncio loop on the main thread for the
+# whole session, which breaks pytest-asyncio for every later test file.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("SR_RUN_BROWSER_TESTS", "0") != "1",
+    reason="Browser E2E; set SR_RUN_BROWSER_TESTS=1 (or run via e2e.yml)",
+)
 from playwright.sync_api import (
     Browser,
     BrowserContext,

@@ -643,8 +643,10 @@ async def test_chat_session_dispatches_plain_text_to_llm():
     fake_result.answer = "model reply here"
     fake_result.error = None
 
-    # Patch at the source module since session.py imports lazily
-    with mock.patch("strategy_research.core.agent.loop.AgentLoop") as MockLoop, \
+    # Patch the AgentLoop symbol bound in chat_loop (module-level
+    # ``from .loop import AgentLoop``) — patching loop.AgentLoop is a no-op
+    # once chat_loop has already been imported by earlier tests.
+    with mock.patch("strategy_research.core.agent.chat_loop.AgentLoop") as MockLoop, \
          mock.patch("strategy_research.core.agent.builtin_tools.build_default_registry", return_value=None):
         instance = mock.MagicMock()
         instance.arun = mock.AsyncMock(return_value=fake_result)

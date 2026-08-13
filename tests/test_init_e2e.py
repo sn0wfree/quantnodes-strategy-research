@@ -52,6 +52,11 @@ def _run_init(monkeypatch, llm_path, env_path, args, inputs):
 
     Patches run_onboarding to call the test-mode branch (inputs-driven)
     so no TTY is needed.
+
+    ``_auto_onboard`` binds ``run_onboarding`` at import time (module-level
+    ``from strategy_research.cli.onboard import run_onboarding``), so once
+    it has been imported by an earlier test, patching ``onboard.run_onboarding``
+    is a no-op for the ``main()`` entry path — patch the bound symbol too.
     """
     from strategy_research.cli.onboard import run_onboarding as real_run
 
@@ -61,6 +66,9 @@ def _run_init(monkeypatch, llm_path, env_path, args, inputs):
 
     monkeypatch.setattr(
         "strategy_research.cli.onboard.run_onboarding", fake_run
+    )
+    monkeypatch.setattr(
+        "strategy_research.cli._auto_onboard.run_onboarding", fake_run
     )
 
     with patch("sys.argv", ["prog", "init"] + args):

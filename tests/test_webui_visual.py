@@ -27,8 +27,17 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
+
+# Browser E2E is opt-in (e2e.yml / SR_RUN_BROWSER_TESTS=1): the Playwright
+# sync API keeps a running asyncio loop on the main thread for the whole
+# session, breaking pytest-asyncio for every later test file.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("SR_RUN_BROWSER_TESTS", "0") != "1",
+    reason="Browser E2E; set SR_RUN_BROWSER_TESTS=1 (or run via e2e.yml)",
+)
 from PIL import Image
 from playwright.sync_api import Browser, BrowserContext, Page, expect
+
 
 # Path setup for visual_diff import
 TESTS_DIR = Path(__file__).parent

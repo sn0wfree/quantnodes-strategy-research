@@ -19,6 +19,15 @@ import requests
 
 pytest_plugins = ["conftest_e2e"]
 
+# Real-browser + real-LLM E2E: opt-in only. Skipping also prevents the
+# Playwright sync API from leaving a running asyncio loop on the main
+# thread, which would break pytest-asyncio for every later test file
+# ("Runner.run() cannot be called from a running event loop").
+pytestmark = pytest.mark.skipif(
+    os.environ.get("SR_E2E_REAL_LLM", "0") != "1",
+    reason="Real-browser + real-LLM E2E; set SR_E2E_REAL_LLM=1 to run",
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

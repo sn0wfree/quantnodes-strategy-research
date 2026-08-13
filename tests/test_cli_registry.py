@@ -20,6 +20,27 @@ from strategy_research.cli.commands.registry import (
 )
 
 
+def _reload_core_commands() -> None:
+    """Re-import core_commands so its ``cli_command`` registrations re-run.
+
+    Several tests call ``reset_registry()`` (clearing the global command
+    table) without re-registering core commands afterwards; without this
+    hook every later test that dispatches a CLI command (e.g. ``init`` in
+    test_init_e2e) sees an empty registry.
+    """
+    import importlib
+
+    importlib.reload(core_commands)
+
+
+def setup_module() -> None:
+    _reload_core_commands()
+
+
+def teardown_module() -> None:
+    _reload_core_commands()
+
+
 class TestRegistryBasics(unittest.TestCase):
 
     def setUp(self):
