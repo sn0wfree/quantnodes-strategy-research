@@ -54,6 +54,19 @@ _DICT_WRAPPER_KEYS = (
 # ── Public API ───────────────────────────────────────────────
 
 
+def tool_ok(payload: dict[str, Any]) -> str:
+    """Standard success envelope for tool results."""
+    return json.dumps({"status": "ok", **payload}, ensure_ascii=False)
+
+
+def tool_err(message: Any, **extra: Any) -> str:
+    """Standard error envelope for tool results."""
+    return json.dumps(
+        {"status": "error", "error": str(message), **extra},
+        ensure_ascii=False,
+    )
+
+
 def safe_get_param(
     kwargs: dict,
     name: str,

@@ -15,23 +15,12 @@ import logging
 from typing import Any
 
 from ..tools import EFFECT_DB, BaseTool, ToolContext
-from .utils import err_actionable, try_unwrap_list
+from .utils import err_actionable, tool_ok, try_unwrap_list
 
 logger = logging.getLogger(__name__)
 
 
 # ── Shared helpers ───────────────────────────────────────────────────
-
-
-def _ok(payload: dict[str, Any]) -> str:
-    return json.dumps({"status": "ok", **payload}, ensure_ascii=False)
-
-
-def _err(message: str, **extra: Any) -> str:
-    return json.dumps(
-        {"status": "error", "error": str(message), **extra},
-        ensure_ascii=False,
-    )
 
 
 def _get_store():
@@ -142,7 +131,7 @@ class CreateGoalTool(BaseTool):
                 objective=objective,
                 criteria=criteria or default_goal_criteria(),
             )
-            return _ok({
+            return tool_ok({
                 "goal_id": goal.goal_id,
                 "goal_status": goal.status.value,
                 "objective": goal.objective,
@@ -280,7 +269,7 @@ class AddEvidenceTool(BaseTool):
 
             # Re-fetch to get updated progress
             updated = store.get_current_goal(session_id)
-            return _ok({
+            return tool_ok({
                 "evidence_id": record.evidence_id if record else auto_attached_to[0],
                 "goal_id": current.goal_id,
                 "auto_attached_to": auto_attached_to or None,
@@ -361,7 +350,7 @@ class CompleteGoalTool(BaseTool):
                 expected_goal_id=current.goal_id,
                 recap=recap,
             )
-            return _ok({
+            return tool_ok({
                 "goal_id": updated.goal_id,
                 "goal_status": updated.status.value,
                 "recap": updated.recap,
@@ -436,7 +425,7 @@ class GetGoalStatusTool(BaseTool):
             store = _get_store()
             snapshot = store.get_current_snapshot(session_id)
             if snapshot is None:
-                return _ok({
+                return tool_ok({
                     "has_goal": False,
                     "message": "no active goal",
                 })
@@ -445,7 +434,7 @@ class GetGoalStatusTool(BaseTool):
             criteria = snapshot.get("criteria", [])
             evidence_count = snapshot.get("evidence_count", 0)
 
-            return _ok({
+            return tool_ok({
                 "has_goal": True,
                 "goal_id": goal.get("goal_id"),
                 "goal_status": goal.get("status"),
@@ -529,7 +518,7 @@ class ListGoalsTool(BaseTool):
                 status=status_filter,
                 limit=limit,
             )
-            return _ok({
+            return tool_ok({
                 "goals": [
                     {
                         "goal_id": g.goal_id,

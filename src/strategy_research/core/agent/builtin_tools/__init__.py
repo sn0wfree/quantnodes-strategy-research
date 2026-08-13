@@ -41,7 +41,7 @@ from ..tools import (
     ToolError,
     ToolRegistry,
 )
-from .utils import err_actionable
+from .utils import err_actionable, tool_ok
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +59,6 @@ def _workspace_from_kwargs(kwargs: dict[str, Any]) -> Path:
     if not isinstance(ws, Path):
         raise ValueError(f"workspace must be Path or str, got {type(ws).__name__}")
     return ws.resolve()
-
-
-def _ok(payload: dict[str, Any]) -> str:
-    return json.dumps({"status": "ok", **payload}, ensure_ascii=False)
-
-
-def _err(message: str, **extra: Any) -> str:
-    return json.dumps(
-        {"status": "error", "error": str(message), **extra},
-        ensure_ascii=False,
-    )
 
 
 def _build_factor_panel(
@@ -495,7 +484,7 @@ class ReadFileTool(BaseTool):
             all_lines = all_lines[: int(limit)]
         output = "\n".join(all_lines)
 
-        return _ok({
+        return tool_ok({
             "path": str(resolved),
             "content": output,
             "total_lines": len(content.splitlines()),
@@ -592,7 +581,7 @@ class ListFilesTool(BaseTool):
                     "type": "dir" if p.is_dir() else "file",
                     "size": p.stat().st_size if p.is_file() else None,
                 })
-        return _ok({
+        return tool_ok({
             "path": str(target),
             "entries": entries,
             "count": len(entries),
@@ -711,7 +700,7 @@ class WriteFileTool(BaseTool):
                 tool="write_file",
             )
 
-        return _ok({
+        return tool_ok({
             "path": str(resolved),
             "bytes_written": len(content.encode("utf-8")),
         })
@@ -1237,7 +1226,7 @@ class ComputeFactorTool(BaseTool):
         sample = non_null.head(n_samples).to_dict()
         sample = {str(k): (None if v != v else float(v)) for k, v in sample.items()}
 
-        return _ok({
+        return tool_ok({
             "factor_name": factor_name or "(unnamed)",
             "factor_code": factor_code,
             "asset": asset,
@@ -1359,7 +1348,7 @@ class GitDiffTool(BaseTool):
         if truncated:
             diff = "\n".join(lines[:max_lines]) + f"\n... ({len(lines) - max_lines} more lines)"
 
-        return _ok({
+        return tool_ok({
             "diff": diff,
             "total_lines": len(lines),
             "truncated": truncated,
@@ -1441,7 +1430,7 @@ class ListHistoryTool(BaseTool):
                         break
 
         if results_path is None or not results_path.exists():
-            return _ok({
+            return tool_ok({
                 "runs": [],
                 "source": None,
                 "message": "no results.tsv found",
@@ -1458,7 +1447,7 @@ class ListHistoryTool(BaseTool):
             )
 
         if not lines:
-            return _ok({"runs": [], "source": str(results_path)})
+            return tool_ok({"runs": [], "source": str(results_path)})
 
         header = lines[0].split("\t")
         rows: list[dict[str, str]] = []
@@ -1473,7 +1462,7 @@ class ListHistoryTool(BaseTool):
         rows.sort(key=lambda r: r.get("run", ""), reverse=True)
         rows = rows[:limit]
 
-        return _ok({
+        return tool_ok({
             "source": str(results_path),
             "n_rows": len(rows),
             "runs": rows,
@@ -1594,7 +1583,7 @@ class FactorAnalysisTool(BaseTool):
         ic = aligned.iloc[:, 0].corr(aligned["fwd_ret"])
         ic_mean = float(aligned.iloc[:, 0].corr(aligned["fwd_ret"], method="spearman")) if len(aligned) > 5 else 0.0
 
-        return _ok({
+        return tool_ok({
             "factor_code": factor_code,
             "asset": asset,
             "forward_days": forward_days,
@@ -1716,7 +1705,7 @@ class PatternRecognitionTool(BaseTool):
             if std5 < std20 * 0.6:
                 patterns.append({"pattern": "volatility_squeeze", "confidence": 0.5})
 
-        return _ok({
+        return tool_ok({
             "asset": asset or "(all)",
             "lookback": lookback,
             "current_price": round(current, 2),
@@ -1800,7 +1789,7 @@ class ListSkillsTool(BaseTool):
                 for s in skills
             ]
 
-            return _ok({
+            return tool_ok({
                 "n_skills": len(skill_list),
                 "categories": registry.categories(),
                 "skills": skill_list,
@@ -1881,7 +1870,7 @@ class LoadSkillTool(BaseTool):
                     available=available,
                 )
 
-            return _ok({
+            return tool_ok({
                 "name": skill.name,
                 "category": skill.category,
                 "description": skill.description,
@@ -1982,7 +1971,7 @@ class OptionsPricingTool(BaseTool):
             strike * T * exp(-rate * T) * norm.cdf(d2 if option_type == "call" else -d2) / 100
         )
 
-        return _ok({
+        return tool_ok({
             "option_type": option_type,
             "spot": spot,
             "strike": strike,
@@ -2133,7 +2122,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
         ic_arr = np.array(ic_pearson_list)
         spear_arr = np.array(ic_spearman_list)
 
-        return _ok({
+        return tool_ok({
             "factor_code": factor_code,
             "n_assets": len(factor_panel),
             "n_dates": len(ic_pearson_list),
@@ -2285,7 +2274,7 @@ class FactorQuintileReturns(BaseTool):
         if q1 is not None and qn is not None:
             result["long_short_spread"] = round(qn - q1, 6)
 
-        return _ok({
+        return tool_ok({
             "factor_code": factor_code,
             "n_groups": n_groups,
             "holding_period": holding_period,
@@ -2427,7 +2416,7 @@ class FactorICDecay(BaseTool):
             else:
                 results.append({"horizon": h, "ic_mean": None, "ic_std": None, "ir": None, "n_periods": 0})
 
-        return _ok({
+        return tool_ok({
             "factor_code": factor_code,
             "n_assets": len(factor_panel),
             "ic_decay": results,
@@ -2523,7 +2512,7 @@ class FactorTurnover(BaseTool):
             return err_actionable("no valid turnover observations", tool="factor_turnover")
 
         arr = np.array(turnover_list)
-        return _ok({
+        return tool_ok({
             "factor_code": factor_code,
             "n_assets": len(factor_panel),
             "n_periods": len(turnover_list),
@@ -2627,7 +2616,7 @@ class StrategyCompare(BaseTool):
             row["run_name"] = latest.get("run_name", "")
             results.append(row)
 
-        return _ok({
+        return tool_ok({
             "strategies": strategy_names,
             "metrics": metrics_keys,
             "comparison": results,
@@ -2736,7 +2725,7 @@ class DrawdownAnalysis(BaseTool):
         max_dd = round(float(np.min(drawdown)), 4)
         current_dd = round(float(drawdown[-1]), 4)
 
-        return _ok({
+        return tool_ok({
             "strategy": strategy_name,
             "run": latest_run.name,
             "equity_length": len(equity),
@@ -2838,7 +2827,7 @@ class BenchmarkComparison(BaseTool):
         rel_dd = (cum_excess - rel_peak) / rel_peak
         max_rel_dd = float(np.min(rel_dd))
 
-        return _ok({
+        return tool_ok({
             "strategy": strategy_name,
             "benchmark": benchmark_code,
             "n_periods": min_len,
@@ -2977,7 +2966,7 @@ class DataCleanTool(BaseTool):
 
             conn.close()
 
-            return _ok({
+            return tool_ok({
                 "strategy_name": strategy_name,
                 "preset": preset,
                 "dry_run": dry_run,
@@ -3121,7 +3110,7 @@ class ToolHelpTool(BaseTool):
                 tool="tool_help",
                 extra={"available": available},
             )
-        return _ok({
+        return tool_ok({
             "name": tool.name,
             "category": tool.category,
             "brief": tool.brief,

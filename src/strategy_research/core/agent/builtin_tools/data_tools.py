@@ -2,26 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
 
 from ..tools import EFFECT_DB, EFFECT_NET, BaseTool, ToolContext, ToolRegistry
-from .utils import err_actionable, try_unwrap_dict, try_unwrap_list
+from .utils import err_actionable, tool_ok, try_unwrap_dict, try_unwrap_list
 
 logger = logging.getLogger(__name__)
-
-
-def _ok(payload: dict[str, Any]) -> str:
-    return json.dumps({"status": "ok", **payload}, ensure_ascii=False)
-
-
-def _err(message: str, **extra: Any) -> str:
-    return json.dumps(
-        {"status": "error", "error": str(message), **extra},
-        ensure_ascii=False,
-    )
 
 
 def _summarize_fetch_result(data: dict) -> tuple[dict, dict, int]:
@@ -231,7 +219,7 @@ class GetMarketDataTool(BaseTool):
                     Path(workspace), data, strategy_name=strategy_name
                 )
 
-            return _ok({
+            return tool_ok({
                 "summary": summary,
                 "preview": preview,
                 "persisted": persist,
@@ -327,7 +315,7 @@ class ListDataSourcesTool(BaseTool):
                 "requires_auth": requires_auth,
             })
 
-        return _ok({
+        return tool_ok({
             "n_sources": len(sources),
             "sources": sources,
         })
@@ -395,7 +383,7 @@ class SearchSymbolTool(BaseTool):
             # A-share: use spot data for fuzzy search
             df = ak.stock_zh_a_spot_em()
             if df is None or df.empty:
-                return _ok({"results": [], "query": query, "market": market})
+                return tool_ok({"results": [], "query": query, "market": market})
 
             # Fuzzy match: query in code or name
             mask = (
@@ -414,7 +402,7 @@ class SearchSymbolTool(BaseTool):
                     "change_pct": row.get("涨跌幅"),
                 })
 
-            return _ok({
+            return tool_ok({
                 "results": results,
                 "query": query,
                 "market": market,
@@ -559,7 +547,7 @@ class ImportDataTool(BaseTool):
                 total_rows += rows
 
             conn.close()
-            return _ok({
+            return tool_ok({
                 "imported": total_rows,
                 "n_codes": len(data),
                 "strategy_name": strategy_name,
@@ -748,7 +736,7 @@ class CheckDataTool(BaseTool):
                 tool="check_data",
             )
 
-        return _ok({
+        return tool_ok({
             "strategy_name": strategy_name,
             "readiness": report.to_dict(),
             "hint": "修复动作参考 readiness.checks[*].fix_hint",
