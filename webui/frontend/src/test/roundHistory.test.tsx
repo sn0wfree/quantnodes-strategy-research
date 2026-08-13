@@ -118,6 +118,38 @@ describe('RoundHistory', () => {
     expect(onOpenRun).toHaveBeenCalledWith('run_0002')
   })
 
+  it('renders verdict-colored timeline dots and connectors', () => {
+    const { container } = render(
+      <RoundHistory
+        rounds={[
+          round({ round_num: 1, verdict: 'keep' }),
+          round({ round_num: 2, verdict: 'review' }),
+          round({ round_num: 3, verdict: 'discard' }),
+        ]}
+        currentRound={3}
+      />
+    )
+    // keep → emerald dot, review → amber dot, discard → slate dot (+ badges)
+    expect(container.querySelectorAll('.border-emerald-500').length).toBe(1)
+    expect(container.querySelectorAll('.border-amber-500').length).toBe(1)
+    expect(container.querySelectorAll('.border-slate-600').length).toBe(2)
+    // connectors inherit the verdict color of the round
+    expect(container.querySelectorAll('[class*="bg-emerald-500/40"]').length).toBe(1)
+    expect(container.querySelectorAll('[class*="bg-amber-500/40"]').length).toBe(1)
+    // last round has no connector below it
+    expect(container.querySelectorAll('.flex-1.w-0\\.5').length).toBe(2)
+  })
+
+  it('pulses the timeline dot of the current round', () => {
+    const { container } = render(
+      <RoundHistory
+        rounds={[round(), round({ round_num: 2 })]}
+        currentRound={2}
+      />
+    )
+    expect(container.querySelectorAll('.animate-pulse').length).toBe(1)
+  })
+
   it('does not render open-run buttons when onOpenRun is absent', () => {
     render(<RoundHistory rounds={[round()]} currentRound={1} />)
     expect(screen.queryAllByTitle('查看回测产物')).toHaveLength(0)

@@ -206,4 +206,31 @@ describe('StudyPage', () => {
     )
     expect(screen.getByText('尚未选择 session')).toBeTruthy()
   })
+
+  it('auto-selects the first study when none is active', async () => {
+    mockList.mockResolvedValue({
+      status: 'ok',
+      studies: [
+        { ...STUDIES[0], execution_status: 'complete' },
+        { ...STUDIES[1], execution_status: 'complete' },
+      ],
+    } as never)
+    render(
+      <MemoryRouter>
+        <StudyPage />
+      </MemoryRouter>
+    )
+    await waitFor(() => expect(mockSummary).toHaveBeenCalledWith('st-1'))
+  })
+
+  it('clears the summary when the list becomes empty', async () => {
+    mockList.mockResolvedValue({ status: 'ok', studies: [] } as never)
+    render(
+      <MemoryRouter>
+        <StudyPage />
+      </MemoryRouter>
+    )
+    expect(await screen.findByText('选择任务查看摘要')).toBeTruthy()
+    expect(mockSummary).not.toHaveBeenCalled()
+  })
 })

@@ -115,8 +115,8 @@ export function FlowCard({ nodes, currentRound, totalRounds }: Props) {
 
       {/* Progress bar */}
       <div className="mt-2 flex items-center gap-2 border-t border-slate-800/60 pt-2 text-[10px] text-slate-500">
-        <span className="whitespace-nowrap">
-          <span className="font-mono text-slate-300">{doneCount}</span>/{totalCount} 步骤
+        <span className="whitespace-nowrap font-mono text-slate-300">
+          {doneCount}/{totalCount} 步骤
         </span>
         <div className="h-1 flex-1 overflow-hidden rounded-full bg-slate-700/80">
           <div

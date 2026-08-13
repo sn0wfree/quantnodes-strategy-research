@@ -90,6 +90,28 @@ describe('StudyCreatePanel', () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('st-new'))
   })
 
+  it('submits with a custom metric added in advanced params', async () => {
+    mockStart.mockResolvedValue({
+      status: 'ok', study_id: 'st-new', execution_status: 'queued',
+    } as never)
+    render(<StudyCreatePanel sessionId="sess-1" workspacePath="/w" />)
+    fireEvent.change(screen.getByPlaceholderText(/研究 A 股动量因子/), {
+      target: { value: '动量因子研究' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/自动生成/), {
+      target: { value: 'momentum_20d' },
+    })
+    fireEvent.click(screen.getByText('高级参数'))
+    fireEvent.click(screen.getByText('添加指标'))
+    const metricNames = screen.getAllByPlaceholderText('metric')
+    fireEvent.change(metricNames[3], { target: { value: 'sortino' } })
+    fireEvent.click(screen.getByRole('button', { name: /启动 study/ }))
+    await waitFor(() => expect(mockStart).toHaveBeenCalled())
+    const body = mockStart.mock.calls[0][0] as { metric_targets: Array<{ name: string }> }
+    expect(body.metric_targets).toHaveLength(4)
+    expect(body.metric_targets[3].name).toBe('sortino')
+  })
+
   it('surfaces start errors', async () => {
     mockStart.mockRejectedValueOnce(new Error('start failed') as never)
     render(<StudyCreatePanel sessionId="sess-1" workspacePath="/w" />)

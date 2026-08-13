@@ -136,4 +136,27 @@ describe('StudyTaskSummary', () => {
     await waitFor(() => expect(mockSummary).toHaveBeenCalledTimes(2))
     expect(mockSummary).toHaveBeenLastCalledWith('st-2')
   })
+
+  it('shows the metrics empty state when rounds have no metrics', async () => {
+    mockSummary.mockResolvedValue(fixture({ recent_rounds: [] }) as never)
+    render(
+      <MemoryRouter>
+        <StudyTaskSummary studyId="st-1" />
+      </MemoryRouter>
+    )
+    expect(await screen.findByText('暂无带指标的轮次')).toBeInTheDocument()
+  })
+
+  it('omits the verdict badge when there is no last verdict', async () => {
+    mockSummary.mockResolvedValue(
+      fixture({ last_verdict: null, recent_rounds: [] }) as never
+    )
+    render(
+      <MemoryRouter>
+        <StudyTaskSummary studyId="st-1" />
+      </MemoryRouter>
+    )
+    await screen.findByText('动量因子研究')
+    expect(screen.queryByText(/keep/)).not.toBeInTheDocument()
+  })
 })

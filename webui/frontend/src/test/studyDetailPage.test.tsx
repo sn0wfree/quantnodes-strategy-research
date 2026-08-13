@@ -248,6 +248,13 @@ describe('StudyDetailPage interactions', () => {
     expect(await screen.findByText(/directive rejected/)).toBeInTheDocument()
   })
 
+  it('renders the task-info card in the sidebar', async () => {
+    renderPage()
+    expect(await screen.findByText('任务信息')).toBeInTheDocument()
+    expect(screen.getByText('/tmp/ws')).toBeInTheDocument()
+    expect(screen.getByText('2026-08-01 10:00')).toBeInTheDocument()
+  })
+
   it('does not submit an empty directive', async () => {
     renderPage()
     await screen.findByText(/mom_20d/)
