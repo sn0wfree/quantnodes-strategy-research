@@ -20,7 +20,7 @@ from strategy_research.cli.tui.widgets.sidebar import CommandSidebar
 from strategy_research.cli.tui.widgets.status_header import StatusHeader
 from strategy_research.cli.tui.widgets.streaming_text import StreamingText
 from strategy_research.cli.tui.widgets.thinking_spinner import ThinkingSpinner
-from strategy_research.cli.tui.widgets.tools_rail import ToolsRail, Milestone, TimelineEntry
+from strategy_research.cli.tui.widgets.tools_rail import Milestone, TimelineEntry, ToolsRail
 from strategy_research.cli.tui.widgets.transcript import TranscriptView
 
 __all__ = [

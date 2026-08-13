@@ -14,8 +14,8 @@ import json
 import logging
 from typing import Any
 
-from ..tools import BaseTool, EFFECT_DB, ToolContext
-from .utils import err_actionable, safe_get_param, try_unwrap_list
+from ..tools import EFFECT_DB, BaseTool, ToolContext
+from .utils import err_actionable, try_unwrap_list
 
 logger = logging.getLogger(__name__)
 
@@ -521,7 +521,7 @@ class ListGoalsTool(BaseTool):
         status_str = status
 
         try:
-            from ...goal import GoalStatus, GoalStore
+            from ...goal import GoalStatus
             store = _get_store()
             status_filter = GoalStatus(status_str) if status_str else None
             goals = store.list_goals(
@@ -543,7 +543,7 @@ class ListGoalsTool(BaseTool):
                 ],
                 "count": len(goals),
             })
-        except ValueError as exc:
+        except ValueError:
             # GoalStatus enum parsing failed
             return err_actionable(
                 f"invalid status value: {status_str!r}",

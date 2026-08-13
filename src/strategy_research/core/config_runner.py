@@ -107,7 +107,7 @@ def create_backtest_config(cfg: dict) -> BacktestConfig:
 
 def _is_data_fresh(workspace_path: Path, strategy_name: str, end_date: str) -> bool:
     """Check if DuckDB data is fresh enough (ends within 7 days of end_date)."""
-    from datetime import datetime, timedelta
+    from datetime import datetime
     try:
         from .db import get_connection
         conn = get_connection(workspace_path, read_only=True)
@@ -343,7 +343,7 @@ class FactorStrategy:
     ) -> dict[str, float]:
         """计算权重."""
         from .alpha_zoo_adapter import AlphaZooAdapter
-        from .compute_factor import compute_factor, FactorComputeError
+        from .compute_factor import FactorComputeError, compute_factor
         from .tools.data_transforms import (
             is_wide_close_format,
             long_to_wide_ohlcv_per_asset,

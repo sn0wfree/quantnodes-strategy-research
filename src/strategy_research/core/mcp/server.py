@@ -241,7 +241,7 @@ class MCPServer:
             **kwargs: Any,
         ) -> str:
             try:
-                from ..goal import GoalRecord, GoalStatus, GoalStore
+                from ..goal import GoalStatus, GoalStore
                 store = GoalStore()
                 if not goal_id:
                     return json.dumps({"status": "error", "error": "goal_id is required"}, ensure_ascii=False)
@@ -835,6 +835,7 @@ class MCPServer:
                 task = f"执行 swarm preset: {preset_name}"
 
             from pathlib import Path
+
             from ..swarm import SwarmRuntime, load_preset
 
             presets_dir = Path(__file__).parent.parent / "swarm" / "presets"

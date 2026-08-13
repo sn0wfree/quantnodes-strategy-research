@@ -39,7 +39,6 @@ from strategy_research.cli import main as _cli_main
 from strategy_research.cli.interactive.main import main as _interactive_main
 from strategy_research.cli.tui.app import ResearchApp
 
-
 # Flags understood by the REPL entry point only. Anything outside this
 # set (subcommands, --help, --llm-list-profiles, ...) falls through to
 # argparse.
@@ -99,6 +98,7 @@ def _build_llm_client():
     """
     try:
         from dotenv import load_dotenv
+
         from strategy_research.cli.onboard import _QUANTNODES_DOTENV_PATH
         load_dotenv(_QUANTNODES_DOTENV_PATH, override=True)
     except Exception:

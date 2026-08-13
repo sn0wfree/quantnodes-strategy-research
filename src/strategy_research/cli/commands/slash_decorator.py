@@ -30,7 +30,6 @@ from typing import Any, Callable
 
 from . import slash_router
 
-
 # Tracks auto-generated run_<name> aliases for test introspection.
 _RUN_ALIASES: dict[str, Callable[..., int]] = {}
 

@@ -45,7 +45,6 @@ async def goal_start(req: GoalStartRequest, request: Request):
         from ...core.goal.context import default_goal_criteria
         from ...core.goal.events import (
             CHANGE_TYPE_CREATE,
-            build_goal_updated_payload,
         )
 
         db_path = getattr(request.app.state, "goal_db_path", None)
@@ -151,7 +150,6 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
         from ...core.goal import EvidenceInput, GoalStore
         from ...core.goal.events import (
             CHANGE_TYPE_EVIDENCE,
-            build_goal_updated_payload,
         )
 
         db_path = getattr(request.app.state, "goal_db_path", None)

@@ -11,16 +11,17 @@ out of the box.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ._task_utils import log_task_exception
+
+if TYPE_CHECKING:
+    from ...core.study.scheduler import StudyScheduler
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -155,8 +156,8 @@ def _get_study_scheduler():
     ``/study start`` wrote the row — the consumer loop then saw no
     study and silently exited.
     """
-    from .chat import _get_session_service
     from ...core.study import StudyScheduler, StudyStore
+    from .chat import _get_session_service
 
     db_path = str(StudyStore().db_path)
     sched = _scheduler_cache.get(db_path)
@@ -264,7 +265,7 @@ async def study_start(req: StudyStartRequest, request: Request):
     try:
         from ...core.goal import GoalStore
         from ...core.goal.context import default_goal_criteria
-        from ...core.study import StudyStore, StudyStatus, default_metric_targets
+        from ...core.study import StudyStatus, StudyStore, default_metric_targets
 
         targets = (
             [t.model_dump() for t in req.metric_targets]
@@ -332,8 +333,11 @@ async def study_start(req: StudyStartRequest, request: Request):
         else:
             # Original GoalWorkflowRunner path (single DAG execution)
             from ...core.goal.workflow import (
-                GoalWorkflowConfig, GoalWorkflowGoalConfig, GoalAgentConfig,
-                CompletionConfig, GoalWorkflowRunner,
+                CompletionConfig,
+                GoalAgentConfig,
+                GoalWorkflowConfig,
+                GoalWorkflowGoalConfig,
+                GoalWorkflowRunner,
             )
             from .chat import _get_session_service
 
@@ -459,7 +463,7 @@ async def study_list(
         from .web_session import _fetch_session_owned, _get_db
         user_id = getattr(request.state, "user_id", None) or "anonymous"
         _fetch_session_owned(_get_db(), session_id, user_id)
-    from ...core.study import StudyStore, StudyStatus
+    from ...core.study import StudyStatus, StudyStore
     try:
         status_enum = StudyStatus(status) if status else None
     except ValueError:
@@ -694,7 +698,7 @@ async def study_resume(request: Request, study_id: str):
     sched = _get_study_scheduler()
 
     # Check current status to decide resume path
-    from ...core.study import StudyStore, StudyStatus
+    from ...core.study import StudyStatus, StudyStore
     with StudyStore() as store:
         study = store.get_study(study_id)
     if study is None:
@@ -885,7 +889,6 @@ async def study_guidance(request: Request, study_id: str):
 async def study_round_summary_md(request: Request, study_id: str, round_num: int):
     """v2: single-round summary.md content."""
     from ...core.study import round_manifest as rm
-    from ...core.study import state_store as ss
     study = _owned_study(request, study_id)
     p = rm.summary_path(Path(study.workspace_path), study_id, round_num)
     if not p.exists():

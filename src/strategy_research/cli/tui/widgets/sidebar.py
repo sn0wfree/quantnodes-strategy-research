@@ -14,8 +14,8 @@ from typing import Any, List, Optional
 from textual.widgets import Label, ListItem, ListView
 
 from strategy_research.cli.commands.slash_router import (
-    Command,
     SLASH_COMMANDS,
+    Command,
 )
 from strategy_research.cli.tui.messages import SynthesizeInput
 

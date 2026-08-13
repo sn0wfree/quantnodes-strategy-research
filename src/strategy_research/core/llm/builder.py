@@ -105,9 +105,9 @@ class LLMConfigBuilder:
         """Apply the OPENAI_* env-var layer (base_url, model)."""
         eff_env = env if env is not None else self._env
         overrides: dict[str, Any] = {}
-        if eff_env.get(ENV_BASE_URL := "OPENAI_BASE_URL"):
+        if eff_env.get("OPENAI_BASE_URL"):
             overrides["base_url"] = eff_env["OPENAI_BASE_URL"]
-        if eff_env.get(ENV_MODEL := "OPENAI_MODEL"):
+        if eff_env.get("OPENAI_MODEL"):
             overrides["model"] = eff_env["OPENAI_MODEL"]
         self._builder = self._builder.with_yaml_data("env", overrides)
         return self

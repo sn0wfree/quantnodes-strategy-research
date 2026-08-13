@@ -22,7 +22,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,11 @@ _LEGACY_L1_TOOL_LIMITS_DOC: dict[str, int] = {
     "list_files": 1000,
     "_default": 2000,
 }
+
+
+# Legacy callback signature kept for API compatibility (see
+# ``test_compact_full_pipeline.py::test_on_compaction_callback_accepted``).
+CompactionCallback = Callable[[str, Any], None]
 
 
 @dataclass(frozen=True)

@@ -73,15 +73,20 @@ def meets_metric_targets(metrics: dict[str, Any], targets: list[dict]) -> bool:
         except (TypeError, ValueError):
             return False
         if op == ">=":
-            if not (a >= v): return False
+            if not ((a >= v)):
+                return False
         elif op == "<=":
-            if not (a <= v): return False
+            if not ((a <= v)):
+                return False
         elif op == ">":
-            if not (a > v): return False
+            if not ((a > v)):
+                return False
         elif op == "<":
-            if not (a < v): return False
+            if not ((a < v)):
+                return False
         elif op == "==":
-            if not (a == v): return False
+            if not ((a == v)):
+                return False
         else:
             # unknown operator — treat as not-met
             return False
@@ -199,8 +204,10 @@ class AutoresearchRunner:
             self._emit(session, "study_failed", {"study_id": sid, "error": f"{exc}"[:500], "reason": ShutdownReason.ERROR})
         finally:
             if self._own_goal_store:
-                try: self._goal_store.close()
-                except Exception: pass
+                try:
+                    self._goal_store.close()
+                except Exception:
+                    pass
             self._emit(session, "study_executor_stopped", {"study_id": sid, "reason": reason})
         return reason
 
@@ -494,6 +501,7 @@ class AutoresearchRunner:
         """Single monitor check: re-backtest the last keep run, compare to
         ``metric_targets`` (no LLM, no gates). """
         from datetime import datetime, timezone
+
         from strategy_research.core.backtest import run_backtest_script
         from strategy_research.core.study import state_store as ss
 
@@ -559,11 +567,13 @@ class AutoresearchRunner:
         Overridable for tests to stub round execution.
         """
         from strategy_research.core.autoresearch import (
-            read_current_state, generate_run_summary, save_run_summary,
             _create_run_dir,
-        )
-        from strategy_research.core.autoresearch import (
-            run_researcher_phase, run_execution_phase, run_evaluation_phase,
+            generate_run_summary,
+            read_current_state,
+            run_evaluation_phase,
+            run_execution_phase,
+            run_researcher_phase,
+            save_run_summary,
         )
         from strategy_research.core.study import review_loop as rl
         from strategy_research.core.study import round_manifest as rm
@@ -597,7 +607,6 @@ class AutoresearchRunner:
         })
 
         # ── round dir + inherited strategy copy ─────────────────────
-        rounds_dir = root / "rounds"
         round_dir = rm.round_dir(path, sid, round_num)
         round_dir.mkdir(parents=True, exist_ok=True)
 
@@ -886,7 +895,8 @@ class AutoresearchRunner:
         (repeated high deviation / repeated review failure), else None.
         """
         from strategy_research.core.agent.role_factory import (
-            run_agent_via_llm, should_use_real_llm,
+            run_agent_via_llm,
+            should_use_real_llm,
         )
         from strategy_research.core.study import review_loop as rl
         from strategy_research.core.study import round_manifest as rm
@@ -953,7 +963,6 @@ class AutoresearchRunner:
         state.review_fail_count = 0
 
         # ── ② information collection ───────────────────────────────
-        collected = 0
         if rl.should_collect(
             info_gap=review["info_gap"],
             round_num=round_num,
@@ -961,7 +970,7 @@ class AutoresearchRunner:
             collect_interval=SR_STUDY_COLLECT_INTERVAL,
         ):
             topics = review["topics"] or [self.study.objective[:80]]
-            collected = self._collect_knowledge(topics)
+            self._collect_knowledge(topics)
 
         # ── ③ todos application ────────────────────────────────────
         applied = rl.apply_todos(
@@ -1017,7 +1026,8 @@ class AutoresearchRunner:
         Returns the number of appended entries (0 on stub/failure).
         """
         from strategy_research.core.agent.role_factory import (
-            run_agent_via_llm, should_use_real_llm,
+            run_agent_via_llm,
+            should_use_real_llm,
         )
         from strategy_research.core.study import review_loop as rl
         from strategy_research.core.study import state_store as ss
@@ -1250,8 +1260,10 @@ class AutoresearchRunner:
             nums: list[int] = []
             for d in runs_dir.iterdir():
                 if d.is_dir() and d.name.startswith("run_"):
-                    try: nums.append(int(d.name.split("_")[1]))
-                    except (ValueError, IndexError): pass
+                    try:
+                        nums.append(int(d.name.split("_")[1]))
+                    except (ValueError, IndexError):
+                        pass
             if not nums:
                 return None
             return load_run_summary(runs_dir / f"run_{max(nums):04d}")
@@ -1267,8 +1279,10 @@ class AutoresearchRunner:
             await asyncio.sleep(0.5)
 
     def _emit(self, session_id: str, event: str, data: dict) -> None:
-        try: self.emitter.emit(session_id, event, data)
-        except Exception as exc: logger.debug("runner emit %s failed: %s", event, exc)
+        try:
+            self.emitter.emit(session_id, event, data)
+        except Exception as exc:
+            logger.debug("runner emit %s failed: %s", event, exc)
 
     def _open_goal_store(self):
         from strategy_research.core.goal import GoalStore

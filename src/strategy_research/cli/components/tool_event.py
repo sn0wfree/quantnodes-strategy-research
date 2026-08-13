@@ -24,7 +24,11 @@ from rich.text import Text
 # terminals don't render mojibake.
 from strategy_research.cli.utils.ascii_compat import (
     ELLIPSIS_ASCII as _ELL_ASCII,
+)
+from strategy_research.cli.utils.ascii_compat import (
     ELLIPSIS_UNICODE as _ELL_UNI,
+)
+from strategy_research.cli.utils.ascii_compat import (
     is_ascii_mode,
     status_marker,
 )
@@ -46,7 +50,6 @@ _STATUS_STYLE: dict[str, str] = {
 
 # Status markers are Unicode ●/× by default. The :func:`status_marker`
 # helper picks the right glyph per current mode (Unicode vs ASCII).
-from strategy_research.cli.utils.ascii_compat import status_marker
 
 _STATUS_MARKER: dict[str, str] = {
     "running": status_marker("running"),

@@ -17,14 +17,12 @@ Audit log: in-memory ring buffer of last 100 admin actions.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import time
 from collections import deque
 from typing import Any
-
-import hmac
-import logging
 
 from fastapi import APIRouter, Header, HTTPException, Query
 

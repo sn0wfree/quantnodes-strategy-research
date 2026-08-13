@@ -23,12 +23,10 @@ detail to the main transcript.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, List, Optional
 
 from textual.widgets import Static
-
-from strategy_research.cli.tui.theme import brand_tokens
 
 
 @dataclass

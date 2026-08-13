@@ -14,7 +14,7 @@ import json
 import logging
 import types
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, get_args, get_origin, get_type_hints
 
@@ -227,7 +227,7 @@ def _coerce_param_value(name: str, value: Any, annotation: Any) -> Any:
         if isinstance(value, str):
             try:
                 parsed = json.loads(value)
-            except json.JSONDecodeError as exc:
+            except json.JSONDecodeError:
                 raise ToolError(
                     f"invalid value for '{name}': not a valid JSON list",
                     received=value,
@@ -245,7 +245,7 @@ def _coerce_param_value(name: str, value: Any, annotation: Any) -> Any:
         if isinstance(value, str):
             try:
                 parsed = json.loads(value)
-            except json.JSONDecodeError as exc:
+            except json.JSONDecodeError:
                 raise ToolError(
                     f"invalid value for '{name}': not a valid JSON object",
                     received=value,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -485,6 +486,7 @@ async def definitions_delete(name: str, request: Request):
 async def definitions_copy(name: str, request: Request):
     """Copy a definition (typically a builtin) into the user directory."""
     import json as _json
+
     from ...core.workflow.builtin import load_definition, save_user_definition
     from ...core.workflow.definition import WorkflowDefinition
 
@@ -585,7 +587,6 @@ async def run_detail(run_id: str):
 
 
 def _approval_node_ids(store: Any, run_id: str) -> list[str]:
-    import json
     rows = store._ensure_conn().execute(
         "SELECT node_id FROM approvals WHERE run_id = ? ORDER BY created_at", (run_id,),
     ).fetchall()

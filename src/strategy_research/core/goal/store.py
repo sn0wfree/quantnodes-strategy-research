@@ -25,6 +25,7 @@ from .models import (
     GoalCriterion,
     GoalRecord,
     GoalStatus,
+    JournalEntry,
     RiskTier,
     StaleGoalError,
 )
@@ -1011,7 +1012,6 @@ class GoalStore:
             )
 
             # Write a synthetic audit row for record-keeping
-            all_evidence_ids = [ev.evidence_id for ev in evidence]
             self._conn.execute(
                 """
                 INSERT INTO goal_audits (
@@ -1494,7 +1494,6 @@ class GoalStore:
         self, goal_id: str, limit: int = 50
     ) -> list["JournalEntry"]:
         """Return journal entries for a goal, newest first."""
-        from .models import JournalEntry
         rows = self._conn.execute(
             "SELECT * FROM goal_journal WHERE goal_id = ? "
             "ORDER BY round_num DESC, created_at DESC LIMIT ?",

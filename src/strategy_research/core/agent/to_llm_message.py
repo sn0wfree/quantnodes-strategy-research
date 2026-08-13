@@ -88,10 +88,10 @@ def get_message_type(db_message: dict) -> str:
 
 def project_to_llm_message(db_message: dict) -> Optional[dict]:
     """Project a single DB message to LLM input format.
-    
+
     Returns None for messages that should be skipped entirely
     (e.g. system-internal events that don't belong in LLM context).
-    
+
     Returns a dict with 'role' and 'content' (or 'content_parts')
     ready to send to the LLM API.
     """
@@ -129,7 +129,7 @@ def project_to_llm_message(db_message: dict) -> Optional[dict]:
 
 def project_messages_to_llm(db_messages: list[dict]) -> list[dict]:
     """Project a list of DB messages to LLM input, in order.
-    
+
     Skips None results (e.g. internal events).
     """
     result = []
@@ -142,7 +142,7 @@ def project_messages_to_llm(db_messages: list[dict]) -> list[dict]:
 
 def _extract_assistant_content(db_message: dict) -> str:
     """Extract text content from assistant message parts.
-    
+
     Supports two storage formats:
     - New: parts_json is a list of parts, each with type='text'|'tool_call' etc.
     - Legacy: content field has the text directly

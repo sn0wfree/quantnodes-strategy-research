@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ...backtest import run_backtest_from_yaml
-from ...compute_factor import compute_factor, FactorComputeError
+from ...compute_factor import FactorComputeError, compute_factor
 from ..sandbox import (
     PathValidationError,
     PathWhitelist,
@@ -36,13 +36,12 @@ from ..sandbox import (
 from ..tools import (
     EFFECT_DB,
     EFFECT_FS,
-    EFFECT_NET,
     BaseTool,
     ToolContext,
     ToolError,
     ToolRegistry,
 )
-from .utils import err_actionable, safe_get_param, try_unwrap_list, try_unwrap_dict
+from .utils import err_actionable
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +220,7 @@ class ReadFileTool(BaseTool):
 
 
 class ListFilesTool(BaseTool):
-    """列出工作区目录内容（文件/子目录，支持 glob）。 
+    """列出工作区目录内容（文件/子目录，支持 glob）。
 
     # ── 工具说明书 ──────────────────────────────
     # 版本: 1.1.0
@@ -726,7 +725,6 @@ class EngineRunStep(BaseTool):
         action: str,
         description: str,
     ) -> dict:
-        from ...backtest import run_backtest_from_yaml
 
         try:
             result = run_backtest_from_yaml(
@@ -1822,6 +1820,7 @@ class FactorCrossSectionalAnalysis(BaseTool):
 
         # Compute factor per asset and build date×asset panel
         import pandas as pd
+
         from ...tools.data_transforms import long_to_single_asset_wide
 
         factor_panel = {}
@@ -2576,7 +2575,6 @@ class DrawdownAnalysis(BaseTool):
                     for col in ["equity", "nav", "portfolio_value", "value", "close"]:
                         if col in eq_df.columns:
                             equity = eq_df[col].values
-                            dates = eq_df.iloc[:, 0].values if len(eq_df.columns) > 1 else None
                             break
                     if equity is not None:
                         break
@@ -2888,10 +2886,9 @@ class DataCleanTool(BaseTool):
             )
 
         try:
-            from ...tools.data_clean import clean_data
-
             # 加载数据
             from ...db import get_connection
+            from ...tools.data_clean import clean_data
             if not (workspace / "data.duckdb").exists():
                 return err_actionable(
                     "no DuckDB database in workspace",

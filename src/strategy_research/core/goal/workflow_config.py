@@ -14,6 +14,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from .workflow import GoalWorkflowConfig
+
 logger = logging.getLogger(__name__)
 
 _PRESETS_DIR = Path(__file__).parent.parent / "swarm" / "presets"

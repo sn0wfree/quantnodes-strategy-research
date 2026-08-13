@@ -84,7 +84,10 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["F", "E", "W", "I", "C90"]
-ignore = ["E501", "E741"]
+ignore = ["E501", "E741", "E402"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
 "src/strategy_research/core/alpha_zoo/**" = ["F401"]

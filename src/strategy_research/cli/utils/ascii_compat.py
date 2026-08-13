@@ -25,7 +25,6 @@ import sys
 import threading
 from typing import Mapping
 
-
 # Per-thread override (used by tests; falls back to env detection
 # when no override is set).
 _ASCII_OVERRIDE = threading.local()

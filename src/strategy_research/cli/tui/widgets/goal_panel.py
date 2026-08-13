@@ -225,7 +225,6 @@ class GoalPanel(Static):
           - workflow_resumed: show resumed status
         """
         agent_id = data.get("agent_id", "")
-        layer = data.get("layer", -1)
 
         if event == "agent_start":
             # Mark agent as running in criteria (if we have criteria)

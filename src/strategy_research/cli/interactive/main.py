@@ -34,24 +34,28 @@ from strategy_research.cli.commands.slash_chat import (
     cmd_quit,
     cmd_shadow,
 )
+from strategy_research.cli.commands.slash_goal import (
+    cmd_cancel,
+    cmd_complete,
+    cmd_evidence,
+    cmd_start,
+    cmd_status,
+)
+from strategy_research.cli.commands.slash_goal import (
+    cmd_help as goal_help,
+)
 from strategy_research.cli.commands.slash_halt import (
     cmd_halt,
     cmd_resume,
     is_halt_command,
     is_resume_command,
 )
-from strategy_research.cli.commands.slash_goal import (
-    cmd_cancel,
-    cmd_complete,
-    cmd_evidence,
-    cmd_help as goal_help,
-    cmd_start,
-    cmd_status,
-)
 from strategy_research.cli.commands.slash_memory import (
     cmd_forget,
     cmd_list,
     cmd_search,
+)
+from strategy_research.cli.commands.slash_memory import (
     cmd_show as memory_show,
 )
 from strategy_research.cli.commands.slash_router import (
@@ -60,6 +64,8 @@ from strategy_research.cli.commands.slash_router import (
 from strategy_research.cli.commands.slash_session import (
     cmd_export,
     cmd_history,
+)
+from strategy_research.cli.commands.slash_session import (
     cmd_search as session_search,
 )
 from strategy_research.cli.halt import clear_halt, trip_halt

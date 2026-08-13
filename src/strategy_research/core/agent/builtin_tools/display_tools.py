@@ -20,11 +20,8 @@ html → _on_html) so reloads keep them in the chat record.
 from __future__ import annotations
 
 import csv
-import io
 import json
 import logging
-import math
-import os
 import uuid
 from pathlib import Path
 from typing import Any, Optional

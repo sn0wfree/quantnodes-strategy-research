@@ -1455,7 +1455,6 @@ def run_research_round(
     # Local imports keep the module import graph light for callers that
     # only need the helpers above.
     from strategy_research.core.autoresearch import (
-        DEFAULT_KEEP_RECENT,
         detect_lazy_behavior,
         generate_run_summary,
         read_agent_history,
@@ -1468,9 +1467,9 @@ def run_research_round(
     )
     from strategy_research.core.backtest import run_backtest_script
     from strategy_research.core.strategy_acceptance import (
-        AcceptanceConfig,
-        DEFAULT_CONFIG,
         decide as make_decision,
+    )
+    from strategy_research.core.strategy_acceptance import (
         load_config as load_acceptance_config,
     )
 
@@ -1960,6 +1959,8 @@ def run_evaluation_phase(
     from strategy_research.core.autoresearch import save_agent_record
     from strategy_research.core.strategy_acceptance import (
         decide as make_decision,
+    )
+    from strategy_research.core.strategy_acceptance import (
         load_config as load_acceptance_config,
     )
 

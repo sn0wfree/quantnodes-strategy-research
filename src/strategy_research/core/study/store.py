@@ -27,6 +27,7 @@ from .models import (
     MetricTarget,
     StudyDirective,
     StudyRecord,
+    StudyRoundRecord,
     StudyStatus,
 )
 
@@ -713,11 +714,11 @@ class StudyStore:
         # gate on its own clock. This is cheap enough for Phase 3's
         # small study count.
         rows = self._conn.execute(
-            f"SELECT * FROM studies "
-            f"WHERE execution_status = 'monitoring' "
-            f"  AND monitor_interval_seconds IS NOT NULL "
-            f"ORDER BY last_monitor_check_at ASC, created_at ASC "
-            f"LIMIT ?",
+            "SELECT * FROM studies "
+            "WHERE execution_status = 'monitoring' "
+            "  AND monitor_interval_seconds IS NOT NULL "
+            "ORDER BY last_monitor_check_at ASC, created_at ASC "
+            "LIMIT ?",
             (limit,),
         ).fetchall()
         return [self._study_from_row(row) for row in rows]
@@ -783,7 +784,6 @@ class StudyStore:
         Complements ``append_round`` (phase-1 body); payload mirrors the
         manifest's ``review`` section (design §9.4/§20.4).
         """
-        from .models import StudyRoundRecord
         now = _now_iso()
         with self._write_transaction():
             self._conn.execute(
@@ -798,7 +798,6 @@ class StudyStore:
         self, study_id: str, limit: int = 50
     ) -> list["StudyRoundRecord"]:
         """Return round history for a study, newest first."""
-        from .models import StudyRoundRecord
         rows = self._conn.execute(
             "SELECT * FROM study_rounds WHERE study_id = ? "
             "ORDER BY round_num DESC LIMIT ?",

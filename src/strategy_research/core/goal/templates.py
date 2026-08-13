@@ -9,7 +9,7 @@ The template's criteria replace the default 3-criterion list.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

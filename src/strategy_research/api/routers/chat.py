@@ -7,13 +7,16 @@ import json
 import logging
 import os
 import uuid
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from strategy_research.core.agent.event_store import EventStore
+
+if TYPE_CHECKING:
+    from ...core.permission import PermissionGateway
 
 from ..session.service import SessionService
 from ..session.store import SessionStore
@@ -423,7 +426,6 @@ async def _run_agent_loop_background(
         )
 
         mm = get_default_memory_manager()
-        history = await mm.get(session_id) or []
 
         loop = build_chat_agent_loop(
             config=cfg,
@@ -962,6 +964,8 @@ async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
         for study, config, goal_id, objective, ws in _study_pending_submits:
             if config is None:
                 # AEGIS: autoresearch → scheduler
+                from .study import _get_study_scheduler
+
                 sched = _get_study_scheduler()
                 import asyncio as _asyncio
                 task = _asyncio.create_task(sched.submit(study))
@@ -1120,6 +1124,8 @@ def _parse_metric_targets(spec: str) -> list[dict] | None:
 def _default_workspace() -> str:
     """Return the process-default workspace path for /study defaults."""
     import os
+    from pathlib import Path
+
     return os.environ.get("SR_WORKSPACE_PATH") or str(
         Path.home() / ".quantnodes-research"
     )

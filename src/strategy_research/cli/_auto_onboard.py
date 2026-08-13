@@ -32,9 +32,9 @@ import sys
 from pathlib import Path
 
 from strategy_research.cli.onboard import (
-    run_onboarding,
-    _QUANTNODES_LLM_JSON_PATH,
     _QUANTNODES_DOTENV_PATH,
+    _QUANTNODES_LLM_JSON_PATH,
+    run_onboarding,
 )
 
 # Two additional candidates per vibe-trading/cli/main.py:100-102.

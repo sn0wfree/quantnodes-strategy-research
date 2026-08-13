@@ -15,6 +15,14 @@ Public API:
 
 from __future__ import annotations
 
+from .executor import (
+    ControlToken,
+    EventEmitter,
+    NullEmitter,
+    ShutdownReason,
+    acceptance_config_from_targets,
+    meets_metric_targets,
+)
 from .models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,
@@ -24,18 +32,9 @@ from .models import (
     StudyStatus,
     default_metric_targets,
 )
-from .store import StudyStore
-from .executor import (
-    AutoresearchExecutor,
-    ControlToken,
-    EventEmitter,
-    NullEmitter,
-    ShutdownReason,
-    acceptance_config_from_targets,
-    meets_metric_targets,
-)
 from .runner import AutoresearchRunner
 from .scheduler import StudyScheduler, make_event_bus_emitter
+from .store import StudyStore
 
 # Backward-compat: AutoresearchExecutor points to the new runner
 AutoresearchExecutor = AutoresearchRunner

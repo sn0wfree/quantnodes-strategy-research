@@ -23,7 +23,7 @@ fallback, no empty defaults.
 from __future__ import annotations
 
 import re
-from typing import Iterable, Literal
+from typing import Literal
 
 import pandas as pd
 

@@ -320,7 +320,6 @@ class WorkflowDefinition:
         # Map each bucket to the approval that gates it: the approval
         # whose position in the topological order immediately precedes
         # the bucket.  Reconstructed via the original order.
-        approvals = {i: nid for i, nid in enumerate(ordered) if nid in approval_ids}
         approval_positions = [i for i, nid in enumerate(ordered) if nid in approval_ids]
 
         cursor = 0

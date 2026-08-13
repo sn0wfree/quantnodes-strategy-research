@@ -6,8 +6,10 @@ from strategy_research.cli.interactive.completer import SlashCompleter
 from strategy_research.cli.interactive.main import (
     InteractiveContext,
     dispatch_slash,
-    main as interactive_main,
     process_turn,
+)
+from strategy_research.cli.interactive.main import (
+    main as interactive_main,
 )
 from strategy_research.cli.onboard import (
     BACK,

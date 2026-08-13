@@ -82,15 +82,20 @@ def meets_metric_targets(metrics: dict[str, Any], targets: list[dict]) -> bool:
         except (TypeError, ValueError):
             return False
         if op == ">=":
-            if not (a >= v): return False
+            if not ((a >= v)):
+                return False
         elif op == "<=":
-            if not (a <= v): return False
+            if not ((a <= v)):
+                return False
         elif op == ">":
-            if not (a > v): return False
+            if not ((a > v)):
+                return False
         elif op == "<":
-            if not (a < v): return False
+            if not ((a < v)):
+                return False
         elif op == "==":
-            if not (a == v): return False
+            if not ((a == v)):
+                return False
         else:
             # unknown operator — treat as not-met
             return False
@@ -500,6 +505,7 @@ class AutoresearchExecutor:
         before the backtest runs so timing fields are honest.
         """
         from datetime import datetime, timezone
+
         from strategy_research.core.backtest import run_backtest_script
 
         now_iso = datetime.now(timezone.utc).isoformat()

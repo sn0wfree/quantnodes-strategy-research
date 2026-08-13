@@ -10,7 +10,6 @@ all registered commands, then dispatches via ``registry.dispatch``.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -20,7 +19,6 @@ import yaml
 from .commands import core_commands  # noqa: F401  (registration side effect)
 from .commands import llm as _llm_cmd  # noqa: F401  (registration side effect)
 from .commands.autoresearch import _spawn_agent as _spawn_agent
-from .commands.registry import dispatch as _dispatch
 from .commands.registry import wire_commands as _wire
 from .commands.server import (
     cmd_api_serve,
@@ -524,7 +522,6 @@ def cmd_import(args: argparse.Namespace) -> int:
         return 1
 
     from strategy_research.core.data_import import (
-        generate_sample_data,
         import_akshare,
         import_csv_ohlcv,
         import_fred,
@@ -989,6 +986,8 @@ def main() -> int:
             mcp_parser.print_help()
             return 0
     elif args.command == "export":
+        from .commands.export import cmd_export
+
         return cmd_export(args)
     elif args.command == "schedule":
         from strategy_research.core.scheduled_research.cli import (
@@ -1075,6 +1074,8 @@ def main() -> int:
             return 0
     elif args.command == "compact":
         if getattr(args, "compact_command", None) == "show":
+            from .commands.compact_show import cmd_compact_show
+
             return cmd_compact_show(args)
         else:
             compact_parser.print_help()

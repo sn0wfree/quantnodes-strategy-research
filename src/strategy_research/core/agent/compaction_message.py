@@ -55,7 +55,7 @@ VALID_MESSAGE_TYPES = frozenset({
 @dataclass
 class CompactionMessage:
     """opencode-aligned compaction message.
-    
+
     Attributes:
         id: Unique message id (UUID string).
         session_id: Session this compaction belongs to.
@@ -89,7 +89,9 @@ class CompactionMessage:
         if isinstance(row, dict):
             get = row.get
         else:
-            get = lambda k, default=None: row[k] if k in row.keys() else default
+
+            def get(k, default=None):
+                return row[k] if k in row.keys() else default
 
         # Prefer parts_json; fall back to content for legacy rows
         summary = ""
@@ -184,13 +186,13 @@ class CompactionMessage:
 
     def to_llm_message(self) -> dict:
         """Project to LLM input as USER role with <conversation-checkpoint> wrap.
-        
+
         This is the core fix for the "spontaneous summary" bug. By
         projecting as `user` (not `assistant`), the LLM treats this
         as "user-provided historical context" rather than "previous
         assistant turn". The explicit "not as new instructions"
         framing prevents the LLM from continuing the summary task.
-        
+
         The recent-context section includes the serialized recent
         messages so the LLM doesn't lose track of immediately
         preceding context.

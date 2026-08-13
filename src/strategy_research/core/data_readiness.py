@@ -17,9 +17,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-
-import pandas as pd
 
 _HEAD = 200
 _LIST_MAX = 10
@@ -217,7 +214,7 @@ def _check_assets(
         checks.append(ReadinessCheck(
             id="C4", name="覆盖密度", status="fail",
             detail=f"资产行数 ≤2（无法计算指标）: {_fmt_list(tiny)}",
-            fix_hint=f"重拉数据（get_market_data）修复残留资产；确认 codes 正确",
+            fix_hint="重拉数据（get_market_data）修复残留资产；确认 codes 正确",
         ))
     elif sparse:
         checks.append(ReadinessCheck(

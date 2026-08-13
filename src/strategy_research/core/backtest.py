@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -20,8 +21,11 @@ from .db import (
     save_nav_history,
     save_weight_history,
 )
-from .git import git_commit as git_commit, git_commit_rich, git_get_hash
+from .git import git_commit as git_commit
+from .git import git_commit_rich, git_get_hash
 from .run_card import write_run_card
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # 子进程环境变量白名单

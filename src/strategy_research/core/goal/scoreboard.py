@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 # Valid lever types (maps to strategist action / researcher action)
 VALID_LEVERS = frozenset({"configuration", "control", "action", "instruction"})
 

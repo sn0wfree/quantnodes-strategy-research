@@ -13,7 +13,6 @@ from typing import Tuple
 
 from textual.binding import Binding
 
-
 TUI_BINDINGS: Tuple[Binding, ...] = (
     Binding("ctrl+c", "halt", "Halt", show=True),
     Binding("ctrl+d", "quit_app", "Quit", show=True),

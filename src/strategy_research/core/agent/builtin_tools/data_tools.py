@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..tools import BaseTool, EFFECT_DB, EFFECT_FS, EFFECT_NET, ToolContext, ToolRegistry
+from ..tools import EFFECT_DB, EFFECT_NET, BaseTool, ToolContext, ToolRegistry
 from .utils import err_actionable, try_unwrap_dict, try_unwrap_list
 
 logger = logging.getLogger(__name__)
@@ -507,7 +507,9 @@ class ImportDataTool(BaseTool):
 
         try:
             from pathlib import Path
+
             import pandas as pd
+
             from ...db import get_connection, init_db
 
             ws = Path(workspace)

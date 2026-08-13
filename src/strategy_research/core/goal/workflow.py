@@ -93,8 +93,8 @@ class GoalWorkflowConfig:
 
     def to_swarm_preset(self) -> Any:
         """Convert to a SwarmPreset for use with SwarmRuntime (P3.3)."""
-        from ..workflow.types import AgentCall
         from ..swarm.runtime import SwarmPreset
+        from ..workflow.types import AgentCall
 
         agent_calls = []
         for agent in self.agents:
@@ -425,8 +425,8 @@ class GoalWorkflowRunner:
         """Run a single monitor check: re-backtest and return metrics."""
         # Simplified: try to import and run backtest if available
         try:
+
             from ...core.backtest import run_backtest_script
-            from pathlib import Path
             result = run_backtest_script(
                 workspace_path=self._workspace,
                 strategy_name=strategy_name or "default",
@@ -481,8 +481,6 @@ class GoalWorkflowRunner:
             from .store import GoalStore
             self._store = GoalStore()
 
-        from .context import default_goal_criteria
-        from .models import RiskTier
 
         self._state.status = "running"
         self._state.start_time = time.time()
@@ -537,8 +535,8 @@ class GoalWorkflowRunner:
         }
 
         # 3. Create GoalWorkflowHook (P1.2: pass runner for cancelled check)
-        from .workflow_hook import GoalWorkflowHook
         from .completion_strategy import CompletionStrategyFactory
+        from .workflow_hook import GoalWorkflowHook
 
         self._hook = GoalWorkflowHook(
             session_id=self._session_id,
@@ -617,8 +615,8 @@ class GoalWorkflowRunner:
         Raises:
             FileNotFoundError: No checkpoint exists for this goal.
         """
-        from .checkpoint_store import CheckpointStore
         from ..swarm.runtime import AgentResult, SwarmRuntime
+        from .checkpoint_store import CheckpointStore
 
         cps = CheckpointStore()
         cp_data = cps.load(self._session_id, self._goal_id)
@@ -658,8 +656,8 @@ class GoalWorkflowRunner:
         # Rebuild the evidence-map and hook (same as start, but no
         # replace_goal). The hook's _layer_results are pre-seeded so
         # subsequent evidence_collection doesn't double-count.
-        from .workflow_hook import GoalWorkflowHook
         from .completion_strategy import CompletionStrategyFactory
+        from .workflow_hook import GoalWorkflowHook
 
         evidence_map: dict[str, int] = {
             agent.id: agent.evidence_criterion
@@ -785,8 +783,8 @@ class GoalWorkflowRunner:
 
         evidence_map = {a.id: a.evidence_criterion for a in self._config.agents}
 
-        from .workflow_hook import GoalWorkflowHook
         from .completion_strategy import CompletionStrategyFactory
+        from .workflow_hook import GoalWorkflowHook
 
         self._hook = GoalWorkflowHook(
             session_id=self._session_id,
@@ -846,8 +844,8 @@ class GoalWorkflowRunner:
         that can run through the controller pipeline.
         """
         try:
-            from ..workflow.controller import ControllerConfig, WorkflowController
             from ..workflow.agents import AgentRegistry
+            from ..workflow.controller import ControllerConfig, WorkflowController
 
             registry = AgentRegistry()
             # Register each agent from the YAML config as a simple executor

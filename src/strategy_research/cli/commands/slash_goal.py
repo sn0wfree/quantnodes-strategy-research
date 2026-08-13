@@ -297,7 +297,6 @@ def cmd_complete(recap: str = "", *, console: Optional[Console] = None,
     """
     console = _resolve_console(console)
     try:
-        from strategy_research.core.goal.context import criterion_is_covered
         from strategy_research.core.goal.models import AuditRow, GoalStatus
 
         store = _store()
