@@ -1191,88 +1191,14 @@ def _study_start_cmd(rest: list[str], session_id: str) -> str:
             (gdir / "guidance.md").write_text(guidance_text, encoding="utf-8")
 
         # Phase 3: Build GoalWorkflowConfig for the 9-agent preset
-        from pathlib import Path
+        # (single factory — see core.goal.workflow_config).
+        from ...core.goal.workflow_config import build_autoresearch_workflow_config
 
-        from ...core.goal.workflow import (
-            CompletionConfig,
-            GoalAgentConfig,
-            GoalWorkflowConfig,
-            GoalWorkflowGoalConfig,
-        )
-
-        # Create a config that maps study parameters to the workflow
-        agent_configs = [
-            GoalAgentConfig(id="researcher", prompt_file=".prompts/researcher.md",
-                           tools=["read_file", "list_history", "factor_analysis", "web_search",
-                                  "read_url", "get_market_data", "search_symbol"],
-                           input_from=[], evidence_criterion=0, timeout=180, max_retries=3),
-            GoalAgentConfig(id="data_quality", prompt_file=".prompts/data_quality.md",
-                           tools=["read_file", "web_search", "read_url", "get_market_data",
-                                  "list_data_sources"],
-                           input_from=["researcher"], evidence_criterion=1, timeout=120, max_retries=2),
-            GoalAgentConfig(id="factor_analyst", prompt_file=".prompts/factor_analyst.md",
-                           tools=["read_file", "compute_factor", "factor_analysis", "get_market_data"],
-                           input_from=["researcher", "data_quality"], evidence_criterion=1,
-                           timeout=180, max_retries=3),
-            GoalAgentConfig(id="strategist", prompt_file=".prompts/strategist.md",
-                           tools=["read_file", "write_file", "run_backtest", "git_diff",
-                                  "web_search", "read_url", "get_market_data"],
-                           input_from=["researcher", "data_quality", "factor_analyst"],
-                           evidence_criterion=2, timeout=240, max_retries=3),
-            GoalAgentConfig(id="portfolio_construction", prompt_file=".prompts/portfolio_construction.md",
-                           tools=["read_file", "get_market_data"],
-                           input_from=["strategist"], evidence_criterion=2, timeout=120, max_retries=2),
-            GoalAgentConfig(id="backtest", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=[], input_from=["portfolio_construction"], evidence_criterion=2,
-                           timeout=300, max_retries=1, executor_type="python_executor",
-                           python_function="run_backtest_script"),
-            GoalAgentConfig(id="risk_controller", prompt_file=".prompts/risk_controller.md",
-                           tools=["read_file", "factor_analysis", "get_market_data"],
-                           input_from=["backtest"], evidence_criterion=3, timeout=180, max_retries=2),
-            GoalAgentConfig(id="attribution_analyst", prompt_file=".prompts/attribution_analyst.md",
-                           tools=["read_file", "factor_analysis"],
-                           input_from=["backtest", "risk_controller"], evidence_criterion=3,
-                           timeout=180, max_retries=2),
-            GoalAgentConfig(id="anti_overfit_analyst", prompt_file=".prompts/anti_overfit_analyst.md",
-                           tools=["read_file", "list_history", "factor_analysis"],
-                           input_from=["backtest", "risk_controller", "attribution_analyst"],
-                           evidence_criterion=4, timeout=180, max_retries=2),
-            GoalAgentConfig(id="backtest_diagnostics", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=["read_file", "run_backtest", "git_diff"],
-                           input_from=["anti_overfit_analyst"], evidence_criterion=4,
-                           timeout=120, max_retries=2),
-            GoalAgentConfig(id="decide", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=[], input_from=["backtest", "anti_overfit_analyst", "backtest_diagnostics"],
-                           evidence_criterion=4, timeout=60, max_retries=1,
-                           executor_type="evaluator", python_function="decide"),
-        ]
-
-        config = GoalWorkflowConfig(
-            name=f"autoresearch_{strategy}",
-            description=f"9-agent autoresearch: {objective}",
-            goal=GoalWorkflowGoalConfig(
-                default_criteria=default_goal_criteria(),
-                risk_tier="research_general",
-            ),
-            agents=agent_configs,
-            dag={
-                "researcher": [],
-                "data_quality": ["researcher"],
-                "factor_analyst": ["researcher", "data_quality"],
-                "strategist": ["researcher", "data_quality", "factor_analyst"],
-                "portfolio_construction": ["strategist"],
-                "backtest": ["portfolio_construction"],
-                "risk_controller": ["backtest"],
-                "attribution_analyst": ["backtest", "risk_controller"],
-                "anti_overfit_analyst": ["backtest", "risk_controller", "attribution_analyst"],
-                "backtest_diagnostics": ["anti_overfit_analyst"],
-                "decide": ["backtest", "anti_overfit_analyst", "backtest_diagnostics"],
-            },
-            completion=CompletionConfig(
-                mode="auto",
-                metric_targets=targets,
-                monitor_interval_seconds=flags.get("monitor_interval_seconds"),
-            ),
+        config = build_autoresearch_workflow_config(
+            strategy_name=strategy,
+            objective=objective,
+            metric_targets=targets,
+            monitor_interval_seconds=flags.get("monitor_interval_seconds"),
             budget_turn=flags.get("budget_turn"),
             budget_time_seconds=flags.get("budget_time_seconds"),
         )
