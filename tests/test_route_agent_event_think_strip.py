@@ -118,8 +118,10 @@ class TestStripSourceIsTextFilters:
         import inspect
         from strategy_research.cli.tui import app as app_module
         src = inspect.getsource(app_module.ResearchApp.route_agent_event)
+        route_src = inspect.getsource(app_module.ResearchApp._route_assistant_message)
         # text_delta path still uses strip_thinking_tags
         assert "strip_thinking_tags" in src
-        # assistant_message path now uses extract_thinking_tags
-        assert "extract_thinking_tags" in src
+        # assistant_message path now uses extract_thinking_tags (in the
+        # extracted _route_assistant_message helper)
+        assert "extract_thinking_tags" in route_src
         assert "from strategy_research.cli.tui.text_filters import" in src
