@@ -76,46 +76,15 @@ def smart_init_workspace_templates(
 
     # 2. Recursive walk over package templates (sorted for deterministic order).
     for src_path in sorted(pkg_templates.rglob("*")):
-        rel = src_path.relative_to(pkg_templates)
-
-        # Skip excluded top-level dirs (e.g. .prompts).
-        if rel.parts and rel.parts[0] in _EXCLUDED_TOP_DIRS:
-            continue
-
-        # Skip Python bytecode caches (__pycache__/*.pyc).
-        if any(part == "__pycache__" for part in rel.parts):
-            continue
-
-        dst_path = ws_templates / rel
-
-        if src_path.is_dir():
-            # Ensure directory exists in workspace.
-            try:
-                dst_path.mkdir(parents=True, exist_ok=True)
-                if verbose:
-                    logger.debug("dir ensured: %s", rel)
-            except Exception as exc:
-                errors.append(f"mkdir {rel}: {exc}")
-                logger.warning("failed to mkdir %s: %s", rel, exc)
-            continue
-
-        # It's a file. Check if workspace already has it.
-        if dst_path.exists():
-            skipped.append(str(rel))
-            if verbose:
-                logger.debug("skipped (exists): %s", rel)
-            continue
-
-        # Copy missing file.
-        try:
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_path, dst_path)
-            copied.append(str(rel))
-            if verbose:
-                logger.info("scaffolded: %s", rel)
-        except Exception as exc:
-            errors.append(f"copy {rel}: {exc}")
-            logger.warning("failed to copy %s: %s", rel, exc)
+        action = _scaffold_entry(
+            src_path, pkg_templates, ws_templates, verbose
+        )
+        if action[0]:
+            copied.append(action[0])
+        elif action[1]:
+            skipped.append(action[1])
+        elif action[2]:
+            errors.append(action[2])
 
     # 3. Summary log.
     if errors:
@@ -141,6 +110,57 @@ def smart_init_workspace_templates(
         )
 
     return {"copied": copied, "skipped": skipped, "errors": errors}
+
+
+def _scaffold_entry(
+    src_path: Path,
+    pkg_templates: Path,
+    ws_templates: Path,
+    verbose: bool,
+) -> tuple[str | None, str | None, str | None]:
+    """Scaffold one package-template entry into the workspace.
+
+    Returns ``(copied, skipped, error)`` — exactly one is non-None.
+    """
+    rel = src_path.relative_to(pkg_templates)
+
+    # Skip excluded top-level dirs (e.g. .prompts).
+    if rel.parts and rel.parts[0] in _EXCLUDED_TOP_DIRS:
+        return None, None, None
+
+    # Skip Python bytecode caches (__pycache__/*.pyc).
+    if any(part == "__pycache__" for part in rel.parts):
+        return None, None, None
+
+    dst_path = ws_templates / rel
+
+    if src_path.is_dir():
+        try:
+            dst_path.mkdir(parents=True, exist_ok=True)
+            if verbose:
+                logger.debug("dir ensured: %s", rel)
+            return None, None, None
+        except Exception as exc:
+            msg = f"mkdir {rel}: {exc}"
+            logger.warning("failed to mkdir %s: %s", rel, exc)
+            return None, None, msg
+
+    # It's a file. Check if workspace already has it.
+    if dst_path.exists():
+        if verbose:
+            logger.debug("skipped (exists): %s", rel)
+        return None, str(rel), None
+
+    try:
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dst_path)
+        if verbose:
+            logger.info("scaffolded: %s", rel)
+        return str(rel), None, None
+    except Exception as exc:
+        msg = f"copy {rel}: {exc}"
+        logger.warning("failed to copy %s: %s", rel, exc)
+        return None, None, msg
 
 
 __all__ = ["smart_init_workspace_templates"]

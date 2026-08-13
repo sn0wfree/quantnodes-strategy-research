@@ -235,37 +235,59 @@ def _try_unwrap_dict(d: dict) -> Optional[dict]:
 
 def _coerce(value: Any, expected_type: type) -> Any:
     """Try to coerce ``value`` to ``expected_type``. Returns None on failure."""
-    if expected_type is int:
-        if isinstance(value, float) and value.is_integer():
+    handler = _COERCE_HANDLERS.get(expected_type)
+    if handler is None:
+        return None
+    return handler(value)
+
+
+def _coerce_int(value: Any) -> Any:
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
             return int(value)
-        if isinstance(value, str):
-            try:
-                return int(value)
-            except (ValueError, TypeError):
-                return None
-    if expected_type is float:
-        if isinstance(value, int):
-            return float(value)
-        if isinstance(value, str):
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return None
-    if expected_type is str:
-        if isinstance(value, (int, float, bool)):
-            return str(value)
-        return None
-    if expected_type is bool:
-        if isinstance(value, bool):
-            return value
-        return None
-    if expected_type is list:
-        if isinstance(value, (tuple, set, frozenset)):
-            return list(value)
-        return None
-    if expected_type is dict:
-        return None  # dict-from-something doesn't make sense
+        except (ValueError, TypeError):
+            return None
     return None
+
+
+def _coerce_float(value: Any) -> Any:
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _coerce_str(value: Any) -> Any:
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return None
+
+
+def _coerce_bool(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _coerce_list(value: Any) -> Any:
+    if isinstance(value, (tuple, set, frozenset)):
+        return list(value)
+    return None
+
+
+_COERCE_HANDLERS = {
+    int: _coerce_int,
+    float: _coerce_float,
+    str: _coerce_str,
+    bool: _coerce_bool,
+    list: _coerce_list,
+}
 
 
 __all__ = [

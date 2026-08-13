@@ -60,37 +60,56 @@ def validate_artifacts(run_dir: Path) -> list[str]:
 
         try:
             if filename.endswith(".csv"):
-                df = pd.read_csv(filepath)
-                expected_cols = spec.get("columns", [])
-                missing_cols = [c for c in expected_cols if c not in df.columns]
-                if missing_cols:
-                    warnings.append(f"{filename}: missing columns {missing_cols}")
-                min_rows = spec.get("min_rows", 0)
-                if len(df) < min_rows:
-                    warnings.append(f"{filename}: {len(df)} rows < min_rows {min_rows}")
-                # Check for inf values in numeric columns
-                for col in df.select_dtypes(include=["float64", "float32"]).columns:
-                    if df[col].isin([float("inf"), float("-inf")]).any():
-                        warnings.append(f"{filename}: inf values in column '{col}'")
-
+                _validate_csv(filepath, spec, filename, warnings)
             elif filename.endswith(".json"):
-                with open(filepath, encoding="utf-8") as f:
-                    data = json.load(f)
-                expected_fields = spec.get("fields", [])
-                missing = [k for k in expected_fields if k not in data]
-                if missing:
-                    warnings.append(f"{filename}: missing fields {missing}")
-                # Check for NaN/Inf in metric values
-                for k, v in data.items():
-                    if isinstance(v, float):
-                        if v != v:  # NaN
-                            warnings.append(f"{filename}: NaN in field '{k}'")
-                        elif v == float("inf") or v == float("-inf"):
-                            warnings.append(f"{filename}: inf in field '{k}'")
+                _validate_json(filepath, spec, filename, warnings)
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"{filename}: validation error: {exc}")
 
     return warnings
+
+
+def _validate_csv(
+    filepath: Path,
+    spec: dict,
+    filename: str,
+    warnings: list[str],
+) -> None:
+    """Validate a single CSV artifact against its spec."""
+    df = pd.read_csv(filepath)
+    expected_cols = spec.get("columns", [])
+    missing_cols = [c for c in expected_cols if c not in df.columns]
+    if missing_cols:
+        warnings.append(f"{filename}: missing columns {missing_cols}")
+    min_rows = spec.get("min_rows", 0)
+    if len(df) < min_rows:
+        warnings.append(f"{filename}: {len(df)} rows < min_rows {min_rows}")
+    # Check for inf values in numeric columns
+    for col in df.select_dtypes(include=["float64", "float32"]).columns:
+        if df[col].isin([float("inf"), float("-inf")]).any():
+            warnings.append(f"{filename}: inf values in column '{col}'")
+
+
+def _validate_json(
+    filepath: Path,
+    spec: dict,
+    filename: str,
+    warnings: list[str],
+) -> None:
+    """Validate a single JSON artifact against its spec."""
+    with open(filepath, encoding="utf-8") as f:
+        data = json.load(f)
+    expected_fields = spec.get("fields", [])
+    missing = [k for k in expected_fields if k not in data]
+    if missing:
+        warnings.append(f"{filename}: missing fields {missing}")
+    # Check for NaN/Inf in metric values
+    for k, v in data.items():
+        if isinstance(v, float):
+            if v != v:  # NaN
+                warnings.append(f"{filename}: NaN in field '{k}'")
+            elif v == float("inf") or v == float("-inf"):
+                warnings.append(f"{filename}: inf in field '{k}'")
 
 
 def write_equity_curve(

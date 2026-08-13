@@ -224,72 +224,83 @@ def _coerce_param_value(name: str, value: Any, annotation: Any) -> Any:
             annotation = non_none[0]
             origin = get_origin(annotation)
     if origin is list:
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-            except json.JSONDecodeError:
-                raise ToolError(
-                    f"invalid value for '{name}': not a valid JSON list",
-                    received=value,
-                    expected=f"list e.g. {_list_example(annotation)} or JSON string",
-                    fix=f"pass a list for '{name}'",
-                )
-            if isinstance(parsed, list):
-                return parsed
-        if isinstance(value, dict) and len(value) == 1:
-            inner = next(iter(value.values()))
-            if isinstance(inner, list):
-                return inner
-        return value
+        return _coerce_list(name, value, annotation)
     if origin is dict:
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-            except json.JSONDecodeError:
-                raise ToolError(
-                    f"invalid value for '{name}': not a valid JSON object",
-                    received=value,
-                    expected="object (JSON string or dict)",
-                    fix=f"pass an object for '{name}'",
-                )
-            if isinstance(parsed, dict):
-                return parsed
-        return value
+        return _coerce_dict(name, value)
     if annotation is int:
-        if isinstance(value, str):
-            try:
-                return int(value)
-            except ValueError:
-                raise ToolError(
-                    f"invalid value for '{name}': expected an integer",
-                    received=value,
-                    expected="integer",
-                )
-        return value
+        return _coerce_scalar(name, value, "integer", int)
     if annotation is float:
-        if isinstance(value, str):
-            try:
-                return float(value)
-            except ValueError:
-                raise ToolError(
-                    f"invalid value for '{name}': expected a number",
-                    received=value,
-                    expected="number",
-                )
-        return value
+        return _coerce_scalar(name, value, "number", float)
     if annotation is bool:
-        if isinstance(value, str):
-            lowered = value.lower()
-            if lowered in ("true", "1"):
-                return True
-            if lowered in ("false", "0"):
-                return False
+        return _coerce_bool(name, value)
+    return value
+
+
+def _coerce_list(name: str, value: Any, annotation: Any) -> Any:
+    """Coerce a scalar/JSON-string/dict-wrapped value into a list."""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
             raise ToolError(
-                f"invalid value for '{name}': expected true/false",
+                f"invalid value for '{name}': not a valid JSON list",
                 received=value,
-                expected="boolean (true/false)",
+                expected=f"list e.g. {_list_example(annotation)} or JSON string",
+                fix=f"pass a list for '{name}'",
             )
-        return value
+        if isinstance(parsed, list):
+            return parsed
+    if isinstance(value, dict) and len(value) == 1:
+        inner = next(iter(value.values()))
+        if isinstance(inner, list):
+            return inner
+    return value
+
+
+def _coerce_dict(name: str, value: Any) -> Any:
+    """Coerce a JSON-string value into a dict."""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            raise ToolError(
+                f"invalid value for '{name}': not a valid JSON object",
+                received=value,
+                expected="object (JSON string or dict)",
+                fix=f"pass an object for '{name}'",
+            )
+        if isinstance(parsed, dict):
+            return parsed
+    return value
+
+
+def _coerce_scalar(name: str, value: Any, expected: str, caster) -> Any:
+    """Coerce a string into a numeric scalar."""
+    if isinstance(value, str):
+        try:
+            return caster(value)
+        except ValueError:
+            raise ToolError(
+                f"invalid value for '{name}': expected {expected}",
+                received=value,
+                expected=expected,
+            )
+    return value
+
+
+def _coerce_bool(name: str, value: Any) -> Any:
+    """Coerce a string into a boolean."""
+    if isinstance(value, str):
+        lowered = value.lower()
+        if lowered in ("true", "1"):
+            return True
+        if lowered in ("false", "0"):
+            return False
+        raise ToolError(
+            f"invalid value for '{name}': expected true/false",
+            received=value,
+            expected="boolean (true/false)",
+        )
     return value
 
 

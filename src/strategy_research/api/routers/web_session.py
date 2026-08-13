@@ -191,30 +191,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # have been run BEFORE this code on existing DBs, otherwise
     # result-bearing tool results are lost (same caveat, now only once).
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version < 2:
-        # Backfill text-part ids while parts_json still exists
-        _migrate_text_part_ids(conn)
-        conn.execute("DELETE FROM messages WHERE role = 'tool'")
-        if _has_column(conn, "messages", "tool_call_id"):
-            _drop_column(conn, "messages", "tool_call_id")
-        if _has_column(conn, "messages", "parts_json"):
-            _drop_column(conn, "messages", "parts_json")
-        conn.execute("PRAGMA user_version = 2")
-    if version < 3:
-        # One-time compaction-type backfill (full-table LIKE scan)
-        _migrate_message_types(conn)
-        conn.execute("PRAGMA user_version = 3")
-    if version < 4:
-        # Chat persona column (Composer agent selector). Nullable so old
-        # rows start as the default chat persona.
-        _add_column(conn, "attempts", "persona", "TEXT")
-        conn.execute("PRAGMA user_version = 4")
-    if version < 5:
-        # Plan/Build mode + model override + thinking params (A2 feature).
-        _add_column(conn, "attempts", "mode", "TEXT NOT NULL DEFAULT 'build'")
-        _add_column(conn, "attempts", "model_override", "TEXT")
-        _add_column(conn, "attempts", "thinking", "TEXT NOT NULL DEFAULT 'auto'")
-        conn.execute("PRAGMA user_version = 5")
+    _run_schema_migrations(conn, version)
 
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
@@ -293,89 +270,126 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
 
     # FTS5 virtual table (graceful fallback if FTS5 not compiled in).
-    # Use trigram tokenizer for substring matching across Chinese/English boundaries
-    # (unicode61 default doesn't split Latin/Chinese tokens).
-    #
-    # Auto-heal: if messages_fts already exists with the wrong tokenizer
-    # (e.g. unicode61 from an older schema version), drop it and recreate
-    # with trigram so search behaves consistently. Otherwise SQLite happily
-    # skips the CREATE VIRTUAL TABLE IF NOT EXISTS and the wrong tokenizer
-    # sticks forever.
-    needs_fts_rebuild = False
+    _ensure_fts_table(conn)
+
+
+def _run_schema_migrations(
+    conn: sqlite3.Connection, version: int
+) -> None:
+    """Run one-time versioned schema migrations (idempotent via PRAGMA)."""
+    if version < 2:
+        # Backfill text-part ids while parts_json still exists
+        _migrate_text_part_ids(conn)
+        conn.execute("DELETE FROM messages WHERE role = 'tool'")
+        if _has_column(conn, "messages", "tool_call_id"):
+            _drop_column(conn, "messages", "tool_call_id")
+        if _has_column(conn, "messages", "parts_json"):
+            _drop_column(conn, "messages", "parts_json")
+        conn.execute("PRAGMA user_version = 2")
+    if version < 3:
+        # One-time compaction-type backfill (full-table LIKE scan)
+        _migrate_message_types(conn)
+        conn.execute("PRAGMA user_version = 3")
+    if version < 4:
+        # Chat persona column (Composer agent selector). Nullable so old
+        # rows start as the default chat persona.
+        _add_column(conn, "attempts", "persona", "TEXT")
+        conn.execute("PRAGMA user_version = 4")
+    if version < 5:
+        # Plan/Build mode + model override + thinking params (A2 feature).
+        _add_column(conn, "attempts", "mode", "TEXT NOT NULL DEFAULT 'build'")
+        _add_column(conn, "attempts", "model_override", "TEXT")
+        _add_column(conn, "attempts", "thinking", "TEXT NOT NULL DEFAULT 'auto'")
+        conn.execute("PRAGMA user_version = 5")
+
+
+def _ensure_fts_table(conn: sqlite3.Connection) -> None:
+    """Create/repair the messages_fts full-text search table + triggers.
+
+    Uses trigram tokenizer for substring matching across Chinese/English
+    boundaries. Auto-heals a wrong-tokenizer FTS table. Gracefully
+    disables search if FTS5 is unavailable.
+    """
     try:
-        existing_fts = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'"
-        ).fetchone()
-        if existing_fts and existing_fts[0]:
-            sql_text = existing_fts[0].lower()
-            if "tokenize='trigram'" not in sql_text and 'tokenize="trigram"' not in sql_text:
-                needs_fts_rebuild = True
-                logger.warning(
-                    "messages_fts exists with wrong tokenizer; "
-                    "auto-rebuilding with trigram tokenizer..."
-                )
-
-        if needs_fts_rebuild:
-            # Drop the triggers first so we can rebuild cleanly
-            for trig in ("messages_ai", "messages_ad", "messages_au"):
-                try:
-                    conn.execute(f"DROP TRIGGER IF EXISTS {trig}")
-                except sqlite3.OperationalError as exc:
-                    logger.warning("drop trigger %s: %s", trig, exc)
-            try:
-                conn.execute("DROP TABLE IF EXISTS messages_fts")
-            except sqlite3.OperationalError as exc:
-                logger.error(
-                    "drop messages_fts failed (%s); skipping FTS rebuild", exc
-                )
-                needs_fts_rebuild = False
-
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                content,
-                role,
-                content='messages',
-                content_rowid='rowid',
-                tokenize='trigram'
-            )
-        """)
-        # Triggers to keep FTS in sync with messages
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                INSERT INTO messages_fts(rowid, content, role)
-                VALUES (new.rowid, new.content, new.role);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content, role)
-                VALUES ('delete', old.rowid, old.content, old.role);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content, role)
-                VALUES ('delete', old.rowid, old.content, old.role);
-                INSERT INTO messages_fts(rowid, content, role)
-                VALUES (new.rowid, new.content, new.role);
-            END
-        """)
-
-        # If we rebuilt the FTS table, repopulate it from messages
-        if needs_fts_rebuild:
-            try:
-                conn.execute(
-                    "INSERT INTO messages_fts(rowid, content, role) "
-                    "SELECT rowid, content, role FROM messages"
-                )
-                logger.info(
-                    "messages_fts rebuilt with trigram tokenizer; "
-                    "backfilled from messages table"
-                )
-            except sqlite3.OperationalError as exc:
-                logger.error("FTS backfill failed (continuing): %s", exc)
+        _ensure_fts_table_impl(conn)
     except sqlite3.OperationalError as exc:
         logger.warning("FTS5 unavailable, search endpoint will be disabled: %s", exc)
+
+
+def _ensure_fts_table_impl(conn: sqlite3.Connection) -> None:
+    """Create/repair the FTS table assuming FTS5 is available."""
+    needs_fts_rebuild = False
+    existing_fts = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+    ).fetchone()
+    if existing_fts and existing_fts[0]:
+        sql_text = existing_fts[0].lower()
+        if "tokenize='trigram'" not in sql_text and 'tokenize="trigram"' not in sql_text:
+            needs_fts_rebuild = True
+            logger.warning(
+                "messages_fts exists with wrong tokenizer; "
+                "auto-rebuilding with trigram tokenizer..."
+            )
+
+    if needs_fts_rebuild:
+        # Drop the triggers first so we can rebuild cleanly
+        for trig in ("messages_ai", "messages_ad", "messages_au"):
+            try:
+                conn.execute(f"DROP TRIGGER IF EXISTS {trig}")
+            except sqlite3.OperationalError as exc:
+                logger.warning("drop trigger %s: %s", trig, exc)
+        try:
+            conn.execute("DROP TABLE IF EXISTS messages_fts")
+        except sqlite3.OperationalError as exc:
+            logger.error(
+                "drop messages_fts failed (%s); skipping FTS rebuild", exc
+            )
+            needs_fts_rebuild = False
+
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            content,
+            role,
+            content='messages',
+            content_rowid='rowid',
+            tokenize='trigram'
+        )
+    """)
+    # Triggers to keep FTS in sync with messages
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO messages_fts(rowid, content, role)
+            VALUES (new.rowid, new.content, new.role);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, role)
+            VALUES ('delete', old.rowid, old.content, old.role);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, role)
+            VALUES ('delete', old.rowid, old.content, old.role);
+            INSERT INTO messages_fts(rowid, content, role)
+            VALUES (new.rowid, new.content, new.role);
+        END
+    """)
+
+    # If we rebuilt the FTS table, repopulate it from messages
+    if needs_fts_rebuild:
+        try:
+            conn.execute(
+                "INSERT INTO messages_fts(rowid, content, role) "
+                "SELECT rowid, content, role FROM messages"
+            )
+            logger.info(
+                "messages_fts rebuilt with trigram tokenizer; "
+                "backfilled from messages table"
+            )
+        except sqlite3.OperationalError as exc:
+            logger.error("FTS backfill failed (continuing): %s", exc)
 
 
 def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) -> None:
