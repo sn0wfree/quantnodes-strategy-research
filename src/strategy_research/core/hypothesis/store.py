@@ -44,6 +44,26 @@ def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def _apply_scalar_fields(hyp: Any, fields: dict) -> None:
+    """Set stripped scalar fields that are not None (by attribute name)."""
+    for attr, value in fields.items():
+        if value is not None:
+            setattr(hyp, attr, value.strip())
+
+
+def _apply_status(hyp: Any, status: str) -> None:
+    """Validate and apply a status change on a hypothesis."""
+    new_status = _validate_status(status)
+    if new_status != hyp.status:
+        allowed = VALID_TRANSITIONS.get(hyp.status, set())
+        if new_status not in allowed:
+            raise ValueError(
+                f"invalid transition: {hyp.status} -> {new_status}. "
+                f"Allowed: {sorted(allowed) or '(terminal)'}"
+            )
+    hyp.status = new_status
+
+
 def default_db_path() -> Path:
     """Return the configured hypothesis database path.
 
@@ -314,30 +334,19 @@ class HypothesisStore:
                 return None
             hyp = self._row_to_hyp(row)
 
-            if title is not None:
-                hyp.title = title.strip()
-            if thesis is not None:
-                hyp.thesis = thesis.strip()
+            _apply_scalar_fields(hyp, {
+                "title": title,
+                "thesis": thesis,
+                "universe": universe,
+                "signal_definition": signal_definition,
+                "invalidation_notes": invalidation_notes,
+            })
             if status is not None:
-                new_status = _validate_status(status)
-                if new_status != hyp.status:
-                    allowed = VALID_TRANSITIONS.get(hyp.status, set())
-                    if new_status not in allowed:
-                        raise ValueError(
-                            f"invalid transition: {hyp.status} -> {new_status}. "
-                            f"Allowed: {sorted(allowed) or '(terminal)'}"
-                        )
-                hyp.status = new_status
-            if universe is not None:
-                hyp.universe = universe.strip()
-            if signal_definition is not None:
-                hyp.signal_definition = signal_definition.strip()
+                _apply_status(hyp, status)
             if data_sources is not None:
                 hyp.data_sources = _coerce_str_list(data_sources)
             if skills is not None:
                 hyp.skills = _coerce_str_list(skills)
-            if invalidation_notes is not None:
-                hyp.invalidation_notes = invalidation_notes.strip()
             if parent_hypothesis_id is not None:
                 hyp.parent_hypothesis_id = parent_hypothesis_id or None
             if related_ids is not None:
