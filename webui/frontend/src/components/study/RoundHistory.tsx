@@ -18,11 +18,26 @@ function formatTime(iso: string): string {
   }
 }
 
+const VERDICT_STYLES: Record<string, { badge: string; label: string }> = {
+  keep: {
+    badge: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+    label: '保留',
+  },
+  discard: {
+    badge: 'border-slate-600 bg-slate-800/70 text-slate-400',
+    label: '弃用',
+  },
+  review: {
+    badge: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+    label: '待复核',
+  },
+}
+
 function MetricValue({ label, value }: { label: string; value?: number | null }) {
   const display = value != null ? value.toFixed(2) : '—'
   return (
-    <span className="font-mono text-[10px]">
-      <span className="text-slate-500">{label}:</span>{' '}
+    <span className="font-mono text-[10px] tabular-nums">
+      <span className="text-slate-600">{label}:</span>{' '}
       <span className="text-slate-300">{display}</span>
     </span>
   )
@@ -39,49 +54,67 @@ function RoundItem({
 }) {
   const [expanded, setExpanded] = useState(false)
   const hasFailures = round.factor_failures && round.factor_failures.length > 0
+  const verdict = round.verdict ?? '—'
+  const verdictStyle = VERDICT_STYLES[verdict] ?? {
+    badge: 'border-slate-700 bg-slate-800 text-slate-400',
+    label: verdict,
+  }
+  const accent =
+    verdict === 'keep'
+      ? 'border-l-emerald-500'
+      : verdict === 'review'
+        ? 'border-l-amber-500'
+        : 'border-l-slate-700'
 
   return (
-    <div>
-      <div className="flex items-center gap-1 rounded hover:bg-slate-800 transition-colors">
+    <div className="rounded-lg transition-colors hover:bg-slate-800/30">
+      <div className="flex items-center gap-1">
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
-          className={`flex flex-1 items-center gap-1.5 text-left py-1 px-1 rounded transition-colors ${
-            isCurrent ? 'bg-slate-800/50' : ''
+          aria-expanded={expanded}
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg border-l-2 py-1.5 pl-2 pr-1.5 text-left transition-colors ${accent} ${
+            isCurrent ? 'bg-slate-800/50 ring-1 ring-slate-700' : ''
           }`}
         >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 text-slate-500 flex-shrink-0" />
-        ) : (
-          <ChevronRight className="h-3 w-3 text-slate-500 flex-shrink-0" />
-        )}
-        <span className="text-[10px] text-slate-400 w-6">R{round.round_num}</span>
-        <span className="text-[10px] text-slate-500 w-10">{formatTime(round.created_at)}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400">
-          {round.run_name}
-        </span>
-        <span
-          className={`text-[10px] px-1 rounded ${
-            round.verdict === 'keep'
-              ? 'bg-emerald-900/50 text-emerald-400'
-              : 'bg-slate-800 text-slate-400'
-          }`}
-        >
-          {round.verdict ?? '—'}
-          {round.verdict === 'keep' && ' ✓'}
-        </span>
-        <MetricValue label="C" value={round.metrics?.calmar} />
-        <MetricValue label="S" value={round.metrics?.sharpe} />
-        <MetricValue label="D" value={round.metrics?.max_dd} />
-        {hasFailures && (
-          <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0 ml-auto" />
-        )}
+          {expanded ? (
+            <ChevronDown className="h-3 w-3 flex-shrink-0 text-slate-500" />
+          ) : (
+            <ChevronRight className="h-3 w-3 flex-shrink-0 text-slate-500" />
+          )}
+          <span
+            className={`w-6 flex-shrink-0 font-mono text-[10px] ${
+              isCurrent ? 'text-primary-400' : 'text-slate-400'
+            }`}
+          >
+            R{round.round_num}
+          </span>
+          <span className="w-10 flex-shrink-0 text-[10px] text-slate-600">
+            {formatTime(round.created_at)}
+          </span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400">
+            {round.run_name}
+          </span>
+          <span
+            className={`flex-shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${verdictStyle.badge}`}
+            title={`verdict: ${verdict}（${verdictStyle.label}）`}
+          >
+            {verdict}
+            {round.verdict === 'keep' && ' ✓'}
+          </span>
+          <MetricValue label="C" value={round.metrics?.calmar} />
+          <MetricValue label="S" value={round.metrics?.sharpe} />
+          <MetricValue label="D" value={round.metrics?.max_dd} />
+          {hasFailures && (
+            <AlertTriangle className="h-3 w-3 flex-shrink-0 text-amber-500" />
+          )}
         </button>
         {onOpenRun && (
           <button
             type="button"
             title="查看回测产物"
             onClick={() => onOpenRun(round.run_name)}
-            className="p-1 rounded text-slate-500 hover:text-sky-400 hover:bg-slate-800 transition-colors"
+            className="flex-shrink-0 cursor-pointer rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-800 hover:text-sky-400"
           >
             <ExternalLink className="h-3 w-3" />
           </button>
@@ -89,13 +122,13 @@ function RoundItem({
       </div>
 
       {expanded && (
-        <div className="ml-5 mr-1 mb-2 border-l-2 border-slate-700 pl-2 space-y-2">
+        <div className="ml-5 mr-2 mb-2 border-l-2 border-slate-700 pl-2.5 space-y-2">
           {/* Factor failures */}
           {hasFailures && (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {round.factor_failures!.map((f, i) => (
-                <div key={i} className="text-[10px]">
-                  <div className="flex items-center gap-1 text-amber-400">
+                <div key={i} className="rounded-lg border border-amber-900/30 bg-amber-950/20 px-2 py-1.5 text-[10px]">
+                  <div className="flex items-center gap-1.5 text-amber-400">
                     <AlertTriangle className="h-3 w-3" />
                     <span className="font-mono">{f.factor_code}</span>
                   </div>
@@ -121,17 +154,21 @@ function RoundItem({
 export function RoundHistory({ rounds, currentRound, onOpenRun }: Props) {
   if (rounds.length === 0) {
     return (
-      <div className="rounded border border-slate-700 bg-slate-900 p-2">
-        <div className="text-[10px] uppercase text-slate-500 mb-1">Round 历史</div>
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500 mb-1">
+          Round 历史
+        </div>
         <p className="text-xs text-slate-500">暂无历史记录</p>
       </div>
     )
   }
 
   return (
-    <div className="rounded border border-slate-700 bg-slate-900 p-2">
-      <div className="text-[10px] uppercase text-slate-500 mb-1">Round 历史</div>
-      <div className="space-y-0">
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft transition-colors hover:border-slate-700">
+      <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+        Round 历史
+      </div>
+      <div className="space-y-0.5">
         {rounds.map((round) => (
           <RoundItem
             key={round.round_num}

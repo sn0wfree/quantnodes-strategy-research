@@ -38,6 +38,8 @@ vi.mock('lucide-react', () => {
     Activity: Stub, Layers: Stub, Eye: Stub, EyeOff: Stub, Plus: Stub,
     ArrowRight: Stub, Search: Stub, MessageSquare: Stub,
     Settings: Stub, Workflow: Stub, BookOpen: Stub,
+    Moon: Stub, Sun: Stub, Network: Stub, Sigma: Stub, Library: Stub, LogOut: Stub,
+    Circle: Stub, CheckCircle2: Stub, SlidersHorizontal: Stub,
   }
 })
 
@@ -126,7 +128,7 @@ describe('StudyDetailPage', () => {
     expect(await screen.findByText(/mom_20d/)).toBeInTheDocument()
     expect(screen.getAllByText('找到 alpha 因子').length).toBeGreaterThan(0)
     expect(screen.getByText('运行中')).toBeInTheDocument()
-    expect(screen.getByText(/Round 2\/5/)).toBeInTheDocument()
+    expect(screen.getByText(/2\/5/)).toBeInTheDocument()
     expect(screen.getByText('run_0002')).toBeInTheDocument()
     expect(screen.getByText('momentum')).toBeInTheDocument()
     expect(mockSummary).toHaveBeenCalledWith('st-1')

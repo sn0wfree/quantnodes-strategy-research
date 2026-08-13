@@ -29,6 +29,7 @@ vi.mock('lucide-react', () => {
     Columns2: Stub, PanelRight: Stub, PanelRightClose: Stub, Pencil: Stub,
     FileCode: Stub, LineChart: Stub, TrendingUp: Stub, TrendingDown: Stub,
     ListChecks: Stub, Library: Stub, LogOut: Stub, Network: Stub, Sigma: Stub,
+    SlidersHorizontal: Stub,
   }
 })
 

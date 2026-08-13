@@ -73,27 +73,120 @@ vi.mock('../api/client', async () => {
 
 vi.mock('lucide-react', () => {
   const Stub = () => null
-  return new Proxy(
-    {
-      ArrowLeft: Stub, Play: Stub, Plus: Stub, Save: Stub, Pencil: Stub,
-      Trash2: Stub, Copy: Stub, RefreshCw: Stub, Loader2: Stub,
-      Bot: Stub, CalendarCheck: Stub, ClipboardList: Stub, Gauge: Stub,
-      Code2: Stub, Wrench: Stub, Check: Stub, X: Stub,
-      Clock: Stub, CheckCircle: Stub, XCircle: Stub, AlertCircle: Stub,
-      ArrowRight: Stub, FileJson: Stub,
-      Boxes: Stub, ListChecks: Stub, ChevronDown: Stub, ChevronUp: Stub,
-      Search: Stub, LayoutGrid: Stub, Undo2: Stub, Redo2: Stub,
-      History: Stub, FileClock: Stub, Workflow: Stub, Pause: Stub, RotateCcw: Stub,
-      MessageSquareText: Stub, Sparkles: Stub, Send: Stub, Square: Stub, Minus: Stub,
-      Hammer: Stub, Brain: Stub,
-    },
-    {
-      get(target, prop) {
-        if (prop in target) return (target as Record<string | symbol, unknown>)[prop]
-        return Stub
-      },
-    },
-  )
+  return {
+    Activity: Stub,
+    AlertCircle: Stub,
+    AlertTriangle: Stub,
+    Archive: Stub,
+    ArrowLeft: Stub,
+    ArrowRight: Stub,
+    ArrowRightCircle: Stub,
+    BarChart3: Stub,
+    Bold: Stub,
+    BookOpen: Stub,
+    Bot: Stub,
+    Brain: Stub,
+    Calculator: Stub,
+    CalendarCheck: Stub,
+    ChartLine: Stub,
+    Check: Stub,
+    CheckCircle: Stub,
+    CheckCircle2: Stub,
+    ChevronDown: Stub,
+    ChevronLeft: Stub,
+    ChevronRight: Stub,
+    ChevronUp: Stub,
+    Circle: Stub,
+    CircleDashed: Stub,
+    ClipboardList: Stub,
+    Clock: Stub,
+    Code: Stub,
+    Code2: Stub,
+    Columns2: Stub,
+    Command: Stub,
+    Copy: Stub,
+    Cpu: Stub,
+    Database: Stub,
+    Download: Stub,
+    Edit3: Stub,
+    ExternalLink: Stub,
+    Eye: Stub,
+    EyeOff: Stub,
+    FileClock: Stub,
+    FileCode2: Stub,
+    FileEdit: Stub,
+    FileJson: Stub,
+    FileText: Stub,
+    Folder: Stub,
+    FolderOpen: Stub,
+    Gauge: Stub,
+    GitCompare: Stub,
+    Globe: Stub,
+    Hammer: Stub,
+    Hash: Stub,
+    HeartPulse: Stub,
+    HelpCircle: Stub,
+    History: Stub,
+    Image: Stub,
+    Inbox: Stub,
+    Info: Stub,
+    Italic: Stub,
+    Layers: Stub,
+    LayoutGrid: Stub,
+    Library: Stub,
+    LineChart: Stub,
+    Link2: Stub,
+    List: Stub,
+    ListOrdered: Stub,
+    Loader2: Stub,
+    LogOut: Stub,
+    MessageSquare: Stub,
+    MessageSquareText: Stub,
+    Minimize2: Stub,
+    Minus: Stub,
+    Moon: Stub,
+    Network: Stub,
+    Palette: Stub,
+    PanelRight: Stub,
+    PanelRightClose: Stub,
+    Pause: Stub,
+    PenTool: Stub,
+    Pencil: Stub,
+    Play: Stub,
+    Plus: Stub,
+    Quote: Stub,
+    Redo2: Stub,
+    RefreshCw: Stub,
+    RotateCcw: Stub,
+    Save: Stub,
+    Search: Stub,
+    Send: Stub,
+    Settings: Stub,
+    Shield: Stub,
+    Sigma: Stub,
+    SlidersHorizontal: Stub,
+    Sparkles: Stub,
+    Square: Stub,
+    Star: Stub,
+    Sun: Stub,
+    Table: Stub,
+    Tag: Stub,
+    Target: Stub,
+    ThumbsDown: Stub,
+    ThumbsUp: Stub,
+    Trash2: Stub,
+    TrendingDown: Stub,
+    TrendingUp: Stub,
+    Undo2: Stub,
+    User: Stub,
+    Wifi: Stub,
+    WifiOff: Stub,
+    Workflow: Stub,
+    Wrench: Stub,
+    X: Stub,
+    XCircle: Stub,
+    Zap: Stub,
+  }
 })
 
 vi.mock('@xyflow/react', async () => {
@@ -126,6 +219,29 @@ vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom')
   return { ...actual, useNavigate: () => () => {} }
 })
+
+// jsdom lacks EventSource; OrchestratorChat opens a chat SSE connection on
+// mount. Minimal stub: records the URL, never fires events, no timers.
+class MockEventSource {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSED = 2
+  readyState = MockEventSource.CONNECTING
+  url: string
+  onopen: ((ev: Event) => void) | null = null
+  onerror: ((ev: Event) => void) | null = null
+  private handlers: Record<string, Array<(ev: unknown) => void>> = {}
+  constructor(url: string) {
+    this.url = url
+  }
+  addEventListener(type: string, cb: (ev: unknown) => void) {
+    ;(this.handlers[type] ??= []).push(cb)
+  }
+  close() {
+    this.readyState = MockEventSource.CLOSED
+  }
+}
+vi.stubGlobal('EventSource', MockEventSource)
 
 import { api } from '../api/client'
 import { useSessionStore } from '../stores/session'

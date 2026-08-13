@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStudyStore } from '../../stores/study'
 import { useAuthStore } from '../../stores/auth'
 import { api, type MetricTarget } from '../../api/client'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, Target, SlidersHorizontal } from 'lucide-react'
 import { StrategyNameInput } from './StrategyNameInput'
 
 interface Props {
@@ -16,6 +16,29 @@ const DEFAULT_METRICS: MetricTarget[] = [
   { name: 'sharpe', op: '>=', value: 0.3 },
   { name: 'max_dd', op: '>=', value: -0.15 },
 ]
+
+const INPUT_CLS =
+  'w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-sm text-slate-200 outline-none transition-shadow focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40'
+
+function Section({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+      <div className="mb-2.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+        {icon}
+        {title}
+      </div>
+      {children}
+    </div>
+  )
+}
 
 export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) {
   const [objective, setObjective] = useState('')
@@ -79,43 +102,41 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4 text-slate-100">
-      <div>
-        <label className="block text-xs font-medium text-slate-300 mb-1">
-          研究目标
-        </label>
+    <form onSubmit={onSubmit} className="space-y-3 text-slate-100">
+      <Section icon={<Target className="h-3 w-3 text-primary-400" />} title="研究目标">
         <textarea
           rows={3}
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
           placeholder="例：研究 A 股动量因子，目标 Calmar ≥ 0.5"
-          className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+          className={INPUT_CLS}
         />
-      </div>
+        <div className="mt-2.5">
+          <StrategyNameInput
+            objective={objective}
+            userId={userId}
+            sessionId={sessionId}
+            value={strategyName}
+            onChange={setStrategyName}
+          />
+        </div>
+      </Section>
 
-      <StrategyNameInput
-        objective={objective}
-        userId={userId}
-        sessionId={sessionId}
-        value={strategyName}
-        onChange={setStrategyName}
-      />
-
-      <div>
-        <label className="block text-xs font-medium text-slate-300 mb-1">
-          验收指标（默认对齐 AcceptanceConfig：calmar/sharpe/max_dd）
-        </label>
-        <div className="space-y-1">
+      <Section
+        icon={<Target className="h-3 w-3 text-primary-400" />}
+        title="验收指标（默认对齐 AcceptanceConfig：calmar/sharpe/max_dd）"
+      >
+        <div className="space-y-1.5">
           {metrics.map((m, i) => (
             <div key={i} className="flex items-center gap-2 text-sm">
               <input
-                className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-0.5"
+                className="w-28 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
                 value={m.name}
                 onChange={(e) => updateMetric(i, { name: e.target.value })}
                 placeholder="metric"
               />
               <select
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5"
+                className="cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500"
                 value={m.op}
                 onChange={(e) =>
                   updateMetric(i, { op: e.target.value as MetricTarget['op'] })
@@ -130,7 +151,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
               <input
                 type="number"
                 step="0.01"
-                className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-0.5"
+                className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
                 value={m.value}
                 onChange={(e) => updateMetric(i, { value: Number(e.target.value) })}
               />
@@ -140,7 +161,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
                   onClick={() =>
                     setMetrics((prev) => prev.filter((_, idx) => idx !== i))
                   }
-                  className="text-slate-500 hover:text-rose-400"
+                  className="cursor-pointer text-slate-500 transition-colors hover:text-rose-400"
                   aria-label="Remove metric"
                 >
                   <X className="h-4 w-4" />
@@ -154,81 +175,79 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
           onClick={() =>
             setMetrics((prev) => [...prev, { name: '', op: '>=', value: 0 }])
           }
-          className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200"
+          className="mt-1.5 inline-flex cursor-pointer items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-200"
         >
           <Plus className="h-3 w-3" /> 添加指标
         </button>
-      </div>
+      </Section>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            轮数预算 (turns)
-          </label>
-          <input
-            type="number"
-            min={1}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-sm"
-            value={budgetTurn}
-            onChange={(e) =>
-              setBudgetTurn(e.target.value === '' ? '' : Number(e.target.value))
-            }
-            placeholder="不限"
-          />
+      <Section icon={<SlidersHorizontal className="h-3 w-3 text-primary-400" />} title="高级参数">
+        <div className="grid grid-cols-2 gap-2.5">
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">轮数预算 (turns)</label>
+            <input
+              type="number"
+              min={1}
+              className={INPUT_CLS}
+              value={budgetTurn}
+              onChange={(e) =>
+                setBudgetTurn(e.target.value === '' ? '' : Number(e.target.value))
+              }
+              placeholder="不限"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">最大轮数</label>
+            <input
+              type="number"
+              min={1}
+              className={INPUT_CLS}
+              value={maxRounds}
+              onChange={(e) =>
+                setMaxRounds(e.target.value === '' ? '' : Number(e.target.value))
+              }
+              placeholder="不限"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">监控间隔（秒，0=不监控）</label>
+            <input
+              type="number"
+              min={0}
+              className={INPUT_CLS}
+              value={monitorSec}
+              onChange={(e) =>
+                setMonitorSec(e.target.value === '' ? '' : Number(e.target.value))
+              }
+              placeholder="例 3600"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">Behavior (CI)</label>
+            <select
+              className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-primary-500"
+              value={behavior}
+              onChange={(e) => setBehavior(e.target.value)}
+            >
+              <option value="">real LLM</option>
+              <option value="static">static</option>
+              <option value="varying">varying</option>
+              <option value="improving">improving</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            最大轮数
-          </label>
-          <input
-            type="number"
-            min={1}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-sm"
-            value={maxRounds}
-            onChange={(e) =>
-              setMaxRounds(e.target.value === '' ? '' : Number(e.target.value))
-            }
-            placeholder="不限"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            监控间隔（秒，0=不监控）
-          </label>
-          <input
-            type="number"
-            min={0}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-sm"
-            value={monitorSec}
-            onChange={(e) =>
-              setMonitorSec(e.target.value === '' ? '' : Number(e.target.value))
-            }
-            placeholder="例 3600"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            Behavior (CI)
-          </label>
-          <select
-            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-sm"
-            value={behavior}
-            onChange={(e) => setBehavior(e.target.value)}
-          >
-            <option value="">real LLM</option>
-            <option value="static">static</option>
-            <option value="varying">varying</option>
-            <option value="improving">improving</option>
-          </select>
-        </div>
-      </div>
+      </Section>
 
-      {error && <p className="text-xs text-rose-400">{error}</p>}
+      {error && (
+        <p className="rounded-lg border border-rose-800 bg-rose-950/50 px-2.5 py-1.5 text-xs text-rose-300">
+          {error}
+        </p>
+      )}
 
       <button
         type="submit"
         disabled={submitting || busy || !objective.trim() || !strategyName.trim()}
-        className="w-full rounded bg-sky-600 px-3 py-1.5 text-sm font-medium hover:bg-sky-500 disabled:opacity-50"
+        className="w-full cursor-pointer rounded-xl bg-gradient-to-r from-primary-600 to-accent-500 px-3 py-2 text-sm font-medium text-white shadow-glow transition-all hover:from-primary-500 hover:to-accent-400 active:scale-[0.98] disabled:opacity-50 disabled:shadow-none"
       >
         {submitting ? '启动中…' : '启动 study'}
       </button>

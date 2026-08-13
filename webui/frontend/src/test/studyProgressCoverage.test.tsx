@@ -28,7 +28,8 @@ vi.mock('lucide-react', () => {
     Target: Stub, Layers: Stub, Eye: Stub, EyeOff: Stub, RefreshCw: Stub,
     ArrowRight: Stub, Search: Stub, MessageSquare: Stub, Settings: Stub,
     Workflow: Stub, Bot: Stub, ChevronRight: Stub, ChevronDown: Stub,
-    AlertTriangle: Stub, BarChart3: Stub,
+    AlertTriangle: Stub, BarChart3: Stub, CheckCircle2: Stub,
+    SlidersHorizontal: Stub, Circle: Stub,
   }
 })
 

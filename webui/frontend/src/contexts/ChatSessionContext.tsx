@@ -31,6 +31,6 @@ export function ChatSessionProvider({
 
 export function useChatSessionId(): string | null {
   const ctx = useContext(ChatSessionContext)
-  if (ctx !== null) return ctx
-  return useSessionStore((s) => s.currentSessionId)
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
+  return ctx !== null ? ctx : currentSessionId
 }
