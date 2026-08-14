@@ -86,6 +86,9 @@ def cmd_engine_run_backtest(args: argparse.Namespace) -> int:
             signal_engine_path=Path(args.signal_engine).resolve(),
             bars_per_year=args.bars_per_year,
             optimizer=args.optimizer if args.optimizer != "none" else None,
+            # progress lines on stdout → captured into run.log in the
+            # backgrounded mode (log-progress liveness for long backtests)
+            progress_every=0,
         )
     except Exception as e:
         print(f"❌ 回测失败: {e}")
