@@ -18,6 +18,19 @@ from typing import TYPE_CHECKING, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from ..schemas.study import (
+    StudyActionResponse,
+    StudyDirectiveCreatedResponse,
+    StudyDirectivesResponse,
+    StudyGuidanceResponse,
+    StudyJournalResponse,
+    StudyListResponse,
+    StudyRoundsResponse,
+    StudyRoundSummaryMdResponse,
+    StudyStartResponse,
+    StudyStatusResponse,
+    StudySummaryResponse,
+)
 from ._task_utils import log_task_exception
 
 if TYPE_CHECKING:
@@ -188,7 +201,9 @@ class StudyStartRequest(BaseModel):
     workspace_path: str
     strategy_name: str
     executor_type: str = "autoresearch"  # "autoresearch" (default, round-based) or "workflow" (DAG)
-    metric_targets: Optional[list[MetricTargetModel]] = None
+    metric_targets: Optional[list[MetricTargetModel]] = Field(
+        None, max_length=16,
+    )
     budget_token: Optional[int] = None
     budget_turn: Optional[int] = None
     budget_time_seconds: Optional[int] = None
@@ -212,10 +227,30 @@ class CancelRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=512)
 
 
+def _serialize_round(r) -> dict:
+    """Shared round wire shape (used by summary + rounds list).
+
+    Single source of truth so both endpoints return identical fields
+    (round_num, run_name, metrics, verdict, review, error,
+    factor_failures, verdict_reason, created_at).
+    """
+    return {
+        "round_num": r.round_num,
+        "run_name": r.run_name,
+        "metrics": r.metrics,
+        "verdict": r.verdict,
+        "review": getattr(r, "review", None),
+        "error": getattr(r, "error", None),
+        "factor_failures": getattr(r, "factor_failures", None) or [],
+        "verdict_reason": getattr(r, "verdict_reason", None),
+        "created_at": r.created_at,
+    }
+
+
 # ── POST /study/start ───────────────────────────────────────────────
 
 
-@router.post("/start")
+@router.post("/start", response_model=StudyStartResponse)
 async def study_start(req: StudyStartRequest, request: Request):
     """Create a study + its goal ledger row + queue the executor.
 
@@ -356,16 +391,19 @@ async def study_start(req: StudyStartRequest, request: Request):
 # ── GET /study/status, /study/list ───────────────────────────────────
 
 
-@router.get("/list")
+@router.get("/list", response_model=StudyListResponse)
 async def study_list(
     request: Request,
     session_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
+    before_created_at: Optional[str] = None,
 ):
     """List studies, optionally filtered by session/status.
 
     When session_id is provided, enforces ownership (IDOR).
+    ``before_created_at`` enables keyset pagination: pass the
+    ``created_at`` of the last row from the previous page.
     """
     if session_id:
         # Security: only allow listing studies for sessions the caller
@@ -379,7 +417,10 @@ async def study_list(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"invalid status: {status}")
     with StudyStore() as store:
-        rows = store.list_studies(session_id=session_id, status=status_enum, limit=limit)
+        rows = store.list_studies(
+            session_id=session_id, status=status_enum,
+            limit=limit, before_created_at=before_created_at,
+        )
     def _shape(r):
         return {
             "study_id": r.study_id, "session_id": r.session_id,
@@ -393,10 +434,14 @@ async def study_list(
             "created_at": r.created_at, "updated_at": r.updated_at,
             "completed_at": r.completed_at,
         }
-    return {"status": "ok", "studies": [_shape(r) for r in rows]}
+    # Keyset cursor: expose the last row's created_at so the client can
+    # fetch older pages (None when the page is exhausted).
+    next_cursor = rows[-1].created_at if len(rows) == limit else None
+    return {"status": "ok", "studies": [_shape(r) for r in rows],
+            "next_cursor": next_cursor}
 
 
-@router.get("/status")
+@router.get("/status", response_model=StudyStatusResponse, response_model_exclude_none=True)
 async def study_status(
     request: Request,
     session_id: str = Query(...),
@@ -478,7 +523,7 @@ def _snapshot(s: dict | None) -> dict | None:
 # ── GET /study/{study_id}/summary ──────────────────────────────────
 
 
-@router.get("/{study_id}/summary")
+@router.get("/{study_id}/summary", response_model=StudySummaryResponse)
 async def study_summary(request: Request, study_id: str):
     """Return study summary with recent rounds, scoreboard, and goal snapshot."""
     from ...core.goal import GoalStore
@@ -520,21 +565,15 @@ async def study_summary(request: Request, study_id: str):
         "objective": study.objective,
         "strategy_name": study.strategy_name,
         "workspace_path": study.workspace_path,
+        "metric_targets": study.metric_targets,
         "created_at": study.created_at,
         "updated_at": study.updated_at,
         "completed_at": study.completed_at,
         "last_metrics": study.last_metrics,
         "last_verdict": study.last_verdict,
-        "recent_rounds": [
-            {
-                "round_num": r.round_num,
-                "run_name": r.run_name,
-                "metrics": r.metrics,
-                "verdict": r.verdict,
-                "created_at": r.created_at,
-            }
-            for r in recent_rounds
-        ],
+        "last_error": study.last_error,
+        "last_traceback": study.last_traceback,
+        "recent_rounds": [_serialize_round(r) for r in recent_rounds],
         "scoreboard": scoreboard,
         "goal_snapshot": _snapshot(goal_snapshot),
     }
@@ -587,7 +626,7 @@ def _study_session_id(study_id: str) -> str | None:
     return study.owner_session_id if study else None
 
 
-@router.post("/{study_id}/pause")
+@router.post("/{study_id}/pause", response_model=StudyActionResponse)
 async def study_pause(request: Request, study_id: str):
     sid = _study_session_id(study_id)
     if sid is None:
@@ -610,7 +649,7 @@ async def study_pause(request: Request, study_id: str):
     return {"status": "ok", "study_id": study_id, "action": "paused"}
 
 
-@router.post("/{study_id}/resume")
+@router.post("/{study_id}/resume", response_model=StudyActionResponse)
 async def study_resume(request: Request, study_id: str):
     """Resume a paused or interrupted study."""
     sid = _study_session_id(study_id)
@@ -638,7 +677,7 @@ async def study_resume(request: Request, study_id: str):
     return {"status": "ok", "study_id": study_id, "action": "resumed"}
 
 
-@router.post("/{study_id}/cancel")
+@router.post("/{study_id}/cancel", response_model=StudyActionResponse)
 async def study_cancel(request: Request, study_id: str, req: CancelRequest | None = None):
     sid = _study_session_id(study_id)
     if sid is None:
@@ -653,7 +692,7 @@ async def study_cancel(request: Request, study_id: str, req: CancelRequest | Non
 # ── POST /study/{study_id}/directive (Phase 2: mid-exec interaction) ──
 
 
-@router.post("/{study_id}/directive")
+@router.post("/{study_id}/directive", response_model=StudyDirectiveCreatedResponse)
 async def study_directive(request: Request, study_id: str, req: DirectiveRequest):
     """Inject a user-issued directive into the study's next round.
 
@@ -699,7 +738,7 @@ async def study_directive(request: Request, study_id: str, req: DirectiveRequest
     }
 
 
-@router.get("/{study_id}/directives")
+@router.get("/{study_id}/directives", response_model=StudyDirectivesResponse)
 async def study_directives_list(request: Request, study_id: str):
     """List pending + consumed directives for a study (audit trail)."""
     from ...core.study import StudyStore
@@ -736,7 +775,7 @@ def _owned_study(request: Request, study_id: str):
         return study
 
 
-@router.get("/{study_id}/rounds")
+@router.get("/{study_id}/rounds", response_model=StudyRoundsResponse)
 async def study_rounds_list(
     request: Request, study_id: str,
     offset: int = 0, limit: int = 20,
@@ -754,21 +793,11 @@ async def study_rounds_list(
         "total": total,
         "offset": offset,
         "limit": limit,
-        "rounds": [
-            {
-                "round": r.round_num,
-                "run_name": r.run_name,
-                "verdict": r.verdict,
-                "metrics": r.metrics,
-                "review": r.review,
-                "created_at": r.created_at,
-            }
-            for r in page
-        ],
+        "rounds": [_serialize_round(r) for r in page],
     }
 
 
-@router.get("/{study_id}/journal")
+@router.get("/{study_id}/journal", response_model=StudyJournalResponse)
 async def study_journal(request: Request, study_id: str):
     """v2: journal.md content (append-only archive, single source)."""
     from ...core.study import state_store as ss
@@ -778,7 +807,7 @@ async def study_journal(request: Request, study_id: str):
     return {"status": "ok", "study_id": study_id, "journal": content}
 
 
-@router.get("/{study_id}/guidance")
+@router.get("/{study_id}/guidance", response_model=StudyGuidanceResponse)
 async def study_guidance(request: Request, study_id: str):
     """v2: guidance.md content + parsed gates (design §13.4)."""
     from ...core.study import guidance as gd
@@ -797,7 +826,7 @@ async def study_guidance(request: Request, study_id: str):
     }
 
 
-@router.get("/{study_id}/rounds/{round_num}/summary_md")
+@router.get("/{study_id}/rounds/{round_num}/summary_md", response_model=StudyRoundSummaryMdResponse)
 async def study_round_summary_md(request: Request, study_id: str, round_num: int):
     """v2: single-round summary.md content."""
     from ...core.study import round_manifest as rm

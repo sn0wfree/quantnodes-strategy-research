@@ -154,6 +154,13 @@ class StudyStore:
                     "UPDATE studies SET owner_session_id = session_id "
                     "WHERE owner_session_id IS NULL"
                 )
+            # v2: owner_session_id + created_at composite for the list
+            # endpoint's keyset pagination (list_studies ORDER BY
+            # created_at DESC WHERE owner_session_id = ?).
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_studies_owner_created "
+                "ON studies(owner_session_id, created_at DESC)"
+            )
             if "last_traceback" not in cols:
                 self._conn.execute(
                     "ALTER TABLE studies ADD COLUMN last_traceback TEXT"
@@ -206,6 +213,11 @@ class StudyStore:
                 self._conn.execute(
                     "ALTER TABLE study_rounds ADD COLUMN review_json TEXT"
                 )
+            for _col in ("error", "factor_failures_json", "verdict_reason"):
+                if _col not in round_cols:
+                    self._conn.execute(
+                        f"ALTER TABLE study_rounds ADD COLUMN {_col} TEXT"
+                    )
             # Release any implicit transaction (migration UPDATE above)
             # so other connections (GoalStore, same DB file) can write.
             self._conn.commit()
@@ -477,13 +489,20 @@ class StudyStore:
         return self._study_from_row(row) if row else None
 
     @synchronized
+    @synchronized
     def list_studies(
         self,
         session_id: str | None = None,
         status: StudyStatus | None = None,
         limit: int = 100,
+        before_created_at: str | None = None,
     ) -> list[StudyRecord]:
-        """List studies, optionally filtered by owner session; newest first."""
+        """List studies, optionally filtered by owner session; newest first.
+
+        ``before_created_at`` enables keyset pagination (pass the
+        ``created_at`` of the last row from the previous page to fetch
+        older studies).
+        """
 
         query = "SELECT * FROM studies WHERE 1=1"
         params: list[Any] = []
@@ -493,6 +512,9 @@ class StudyStore:
         if status:
             query += " AND execution_status = ?"
             params.append(status.value)
+        if before_created_at:
+            query += " AND created_at < ?"
+            params.append(before_created_at)
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
 
@@ -735,6 +757,11 @@ class StudyStore:
         evidence_ids: list[str] | None = None,
         config_changes: dict | None = None,
         agent_output: str | None = None,
+        *,
+        error: str | None = None,
+        factor_failures: list[dict] | None = None,
+        verdict_reason: str | None = None,
+        review: dict | None = None,
     ) -> "StudyRoundRecord":
         """Append a round record to ``study_rounds``."""
         from .models import StudyRoundRecord
@@ -752,8 +779,9 @@ class StudyStore:
                 INSERT INTO study_rounds (
                     round_id, study_id, goal_id, session_id, round_num,
                     run_name, metrics_json, verdict, evidence_ids_json,
-                    config_changes_json, agent_output, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    config_changes_json, agent_output, created_at,
+                    review_json, error, factor_failures_json, verdict_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     round_id, study_id, goal_id, session_id, round_num,
@@ -761,6 +789,10 @@ class StudyStore:
                     json_dumps(evidence_ids or []),
                     json_dumps(config_changes) if config_changes else None,
                     agent_output, now,
+                    json_dumps(review) if review else None,
+                    error,
+                    json_dumps(factor_failures) if factor_failures else None,
+                    verdict_reason,
                 ),
             )
         return StudyRoundRecord(
@@ -769,6 +801,9 @@ class StudyStore:
             metrics=metrics or {}, verdict=verdict,
             evidence_ids=evidence_ids or [], config_changes=config_changes,
             agent_output=agent_output, created_at=now,
+            review=review, error=error,
+            factor_failures=factor_failures or [],
+            verdict_reason=verdict_reason,
         )
 
     @synchronized
@@ -826,6 +861,7 @@ class StudyStore:
 
     def _round_from_row(self, row: sqlite3.Row) -> "StudyRoundRecord":
         from .models import StudyRoundRecord
+        keys = row.keys()
         return StudyRoundRecord(
             round_id=row["round_id"],
             study_id=row["study_id"],
@@ -839,7 +875,11 @@ class StudyStore:
             config_changes=json_loads(row["config_changes_json"], None),
             agent_output=row["agent_output"],
             review=json_loads(row["review_json"], None)
-            if "review_json" in row.keys() else None,
+            if "review_json" in keys else None,
+            error=row["error"] if "error" in keys else None,
+            factor_failures=json_loads(row["factor_failures_json"], [])
+            if "factor_failures_json" in keys else [],
+            verdict_reason=row["verdict_reason"] if "verdict_reason" in keys else None,
             created_at=row["created_at"],
         )
 

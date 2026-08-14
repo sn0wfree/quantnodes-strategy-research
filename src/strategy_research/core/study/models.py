@@ -133,6 +133,9 @@ class StudyRoundRecord:
     config_changes: dict | None = None
     agent_output: str | None = None
     review: dict | None = None   # v2 phase-2 overlay (manifest review section)
+    error: str | None = None
+    factor_failures: list[dict] = field(default_factory=list)
+    verdict_reason: str | None = None
     created_at: str = ""
 
 
