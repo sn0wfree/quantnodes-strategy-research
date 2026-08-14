@@ -116,10 +116,14 @@ def test_oldest_first_ordering(session_service):
 
 
 def test_terminal_attempts_excluded(session_service):
+    """COMPLETED is excluded; FAILED is included (C1: up to 5 with error)."""
     sid = "sess-term"
     _insert_attempt(session_service.store, sid, AttemptStatus.COMPLETED, "2026-01-01T00:00:01")
     _insert_attempt(session_service.store, sid, AttemptStatus.FAILED, "2026-01-01T00:00:02")
-    assert session_service.list_active_attempts(sid) == []
+    result = session_service.list_active_attempts(sid)
+    # COMPLETED excluded; FAILED included with error info
+    assert len(result) == 1
+    assert result[0]["status"] == "failed"
 
 
 # ── HTTP endpoint ─────────────────────────────────────────────────────

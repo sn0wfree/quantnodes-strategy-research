@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from strategy_research.api.app import create_app
 from strategy_research.core.study.hanging_events import (
+    EVENT_CHAT_STALL,
     EVENT_CIRCUIT_OPEN,
     EVENT_LOG_STALL,
     EVENT_NO_PROGRESS,
@@ -45,12 +46,13 @@ class TestHangingEventsStore:
         assert counts[EVENT_WALLCLOCK] == 2
         assert counts[EVENT_WATCHDOG] == 1
         assert counts[EVENT_NO_PROGRESS] == 0
+        assert counts[EVENT_CHAT_STALL] == 0
 
     def test_unknown_type_ignored(self, store):
         store.record("bogus_type", session_id="s1")
         assert store.count_since() == {t: 0 for t in (
             EVENT_WALLCLOCK, EVENT_LOG_STALL, EVENT_NO_PROGRESS,
-            EVENT_CIRCUIT_OPEN, EVENT_WATCHDOG,
+            EVENT_CIRCUIT_OPEN, EVENT_WATCHDOG, EVENT_CHAT_STALL,
         )}
 
     def test_count_since_respects_window(self, store):
@@ -87,7 +89,7 @@ class TestHangingEventsStore:
         assert store.clear() >= 1
         assert store.count_since() == {t: 0 for t in (
             EVENT_WALLCLOCK, EVENT_LOG_STALL, EVENT_NO_PROGRESS,
-            EVENT_CIRCUIT_OPEN, EVENT_WATCHDOG,
+            EVENT_CIRCUIT_OPEN, EVENT_WATCHDOG, EVENT_CHAT_STALL,
         )}
 
     def test_clear_older_than(self, store):
@@ -180,6 +182,7 @@ class TestDumpHangingSignals:
         assert h[EVENT_WALLCLOCK] == 1
         assert h[EVENT_NO_PROGRESS] == 1
         assert h[EVENT_WATCHDOG] == 0
+        assert h[EVENT_CHAT_STALL] == 0
 
 
 class TestListRecent:
