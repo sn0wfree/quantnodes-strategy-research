@@ -93,9 +93,21 @@ def create_app(
             logger.info("[STARTUP] migrated %d legacy scheduled jobs → SQLite", migrated)
         from .routers.study import _get_study_scheduler
 
+        scheduler = _get_study_scheduler()
+        # Recover studies left RUNNING/QUEUED from a prior process:
+        # RUNNING → INTERRUPTED (manual resume), QUEUED → re-queue, MONITORING
+        # → rebuild monitor task. Without this, uvicorn reload or crash leaves
+        # ghost studies that no consumer will ever pick up.
+        recovered = await scheduler.recover_on_startup()
+        if recovered:
+            logger.info(
+                "[STARTUP] study scheduler recovered %d studies from prior process",
+                len(recovered),
+            )
+
         schedule_executor = ScheduledResearchExecutor(
             schedule_store,
-            scheduler=_get_study_scheduler(),
+            scheduler=scheduler,
         )
         schedule_executor.start(loop=asyncio.get_running_loop())
         logger.info("[STARTUP] scheduled research daemon started")
