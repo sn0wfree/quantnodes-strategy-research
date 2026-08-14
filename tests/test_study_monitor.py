@@ -61,7 +61,7 @@ def _make_runner(env, *, monitor_interval: int | None = 60, status=None, metrics
         max_rounds=None, monitor_interval_seconds=monitor_interval,
     )
     store.update_goal_id(study.study_id, goal.goal_id)
-    from strategy_research.api.routers.study import _init_study_dir
+    from strategy_research.core.study.bootstrap import init_study_dir as _init_study_dir
     _init_study_dir(env, study.study_id, "demo", "x")
     if status is not None:
         store.update_execution_status(study.study_id, status)

@@ -203,7 +203,7 @@ def test_runner_gate_hard_check_forces_discard(tmp_path, monkeypatch):
     import asyncio
 
     import strategy_research.core.autoresearch as ar_mod
-    from strategy_research.api.routers.study import _init_study_dir
+    from strategy_research.core.study.bootstrap import init_study_dir as _init_study_dir
     from strategy_research.core.goal import GoalStore
     from strategy_research.core.goal.context import default_goal_criteria
     from strategy_research.core.study import round_manifest as rm
@@ -298,7 +298,7 @@ def test_runner_gate_no_violation_keeps_verdict(tmp_path, monkeypatch):
     import asyncio
 
     import strategy_research.core.autoresearch as ar_mod
-    from strategy_research.api.routers.study import _init_study_dir
+    from strategy_research.core.study.bootstrap import init_study_dir as _init_study_dir
     from strategy_research.core.goal import GoalStore
     from strategy_research.core.goal.context import default_goal_criteria
     from strategy_research.core.study import round_manifest as rm

@@ -27,116 +27,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _create_minimal_strategy(strat_dir: Path, strategy_name: str) -> None:
-    """Create minimal strategy.py for new study."""
-    strategy_py = strat_dir / "strategy.py"
-    if not strategy_py.exists():
-        strategy_py.write_text(
-            f'"""Auto-generated strategy: {strategy_name}"""\n'
-            f"# This file will be overwritten by the autoresearch agent.\n\n"
-            f"PARAMS = {{}}\n"
-            f"FACTOR_EXPRS = []\n"
-            f"FACTOR_WEIGHT_METHOD = \"equal\"\n",
-            encoding="utf-8",
-        )
-
-
-_RESULTS_TSV_HEADER = (
-    "run\tcommit\taction\tcalmar\tsharpe\tmax_dd\t"
-    "ann_return\tturnover\tfactors_added\tfactors_removed\t"
-    "params_changed\tstatus\tdescription\tround\n"
-)
-
-_TODOS_TEMPLATE = (
-    "# 任务子任务清单（评审维护）\n"
-    "\n"
-    "## 待办\n"
-    "\n"
-    "## 进行中\n"
-    "\n"
-    "## 已放弃\n"
-    "\n"
-)
-
-_KNOWLEDGE_TEMPLATE = (
-    "# 知识储备与 Idea 池\n"
-    "<!-- 外部信息收集沉淀 · 追加式 · 每轮注入近期条目 -->\n"
-    "\n"
-)
-
-_STUDY_GUIDANCE_TEMPLATE = """\
-# 研究指引（每轮自动注入）
-
-## 决策规则（人类判断点）
-<!-- 在此定义硬性规则；enforce:true 的 gate 走 frontmatter -->
-
-## 偏好
-- 因子表达式保持可解释性；优先验证与任务目标直接相关的因子。
-
-## 任务文档说明（需要时用 read_file 按需读取）
-- `study/{study_id}/journal.md`：全任务轮次归档（追加式，一行式摘要）。
-- `study/{study_id}/rounds/round_NNNN/summary.md`：单轮详细总结。
-- `study/{study_id}/todos.md`：任务子任务清单。
-- `study/{study_id}/knowledge.md`：外部信息储备。
-- 每轮产物默认已注入上下文，仅在信息不足时按需读取。
-"""
-
-
-def _init_study_dir(
-    ws: Path,
-    study_id: str,
-    strategy_name: str,
-    objective: str,
-    guidance_md: str | None = None,
-) -> dict:
-    """v2 bootstrap: autonomous study directory (design §6.2).
-
-    Creates baseline/strategy.py, results.tsv header, guidance.md,
-    todos.md, knowledge.md and state.json.
-    """
-    from ...core.study.state_store import init as init_state
-
-    root = ws / "study" / study_id
-    (root / "baseline").mkdir(parents=True, exist_ok=True)
-    (root / "rounds").mkdir(parents=True, exist_ok=True)
-
-    # baseline strategy: existing strategy copied, else minimal template
-    baseline_py = root / "baseline" / "strategy.py"
-    src = ws / "strategies" / strategy_name / "strategy.py"
-    if src.exists():
-        baseline_py.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    else:
-        _create_minimal_strategy(root / "baseline", strategy_name)
-
-    # results.tsv header (round column last)
-    tsv = root / "results.tsv"
-    if not tsv.exists():
-        tsv.write_text(_RESULTS_TSV_HEADER, encoding="utf-8")
-
-    # guidance.md: request override > built-in template
-    guidance = root / "guidance.md"
-    if guidance_md:
-        guidance.write_text(guidance_md, encoding="utf-8")
-    elif not guidance.exists():
-        guidance.write_text(
-            _STUDY_GUIDANCE_TEMPLATE.format(study_id=study_id),
-            encoding="utf-8",
-        )
-
-    # todos.md / knowledge.md templates
-    todos = root / "todos.md"
-    if not todos.exists():
-        todos.write_text(_TODOS_TEMPLATE, encoding="utf-8")
-    knowledge = root / "knowledge.md"
-    if not knowledge.exists():
-        knowledge.write_text(_KNOWLEDGE_TEMPLATE, encoding="utf-8")
-
-    # state.json
-    init_state(ws, study_id)
-
-    return {"root": str(root), "results_tsv": str(tsv)}
-
-
 # ── scheduler cache (mirrors chat._session_service_cache pattern) ───
 
 
@@ -224,45 +114,66 @@ async def study_start(req: StudyStartRequest, request: Request):
     print(f"[STUDY:api] POST /study/start session={req.session_id} "
           f"strategy={req.strategy_name} objective={req.objective[:40]}",
           flush=True)
-    # Workspace validation — fail fast on bad config before persistence.
-    ws = Path(req.workspace_path)
-    if not ws.exists():
-        raise HTTPException(
-            status_code=400,
-            detail=f"workspace_path does not exist: {req.workspace_path}",
-        )
-    # Security: reject strategy_name that escapes the workspace via "..",
-    # path separators, or NUL bytes. Then resolve and verify containment.
-    if not req.strategy_name or "/" in req.strategy_name or "\\" in req.strategy_name \
-            or "\0" in req.strategy_name or req.strategy_name.startswith("."):
-        raise HTTPException(
-            status_code=400,
-            detail="strategy_name must be a single segment without path separators",
-        )
-    ws_resolved = ws.resolve()
-    strat_dir = (ws_resolved / "strategies" / req.strategy_name).resolve()
-    try:
-        strat_dir.relative_to(ws_resolved)
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail="strategy_name resolves outside workspace",
-        )
-    if not strat_dir.exists():
-        # Auto-create strategy directory with minimal strategy.py
-        strat_dir.mkdir(parents=True, exist_ok=True)
-        _create_minimal_strategy(strat_dir, req.strategy_name)
+
+    from ...core.study.bootstrap import create_study_record
 
     try:
+        if req.executor_type == "autoresearch":
+            from ...core.study import StudyStatus
+            # AEGIS: round-based AutoresearchRunner via the scheduler.
+            # Shared orchestration (validation / ledger / autonomous dir)
+            # lives in core/study/bootstrap.py.
+            study = create_study_record(
+                owner_session_id=req.session_id,
+                objective=req.objective,
+                workspace_path=req.workspace_path,
+                strategy_name=req.strategy_name,
+                metric_targets=(
+                    [t.model_dump() for t in req.metric_targets]
+                    if req.metric_targets else None
+                ),
+                budget_token=req.budget_token,
+                budget_turn=req.budget_turn,
+                budget_time_seconds=req.budget_time_seconds,
+                cooldown_base=req.cooldown_base,
+                cooldown_jitter=req.cooldown_jitter,
+                min_cooldown=req.min_cooldown,
+                max_rounds=req.max_rounds,
+                behavior=req.behavior,
+                monitor_interval_seconds=req.monitor_interval_seconds,
+                guidance_md=req.guidance_md,
+                lazy_detection_interval=req.lazy_detection_interval,
+                keep_recent=req.keep_recent,
+            )
+            # Queue without blocking the request; uncaught submit errors
+            # are logged via the done callback.
+            sched = _get_study_scheduler()
+            import asyncio
+            task = asyncio.create_task(sched.submit(study))
+            task.add_done_callback(log_task_exception)
+            return {
+                "status": "ok",
+                "study_id": study.study_id,
+                "goal_id": study.goal_id,
+                "session_id": study.study_id,
+                "execution_status": StudyStatus.QUEUED.value,
+                "executor_type": "autoresearch",
+            }
+        # executor_type == "workflow": single DAG execution via
+        # GoalWorkflowRunner (kept in the API layer — needs session_service).
         from ...core.goal import GoalStore
         from ...core.goal.context import default_goal_criteria
+        from ...core.goal.workflow import GoalWorkflowRunner
+        from ...core.goal.workflow_config import build_autoresearch_workflow_config
         from ...core.study import StudyStatus, StudyStore, default_metric_targets
+        from ...core.study.bootstrap import validate_workspace_strategy
+        from .chat import _get_session_service
 
+        ws = validate_workspace_strategy(req.workspace_path, req.strategy_name)
         targets = (
             [t.model_dump() for t in req.metric_targets]
             if req.metric_targets else default_metric_targets()
         )
-        # v2 single identity: the study row is created first so its
-        # session_id (== study_id) can be the goal's isolation domain.
         with StudyStore() as store:
             study = store.create_study(
                 owner_session_id=req.session_id,
@@ -281,8 +192,6 @@ async def study_start(req: StudyStartRequest, request: Request):
                 behavior=req.behavior,
                 monitor_interval_seconds=req.monitor_interval_seconds,
             )
-            # Goal ledger under the study's own identity: parallel studies
-            # never supersede each other's goals (supersede=False).
             goal_store = GoalStore()
             goal = goal_store.replace_goal(
                 session_id=study.study_id,
@@ -292,48 +201,14 @@ async def study_start(req: StudyStartRequest, request: Request):
             )
             study = store.update_goal_id(study.study_id, goal.goal_id)
 
-        # v2 bootstrap: autonomous study directory (baseline strategy,
-        # results.tsv, guidance.md, todos.md, knowledge.md, state.json)
-        if req.executor_type == "autoresearch":
-            _init_study_dir(
-                ws_resolved,
-                study.study_id,
-                req.strategy_name,
-                req.objective,
-                guidance_md=req.guidance_md,
-            )
-
-        # Phase 3: Start GoalWorkflowRunner instead of scheduler
-        # AEGIS: executor_type="autoresearch" uses AutoresearchRunner (round-based)
-        # executor_type="workflow" uses GoalWorkflowRunner (single DAG)
-        if req.executor_type == "autoresearch":
-            # Use scheduler → AutoresearchRunner (AEGIS-powered round loop)
-            sched = _get_study_scheduler()
-            import asyncio
-            task = asyncio.create_task(sched.submit(study))
-            task.add_done_callback(log_task_exception)
-            return {
-                "status": "ok",
-                "study_id": study.study_id,
-                "goal_id": study.goal_id,
-                "session_id": study.study_id,
-                "execution_status": StudyStatus.QUEUED.value,
-                "executor_type": "autoresearch",
-            }
-        else:
-            # Original GoalWorkflowRunner path (single DAG execution)
-            from ...core.goal.workflow import GoalWorkflowRunner
-            from ...core.goal.workflow_config import build_autoresearch_workflow_config
-            from .chat import _get_session_service
-
-            config = build_autoresearch_workflow_config(
-                strategy_name=req.strategy_name,
-                objective=req.objective,
-                metric_targets=targets,
-                monitor_interval_seconds=req.monitor_interval_seconds,
-                budget_turn=req.budget_turn,
-                budget_time_seconds=req.budget_time_seconds,
-            )
+        config = build_autoresearch_workflow_config(
+            strategy_name=req.strategy_name,
+            objective=req.objective,
+            metric_targets=targets,
+            monitor_interval_seconds=req.monitor_interval_seconds,
+            budget_turn=req.budget_turn,
+            budget_time_seconds=req.budget_time_seconds,
+        )
 
         session_service = _get_session_service()
         runner = GoalWorkflowRunner(
@@ -344,6 +219,7 @@ async def study_start(req: StudyStartRequest, request: Request):
         )
         runner.set_goal_id(goal.goal_id)
         # Start in background (non-blocking). A5: log uncaught exceptions.
+        import asyncio
         task = asyncio.create_task(runner.start(req.objective))
         task.add_done_callback(log_task_exception)
         return {

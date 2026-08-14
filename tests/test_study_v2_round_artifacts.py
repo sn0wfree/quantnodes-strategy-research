@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_research.api.routers.study import _init_study_dir
+from strategy_research.core.study.bootstrap import init_study_dir as _init_study_dir
 from strategy_research.core.study import StudyStore
 from strategy_research.core.study.round_manifest import (
     append_journal_md,

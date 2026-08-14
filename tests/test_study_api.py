@@ -106,7 +106,7 @@ async def test_start_auto_creates_strategy(_app_env):
     Note: We can't fully test the start endpoint because it triggers the
     scheduler in the background. Instead, test the auto-creation logic directly.
     """
-    from strategy_research.api.routers.study import _create_minimal_strategy
+    from strategy_research.core.study.bootstrap import _create_minimal_strategy
 
     strat_dir = _app_env / "strategies" / "auto_created_strat"
     assert not strat_dir.exists()
