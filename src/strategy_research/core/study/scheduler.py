@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from .models import StudyRecord, StudyStatus
@@ -30,6 +31,23 @@ logger = logging.getLogger(__name__)
 # v2: global concurrency cap across ALL studies (per-process semaphore).
 # Study directories are autonomous (study/<id>/), so no per-strategy locks.
 SR_STUDY_MAX_CONCURRENT = int(os.environ.get("SR_STUDY_MAX_CONCURRENT", "3"))
+
+# Watchdog: a RUNNING study whose heartbeat is older than this is force-
+# interrupted (heartbeat is bumped once per round; real-LLM rounds can run
+# long, hence the conservative default of 1h).
+SR_STUDY_HEARTBEAT_TIMEOUT = int(os.environ.get("SR_STUDY_HEARTBEAT_TIMEOUT", "3600"))
+SR_STUDY_WATCHDOG_INTERVAL = int(os.environ.get("SR_STUDY_WATCHDOG_INTERVAL", "60"))
+
+# Statuses that must never be (re-)executed: submitting one is rejected.
+# MONITORING / INTERRUPTED / PAUSED remain resumable (recover path).
+_TERMINAL_STATUSES = frozenset({
+    StudyStatus.COMPLETE,
+    StudyStatus.CANCELLED,
+    StudyStatus.ERROR,
+    StudyStatus.BUDGET_LIMITED,
+    StudyStatus.EARLY_STOPPED,
+    StudyStatus.NEEDS_REFRESH,
+})
 
 
 def _dlog(module: str, msg: str, *args) -> None:
@@ -72,14 +90,44 @@ class StudyScheduler:
         self._dispatch_tasks: dict[str, asyncio.Task] = {}
         # v2: global concurrency semaphore (SR_STUDY_MAX_CONCURRENT)
         self._semaphore = asyncio.Semaphore(max(1, SR_STUDY_MAX_CONCURRENT))
+        # Dedupe guard: study_ids sitting in a session queue (submitted but
+        # not yet picked up). Prevents double-enqueue of the same study.
+        self._queued_study_ids: set[str] = set()
+        # Watchdog: done-task cleanup + heartbeat-stale interruption.
+        self._watchdog_task: asyncio.Task | None = None
+        self._watchdog_interval = max(10, SR_STUDY_WATCHDOG_INTERVAL)
+        self._heartbeat_timeout = max(60, SR_STUDY_HEARTBEAT_TIMEOUT)
         self._shutdown = False
 
     # ── public: submit ─────────────────────────────────────────────
 
-    async def submit(self, study: StudyRecord) -> None:
-        """Enqueue a study for execution on its session."""
+    async def submit(self, study: StudyRecord) -> bool:
+        """Enqueue a study for execution on its session.
+
+        Returns ``False`` (and does nothing) when the study is already
+        queued / active / held by the scheduler or has reached a terminal
+        status — a duplicate submit must never run a study twice.
+        """
+        sid = study.study_id
+        # 1. Already active (running / dispatching / paused via token)?
+        if sid in self._active_executors or sid in self._active_tasks \
+                or sid in self._dispatch_tasks or sid in self._control_tokens:
+            _dlog("sched", "submit rejected: study already active %s", sid)
+            return False
+        # 2. Already sitting in its session queue?
+        if sid in self._queued_study_ids:
+            _dlog("sched", "submit rejected: study already queued %s", sid)
+            return False
+        # 3. Store is authoritative for lifecycle: a terminal study must
+        #    never be re-executed (e.g. duplicate start of a finished one).
+        current = self.store.get_study(sid)
+        if current is not None and current.execution_status in _TERMINAL_STATUSES:
+            _dlog("sched", "submit rejected: study terminal %s (%s)",
+                  sid, current.execution_status.value)
+            return False
+
         _dlog("sched", "submit study=%s session=%s status=%s",
-              study.study_id, study.session_id, study.execution_status.value)
+              sid, study.session_id, study.execution_status.value)
         # Mark queued in store (defensive; create_study already sets it,
         # but if submit() is called on a recovered RUNNING study, we do
         # not downgrade it here — only fresh submits pass through).
@@ -103,8 +151,11 @@ class StudyScheduler:
 
         # Ensure per-session queue + consumer are alive
         q = self._session_queues.setdefault(study.session_id, asyncio.Queue())
+        self._queued_study_ids.add(sid)
         await q.put(study.study_id)
         self._ensure_consumer(study.session_id)
+        self._ensure_watchdog()
+        return True
 
     # ── public: control ────────────────────────────────────────────
 
@@ -212,11 +263,15 @@ class StudyScheduler:
             task.cancel()
         for _sid, task in list(self._session_consumers.items()):
             task.cancel()
+        if self._watchdog_task is not None:
+            self._watchdog_task.cancel()
+            self._watchdog_task = None
         # give tasks a moment to unwind
         await asyncio.sleep(0)
         self._active_tasks.clear()
         self._dispatch_tasks.clear()
         self._session_consumers.clear()
+        self._queued_study_ids.clear()
 
     # ── internals ──────────────────────────────────────────────────
 
@@ -241,6 +296,7 @@ class StudyScheduler:
             if study_id is None:
                 break
             logger.info("study session_loop got study=%s", study_id)
+            self._queued_study_ids.discard(study_id)
             # v2: true parallelism — do NOT await the study to completion;
             # the global semaphore inside _run_one_study caps concurrency.
             task = asyncio.create_task(self._run_one_study(study_id))
@@ -267,6 +323,13 @@ class StudyScheduler:
         study = self.store.get_study(study_id)
         if study is None:
             _dlog("sched", "_run_one_study: study not found %s", study_id)
+            return
+        # Defense in depth: the store is authoritative. A study that went
+        # terminal between enqueue and dispatch (e.g. cancelled elsewhere)
+        # must not execute — a stale queue entry is silently dropped.
+        if study.execution_status in _TERMINAL_STATUSES:
+            _dlog("sched", "_run_one_study: drop terminal %s (%s)",
+                  study_id, study.execution_status.value)
             return
         # Cooperative mutex with chat: if chat is mid-loop, wait for it.
         if self.session_service is not None:
@@ -319,6 +382,81 @@ class StudyScheduler:
                 self.session_service.mark_session_processing(
                     study.session_id, processing=False,
                 )
+
+    # ── watchdog: task health + heartbeat staleness ────────────────
+
+    def _ensure_watchdog(self) -> None:
+        """Lazily start the background watchdog (one per scheduler)."""
+        if self._watchdog_task is not None:
+            return
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+
+    async def _watchdog_loop(self) -> None:
+        try:
+            while not self._shutdown:
+                await asyncio.sleep(self._watchdog_interval)
+                await self._watchdog_tick()
+        except asyncio.CancelledError:
+            pass
+
+    async def _watchdog_tick(self) -> None:
+        """Sweep active tasks: cleanup dead ones, interrupt stale ones."""
+        # 1. Tasks that finished without the normal cleanup path → mark
+        #    INTERRUPTED so the row is not left RUNNING forever.
+        for sid in list(self._active_tasks):
+            task = self._active_tasks.get(sid)
+            if task is None or not task.done():
+                continue
+            self._active_tasks.pop(sid, None)
+            self._dispatch_tasks.pop(sid, None)
+            self._active_executors.pop(sid, None)
+            tok = self._control_tokens.pop(sid, None)
+            record = self.store.get_study(sid)
+            if record is not None and \
+                    record.execution_status not in _TERMINAL_STATUSES:
+                self.store.update_execution_status(
+                    sid, StudyStatus.INTERRUPTED,
+                    last_error="watchdog: task ended without cleanup",
+                )
+                self._emit_event(record.session_id, "study_interrupted", {
+                    "study_id": sid,
+                    "session_id": record.session_id,
+                    "round": record.current_round,
+                    "reason": "watchdog: task ended without cleanup",
+                })
+            elif tok is not None:
+                # Terminal study with a lingering token — just drop it.
+                self._control_tokens.pop(sid, None)
+
+        # 2. Heartbeat stale → force-cancel the executor task + INTERRUPTED.
+        now = datetime.now(timezone.utc)
+        for sid, task in list(self._active_tasks.items()):
+            record = self.store.get_study(sid)
+            if record is None or not record.heartbeat:
+                continue
+            try:
+                hb = datetime.fromisoformat(record.heartbeat)
+            except ValueError:
+                continue
+            age = (now - hb).total_seconds()
+            if age <= self._heartbeat_timeout:
+                continue
+            _dlog("sched", "watchdog: heartbeat stale study=%s age=%.0fs",
+                  sid, age)
+            tok = self._control_tokens.get(sid)
+            if tok is not None:
+                tok.cancelled = True
+            task.cancel()
+            self.store.update_execution_status(
+                sid, StudyStatus.INTERRUPTED,
+                last_error=f"watchdog: heartbeat stale ({age:.0f}s)",
+            )
+            self._emit_event(record.session_id, "study_interrupted", {
+                "study_id": sid,
+                "session_id": record.session_id,
+                "round": record.current_round,
+                "reason": "heartbeat stale",
+            })
 
     def _make_emitter(self, study: StudyRecord):
         """Construct an emitter bound to the study's session event_bus.

@@ -25,6 +25,7 @@ from strategy_research.core.study import (
     StudyStore,
 )
 from strategy_research.core.study import runner as runner_mod
+from strategy_research.core.study.runner import ControlToken
 
 
 @pytest.fixture(autouse=True)
@@ -272,3 +273,198 @@ def test_recover_on_startup_respects_paused(store, goal_store, monkeypatch):
 
     asyncio.run(main())
     assert store.get_study(study.study_id).execution_status == StudyStatus.PAUSED
+
+
+# ── concurrency guards: submit dedupe + terminal defense ─────────────
+
+
+def test_submit_duplicate_rejected_while_running(store, goal_store, monkeypatch):
+    """A study already running must reject a second submit."""
+    rounds = {"n": 0}
+    _patch_round(monkeypatch, metrics={"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
+                 rounds_counter=rounds, e2_passed=False)
+    goal, study = _setup(store, goal_store,
+        metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
+        max_rounds=2,
+    )
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+
+    async def main():
+        assert await sched.submit(study) is True
+        await _await_status(store, study.study_id, StudyStatus.RUNNING)
+        # Duplicate submit while active → rejected, and the study must
+        # only ever run once.
+        assert await sched.submit(study) is False
+        await sched.shutdown()
+
+    asyncio.run(main())
+    # max_rounds=2 → exactly 2 rounds total, not 4.
+    assert rounds["n"] == 2
+    assert store.get_study(study.study_id).execution_status == StudyStatus.ERROR
+
+
+def test_submit_duplicate_rejected_while_queued(store, goal_store, monkeypatch):
+    """A study waiting in its session queue must reject a second submit."""
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    svc.mark_session_processing(study.study_id, processing=True)  # block pickup
+    sched = StudyScheduler(store, session_service=svc)
+
+    async def main():
+        assert await sched.submit(study) is True
+        # Consumer holds the session key → study stays QUEUED; a second
+        # submit is rejected while it sits in the queue.
+        assert await sched.submit(study) is False
+        assert len(sched._queued_study_ids) == 1
+        svc.mark_session_processing(study.study_id, processing=False)
+        cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
+        assert cur is not None and cur.execution_status == StudyStatus.COMPLETE
+        await sched.shutdown()
+
+    asyncio.run(main())
+
+
+def test_submit_terminal_study_rejected(store, goal_store, monkeypatch):
+    """A study that already reached a terminal status must not re-run."""
+    rounds = {"n": 0}
+    _patch_round(monkeypatch, rounds_counter=rounds)  # e2_passed=True → COMPLETE
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+
+    async def main():
+        assert await sched.submit(study) is True
+        cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
+        assert cur is not None and cur.execution_status == StudyStatus.COMPLETE
+        # Finished study re-submitted (duplicate start) → rejected.
+        assert await sched.submit(study) is False
+        await sched.shutdown()
+
+    asyncio.run(main())
+    assert rounds["n"] == 1
+
+
+def test_resume_interrupted_not_blocked_by_guards(store, goal_store, monkeypatch):
+    """INTERRUPTED (recover) resumes through the same submit path."""
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    store.update_execution_status(study.study_id, StudyStatus.INTERRUPTED)
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+
+    async def main():
+        assert await sched.resume_interrupted(study.study_id) is True
+        cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
+        assert cur is not None and cur.execution_status == StudyStatus.COMPLETE
+        # After completion, resume again → rejected (terminal).
+        assert await sched.resume_interrupted(study.study_id) is False
+        await sched.shutdown()
+
+    asyncio.run(main())
+
+
+def test_stale_queue_entry_dropped_for_terminal_study(store, goal_store, monkeypatch):
+    """A queue entry that aged into terminal between enqueue and pickup
+    must be dropped, not executed."""
+    rounds = {"n": 0}
+    _patch_round(monkeypatch, rounds_counter=rounds)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    svc.mark_session_processing(study.study_id, processing=True)  # hold pickup
+    sched = StudyScheduler(store, session_service=svc)
+
+    async def main():
+        assert await sched.submit(study) is True
+        # While queued, the study is cancelled elsewhere → terminal.
+        store.update_execution_status(study.study_id, StudyStatus.CANCELLED)
+        svc.mark_session_processing(study.study_id, processing=False)
+        # Give the consumer a chance to pick the stale entry up.
+        await asyncio.sleep(0.1)
+        await sched.shutdown()
+
+    asyncio.run(main())
+    assert rounds["n"] == 0  # never executed
+    assert store.get_study(study.study_id).execution_status == StudyStatus.CANCELLED
+
+
+# ── watchdog: task health + heartbeat staleness ──────────────────────
+
+
+def test_watchdog_cleans_done_task(store, goal_store, monkeypatch):
+    """A finished task left in _active_tasks → cleaned + INTERRUPTED."""
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+    store.update_execution_status(study.study_id, StudyStatus.RUNNING)
+
+    async def main():
+        # Simulate a stray done task with no cleanup.
+        done = asyncio.create_task(asyncio.sleep(0))
+        sched._active_tasks[study.study_id] = done
+        await asyncio.sleep(0.02)  # let the sleep-task finish
+        await sched._watchdog_tick()
+        assert study.study_id not in sched._active_tasks
+        await sched.shutdown()
+
+    asyncio.run(main())
+    assert store.get_study(study.study_id).execution_status == StudyStatus.INTERRUPTED
+
+
+def test_watchdog_heartbeat_stale_interrupts(store, goal_store, monkeypatch):
+    """A RUNNING study with a stale heartbeat is force-interrupted."""
+
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+    sched._heartbeat_timeout = 60  # force small timeout for the test
+    store.update_execution_status(study.study_id, StudyStatus.RUNNING)
+    # Heartbeat 2 hours ago → stale.
+    import datetime as _dt
+    stale = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)).isoformat()
+    store._conn.execute(
+        "UPDATE studies SET heartbeat = ? WHERE study_id = ?",
+        (stale, study.study_id),
+    )
+    store._conn.commit()
+
+    async def main():
+        # A live-but-stale executor task.
+        live = asyncio.create_task(asyncio.sleep(3600))
+        sched._active_tasks[study.study_id] = live
+        sched._control_tokens[study.study_id] = ControlToken()
+        await sched._watchdog_tick()
+        await asyncio.sleep(0)  # let the cancellation propagate
+        assert live.cancelled()
+        await sched.shutdown()
+
+    asyncio.run(main())
+    cur = store.get_study(study.study_id)
+    assert cur.execution_status == StudyStatus.INTERRUPTED
+    assert "heartbeat stale" in (cur.last_error or "")
+
+
+def test_watchdog_fresh_heartbeat_untouched(store, goal_store, monkeypatch):
+    """A RUNNING study with a fresh heartbeat survives the sweep."""
+
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+    sched._heartbeat_timeout = 60
+    store.update_execution_status(study.study_id, StudyStatus.RUNNING)
+    store.update_round_heartbeat(study.study_id, 1)  # fresh heartbeat now
+
+    async def main():
+        live = asyncio.create_task(asyncio.sleep(3600))
+        sched._active_tasks[study.study_id] = live
+        await sched._watchdog_tick()
+        assert not live.cancelled()
+        live.cancel()
+        await sched.shutdown()
+
+    asyncio.run(main())
+    assert store.get_study(study.study_id).execution_status == StudyStatus.RUNNING
