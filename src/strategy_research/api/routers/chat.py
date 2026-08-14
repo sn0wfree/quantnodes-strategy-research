@@ -19,10 +19,12 @@ from ..schemas.chat import (
     CancelRequest,
     ChatAttemptsResponse,
     ChatCancelResponse,
-    ChatMessageRequest as ChatMessage,
     ChatPersonasResponse,
     ChatQueueResumeResponse,
     SendMessageResponse,
+)
+from ..schemas.chat import (
+    ChatMessageRequest as ChatMessage,
 )
 from ..session.service import SessionService
 from ..sse_buffer import sse_buffer
@@ -789,6 +791,20 @@ async def list_active_attempts(
     _fetch_session_owned(_get_db(), session_id, user_id)
     service = _get_session_service()
     return {"attempts": service.list_active_attempts(session_id)}
+
+
+@router.get("/session/{session_id}/available_actions")
+async def chat_available_actions(session_id: str, request: Request):
+    """C3: actions the current session state permits (drives the UI's buttons)."""
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _fetch_session_owned(_get_db(), session_id, user_id)
+    service = _get_session_service()
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "actions": service.get_available_actions(session_id),
+    }
 
 
 @router.get("/personas", response_model=ChatPersonasResponse)

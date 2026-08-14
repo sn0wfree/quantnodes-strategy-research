@@ -131,6 +131,12 @@ export function useSSE(sessionId: string | null) {
 
       const handler = HANDLERS[event]
       if (handler) handler(data, ctx)
+
+      // C3: store trace_id from any SSE event for log correlation
+      const tid = data?.trace_id as string | undefined
+      if (tid && typeof tid === 'string') {
+        useChatStore.getState().setTraceId(tid)
+      }
     },
     [
       sessionId,

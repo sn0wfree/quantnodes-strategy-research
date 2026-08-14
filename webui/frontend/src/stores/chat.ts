@@ -182,6 +182,9 @@ interface ChatState {
   /** Most recent compaction event (for CompactBanner). */
   lastCompaction: { layer: string; timestamp: number } | null
   setLastCompaction: (c: { layer: string; timestamp: number } | null) => void
+  /** C3: latest trace_id from SSE events (for log correlation). */
+  traceId: string | null
+  setTraceId: (id: string | null) => void
   /**
    * Per-part streaming text preview buffer.
    *
@@ -251,7 +254,9 @@ export const useChatStore = create<ChatState>()(
     lastCompaction: null,
     partTextAccumDelta: {},
     pendingPermission: null,
+    traceId: null,
     setLastCompaction: (c) => set({ lastCompaction: c }),
+    setTraceId: (id) => set({ traceId: id }),
     accumulatePartText: (partId, delta) =>
       set((state) => {
         if (!delta) return

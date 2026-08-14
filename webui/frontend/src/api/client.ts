@@ -476,6 +476,13 @@ class APIClient {
       this.get<{ personas: Array<{ id: string; name: string; description: string }> }>(
         '/chat/personas',
       ),
+
+    availableActions: (sessionId: string) =>
+      this.get<{
+        status: string
+        session_id: string
+        actions: Array<{ name: string; label: string; destructive: string }>
+      }>(`/chat/session/${sessionId}/available_actions`),
   }
 
   definitionRuns = {

@@ -180,14 +180,45 @@ class EventStore:
         seq per session. When ``flush_to_messages=True``, also calls
         Projector.flush() to update messages + message_parts tables
         (best-effort — failures are logged and ignored).
+
+        C3: automatically injects ``trace_id`` / ``session_id`` /
+        ``study_id`` / ``round_num`` from the current trace ContextVar
+        into every event's data dict (if not already present), so SSE
+        clients can correlate events without explicit binding at each
+        emit site.
         """
+        # C3: inject trace context into event data
+        merged = dict(data or {})
+        try:
+            from ...core.observability.trace import (
+                _round_num, _session_id as _ctx_session, _study_id, _trace_id,
+            )
+            if "trace_id" not in merged:
+                tid = _trace_id.get()
+                if tid:
+                    merged["trace_id"] = tid
+            if "session_id" not in merged:
+                sid = _ctx_session.get()
+                if sid:
+                    merged["session_id"] = sid
+            if "study_id" not in merged:
+                stid = _study_id.get()
+                if stid:
+                    merged["study_id"] = stid
+            if "round_num" not in merged:
+                rn = _round_num.get()
+                if rn is not None:
+                    merged["round_num"] = rn
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             seq = self._next_seq(session_id)
             event = EventV2(
                 aggregate_id=session_id,
                 seq=seq,
                 type=event_type,
-                data=data or {},
+                data=merged,
             )
             try:
                 self._persist(event)
@@ -227,11 +258,37 @@ class EventStore:
         return event
 
     def publish(self, event: EventV2) -> None:
-        """Lower-level publish: takes a pre-built EventV2."""
+        """Lower-level publish: takes a pre-built EventV2.
+
+        C3: injects trace context into event data if not already present.
+        """
         if not event.id:
             event.id = str(uuid.uuid4())
         if not event.time_created:
             event.time_created = time.time()
+        # C3: inject trace context
+        try:
+            from ...core.observability.trace import (
+                _round_num, _session_id as _ctx_session, _study_id, _trace_id,
+            )
+            if "trace_id" not in event.data:
+                tid = _trace_id.get()
+                if tid:
+                    event.data["trace_id"] = tid
+            if "session_id" not in event.data:
+                sid = _ctx_session.get()
+                if sid:
+                    event.data["session_id"] = sid
+            if "study_id" not in event.data:
+                stid = _study_id.get()
+                if stid:
+                    event.data["study_id"] = stid
+            if "round_num" not in event.data:
+                rn = _round_num.get()
+                if rn is not None:
+                    event.data["round_num"] = rn
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             try:
                 self._persist(event)

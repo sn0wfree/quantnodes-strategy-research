@@ -557,6 +557,23 @@ class SessionService:
         """
         return session_id in self._processing_sessions
 
+    def get_available_actions(self, session_id: str) -> list[dict[str, str]]:
+        """Actions the current session state permits (C3: drives the UI).
+
+        Returns a list of ``{name, label, destructive}`` dicts.
+        """
+        actions: list[dict[str, str]] = []
+        if session_id in self._processing_sessions:
+            # Running attempt: can cancel
+            actions.append({"name": "cancel", "label": "取消", "destructive": "false"})
+        if session_id in self._paused_sessions:
+            # Paused: can resume
+            actions.append({"name": "resume", "label": "恢复", "destructive": "false"})
+        if session_id not in self._processing_sessions and session_id not in self._paused_sessions:
+            # Idle: can send
+            actions.append({"name": "send", "label": "发送", "destructive": "false"})
+        return actions
+
     def mark_session_processing(
         self, session_id: str, *, processing: bool
     ) -> None:
