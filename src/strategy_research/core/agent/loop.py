@@ -1092,23 +1092,32 @@ class AgentLoop:
             ]
         return msg
 
-    def _execute_tool_call(
-        self, tc: ToolCall, result: LoopResult
+    async def _execute_tool_call_core(
+        self, tc: ToolCall, result: LoopResult, *, async_mode: bool
     ) -> dict[str, Any]:
-        """Execute one tool_call via the registry; return tool-result message."""
+        """Shared tool-call core (single source for both modes).
+
+        ``async_mode`` selects ``tool.ainvoke`` (permission-gated, awaited
+        on the loop) vs ``tool.invoke`` (direct sync call) and
+        ``asyncio.sleep`` vs ``time.sleep`` for the transient-retry delay.
+        The sync entry runs this core via ``_run_coro_in_sync`` (from a
+        pool thread there is no running loop, so no nested thread).
+        """
         result.tool_calls_made += 1
         tool = self.registry.get(tc.name)
         if tool is None:
             logger.warning("tool '%s' not in registry", tc.name)
             self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
             self._emit("tool_result", {
-            "tool": tc.name,
-            "call_id": tc.id,
-            "status": "error",
-            "ok": False,  # backward compat
-            "elapsed_ms": 0,
-            "preview": "tool not in registry",
-        })
+                "tool": tc.name,
+                "id": tc.id,
+                "call_id": tc.id,
+                "status": "error",
+                "ok": False,  # backward compat
+                "result": "tool not in registry",
+                "preview": "tool not in registry",
+                "elapsed_ms": 0,
+            })
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -1181,7 +1190,10 @@ class AgentLoop:
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
             try:
-                output = tool.invoke(kwargs)
+                if async_mode:
+                    output = await tool.ainvoke(kwargs, kwargs.get("ctx"))
+                else:
+                    output = tool.invoke(kwargs)
                 last_exc = None
                 break
             except TRANSIENT_TOOL_ERRORS as exc:
@@ -1190,7 +1202,10 @@ class AgentLoop:
                                tc.name, type(exc).__name__, _attempt + 1,
                                _TOOL_MAX_RETRIES, exc)
                 if _attempt < _TOOL_MAX_RETRIES - 1:
-                    time.sleep(_TOOL_RETRY_DELAY)
+                    if async_mode:
+                        await asyncio.sleep(_TOOL_RETRY_DELAY)
+                    else:
+                        time.sleep(_TOOL_RETRY_DELAY)
             except Exception as exc:                    # noqa: BLE001
                 logger.exception("tool %s raised", tc.name)
                 output = json.dumps(
@@ -1252,10 +1267,27 @@ class AgentLoop:
             "content": output,
         }
 
-    def _execute_tool_with_heartbeat(
+    def _execute_tool_call(
         self, tc: ToolCall, result: LoopResult
     ) -> dict[str, Any]:
-        """Execute tool_call with HeartbeatTimer for long-running tools."""
+        """Execute one tool_call via the registry; return tool-result message.
+
+        Sync entry over the shared core (see ``_execute_tool_call_core``).
+        """
+        return _run_coro_in_sync(
+            self._execute_tool_call_core(tc, result, async_mode=False)
+        )
+
+    async def _aexecute_tool_call(
+        self, tc: ToolCall, result: LoopResult
+    ) -> dict[str, Any]:
+        """Async version of _execute_tool_call (permission-gated ainvoke)."""
+        return await self._execute_tool_call_core(tc, result, async_mode=True)
+
+    async def _execute_tool_with_heartbeat_core(
+        self, tc: ToolCall, result: LoopResult, *, async_mode: bool
+    ) -> dict[str, Any]:
+        """Shared heartbeat wrapper (single source for both modes)."""
         def _heartbeat_tick(payload: dict) -> None:
             self._trace({"type": "heartbeat", **payload})
             self._emit("tool_heartbeat", {
@@ -1269,7 +1301,25 @@ class AgentLoop:
             interval=self.heartbeat_interval,
             emit=_heartbeat_tick,
         ):
-            return self._execute_tool_call(tc, result)
+            return await self._execute_tool_call_core(tc, result, async_mode=async_mode)
+
+    def _execute_tool_with_heartbeat(
+        self, tc: ToolCall, result: LoopResult
+    ) -> dict[str, Any]:
+        """Execute tool_call with HeartbeatTimer for long-running tools.
+
+        Sync entry over the shared core (see
+        ``_execute_tool_with_heartbeat_core``).
+        """
+        return _run_coro_in_sync(
+            self._execute_tool_with_heartbeat_core(tc, result, async_mode=False)
+        )
+
+    async def _aexecute_tool_with_heartbeat(
+        self, tc: ToolCall, result: LoopResult
+    ) -> dict[str, Any]:
+        """Async version of _execute_tool_with_heartbeat."""
+        return await self._execute_tool_with_heartbeat_core(tc, result, async_mode=True)
 
     def _execute_tool_batch(
         self, tool_calls: list[ToolCall], result: LoopResult
@@ -1337,179 +1387,6 @@ class AgentLoop:
         return len(set(window)) == 1
 
     # ── Async tool execution ─────────────────────
-
-    async def _aexecute_tool_call(
-        self, tc: ToolCall, result: LoopResult
-    ) -> dict[str, Any]:
-        """Async version of _execute_tool_call using asyncio.to_thread."""
-        result.tool_calls_made += 1
-        tool = self.registry.get(tc.name)
-        if tool is None:
-            logger.warning("tool '%s' not in registry", tc.name)
-            self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
-            self._emit("tool_result", {
-                "tool": tc.name,
-                "id": tc.id,
-                "call_id": tc.id,
-                "status": "error",
-                "ok": False,
-                "result": "tool not in registry",
-                "preview": "tool not in registry",
-                "elapsed_ms": 0,
-            })
-            return {
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(
-                    {"status": "error", "error": f"tool '{tc.name}' not found"},
-                    ensure_ascii=False,
-                ),
-            }
-
-        self._emit("tool_call", {
-            "tool": tc.name,
-            "name": tc.name,
-            "id": tc.id,
-            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-            if not isinstance(tc.arguments, str)
-            else tc.arguments,
-            "call_id": tc.id,
-            "iter": getattr(self, "_current_iter", 0),
-        })
-
-        kwargs = dict(tc.arguments)
-        if "workspace" not in kwargs and self.workspace is not None:
-            kwargs["workspace"] = self.workspace
-        if "session_id" not in kwargs and self.session_id is not None:
-            kwargs["session_id"] = self.session_id
-
-        def _progress_callback(steps: list[str]) -> None:
-            self._emit("tool_progress", {
-                "id": tc.id,
-                "steps": steps,
-            })
-        kwargs["_progress_callback"] = _progress_callback
-
-        kwargs["ctx"] = ToolContext(
-            workspace=self.workspace,
-            session_id=self.session_id,
-            strategy_dir=self.strategy_dir,
-            runs_dir=self.runs_dir,
-            results_tsv=self.results_tsv,
-            write_roots=self.write_roots,
-            read_roots=self.read_roots,
-            emit_progress=_progress_callback,
-            emit_event=self._emit,
-            message_id=getattr(self, "_current_message_id", None),
-            permission_evaluator=getattr(self, "_permission_evaluator", None),
-            permission_gateway=getattr(self, "_permission_gateway", None),
-            tool_call_id=tc.id,
-        )
-
-        # SubAgentTool injection: emit_event, message_id, count ref, parent registry
-        if tc.name == "delegate_to_agent":
-            kwargs["emit_event"] = self._emit
-            kwargs["message_id"] = getattr(self, "_current_message_id", None)
-            kwargs["_subagent_count_ref"] = self._subagent_count
-            kwargs["_parent_registry"] = self.registry
-
-        # TodoWriteTool injection: emit_event (session_id already injected)
-        if tc.name == "todo_write":
-            kwargs["emit_event"] = self._emit
-
-        t0 = time.perf_counter()
-        # ── Tool-level auto-retry for transient errors (sync parity) ─
-        # Tier 1 A1: the async path uses ``ainvoke`` so the permission
-        # gate (ASK -> SSE -> user reply) can run via the event loop
-        # without blocking the worker thread. Sync parity path below
-        # keeps ``invoke`` since async-in-thread would deadlock.
-        last_exc = None
-        for _attempt in range(_TOOL_MAX_RETRIES):
-            try:
-                output = await tool.ainvoke(kwargs, kwargs.get("ctx"))
-                last_exc = None
-                break
-            except TRANSIENT_TOOL_ERRORS as exc:
-                last_exc = exc
-                logger.warning("tool %s raised %s (attempt %d/%d): %s",
-                               tc.name, type(exc).__name__, _attempt + 1,
-                               _TOOL_MAX_RETRIES, exc)
-                if _attempt < _TOOL_MAX_RETRIES - 1:
-                    await asyncio.sleep(_TOOL_RETRY_DELAY)
-            except Exception as exc:                    # noqa: BLE001
-                logger.exception("tool %s raised", tc.name)
-                output = json.dumps(
-                    {"status": "error", "error": f"{type(exc).__name__}: {exc}"},
-                    ensure_ascii=False,
-                )
-                last_exc = None
-                break
-        else:
-            # All retries exhausted for transient errors
-            output = json.dumps(
-                {"status": "error", "error": f"{type(last_exc).__name__}: {last_exc}",
-                 "hint": "tool failed after retries; check input parameters or data quality"},
-                ensure_ascii=False,
-            )
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-
-        is_error = isinstance(output, str) and output.startswith('{"status": "error"')
-        status_str = "error" if is_error else "done"
-
-        # Update circuit breaker
-        if self._circuit_breaker is not None:
-            if is_error:
-                self._circuit_breaker.record_failure(tc.name)
-            else:
-                self._circuit_breaker.record_success(tc.name)
-
-        output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
-        output_full = (output if isinstance(output, str) else str(output))[:_TOOL_RESULT_MAX]
-        self._emit("tool_result", {
-            "tool": tc.name,
-            "id": tc.id,
-            "call_id": tc.id,
-            "status": status_str,
-            "ok": not is_error,
-            "result": output_full,
-            "preview": output_preview,
-            "elapsed_ms": elapsed_ms,
-        })
-
-        self._trace({
-            "type": "tool_result",
-            "tool": tc.name,
-            "call_id": tc.id,
-            "status": status_str,
-            "iteration": getattr(self, "_current_iter", 0),
-            "elapsed_ms": elapsed_ms,
-            "output_preview": output_preview,
-        })
-
-        return {
-            "role": "tool",
-            "tool_call_id": tc.id,
-            "content": output,
-        }
-
-    async def _aexecute_tool_with_heartbeat(
-        self, tc: ToolCall, result: LoopResult
-    ) -> dict[str, Any]:
-        """Async version of _execute_tool_with_heartbeat."""
-        def _heartbeat_tick(payload: dict) -> None:
-            self._trace({"type": "heartbeat", **payload})
-            self._emit("tool_heartbeat", {
-                "tool": tc.name,
-                "call_id": tc.id,
-                "elapsed_s": payload.get("elapsed_s", 0.0),
-            })
-
-        with HeartbeatTimer(
-            tool_name=tc.name,
-            interval=self.heartbeat_interval,
-            emit=_heartbeat_tick,
-        ):
-            return await self._aexecute_tool_call(tc, result)
 
     async def _aexecute_tool_batch(
         self, tool_calls: list[ToolCall], result: LoopResult
