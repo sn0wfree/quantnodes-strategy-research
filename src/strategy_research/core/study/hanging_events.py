@@ -115,6 +115,7 @@ class HangingEventsStore:
         self,
         *,
         session_id: str | None = None,
+        study_id: str | None = None,
         hours: float = 24,
     ) -> dict[str, int]:
         """Count events of each type in the last ``hours`` (default 24h)."""
@@ -125,6 +126,9 @@ class HangingEventsStore:
         if session_id:
             sql += " AND session_id = ?"
             params.append(session_id)
+        if study_id:
+            sql += " AND study_id = ?"
+            params.append(study_id)
         sql += " GROUP BY event_type"
         out = {t: 0 for t in _ALL_EVENT_TYPES}
         try:
@@ -213,6 +217,53 @@ class HangingEventsStore:
             for r in recent
         ]
         return out
+
+    def list_recent(
+        self,
+        *,
+        study_id: str | None = None,
+        hours: float = 24,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Recent events (newest first), optionally filtered by study.
+
+        Returns rows as dicts with iso timestamps — the per-study view
+        the UI draws its badge / panel from.
+        """
+        since = time.time() - hours * 3600
+        params: list[Any] = [since]
+        sql = (
+            "SELECT event_type, study_id, session_id, detail, created_at "
+            "FROM hanging_events WHERE created_at >= ?"
+        )
+        if study_id:
+            sql += " AND study_id = ?"
+            params.append(study_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        import datetime as _dt
+
+        def _iso(ts: float) -> str:
+            return _dt.datetime.fromtimestamp(
+                ts, tz=_dt.timezone.utc,
+            ).isoformat()
+
+        try:
+            with self._lock:
+                rows = self._conn.execute(sql, params).fetchall()
+        except sqlite3.Error:
+            return []
+        return [
+            {
+                "event_type": r["event_type"],
+                "study_id": r["study_id"],
+                "session_id": r["session_id"],
+                "detail": r["detail"],
+                "created_at": r["created_at"],
+                "created_at_iso": _iso(r["created_at"]),
+            }
+            for r in rows
+        ]
 
     def clear(self, *, hours: float | None = None) -> int:
         """Delete events (all or older than ``hours``). Returns rows removed."""

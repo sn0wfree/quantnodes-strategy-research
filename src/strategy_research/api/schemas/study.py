@@ -245,3 +245,23 @@ class StudyAdoptResponse(BaseModel):
     round: int
     adopted_run_dir: str
     note: str
+
+
+# ── Phase 4: per-study hanging events (observability in the UI) ─────
+
+
+class HangingEventItem(BaseModel):
+    event_type: str
+    study_id: Optional[str] = None
+    session_id: Optional[str] = None
+    detail: Optional[str] = None
+    created_at: float
+    created_at_iso: str
+
+
+class StudyHangingEventsResponse(BaseModel):
+    status: str
+    study_id: str
+    window_hours: float
+    by_type: dict = Field(default_factory=dict)
+    recent: list[HangingEventItem] = Field(default_factory=list)

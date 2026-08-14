@@ -180,3 +180,75 @@ class TestDumpHangingSignals:
         assert h[EVENT_WALLCLOCK] == 1
         assert h[EVENT_NO_PROGRESS] == 1
         assert h[EVENT_WATCHDOG] == 0
+
+
+class TestListRecent:
+    def test_list_recent_filters_by_study(self, store):
+        store.record(EVENT_WALLCLOCK, study_id="st-a", session_id="s1", detail="a1")
+        store.record(EVENT_WATCHDOG, study_id="st-b", session_id="s2", detail="b1")
+        store.record(EVENT_LOG_STALL, study_id="st-a", session_id="s1", detail="a2")
+        rows = store.list_recent(study_id="st-a", hours=24)
+        assert len(rows) == 2
+        assert all(r["study_id"] == "st-a" for r in rows)
+        # newest first (a2 recorded last)
+        assert rows[0]["event_type"] == EVENT_LOG_STALL
+        assert rows[0]["created_at_iso"]
+
+    def test_list_recent_all_without_filter(self, store):
+        store.record(EVENT_WALLCLOCK, study_id="st-a")
+        store.record(EVENT_WATCHDOG, study_id="st-b")
+        rows = store.list_recent(hours=24)
+        assert len(rows) == 2
+
+
+class TestStudyHangingEventsApi:
+    def test_endpoint_returns_by_type_and_recent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+        monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+        sessions_db = tmp_path / "sessions.db"
+        monkeypatch.setenv("SR_SESSIONS_DB", str(sessions_db))
+        import sqlite3
+        conn = sqlite3.connect(str(sessions_db))
+        conn.executescript(
+            """
+            CREATE TABLE sessions (
+              id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT,
+              created_at TEXT, updated_at TEXT, starred INTEGER NOT NULL DEFAULT 0,
+              tags_json TEXT NOT NULL DEFAULT '[]', message_count INTEGER NOT NULL DEFAULT 0,
+              archived INTEGER NOT NULL DEFAULT 0
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO sessions (id, user_id, created_at, updated_at) "
+            "VALUES ('sess-h', 'tester', '2026-08-01T10:00:00', '2026-08-01T10:00:00')"
+        )
+        conn.commit()
+        conn.close()
+        from strategy_research.api.auth_tokens import create_token
+        from strategy_research.core.study import StudyStore
+
+        store = StudyStore()
+        rec = store.create_study(
+            owner_session_id="sess-h",
+            goal_id=None,
+            objective="x",
+            workspace_path=str(tmp_path),
+            strategy_name="demo",
+        )
+        record_event(EVENT_WALLCLOCK, study_id=rec.study_id, session_id=rec.session_id)
+        record_event(EVENT_WATCHDOG, study_id=rec.study_id, session_id=rec.session_id)
+        record_event(EVENT_WATCHDOG, study_id="other-study", session_id="s-other")
+
+        client = TestClient(
+            create_app(),
+            headers={"Authorization": f"Bearer {create_token('tester')}"},
+        )
+        r = client.get(f"/api/study/{rec.study_id}/hanging_events")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["by_type"][EVENT_WALLCLOCK] == 1
+        assert body["by_type"][EVENT_WATCHDOG] == 1
+        assert body["by_type"][EVENT_NO_PROGRESS] == 0
+        assert len(body["recent"]) == 2
+        assert all(e["study_id"] == rec.study_id for e in body["recent"])

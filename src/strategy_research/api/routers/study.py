@@ -24,6 +24,7 @@ from ..schemas.study import (
     StudyDirectiveCreatedResponse,
     StudyDirectivesResponse,
     StudyGuidanceResponse,
+    StudyHangingEventsResponse,
     StudyJournalResponse,
     StudyListResponse,
     StudyRoundArtifactsResponse,
@@ -988,4 +989,33 @@ async def study_round_adopt(request: Request, study_id: str, round_num: int):
         "round": round_num,
         "adopted_run_dir": str(runs[0].relative_to(ws)),
         "note": "copied to study baseline; next resume will start from this round's strategy",
+    }
+
+
+# ── Phase 4: per-study hanging events ───────────────────────────────
+
+
+@router.get("/{study_id}/hanging_events", response_model=StudyHangingEventsResponse)
+async def study_hanging_events(
+    request: Request, study_id: str,
+    hours: float = Query(24, ge=1, le=24 * 30),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Recent watchdog / stall / breaker events for one study.
+
+    The UI shows a badge count + recent list so operators can tell at a
+    glance whether a study has been killed by the watchdog vs. completed
+    normally.
+    """
+    _owned_study(request, study_id)
+    from ...core.study import hanging_events as he
+    with he.HangingEventsStore() as store:
+        by_type = store.count_since(study_id=study_id, hours=hours)
+        recent = store.list_recent(study_id=study_id, hours=hours, limit=limit)
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "window_hours": hours,
+        "by_type": by_type,
+        "recent": recent,
     }

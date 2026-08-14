@@ -258,3 +258,51 @@ def test_repair_budget_exhausted_stays_needs_refresh(env, monkeypatch):
         assert "study_budget_limited" in collector.names()
 
     asyncio.run(main())
+
+
+# ── v4: SSE events carry trace context ───────────────────────────────
+
+
+def test_emitted_events_carry_trace_id(env, monkeypatch):
+    """study_started / study_round / study_complete events must include
+    a stable study-scoped trace_id + study_id + round_num (log correlation)."""
+    _patch_round(monkeypatch)
+    gs = GoalStore()
+    store = StudyStore()
+    goal = gs.replace_goal(
+        session_id="sess-t", objective="x",
+        criteria=default_goal_criteria(), supersede=False,
+    )
+    study = store.create_study(
+        owner_session_id="sess-t", goal_id=goal.goal_id, objective="x",
+        workspace_path=str(env), strategy_name="demo",
+        metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
+        cooldown_base=0.01, cooldown_jitter=0.01, min_cooldown=0.01,
+        max_rounds=None, monitor_interval_seconds=None,
+    )
+    store.update_goal_id(study.study_id, goal.goal_id)
+    from strategy_research.core.study.bootstrap import init_study_dir as _init_study_dir
+    _init_study_dir(env, study.study_id, "demo", "x")
+
+    collector = _Collector()
+    runner = AutoresearchRunner(study, store, control=ControlToken(), emitter=collector)
+
+    async def main():
+        reason = await runner.run()
+        assert reason == ShutdownReason.TARGETS_MET
+        started = next(
+            (d for s, e, d in collector.events if e == "study_started"), None
+        )
+        assert started is not None
+        assert started["trace_id"], "study_started must carry trace_id"
+        rounds = [d for s, e, d in collector.events if e == "study_round"]
+        assert len(rounds) >= 1
+        for d in rounds:
+            assert d["trace_id"] == started["trace_id"], (
+                "trace_id must be stable across rounds (study-scoped)"
+            )
+            assert d["study_id"] == study.study_id
+            assert d["round_num"] is not None
+            assert d["round"] == d["round_num"]
+
+    asyncio.run(main())

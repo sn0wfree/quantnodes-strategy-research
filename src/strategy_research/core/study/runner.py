@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..observability import new_trace_id
 from .models import StudyRecord, StudyStatus
 from .store import StudyStore
 
@@ -212,6 +213,9 @@ class AutoresearchRunner:
         # ``invalidate_study_cache()`` after ``update_execution_status``.
         self._study_cache: StudyRecord | None = None
         self._study_cache_ts: float = 0.0
+        # v4: study-scoped trace id — stable across rounds so every SSE
+        # event + log line for this study correlates to one research line.
+        self._trace_id = new_trace_id()
 
     def _get_study(self, *, force: bool = False) -> StudyRecord:
         """Return current ``StudyRecord`` from DB, cached for ~5s.
@@ -242,6 +246,13 @@ class AutoresearchRunner:
         session = self._get_study().session_id
         _dlog("runner", "run() starting study=%s session=%s max_rounds=%s",
               sid, session, self._get_study().max_rounds)
+        # v4: bind the study-scoped trace for the whole lifecycle so
+        # every log line + emitted event carries trace_id.
+        from ..observability import bind_trace
+        with bind_trace(trace_id=self._trace_id, study_id=sid):
+            return await self._run_lifecycle(sid, session)
+
+    async def _run_lifecycle(self, sid: str, session: str) -> str:
         self._emit(session, "study_started", {"study_id": sid, "round": self._get_study().current_round})
         reason = ShutdownReason.ERROR
         try:
@@ -668,9 +679,15 @@ class AutoresearchRunner:
 
         Overridable for tests to stub round execution.
         """
-        from ..observability import bind_trace
+        from ..observability import bind_trace, get_trace_context
 
+        # v4: ensure a trace_id exists for the round (study-scoped stable
+        # id: generated once per study, reused across rounds so all rounds
+        # correlate to the same research line). Outer attempts may already
+        # have bound one.
+        outer = get_trace_context()
         with bind_trace(
+            trace_id=outer.get("trace_id") or self._trace_id,
             study_id=self._get_study().study_id,
             round_num=round_num,
         ):
@@ -1449,6 +1466,20 @@ class AutoresearchRunner:
             await asyncio.sleep(0.5)
 
     def _emit(self, session_id: str, event: str, data: dict) -> None:
+        # v4 observability: attach the live trace context (trace_id /
+        # study_id / round_num) to every SSE event so the UI can show a
+        # copyable trace_id for log correlation.
+        try:
+            from ..observability import get_trace_context
+            ctx = get_trace_context()
+            data = {
+                "trace_id": ctx.get("trace_id"),
+                "study_id": ctx.get("study_id") or data.get("study_id"),
+                "round_num": ctx.get("round_num") or data.get("round"),
+                **data,
+            }
+        except Exception:  # noqa: BLE001 — best-effort decoration
+            pass
         try:
             self.emitter.emit(session_id, event, data)
         except Exception as exc:
