@@ -199,3 +199,49 @@ class StudyRoundSummaryMdResponse(BaseModel):
     study_id: str
     round: int
     summary_md: str
+
+
+# ── Phase 3: round detail / artifacts / diff / adopt ────────────────
+
+
+class ArtifactItem(BaseModel):
+    path: str
+    size: int
+    mtime: Optional[str] = None
+
+
+class StudyRoundArtifactsResponse(BaseModel):
+    status: str
+    study_id: str
+    round: int
+    round_dir: str
+    artifacts: list[ArtifactItem]
+
+
+class StudyRoundManifestResponse(BaseModel):
+    status: str
+    study_id: str
+    round: int
+    manifest: dict
+
+
+class DiffLine(BaseModel):
+    line: str
+    kind: str  # "context" | "add" | "del"
+
+
+class StudyRoundDiffResponse(BaseModel):
+    status: str
+    study_id: str
+    round_a: int
+    round_b: int
+    diff: list[DiffLine]
+    stats: dict
+
+
+class StudyAdoptResponse(BaseModel):
+    status: str
+    study_id: str
+    round: int
+    adopted_run_dir: str
+    note: str

@@ -20,11 +20,15 @@ from pydantic import BaseModel, Field
 
 from ..schemas.study import (
     StudyActionResponse,
+    StudyAdoptResponse,
     StudyDirectiveCreatedResponse,
     StudyDirectivesResponse,
     StudyGuidanceResponse,
     StudyJournalResponse,
     StudyListResponse,
+    StudyRoundArtifactsResponse,
+    StudyRoundDiffResponse,
+    StudyRoundManifestResponse,
     StudyRoundsResponse,
     StudyRoundSummaryMdResponse,
     StudyStartResponse,
@@ -839,4 +843,149 @@ async def study_round_summary_md(request: Request, study_id: str, round_num: int
         "study_id": study_id,
         "round": round_num,
         "summary_md": p.read_text(encoding="utf-8"),
+    }
+
+
+# ── Phase 3: round detail / artifacts / diff / adopt ────────────────
+
+
+def _round_run_dirs(workspace_path: Path, study_id: str, round_num: int) -> list[Path]:
+    """All ``run_*`` directories inside a round dir (study layout)."""
+    from ...core.study import round_manifest as rm
+    rd = rm.round_dir(workspace_path, study_id, round_num)
+    if not rd.exists():
+        return []
+    return [d for d in rd.iterdir() if d.is_dir() and d.name.startswith("run_")]
+
+
+@router.get("/{study_id}/rounds/{round_num}/artifacts", response_model=StudyRoundArtifactsResponse)
+async def study_round_artifacts(request: Request, study_id: str, round_num: int):
+    """List files produced by a round (round dir + run dirs), newest first.
+
+    Files: manifest.json / summary.md at round root, plus everything
+    under the run_* directories (strategy.py, config.yaml, agents/*,
+    backtest logs...).
+    """
+    _owned_study(request, study_id)
+    from ...core.study import round_manifest as rm
+    study = _owned_study(request, study_id)
+    rd = rm.round_dir(Path(study.workspace_path), study_id, round_num)
+    if not rd.exists():
+        raise HTTPException(status_code=404, detail="round dir not found")
+    artifacts: list[dict] = []
+    for p in sorted(rd.rglob("*"), key=lambda f: f.stat().st_mtime, reverse=True):
+        if p.is_file():
+            st = p.stat()
+            artifacts.append({
+                "path": str(p.relative_to(rd)),
+                "size": st.st_size,
+                "mtime": str(st.st_mtime),
+            })
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "round": round_num,
+        "round_dir": str(rd.relative_to(Path(study.workspace_path))),
+        "artifacts": artifacts,
+    }
+
+
+@router.get("/{study_id}/rounds/{round_num}/manifest", response_model=StudyRoundManifestResponse)
+async def study_round_manifest(request: Request, study_id: str, round_num: int):
+    """Round manifest.json content (hypothesis / changes / metrics / next)."""
+    _owned_study(request, study_id)
+    from ...core.study import round_manifest as rm
+    study = _owned_study(request, study_id)
+    m = rm.load_manifest(Path(study.workspace_path), study_id, round_num)
+    if m is None:
+        raise HTTPException(status_code=404, detail="round manifest not found")
+    return {"status": "ok", "study_id": study_id, "round": round_num, "manifest": m}
+
+
+@router.get("/{study_id}/rounds/{round_num}/diff", response_model=StudyRoundDiffResponse)
+async def study_round_diff(
+    request: Request, study_id: str, round_num: int,
+    against: int = Query(0, ge=0),
+):
+    """Unified diff of the adopted strategy.py between two rounds.
+
+    ``against=0`` diffs against the baseline strategy (ws/strategies/
+    <name>/baseline/strategy.py). Otherwise diffs round ``against``'s
+    adopted run strategy vs round ``round_num``'s.
+    """
+    _owned_study(request, study_id)
+    import difflib
+    study = _owned_study(request, study_id)
+    ws = Path(study.workspace_path)
+
+    def _strategy_of(rn: int) -> Path | None:
+        if rn == 0:
+            base = ws / "strategies" / study.strategy_name / "baseline" / "strategy.py"
+            return base if base.exists() else None
+        runs = _round_run_dirs(ws, study_id, rn)
+        if not runs:
+            return None
+        # adopted strategy is in the round's (single) run dir
+        return runs[0] / "strategy.py"
+
+    pa = _strategy_of(against)
+    pb = _strategy_of(round_num)
+    if pa is None or pb is None:
+        raise HTTPException(status_code=404, detail="strategy.py not found for diff")
+    la = pa.read_text(encoding="utf-8").splitlines()
+    lb = pb.read_text(encoding="utf-8").splitlines()
+    lines = []
+    adds = dels = ctx = 0
+    for line in difflib.unified_diff(la, lb, fromfile=f"round_{against}", tofile=f"round_{round_num}", lineterm=""):
+        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            continue
+        if line.startswith("+"):
+            lines.append({"line": line[1:], "kind": "add"})
+            adds += 1
+        elif line.startswith("-"):
+            lines.append({"line": line[1:], "kind": "del"})
+            dels += 1
+        else:
+            lines.append({"line": line, "kind": "context"})
+            ctx += 1
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "round_a": against,
+        "round_b": round_num,
+        "diff": lines,
+        "stats": {"adds": adds, "dels": dels, "context": ctx},
+    }
+
+
+@router.post("/{study_id}/rounds/{round_num}/adopt", response_model=StudyAdoptResponse)
+async def study_round_adopt(request: Request, study_id: str, round_num: int):
+    """Adopt a round's strategy.py as the new round-start baseline.
+
+    NON-DESTRUCTIVE: copies the round's adopted run strategy.py into the
+    study root's baseline dir (``ws/study/{id}/baseline/strategy.py``),
+    overwriting the study's own baseline — the strategies/<name>/baseline
+    (shared across studies) is left untouched. Safe to call while the
+    study is paused/interrupted.
+    """
+    _owned_study(request, study_id)
+    study = _owned_study(request, study_id)
+    ws = Path(study.workspace_path)
+    runs = _round_run_dirs(ws, study_id, round_num)
+    if not runs:
+        raise HTTPException(status_code=404, detail="round run dir not found")
+    src = runs[0] / "strategy.py"
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="round strategy.py not found")
+    study_baseline = ws / "study" / study_id / "baseline"
+    study_baseline.mkdir(parents=True, exist_ok=True)
+    study_baseline.joinpath("strategy.py").write_text(
+        src.read_text(encoding="utf-8"), encoding="utf-8",
+    )
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "round": round_num,
+        "adopted_run_dir": str(runs[0].relative_to(ws)),
+        "note": "copied to study baseline; next resume will start from this round's strategy",
     }
