@@ -690,29 +690,17 @@ async def study_directives_list(request: Request, study_id: str):
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
-        # Pull all (pending + consumed). Direct access on store.conn —
-        # acceptable for the audit-only endpoint.
-        with store._lock:  # noqa: SLF001 — internal but stable
-            rows = store._conn.execute(  # noqa: SLF001
-                """
-                SELECT directive_id, content, issued_by, created_at, consumed_at
-                FROM study_directives
-                WHERE study_id = ?
-                ORDER BY created_at DESC
-                LIMIT 50
-                """,
-                (study_id,),
-            ).fetchall()
+        rows = store.list_directives(study_id, limit=50)
     return {
         "status": "ok",
         "study_id": study_id,
         "directives": [
             {
-                "directive_id": r["directive_id"],
-                "content": r["content"],
-                "issued_by": r["issued_by"],
-                "created_at": r["created_at"],
-                "consumed_at": r["consumed_at"],
+                "directive_id": r.directive_id,
+                "content": r.content,
+                "issued_by": r.issued_by,
+                "created_at": r.created_at,
+                "consumed_at": r.consumed_at,
             }
             for r in rows
         ],
@@ -741,11 +729,12 @@ async def study_rounds_list(
     _owned_study(request, study_id)
     with StudyStore() as store:
         rows = store.list_rounds(study_id, limit=offset + limit)
+        total = store.count_rounds(study_id)
     page = rows[offset:offset + limit]
     return {
         "status": "ok",
         "study_id": study_id,
-        "total": len(rows),
+        "total": total,
         "offset": offset,
         "limit": limit,
         "rounds": [

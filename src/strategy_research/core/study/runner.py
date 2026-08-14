@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -261,8 +262,13 @@ class AutoresearchRunner:
         except Exception as exc:
             _dlog("runner", "run() FAILED: study=%s error=%s", sid, exc)
             logger.exception("study %s failed: %s", sid, exc)
-            self.study_store.update_execution_status(sid, StudyStatus.ERROR, last_error=f"{exc}"[:500])
-            self._emit(session, "study_failed", {"study_id": sid, "error": f"{exc}"[:500], "reason": ShutdownReason.ERROR})
+            tb = traceback.format_exc()
+            self.study_store.update_execution_status(
+                sid, StudyStatus.ERROR,
+                last_error=f"{type(exc).__name__}: {exc}"[:500],
+                last_traceback=tb[:8000],
+            )
+            self._emit(session, "study_failed", {"study_id": sid, "error": f"{type(exc).__name__}: {exc}"[:500], "reason": ShutdownReason.ERROR})
         finally:
             if self._own_goal_store:
                 try:

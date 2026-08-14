@@ -102,6 +102,7 @@ class StudyRecord:
     last_metrics: dict | None = None
     last_verdict: str | None = None
     last_error: str | None = None
+    last_traceback: str | None = None
     heartbeat: str = ""
     created_at: str = ""
     updated_at: str = ""

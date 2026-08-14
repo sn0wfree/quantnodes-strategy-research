@@ -124,6 +124,7 @@ class StudyStore:
                     last_metrics            TEXT,
                     last_verdict            TEXT,
                     last_error              TEXT,
+                    last_traceback          TEXT,
                     heartbeat               TEXT,
                     created_at              TEXT NOT NULL,
                     updated_at              TEXT NOT NULL,
@@ -152,6 +153,10 @@ class StudyStore:
                 self._conn.execute(
                     "UPDATE studies SET owner_session_id = session_id "
                     "WHERE owner_session_id IS NULL"
+                )
+            if "last_traceback" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE studies ADD COLUMN last_traceback TEXT"
                 )
             self._conn.execute(
                 """
@@ -361,6 +366,7 @@ class StudyStore:
         status: StudyStatus,
         *,
         last_error: str | None = None,
+        last_traceback: str | None = None,
         last_metrics: dict | None = None,
         last_verdict: str | None = None,
     ) -> StudyRecord | None:
@@ -393,6 +399,9 @@ class StudyStore:
         if last_error is not None:
             sets.append("last_error = ?")
             params.append(last_error)
+        if last_traceback is not None:
+            sets.append("last_traceback = ?")
+            params.append(last_traceback)
         if last_metrics is not None:
             sets.append("last_metrics = ?")
             params.append(json_dumps(last_metrics))
@@ -598,6 +607,34 @@ class StudyStore:
         ]
 
     @synchronized
+    def list_directives(
+        self, study_id: str, limit: int = 50
+    ) -> list[StudyDirective]:
+        """Return all directives (pending + consumed), newest first."""
+        rows = self._conn.execute(
+            """
+            SELECT directive_id, study_id, content, issued_by, created_at,
+                   consumed_at
+            FROM study_directives
+            WHERE study_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (study_id, limit),
+        ).fetchall()
+        return [
+            StudyDirective(
+                directive_id=row["directive_id"],
+                study_id=row["study_id"],
+                content=row["content"],
+                issued_by=row["issued_by"],
+                created_at=row["created_at"],
+                consumed_at=row["consumed_at"],
+            )
+            for row in rows
+        ]
+
+    @synchronized
     def mark_directives_consumed(
         self, study_id: str, directive_ids: list[str]
     ) -> int:
@@ -768,6 +805,15 @@ class StudyStore:
         return [self._round_from_row(r) for r in rows]
 
     @synchronized
+    def count_rounds(self, study_id: str) -> int:
+        """Return the true total round count for pagination headers."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM study_rounds WHERE study_id = ?",
+            (study_id,),
+        ).fetchone()
+        return int(row["n"] if row else 0)
+
+    @synchronized
     def get_round(
         self, study_id: str, round_num: int
     ) -> "StudyRoundRecord | None":
@@ -840,6 +886,7 @@ class StudyStore:
             last_metrics=metrics_raw if isinstance(metrics_raw, dict) else None,
             last_verdict=row["last_verdict"],
             last_error=row["last_error"],
+            last_traceback=row["last_traceback"],
             heartbeat=row["heartbeat"] or "",
             created_at=row["created_at"],
             updated_at=row["updated_at"],
