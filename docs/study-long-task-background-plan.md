@@ -152,15 +152,32 @@ core/autoresearch.py                 — study 场景迭代上限 8→10（2 角
 
 | 步骤 | 内容 | 验收 |
 |---|---|---|
-| S1 | 设计文档（本文档） | git commit |
-| S2 | bg_proc 基础设施 + 单测 | test_bg_proc 全绿 |
-| S3 | run_strategy 后台化 + backtest 测试改写 | test_backtest 全绿 |
-| S4 | engine progress_every + 测试 | test_engine_progress 全绿 |
-| S5 | run_bg_command 工具集 + 测试 | test_bg_tools 全绿 |
-| S6 | run_backtest background 参数 + 测试 | test_backtest_tools 全绿 |
-| S7 | runner _current_log + 收割 + watchdog + 测试 | study 系全绿 |
-| S8 | rules + 白名单 + 迭代预算 + 断言 | prompt 断言通过 |
-| S9 | 回归全量 + 文档实施记录 | 全绿 |
+| S1 | 设计文档（本文档） | ✅ `b5f2700` |
+| S2 | bg_proc 基础设施 + 单测 | ✅ `4bd3457`（13 tests） |
+| S3 | run_strategy 后台化 + backtest 测试改写 | ✅ `56993d6`（48 tests） |
+| S4 | engine progress_every + 测试 | ✅ `6ead907`（653 engine 系） |
+| S5 | run_bg_command 工具集 + 测试 | ✅ `b003712`（9 tests） |
+| S6 | run_backtest background 参数 + 测试 | ✅ `eace71f`（4 tests） |
+| S7 | 注册表下沉 + runner 收割 + watchdog + 测试 | ✅ `91a93ed`（31 tests） |
+| S8 | rules + 白名单 + 迭代预算 + 断言 | ✅ `5cb9999` |
+| S9 | 回归全量 + 文档实施记录 | ✅ **10813 passed / 0 failed** |
+
+### 实施记录（S2-S8 落地要点）
+
+- **S2**：`core/utils/bg_proc.py` — run_bg（Popen+流式+start_new_session）/wait_bg（启动宽限 max(10s, 5×poll) + 停滞判定）/log_tail/is_stalled/kill_bg/log_progress；`SR_BACKTEST_STALL_TIMEOUT` 默认 300
+- **S3**：`run_strategy` 超时语义 墙钟→日志停滞；run.log 流式（删一次性写入）；stalled 错误带日志尾部
+- **S4**：`BaseEngine.run_backtest(progress_every)` — align/每 N bar（N=max(1,bars//100)，≤100 行）/metrics 三处 stdout 进度行；CLI run-backtest 默认开启（progress_every=0 自动频率）
+- **S5**：`run_bg_command` 单入口（start/status/wait/log/kill）+ 模块级注册表 + opt-in 注册
+- **S6**：`run_backtest(background=True)` 线程化后台（步骤级日志 + 完成态带回 result）；前台默认不变；线程任务 kill 仅注销
+- **S7**：注册表下沉 bg_proc（`owner` 归属 + `harvest_by_owner`）；runner 轮结束收割（放 stop 条件前，避免 max_rounds 早退绕过）+ run() finally 兜底；watchdog 第三分支扫注册表停滞任务（kill + 注销 + study_interrupted 事件）
+- **S8**：`_common/rules/long-task.md`（何时显式转后台/观察窗 ×3/停滞交接/token 纪律）+ INDEX 索引；4 角色白名单（strategist/backtest_diagnostics/factor_analyst/data_quality）加 run_bg_command；study 三 phase `max_iterations=10`（CLI 默认 8 不变）；工具说明书契约（版本/变更 + 6 章节）
+
+### 关键修正（实施中）
+
+- wait_bg 停滞判定参考点改为当前时间 + 启动宽限（原实现 last_activity 引用导致永不判定停滞）
+- 轮收割插点在 stop 条件检查之前（max_rounds/stagnation 早退不绕过）
+- engine 进度行去掉"末尾补打"（整除时多 1 行，改为 metrics done 表完成）
+- `_make_spawn_fn` 加 max_iterations 透传时曾重复参数（脚本替换误伤），已修复
 
 ## 11. 风险与对策
 
