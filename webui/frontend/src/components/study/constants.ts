@@ -9,6 +9,7 @@ export const STUDY_STATUS_LABELS: Record<string, string> = {
   budget_limited: '预算受限',
   monitoring: '监控中',
   needs_refresh: '需刷新证据',
+  early_stopped: '提前停止',
 }
 
 export const STUDY_STATUS_COLORS: Record<string, string> = {
@@ -22,4 +23,5 @@ export const STUDY_STATUS_COLORS: Record<string, string> = {
   budget_limited: 'bg-orange-700 text-orange-100',
   monitoring: 'bg-indigo-700 text-indigo-100',
   needs_refresh: 'bg-rose-800 text-rose-100',
+  early_stopped: 'bg-rose-800 text-rose-100',
 }

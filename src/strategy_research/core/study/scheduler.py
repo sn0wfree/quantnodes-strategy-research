@@ -188,11 +188,19 @@ class StudyScheduler:
         await self.submit(study)
         return True
 
-    def cancel(self, study_id: str) -> bool:
+    def cancel(self, study_id: str, reason: str | None = None) -> bool:
         tok = self._control_tokens.get(study_id)
         if tok is None:
             return False
         tok.cancelled = True
+        if reason:
+            try:
+                self.store.update_execution_status(
+                    study_id, StudyStatus.CANCELLED,
+                    last_error=f"cancelled: {reason}",
+                )
+            except Exception:  # noqa: BLE001 — best-effort audit trail
+                pass
         return True
 
     # ── public: introspection ─────────────────────────────────────

@@ -177,7 +177,8 @@ export function StudyDetailPage() {
   const canCancel =
     status !== 'complete' && status !== 'cancelled' &&
     status !== 'error' && status !== 'needs_refresh' &&
-    status !== 'interrupted'
+    status !== 'interrupted' && status !== 'early_stopped' &&
+    status !== 'budget_limited'
 
   const controlActions = (
     <div className="flex items-center gap-1.5">

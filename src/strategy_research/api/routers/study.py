@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ._task_utils import log_task_exception
 
@@ -204,8 +204,12 @@ class StudyStartRequest(BaseModel):
 
 
 class DirectiveRequest(BaseModel):
-    content: str
-    issued_by: Optional[str] = None
+    content: str = Field(..., min_length=1, max_length=32_000)
+    issued_by: Optional[str] = Field(None, max_length=128)
+
+
+class CancelRequest(BaseModel):
+    reason: Optional[str] = Field(None, max_length=512)
 
 
 # ── POST /study/start ───────────────────────────────────────────────
@@ -588,9 +592,21 @@ async def study_pause(request: Request, study_id: str):
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not active")
+    from ...core.study import StudyStatus, StudyStore
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+    if study is not None and study.execution_status not in (
+        StudyStatus.RUNNING, StudyStatus.MONITORING,
+    ):
+        # Not in a pausable state (e.g. INTERRUPTED, QUEUED, terminal):
+        # 409 Conflict — the UI must not pretend the pause took effect.
+        raise HTTPException(
+            status_code=409,
+            detail=f"study not pausable in state {study.execution_status.value}",
+        )
     sched = _get_study_scheduler()
     if not sched.pause(study_id):
-        raise HTTPException(status_code=404, detail="study not active")
+        raise HTTPException(status_code=409, detail="study not pausable")
     return {"status": "ok", "study_id": study_id, "action": "paused"}
 
 
@@ -623,12 +639,13 @@ async def study_resume(request: Request, study_id: str):
 
 
 @router.post("/{study_id}/cancel")
-async def study_cancel(request: Request, study_id: str):
+async def study_cancel(request: Request, study_id: str, req: CancelRequest | None = None):
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not active")
     sched = _get_study_scheduler()
-    if not sched.cancel(study_id):
+    reason = req.reason if req else None
+    if not sched.cancel(study_id, reason=reason):
         raise HTTPException(status_code=404, detail="study not active")
     return {"status": "ok", "study_id": study_id, "action": "cancelled"}
 
