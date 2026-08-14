@@ -84,10 +84,10 @@ def test_study_start_registers_done_callback_on_sched_submit(monkeypatch):
 
     import strategy_research.api.routers.study as study_router
     src = inspect.getsource(study_router.study_start)
-    # Both call sites (autoresearch branch + workflow branch) must use
-    # the callback pattern.
+    # E3 拆分后只剩 autoresearch 一个 call site（workflow 走专用端点），
+    # 仍必须使用 callback 模式。
     assert "task.add_done_callback(log_task_exception)" in src
-    assert src.count("asyncio.create_task") >= 2
+    assert src.count("asyncio.create_task") >= 1
 
 
 def test_chat_flush_study_pending_submits_uses_callback():
