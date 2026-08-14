@@ -709,6 +709,7 @@ export const HANGING_EVENT_LABELS: Record<string, string> = {
   no_progress: '无进展',
   circuit_breaker_open: '熔断器打开',
   watchdog_interrupt: '看门狗中断',
+  chat_attempt_stall: '会话尝试超时',
 }
 
 // ── Phase 5: action matrix ──────────────────────────────────────────

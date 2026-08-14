@@ -25,6 +25,7 @@ EVENT_LOG_STALL = "log_stall"
 EVENT_NO_PROGRESS = "no_progress"
 EVENT_CIRCUIT_OPEN = "circuit_breaker_open"
 EVENT_WATCHDOG = "watchdog_interrupt"
+EVENT_CHAT_STALL = "chat_attempt_stall"  # C1: chat attempt timed out
 
 _ALL_EVENT_TYPES = frozenset({
     EVENT_WALLCLOCK,
@@ -32,6 +33,7 @@ _ALL_EVENT_TYPES = frozenset({
     EVENT_NO_PROGRESS,
     EVENT_CIRCUIT_OPEN,
     EVENT_WATCHDOG,
+    EVENT_CHAT_STALL,
 })
 
 _SCHEMA = """

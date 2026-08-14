@@ -37,6 +37,12 @@ MAX_HISTORY_CHARS = 12000
 # Hard limit for queued messages per session. Exceeding returns 429 to caller.
 _QUEUE_LIMIT = 10
 
+# C1: wallclock timeout for a single attempt. A running AgentLoop that
+# exceeds this duration is killed (CancelledError → mark_failed). This
+# prevents a single hung tool call / LLM stream from permanently
+# blocking the session's queue. Set to 0 to disable.
+_CHAT_ATTEMPT_TIMEOUT = int(os.environ.get("SR_CHAT_ATTEMPT_TIMEOUT", "600"))
+
 
 def _build_attempt_metrics(usage_state: dict[str, int], loop_result: Any) -> dict:
     """Build the attempt metrics payload from usage counters and loop result."""
@@ -582,35 +588,45 @@ class SessionService:
           dropped once drained (``_process_session_queue``), so stale
           pending rows from before a restart are skipped too.
 
+        C1: also returns the 5 most recent FAILED attempts (with error)
+        so the frontend can display failure reasons.
+
         Returns one dict per live attempt:
-        ``{"attempt_id", "message_id", "status", "prompt", "created_at"}``
-        with status normalized to ``running`` / ``queued`` for the
-        frontend.
+        ``{"attempt_id", "message_id", "status", "prompt", "created_at",
+          "error"}``
+        with status normalized to ``running`` / ``queued`` / ``failed``.
         """
         attempts = self.store.list_attempts_by_status(
             session_id,
-            [AttemptStatus.PENDING.value, AttemptStatus.RUNNING.value],
+            [AttemptStatus.PENDING.value, AttemptStatus.RUNNING.value,
+             AttemptStatus.FAILED.value],
         )
         queue_alive = session_id in self._session_queues
         out: list[dict[str, str]] = []
+        failed_count = 0
         for attempt in attempts:
             if attempt.status == AttemptStatus.RUNNING:
                 if attempt.attempt_id not in self._active_loops:
                     continue
                 status = "running"
+            elif attempt.status == AttemptStatus.FAILED:
+                # C1: include up to 5 recent failures with error info
+                failed_count += 1
+                if failed_count > 5:
+                    continue
+                status = "failed"
             else:
                 if not queue_alive:
                     continue
                 status = "queued"
-            out.append(
-                {
-                    "attempt_id": attempt.attempt_id,
-                    "message_id": attempt.message_id or "",
-                    "status": status,
-                    "prompt": attempt.prompt or "",
-                    "created_at": attempt.created_at or "",
-                }
-            )
+            out.append({
+                "attempt_id": attempt.attempt_id or "",
+                "message_id": attempt.message_id or "",
+                "status": status,
+                "prompt": attempt.prompt[:200] if attempt.prompt else "",
+                "created_at": attempt.created_at,
+                "error": attempt.error or "",
+            })
         return out
 
     async def wait_for_attempt(
@@ -802,19 +818,69 @@ class SessionService:
 
             # 2. Run AgentLoop with history context
             logger.info("[EXEC] running agent_loop model=%s max_iter=%d", model, max_iterations)
-            result_dict = await self._run_with_agent(
-                attempt=attempt,
-                history=history,
-                model=model,
-                max_iterations=max_iterations,
-                system_prompt=system_prompt,
-                allow_shell_tools=allow_shell_tools,
-                persona=getattr(attempt, "persona", None),
-                mode=mode,
-                thinking=thinking,
-                cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
-                accumulated_parts=accumulated_parts,
-            )
+            # C1: wallclock timeout — a hung AgentLoop (stuck tool/LLM
+            # stream) must not block the session queue forever.
+            if _CHAT_ATTEMPT_TIMEOUT > 0:
+                try:
+                    result_dict = await asyncio.wait_for(
+                        self._run_with_agent(
+                            attempt=attempt,
+                            history=history,
+                            model=model,
+                            max_iterations=max_iterations,
+                            system_prompt=system_prompt,
+                            allow_shell_tools=allow_shell_tools,
+                            persona=getattr(attempt, "persona", None),
+                            mode=mode,
+                            thinking=thinking,
+                            cfg=cfg,
+                            accumulated_parts=accumulated_parts,
+                        ),
+                        timeout=_CHAT_ATTEMPT_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[EXEC] attempt %s timed out after %ds",
+                        attempt.attempt_id, _CHAT_ATTEMPT_TIMEOUT,
+                    )
+                    attempt.mark_failed(
+                        error=f"attempt timed out after {_CHAT_ATTEMPT_TIMEOUT}s"
+                    )
+                    self.store.update_attempt(attempt)
+                    self.event_bus.emit(
+                        session_id, "attempt.failed",
+                        {"attempt_id": attempt.attempt_id, "status": "error",
+                         "error": attempt.error},
+                    )
+                    self.event_bus.emit(
+                        session_id, "agent_done",
+                        {"message_id": attempt.message_id, "status": "error"},
+                    )
+                    # C1.3: hanging events for observability
+                    try:
+                        from ...core.study.hanging_events import record_event
+                        record_event(
+                            "chat_attempt_stall",
+                            session_id=session_id,
+                            detail=f"attempt={attempt.attempt_id} timeout={_CHAT_ATTEMPT_TIMEOUT}s",
+                        )
+                    except Exception:  # noqa: BLE001 — best-effort
+                        pass
+                    return
+            else:
+                result_dict = await self._run_with_agent(
+                    attempt=attempt,
+                    history=history,
+                    model=model,
+                    max_iterations=max_iterations,
+                    system_prompt=system_prompt,
+                    allow_shell_tools=allow_shell_tools,
+                    persona=getattr(attempt, "persona", None),
+                    mode=mode,
+                    thinking=thinking,
+                    cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
+                    accumulated_parts=accumulated_parts,
+                )
             logger.info("[EXEC] agent_result status=%s content_len=%d",
                        result_dict.get("status"), len(result_dict.get("content", "")))
 

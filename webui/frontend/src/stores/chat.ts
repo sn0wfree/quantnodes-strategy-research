@@ -403,9 +403,10 @@ export const useChatStore = create<ChatState>()(
           attempts: {
             attempt_id: string
             message_id: string
-            status: 'running' | 'queued'
+            status: 'running' | 'queued' | 'failed'
             prompt: string
             created_at: string
+            error?: string
           }[]
         }>(`/chat/attempts?session_id=${sessionId}`)
         if (seq !== loadMessagesSeq) return // stale response (session switched)
@@ -431,6 +432,18 @@ export const useChatStore = create<ChatState>()(
               }
               state.activeAttemptId = a.attempt_id
               state.streamingMessageId = mid
+            } else if (a.status === 'failed' && a.error) {
+              // C1: show failed attempt as an error message bubble
+              if (!state.messages.has(mid)) {
+                state.messages.set(mid, {
+                  id: mid,
+                  session_id: sessionId,
+                  role: 'assistant',
+                  parts: [{ type: 'text', id: `err-${mid}`, text: a.error }],
+                  created_at: createdAt,
+                  metadata: { status: 'error', error: a.error },
+                })
+              }
             } else {
               // Queued: rebuild the in-memory placeholder (it is never
               // persisted; projector only materializes user messages).
