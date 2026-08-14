@@ -584,6 +584,14 @@ async def study_summary(request: Request, study_id: str):
         "recent_rounds": [_serialize_round(r) for r in recent_rounds],
         "scoreboard": scoreboard,
         "goal_snapshot": _snapshot(goal_snapshot),
+        "monitor_state": (
+            {
+                "drift_count": study.monitor_drift_count,
+                "last_check_at": study.last_monitor_check_at,
+                "interval_seconds": study.monitor_interval_seconds,
+            }
+            if study.monitor_interval_seconds is not None else None
+        ),
     }
 
 

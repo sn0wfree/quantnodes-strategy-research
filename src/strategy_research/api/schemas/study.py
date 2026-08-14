@@ -139,6 +139,7 @@ class StudySummaryResponse(BaseModel):
     recent_rounds: list[StudyRoundModel] = Field(default_factory=list)
     scoreboard: list = Field(default_factory=list)
     goal_snapshot: Optional[GoalSnapshotModel] = None
+    monitor_state: Optional[dict] = None
 
 
 class StudyRoundsResponse(BaseModel):

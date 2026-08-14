@@ -931,3 +931,41 @@ async def test_guidance_endpoint_global_fallback_and_404(_app_env, tmp_path, mon
         data = r.json()
         assert data["task_scope"] is False
         assert "global template body" in data["body"]
+
+
+@pytest.mark.asyncio
+async def test_summary_includes_monitor_state(_app_env, tmp_path, monkeypatch):
+    """B4: summary 应返回 monitor_state（drift_count/last_check_at/interval）。"""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        study = store.create_study(
+            owner_session_id="sess-1",
+            goal_id=None,
+            objective="monitor me",
+            workspace_path=str(_app_env),
+            strategy_name="demo_strategy",
+            executor_type="autoresearch",
+            monitor_interval_seconds=60,
+        )
+        store.update_monitor_check(study.study_id, last_check_at="2026-08-01T12:00:00", drift=True)
+        store.update_monitor_check(study.study_id, last_check_at="2026-08-01T13:00:00", drift=False)
+        study_id = study.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.get(f"/api/study/{study_id}/summary")
+        assert r.status_code == 200
+        ms = r.json()["monitor_state"]
+        assert ms is not None
+        assert ms["drift_count"] == 1  # drift=True 一次
+        assert ms["interval_seconds"] == 60
+        assert ms["last_check_at"] is not None

@@ -619,6 +619,11 @@ export interface StudySummaryResponse {
       required: boolean
     }>
   } | null
+  monitor_state?: {
+    drift_count: number
+    last_check_at?: string | null
+    interval_seconds?: number | null
+  } | null
 }
 
 // ── Phase 3: round detail / artifacts / diff / adopt types ──────────

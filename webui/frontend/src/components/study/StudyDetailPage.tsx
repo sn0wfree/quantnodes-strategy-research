@@ -205,6 +205,8 @@ export function StudyDetailPage() {
     .map((r) => r.metrics?.calmar)
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
     .reduce((a, b) => Math.max(a, b), 0)
+  const driftCount = summary.monitor_state?.drift_count ?? 0
+  const isDrifting = status === 'needs_refresh' || driftCount > 0
 
   const openRun = (runName: string) => {
     if (!strategyName) return
@@ -292,7 +294,7 @@ export function StudyDetailPage() {
           icon={<Activity className="h-4 w-4" />}
           iconCls="border border-amber-500/30 bg-amber-500/10 text-amber-400"
           value={STUDY_STATUS_LABELS[status] ?? status}
-          label="执行状态"
+          label={isDrifting ? `漂移 ×${driftCount}（需检查）` : '执行状态'}
           valueCls={STUDY_STATUS_COLORS[status]?.split(' ')[0] ? 'text-slate-100' : 'text-slate-100'}
         />
         <KpiCard
