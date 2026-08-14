@@ -76,9 +76,29 @@ def create_app(
         logger.info("[STARTUP] SessionService ready (DI container)")
 
         task = asyncio.create_task(_refresh_model_catalog_async())
+
+        # Scheduled research daemon: migrate legacy JSON jobs once, then
+        # tick on the main loop dispatching due jobs to the study system.
+        from ..core.scheduled_research.executor import ScheduledResearchExecutor
+        from ..core.scheduled_research.store import ScheduledResearchStore
+
+        schedule_store = ScheduledResearchStore()
+        migrated = schedule_store.migrate_from_json()
+        if migrated:
+            logger.info("[STARTUP] migrated %d legacy scheduled jobs → SQLite", migrated)
+        from .routers.study import _get_study_scheduler
+
+        schedule_executor = ScheduledResearchExecutor(
+            schedule_store,
+            scheduler=_get_study_scheduler(),
+        )
+        schedule_executor.start(loop=asyncio.get_running_loop())
+        logger.info("[STARTUP] scheduled research daemon started")
+
         try:
             yield
         finally:
+            schedule_executor.stop()
             task.cancel()
             try:
                 await task
@@ -169,6 +189,8 @@ def create_app(
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
     app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
     app.include_router(study.router, prefix="/api/study", tags=["study"])
+    from .routers import schedule
+    app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
     app.include_router(hypothesis.router, prefix="/api/hypothesis", tags=["hypothesis"])
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
