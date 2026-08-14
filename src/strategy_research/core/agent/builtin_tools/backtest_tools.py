@@ -81,6 +81,7 @@ class RunBacktestTool(BaseTool):
         action: str = "agent",
         description: str = "",
         yaml_path: str | None = None,
+        background: bool = False,
     ) -> str:
         if ctx.workspace is None:
             raise ToolError(
@@ -101,6 +102,23 @@ class RunBacktestTool(BaseTool):
         action = action or "agent"
         description = description or ""
 
+        if background:
+            return self._execute_background(
+                ctx, workspace, strategy_name, action, description, yaml_path,
+            )
+        return self._execute_foreground(
+            ctx, workspace, strategy_name, action, description, yaml_path,
+        )
+
+    def _execute_foreground(
+        self,
+        ctx: ToolContext,
+        workspace,
+        strategy_name: str,
+        action: str,
+        description: str,
+        yaml_path: str | None,
+    ) -> str:
         # ── 步骤 1: 配置加载 ────────────────────────────────────
         cfg_step = ConfigLoadStep()
         out = json.loads(cfg_step.execute(
@@ -166,6 +184,120 @@ class RunBacktestTool(BaseTool):
             # 需要排查时用 read_file 读文件内容。
             "artifacts": artifacts,
         }, ensure_ascii=False, default=str)
+
+    def _execute_background(
+        self,
+        ctx: ToolContext,
+        workspace,
+        strategy_name: str,
+        action: str,
+        description: str,
+        yaml_path: str | None,
+    ) -> str:
+        """后台模式：整条工具链在线程中执行，进度写日志，立即返回
+        ``{status:"running", task_id, log}``。
+
+        轮询：``run_bg_command(action="wait"|"status"|"log", task_id=...)``。
+        完成态 ``status`` 直接带回结果（metrics/artifacts）。
+        """
+        import threading
+        import uuid as _uuid
+        from pathlib import Path as _Path
+
+        from .bg_tools import (
+            log_progress,
+            register_thread_task,
+            set_task_result,
+        )
+
+        log_path = _Path(str(workspace)) / "bg_tasks" / f"{_uuid.uuid4().hex[:8]}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _run() -> None:
+            try:
+                log_progress(log_path, "[backtest] step: config load")
+                cfg_step = ConfigLoadStep()
+                out = json.loads(cfg_step.execute(
+                    ctx=ctx, workspace=workspace, strategy_name=strategy_name,
+                    yaml_path=yaml_path,
+                ))
+                if out.get("status") == "error":
+                    set_task_result(task_id, {"status": "error", **out})
+                    return
+                cfg = out["cfg"]
+                resolved_yaml = out.get("yaml_path")
+
+                log_progress(log_path, "[backtest] step: data prepare")
+                prepare_step = DataPrepareStep()
+                out = json.loads(prepare_step.execute(
+                    ctx=ctx, workspace=workspace, cfg=cfg,
+                ))
+                if out.get("status") == "error":
+                    set_task_result(task_id, {"status": "error", **out})
+                    return
+
+                log_progress(log_path, "[backtest] step: data readiness gate")
+                gate_step = DataReadinessStep()
+                out = json.loads(gate_step.execute(
+                    ctx=ctx, workspace=workspace, strategy_name=strategy_name,
+                    cfg=cfg,
+                ))
+                if out.get("status") == "error":
+                    set_task_result(task_id, {"status": "error", **out})
+                    return
+                readiness_summary = out.get("report", {})
+
+                log_progress(log_path, "[backtest] step: engine running")
+                engine_step = EngineRunStep()
+                out = json.loads(engine_step.execute(
+                    ctx=ctx, workspace=workspace, strategy_name=strategy_name,
+                    cfg=cfg, yaml_path=resolved_yaml, action=action,
+                    description=description,
+                ))
+                if out.get("status") == "error":
+                    set_task_result(task_id, {"status": "error", **out})
+                    return
+
+                run_name = out.get("run", "")
+                runs_root = ctx.runs_dir if ctx.runs_dir is not None \
+                    else workspace / "runs" / strategy_name
+                artifacts = {
+                    "equity_curve": f"{runs_root}/{run_name}/equity_curve.csv",
+                    "metrics": f"{runs_root}/{run_name}/metrics.json",
+                    "run_card": f"{runs_root}/{run_name}/run_card.json",
+                }
+                log_progress(
+                    log_path, f"[backtest] done run={run_name} status={out.get('status', 'success')}",
+                )
+                set_task_result(task_id, {
+                    "status": "ok",
+                    "run": run_name,
+                    "strategy": strategy_name,
+                    "metrics": out.get("metrics", {}),
+                    "run_status": out.get("status", "success"),
+                    "factor_failures": out.get("factor_failures", []),
+                    "warnings": out.get("warnings", []),
+                    "readiness": readiness_summary,
+                    "artifacts": artifacts,
+                })
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("background run_backtest failed")
+                log_progress(log_path, f"[backtest] failed: {exc}")
+                set_task_result(task_id, {
+                    "status": "error", "error": f"{exc}",
+                })
+
+        thread = threading.Thread(target=_run, daemon=True, name=f"bg-backtest-{strategy_name}")
+        task_id = register_thread_task(
+            thread, log_path, f"run_backtest(background=True) {strategy_name}",
+        )
+        thread.start()
+        return json.dumps({
+            "status": "running", "task_id": task_id,
+            "log": str(log_path),
+            "fix": "轮询: run_bg_command(action='wait', task_id=...) 观察窗 ×3；"
+                   "完成态 status 直接带回结果",
+        }, ensure_ascii=False)
 
 
 # ── RunBacktestTool 组合子步骤 ───────────────────────────────────────

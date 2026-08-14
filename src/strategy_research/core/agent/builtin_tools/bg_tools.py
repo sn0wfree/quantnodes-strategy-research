@@ -36,10 +36,12 @@ _MAX_WAIT_SECONDS = 120  # clamp for the wait observation window
 
 @dataclass
 class _BgHandle:
-    proc: Any  # subprocess.Popen
+    proc: Any  # subprocess.Popen | None（thread 模式为 None）
+    thread: Any  # threading.Thread | None（subprocess 模式为 None）
     log_path: Path
     command: str
     started_at: float
+    result: Any = None  # thread 模式的完成结果（status done 时带回）
 
 
 # Process-wide registry: task_id → handle. Shared with run_backtest
@@ -53,7 +55,23 @@ def register_task(proc: Any, log_path: Path, command: str) -> str:
     task_id = f"bg_{uuid.uuid4().hex[:8]}"
     with _TASKS_LOCK:
         _TASKS[task_id] = _BgHandle(
-            proc=proc, log_path=Path(log_path),
+            proc=proc, thread=None, log_path=Path(log_path),
+            command=command, started_at=time.time(),
+        )
+    return task_id
+
+
+def register_thread_task(thread: Any, log_path: Path, command: str) -> str:
+    """Register a background *thread* task; returns the new task_id.
+
+    Used by tools that background their own in-process pipeline (e.g.
+    ``RunBacktestTool(background=True)``). Liveness is judged by the log
+    file the thread writes via ``log_progress``.
+    """
+    task_id = f"bg_{uuid.uuid4().hex[:8]}"
+    with _TASKS_LOCK:
+        _TASKS[task_id] = _BgHandle(
+            proc=None, thread=thread, log_path=Path(log_path),
             command=command, started_at=time.time(),
         )
     return task_id
@@ -69,20 +87,42 @@ def unregister_task(task_id: str) -> None:
         _TASKS.pop(task_id, None)
 
 
+def set_task_result(task_id: str, result: Any) -> None:
+    """Attach a completion result to a task (shown by ``status``)."""
+    with _TASKS_LOCK:
+        handle = _TASKS.get(task_id)
+        if handle is not None:
+            handle.result = result
+
+
 def active_tasks() -> list[tuple[str, _BgHandle]]:
     """Snapshot of live tasks (watchdog / round-end harvest)."""
     with _TASKS_LOCK:
-        return [(tid, h) for tid, h in _TASKS.items()
-                if h.proc.poll() is None]
+        live: list[tuple[str, _BgHandle]] = []
+        for tid, h in _TASKS.items():
+            if h.proc is not None:
+                if h.proc.poll() is None:
+                    live.append((tid, h))
+            elif h.thread is not None and h.thread.is_alive():
+                live.append((tid, h))
+        return live
 
 
 def _status_payload(task_id: str, handle: _BgHandle) -> dict:
-    proc = handle.proc
-    if proc.poll() is not None:
+    if handle.proc is not None:
+        proc = handle.proc
+        if proc.poll() is not None:
+            return {
+                "task_id": task_id, "state": "done",
+                "exit_code": proc.returncode,
+                "log": str(handle.log_path),
+                **({"result": handle.result} if handle.result is not None else {}),
+            }
+    elif handle.thread is not None and not handle.thread.is_alive():
         return {
             "task_id": task_id, "state": "done",
-            "exit_code": proc.returncode,
             "log": str(handle.log_path),
+            **({"result": handle.result} if handle.result is not None else {}),
         }
     if is_stalled(handle.log_path, _STALL_TIMEOUT):
         return {
@@ -190,7 +230,15 @@ class RunBgCommandTool(BaseTool):
                     "log": log_tail(handle.log_path, n=n),
                 }, ensure_ascii=False)
             # kill
-            kill_bg(handle.proc)
+            if handle.proc is not None:
+                kill_bg(handle.proc)
+            else:
+                # thread-mode tasks can't be force-killed; deregistering
+                # makes them invisible (the thread finishes on its own)
+                logger.warning(
+                    "run_bg_command kill: thread task %s not force-killable; "
+                    "deregistered", task_id,
+                )
             unregister_task(task_id)
             return json.dumps({
                 "status": "ok", "task_id": task_id, "killed": True,
