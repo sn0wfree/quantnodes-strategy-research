@@ -198,7 +198,41 @@ journalctl -u strategy-research | jq 'select(.study_id=="st-9")'
   WHERE created_at < strftime('%s','now')-30*24*3600`（30 天），或跑
   `strategy-research hangs` 后手工清。
 
-## 6. 相关代码
+## 6. 页面可观测性（Phase 3/4）
+
+### 6.1 轮次详情端点（Phase 3）
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/study/{id}/rounds/{n}/artifacts` | 轮次产物文件列表（round 根 + run_* 目录，path/size/mtime 按时间倒序） |
+| `GET /api/study/{id}/rounds/{n}/manifest` | manifest.json（hypothesis / strategy_changes / metrics / verdict / next） |
+| `GET /api/study/{id}/rounds/{n}/diff?against={m}` | 两轮 strategy.py unified diff；`against=0` 对 baseline；返回 add/del/context 行 + 统计 |
+| `POST /api/study/{id}/rounds/{n}/adopt` | 非破坏性采用：复制该轮 strategy.py 到 `ws/study/{id}/baseline/`（下一轮继承源），不动共享 `strategies/<name>/baseline` |
+
+### 6.2 事件与 trace 接 UI（Phase 4）
+
+- `GET /api/study/{id}/hanging_events?hours=24&limit=20`：该 study 近 N 小时
+  卡死事件（`by_type` 计数 + `recent` 列表，含 `created_at_iso`）。
+- 所有 `study_*` SSE 事件（`study_started` / `study_round` / `study_failed` …）
+  均带 `trace_id` / `study_id` / `round_num`。`trace_id` 每 study 一次生成、
+  跨轮稳定（`AutoresearchRunner._trace_id`），页面错误条可一键复制去日志查询：
+  `journalctl -u strategy-research | jq 'select(.trace_id=="...")'`。
+
+### 6.3 状态机 v2（Phase 5）
+
+- `GET /api/study/{id}/available_actions`：返回当前状态允许的操作
+  （name / label / destructive）—— **前端按钮由后端驱动**，不再硬编码。
+- `POST /api/study/{id}/actions/{name}`：统一操作入口
+  （pause / resume / resume_interrupted / cancel，body 可带 `reason`）；
+  状态不允许时返回 409。
+- `POST /api/study/{id}/rounds/{n}/redo`：丢弃该轮（DB 行 + state.json
+  回退 + round 目录删除）并重新排队从 `round n-1` 重跑；running 状态拒绝（409）。
+- 操作矩阵定义在 `core/study/models.py::ACTION_MATRIX`：QUEUED→{cancel}，
+  RUNNING→{pause,cancel}，PAUSED→{resume,cancel}，INTERRUPTED→{resume_interrupted}，
+  MONITORING→{pause,cancel}；终态（complete/cancelled/error/budget_limited/
+  early_stopped/needs_refresh）无操作。
+
+## 7. 相关代码
 
 | 组件 | 文件 |
 |---|---|
@@ -209,4 +243,6 @@ journalctl -u strategy-research | jq 'select(.study_id=="st-9")'
 | 事件埋点 | `core/llm/openai_client.py`、`core/study/scheduler.py`、`core/agent/loop.py`、`core/agent/circuit_breaker.py` |
 | trace context + JSON | `core/observability/trace.py` |
 | trace 绑定点 | `api/session/service.py`、`core/agent/loop.py`、`core/study/runner.py` |
-| 测试 | `tests/test_study_dump.py`、`tests/test_admin_metrics.py`、`tests/test_hanging_events.py`、`tests/test_trace_context.py` |
+| 轮次详情端点 | `api/routers/study.py`（artifacts/manifest/diff/adopt/redo/hanging_events/actions） |
+| 状态机矩阵 | `core/study/models.py::ACTION_MATRIX` + `allowed_actions()` |
+| 测试 | `tests/test_study_dump.py`、`tests/test_admin_metrics.py`、`tests/test_hanging_events.py`、`tests/test_trace_context.py`、`tests/test_study_round_detail.py`、`tests/test_study_actions.py` |

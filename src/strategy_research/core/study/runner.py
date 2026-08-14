@@ -1057,7 +1057,10 @@ class AutoresearchRunner:
         state.budget_used_time_s = round(self._total_used_time, 1)
         ss.save(path, sid, state)
 
-        # DB mirror: study_rounds row (phase 1 body)
+        # DB mirror: study_rounds row (phase 1 body). File-first: the
+        # state.json write above is authoritative; the DB mirror is
+        # best-effort but retried once so a transient SQLite lock does
+        # not leave the UI permanently behind (H1).
         try:
             self.study_store.append_round(
                 sid, round_num, run_name,
@@ -1065,7 +1068,15 @@ class AutoresearchRunner:
                 config_changes=strategy_changes,
             )
         except Exception as exc:  # noqa: BLE001 — file-first; DB is mirror
-            logger.warning("append_round failed (mirror): %s", exc)
+            logger.warning("append_round failed (mirror, retry): %s", exc)
+            try:
+                self.study_store.append_round(
+                    sid, round_num, run_name,
+                    metrics=metrics, verdict=verdict,
+                    config_changes=strategy_changes,
+                )
+            except Exception as exc2:  # noqa: BLE001 — keep going
+                logger.warning("append_round retry failed (mirror): %s", exc2)
 
     def _run_review_cycle(
         self,
@@ -1458,8 +1469,23 @@ class AutoresearchRunner:
             return None
 
     def _mark_terminal(self, status: StudyStatus, *, last_metrics=None, last_error=None, reason=None):
+        """Persist a terminal status to the DB (best-effort, H2).
+
+        A transient DB failure must not crash the whole run — the caller
+        still emits the SSE notification and the poll loop reconciles
+        the UI from the DB on the next tick. Logged loudly for ops.
+        """
         err = last_error if reason is None else f"{reason}:{last_error or ''}"
-        self.study_store.update_execution_status(self._get_study().study_id, status, last_error=err, last_metrics=last_metrics)
+        try:
+            self.study_store.update_execution_status(
+                self._get_study().study_id, status,
+                last_error=err, last_metrics=last_metrics,
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort persistence
+            logger.warning(
+                "mark_terminal failed to persist %s for study %s: %s",
+                status.value, self.study_id, exc,
+            )
 
     async def _wait_until_resumed(self):
         while self.control.paused and not self.control.cancelled:
