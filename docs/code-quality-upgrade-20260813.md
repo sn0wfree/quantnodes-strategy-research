@@ -72,7 +72,23 @@
 
 **额外修复（P3 触发）**：`SQLiteStore` 与 `web_session` 的 sessions/messages DDL 分叉是真实隐患根因（谁先建表谁赢），已统一 schema + user_id 兼容插入 + FK 下先插父行；两个 TUI 流式测试原本依赖该 FK bug 的降级路径才通过，已改为显式 mock 降级。
 
-**完成标准**：每阶段 `ruff check src` 全绿 + 相关测试通过；阶段边界跑全量回归。
+**追加轮（2026-08-14）：sync/async 公用专项**
+
+| 项 | 状态 |
+| --- | --- |
+| Tier 1: conftest 会话级 `SR_WORKSPACE_PATH` 隔离（灭 cwd 会话库跨测试污染） | ✅ |
+| Tier 1: 删 DELETE-CANDIDATE 死代码（session router、update_message_content、warm fn、SessionStore 遗留方法） | ✅ |
+| Tier 1: tests 目录 ruff 1163→0（F841 用保留 RHS 求值的正确变换；F821 补导入；F811 删 5 处重复定义；删 3 个引用已移除 API 的死测试类） | ✅ |
+| `run`/`arun` 合一为 `_run_loop_core(async_mode)` + `_run_coro_in_sync` 桥 | ✅ |
+| `_maybe_compact`/`_amaybe_compact` 合一为共享同步核心 + to_thread | ✅ |
+| `_execute_tool_call`/`_aexecute_tool_call`、heartbeat 对合一（async 核心 + async_mode 分支） | ✅ |
+| `_execute_tool_batch` 对 | ⏸ 保留双实现：sync 为 ThreadPoolExecutor 真并行，async 为 gather（loop 内顺序执行），并行语义差异需专门论证 |
+| `_stream_chat`/`_astream_chat` 对 | 建议保留双实现（同步/异步迭代器协议不同，消费方不同） |
+| 底层双 API（`chat`/`achat`、`stream`/`astream`） | 不合并（httpx sync/async 双 client） |
+
+**公用原则（结论）**：以 async 为基座、sync 薄桥；纯逻辑抽纯函数零成本共用；IO 边界用 async_mode 参数化或 to_thread 整包；底层双 API 与流式不强合。`ainvoke`（async 包装 sync）与 `_run_coro_in_sync`（sync 桥 async）形成闭环。
+
+**完成标准**：每阶段 `ruff check src` 全绿 + 相关测试通过；阶段边界跑全量回归。最终全量 **10732 passed / 0 failed**。
 
 ## 3. 风险清单
 
