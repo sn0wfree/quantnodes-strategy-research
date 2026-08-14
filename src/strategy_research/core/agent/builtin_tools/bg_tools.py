@@ -91,29 +91,44 @@ class RunBgCommandTool(BaseTool):
 
     # ── 工具说明书 ──────────────────────────────
     # 版本: 1.0.0
+    # 变更: v1.0.0 初始版本（长任务后台化 + 日志轮询）
     #
     # ## 用途
     # 将耗时长命令转为后台执行（nohup 语义），日志持续落盘 run.log；
     # 通过日志推进判定进展（写日志 = 正常，停滞 > 300s = 卡死）。
     # 长任务（长回测/大数据计算/下载）用此工具，避免阻塞当前回合。
     #
-    # ## action 参数
-    # - start:  后台启动 command（log 可选，默认 workspace/bg_tasks/<id>.log）
-    #   → {task_id, log}
-    # - status: 查询任务状态 → running|stalled|done（含 exit_code/停滞秒数/尾部3行）
-    # - wait:   观察窗（内部等待 seconds 秒，1..120）→ status
-    # - log:    读日志尾部 n_lines 行（默认 20）
-    # - kill:   终止任务（整组 kill）并注销
+    # ## 参数
+    # - action: start|status|wait|log|kill (必填)
+    # - task_id: 任务 ID (start 之外必填)
+    # - command: 要后台启动的命令 (start 必填)
+    # - cwd: 工作目录 (start 可选, 默认 workspace)
+    # - log: 日志路径 (start 可选, 默认 workspace/bg_tasks/<id>.log)
+    # - seconds: 观察窗秒数 (wait, 1..120, 默认 15)
+    # - n_lines: 读取行数 (log, 1..200, 默认 20)
     #
-    # ## 轮询协议（配合 _common/rules/long-task.md）
-    # 预判长任务 → start 或 run_backtest(background=True)
-    #   → wait(task_id, 15) 观察窗 × 最多 3 次
-    #   → 有新日志行 = 进行中；3 次无进展 = 停滞，停止轮询交由系统 watchdog
-    #   → 完成（exit_code=0）→ 读结果文件继续
+    # ## 示例
+    # start:  {"action": "start", "command": "python compute.py --full"}
+    #   → {"status": "running", "task_id": "bg_xxxx", "log": "..."}
+    # wait:  {"action": "wait", "task_id": "bg_xxxx", "seconds": 15}
+    #   → {"state": "running"|"stalled"|"done", ...}
+    # log:   {"action": "log", "task_id": "bg_xxxx", "n_lines": 20}
     #
-    # ## 约束
-    # - 同一 task_id 只操作一次（不重复启动）
-    # - 每次 log 读取 ≤ n_lines（默认 20 行），控制 token 成本
+    # ## 边界
+    # - thread 模式任务 (run_backtest background=True) 无法强制 kill —
+    #   kill 仅注销，线程自然结束后清理
+    # - 日志停滞判定 300s 为固定窗口；观察窗 wait 内部已 sleep，勿重复等待
+    #
+    # ## 错误处理范式
+    # - 未知 action → {"status": "error", "error": "unknown action: ..."}
+    # - 未知 task_id → {"status": "error", "error": "unknown task_id: ..."}
+    #   （先 start 或 run_backtest(background=True) 获取）
+    # - 危险命令 → {"status": "error", "error": "command blocked for safety"}
+    # - 全部错误可安全重试，无部分写入遗留
+    #
+    # ## 相关工具
+    # run_backtest: 回测后台化 (background=True); read_file: 日志任意行段读取;
+    # run_command: 前台短命令执行 (≤120s)
     # ─────────────────────────────────────────────
     """
 
