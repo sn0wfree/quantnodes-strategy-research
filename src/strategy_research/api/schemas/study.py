@@ -265,3 +265,27 @@ class StudyHangingEventsResponse(BaseModel):
     window_hours: float
     by_type: dict = Field(default_factory=dict)
     recent: list[HangingEventItem] = Field(default_factory=list)
+
+
+# ── Phase 5: action matrix (state-machine v2) ───────────────────────
+
+
+class StudyActionItem(BaseModel):
+    name: str
+    label: str
+    destructive: bool = False
+
+
+class StudyAvailableActionsResponse(BaseModel):
+    status: str
+    study_id: str
+    execution_status: str
+    actions: list[StudyActionItem]
+
+
+class StudyActionRequest(BaseModel):
+    reason: Optional[str] = Field(None, max_length=512)
+
+
+class StudyRedoRequest(BaseModel):
+    round_num: int = Field(..., ge=1)

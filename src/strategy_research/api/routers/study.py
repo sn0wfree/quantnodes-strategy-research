@@ -19,8 +19,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..schemas.study import (
+    StudyActionItem,
+    StudyActionRequest,
     StudyActionResponse,
     StudyAdoptResponse,
+    StudyAvailableActionsResponse,
     StudyDirectiveCreatedResponse,
     StudyDirectivesResponse,
     StudyGuidanceResponse,
@@ -1018,4 +1021,122 @@ async def study_hanging_events(
         "window_hours": hours,
         "by_type": by_type,
         "recent": recent,
+    }
+
+
+# ── Phase 5: action matrix (state-machine v2) ───────────────────────
+
+
+# Human labels + destructive flags for the action matrix.
+_ACTION_META: dict[str, dict] = {
+    "pause": {"label": "暂停", "destructive": False},
+    "resume": {"label": "恢复", "destructive": False},
+    "resume_interrupted": {"label": "恢复（重新排队）", "destructive": False},
+    "cancel": {"label": "取消", "destructive": True},
+    "redo": {"label": "重跑本轮", "destructive": True},
+}
+
+
+@router.get("/{study_id}/available_actions", response_model=StudyAvailableActionsResponse)
+async def study_available_actions(request: Request, study_id: str):
+    """Actions the current status permits (drives the UI's buttons)."""
+    from ...core.study import StudyStore
+    from ...core.study.models import allowed_actions
+    _owned_study(request, study_id)
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="study not found")
+    status = study.execution_status.value
+    actions = [
+        StudyActionItem(name=a.value, **_ACTION_META[a.value])
+        for a in allowed_actions(study.execution_status)
+        if a.value in _ACTION_META
+    ]
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "execution_status": status,
+        "actions": actions,
+    }
+
+
+@router.post("/{study_id}/actions/{action_name}", response_model=StudyActionResponse)
+async def study_dispatch_action(
+    request: Request, study_id: str, action_name: str,
+    body: StudyActionRequest | None = None,
+):
+    """Unified action entrypoint: pause / resume / resume_interrupted /
+    cancel / redo (see ``GET /available_actions`` for what's allowed now).
+
+    Returns 409 when the action is not allowed in the current status —
+    the UI must render buttons only from ``available_actions``.
+    """
+    from ...core.study import StudyStore
+    _owned_study(request, study_id)
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="study not found")
+
+    from ...core.study.models import StudyAction, allowed_actions
+    try:
+        act = StudyAction(action_name)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"unknown action: {action_name}")
+    if act not in allowed_actions(study.execution_status):
+        raise HTTPException(
+            status_code=409,
+            detail=f"action '{action_name}' not allowed in state {study.execution_status.value}",
+        )
+
+    sched = _get_study_scheduler()
+    reason = body.reason if body else None
+
+    if act == StudyAction.PAUSE:
+        if not sched.pause(study_id):
+            raise HTTPException(status_code=409, detail="study not pausable")
+        return {"status": "ok", "study_id": study_id, "action": "paused"}
+    if act == StudyAction.RESUME:
+        if not sched.resume(study_id):
+            raise HTTPException(status_code=409, detail="study not resumable")
+        return {"status": "ok", "study_id": study_id, "action": "resumed"}
+    if act == StudyAction.RESUME_INTERRUPTED:
+        if not await sched.resume_interrupted(study_id):
+            raise HTTPException(status_code=409, detail="study not resumable")
+        return {"status": "ok", "study_id": study_id, "action": "resumed_from_interrupted"}
+    if act == StudyAction.CANCEL:
+        if not sched.cancel(study_id, reason=reason):
+            raise HTTPException(status_code=409, detail="study not cancellable")
+        return {"status": "ok", "study_id": study_id, "action": "cancelled"}
+    raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
+
+
+@router.post("/{study_id}/rounds/{round_num}/redo", response_model=StudyActionResponse)
+async def study_round_redo(
+    request: Request, study_id: str, round_num: int,
+):
+    """Redo round ``round_num``: discard its artifacts + state, re-queue
+    the study to start again from round ``round_num - 1``.
+
+    Destructive (removes the round's run dir + DB row); the study must
+    not be currently running.
+    """
+    from ...core.study import StudyStatus, StudyStore
+    _owned_study(request, study_id)
+    with StudyStore() as store:
+        study = store.get_study(study_id)
+        if study is None:
+            raise HTTPException(status_code=404, detail="study not found")
+        if study.execution_status == StudyStatus.RUNNING:
+            raise HTTPException(status_code=409, detail="study is running; pause or cancel first")
+    sched = _get_study_scheduler()
+    ok = await sched.redo(
+        study_id, round_num, workspace_path=study.workspace_path,
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="redo failed")
+    return {
+        "status": "ok", "study_id": study_id,
+        "action": f"redo_round_{round_num}",
     }

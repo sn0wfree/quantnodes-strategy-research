@@ -50,6 +50,40 @@ ACTIVE_EXECUTION_STATUSES = frozenset(
 )
 
 
+class StudyAction(str, Enum):
+    """User-initiated operations on a study (Phase 5 state-machine v2).
+
+    The single source of truth for what a study in a given status may
+    do. The API exposes ``GET /{id}/available_actions`` and a unified
+    ``POST /{id}/actions/{name}`` entrypoint; the UI renders buttons
+    only for the actions the backend reports.
+    """
+
+    PAUSE = "pause"
+    RESUME = "resume"          # unpause a paused study
+    RESUME_INTERRUPTED = "resume_interrupted"  # re-queue an interrupted study
+    CANCEL = "cancel"
+    REDO = "redo"              # discard current round and restart from round N-1
+    DIRECTIVE = "directive"    # inject a mid-execution research direction
+
+
+# status × allowed actions — the action matrix. Any status not listed
+# here has NO user actions (terminal states: complete / cancelled /
+# error / budget_limited / early_stopped / needs_refresh).
+ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
+    StudyStatus.QUEUED: frozenset({StudyAction.CANCEL}),
+    StudyStatus.RUNNING: frozenset({StudyAction.PAUSE, StudyAction.CANCEL}),
+    StudyStatus.PAUSED: frozenset({StudyAction.RESUME, StudyAction.CANCEL}),
+    StudyStatus.INTERRUPTED: frozenset({StudyAction.RESUME_INTERRUPTED}),
+    StudyStatus.MONITORING: frozenset({StudyAction.PAUSE, StudyAction.CANCEL}),
+}
+
+
+def allowed_actions(status: StudyStatus) -> frozenset[StudyAction]:
+    """Return the actions permitted for a study in ``status``."""
+    return ACTION_MATRIX.get(status, frozenset())
+
+
 @dataclass(frozen=True)
 class MetricTarget:
     """A single quantitative acceptance target for a study.

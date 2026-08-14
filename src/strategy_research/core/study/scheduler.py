@@ -203,6 +203,65 @@ class StudyScheduler:
                 pass
         return True
 
+    async def redo(
+        self,
+        study_id: str,
+        round_num: int,
+        *,
+        workspace_path: str,
+    ) -> bool:
+        """Discard round ``round_num`` (DB row + state + round dir) and
+        re-queue the study to start again from round ``round_num - 1``.
+
+        Phase 5 redo: the runner's round loop starts from
+        ``state.last_completed_round``, so rewinding that counter (plus
+        removing the round's artifacts) makes the next execution
+        re-produce the round. The study must not be currently running.
+        """
+        from pathlib import Path
+
+        from . import state_store as ss
+
+        study = self.store.get_study(study_id)
+        if study is None:
+            return False
+        if study.execution_status in _TERMINAL_STATUSES:
+            return False
+        if study.execution_status == StudyStatus.RUNNING:
+            return False  # must pause/cancel first
+
+        # 1. DB: drop the round row + rewind current_round
+        self.store.delete_round(study_id, round_num)
+        self.store.update_round_heartbeat(study_id, max(0, round_num - 1))
+        self.store.update_execution_status(
+            study_id, StudyStatus.INTERRUPTED,
+            last_error=None,
+        )
+
+        # 2. State: rewind last_completed_round so the runner re-does
+        #    round_num on next execution.
+        state = ss.load(Path(workspace_path), study_id)
+        state.last_completed_round = max(0, round_num - 1)
+        if state.last_keep_run_dir:
+            # If the discarded round was the last keep, fall back so the
+            # next round does not inherit from a deleted run dir.
+            state.last_keep_run_dir = None
+        ss.save(Path(workspace_path), study_id, state)
+
+        # 3. Remove the round's artifacts dir (round dir tree).
+        from . import round_manifest as rm
+        rd = rm.round_dir(Path(workspace_path), study_id, round_num)
+        if rd.exists():
+            import shutil
+            shutil.rmtree(rd, ignore_errors=True)
+
+        # 4. Re-queue (INTERRUPTED → QUEUED via submit).
+        refreshed = self.store.get_study(study_id)
+        if refreshed is None:
+            return False
+        await self.submit(refreshed)
+        return True
+
     # ── public: introspection ─────────────────────────────────────
 
     def is_running(self, study_id: str) -> bool:

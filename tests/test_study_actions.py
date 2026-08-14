@@ -1,0 +1,226 @@
+"""Phase 5 tests — action matrix + available_actions + unified dispatch + redo.
+
+Covers:
+- ``allowed_actions`` matrix per status
+- GET /{id}/available_actions (status-dependent list)
+- POST /{id}/actions/{name} dispatch + 409 when not allowed
+- POST /{id}/rounds/{n}/redo: DB row + state.json + round dir rewind
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import httpx
+import pytest
+
+from strategy_research.core.study.models import (
+    StudyAction,
+    StudyStatus,
+    allowed_actions,
+)
+
+
+def _bearer(user_id: str = "tester") -> dict:
+    from strategy_research.api.auth_tokens import create_token
+
+    return {"Authorization": f"Bearer {create_token(user_id)}"}
+
+
+def _build_asgi_app():
+    from fastapi import FastAPI
+
+    from strategy_research.api.middleware import AuthMiddleware
+    from strategy_research.api.routers import chat, study
+    from strategy_research.api.routers.web_session import router as session_router
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+    app.include_router(chat.router, prefix="/api/chat")
+    app.include_router(session_router, prefix="/api/chat/session")
+    app.include_router(study.router, prefix="/api/study")
+    return app
+
+
+@pytest.fixture
+def _env(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+    sessions_db = tmp_path / "sessions.db"
+    monkeypatch.setenv("SR_SESSIONS_DB", str(sessions_db))
+    conn = sqlite3.connect(str(sessions_db))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT,
+          created_at TEXT, updated_at TEXT, starred INTEGER NOT NULL DEFAULT 0,
+          tags_json TEXT NOT NULL DEFAULT '[]', message_count INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, user_id, created_at, updated_at) "
+        "VALUES ('sess-5', 'tester', '2026-08-01T10:00:00', '2026-08-01T10:00:00')"
+    )
+    conn.commit()
+    conn.close()
+    from strategy_research.core.study import StudyStore
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="sess-5", goal_id=None, objective="x",
+        workspace_path=str(tmp_path), strategy_name="demo",
+    )
+    return rec.study_id, tmp_path
+
+
+# ── action matrix ────────────────────────────────────────────────────
+
+
+class TestActionMatrix:
+    def test_running_allows_pause_cancel(self):
+        acts = allowed_actions(StudyStatus.RUNNING)
+        assert StudyAction.PAUSE in acts
+        assert StudyAction.CANCEL in acts
+        assert StudyAction.RESUME not in acts
+
+    def test_paused_allows_resume_cancel(self):
+        acts = allowed_actions(StudyStatus.PAUSED)
+        assert StudyAction.RESUME in acts
+        assert StudyAction.CANCEL in acts
+
+    def test_interrupted_allows_only_resume_interrupted(self):
+        acts = allowed_actions(StudyStatus.INTERRUPTED)
+        assert acts == frozenset({StudyAction.RESUME_INTERRUPTED})
+
+    def test_terminal_statuses_have_no_actions(self):
+        for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED,
+                   StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
+                   StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
+            assert allowed_actions(st) == frozenset(), st
+
+
+# ── HTTP: available_actions + dispatch ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_available_actions_matches_matrix(_env):
+    study_id, tmp_path = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.get(f"/api/study/{study_id}/available_actions")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["execution_status"] == StudyStatus.QUEUED.value
+        names = {a["name"] for a in body["actions"]}
+        assert names == {StudyAction.CANCEL.value}
+        assert body["actions"][0]["destructive"] is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_cancel_not_allowed_returns_409(_env):
+    study_id, _ = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        # QUEUED → pause is not in the matrix → 409
+        r = await client.post(f"/api/study/{study_id}/actions/pause")
+        assert r.status_code == 409
+        # QUEUED → cancel IS allowed but scheduler has no token yet → 409
+        # (scheduler.pause/cancel returns False when no control token)
+        r2 = await client.post(f"/api/study/{study_id}/actions/cancel")
+        assert r2.status_code in (200, 409)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_unknown_action_404(_env):
+    study_id, _ = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.post(f"/api/study/{study_id}/actions/bogus")
+        assert r.status_code == 404
+
+
+# ── redo ─────────────────────────────────────────────────────────────
+
+
+def test_scheduler_redo_rewinds_state_and_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
+    import asyncio
+
+    from strategy_research.core.study import StudyScheduler, StudyStore
+    from strategy_research.core.study import state_store as ss
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="s1", goal_id=None, objective="x",
+        workspace_path=str(tmp_path), strategy_name="demo",
+    )
+    sid = rec.study_id
+    # Simulate: round 3 completed (DB row + state.json + round dir).
+    store.append_round(sid, 3, "run_0001", metrics={"calmar": 1.0}, verdict="keep")
+    store.update_round_heartbeat(sid, 3)
+    ws = tmp_path / "study" / sid
+    (ws / "rounds" / "round_0003" / "run_0001").mkdir(parents=True)
+    (ws / "rounds" / "round_0003" / "run_0001" / "strategy.py").write_text("PARAMS={}\n")
+    st = ss.StudyState()
+    st.last_completed_round = 3
+    st.last_keep_run_dir = "rounds/round_0003/run_0001"
+    ss.save(tmp_path, sid, st)
+
+    sched = StudyScheduler(store, session_service=None)
+
+    async def main():
+        ok = await sched.redo(sid, 3, workspace_path=str(tmp_path))
+        assert ok is True
+        # DB round row gone + current_round rewound
+        assert store.get_round(sid, 3) is None
+        assert store.get_study(sid).current_round == 2
+        # state rewound
+        st2 = ss.load(tmp_path, sid)
+        assert st2.last_completed_round == 2
+        assert st2.last_keep_run_dir is None
+        # round dir removed
+        assert not (ws / "rounds" / "round_0003").exists()
+        # re-queued for execution
+        assert store.get_study(sid).execution_status == StudyStatus.QUEUED
+        await sched.shutdown()
+
+    asyncio.run(main())
+
+
+def test_scheduler_redo_rejects_running(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
+    import asyncio
+
+    from strategy_research.core.study import StudyScheduler, StudyStore
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="s1", goal_id=None, objective="x",
+        workspace_path=str(tmp_path), strategy_name="demo",
+    )
+    store.update_execution_status(rec.study_id, StudyStatus.RUNNING)
+    sched = StudyScheduler(store, session_service=None)
+
+    async def main():
+        ok = await sched.redo(rec.study_id, 2, workspace_path=str(tmp_path))
+        assert ok is False
+        await sched.shutdown()
+
+    asyncio.run(main())

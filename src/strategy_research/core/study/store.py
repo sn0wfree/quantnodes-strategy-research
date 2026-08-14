@@ -448,6 +448,16 @@ class StudyStore:
             )
 
     @synchronized
+    def delete_round(self, study_id: str, round_num: int) -> int:
+        """Delete a round's DB row (redo: remove the discarded round)."""
+        with write_transaction(self._conn):
+            cur = self._conn.execute(
+                "DELETE FROM study_rounds WHERE study_id = ? AND round_num = ?",
+                (study_id, round_num),
+            )
+        return cur.rowcount
+
+    @synchronized
     def update_last_metrics(
         self, study_id: str, metrics: dict, verdict: str
     ) -> None:
