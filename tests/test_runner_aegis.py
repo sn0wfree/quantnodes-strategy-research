@@ -4,22 +4,18 @@ Uses behavior stubs to drive the runner without LLM calls.
 """
 import asyncio
 import os
-from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
+from strategy_research.core.goal.store import GoalStore
 from strategy_research.core.study.runner import (
     AutoresearchRunner,
     ControlToken,
-    NullEmitter,
     ShutdownReason,
-    meets_metric_targets,
     _metric_pass_set,
+    meets_metric_targets,
 )
 from strategy_research.core.study.store import StudyStore
-from strategy_research.core.study.models import StudyStatus
-from strategy_research.core.goal.store import GoalStore
 
 
 @pytest.fixture(autouse=True)

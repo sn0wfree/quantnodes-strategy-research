@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_research.core.goal import GoalStore, GoalStatus
+from strategy_research.core.goal import GoalStatus, GoalStore
 
 
 @pytest.fixture

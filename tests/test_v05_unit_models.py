@@ -14,14 +14,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from strategy_research.core.goal.workflow import (
-    GoalWorkflowConfig,
-    GoalWorkflowGoalConfig,
-    GoalAgentConfig,
-    CompletionConfig,
     BranchConfig,
-    GoalWorkflowState,
+    GoalAgentConfig,
     GoalEvidenceCollector,
-    GoalWorkflowRunner,
+    GoalWorkflowConfig,
+    GoalWorkflowState,
     _AgentConfigExecutor,
 )
 from strategy_research.core.goal.workflow_config import load_goal_workflow

@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock
-
-import pytest
 
 from strategy_research.core.hooks.bundled.session_memory import SessionMemoryHook
 from strategy_research.core.hooks.context import AgentHookContext
@@ -153,7 +149,7 @@ class TestSessionMemoryWithSessionDB:
 
         db_path = tmp_path / "test_sessions.db"
         db = SessionDB(db_path)
-        session = db.create_session("sess_db_001", workspace=str(tmp_path))
+        db.create_session('sess_db_001', workspace=str(tmp_path))
 
         mock_manager = MagicMock()
         mock_manager.add_message = MagicMock()

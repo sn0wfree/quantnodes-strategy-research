@@ -291,9 +291,9 @@ def test_where_df_scalar(panel):
 
 def test_where_2arg(panel):
     """2 参数 where: cond, value -> 若 cond 为真返回 value, 否则 NaN。"""
-    cond = panel["close"] > 30
-    val = 1.0
-    result = evaluate_node({"op": "where", "args": [{"column": "close"}, 30.0]}, {}, panel)
+    panel['close'] > 30
+    1.0
+    evaluate_node({'op': 'where', 'args': [{'column': 'close'}, 30.0]}, {}, panel)
     # 上面语法不对。重测：
     result2 = compute_alpha_from_yaml({
         "id": "test",
@@ -387,7 +387,7 @@ def test_compute_factor_returns_dataframe_promote_series(panel):
 
 def test_compute_shape_mismatch_raises(panel):
     """形状不匹配时应报错."""
-    small_data = panel["close"].iloc[:5]
+    panel['close'].iloc[:5]
     small_panel = {k: v.iloc[:5] if isinstance(v, pd.DataFrame) else v for k, v in panel.items()}
     # Use a config that produces a differently-shaped result
     config = {
@@ -487,7 +487,7 @@ def test_multi_step_dependency_chain(panel):
 
 def test_op_with_constant_series_arg(panel):
     """常量化 DataFrame 参数自动规约."""
-    const_df = pd.DataFrame(5, index=panel["close"].index, columns=["X"])
+    pd.DataFrame(5, index=panel['close'].index, columns=['X'])
     config = {
         "id": "const_arg",
         "steps": [

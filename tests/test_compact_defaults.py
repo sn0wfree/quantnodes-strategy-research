@@ -9,14 +9,10 @@ Verifies:
 from __future__ import annotations
 
 import dataclasses
-import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from strategy_research.core.agent.compact import CompactConfig
-
 
 # ── Defaults (user-specified + opencode-aligned) ─────────────
 

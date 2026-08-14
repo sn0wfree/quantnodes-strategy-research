@@ -18,7 +18,6 @@ import pytest
 
 from strategy_research.core.agent.tools import ToolContext
 
-
 # ── Test fixtures ──────────────────────────────────────────────────
 
 
@@ -186,7 +185,6 @@ class TestShellToolRegistration:
 
     def test_chat_loop_removes_shell_tool_when_disabled(self):
         from strategy_research.core.agent.builtin_tools import build_default_registry
-        from strategy_research.core.agent.tools import ToolRegistry
 
         # Simulate the gating logic from build_chat_agent_loop
         r = build_default_registry()

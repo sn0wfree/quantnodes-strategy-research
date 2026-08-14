@@ -17,11 +17,9 @@ These tests verify:
 from __future__ import annotations
 
 import asyncio
-import os
 import sqlite3
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path

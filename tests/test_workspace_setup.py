@@ -11,18 +11,13 @@ Covers:
 """
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
-
-import pytest
 
 from strategy_research import _TEMPLATES_DIR
 from strategy_research.core.workspace_setup import (
     _EXCLUDED_TOP_DIRS,
     smart_init_workspace_templates,
 )
-
 
 # ── Expected counts (computed against current package) ───────────
 

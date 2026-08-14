@@ -68,15 +68,15 @@ class TestCRUD:
 
     def test_list_filter_by_goal(self, store: HypothesisStore):
         h1 = store.create(title="h1", thesis="t1", goal_id="goal_abc")
-        h2 = store.create(title="h2", thesis="t2", goal_id="goal_xyz")
+        store.create(title='h2', thesis='t2', goal_id='goal_xyz')
         results = store.list(goal_id="goal_abc")
         assert len(results) == 1
         assert results[0].hypothesis_id == h1.hypothesis_id
 
     def test_list_filter_by_parent(self, store: HypothesisStore):
         parent = store.create(title="p", thesis="t")
-        c1 = store.derive(parent_id=parent.hypothesis_id, title="c1", thesis="t")
-        c2 = store.derive(parent_id=parent.hypothesis_id, title="c2", thesis="t")
+        store.derive(parent_id=parent.hypothesis_id, title='c1', thesis='t')
+        store.derive(parent_id=parent.hypothesis_id, title='c2', thesis='t')
         unrelated = store.create(title="u", thesis="u")
         children = store.list(parent_id=parent.hypothesis_id)
         assert len(children) == 2
@@ -333,7 +333,7 @@ class TestRegistrySqliteMode:
         from strategy_research.core.hypothesis import HypothesisRegistry
         json_path = tmp_path / "fallback.json"
         reg = HypothesisRegistry(path=json_path)
-        h = reg.create(title="via json", thesis="t")
+        reg.create(title='via json', thesis='t')
         assert json_path.exists()  # JSON file should be created
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -204,10 +203,7 @@ class TestRunOnboarding:
     def test_skip_tushare(self, fresh_paths):
         llm_path, env_path = fresh_paths
         inputs = ["OpenAI", "gpt-4o-mini", "sk-test", "120"]
-        result = run_onboarding(
-            llm_json_path=llm_path, dotenv_path=env_path,
-            inputs=inputs, skip_tushare=True,
-        )
+        run_onboarding(llm_json_path=llm_path, dotenv_path=env_path, inputs=inputs, skip_tushare=True)
         env_content = env_path.read_text(encoding="utf-8")
         assert "TUSHARE_TOKEN" not in env_content
 

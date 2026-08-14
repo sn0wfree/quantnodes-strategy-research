@@ -15,11 +15,13 @@ import pytest
 
 from strategy_research.core.goal import GoalStore
 from strategy_research.core.goal.context import default_goal_criteria
-from strategy_research.core.study import runner as runner_mod
-from strategy_research.core.study import state_store as ss
 from strategy_research.core.study import StudyStatus, StudyStore
+from strategy_research.core.study import state_store as ss
 from strategy_research.core.study.runner import (
-    AutoresearchRunner, ControlToken, NullEmitter, ShutdownReason,
+    AutoresearchRunner,
+    ControlToken,
+    NullEmitter,
+    ShutdownReason,
 )
 
 
@@ -41,7 +43,6 @@ def env(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     (ws / "strategies" / "demo").mkdir(parents=True)
     (ws / "strategies" / "demo" / "strategy.py").write_text("PARAMS = {}\n", encoding="utf-8")
-    from strategy_research.api.routers.study import _init_study_dir
     return ws
 
 

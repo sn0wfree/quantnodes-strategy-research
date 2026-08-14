@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.api.routers.chat import ChatMessage
-from strategy_research.api.session.models import Attempt, AttemptStatus
-
+from strategy_research.api.session.models import Attempt
 
 # ── ChatMessage schema ────────────────────────────────────────────
 
@@ -130,6 +127,7 @@ class TestSendAsyncPassesFields:
 
     def test_send_async_includes_mode(self):
         import inspect
+
         from strategy_research.api.routers.chat import send_async
         source = inspect.getsource(send_async)
         assert "mode=_mode" in source
@@ -137,12 +135,14 @@ class TestSendAsyncPassesFields:
 
     def test_send_async_includes_model(self):
         import inspect
+
         from strategy_research.api.routers.chat import send_async
         source = inspect.getsource(send_async)
         assert "model=body.model" in source
 
     def test_send_async_includes_thinking(self):
         import inspect
+
         from strategy_research.api.routers.chat import send_async
         source = inspect.getsource(send_async)
         assert "thinking=body.thinking" in source
@@ -150,6 +150,7 @@ class TestSendAsyncPassesFields:
     def test_send_async_plan_mode_max_iter_1(self):
         """Plan mode should set max_iterations to 1."""
         import inspect
+
         from strategy_research.api.routers.chat import send_async
         source = inspect.getsource(send_async)
         assert '_max_iter_eff = 1 if _mode == "plan"' in source
@@ -157,6 +158,7 @@ class TestSendAsyncPassesFields:
     def test_send_async_plan_mode_no_shell(self):
         """Plan mode should disable shell tools (via _shell_tools_enabled)."""
         import inspect
+
         from strategy_research.api.routers.chat import send_async
         source = inspect.getsource(send_async)
         assert "_shell_tools_enabled(_mode)" in source

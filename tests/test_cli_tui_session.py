@@ -20,17 +20,17 @@ Scenarios:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from unittest import mock
 
 import pytest
 
-from strategy_research.cli.halt import HALT, clear_halt, is_halted, trip_halt
-from strategy_research.cli.interactive.main import InteractiveContext, process_turn
+from strategy_research.cli.halt import is_halted, trip_halt
+from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.session import (
-    ChatSession,
     QUIT_RC,
+    ChatSession,
 )
 
 

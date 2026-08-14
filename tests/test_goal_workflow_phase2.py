@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
 from unittest import mock
 
 import pytest
@@ -51,7 +50,6 @@ from strategy_research.core.goal.completion_strategy import (
 from strategy_research.core.goal.event_bus import (
     CollectingObserver,
     GoalPanelObserver,
-    LoggerObserver,
     WorkflowEventBus,
 )
 from strategy_research.core.goal.validator_registry import (
@@ -59,7 +57,6 @@ from strategy_research.core.goal.validator_registry import (
     register_default_validators,
 )
 from strategy_research.core.workflow.agent_runner import (
-    AgentRunner,
     AgentRunnerFactory,
     AgentRunnerRegistry,
     StubAgentRunner,
@@ -70,7 +67,6 @@ from strategy_research.core.workflow.decorators import (
     with_timeout,
     with_validation,
 )
-
 
 # ── AgentRunner (R3) ──────────────────────────────────────────
 

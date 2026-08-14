@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from strategy_research.core.agent.sandbox import (
-    ASTValidationError,
     DEFAULT_READ_ROOTS,
     DEFAULT_WRITE_ROOTS,
+    ASTValidationError,
     PathValidationError,
     PathWhitelist,
     validate_python_source,
     validate_python_source_or_raise,
 )
-
 
 # ── AST guard ────────────────────────────────────────────────────────
 

@@ -15,17 +15,14 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from strategy_research.core.goal.completion_strategy import (
     AutoCompleteStrategy,
+    CompletionStrategyFactory,
     LiteCompleteStrategy,
     ManualCompleteStrategy,
-    CompletionStrategyFactory,
 )
+from strategy_research.core.workflow.agents import AgentExecutor, AgentRegistry
 from strategy_research.core.workflow.prompt import PromptBuilder
-from strategy_research.core.workflow.agents import AgentRegistry, AgentExecutor
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # AutoCompleteStrategy

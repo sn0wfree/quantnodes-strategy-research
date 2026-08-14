@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 from strategy_research.cli.tui.app import ResearchApp
 from strategy_research.cli.tui.widgets.transcript import TranscriptView
 
@@ -116,6 +114,7 @@ class TestStripSourceIsTextFilters:
 
     def test_uses_text_filters_module(self):
         import inspect
+
         from strategy_research.cli.tui import app as app_module
         src = inspect.getsource(app_module.ResearchApp.route_agent_event)
         route_src = inspect.getsource(app_module.ResearchApp._route_assistant_message)

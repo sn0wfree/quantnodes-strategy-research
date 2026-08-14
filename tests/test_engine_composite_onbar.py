@@ -11,7 +11,6 @@ from strategy_research.core.engine.composite import (
 )
 from strategy_research.core.engine.models import Position
 
-
 # ============================================================
 # Fixtures
 # ============================================================
@@ -151,7 +150,7 @@ class TestCompositeCryptoOnBar:
 
     def test_no_funding_at_non_funding_hour(self, composite_crypto, crypto_bar):
         ts = pd.Timestamp("2024-01-01 10:00:00")  # not funding hour
-        initial_capital = composite_crypto.capital
+        composite_crypto.capital
         composite_crypto.on_bar("BTC/USDT", crypto_bar, ts)
         # At non-funding hour, only "daily_done" mechanism; first call still applies
         # But this is actually still applied (daily_done is the dedup mechanism for non-funding hours)
@@ -208,7 +207,7 @@ class TestCompositeForexOnBar:
 
     def test_swap_dedup_same_day(self, composite_forex, forex_bar):
         ts = pd.Timestamp("2024-01-02")
-        initial = composite_forex.capital
+        composite_forex.capital
         composite_forex.on_bar("EURUSD", forex_bar, ts)
         after_first = composite_forex.capital
         composite_forex.on_bar("EURUSD", forex_bar, ts)
@@ -216,7 +215,7 @@ class TestCompositeForexOnBar:
         assert composite_forex.capital == after_first
 
     def test_swap_on_different_day(self, composite_forex, forex_bar):
-        initial = composite_forex.capital
+        composite_forex.capital
         composite_forex.on_bar("EURUSD", forex_bar, pd.Timestamp("2024-01-02"))
         after_first = composite_forex.capital
         composite_forex.on_bar("EURUSD", forex_bar, pd.Timestamp("2024-01-03"))

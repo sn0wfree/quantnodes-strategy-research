@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ============================================================
 # Phase A-1: portfolio CLI wiring
 # ============================================================
@@ -22,8 +21,9 @@ class TestPortfolioCliWiring:
 
     def test_portfolio_subparser_available(self, capsys):
         """`quantnodes-research portfolio --help` 应不报错。"""
-        from strategy_research.cli import main
         import sys
+
+        from strategy_research.cli import main
         sys.argv = ["quantnodes-research", "portfolio", "--help"]
         with pytest.raises(SystemExit) as exc_info:
             main()
@@ -93,7 +93,6 @@ class TestCriticAgent:
 
     def test_critic_improving_behavior_approves_later(self):
         """AUTORESEARCH_BEHAVIOR=improving + round>=2 应 approve."""
-        import os
         old = os.environ.get("AUTORESEARCH_BEHAVIOR")
         os.environ["AUTORESEARCH_BEHAVIOR"] = "improving"
         try:
@@ -123,6 +122,7 @@ class TestFallbackChainsCleanup:
 
     def test_chains_no_unregistered_loaders(self):
         from strategy_research.core.data_source import FALLBACK_CHAINS
+
         # 已注册的 loader
         from strategy_research.core.data_source.registry import _ensure_registered
         _ensure_registered()

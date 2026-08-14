@@ -9,10 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import pytest
-
 from strategy_research.api.routers._task_utils import log_task_exception
-
 
 # ────────────────────────── log_task_exception ──────────────────────────
 
@@ -84,6 +81,7 @@ def test_study_start_registers_done_callback_on_sched_submit(monkeypatch):
     """study_start 调用 asyncio.create_task(sched.submit(study)) 并注册
     log_task_exception done-callback. 通过 grep 源码 + 行为断言验证。"""
     import inspect
+
     import strategy_research.api.routers.study as study_router
     src = inspect.getsource(study_router.study_start)
     # Both call sites (autoresearch branch + workflow branch) must use
@@ -95,6 +93,7 @@ def test_study_start_registers_done_callback_on_sched_submit(monkeypatch):
 def test_chat_flush_study_pending_submits_uses_callback():
     """chat.py:865 的 create_task 也接入了 callback。"""
     import inspect
+
     import strategy_research.api.routers.slash_commands as slash_commands
     src = inspect.getsource(slash_commands)
     # Find the section that creates the sched.submit task and assert it

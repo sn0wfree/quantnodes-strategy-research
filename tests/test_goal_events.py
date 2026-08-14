@@ -182,7 +182,7 @@ class TestProjectorGoalMessage(unittest.TestCase):
         import sqlite3
         import tempfile
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory():
             db = Path(self._tmpdir.name) / "goal_test.db"
             conn = sqlite3.connect(str(db))
             conn.execute(

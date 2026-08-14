@@ -1,10 +1,7 @@
 """Tests for file_cache decorator used by market data loaders."""
 
 import os
-import shutil
-import tempfile
 import time
-from pathlib import Path
 
 import pandas as pd
 import pytest

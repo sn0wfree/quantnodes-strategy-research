@@ -11,7 +11,6 @@ whose fixture predates the attempts table and is a pre-existing failure).
 """
 import asyncio
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest

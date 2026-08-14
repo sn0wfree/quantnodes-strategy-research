@@ -6,13 +6,10 @@ entry, without requiring real LLM calls.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from strategy_research.core.agent.context import ContextBuilder
 from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.agent.tools import ToolRegistry
 from strategy_research.core.llm.openai_client import LLMConfig

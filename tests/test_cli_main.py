@@ -11,7 +11,6 @@ from strategy_research.cli.interactive.main import (
     process_turn,
 )
 
-
 # ─── InteractiveContext ────────────────────────────────────────────────
 
 
@@ -116,7 +115,7 @@ class TestProcessTurn:
         clear_halt()
 
     def test_bare_word_resume_clears(self):
-        from strategy_research.cli.halt import trip_halt, clear_halt, is_halted
+        from strategy_research.cli.halt import clear_halt, is_halted, trip_halt
         trip_halt()
         rc = process_turn("resume")
         assert rc == 0

@@ -16,13 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.agent.builtin_tools import build_default_registry
+from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.autoresearch import (
-    _create_run_dir, read_current_state,
+    _create_run_dir,
+    read_current_state,
 )
 from strategy_research.core.backtest import (
-    update_results_tsv, run_backtest_script, run_backtest_from_yaml,
+    run_backtest_from_yaml,
+    run_backtest_script,
+    update_results_tsv,
 )
 from strategy_research.core.study.runner import AutoresearchRunner
 
@@ -114,7 +117,7 @@ def test_run_backtest_script_custom_layout(tmp_path):
 
 def test_run_backtest_from_yaml_custom_layout(tmp_path, monkeypatch):
     import types as _types
-    from strategy_research.core import backtest as backtest_mod
+
 
     study_root = tmp_path / "study_s2"
     rounds = study_root / "rounds" / "round_0002"

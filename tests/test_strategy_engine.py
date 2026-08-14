@@ -118,9 +118,7 @@ def test_engine_with_cost_deducts_from_nav():
             weights = {c: 0.6 if i == 0 else 0.4 / (len(cols) - 1) for i, c in enumerate(cols)}
             return weights
 
-    result_no_cost = engine_no_cost = StrategyEngine().run(
-        panel.copy(), FlippingStrategy(), min_history=60, cost=CostConfig(enabled=False),
-    )
+    result_no_cost = StrategyEngine().run(panel.copy(), FlippingStrategy(), min_history=60, cost=CostConfig(enabled=False))
     result_with_cost = StrategyEngine().run(
         panel.copy(), FlippingStrategy(), min_history=60, cost=cost,
     )

@@ -168,7 +168,7 @@ class TestSessionStoreAttemptCRUD(unittest.TestCase):
 
     def test_create_attempt_with_react_trace(self) -> None:
         attempt = _make_attempt()
-        result = self.store.create_attempt(attempt)
+        self.store.create_attempt(attempt)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -180,7 +180,7 @@ class TestSessionStoreAttemptCRUD(unittest.TestCase):
 
     def test_create_attempt_with_metrics(self) -> None:
         attempt = _make_attempt()
-        result = self.store.create_attempt(attempt)
+        self.store.create_attempt(attempt)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         row = conn.execute(

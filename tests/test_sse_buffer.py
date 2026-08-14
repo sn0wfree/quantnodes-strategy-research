@@ -7,8 +7,7 @@ import time
 
 import pytest
 
-from strategy_research.api.sse_buffer import SSEEvent, SSEEventBuffer
-
+from strategy_research.api.sse_buffer import SSEEventBuffer
 
 # ────────────────────────── push / id ──────────────────────────
 
@@ -154,7 +153,7 @@ async def test_multiple_listeners_per_session_multicast():
 async def test_unregister_removes_only_one_listener():
     buf = SSEEventBuffer()
     evt1 = buf.register_session("s1")
-    evt2 = buf.register_session("s1")
+    buf.register_session('s1')
     buf.unregister_session("s1", evt1)
     # Session still exists (evt2 is registered).
     assert "s1" in buf._session_events

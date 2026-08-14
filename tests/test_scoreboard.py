@@ -1,9 +1,8 @@
 """Tests for goal/scoreboard.py — AEGIS Lever Scoreboard."""
 from strategy_research.core.goal.scoreboard import (
-    LeverScoreboard,
-    VALID_LEVERS,
     FATIGUE_WINDOW,
-    FATIGUE_MIN_GAIN,
+    VALID_LEVERS,
+    LeverScoreboard,
 )
 
 

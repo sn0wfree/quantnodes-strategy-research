@@ -7,27 +7,22 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.tools import ToolRegistry
 from strategy_research.core.llm import LLMResponse, ToolCall
-from strategy_research.core.llm.errors import LLMAuthError, LLMRateLimitError, LLMTimeoutError
+from strategy_research.core.llm.errors import LLMAuthError
 from strategy_research.core.workflow.controller import (
     ControllerConfig,
     WorkflowController,
 )
 from strategy_research.core.workflow.types import AgentCall, AgentStatus
 from strategy_research.core.workflow.worker import (
-    KEEP_RECENT_TOOLS,
     TOKEN_LIMIT_CHARS,
     SwarmWorker,
-    WorkerResult,
     WorkerStatus,
     _first_two_sentences,
     _microcompact_tool_results,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -287,10 +282,8 @@ class TestExecuteAgent:
 
     def test_whitelist_filters_tools(self):
         """Verify only whitelisted tools are in the registry."""
-        from strategy_research.core.agent.tools import ToolRegistry
-        from strategy_research.core.agent.builtin_tools import build_default_registry
 
-        full = build_default_registry()
+        build_default_registry()
         ctrl = self._make_controller()
         filtered = ctrl._build_tool_registry(["read_file"])
         assert "read_file" in filtered
@@ -327,8 +320,8 @@ class TestSwarmRuntimeDefaultController:
         assert r2._owns_default_controller is False
 
     def test_runtime_with_no_controller_builds_default(self, monkeypatch, tmp_path):
-        from strategy_research.core.swarm.runtime import SwarmRuntime, SwarmPreset, AgentResult
-        from strategy_research.core.workflow.types import AgentCall, AgentStatus
+        from strategy_research.core.swarm.runtime import SwarmPreset, SwarmRuntime
+        from strategy_research.core.workflow.types import AgentCall
 
         # Mock the controller factory to return a stub controller
         class StubController:
@@ -367,7 +360,7 @@ class TestSwarmRuntimeDefaultController:
 
     def test_default_controller_failure_does_not_propagate(self, monkeypatch, tmp_path):
         """Default controller swallows errors to keep DAG layers alive."""
-        from strategy_research.core.swarm.runtime import SwarmRuntime, SwarmPreset
+        from strategy_research.core.swarm.runtime import SwarmPreset, SwarmRuntime
         from strategy_research.core.workflow.types import AgentCall
 
         class FailingController:
@@ -394,7 +387,7 @@ class TestSwarmRuntimeDefaultController:
 
     def test_user_supplied_controller_failure_propagates(self, monkeypatch, tmp_path):
         """When caller provides a controller, their exceptions must bubble up."""
-        from strategy_research.core.swarm.runtime import SwarmRuntime, SwarmPreset
+        from strategy_research.core.swarm.runtime import SwarmPreset, SwarmRuntime
         from strategy_research.core.workflow.types import AgentCall
 
         class StrictController:
@@ -529,7 +522,7 @@ class TestSwarmWorkerToolContext:
             registry=registry,
             system_prompt="x",
         )
-        result = worker.run("t")
+        worker.run('t')
         # No ctx injected → the tool receives ctx=None and reports it
         tool_msg = [m for m in mock.last_messages if m["role"] == "tool"]
         assert '"ctx_is_none": true' in tool_msg[-1]["content"]

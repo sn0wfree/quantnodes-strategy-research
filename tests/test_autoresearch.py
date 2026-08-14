@@ -15,6 +15,7 @@ from strategy_research.core.autoresearch import (
     detect_lazy_behavior,
     generate_run_summary,
     get_cooldown_seconds,
+    get_run_data,
     load_run_summary,
     parse_agent_output,
     read_current_state,
@@ -22,9 +23,8 @@ from strategy_research.core.autoresearch import (
     save_agent_record,
     save_laziness_report,
     save_run_summary,
-    should_run_lazy_detection,
     should_read_detailed,
-    get_run_data,
+    should_run_lazy_detection,
 )
 
 

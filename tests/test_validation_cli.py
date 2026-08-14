@@ -6,8 +6,6 @@ import argparse
 import json
 from pathlib import Path
 
-import pytest
-
 from strategy_research.core.validation.cli import (
     add_validate_subparsers,
     cmd_validate_run,

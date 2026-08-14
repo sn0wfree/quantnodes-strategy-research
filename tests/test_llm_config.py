@@ -18,10 +18,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+import strategy_research.core.llm.config as _cfg_mod
 from strategy_research.core.llm import LLMConfig
 from strategy_research.core.llm.config import (
     DEFAULT_LLM_CONFIG_PATH,
@@ -31,14 +31,12 @@ from strategy_research.core.llm.config import (
     ENV_LLM_API_KEY,
     ENV_MODEL,
     ENV_PROFILE,
-    PROVIDER_DEFAULTS,
     _cli_to_overrides,
     _env_to_overrides,
     apply_api_key,
     find_llm_config_path,
     load_api_key_from_env,
 )
-import strategy_research.core.llm.config as _cfg_mod
 
 # conftest._purge_llm_env replaces _try_load_dotenv with a no-op per test;
 # capture the original here (module import happens before any fixture runs)

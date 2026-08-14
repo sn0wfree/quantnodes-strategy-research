@@ -14,11 +14,9 @@ More gaps covered in this file:
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -28,8 +26,6 @@ from strategy_research.api.session.event_bus_v2 import EventBusV2
 from strategy_research.api.session.event_v2 import EventType, EventV2
 from strategy_research.api.session.events import EventBus
 from strategy_research.api.session.projector import (
-    ProjectedMessage,
-    ProjectedPart,
     ProjectedSession,
     Projector,
 )

@@ -112,11 +112,11 @@ class TestPromptSelection:
         session.session_logger = None
         session._pending_input = None
 
-        chat_content = _CHAT_PROMPT_PATH.read_text(encoding="utf-8")
+        _CHAT_PROMPT_PATH.read_text(encoding='utf-8')
 
         # Capture what system_prompt is passed to AgentLoop
         captured_prompts = []
-        original_init = None
+        None
 
         def capture_agent_loop_init(self_loop, **kwargs):
             captured_prompts.append(kwargs.get("system_prompt", ""))

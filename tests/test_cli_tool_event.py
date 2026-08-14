@@ -83,7 +83,6 @@ class TestSummarizeArgs:
 
     def test_truncation(self):
         from strategy_research.cli.utils.ascii_compat import (
-            ELLIPSIS_ASCII,
             ELLIPSIS_UNICODE,
             register_ascii_mode,
         )

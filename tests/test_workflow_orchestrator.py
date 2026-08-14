@@ -264,6 +264,7 @@ def test_normal_session_registry_untouched(monkeypatch):
 def draft_client(tmp_path, monkeypatch):
     monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
     from fastapi.testclient import TestClient
+
     from strategy_research.api.app import create_app
 
     app = create_app()

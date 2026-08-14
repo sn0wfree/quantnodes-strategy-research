@@ -6,9 +6,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
-
-import pytest
 
 from strategy_research.core.backtest import (
     create_run_dir,
@@ -19,7 +16,6 @@ from strategy_research.core.backtest import (
     parse_run_log,
     update_results_tsv,
 )
-
 
 # ============================================================
 # 1. parse_run_log — 8 个 metric patterns + 缺失文件
@@ -630,7 +626,6 @@ def test_get_best_experiment_handles_invalid_metric_value(tmp_path):
 
 def test_save_run_metrics_cleans_nan_to_null(tmp_path):
     """NaN/Inf 必须序列化为合法 JSON (null)，而不是 NaN 字面量。"""
-    import math
 
     from strategy_research.core.backtest import save_run_metrics
 

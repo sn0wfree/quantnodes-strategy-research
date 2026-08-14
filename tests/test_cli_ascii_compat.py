@@ -197,7 +197,6 @@ class TestToolEventModeReflection:
 
     def test_render_tool_event_uses_ascii_ellipsis_in_ascii_mode(self):
         from strategy_research.cli.components.tool_event import (
-            render_tool_event,
             summarize_args,
         )
         register_ascii_mode(True)

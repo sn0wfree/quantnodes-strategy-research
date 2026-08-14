@@ -1,6 +1,6 @@
+
 import pytest
-import time
-from pathlib import Path
+
 from strategy_research.core.session import Session, SessionDB, SessionManager, SessionMessage
 
 
@@ -27,7 +27,7 @@ class TestSessionModels:
 
 class TestSessionDBInit:
     def test_init_creates_db(self, tmp_path):
-        db = SessionDB(tmp_path / "test.db")
+        SessionDB(tmp_path / 'test.db')
         assert (tmp_path / "test.db").exists()
 
     def test_init_default_path(self):

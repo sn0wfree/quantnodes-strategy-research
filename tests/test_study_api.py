@@ -16,6 +16,7 @@ import pytest
 
 def _build_asgi_app():
     from fastapi import FastAPI
+
     from strategy_research.api.middleware import AuthMiddleware
     from strategy_research.api.routers import chat, study
     from strategy_research.api.routers.web_session import router as session_router
@@ -101,11 +102,10 @@ async def test_start_rejects_missing_workspace(_app_env):
 @pytest.mark.asyncio
 async def test_start_auto_creates_strategy(_app_env):
     """When strategy dir doesn't exist, it should be auto-created.
-    
+
     Note: We can't fully test the start endpoint because it triggers the
     scheduler in the background. Instead, test the auto-creation logic directly.
     """
-    from pathlib import Path
     from strategy_research.api.routers.study import _create_minimal_strategy
 
     strat_dir = _app_env / "strategies" / "auto_created_strat"
@@ -646,7 +646,7 @@ async def test_status_returns_no_study_when_session_has_none(_app_env, monkeypat
 @pytest.mark.asyncio
 async def test_status_returns_active_study_for_session(_app_env, tmp_path, monkeypatch):
     """GET /status?session_id= 应返回该 session 的 active study。"""
-    from strategy_research.core.study import StudyStore, StudyStatus
+    from strategy_research.core.study import StudyStatus, StudyStore
 
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
@@ -720,12 +720,11 @@ async def test_status_includes_goal_snapshot_when_goal_linked(_app_env, tmp_path
         goal_id = goal.goal_id
 
     with StudyStore(db_path=db_path) as store:
-        s = store.create_study(
+        store.create_study(
             owner_session_id="sess-1", goal_id=goal_id, objective="with goal",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
-        study_id = s.study_id
 
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
@@ -835,7 +834,8 @@ async def test_start_rejects_strategy_name_with_path_traversal(_app_env, monkeyp
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
 
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
+
     from strategy_research.api.routers import study as study_router
 
     sched = MagicMock()
@@ -860,7 +860,8 @@ async def test_start_rejects_strategy_name_with_path_traversal(_app_env, monkeyp
 @pytest.mark.asyncio
 async def test_start_accepts_plain_strategy_name(_app_env, monkeypatch):
     """A1: 合法的 strategy_name 仍然通过。"""
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
+
     from strategy_research.api.routers import study as study_router
 
     sched = MagicMock()

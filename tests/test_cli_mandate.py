@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import pytest
-
 from strategy_research.cli.interactive.main import process_turn
 from strategy_research.cli.mandate import (
     Proposal,
@@ -184,7 +182,7 @@ class TestProcessTurnIntercept:
 
     def test_text_with_pending_proposal_falls_through(self):
         ctx = _Ctx(pending_proposal=make_proposal("Choose:", ["alpha"]))
-        rc = process_turn("Try alpha again", ctx)
+        process_turn('Try alpha again', ctx)
         # Not a digit string — falls through to history
         assert len(ctx.history) == 1
         # proposal NOT consumed
@@ -192,7 +190,7 @@ class TestProcessTurnIntercept:
 
     def test_digit_with_no_proposal_just_history(self):
         ctx = _Ctx(pending_proposal=None)
-        rc = process_turn("3", ctx)
+        process_turn('3', ctx)
         # No proposal — digit is plain text, goes to history
         assert len(ctx.history) == 1
         assert ctx.history[0]["content"] == "3"

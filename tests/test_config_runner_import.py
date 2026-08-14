@@ -6,6 +6,7 @@ because the module actually lives at ``strategy_research.core.utils.backtest_uti
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -143,8 +144,8 @@ factors:
 
     def test_compute_weights_loads_price_data(self, strategy_workspace: Path):
         from strategy_research.core.config_runner import (
-            create_strategy,
             create_engine,
+            create_strategy,
             load_data,
         )
 

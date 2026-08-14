@@ -13,9 +13,7 @@ Tests the full workflow:
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from pathlib import Path
 
 import pytest
 from playwright.async_api import async_playwright
@@ -140,7 +138,7 @@ async def test_factor_analysis_workflow():
 
             # 5. Verify message display
             print("5. Verifying message display...")
-            body = await page.inner_text("body")
+            await page.inner_text("body")
 
             # Check user message exists
             user_msgs = page.locator('[class*="bg-primary"][class*="rounded-lg"]')
@@ -263,7 +261,7 @@ async def test_cancel_functionality():
             print(f"Cancel button visible during streaming: {is_visible}")
 
             # 5. Wait for response
-            responded = await _wait_for_response(page, timeout_s=30)
+            await _wait_for_response(page, timeout_s=30)
 
             await _take_screenshot(page, "cancel_test")
             print("✅ Cancel functionality test completed!")
@@ -317,7 +315,7 @@ async def test_full_session_history():
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(3000)
 
-            body = await page.inner_text("body")
+            await page.inner_text("body")
 
             # Check multiple user messages (gradient bubble)
             user_msgs = page.locator('div.rounded-br-md.bg-gradient-to-br')

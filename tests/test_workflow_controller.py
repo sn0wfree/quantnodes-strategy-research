@@ -1,11 +1,10 @@
-import pytest
+from strategy_research.core.workflow.agents import AgentRegistry
 from strategy_research.core.workflow.controller import (
     AgentExecution,
     ControllerConfig,
     RoundExecution,
     WorkflowController,
 )
-from strategy_research.core.workflow.agents import AgentRegistry
 from strategy_research.core.workflow.types import AgentStatus
 
 

@@ -6,7 +6,6 @@ guardrails, active-study lookup and startup recovery scanning.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ from strategy_research.core.study import (
     default_metric_targets,
 )
 from strategy_research.core.study.models import MetricTarget
-
 
 # ── fixtures ─────────────────────────────────────────────────────────
 
@@ -165,8 +163,7 @@ class TestStudyStoreCRUD:
         a = store.create_study(owner_session_id="s1", goal_id=None, objective="a",
                                workspace_path="/w", strategy_name="s")
         store.update_execution_status(a.study_id, StudyStatus.RUNNING)
-        b = store.create_study(owner_session_id="s2", goal_id=None, objective="b",
-                               workspace_path="/w", strategy_name="s")
+        store.create_study(owner_session_id='s2', goal_id=None, objective='b', workspace_path='/w', strategy_name='s')
         # b is queued (default)
         assert len(store.list_studies(status=StudyStatus.RUNNING)) == 1
         assert len(store.list_studies(status=StudyStatus.QUEUED)) == 1
@@ -380,7 +377,6 @@ class TestStudyDirectives:
 
     def test_directive_cascade_on_study_delete(self, store, session_id):
         """Deleting a study removes its directives via FK CASCADE."""
-        from strategy_research.core.study import StudyStore, StudyDirective
         s = store.create_study(owner_session_id=session_id, goal_id=None,
                                objective="x", workspace_path="/w",
                                strategy_name="strat")
@@ -486,7 +482,8 @@ class TestStudyMonitoring:
 
     def test_monitoring_status_in_active_set(self):
         from strategy_research.core.study.models import (
-            ACTIVE_EXECUTION_STATUSES, StudyStatus,
+            ACTIVE_EXECUTION_STATUSES,
+            StudyStatus,
         )
         # MONITORING is intentionally excluded — it's a passive background check
         assert StudyStatus.MONITORING not in ACTIVE_EXECUTION_STATUSES

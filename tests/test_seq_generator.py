@@ -1,7 +1,6 @@
 """Tests for the SeqGenerator (Level 1)."""
 from __future__ import annotations
 
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest

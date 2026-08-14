@@ -14,8 +14,6 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.engine.china_a import ChinaAEngine
-from strategy_research.core.engine.crypto import CryptoEngine
-from strategy_research.core.engine.forex import ForexEngine
 
 
 def _make_data(symbol, n_bars=50, start_price=10.0, freq="B"):
@@ -75,7 +73,7 @@ class TestSignalEdgeCases:
         code = "600000.SH"
         eng = ChinaAEngine({"codes": [code], "initial_cash": 1_000_000.0})
         data_map = {code: _make_data(code)}
-        dates = data_map[code].index
+        data_map[code].index
         signal_map = {}
         eng.run_backtest(data_map, signal_map, [code])
         assert len(eng.trades) == 0

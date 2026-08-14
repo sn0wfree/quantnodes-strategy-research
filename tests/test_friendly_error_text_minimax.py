@@ -7,8 +7,6 @@ Chinese messages that explain what went wrong and what to do.
 
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.api.session.service import _friendly_error_text
 
 

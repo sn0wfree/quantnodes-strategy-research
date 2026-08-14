@@ -14,8 +14,8 @@ import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.combo import (
-    CompositeTool,
     ComboConfigError,
+    CompositeTool,
     _resolve_param,
     load_combo_tools,
 )

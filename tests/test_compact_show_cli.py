@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import io
-import sys
 from contextlib import redirect_stdout
 
-import pytest
-
 from strategy_research.cli.commands.compact_show import cmd_compact_show
-from strategy_research.core.agent.compact import CompactConfig
 
 
 class TestCompactShow:

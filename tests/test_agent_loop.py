@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,8 +11,7 @@ from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import AgentLoop, LoopResult, _tool_call_hash
 from strategy_research.core.agent.tools import ToolRegistry
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
-from strategy_research.core.llm.errors import LLMError, LLMAuthError
-
+from strategy_research.core.llm.errors import LLMAuthError
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -295,7 +292,7 @@ class TestWorkspaceInjection:
             workspace=workspace,
         )
         loop.client.chat = mock.chat
-        r = loop.run("inject")
+        loop.run('inject')
         assert "workspace" in captured_kwargs[0]
         assert captured_kwargs[0]["workspace"] == workspace
         assert captured_kwargs[0]["x"] == 1

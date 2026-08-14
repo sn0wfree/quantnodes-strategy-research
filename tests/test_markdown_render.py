@@ -11,7 +11,6 @@ import pytest
 
 from strategy_research.cli.tui.widgets.transcript import TranscriptView
 
-
 # ── helpers ──────────────────────────────────────────────────────────
 
 

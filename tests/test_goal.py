@@ -2,31 +2,25 @@
 
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
-from datetime import datetime
-
 import pytest
 
-from strategy_research.core.goal.models import (
-    GoalStatus,
-    RiskTier,
-    GoalRecord,
-    GoalClaim,
-    GoalCriterion,
-    EvidenceInput,
-    EvidenceRecord,
-    AuditRow,
-)
 from strategy_research.core.goal.context import (
     default_goal_criteria,
 )
-from strategy_research.core.goal.policy import (
-    reject_live_execution_objective,
-    normalize_required_text,
+from strategy_research.core.goal.models import (
+    AuditRow,
+    EvidenceInput,
+    EvidenceRecord,
+    GoalClaim,
+    GoalCriterion,
+    GoalRecord,
+    GoalStatus,
+    RiskTier,
 )
-
+from strategy_research.core.goal.policy import (
+    normalize_required_text,
+    reject_live_execution_objective,
+)
 
 # ── Model Tests ──────────────────────────────────────────────────────
 
@@ -193,7 +187,7 @@ class TestGoalLifecycle:
         )
         # Simulate status transitions
         assert goal.status == GoalStatus.ACTIVE
-        
+
         # Active -> Complete
         completed = GoalRecord(
             **{**goal.__dict__, "status": GoalStatus.COMPLETE}
@@ -224,16 +218,7 @@ class TestGoalLifecycle:
 
     def test_goal_hierarchy_fields(self):
         """Test parent-child goal relationships."""
-        parent = GoalRecord(
-            goal_id="p1",
-            session_id="s1",
-            status=GoalStatus.ACTIVE,
-            objective="Parent goal",
-            ui_summary="Parent",
-            source="test",
-            protocol="default",
-            risk_tier=RiskTier.RESEARCH_GENERAL,
-        )
+        GoalRecord(goal_id='p1', session_id='s1', status=GoalStatus.ACTIVE, objective='Parent goal', ui_summary='Parent', source='test', protocol='default', risk_tier=RiskTier.RESEARCH_GENERAL)
         child = GoalRecord(
             goal_id="c1",
             session_id="s1",

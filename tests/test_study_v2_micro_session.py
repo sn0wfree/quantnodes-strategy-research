@@ -20,7 +20,9 @@ import pytest
 from strategy_research.core.goal import GoalStore
 from strategy_research.core.goal.context import default_goal_criteria
 from strategy_research.core.study import (
-    StudyScheduler, StudyStatus, StudyStore,
+    StudyScheduler,
+    StudyStatus,
+    StudyStore,
 )
 from strategy_research.core.study import runner as runner_mod
 from strategy_research.core.study import scheduler as scheduler_mod

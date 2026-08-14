@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from strategy_research.core.validation.bootstrap import bootstrap_sharpe_ci
 from strategy_research.core.validation.trade_input import TradeInput

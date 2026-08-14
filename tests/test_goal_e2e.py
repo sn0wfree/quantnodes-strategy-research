@@ -7,29 +7,27 @@ from pathlib import Path
 
 import pytest
 
-from strategy_research.core.goal.models import (
-    GoalStatus,
-    GoalRecord,
-    EvidenceInput,
+from strategy_research.core.agent.builtin_tools import (
+    FactorCrossSectionalAnalysis,
+    FactorICDecay,
+    FactorQuintileReturns,
 )
-from strategy_research.core.goal.store import GoalStore
+from strategy_research.core.agent.builtin_tools.data_tools import ImportDataTool
+from strategy_research.core.agent.tools import ToolContext
+from strategy_research.core.config_runner import load_data
+from strategy_research.core.db import init_db, save_ohlcv_to_db
 from strategy_research.core.goal.context import (
     format_goal_context,
     format_goal_continuation_prompt,
     goal_needs_continuation,
     goal_progress_tuple,
 )
-from strategy_research.core.goal.policy import reject_live_execution_objective
-from strategy_research.core.db import init_db, save_ohlcv_to_db
-from strategy_research.core.agent.builtin_tools import (
-    FactorCrossSectionalAnalysis,
-    FactorQuintileReturns,
-    FactorICDecay,
+from strategy_research.core.goal.models import (
+    EvidenceInput,
+    GoalStatus,
 )
-from strategy_research.core.agent.builtin_tools.data_tools import ImportDataTool
-from strategy_research.core.agent.tools import ToolContext
-from strategy_research.core.config_runner import load_data
-
+from strategy_research.core.goal.policy import reject_live_execution_objective
+from strategy_research.core.goal.store import GoalStore
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -149,11 +147,7 @@ class TestGoalLifecycleE2E:
 
 class TestGoalContextE2E:
     def test_goal_context_format(self, goal_store: GoalStore):
-        goal = goal_store.replace_goal(
-            session_id="e2e-context",
-            objective="分析20日动量因子IC",
-            criteria=["数据获取", "IC分析"],
-        )
+        goal_store.replace_goal(session_id='e2e-context', objective='分析20日动量因子IC', criteria=['数据获取', 'IC分析'])
         snapshot = goal_store.get_current_snapshot("e2e-context")
         context = format_goal_context(snapshot)
         assert "current-research-goal" in context
@@ -310,9 +304,7 @@ class TestDataPipelineE2E:
 
 class TestGoalSupersessionE2E:
     def test_new_goal_supersedes_old(self, goal_store: GoalStore):
-        goal1 = goal_store.replace_goal(
-            session_id="e2e-supersede", objective="第一个目标", criteria=["标准1"],
-        )
+        goal_store.replace_goal(session_id='e2e-supersede', objective='第一个目标', criteria=['标准1'])
         goal2 = goal_store.replace_goal(
             session_id="e2e-supersede", objective="第二个目标", criteria=["标准2"],
         )

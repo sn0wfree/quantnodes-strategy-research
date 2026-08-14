@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import gc
 import json
-import os
 import shutil
 import sqlite3
 import sys
@@ -23,7 +22,6 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -428,7 +426,6 @@ class TestEventBusV2LongEventIDs(unittest.TestCase):
     def test_publish_with_custom_long_id(self) -> None:
         """An event with a long custom ID round-trips."""
         # UUID is 36 chars, but the test verifies longer IDs work
-        from dataclasses import replace
         long_id = "x" * 200
         e = EventV2(
             id=long_id, aggregate_id="s1", seq=1,
@@ -680,7 +677,6 @@ class TestEventBusV2TimestampPrecision(unittest.TestCase):
     def test_events_ordered_by_seq_not_time(self) -> None:
         """Events are returned in seq order, not time_created order."""
         # Publish events out of time order (seq 1 has later time)
-        import time as t
         from dataclasses import replace
         e1 = EventV2.create("s1", 1, EventType.TEXT_DELTA, {"i": 1})
         time.sleep(0.01)

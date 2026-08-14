@@ -14,7 +14,6 @@ import pytest
 from strategy_research.cli.tui.app import ResearchApp
 from strategy_research.cli.tui.widgets import TranscriptView
 
-
 RESEARCHAPP_KW = {"model": "m", "version": "0.4.2"}
 
 
@@ -215,7 +214,6 @@ async def test_assistant_message_after_text_ended_does_not_double_write():
         await pilot.pause()
 
         # Snapshot line count right after text.ended
-        snapshot_lines = len(tv.lines)
         snapshot_folders = len(tv._folders)
 
         # Now assistant_message fires (e.g. /goal /compact handler)

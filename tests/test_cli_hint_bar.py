@@ -8,7 +8,6 @@ from rich.text import Text
 
 from strategy_research.cli.components.hint_bar import render_hint_bar
 from strategy_research.cli.utils.ascii_compat import (
-    ELLIPSIS_ASCII,
     ELLIPSIS_UNICODE,
     register_ascii_mode,
 )

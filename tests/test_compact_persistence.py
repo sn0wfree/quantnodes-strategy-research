@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from strategy_research.core.agent.compact import (
     CompactConfig,
     _resolve_threshold_tokens,
@@ -23,7 +21,6 @@ from strategy_research.core.agent.loop import (
     compaction_persister_registered,
 )
 from strategy_research.core.llm.config import LLMConfig
-
 
 # ── _resolve_threshold_tokens (opencode formula) ────────────
 

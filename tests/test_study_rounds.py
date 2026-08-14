@@ -1,11 +1,9 @@
 """Tests for study/store.py — study_rounds CRUD."""
 import os
-from pathlib import Path
 
 import pytest
 
 from strategy_research.core.study.store import StudyStore
-from strategy_research.core.study.models import StudyStatus
 
 
 @pytest.fixture(autouse=True)

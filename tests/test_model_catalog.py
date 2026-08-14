@@ -18,7 +18,6 @@ import pytest
 from strategy_research.core.llm.model_catalog import (
     MODELS_DEV_ID,
     ModelCatalog,
-    ModelInfo,
     models_dev_id,
     reset_cache_for_tests,
 )
@@ -158,7 +157,6 @@ def test_refresh_failure_falls_back_to_bundled(tmp_path, monkeypatch):
                     return False
 
                 async def get(self, url, timeout=None):
-                    import httpx
 
                     raise httpx.ConnectError("network unreachable")
 
@@ -342,6 +340,7 @@ def test_refresh_async_failure_serves_real_data_not_synthesized_override():
     get_info(user_config=...).
     """
     from unittest.mock import patch
+
     from strategy_research.core.llm.config import LLMConfig
 
     cfg = LLMConfig(

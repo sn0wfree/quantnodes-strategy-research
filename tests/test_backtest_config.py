@@ -13,7 +13,6 @@ from strategy_research.core.utils.backtest_config import (
     VolTargetingConfig,
 )
 
-
 # ============================================================
 # CostConfig
 # ============================================================

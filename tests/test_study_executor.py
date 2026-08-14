@@ -15,14 +15,10 @@ return a controlled fake result (no autoresearch run). Cover:
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch
 
 import pytest
 
-from strategy_research.core.autoresearch import run_research_round
 from strategy_research.core.goal import GoalStore
 from strategy_research.core.goal.context import default_goal_criteria
 from strategy_research.core.study.executor import (
@@ -33,7 +29,6 @@ from strategy_research.core.study.executor import (
 )
 from strategy_research.core.study.models import StudyStatus
 from strategy_research.core.study.store import StudyStore
-
 
 # ── fixtures ────────────────────────────────────────────────────────
 
@@ -363,7 +358,6 @@ class TestDirectiveInjection:
     def test_pending_directive_passed_to_round(self, store, monkeypatch):
         # Use a study without metric targets so the executor doesn't bail
         # out after one round — it should run round 1, then round 2, etc.
-        from strategy_research.core.study import StudyStatus
         study = store.create_study(
             owner_session_id="sess-st",
             goal_id=None,
@@ -412,6 +406,7 @@ class TestDirectiveInjection:
 
     def test_format_directives(self):
         from dataclasses import dataclass
+
         from strategy_research.core.study.executor import AutoresearchExecutor
         @dataclass
         class D:

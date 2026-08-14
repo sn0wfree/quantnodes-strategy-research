@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-import pytest
 from prompt_toolkit.completion import Completion
 from prompt_toolkit.document import Document
 

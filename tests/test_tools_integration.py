@@ -3,32 +3,28 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 
-from strategy_research.core.db import init_db, get_connection
-from strategy_research.core.agent.tools import ToolContext
 from strategy_research.core.agent.builtin_tools import (
+    FactorAnalysisTool,
     FactorCrossSectionalAnalysis,
     FactorICDecay,
     FactorQuintileReturns,
     FactorTurnover,
-    FactorAnalysisTool,
     PatternRecognitionTool,
-    DrawdownAnalysis,
-    BenchmarkComparison,
     build_default_registry,
 )
 from strategy_research.core.agent.builtin_tools.data_tools import (
-    ImportDataTool,
     GetMarketDataTool,
+    ImportDataTool,
     ListDataSourcesTool,
 )
-
+from strategy_research.core.agent.tools import ToolContext
+from strategy_research.core.db import get_connection, init_db
 
 # ── Shared fixtures ───────────────────────────────────────────────────
 
@@ -45,7 +41,7 @@ def real_market_data(workspace: Path) -> dict:
     """Generate realistic market data for multiple A-share stocks."""
     np.random.seed(42)
     dates = pd.date_range("2023-01-01", periods=252, freq="B")  # 1 year trading days
-    
+
     # Simulate realistic A-share price data
     stocks = {
         "000001.SZ": {"name": "平安银行", "base": 12.0, "vol": 0.02},
@@ -59,19 +55,19 @@ def real_market_data(workspace: Path) -> dict:
         "300750.SZ": {"name": "宁德时代", "base": 200.0, "vol": 0.028},
         "002594.SZ": {"name": "比亚迪", "base": 250.0, "vol": 0.026},
     }
-    
+
     data = {}
     for code, info in stocks.items():
         returns = np.random.randn(len(dates)) * info["vol"]
         prices = info["base"] * np.exp(np.cumsum(returns))
-        
+
         stock_data = []
         for i, (d, close) in enumerate(zip(dates, prices)):
             high = close * (1 + abs(np.random.randn()) * 0.01)
             low = close * (1 - abs(np.random.randn()) * 0.01)
             open_price = close * (1 + np.random.randn() * 0.005)
             volume = int(np.random.lognormal(15, 0.5))
-            
+
             stock_data.append({
                 "date": d.strftime("%Y-%m-%d"),
                 "open": round(open_price, 2),
@@ -81,7 +77,7 @@ def real_market_data(workspace: Path) -> dict:
                 "volume": volume,
             })
         data[code] = stock_data
-    
+
     return data
 
 
@@ -115,18 +111,18 @@ class TestImportAndAnalysis:
     def test_import_then_query(self, populated_workspace: Path):
         """Test importing data then querying it."""
         conn = get_connection(populated_workspace, read_only=True)
-        
+
         # Query ohlcv view
         df = conn.execute("SELECT * FROM ohlcv LIMIT 10").fetchdf()
         assert len(df) == 10
         assert "date" in df.columns
         assert "asset" in df.columns
         assert "close" in df.columns
-        
+
         # Count assets
         assets = conn.execute("SELECT DISTINCT asset FROM ohlcv").fetchdf()
         assert len(assets) == 10
-        
+
         conn.close()
 
     def test_factor_analysis_real_data(self, populated_workspace: Path):
@@ -263,7 +259,7 @@ class TestDataSourceTools:
         assert result["status"] == "ok"
         assert "sources" in result
         assert len(result["sources"]) > 0
-        
+
         # Check that at least one source is available
         available = [s for s in result["sources"] if s.get("available")]
         assert len(available) > 0
@@ -343,14 +339,14 @@ class TestPerformance:
         """Test importing a large dataset."""
         np.random.seed(42)
         dates = pd.date_range("2020-01-01", periods=1000, freq="B")  # 4 years
-        
+
         # Generate data for 50 stocks
         data = {}
         for i in range(50):
             code = f"STOCK{i:03d}.SZ"
             returns = np.random.randn(len(dates)) * 0.02
             prices = 100 * np.exp(np.cumsum(returns))
-            
+
             stock_data = []
             for d, close in zip(dates, prices):
                 stock_data.append({
@@ -362,7 +358,7 @@ class TestPerformance:
                     "volume": int(np.random.lognormal(15, 0.5)),
                 })
             data[code] = stock_data
-        
+
         import_tool = ImportDataTool()
         result = json.loads(import_tool.execute(ctx=ToolContext(workspace=workspace), data=data))
         assert result["status"] == "ok"
@@ -373,13 +369,13 @@ class TestPerformance:
         # Import large dataset first
         np.random.seed(42)
         dates = pd.date_range("2020-01-01", periods=500, freq="B")
-        
+
         data = {}
         for i in range(30):
             code = f"STOCK{i:03d}.SZ"
             returns = np.random.randn(len(dates)) * 0.02
             prices = 100 * np.exp(np.cumsum(returns))
-            
+
             stock_data = []
             for d, close in zip(dates, prices):
                 stock_data.append({
@@ -391,10 +387,10 @@ class TestPerformance:
                     "volume": int(np.random.lognormal(15, 0.5)),
                 })
             data[code] = stock_data
-        
+
         import_tool = ImportDataTool()
         import_tool.execute(ctx=ToolContext(workspace=workspace), data=data)
-        
+
         # Run analysis
         tool = FactorCrossSectionalAnalysis()
         result = json.loads(tool.execute(

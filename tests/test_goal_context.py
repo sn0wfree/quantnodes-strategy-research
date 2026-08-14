@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from strategy_research.core.goal.context import (
     CONTINUABLE_GOAL_STATUSES,
     OPEN_CRITERION_STATUSES,
@@ -22,8 +20,7 @@ from strategy_research.core.goal.context import (
     goal_needs_continuation,
     goal_progress_tuple,
 )
-from strategy_research.core.goal.models import GoalStatus, RiskTier
-
+from strategy_research.core.goal.models import GoalStatus
 
 # ─── Constants ────────────────────────────────────────────────────────────
 

@@ -19,7 +19,6 @@ import json
 import sqlite3
 import tempfile
 import unittest
-import uuid
 from pathlib import Path
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
@@ -302,13 +301,13 @@ class TestB4EventOnlyWrite(unittest.TestCase):
             "message_id": "u1", "content": "hello", "role": "user",
         })
         self.assertEqual(self._count_messages(), 1)
-        first_id = ""
+        ''
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT id FROM messages WHERE session_id = ? ORDER BY seq", ("s1",),
         ).fetchone()
-        first_id = row["id"]
+        row['id']
         conn.close()
 
         # Force re-flush by calling projector.flush() directly

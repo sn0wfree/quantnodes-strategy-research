@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 import requests
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -98,7 +97,6 @@ class TestSSEReconnection:
 
     def test_sse_reconnection(self, auth_info):
         """Server restart → EventSource reconnects automatically."""
-        import socket as sock_mod
 
         base_url, headers, session_id, token = auth_info
 

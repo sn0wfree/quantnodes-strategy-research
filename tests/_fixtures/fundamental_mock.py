@@ -55,7 +55,7 @@ def make_fundamentals_panel(
         return df.fillna(default)
 
     # ROE: 范围 [-0.05, 0.20]
-    roe_q = rng.uniform(-0.05, 0.20, (len(cols),)) * 4  # 季报 4 次
+    rng.uniform(-0.05, 0.2, (len(cols),)) * 4
     roe_panel = pd.DataFrame(
         rng.uniform(-0.05, 0.20, (n_days, n_stocks)),
         index=dates, columns=cols,

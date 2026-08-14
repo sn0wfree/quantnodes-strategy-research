@@ -55,7 +55,7 @@ class TestRowToMessageWithParts:
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        from strategy_research.api.routers.web_session import persist_message, _row_to_message
+        from strategy_research.api.routers.web_session import _row_to_message, persist_message
 
         # Create a message with message_parts
         parts = [
@@ -97,7 +97,6 @@ class TestRowToMessageWithParts:
         _create_session(db_path, "sess-1")
         from strategy_research.api.routers.web_session import _get_db, _row_to_message
 
-        import uuid
         mid = str(uuid.uuid4())
         with _get_db() as conn:
             conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
@@ -132,7 +131,6 @@ class TestRowToMessageWithParts:
         _create_session(db_path, "sess-1")
         from strategy_research.api.routers.web_session import _get_db, _row_to_message
 
-        import uuid
         mid = str(uuid.uuid4())
         with _get_db() as conn:
             conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
@@ -158,7 +156,7 @@ class TestRowToMessageWithParts:
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        from strategy_research.api.routers.web_session import persist_message, _row_to_message
+        from strategy_research.api.routers.web_session import _row_to_message, persist_message
 
         msg_id = persist_message(
             session_id="sess-1", role="user", content="hello", parts=None,
@@ -180,7 +178,7 @@ class TestRowToMessageWithParts:
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
-        from strategy_research.api.routers.web_session import persist_message, _row_to_message
+        from strategy_research.api.routers.web_session import _row_to_message, persist_message
 
         msg_id = persist_message(
             session_id="sess-1", role="assistant", content="⚠️ error msg",
@@ -202,8 +200,8 @@ class TestListMessagesReadsMessageParts:
         db_path = temp_db
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
+
         from strategy_research.api.routers.web_session import persist_message
-        from fastapi import Request
 
         # Create a message with message_parts (Level 2 normal path)
         parts = [
@@ -258,6 +256,7 @@ class TestListMessagesReadsMessageParts:
         _ensure_schema(db_path)
         _create_session(db_path, "sess-1")
         import uuid as _uuid
+
         from strategy_research.api.routers.web_session import _get_db, _row_to_message
 
         # Insert a user message with no parts anywhere

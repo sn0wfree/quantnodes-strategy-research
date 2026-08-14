@@ -7,17 +7,13 @@ LLM but kept in DB for audit/UI display.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import sqlite3
-import time
 
 import pytest
 
-from strategy_research.api.session.service import SessionService
 from strategy_research.api.session.models import Message
+from strategy_research.api.session.service import SessionService
 from strategy_research.core.agent.compact import CompactConfig
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

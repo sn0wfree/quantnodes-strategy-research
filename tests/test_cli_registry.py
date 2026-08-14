@@ -59,7 +59,7 @@ class TestRegistryBasics(unittest.TestCase):
         self.assertIn("autoresearch", cmds)
 
     def test_reset_clears(self):
-        before = len(registered_commands())
+        len(registered_commands())
         reset_registry()
         self.assertEqual(len(registered_commands()), 0)
         # Re-register

@@ -13,12 +13,12 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
-
-from strategy_research.core.alpha_zoo import compute_alpha
 from _fixtures.fundamental_mock import (
     make_fundamentals_panel,
     make_market_benchmark_panel,
 )
+
+from strategy_research.core.alpha_zoo import compute_alpha
 
 warnings.filterwarnings("ignore")
 

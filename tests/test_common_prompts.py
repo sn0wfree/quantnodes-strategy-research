@@ -15,7 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from strategy_research.core.agent.prompt_builder import (
-    ChatPromptBuilder,
     PromptBuilderFactory,
     StaticFilePromptBuilder,
 )

@@ -68,7 +68,7 @@ def test_zscore_zero_mean_unit_std(df_a):
         n_valid = z.iloc[i].notna().sum()
         if n_valid > 1:
             mean = z.iloc[i].mean()
-            std = z.iloc[i].std()
+            z.iloc[i].std()
             # 3 个值时 std 可能不正好是 1
             assert abs(mean) < 1e-9, f"row {i} mean {mean}"
 

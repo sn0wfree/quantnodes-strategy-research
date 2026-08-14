@@ -13,8 +13,6 @@ from __future__ import annotations
 import asyncio
 from unittest import mock
 
-import pytest
-
 from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.session import ChatSession
 
@@ -86,6 +84,7 @@ class TestDispatchRefreshesHeaderAfterArun:
     def test_source_includes_post_arun_call(self):
         """Source-level: dispatch() must call _update_header_stats after _run_agent_loop."""
         import inspect
+
         from strategy_research.cli.tui.session import ChatSession
 
         src = inspect.getsource(ChatSession.dispatch)

@@ -1,7 +1,7 @@
 """Tests for compact_messages — full L0-L4 pipeline, fallback chain, dedup detection."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -154,15 +154,6 @@ class TestCompactMessagesL4:
 
 # Phase A: L3 layer removed. These tests are skipped.
 @pytest.mark.skip(reason="L3 layer removed in Phase A; A4 will replace these")
-class TestCompactMessagesL3:
-    def test_hard_truncate_applied(self):
-        pass
-
-    def test_truncate_preserves_system(self):
-        pass
-
-
-# Phase A: tests unblocked by A4 (compact_messages is now L4-only).
 class TestCompactMessagesDedup:
     def test_empty_short_summary_dedup(self):
         """Empty/short/whitespace summary → L4 result ignored."""
@@ -213,15 +204,6 @@ class TestCompactMessagesMarkerFiltering:
 
 # Phase A: L1 layer removed. Marked as duplicate of earlier skip-decorated class.
 @pytest.mark.skip(reason="L1 layer removed in Phase A; A4 will replace these")
-class TestCompactMessagesForceAll:
-    def test_force_zero_threshold(self):
-        pass
-
-    def test_force_mode_l1_runs(self):
-        pass
-
-
-# Phase A: tests unblocked by A4.
 class TestCompactMessagesFixToolPairs:
     def test_fix_tool_pairs_called(self):
         """After compaction, _fix_tool_pairs repairs orphans."""

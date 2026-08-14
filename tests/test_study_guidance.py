@@ -8,13 +8,9 @@ gates[] records, metric-missing skip.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from strategy_research.core.study import guidance as gd
-
 
 # ── frontmatter parsing ─────────────────────────────────────────────
 
@@ -205,18 +201,17 @@ def test_check_violations_ignores_warn_gates():
 
 def test_runner_gate_hard_check_forces_discard(tmp_path, monkeypatch):
     import asyncio
-    import itertools
 
+    import strategy_research.core.autoresearch as ar_mod
     from strategy_research.api.routers.study import _init_study_dir
     from strategy_research.core.goal import GoalStore
     from strategy_research.core.goal.context import default_goal_criteria
-    from strategy_research.core.study import runner as runner_mod
     from strategy_research.core.study import round_manifest as rm
+    from strategy_research.core.study import runner as runner_mod
     from strategy_research.core.study import state_store as ss
     from strategy_research.core.study.runner import AutoresearchRunner, ControlToken
     from strategy_research.core.study.scheduler import NullEmitter
     from strategy_research.core.study.store import StudyStore
-    import strategy_research.core.autoresearch as ar_mod
 
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
@@ -302,16 +297,16 @@ def test_runner_gate_hard_check_forces_discard(tmp_path, monkeypatch):
 def test_runner_gate_no_violation_keeps_verdict(tmp_path, monkeypatch):
     import asyncio
 
+    import strategy_research.core.autoresearch as ar_mod
     from strategy_research.api.routers.study import _init_study_dir
     from strategy_research.core.goal import GoalStore
     from strategy_research.core.goal.context import default_goal_criteria
-    from strategy_research.core.study import runner as runner_mod
     from strategy_research.core.study import round_manifest as rm
+    from strategy_research.core.study import runner as runner_mod
     from strategy_research.core.study import state_store as ss
     from strategy_research.core.study.runner import AutoresearchRunner, ControlToken
     from strategy_research.core.study.scheduler import NullEmitter
     from strategy_research.core.study.store import StudyStore
-    import strategy_research.core.autoresearch as ar_mod
 
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))

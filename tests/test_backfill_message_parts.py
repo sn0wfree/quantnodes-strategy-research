@@ -165,6 +165,7 @@ class TestBackfillMessageParts:
         _create_session(db_path, "sess-1")
         # Insert with parts_json=null (need to re-add the column)
         import uuid
+
         import strategy_research.api.routers.web_session as ws
         mid = str(uuid.uuid4())
         with ws._get_db() as conn:

@@ -21,9 +21,8 @@ import time
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from starlette.responses import JSONResponse
 
-from strategy_research.api.auth_tokens import _b64_decode, _b64_encode, _load_secret
+from strategy_research.api.auth_tokens import _b64_encode, _load_secret
 from strategy_research.api.middleware import AuthMiddleware
 
 

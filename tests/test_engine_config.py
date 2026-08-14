@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.core.engine.config import BacktestConfigSchema
 
 

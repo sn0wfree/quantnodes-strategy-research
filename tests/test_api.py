@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
 from strategy_research.api.app import create_app
 from strategy_research.api.auth_tokens import create_token
-
 
 # ============================================================
 # fixtures

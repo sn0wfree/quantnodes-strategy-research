@@ -2,21 +2,17 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-
-import pytest
 
 from strategy_research.core.llm.config_audit import (
     AuditIssue,
+    _is_placeholder,
+    _read_env,
+    _read_llm_json,
     detect_issues,
     fix_issues,
     format_report,
-    _read_llm_json,
-    _read_env,
-    _is_placeholder,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

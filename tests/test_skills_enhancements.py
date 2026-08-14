@@ -15,7 +15,6 @@ import pytest
 
 from strategy_research.core.skills import SkillRegistry
 
-
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "src" / "strategy_research" / "templates" / ".skills"
 
 # 10 existing skills (must all have frontmatter)

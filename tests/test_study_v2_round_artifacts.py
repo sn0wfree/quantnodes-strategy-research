@@ -10,19 +10,25 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from strategy_research.api.routers.study import _init_study_dir
-from strategy_research.core.study import StudyStatus, StudyStore
+from strategy_research.core.study import StudyStore
 from strategy_research.core.study.round_manifest import (
-    append_journal_md, build_manifest, load_manifest, resolve_adopted_run,
-    resolve_adopted_run_for_start, render_round_markdown, save_manifest,
+    append_journal_md,
+    build_manifest,
+    load_manifest,
+    render_round_markdown,
+    resolve_adopted_run,
+    resolve_adopted_run_for_start,
+    save_manifest,
 )
 from strategy_research.core.study.state_store import (
-    StudyState, init, load, save,
+    init,
+    load,
+    save,
 )
 
 
@@ -195,7 +201,7 @@ def test_init_study_dir_layout(tmp_path):
     (ws / "strategies" / "demo" / "strategy.py").write_text(
         "PARAMS = {'top_n': 5}\n", encoding="utf-8",
     )
-    info = _init_study_dir(ws, "study_m3", "demo", "研究动量")
+    _init_study_dir(ws, 'study_m3', 'demo', '研究动量')
     root = ws / "study" / "study_m3"
     # baseline copied from existing strategy
     assert "top_n" in (root / "baseline" / "strategy.py").read_text(encoding="utf-8")
@@ -221,7 +227,6 @@ def test_runner_round_artifacts_end_to_end(store, goal_store, monkeypatch, tmp_p
     """A full study run (stubbed round) produces the v2 directory layout:
     rounds/round_NNNN/run_XXXX/strategy.py + manifest.json + summary.md +
     journal.md + state.json."""
-    from unittest.mock import patch
 
     from strategy_research.core.study import runner as runner_mod
     from strategy_research.core.study.runner import AutoresearchRunner

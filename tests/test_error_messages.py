@@ -252,15 +252,15 @@ class TestRunWithAgentCfgParam:
         """
         import asyncio
         import sqlite3
-        import time
-        from strategy_research.api.session.events import EventBus
-        from strategy_research.api.session.store import SessionStore
-        from strategy_research.api.session.models import Attempt
-        from strategy_research.core.llm import LLMConfig
-        from strategy_research.api.routers.web_session import _ensure_schema
 
         # Set up minimal DB
         import tempfile
+        import time
+
+        from strategy_research.api.routers.web_session import _ensure_schema
+        from strategy_research.api.session.events import EventBus
+        from strategy_research.api.session.models import Attempt
+        from strategy_research.api.session.store import SessionStore
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = f"{tmpdir}/test.db"
             conn = sqlite3.connect(db_path)

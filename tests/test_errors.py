@@ -62,7 +62,6 @@ class TestMidLevelCategories(unittest.TestCase):
             BacktestError,
             ConfigError,
             GoalError,
-            NotFoundError,
             ProviderError,
             SessionError,
             SwarmError,

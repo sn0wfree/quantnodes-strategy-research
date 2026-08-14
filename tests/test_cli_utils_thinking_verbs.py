@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from strategy_research.cli.utils.thinking_verbs import (
     THINKING_VERBS,
     pick_thinking_verb,

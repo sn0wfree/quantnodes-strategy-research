@@ -3,41 +3,31 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
 from strategy_research.core.agent.builtin_tools import (
     BenchmarkComparison,
-    ComputeFactorTool,
     DrawdownAnalysis,
     FactorAnalysisTool,
     FactorCrossSectionalAnalysis,
     FactorICDecay,
     FactorQuintileReturns,
     FactorTurnover,
-    GitDiffTool,
-    ListHistoryTool,
     ListSkillsTool,
     LoadSkillTool,
     OptionsPricingTool,
     PatternRecognitionTool,
-    ReadFileTool,
-    RunBacktestTool,
     StrategyCompare,
-    WriteFileTool,
     build_default_registry,
 )
 from strategy_research.core.agent.builtin_tools.data_tools import (
     GetMarketDataTool,
     ImportDataTool,
     ListDataSourcesTool,
-    SearchSymbolTool,
 )
-from strategy_research.core.agent.tools import ToolContext, ToolRegistry
-
+from strategy_research.core.agent.tools import ToolContext
 
 # ── Shared fixtures ───────────────────────────────────────────────────
 
@@ -147,7 +137,7 @@ class TestFactorAnalysisTool:
                     "open": 100, "high": 101, "low": 99,
                     "close": 100, "volume": 1000,
                 })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -187,7 +177,7 @@ class TestPatternRecognitionTool:
                 "low": 99 + i, "close": 100 + i,
                 "volume": 1000,
             })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -238,7 +228,7 @@ class TestFactorCrossSectionalAnalysis:
                 "open": 100, "high": 101, "low": 99,
                 "close": 100, "volume": 1000,
             })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -252,8 +242,8 @@ class TestFactorCrossSectionalAnalysis:
 
     def test_sufficient_assets(self, workspace: Path):
         import duckdb
-        import pandas as pd
         import numpy as np
+        import pandas as pd
         conn = duckdb.connect(str(workspace / "data.duckdb"))
         conn.execute("DROP VIEW IF EXISTS ohlcv")
         dates = pd.date_range("2023-01-01", periods=30, freq="D")
@@ -268,7 +258,7 @@ class TestFactorCrossSectionalAnalysis:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -295,8 +285,8 @@ class TestFactorQuintileReturns:
 
     def test_with_data(self, workspace: Path):
         import duckdb
-        import pandas as pd
         import numpy as np
+        import pandas as pd
         conn = duckdb.connect(str(workspace / "data.duckdb"))
         conn.execute("DROP VIEW IF EXISTS ohlcv")
         dates = pd.date_range("2023-01-01", periods=30, freq="D")
@@ -311,7 +301,7 @@ class TestFactorQuintileReturns:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -339,8 +329,8 @@ class TestFactorICDecay:
 
     def test_with_data(self, workspace: Path):
         import duckdb
-        import pandas as pd
         import numpy as np
+        import pandas as pd
         conn = duckdb.connect(str(workspace / "data.duckdb"))
         conn.execute("DROP VIEW IF EXISTS ohlcv")
         dates = pd.date_range("2023-01-01", periods=30, freq="D")
@@ -355,7 +345,7 @@ class TestFactorICDecay:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -382,8 +372,8 @@ class TestFactorTurnover:
 
     def test_with_data(self, workspace: Path):
         import duckdb
-        import pandas as pd
         import numpy as np
+        import pandas as pd
         conn = duckdb.connect(str(workspace / "data.duckdb"))
         conn.execute("DROP VIEW IF EXISTS ohlcv")
         dates = pd.date_range("2023-01-01", periods=30, freq="D")
@@ -398,7 +388,7 @@ class TestFactorTurnover:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        df = pd.DataFrame(data)
+        pd.DataFrame(data)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -430,7 +420,7 @@ class TestStrategyCompare:
             strategy_dir = workspace / "strategies" / name / "runs"
             strategy_dir.mkdir(parents=True)
             tsv = strategy_dir / "results.tsv"
-            tsv.write_text(f"run\tcalmar\tsharpe\nrun_0001\t0.4\t0.8\n")
+            tsv.write_text("run\tcalmar\tsharpe\nrun_0001\t0.4\t0.8\n")
 
         tool = StrategyCompare()
         result = parse_result(tool.execute(
@@ -459,8 +449,8 @@ class TestDrawdownAnalysis:
         # Create mock equity curve as CSV
         equity_file = strategy_dir / "run_0001" / "equity.csv"
         equity_file.parent.mkdir(parents=True)
-        import pandas as pd
         import numpy as np
+        import pandas as pd
         dates = pd.date_range("2023-01-01", periods=100, freq="D")
         np.random.seed(42)
         equity_df = pd.DataFrame({
@@ -705,7 +695,7 @@ class TestToolDescriptions:
             if name in r.tool_names:
                 tool = r.get(name)
                 # Description should mention example or usage
-                desc_lower = tool.description.lower()
+                tool.description.lower()
                 # Just verify description is substantial (at least 50 chars)
                 assert len(tool.description) >= 30, \
                     f"{name} description too short ({len(tool.description)} chars)"

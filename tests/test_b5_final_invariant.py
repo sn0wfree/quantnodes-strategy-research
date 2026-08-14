@@ -14,7 +14,6 @@ We test this with realistic event sequences for each B5 write path.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -326,10 +325,8 @@ class TestB5FinalInvariant(unittest.TestCase):
 
     def test_invariant_with_dup_emits(self) -> None:
         """Same event emitted twice doesn't break invariant."""
-        from strategy_research.api.session.event_v2 import EventV2, EventType
-        e = EventV2.create("s1", 1, EventType.MESSAGE_RECEIVED, {
-            "message_id": "u1", "content": "hi", "role": "user",
-        })
+        from strategy_research.api.session.event_v2 import EventType, EventV2
+        EventV2.create('s1', 1, EventType.MESSAGE_RECEIVED, {'message_id': 'u1', 'content': 'hi', 'role': 'user'})
         # First emit
         self.v2.emit("s1", "message_received", {
             "message_id": "u1", "content": "hi", "role": "user",

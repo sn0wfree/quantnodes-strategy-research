@@ -1,7 +1,12 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pytest
-from strategy_research.core.engine.global_futures import GlobalFuturesEngine, _GLOBAL_FUTURES_MULTIPLIERS, _get_global_product_code
+
+from strategy_research.core.engine.global_futures import (
+    _GLOBAL_FUTURES_MULTIPLIERS,
+    GlobalFuturesEngine,
+    _get_global_product_code,
+)
 
 
 def _bar(date, close, name=True):

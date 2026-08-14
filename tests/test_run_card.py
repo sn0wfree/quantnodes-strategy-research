@@ -3,14 +3,11 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from strategy_research.core.run_card import (
     BACKTEST_SUMMARY_KEYS,
     SCHEMA_VERSION,
     write_run_card,
 )
-
 
 # ============================================================
 # 1. write_run_card 基础行为
@@ -39,7 +36,7 @@ def test_write_run_card_creates_run_dir(tmp_path):
 
     # write_run_card 不会自动创建 run_dir — 需 pre-create
     run_dir.mkdir(parents=True)
-    card = write_run_card(run_dir, config, metrics)
+    write_run_card(run_dir, config, metrics)
     assert (run_dir / "run_card.json").exists()
 
 

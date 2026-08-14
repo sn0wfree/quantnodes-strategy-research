@@ -54,7 +54,7 @@ def const_5() -> float:
 
 # 各算子的参数构造（每个算子的合法参数类型)
 
-def _args(op, s_a, s_b, df_a, const_5):
+def _args(op, s_a, s_b, df_a, const_5):  # noqa: C901
     """构造针对每个算子的参数列表."""
     if op in {"ts_mean", "ts_std", "ts_max", "ts_min", "ts_sum",
               "ts_skew", "ts_kurt", "ts_median", "ts_var", "ts_prod",
@@ -294,7 +294,7 @@ def test_ones_like_shape(s_a):
     """ones_like 应保持形状。"""
     fn = OPERATORS["ones_like"]
     r = fn(s_a)
-    assert hasattr(r, 'shape'), f"ones_like should have shape"
+    assert hasattr(r, 'shape'), "ones_like should have shape"
     if isinstance(r, pd.Series):
         assert r.shape == s_a.shape
         assert (r == 1).all()
@@ -777,7 +777,7 @@ def test_hl_range_positive(s_ohlcv):
 def test_hl_range_default_close(s_ohlcv):
     """close 参数可选, 默认用 (high+low)/2."""
     fn = OPERATORS["hl_range"]
-    r1 = fn(s_ohlcv["high"], s_ohlcv["low"], s_ohlcv["close"])
+    fn(s_ohlcv['high'], s_ohlcv['low'], s_ohlcv['close'])
     r2 = fn(s_ohlcv["high"], s_ohlcv["low"])  # 用 (h+l)/2 当 close
     # 应都非负, 但数值不等
     assert (r2.dropna() >= 0).all()
@@ -833,8 +833,8 @@ def test_close_to_high_basic(s_ohlcv):
     """若 close 是 10 日内最高, 比值 = 1.0."""
     fn = OPERATORS["close_to_high"]
     # 构造: close 永为 10 日最高
-    high = pd.Series([1.0]*5 + [2.0]*5, index=range(10))
-    close = pd.Series([3.0]*5 + [2.0]*5, index=range(10))  # 前 5 行 close > high (理论上不可能)
+    pd.Series([1.0] * 5 + [2.0] * 5, index=range(10))
+    pd.Series([3.0] * 5 + [2.0] * 5, index=range(10))
     # 简化: 让 high = close
     high2 = pd.Series([10.0]*10, index=range(10))
     close2 = pd.Series([10.0]*10, index=range(10))

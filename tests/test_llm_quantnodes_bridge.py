@@ -12,8 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
+from strategy_research.core.llm.config import LLMConfig
 from strategy_research.core.llm.quantnodes_bridge import (
     CONFIG_PATH,
     _apply_env_overrides,
@@ -21,8 +20,6 @@ from strategy_research.core.llm.quantnodes_bridge import (
     _load_single_path,
     load_quantnodes_llm_config,
 )
-from strategy_research.core.llm.config import LLMConfig
-
 
 # ── _expand_env_var ──────────────────────────────────────────────────
 

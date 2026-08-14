@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from strategy_research.core.goal.workflow_config import (
-    _PRESETS_DIR,
-    _USER_WORKFLOWS_DIR,
     list_goal_workflows,
     load_goal_workflow,
     save_goal_workflow,
 )
-
 
 # ────────────────────────── list_goal_workflows ──────────────────────────
 

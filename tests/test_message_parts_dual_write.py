@@ -9,12 +9,9 @@ The read path is unchanged in this commit. Commit 5 will switch it.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import sys
-import tempfile
 import time
-import uuid
 from pathlib import Path
 
 import pytest
@@ -36,7 +33,7 @@ def temp_db(monkeypatch, tmp_path):
     # Cleanup: close any open connection
     try:
         from strategy_research.api.routers.web_session import _get_db
-        with _get_db() as conn:
+        with _get_db():
             pass
     except Exception:
         pass
@@ -172,7 +169,7 @@ class TestMessagePartsDualWrite:
         sid = "test-sess-4"
         _create_session(db_path, sid)
 
-        from strategy_research.api.routers.web_session import persist_message, _row_to_message, _get_db
+        from strategy_research.api.routers.web_session import _get_db, _row_to_message, persist_message
 
         parts = [
             {"type": "text", "id": "t1", "text": "hi"},

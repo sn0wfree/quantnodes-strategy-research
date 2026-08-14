@@ -13,10 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from strategy_research.core.agent.compact import CompactConfig, compact_messages
+from strategy_research.core.agent.compact import CompactConfig
 from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.llm.config import LLMConfig
-
 
 # ── _persist_compaction_event propagates errors ──────────────
 

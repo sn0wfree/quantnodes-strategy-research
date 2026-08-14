@@ -13,7 +13,6 @@ counter. Verify:
 from __future__ import annotations
 
 from strategy_research.cli.tui.widgets.tools_rail import (
-    Milestone,
     TimelineEntry,
     ToolsRail,
 )

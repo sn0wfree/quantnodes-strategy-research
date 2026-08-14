@@ -5,15 +5,14 @@ from __future__ import annotations
 import pytest
 
 from strategy_research.cli.commands.slash_router import (
+    _ALIASES,
     SLASH_COMMANDS,
     Command,
-    _ALIASES,
     _parse_token,
     _score,
     find_exact,
     match_commands,
 )
-
 
 # ─── Command dataclass ─────────────────────────────────────────────────
 

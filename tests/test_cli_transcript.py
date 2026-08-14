@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
 from strategy_research.cli.ui.transcript import (

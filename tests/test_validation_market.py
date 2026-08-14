@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.core.validation.market import (
-    MarketType,
     SUPPORTED_MARKETS,
+    MarketType,
     bars_per_year,
     warn_if_unsupported_market,
 )

@@ -36,11 +36,10 @@ def temp_db(monkeypatch, tmp_path):
 
 @pytest.fixture
 def session_service(temp_db):
+    from strategy_research.api.routers.web_session import _get_db
+    from strategy_research.api.session.events import EventBus
     from strategy_research.api.session.service import SessionService
     from strategy_research.api.session.store import SessionStore
-    from strategy_research.api.session.events import EventBus
-
-    from strategy_research.api.routers.web_session import _get_db
     _get_db().close()  # ensure schema exists on temp_db
 
     bus = EventBus()

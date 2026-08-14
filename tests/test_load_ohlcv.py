@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.db import (
-    get_connection,
     init_db,
     load_ohlcv_data,
     load_price_data,

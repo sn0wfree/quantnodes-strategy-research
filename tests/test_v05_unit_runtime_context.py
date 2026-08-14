@@ -12,20 +12,16 @@ Covers:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
+from strategy_research.core.goal import context as goal_ctx
 from strategy_research.core.swarm.runtime import (
-    SwarmPreset,
     AgentResult,
+    SwarmPreset,
     SwarmResult,
     SwarmRuntime,
 )
 from strategy_research.core.workflow.types import AgentCall, AgentStatus
-from strategy_research.core.goal import context as goal_ctx
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # SwarmPreset / AgentResult / SwarmResult dataclasses
@@ -270,7 +266,7 @@ class TestSwarmRuntimeExecute:
             agents=[AgentCall(agent_name="a", prompt=".prompts/researcher.md")],
             dag={"a": []},
         )
-        result = rt.execute(preset, tmp_path, "task", hooks=[hook])
+        rt.execute(preset, tmp_path, 'task', hooks=[hook])
         hook.on_layer_start.assert_called()
         hook.on_agent_complete.assert_called()
         hook.on_layer_complete.assert_called()
@@ -287,7 +283,7 @@ class TestSwarmRuntimeExecute:
             ],
             dag={"a": [], "b": ["a"]},
         )
-        result = rt.execute(preset, tmp_path, "task", hooks=[hook])
+        rt.execute(preset, tmp_path, 'task', hooks=[hook])
         # Should stop after first layer
         hook.on_layer_start.assert_called_once()
 

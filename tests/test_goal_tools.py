@@ -3,26 +3,21 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from strategy_research.core.agent.tools import ToolContext
-
+from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.builtin_tools.goal_tools import (
-    CreateGoalTool,
     AddEvidenceTool,
     CompleteGoalTool,
+    CreateGoalTool,
     GetGoalStatusTool,
     ListGoalsTool,
     register_goal_tools,
 )
-from strategy_research.core.agent.builtin_tools import build_default_registry
-from strategy_research.core.agent.tools import ToolRegistry
-from strategy_research.core.goal import GoalStore, GoalStatus, EvidenceInput
-
+from strategy_research.core.agent.tools import ToolContext, ToolRegistry
+from strategy_research.core.goal import EvidenceInput, GoalStore
 
 # ── Goal Tool Unit Tests ────────────────────────────────────────────
 

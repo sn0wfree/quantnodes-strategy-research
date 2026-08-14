@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.hypothesis.registry import (
-    VALID_TRANSITIONS,
     Hypothesis,
     HypothesisRegistry,
 )
@@ -16,7 +15,6 @@ from strategy_research.core.hypothesis.validator import (
     ValidationResult,
     validate_hypothesis,
 )
-
 
 # ============================================================
 # Fixtures

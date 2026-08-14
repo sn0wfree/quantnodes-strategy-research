@@ -14,8 +14,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from strategy_research.api.routers.goal import router as goal_router
 from strategy_research.api.middleware import AuthMiddleware
+from strategy_research.api.routers.goal import router as goal_router
 
 
 @pytest.fixture

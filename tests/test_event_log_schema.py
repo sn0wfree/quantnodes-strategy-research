@@ -237,6 +237,7 @@ class TestEventLogIntegrationWithEnsureSchema(unittest.TestCase):
 
     def tearDown(self) -> None:
         import os
+
         import strategy_research.api.routers.web_session as ws
         ws._get_db_path = self._orig_get_db_path
         if self._orig_workspace_env is None:

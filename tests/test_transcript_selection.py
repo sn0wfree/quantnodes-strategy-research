@@ -11,10 +11,7 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 from strategy_research.cli.tui.widgets.transcript import TranscriptView
-
 
 # ---------------------------------------------------------------- helpers
 
@@ -24,11 +21,12 @@ def _make_tv() -> TranscriptView:
 
     Only tests write() and _plain_lines — does not mount the widget.
     """
-    from textual.strip import Strip
+    import io
+
+    from rich.console import Console as RichConsole
     from rich.segment import Segment
     from textual._cells import cell_len
-    import io
-    from rich.console import Console as RichConsole
+    from textual.strip import Strip
 
     tv = TranscriptView.__new__(TranscriptView)
     tv._stream_baseline = None

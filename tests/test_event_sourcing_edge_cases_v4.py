@@ -16,7 +16,6 @@ diminishing. These cover:
 """
 from __future__ import annotations
 
-import asyncio
 import gc
 import json
 import sqlite3
@@ -25,18 +24,14 @@ import tempfile
 import threading
 import time
 import unittest
-from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
 from strategy_research.api.session.event_v2 import EventType, EventV2
-from strategy_research.api.session.events import EventBus, SSEEvent
+from strategy_research.api.session.events import EventBus
 from strategy_research.api.session.projector import (
-    ProjectedMessage,
-    ProjectedPart,
     ProjectedSession,
     Projector,
 )
@@ -81,7 +76,8 @@ def _setup_db(db_path: Path, with_session: bool = True) -> None:
 
 
 try:
-    from hypothesis import given, settings, strategies as st
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
     from hypothesis.strategies import composite
 
     @composite
@@ -371,7 +367,7 @@ class TestEventBusV2ProcessRestart(unittest.TestCase):
         # count is preserved
         self.assertEqual(v2_2.count("s1"), 10)
 
-        tmp_path = db_path
+        db_path
         db_path.unlink(missing_ok=True)
 
 

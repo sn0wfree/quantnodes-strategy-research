@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -41,11 +40,7 @@ class TestGoalHypothesisValidationLifecycle:
         """Start a goal, run AgentLoop (auto-creates hypothesis), validate."""
         from strategy_research.core.goal import GoalStore
         store = GoalStore()
-        goal = store.replace_goal(
-            session_id="sess_e2e",
-            objective="Validate momentum hypothesis via Monte Carlo",
-            criteria=["Define universe", "Run backtest", "Validate"],
-        )
+        store.replace_goal(session_id='sess_e2e', objective='Validate momentum hypothesis via Monte Carlo', criteria=['Define universe', 'Run backtest', 'Validate'])
 
         # Mock the LLM to return stop immediately
         mock_response = MagicMock()
@@ -117,7 +112,8 @@ class TestGoalHypothesisValidationLifecycle:
     def test_goal_evidence_audit_complete_cycle(self, tmp_path):
         """Full goal lifecycle: start → evidence → audit → complete."""
         import hashlib
-        from strategy_research.core.goal import AuditRow, EvidenceInput, GoalStore, GoalStatus
+
+        from strategy_research.core.goal import AuditRow, EvidenceInput, GoalStatus, GoalStore
 
         store = GoalStore()
         goal = store.replace_goal(

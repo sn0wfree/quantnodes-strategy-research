@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from strategy_research.core.llm import openai_client as oc_mod
 from strategy_research.core.llm.config import LLMConfig
 from strategy_research.core.llm.errors import (
     LLMAuthError,
@@ -18,7 +19,6 @@ from strategy_research.core.llm.errors import (
     LLMRateLimitError,
     LLMServerError,
 )
-from strategy_research.core.llm import openai_client as oc_mod
 
 # Minimal provider adapter so the new ``adapter`` parameters of
 # _build_headers / _build_payload get exercised (see openai_client.py).

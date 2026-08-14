@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from strategy_research.core.workflow.builtin import load_definition
 from strategy_research.core.workflow.executor import WorkflowRunner
 from strategy_research.core.workflow.store import WorkflowStore
@@ -124,7 +122,7 @@ class TestAutoFlow:
         assert runner.replan_count == 0
 
     def test_plan_steps_execute_in_topological_order(self, tmp_path: Path):
-        order: list[str] = []
+        []
         def fake(**kwargs):
             role = kwargs.get("role")
             if role == "planner":

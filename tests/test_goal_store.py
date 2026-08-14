@@ -26,7 +26,6 @@ from strategy_research.core.goal import (
     StaleGoalError,
 )
 
-
 # ─── Fixtures ────────────────────────────────────────────────────────────
 
 

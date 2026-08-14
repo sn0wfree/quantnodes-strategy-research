@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from strategy_research.core.skills.loader import parse_skill_file
 from strategy_research.core.skills.models import Skill
 from strategy_research.core.skills.registry import SkillRegistry
-
 
 # ── Skill Model Tests ──────────────────────────────────────
 

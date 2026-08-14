@@ -17,9 +17,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
-import re
 import warnings
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -27,7 +25,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from strategy_research.core.agent.compact import CompactConfig
-
 
 # ════════════════════════════════════════════════════════════════════
 # Fix 1: _amaybe_compact no longer uses nested asyncio.run + to_thread

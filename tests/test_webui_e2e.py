@@ -1,6 +1,5 @@
 """E2E test for Web UI — full user flow."""
 
-import time
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,7 +21,7 @@ class TestE2EFlow:
             "password": "admin",
         })
         assert res.status_code == 200
-        token = res.json()["access_token"]
+        res.json()['access_token']
 
         # 2. Create session
         res = client.post("/api/chat/session", json={"title": "E2E Session"})

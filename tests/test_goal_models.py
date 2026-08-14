@@ -18,7 +18,6 @@ from strategy_research.core.goal.models import (
     StaleGoalError,
 )
 
-
 # ─── GoalStatus enum ─────────────────────────────────────────────────────
 
 

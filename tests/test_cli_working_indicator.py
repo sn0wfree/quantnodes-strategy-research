@@ -54,7 +54,7 @@ class TestSpinnerContextManager:
         # The Live render would normally spin on a TTY; force_terminal=False
         # makes it a no-op for capture.
         from io import StringIO
-        console = Console(file=StringIO(), force_terminal=False, width=80, record=False)
+        Console(file=StringIO(), force_terminal=False, width=80, record=False)
         s = ThinkingSpinner(verb="Loading…")
         with s as spinner:
             assert spinner is s

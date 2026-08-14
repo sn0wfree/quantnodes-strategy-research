@@ -12,11 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from strategy_research.core.engine.china_a import ChinaAEngine
 from strategy_research.core.engine.composite import CompositeEngine, _detect_market_simple
-from strategy_research.core.engine.crypto import CryptoEngine
-from strategy_research.core.engine.forex import ForexEngine
-from strategy_research.core.engine.global_equity import GlobalEquityEngine
 from strategy_research.core.engine.models import Position
 
 

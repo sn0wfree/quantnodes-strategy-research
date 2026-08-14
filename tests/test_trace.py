@@ -1,7 +1,12 @@
 """Tests for trace.py — TraceWriter JSONL trace writer."""
 from __future__ import annotations
-import json, os, sys, tempfile, unittest
+
+import os
+import sys
+import tempfile
+import unittest
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from strategy_research.core.agent.trace import TraceWriter, _env_int
 

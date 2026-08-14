@@ -6,10 +6,7 @@ plus autoresearch CLI helpers.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
 
 # ============================================================
 # Fixtures
@@ -87,7 +84,6 @@ class TestOnGoalCompleteHook:
 
     def test_unlinked_hypothesis_not_affected(self, goal_store, registry):
         """Hypotheses not linked to this goal should remain untouched."""
-        from strategy_research.core.goal import GoalStatus
         goal = goal_store.replace_goal(
             session_id="sess_hook2",
             objective="Test unlinked",

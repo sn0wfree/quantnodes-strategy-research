@@ -86,7 +86,7 @@ def real_llm_server() -> Iterator[dict]:
 @pytest.fixture
 def authenticated_page(real_llm_server, browser):
     """Login as admin and return a page ready for chat."""
-    from playwright.sync_api import BrowserContext, Page
+    from playwright.sync_api import BrowserContext
 
     base_url = real_llm_server["base_url"]
     ctx: BrowserContext = browser.new_context(
@@ -202,7 +202,7 @@ class TestRealBrowserChatFlow:
 
         # Check response mentions 42
         body = page.inner_text("body")
-        assert "42" in body, f"LLM didn't remember the number"
+        assert "42" in body, "LLM didn't remember the number"
 
     def test_error_display(self, authenticated_page):
         """Error toast shows when LLM fails."""

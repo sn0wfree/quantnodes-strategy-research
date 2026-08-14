@@ -11,10 +11,8 @@
 
 from __future__ import annotations
 
-import base64
 import importlib
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -206,12 +204,12 @@ def test_verify_token_returns_none_on_unknown_user_id_type(tmp_path, monkeypatch
     Implementation currently returns payload.get('sub') as-is; verify
     it round-trips strings but defensively returns None for non-str.
     """
-    from unittest.mock import patch as mpatch
     monkeypatch.setenv("JWT_SECRET", "k")
     at = _reload()
 
     # Build a forged-style payload with int sub via direct hmac.
-    import hmac, hashlib
+    import hashlib
+    import hmac
     payload = json.dumps({"sub": 12345, "exp": 9999999999}).encode()
     encoded = at._b64_encode(payload)
     sig = hmac.new(b"k", encoded.encode(), hashlib.sha256).digest()

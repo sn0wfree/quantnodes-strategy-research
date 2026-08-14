@@ -10,12 +10,9 @@
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-
 
 # ============================================================
 # 1. CheckResult 数据类
@@ -40,8 +37,9 @@ class TestCheckResult:
 
     def test_frozen(self):
         """frozen dataclass 不允许修改字段。"""
-        from strategy_research.core.preflight import CheckResult
         from dataclasses import FrozenInstanceError
+
+        from strategy_research.core.preflight import CheckResult
         cr = CheckResult(name="X", status="ready", message="ok")
         with pytest.raises(FrozenInstanceError):
             cr.name = "Y"  # type: ignore[misc]
@@ -191,8 +189,8 @@ class TestCheckOHLCVIntegrity:
 
     def test_ready_for_ohlcv_data(self, tmp_path: Path):
         """OHLCV 完整时返回 ready。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.preflight import _check_ohlcv_integrity
 
         init_db(tmp_path)

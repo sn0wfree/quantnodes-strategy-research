@@ -17,25 +17,29 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import tempfile
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
+from strategy_research.core.study.attribution import (
+    AttributionOutcome,
+    classify_attribution,
+    compute_precision,
+)
+from strategy_research.core.study.executor import (
+    acceptance_config_from_targets,
+)
+from strategy_research.core.study.executor import (
+    meets_metric_targets as executor_meets_metric_targets,
+)
 from strategy_research.core.study.models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,
     StudyDirective,
-    StudyRecord,
     StudyRoundRecord,
     StudyStatus,
     default_metric_targets,
 )
-from strategy_research.core.study.store import StudyStore
 from strategy_research.core.study.runner import (
     AutoresearchRunner,
     ControlToken,
@@ -44,21 +48,12 @@ from strategy_research.core.study.runner import (
     _metric_pass_set,
     meets_metric_targets,
 )
-from strategy_research.core.study.executor import (
-    acceptance_config_from_targets,
-    meets_metric_targets as executor_meets_metric_targets,
-)
 from strategy_research.core.study.scheduler import (
     StudyScheduler,
-    make_event_bus_emitter,
     _EventBusEmitter,
+    make_event_bus_emitter,
 )
-from strategy_research.core.study.attribution import (
-    AttributionOutcome,
-    classify_attribution,
-    compute_precision,
-)
-
+from strategy_research.core.study.store import StudyStore
 
 # ── fixtures ────────────────────────────────────────────────────────
 

@@ -18,7 +18,6 @@ from typing import Iterator
 import pytest
 import requests
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = REPO_ROOT / "webui" / "static"
 

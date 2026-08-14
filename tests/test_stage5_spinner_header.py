@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from unittest import mock
 
-from strategy_research.cli.tui.widgets.thinking_spinner import ThinkingSpinner, _VERB_POOL
 from strategy_research.cli.tui.widgets.status_header import StatusHeader
+from strategy_research.cli.tui.widgets.thinking_spinner import _VERB_POOL, ThinkingSpinner
 
 
 class TestThinkingSpinnerVerbPool:

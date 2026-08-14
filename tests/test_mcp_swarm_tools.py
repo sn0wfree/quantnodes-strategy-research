@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -92,8 +91,7 @@ class TestRunSwarm:
     def test_get_status_after_run(self, server, tmp_path):
         """run_swarm 后 get_swarm_status 应能找到。"""
         with patch("strategy_research.core.swarm.runtime.SwarmRuntime.execute") as mock_exec:
-            from strategy_research.core.swarm.runtime import AgentResult, SwarmResult
-            from strategy_research.core.workflow.types import AgentStatus
+            from strategy_research.core.swarm.runtime import SwarmResult
 
             mock_exec.return_value = SwarmResult(
                 run_id="status_test_001",

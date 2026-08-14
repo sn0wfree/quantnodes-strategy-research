@@ -19,9 +19,8 @@ What we check:
 """
 from __future__ import annotations
 
-from strategy_research.cli.tui.widgets.transcript import TranscriptView
 from strategy_research.cli.tui.widgets.streaming_text import StreamingText
-
+from strategy_research.cli.tui.widgets.transcript import TranscriptView
 
 # ---------------------------------------------------------------- minimal widget fixture
 
@@ -57,9 +56,9 @@ def _make_tv() -> TranscriptView:
     tv.__dict__["virtual_size"] = Size(0, 0)
     tv.__dict__["auto_scroll"] = True
     # Mock write to push directly to _lines without Rich rendering
-    from textual.strip import Strip
     from rich.segment import Segment
     from textual._cells import cell_len
+    from textual.strip import Strip
 
     def _stub_write(content, *args, **kwargs):
         text = str(content)

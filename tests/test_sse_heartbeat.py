@@ -38,7 +38,8 @@ async def test_event_generator_yields_connected_first():
     chunk so FastAPI flushes response headers and the browser fires
     onopen without waiting for the first real event or the 15s
     heartbeat."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
+
     from fastapi import Request
 
     # Build a minimal request with a unique session id so register_session
@@ -53,7 +54,7 @@ async def test_event_generator_yields_connected_first():
     fake_buffer.replay_from.return_value = []
 
     with patch("strategy_research.api.routers.chat.sse_buffer", fake_buffer), \
-            patch("strategy_research.api.routers.web_session._fetch_session_owned") as mock_fetch:
+            patch("strategy_research.api.routers.web_session._fetch_session_owned") as _:
         # Import inside the patch so the route module picks up the
         # mocked sse_buffer.
         from strategy_research.api.routers.chat import chat_events

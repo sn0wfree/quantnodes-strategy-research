@@ -63,7 +63,7 @@ class TestGetEventStore(unittest.TestCase):
 
     def test_container_wins(self):
         """An attached container's EventStore is used."""
-        from strategy_research.api.container import AppContainer, build_container
+        from strategy_research.api.container import build_container
         from strategy_research.api.dependencies import get_event_store
 
         container = build_container(db_path=Path("/tmp/deps_test.db"))

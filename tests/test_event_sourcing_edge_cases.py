@@ -11,7 +11,6 @@ These tests cover edge cases not in the main test files:
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import sys
 import tempfile
@@ -25,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from strategy_research.api.session.event_bus_v2 import EventBusV2
 from strategy_research.api.session.event_v2 import EventType, EventV2
 from strategy_research.api.session.events import EventBus
-from strategy_research.api.session.projector import Projector, ProjectedSession
+from strategy_research.api.session.projector import ProjectedSession, Projector
 
 
 def _setup_db(db_path: Path, with_sessions: bool = True) -> None:

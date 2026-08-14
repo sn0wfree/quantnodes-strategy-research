@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from strategy_research.core.validation import MarketType
 from strategy_research.core.validation.runner import run_validation
