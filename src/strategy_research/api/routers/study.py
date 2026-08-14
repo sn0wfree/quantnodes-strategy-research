@@ -277,115 +277,56 @@ async def study_start(req: StudyStartRequest, request: Request):
     from ...core.study.bootstrap import create_study_record
 
     try:
-        if req.executor_type == "autoresearch":
-            from ...core.study import StudyStatus
-            # AEGIS: round-based AutoresearchRunner via the scheduler.
-            # Shared orchestration (validation / ledger / autonomous dir)
-            # lives in core/study/bootstrap.py.
-            study = create_study_record(
-                owner_session_id=req.session_id,
-                objective=req.objective,
-                workspace_path=req.workspace_path,
-                strategy_name=req.strategy_name,
-                metric_targets=(
-                    [t.model_dump() for t in req.metric_targets]
-                    if req.metric_targets else None
+        if req.executor_type == "workflow":
+            # E3: split — workflow execution has its own router
+            # (``POST /api/goal/workflow/start``, workflow.py). This
+            # endpoint is round-based autoresearch only.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "executor_type='workflow' is not supported by /study/start; "
+                    "use POST /api/goal/workflow/start for DAG workflows"
                 ),
-                budget_token=req.budget_token,
-                budget_turn=req.budget_turn,
-                budget_time_seconds=req.budget_time_seconds,
-                cooldown_base=req.cooldown_base,
-                cooldown_jitter=req.cooldown_jitter,
-                min_cooldown=req.min_cooldown,
-                max_rounds=req.max_rounds,
-                behavior=req.behavior,
-                monitor_interval_seconds=req.monitor_interval_seconds,
-                guidance_md=req.guidance_md,
-                lazy_detection_interval=req.lazy_detection_interval,
-                keep_recent=req.keep_recent,
             )
-            # Queue without blocking the request; uncaught submit errors
-            # are logged via the done callback.
-            sched = _get_study_scheduler()
-            import asyncio
-            task = asyncio.create_task(sched.submit(study))
-            task.add_done_callback(log_task_exception)
-            return {
-                "status": "ok",
-                "study_id": study.study_id,
-                "goal_id": study.goal_id,
-                "session_id": study.study_id,
-                "execution_status": StudyStatus.QUEUED.value,
-                "executor_type": "autoresearch",
-            }
-        # executor_type == "workflow": single DAG execution via
-        # GoalWorkflowRunner (kept in the API layer — needs session_service).
-        from ...core.goal import GoalStore
-        from ...core.goal.context import default_goal_criteria
-        from ...core.goal.workflow import GoalWorkflowRunner
-        from ...core.goal.workflow_config import build_autoresearch_workflow_config
-        from ...core.study import StudyStatus, StudyStore, default_metric_targets
-        from ...core.study.bootstrap import validate_workspace_strategy
-        from .chat import _get_session_service
-
-        ws = validate_workspace_strategy(req.workspace_path, req.strategy_name)
-        targets = (
-            [t.model_dump() for t in req.metric_targets]
-            if req.metric_targets else default_metric_targets()
-        )
-        with StudyStore() as store:
-            study = store.create_study(
-                owner_session_id=req.session_id,
-                goal_id=None,
-                objective=req.objective,
-                workspace_path=req.workspace_path,
-                strategy_name=req.strategy_name,
-                metric_targets=targets,
-                budget_token=req.budget_token,
-                budget_turn=req.budget_turn,
-                budget_time_seconds=req.budget_time_seconds,
-                cooldown_base=req.cooldown_base,
-                cooldown_jitter=req.cooldown_jitter,
-                min_cooldown=req.min_cooldown,
-                max_rounds=req.max_rounds,
-                behavior=req.behavior,
-                monitor_interval_seconds=req.monitor_interval_seconds,
-            )
-            goal_store = GoalStore()
-            goal = goal_store.replace_goal(
-                session_id=study.study_id,
-                objective=req.objective,
-                criteria=default_goal_criteria(),
-                supersede=False,
-            )
-            study = store.update_goal_id(study.study_id, goal.goal_id)
-
-        config = build_autoresearch_workflow_config(
-            strategy_name=req.strategy_name,
+        from ...core.study import StudyStatus
+        # AEGIS: round-based AutoresearchRunner via the scheduler.
+        # Shared orchestration (validation / ledger / autonomous dir)
+        # lives in core/study/bootstrap.py.
+        study = create_study_record(
+            owner_session_id=req.session_id,
             objective=req.objective,
-            metric_targets=targets,
-            monitor_interval_seconds=req.monitor_interval_seconds,
+            workspace_path=req.workspace_path,
+            strategy_name=req.strategy_name,
+            metric_targets=(
+                [t.model_dump() for t in req.metric_targets]
+                if req.metric_targets else None
+            ),
+            budget_token=req.budget_token,
             budget_turn=req.budget_turn,
             budget_time_seconds=req.budget_time_seconds,
+            cooldown_base=req.cooldown_base,
+            cooldown_jitter=req.cooldown_jitter,
+            min_cooldown=req.min_cooldown,
+            max_rounds=req.max_rounds,
+            behavior=req.behavior,
+            monitor_interval_seconds=req.monitor_interval_seconds,
+            guidance_md=req.guidance_md,
+            lazy_detection_interval=req.lazy_detection_interval,
+            keep_recent=req.keep_recent,
         )
-
-        session_service = _get_session_service()
-        runner = GoalWorkflowRunner(
-            config=config,
-            session_id=req.session_id,
-            session_service=session_service,
-            workspace=ws,
-        )
-        runner.set_goal_id(goal.goal_id)
-        # Start in background (non-blocking). A5: log uncaught exceptions.
+        # Queue without blocking the request; uncaught submit errors
+        # are logged via the done callback.
+        sched = _get_study_scheduler()
         import asyncio
-        task = asyncio.create_task(runner.start(req.objective))
+        task = asyncio.create_task(sched.submit(study))
         task.add_done_callback(log_task_exception)
         return {
             "status": "ok",
             "study_id": study.study_id,
             "goal_id": study.goal_id,
+            "session_id": study.study_id,
             "execution_status": StudyStatus.QUEUED.value,
+            "executor_type": "autoresearch",
         }
     except HTTPException:
         raise

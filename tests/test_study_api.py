@@ -969,3 +969,22 @@ async def test_summary_includes_monitor_state(_app_env, tmp_path, monkeypatch):
         assert ms["drift_count"] == 1  # drift=True 一次
         assert ms["interval_seconds"] == 60
         assert ms["last_check_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_workflow_executor_type(_app_env):
+    """E3: /study/start 只接受 autoresearch；workflow 引导到专用端点。"""
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        body = {
+            "session_id": "sess-1", "objective": "x",
+            "workspace_path": str(_app_env), "strategy_name": "demo_strategy",
+            "executor_type": "workflow",
+        }
+        r = await client.post("/api/study/start", json=body)
+        assert r.status_code == 400
+        assert "workflow" in r.json()["detail"]
