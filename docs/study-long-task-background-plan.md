@@ -179,6 +179,13 @@ core/autoresearch.py                 — study 场景迭代上限 8→10（2 角
 - engine 进度行去掉"末尾补打"（整除时多 1 行，改为 metrics done 表完成）
 - `_make_spawn_fn` 加 max_iterations 透传时曾重复参数（脚本替换误伤），已修复
 
+### 追加轮：A（LLM 流式墙钟）落地（2026-08-14，`e546446`）
+
+- `LLMConfig.wallclock_timeout_s` 默认 **1800s**（30min）；env `SR_AGENT_WALLCLOCK_TIMEOUT` 注入（`_env_to_overrides`）；**≤0 禁用**
+- `stream()`/`astream()`：请求级 `deadline`（monotonic）——每 chunk 到达时 + 每次重试开始前检查，超时抛 `LLMTimeoutError("wall-clock ...")`；**重试穿透**（墙钟超时不再重试）
+- 语义：httpx 60s 是"单次读等待"，墙钟是"整个请求总预算"——慢吐流（每 59s 一行永不 finish）由墙钟兜底
+- 测试 `test_llm_wallclock.py` 7 个：sync/async 慢吐命中、正常流通过、0 禁用、重试前超时即抛、env 注入、默认值
+
 ## 11. 风险与对策
 
 | 风险 | 等级 | 缓解 |
