@@ -3187,6 +3187,456 @@
         }
       }
     },
+    "/api/study/{study_id}/rounds/{round_num}/artifacts": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Round Artifacts",
+        "description": "List files produced by a round (round dir + run dirs), newest first.\n\nFiles: manifest.json / summary.md at round root, plus everything\nunder the run_* directories (strategy.py, config.yaml, agents/*,\nbacktest logs...).",
+        "operationId": "study_round_artifacts_api_study__study_id__rounds__round_num__artifacts_get",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "round_num",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Round Num"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyRoundArtifactsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/rounds/{round_num}/manifest": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Round Manifest",
+        "description": "Round manifest.json content (hypothesis / changes / metrics / next).",
+        "operationId": "study_round_manifest_api_study__study_id__rounds__round_num__manifest_get",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "round_num",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Round Num"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyRoundManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/rounds/{round_num}/diff": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Round Diff",
+        "description": "Unified diff of the adopted strategy.py between two rounds.\n\n``against=0`` diffs against the baseline strategy (ws/strategies/\n<name>/baseline/strategy.py). Otherwise diffs round ``against``'s\nadopted run strategy vs round ``round_num``'s.",
+        "operationId": "study_round_diff_api_study__study_id__rounds__round_num__diff_get",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "round_num",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Round Num"
+            }
+          },
+          {
+            "name": "against",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Against"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyRoundDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/rounds/{round_num}/adopt": {
+      "post": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Round Adopt",
+        "description": "Adopt a round's strategy.py as the new round-start baseline.\n\nNON-DESTRUCTIVE: copies the round's adopted run strategy.py into the\nstudy root's baseline dir (``ws/study/{id}/baseline/strategy.py``),\noverwriting the study's own baseline — the strategies/<name>/baseline\n(shared across studies) is left untouched. Safe to call while the\nstudy is paused/interrupted.",
+        "operationId": "study_round_adopt_api_study__study_id__rounds__round_num__adopt_post",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "round_num",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Round Num"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyAdoptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/hanging_events": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Hanging Events",
+        "description": "Recent watchdog / stall / breaker events for one study.\n\nThe UI shows a badge count + recent list so operators can tell at a\nglance whether a study has been killed by the watchdog vs. completed\nnormally.",
+        "operationId": "study_hanging_events_api_study__study_id__hanging_events_get",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 720,
+              "minimum": 1,
+              "default": 24,
+              "title": "Hours"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyHangingEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/available_actions": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Available Actions",
+        "description": "Actions the current status permits (drives the UI's buttons).",
+        "operationId": "study_available_actions_api_study__study_id__available_actions_get",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyAvailableActionsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/actions/{action_name}": {
+      "post": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Dispatch Action",
+        "description": "Unified action entrypoint: pause / resume / resume_interrupted /\ncancel / redo (see ``GET /available_actions`` for what's allowed now).\n\nReturns 409 when the action is not allowed in the current status —\nthe UI must render buttons only from ``available_actions``.",
+        "operationId": "study_dispatch_action_api_study__study_id__actions__action_name__post",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "action_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StudyActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/{study_id}/rounds/{round_num}/redo": {
+      "post": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Study Round Redo",
+        "description": "Redo round ``round_num``: discard its artifacts + state, re-queue\nthe study to start again from round ``round_num - 1``.\n\nDestructive (removes the round's run dir + DB row); the study must\nnot be currently running.",
+        "operationId": "study_round_redo_api_study__study_id__rounds__round_num__redo_post",
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Study Id"
+            }
+          },
+          {
+            "name": "round_num",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Round Num"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/schedule/create": {
       "post": {
         "tags": [
@@ -4570,6 +5020,35 @@
   },
   "components": {
     "schemas": {
+      "ArtifactItem": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "mtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "size"
+        ],
+        "title": "ArtifactItem"
+      },
       "ChangePassword": {
         "properties": {
           "old_password": {
@@ -4663,6 +5142,24 @@
           "content"
         ],
         "title": "ChatMessage"
+      },
+      "DiffLine": {
+        "properties": {
+          "line": {
+            "type": "string",
+            "title": "Line"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "kind"
+        ],
+        "title": "DiffLine"
       },
       "DirectiveModel": {
         "properties": {
@@ -5012,6 +5509,62 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HangingEventItem": {
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "study_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Study Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "created_at_iso": {
+            "type": "string",
+            "title": "Created At Iso"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_type",
+          "created_at",
+          "created_at_iso"
+        ],
+        "title": "HangingEventItem"
       },
       "HypothesisCreateRequest": {
         "properties": {
@@ -5482,6 +6035,47 @@
         ],
         "title": "SendMessageResponse"
       },
+      "StudyActionItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "destructive": {
+            "type": "boolean",
+            "title": "Destructive",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label"
+        ],
+        "title": "StudyActionItem"
+      },
+      "StudyActionRequest": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "title": "StudyActionRequest"
+      },
       "StudyActionResponse": {
         "properties": {
           "status": {
@@ -5504,6 +6098,70 @@
           "action"
         ],
         "title": "StudyActionResponse"
+      },
+      "StudyAdoptResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "study_id": {
+            "type": "string",
+            "title": "Study Id"
+          },
+          "round": {
+            "type": "integer",
+            "title": "Round"
+          },
+          "adopted_run_dir": {
+            "type": "string",
+            "title": "Adopted Run Dir"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "study_id",
+          "round",
+          "adopted_run_dir",
+          "note"
+        ],
+        "title": "StudyAdoptResponse"
+      },
+      "StudyAvailableActionsResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "study_id": {
+            "type": "string",
+            "title": "Study Id"
+          },
+          "execution_status": {
+            "type": "string",
+            "title": "Execution Status"
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/StudyActionItem"
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "study_id",
+          "execution_status",
+          "actions"
+        ],
+        "title": "StudyAvailableActionsResponse"
       },
       "StudyDirectiveCreatedResponse": {
         "properties": {
@@ -5625,6 +6283,41 @@
           "text"
         ],
         "title": "StudyGuidanceResponse"
+      },
+      "StudyHangingEventsResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "study_id": {
+            "type": "string",
+            "title": "Study Id"
+          },
+          "window_hours": {
+            "type": "number",
+            "title": "Window Hours"
+          },
+          "by_type": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "By Type"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/HangingEventItem"
+            },
+            "type": "array",
+            "title": "Recent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "study_id",
+          "window_hours"
+        ],
+        "title": "StudyHangingEventsResponse"
       },
       "StudyJournalResponse": {
         "properties": {
@@ -5801,6 +6494,113 @@
           "studies"
         ],
         "title": "StudyListResponse"
+      },
+      "StudyRoundArtifactsResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "study_id": {
+            "type": "string",
+            "title": "Study Id"
+          },
+          "round": {
+            "type": "integer",
+            "title": "Round"
+          },
+          "round_dir": {
+            "type": "string",
+            "title": "Round Dir"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactItem"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "study_id",
+          "round",
+          "round_dir",
+          "artifacts"
+        ],
+        "title": "StudyRoundArtifactsResponse"
+      },
+      "StudyRoundDiffResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "study_id": {
+            "type": "string",
+            "title": "Study Id"
+          },
+          "round_a": {
+            "type": "integer",
+            "title": "Round A"
+          },
+          "round_b": {
+            "type": "integer",
+            "title": "Round B"
+          },
+          "diff": {
+            "items": {
+              "$ref": "#/components/schemas/DiffLine"
+            },
+            "type": "array",
+            "title": "Diff"
+          },
+          "stats": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "study_id",
+          "round_a",
+          "round_b",
+          "diff",
+          "stats"
+        ],
+        "title": "StudyRoundDiffResponse"
+      },
+      "StudyRoundManifestResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "study_id": {
+            "type": "string",
+            "title": "Study Id"
+          },
+          "round": {
+            "type": "integer",
+            "title": "Round"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Manifest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "study_id",
+          "round",
+          "manifest"
+        ],
+        "title": "StudyRoundManifestResponse"
       },
       "StudyRoundModel": {
         "properties": {

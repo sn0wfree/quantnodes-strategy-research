@@ -1392,6 +1392,192 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/study/{study_id}/rounds/{round_num}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Study Round Artifacts
+         * @description List files produced by a round (round dir + run dirs), newest first.
+         *
+         *     Files: manifest.json / summary.md at round root, plus everything
+         *     under the run_* directories (strategy.py, config.yaml, agents/*,
+         *     backtest logs...).
+         */
+        get: operations["study_round_artifacts_api_study__study_id__rounds__round_num__artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/rounds/{round_num}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Study Round Manifest
+         * @description Round manifest.json content (hypothesis / changes / metrics / next).
+         */
+        get: operations["study_round_manifest_api_study__study_id__rounds__round_num__manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/rounds/{round_num}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Study Round Diff
+         * @description Unified diff of the adopted strategy.py between two rounds.
+         *
+         *     ``against=0`` diffs against the baseline strategy (ws/strategies/
+         *     <name>/baseline/strategy.py). Otherwise diffs round ``against``'s
+         *     adopted run strategy vs round ``round_num``'s.
+         */
+        get: operations["study_round_diff_api_study__study_id__rounds__round_num__diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/rounds/{round_num}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Study Round Adopt
+         * @description Adopt a round's strategy.py as the new round-start baseline.
+         *
+         *     NON-DESTRUCTIVE: copies the round's adopted run strategy.py into the
+         *     study root's baseline dir (``ws/study/{id}/baseline/strategy.py``),
+         *     overwriting the study's own baseline — the strategies/<name>/baseline
+         *     (shared across studies) is left untouched. Safe to call while the
+         *     study is paused/interrupted.
+         */
+        post: operations["study_round_adopt_api_study__study_id__rounds__round_num__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/hanging_events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Study Hanging Events
+         * @description Recent watchdog / stall / breaker events for one study.
+         *
+         *     The UI shows a badge count + recent list so operators can tell at a
+         *     glance whether a study has been killed by the watchdog vs. completed
+         *     normally.
+         */
+        get: operations["study_hanging_events_api_study__study_id__hanging_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/available_actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Study Available Actions
+         * @description Actions the current status permits (drives the UI's buttons).
+         */
+        get: operations["study_available_actions_api_study__study_id__available_actions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/actions/{action_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Study Dispatch Action
+         * @description Unified action entrypoint: pause / resume / resume_interrupted /
+         *     cancel / redo (see ``GET /available_actions`` for what's allowed now).
+         *
+         *     Returns 409 when the action is not allowed in the current status —
+         *     the UI must render buttons only from ``available_actions``.
+         */
+        post: operations["study_dispatch_action_api_study__study_id__actions__action_name__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/{study_id}/rounds/{round_num}/redo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Study Round Redo
+         * @description Redo round ``round_num``: discard its artifacts + state, re-queue
+         *     the study to start again from round ``round_num - 1``.
+         *
+         *     Destructive (removes the round's run dir + DB row); the study must
+         *     not be currently running.
+         */
+        post: operations["study_round_redo_api_study__study_id__rounds__round_num__redo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedule/create": {
         parameters: {
             query?: never;
@@ -2086,6 +2272,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ArtifactItem */
+        ArtifactItem: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime?: string | null;
+        };
         /** ChangePassword */
         ChangePassword: {
             /** Old Password */
@@ -2109,6 +2304,13 @@ export interface components {
             model?: string | null;
             /** Thinking */
             thinking?: string | null;
+        };
+        /** DiffLine */
+        DiffLine: {
+            /** Line */
+            line: string;
+            /** Kind */
+            kind: string;
         };
         /** DirectiveModel */
         DirectiveModel: {
@@ -2231,6 +2433,21 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HangingEventItem */
+        HangingEventItem: {
+            /** Event Type */
+            event_type: string;
+            /** Study Id */
+            study_id?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /** Created At */
+            created_at: number;
+            /** Created At Iso */
+            created_at_iso: string;
         };
         /** HypothesisCreateRequest */
         HypothesisCreateRequest: {
@@ -2427,6 +2644,23 @@ export interface components {
             /** Attempt Id */
             attempt_id?: string | null;
         };
+        /** StudyActionItem */
+        StudyActionItem: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Destructive
+             * @default false
+             */
+            destructive: boolean;
+        };
+        /** StudyActionRequest */
+        StudyActionRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
         /** StudyActionResponse */
         StudyActionResponse: {
             /** Status */
@@ -2435,6 +2669,30 @@ export interface components {
             study_id: string;
             /** Action */
             action: string;
+        };
+        /** StudyAdoptResponse */
+        StudyAdoptResponse: {
+            /** Status */
+            status: string;
+            /** Study Id */
+            study_id: string;
+            /** Round */
+            round: number;
+            /** Adopted Run Dir */
+            adopted_run_dir: string;
+            /** Note */
+            note: string;
+        };
+        /** StudyAvailableActionsResponse */
+        StudyAvailableActionsResponse: {
+            /** Status */
+            status: string;
+            /** Study Id */
+            study_id: string;
+            /** Execution Status */
+            execution_status: string;
+            /** Actions */
+            actions: components["schemas"]["StudyActionItem"][];
         };
         /** StudyDirectiveCreatedResponse */
         StudyDirectiveCreatedResponse: {
@@ -2472,6 +2730,21 @@ export interface components {
             body?: string | null;
             /** Text */
             text: string;
+        };
+        /** StudyHangingEventsResponse */
+        StudyHangingEventsResponse: {
+            /** Status */
+            status: string;
+            /** Study Id */
+            study_id: string;
+            /** Window Hours */
+            window_hours: number;
+            /** By Type */
+            by_type?: {
+                [key: string]: unknown;
+            };
+            /** Recent */
+            recent?: components["schemas"]["HangingEventItem"][];
         };
         /** StudyJournalResponse */
         StudyJournalResponse: {
@@ -2523,6 +2796,49 @@ export interface components {
             studies: components["schemas"]["StudyListItem"][];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /** StudyRoundArtifactsResponse */
+        StudyRoundArtifactsResponse: {
+            /** Status */
+            status: string;
+            /** Study Id */
+            study_id: string;
+            /** Round */
+            round: number;
+            /** Round Dir */
+            round_dir: string;
+            /** Artifacts */
+            artifacts: components["schemas"]["ArtifactItem"][];
+        };
+        /** StudyRoundDiffResponse */
+        StudyRoundDiffResponse: {
+            /** Status */
+            status: string;
+            /** Study Id */
+            study_id: string;
+            /** Round A */
+            round_a: number;
+            /** Round B */
+            round_b: number;
+            /** Diff */
+            diff: components["schemas"]["DiffLine"][];
+            /** Stats */
+            stats: {
+                [key: string]: unknown;
+            };
+        };
+        /** StudyRoundManifestResponse */
+        StudyRoundManifestResponse: {
+            /** Status */
+            status: string;
+            /** Study Id */
+            study_id: string;
+            /** Round */
+            round: number;
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
         };
         /** StudyRoundModel */
         StudyRoundModel: {
@@ -5127,6 +5443,269 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StudyRoundSummaryMdResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_round_artifacts_api_study__study_id__rounds__round_num__artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+                round_num: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyRoundArtifactsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_round_manifest_api_study__study_id__rounds__round_num__manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+                round_num: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyRoundManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_round_diff_api_study__study_id__rounds__round_num__diff_get: {
+        parameters: {
+            query?: {
+                against?: number;
+            };
+            header?: never;
+            path: {
+                study_id: string;
+                round_num: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyRoundDiffResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_round_adopt_api_study__study_id__rounds__round_num__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+                round_num: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyAdoptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_hanging_events_api_study__study_id__hanging_events_get: {
+        parameters: {
+            query?: {
+                hours?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                study_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyHangingEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_available_actions_api_study__study_id__available_actions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyAvailableActionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_dispatch_action_api_study__study_id__actions__action_name__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+                action_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StudyActionRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    study_round_redo_api_study__study_id__rounds__round_num__redo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+                round_num: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyActionResponse"];
                 };
             };
             /** @description Validation Error */
