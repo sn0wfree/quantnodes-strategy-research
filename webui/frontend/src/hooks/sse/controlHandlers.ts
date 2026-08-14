@@ -73,6 +73,23 @@ export const compact: SSEHandler = (data, ctx) => {
   })
 }
 
+/** C4.2: compact.count — observability event for compact operations. */
+export const compactCount: SSEHandler = (data) => {
+  const { messages_before, messages_after, tokens_before, tokens_after } = data as {
+    messages_before?: number
+    messages_after?: number
+    tokens_before?: number
+    tokens_after?: number
+  }
+  if (messages_before != null && messages_after != null) {
+    // Log for debugging — the banner already shows via compact.ended
+    console.log(
+      `[compact] ${messages_before} → ${messages_after} messages, ` +
+      `${tokens_before ?? '?'} → ${tokens_after ?? '?'} tokens`,
+    )
+  }
+}
+
 /**
  * Defensive cleanup: clear `isStreaming` on every part of every
  * assistant message. The per-protocol handlers (text.ended /

@@ -483,6 +483,11 @@ class APIClient {
         session_id: string
         actions: Array<{ name: string; label: string; destructive: string }>
       }>(`/chat/session/${sessionId}/available_actions`),
+
+    export: (sessionId: string, format: 'markdown' | 'json' = 'markdown') =>
+      this.get<string>(
+        `/chat/session/${sessionId}/export?format=${format}`,
+      ),
   }
 
   definitionRuns = {

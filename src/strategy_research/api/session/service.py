@@ -1420,6 +1420,21 @@ class SessionService:
         # EventBusV2.flush_to_messages=True ensures messages table is updated.
         if layers:
             try:
+                # C4.2: emit compact.count with message counts for observability
+                msg_count_before = len(messages)
+                msg_count_after = len(compressed) if compressed else msg_count_before
+                self.event_bus.emit(
+                    session_id,
+                    "compact.count",
+                    {
+                        "messages_before": msg_count_before,
+                        "messages_after": msg_count_after,
+                        "tokens_before": before_tokens,
+                        "tokens_after": after_tokens,
+                        "layers": layers,
+                    },
+                )
+
                 # opencode-aligned: emit compact.ended with the
                 # compressed set. The projector KEEPS all original
                 # messages in the projection (chat record preserved)

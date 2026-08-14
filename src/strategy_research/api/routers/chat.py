@@ -807,6 +807,63 @@ async def chat_available_actions(session_id: str, request: Request):
     }
 
 
+@router.get("/session/{session_id}/export")
+async def chat_export(
+    session_id: str,
+    request: Request,
+    format: str = Query("markdown", regex="^(markdown|json)$"),
+):
+    """C4: export chat history as markdown or JSON.
+
+    Returns the formatted content as a plain-text response (not JSON)
+    so the browser can offer a download.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _fetch_session_owned(_get_db(), session_id, user_id)
+    service = _get_session_service()
+    messages = service.store.get_messages(session_id, limit=10000)
+
+    if format == "json":
+        import json
+        data = [
+            {
+                "role": m.role,
+                "content": m.content,
+                "message_type": m.message_type,
+                "created_at": m.created_at,
+                "message_id": m.message_id,
+            }
+            for m in messages
+        ]
+        return PlainTextResponse(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            media_type="application/json",
+        )
+
+    # Markdown format
+    lines: list[str] = []
+    for m in messages:
+        if m.message_type == "compaction":
+            lines.append(f"\n---\n*{m.content[:200]}*\n---\n")
+            continue
+        if m.message_type == "error":
+            lines.append(f"**Error:** {m.content}\n")
+            continue
+        if m.role == "user":
+            lines.append(f"**User:** {m.content}\n")
+        elif m.role == "assistant":
+            lines.append(f"**Assistant:** {m.content}\n")
+        else:
+            lines.append(f"**{m.role.title()}:** {m.content}\n")
+    return PlainTextResponse(
+        "\n".join(lines),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
 @router.get("/personas", response_model=ChatPersonasResponse)
 async def list_personas(request: Request = None):
     """List available chat personas (roles) for the Composer agent selector.
