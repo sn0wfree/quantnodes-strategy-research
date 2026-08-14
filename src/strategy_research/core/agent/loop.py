@@ -765,6 +765,16 @@ class AgentLoop:
             self._recent_hashes = self._recent_hashes[-self.no_progress_window:]
         if not self._detect_no_progress():
             return False
+        from ..study.hanging_events import record_event
+        record_event(
+            "no_progress",
+            session_id=getattr(self, "session_id", None),
+            detail=(
+                f"iteration={iteration} "
+                f"window={self.no_progress_window} "
+                f"tool_calls={len(self._recent_hashes)}"
+            ),
+        )
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_no_progress()
         result.finished_reason = "no_progress"

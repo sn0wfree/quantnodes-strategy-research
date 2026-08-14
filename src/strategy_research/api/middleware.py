@@ -22,7 +22,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         "/api/chat/",
         # /api/study/ removed from public prefixes: study task endpoints
         # require authentication + session ownership like chat (see
-        # _fetch_session_owned in routers/web_session.py).
+        # _fetch_session_owned in routers/web_session.py). The
+        # ``/api/study/_internal/*`` ops namespace is exempt: it is
+        # gated by ``X-Admin-Token`` and session ownership is
+        # irrelevant for the operator dump.
+        "/api/study/_internal/",
         "/api/system/",
         "/api/admin/",  # Admin endpoints use X-Admin-Token header
         "/assets/",

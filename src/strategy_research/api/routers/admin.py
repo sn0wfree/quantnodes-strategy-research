@@ -161,6 +161,59 @@ async def get_audit_log(
     }
 
 
+@router.get("/metrics")
+async def get_session_metrics(
+    recent: int = Query(20, ge=1, le=200,
+                        description="Number of recent WriteMetric rows to include"),
+    x_admin_token: str | None = Header(None),
+) -> dict[str, Any]:
+    """Surface the in-memory ``MetricsLogger`` for the session DB.
+
+    Stats are aggregated across every write recorded by the running
+    process (in-memory ring, capped at 10_000). The endpoint is the
+    HTTP twin of the existing ``strategy-research session stats`` CLI
+    command — prefer the CLI for long-running scraping, use HTTP for
+    ad-hoc ops checks.
+    """
+    _verify_admin(x_admin_token)
+    from strategy_research.core.session import SessionDB
+
+    db = SessionDB()
+    stats = db.metrics_logger.get_stats()
+    return {
+        "status": "ok",
+        "stats": stats,
+        "recent": db.metrics_logger.get_recent(n=recent),
+    }
+
+
+@router.get("/hangs/report")
+async def get_hangs_report(
+    hours: float = Query(24, ge=0.1, le=24 * 30,
+                         description="Look-back window in hours"),
+    limit: int = Query(50, ge=1, le=200),
+    x_admin_token: str | None = Header(None),
+) -> dict[str, Any]:
+    """Aggregate hanging-protection events for the ops runbook.
+
+    Events are recorded by each protection layer (LLM wall-clock
+    timeout, backtest log stall, agent no_progress, circuit breaker
+    open, watchdog interrupt) into the goals DB ``hanging_events``
+    table. This endpoint reports how often each fired in the window —
+    the C.2 daily-drive signal for threshold tuning.
+    """
+    _verify_admin(x_admin_token)
+    from strategy_research.core.study.hanging_events import HangingEventsStore
+
+    with HangingEventsStore() as store:
+        rep = store.report(hours=hours, limit=limit)
+    return {
+        "status": "ok",
+        "window_hours": hours,
+        "report": rep,
+    }
+
+
 @router.get("/health")
 async def admin_health() -> dict[str, Any]:
     """Admin health check (no auth required — just shows if admin is enabled)."""

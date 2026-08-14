@@ -585,6 +585,15 @@ class OpenAICompatClient:
     def _check_wallclock(self, deadline: float | None) -> None:
         """Raise LLMTimeoutError once the deadline passed (retries included)."""
         if deadline is not None and time.monotonic() > deadline:
+            from ..study.hanging_events import record_event
+            record_event(
+                "wallclock_timeout",
+                session_id=getattr(self.config, "session_id", None),
+                detail=(
+                    f"model={self.config.model} "
+                    f"wallclock={self.config.wallclock_timeout_s:.0f}s"
+                ),
+            )
             raise LLMTimeoutError(
                 f"stream wall-clock timeout after "
                 f"{self.config.wallclock_timeout_s:.0f}s"

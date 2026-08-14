@@ -443,6 +443,13 @@ class StudyScheduler:
                 continue
             _dlog("sched", "watchdog: heartbeat stale study=%s age=%.0fs",
                   sid, age)
+            from .hanging_events import record_event
+            record_event(
+                "watchdog_interrupt",
+                study_id=sid,
+                session_id=record.session_id,
+                detail=f"heartbeat stale ({age:.0f}s)",
+            )
             tok = self._control_tokens.get(sid)
             if tok is not None:
                 tok.cancelled = True
@@ -472,6 +479,13 @@ class StudyScheduler:
                 continue
             _dlog("sched", "watchdog: bg task stalled task=%s log=%s",
                   handle.task_id, handle.log_path)
+            from .hanging_events import record_event
+            record_event(
+                "log_stall",
+                study_id=handle.owner,
+                session_id=handle.owner,
+                detail=f"bg task {handle.task_id} log stalled",
+            )
             if handle.proc is not None:
                 kill_bg(handle.proc)
             unregister_task(handle.task_id)
@@ -509,6 +523,47 @@ class StudyScheduler:
             self.session_service.event_bus.emit(session_id, event, data)
         except Exception as exc:
             logger.debug("study scheduler emit %s failed: %s", event, exc)
+
+    # ── ops: in-process status dump (A.observability) ────────────────
+
+    def dump_concurrency(self) -> dict[str, Any]:
+        """Snapshot scheduler-level concurrency state.
+
+        Cheap to call: no DB, no event_bus access. Used by the
+        ``/api/study/_internal/dump`` ops endpoint and tests.
+        """
+        return {
+            "semaphore_limit": SR_STUDY_MAX_CONCURRENT,
+            "queued_study_ids": sorted(self._queued_study_ids),
+            "active_executor_ids": sorted(self._active_executors.keys()),
+            "active_task_ids": sorted(self._active_tasks.keys()),
+            "queued_count": len(self._queued_study_ids),
+            "active_count": len(self._active_executors),
+        }
+
+    def dump_watchdog(self) -> dict[str, Any]:
+        """Watchdog liveness + configured thresholds."""
+        return {
+            "alive": (self._watchdog_task is not None
+                      and not self._watchdog_task.done()),
+            "interval_s": self._watchdog_interval,
+            "heartbeat_timeout_s": self._heartbeat_timeout,
+        }
+
+    def dump_session_queues(self) -> dict[str, dict[str, Any]]:
+        """Per-session queue depth + consumer health.
+
+        Cheap: pure dict inspection. Used by ``/api/study/_internal/dump``.
+        """
+        out: dict[str, dict[str, Any]] = {}
+        for sid, q in self._session_queues.items():
+            consumer = self._session_consumers.get(sid)
+            out[sid] = {
+                "queued_depth": q.qsize(),
+                "consumer_alive": (consumer is not None
+                                   and not consumer.done()),
+            }
+        return out
 
 
 # ── emitter factory: bridge EventBusV2 ──────────────────────────────

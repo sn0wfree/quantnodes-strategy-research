@@ -750,6 +750,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # session
     session_parser = subparsers.add_parser("session", help="会话管理")
+    hangs_parser = subparsers.add_parser("hangs", help="卡死防护事件报告")
+    hangs_parser.add_argument("--hours", type=float, default=24,
+                              help="回看窗口（小时），默认 24")
+    hangs_parser.add_argument("--limit", "-l", type=int, default=50,
+                              help="最近事件条数上限，默认 50")
     session_subparsers = session_parser.add_subparsers(dest="session_command", help="会话命令")
 
     # session stats
@@ -930,6 +935,7 @@ def main() -> int:
 
     dispatcher = {
         "session": _dispatch_session,
+        "hangs": _dispatch_hangs,
         "skills": _dispatch_skills,
         "swarm": _dispatch_swarm,
         "mcp": _dispatch_mcp,
@@ -970,6 +976,31 @@ def _dispatch_session(args, parsers) -> int:
     else:
         parsers["session"].print_help()
         return 0
+
+
+def _dispatch_hangs(args, parsers) -> int:
+    """Dispatch the hangs report subcommand."""
+    from strategy_research.core.study.hanging_events import HangingEventsStore
+
+    with HangingEventsStore() as store:
+        rep = store.report(hours=args.hours, limit=args.limit)
+
+    print(f"=== 卡死防护事件报告 (最近 {args.hours:.0f}h, 共 {rep['total_events']} 条) ===")
+    print("-- 按事件类型 --")
+    for t, n in sorted(rep["by_type"].items(), key=lambda kv: -kv[1]):
+        print(f"  {t:24s} {n}")
+    print("-- 按 study --")
+    if not rep["by_study"]:
+        print("  (无)")
+    for row in rep["by_study"]:
+        print(f"  {row['study_id']:36s} {row['count']}")
+    print("-- 最近事件 --")
+    if not rep["recent"]:
+        print("  (无)")
+    for ev in rep["recent"]:
+        print(f"  {ev['created_at_iso'][:19]}  {ev['event_type']:24s} "
+              f"study={ev['study_id'] or '-':.12s}")
+    return 0
 
 
 def _dispatch_skills(args, parsers) -> int:

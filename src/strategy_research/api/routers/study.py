@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ._task_utils import log_task_exception
@@ -59,6 +59,118 @@ def _get_study_scheduler():
         logger.info("study scheduler instantiated for db=%s", db_path)
     return sched
 
+
+# ── ops: in-process status dump (A.observability) ─────────────────
+
+
+async def _study_dump(session_id: str, study_id: str | None) -> dict:
+    """Build a JSON-safe status snapshot for an ops dump request.
+
+    Pulls from the process-wide scheduler (active executors, watchdog,
+    queue depth) and the SQLite store (study records). All times are
+    ISO-8601 UTC; ``heartbeat_age_s`` is computed against the server's
+    own monotonic clock so the operator can read the staleness at a
+    glance.
+    """
+    from datetime import datetime, timezone
+
+    from ...core.study.models import StudyStatus as _SS
+
+    sched = _get_study_scheduler()
+    now = datetime.now(timezone.utc).isoformat()
+
+    studies_payload: list[dict] = []
+    with sched.store as store:
+        rows = store.list_studies(session_id=session_id, limit=200)
+        if study_id:
+            rows = [r for r in rows if r.study_id == study_id]
+        for s in rows:
+            hb_age: float | None = None
+            hb_stale = False
+            if s.heartbeat:
+                try:
+                    hb_dt = datetime.fromisoformat(s.heartbeat)
+                    if hb_dt.tzinfo is None:
+                        hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+                    hb_age = max(0.0,
+                                 (datetime.now(timezone.utc) - hb_dt).total_seconds())
+                    hb_stale = hb_age > sched._heartbeat_timeout
+                except ValueError:
+                    pass
+            in_scheduler = (
+                s.study_id in sched._active_executors
+                or s.study_id in sched._active_tasks
+                or s.study_id in sched._dispatch_tasks
+                or s.study_id in sched._control_tokens
+            )
+            studies_payload.append({
+                "study_id": s.study_id,
+                "objective": s.objective,
+                "strategy_name": s.strategy_name,
+                "execution_status": s.execution_status.value,
+                "current_round": s.current_round,
+                "max_rounds": s.max_rounds,
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
+                "heartbeat": s.heartbeat,
+                "heartbeat_age_s": (round(hb_age, 1) if hb_age is not None else None),
+                "last_error": s.last_error,
+                "hanging_protection": {
+                    "is_active_in_scheduler": in_scheduler,
+                    "heartbeat_stale": hb_stale,
+                    "watchdog_will_interrupt": (
+                        hb_stale and in_scheduler
+                        and s.execution_status == _SS.RUNNING
+                    ),
+                },
+            })
+
+    hanging_signals: dict[str, int] = {}
+    try:
+        from ...core.study.hanging_events import HangingEventsStore
+        with HangingEventsStore() as hes:
+            hanging_signals = hes.count_since(session_id=session_id, hours=24)
+    except Exception:
+        # HangingEventsStore not yet wired (C1) -- leave an empty dict so
+        # the endpoint contract is stable.
+        hanging_signals = {}
+
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "db_path": str(sched.store.db_path),
+        "generated_at": now,
+        "watchdog": sched.dump_watchdog(),
+        "concurrency": sched.dump_concurrency(),
+        "session_queues": sched.dump_session_queues(),
+        "studies": studies_payload,
+        "hanging_signals_in_window": hanging_signals,
+    }
+
+
+@router.get("/_internal/dump")
+async def study_internal_dump(
+    session_id: str = Query(...),
+    study_id: str | None = None,
+    x_admin_token: str | None = Header(None),
+) -> dict:
+    """Operator dump: all scheduler + DB state for a session.
+
+    Requires ``X-Admin-Token`` (reuse the admin auth helper). Use this
+    when triaging a stuck study instead of grepping logs. The intended
+    consumers are the ops runbook and the on-call engineer.
+
+    Topics covered:
+    - scheduler watchdog (alive / interval / heartbeat threshold)
+    - global concurrency (semaphore, queue, active sets)
+    - per-session queue depth + consumer health
+    - per-study lifecycle (round, heartbeat age, last_error, hanging
+      protection flags)
+    - last-24h hanging-protection event counts (C1; empty until then)
+    """
+    from .admin import _verify_admin
+    _verify_admin(x_admin_token)
+    return await _study_dump(session_id=session_id, study_id=study_id)
 
 
 # ── request bodies ──────────────────────────────────────────────────

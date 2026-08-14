@@ -48,8 +48,10 @@ class ToolLoopCircuitBreaker:
     def __init__(
         self,
         config: CircuitBreakerConfig | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._config = config or CircuitBreakerConfig()
+        self.session_id = session_id
         self._state: BreakerState = BreakerState.CLOSED
         self._tool_failures: dict[str, int] = {}
         self._total_failures: int = 0
@@ -147,6 +149,12 @@ class ToolLoopCircuitBreaker:
         self._state = BreakerState.OPEN
         self._opened_at = time.monotonic()
         logger.warning("Circuit breaker OPEN: %s", reason)
+        from ..study.hanging_events import record_event
+        record_event(
+            "circuit_breaker_open",
+            session_id=getattr(self, "session_id", None),
+            detail=reason,
+        )
 
 
 # ── RetryPolicy ─────────────────────────────────────────────────────
