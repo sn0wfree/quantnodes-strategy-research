@@ -19,6 +19,15 @@ vi.mock('../api/client', async () => {
         hangingEvents: vi.fn().mockResolvedValue({
           status: 'ok', study_id: 'st-1', window_hours: 24, by_type: {}, recent: [],
         }),
+        availableActions: vi.fn().mockResolvedValue({
+          status: 'ok', study_id: 'st-1', execution_status: 'running',
+          actions: [
+            { name: 'pause', label: '暂停', destructive: false },
+            { name: 'cancel', label: '取消', destructive: true },
+          ],
+        }),
+        dispatchAction: vi.fn().mockResolvedValue({ status: 'ok', study_id: 'st-1', action: 'ok' }),
+        redoRound: vi.fn(),
       },
     },
     ApiError: class extends Error {
@@ -155,10 +164,9 @@ describe('StudyDetailPage', () => {
   })
 
   it('calls the pause API and surfaces errors', async () => {
-    vi.mocked(api.study.pause).mockResolvedValue({
-      status: 'ok', study_id: 'st-1', action: 'pause',
-    } as never)
-    vi.mocked(api.study.pause).mockRejectedValueOnce(new Error('pause failed') as never)
+    vi.mocked(api.study.dispatchAction).mockRejectedValueOnce(
+      new Error('pause failed') as never
+    )
     renderPage()
     await screen.findByText(/mom_20d/)
     fireEvent.click(screen.getByRole('button', { name: /暂停/ }))
@@ -169,6 +177,13 @@ describe('StudyDetailPage', () => {
     mockSummary.mockResolvedValue(
       summaryFixture({ execution_status: 'paused' }) as never
     )
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'paused',
+      actions: [
+        { name: 'resume', label: '恢复', destructive: false },
+        { name: 'cancel', label: '取消', destructive: true },
+      ],
+    } as never)
     renderPage()
     await screen.findByText(/mom_20d/)
     expect(screen.getByRole('button', { name: /恢复/ })).toBeInTheDocument()
@@ -201,12 +216,21 @@ describe('StudyDetailPage interactions', () => {
     mockSummary.mockResolvedValue(
       summaryFixture({ execution_status: 'paused' }) as never
     )
-    vi.mocked(api.study.resume).mockResolvedValue({
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'paused',
+      actions: [
+        { name: 'resume', label: '恢复', destructive: false },
+        { name: 'cancel', label: '取消', destructive: true },
+      ],
+    } as never)
+    vi.mocked(api.study.dispatchAction).mockResolvedValue({
       status: 'ok', study_id: 'st-1', action: 'resumed',
     } as never)
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /恢复/ }))
-    await waitFor(() => expect(api.study.resume).toHaveBeenCalledWith('st-1'))
+    await waitFor(() =>
+      expect(api.study.dispatchAction).toHaveBeenCalledWith('st-1', 'resume')
+    )
   })
 
   it('submits a directive and refreshes the list', async () => {

@@ -41,6 +41,7 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
   const [diff, setDiff] = useState<StudyRoundDiffResponse | null>(null)
   const [diffAgainst, setDiffAgainst] = useState(0)
   const [adopting, setAdopting] = useState(false)
+  const [redoing, setRedoing] = useState(false)
   const [adopted, setAdopted] = useState<StudyAdoptResponse | null>(null)
   const [error, setError] = useState('')
 
@@ -100,6 +101,20 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
       setError((err as Error).message)
     } finally {
       setAdopting(false)
+    }
+  }
+
+  const onRedo = async () => {
+    setRedoing(true)
+    setError('')
+    try {
+      const r = await api.study.redoRound(studyId, round.round_num)
+      onAdopted?.(`已重排：${r.action} — 将重跑 R${round.round_num}`)
+      onClose()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setRedoing(false)
     }
   }
 
@@ -264,6 +279,27 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
               </div>
             </Section>
           )}
+
+          {/* Redo this round */}
+          <Section title="重跑本轮">
+            <button
+              type="button"
+              onClick={onRedo}
+              disabled={redoing}
+              className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-rose-700/50 bg-rose-950/30 px-2.5 py-2 text-[11px] font-medium text-rose-300 transition-colors hover:bg-rose-900/40 disabled:opacity-50"
+            >
+              {redoing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+              丢弃 R{round.round_num} 并从上一轮重跑
+            </button>
+            <div className="mt-1 flex items-start gap-1 text-[10px] text-slate-500">
+              <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" />
+              破坏性：删除本轮产物 + DB 记录；study 运行中不可用
+            </div>
+          </Section>
 
           {/* Adopt */}
           <Section title="采用本轮策略">

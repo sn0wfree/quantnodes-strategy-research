@@ -245,6 +245,17 @@ class APIClient {
       this.get<StudyHangingEventsResponse>(
         `/study/${studyId}/hanging_events?hours=${hours}&limit=${limit}`
       ),
+
+    availableActions: (studyId: string) =>
+      this.get<StudyAvailableActionsResponse>(`/study/${studyId}/available_actions`),
+
+    dispatchAction: (studyId: string, name: string, reason?: string) =>
+      this.post<StudyActionResponse>(`/study/${studyId}/actions/${name}`, {
+        reason,
+      }),
+
+    redoRound: (studyId: string, roundNum: number) =>
+      this.post<StudyActionResponse>(`/study/${studyId}/rounds/${roundNum}/redo`),
   }
 
   run = {
@@ -693,6 +704,21 @@ export const HANGING_EVENT_LABELS: Record<string, string> = {
   no_progress: '无进展',
   circuit_breaker_open: '熔断器打开',
   watchdog_interrupt: '看门狗中断',
+}
+
+// ── Phase 5: action matrix ──────────────────────────────────────────
+
+export interface StudyActionItem {
+  name: string
+  label: string
+  destructive: boolean
+}
+
+export interface StudyAvailableActionsResponse {
+  status: string
+  study_id: string
+  execution_status: string
+  actions: StudyActionItem[]
 }
 
 // ── Flow types ─────────────────────────────────────────────────────

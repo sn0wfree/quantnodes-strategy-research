@@ -5,7 +5,7 @@ import {
   Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
   ShieldAlert,
 } from 'lucide-react'
-import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, HANGING_EVENT_LABELS } from '../../api/client'
+import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { RoundHistory } from './RoundHistory'
@@ -58,6 +58,7 @@ export function StudyDetailPage() {
   const [directives, setDirectives] = useState<StudyDirectivesResponse | null>(null)
   const [journal, setJournal] = useState<StudyJournalResponse | null>(null)
   const [hanging, setHanging] = useState<StudyHangingEventsResponse | null>(null)
+  const [actions, setActions] = useState<StudyAvailableActionsResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -92,6 +93,15 @@ export function StudyDetailPage() {
     }
   }, [studyId])
 
+  const loadActions = useCallback(async () => {
+    try {
+      const r = await api.study.availableActions(studyId)
+      setActions(r)
+    } catch {
+      setActions(null)
+    }
+  }, [studyId])
+
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -123,16 +133,18 @@ export function StudyDetailPage() {
     void loadDirectives()
     void loadJournal()
     void loadHanging()
+    void loadActions()
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, loadDirectives, loadJournal, loadHanging])
+  }, [studyId, loadDirectives, loadJournal, loadHanging, loadActions])
 
-  const onAction = async (action: 'pause' | 'resume' | 'cancel') => {
+  const onAction = async (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel') => {
     setBusy(true)
     try {
-      await api.study[action](studyId)
+      await api.study.dispatchAction(studyId, action)
+      await loadActions()
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -201,13 +213,12 @@ export function StudyDetailPage() {
     )
   }
 
-  const canPause = status === 'running' || status === 'monitoring'
-  const canResume = status === 'paused' || status === 'interrupted'
-  const canCancel =
-    status !== 'complete' && status !== 'cancelled' &&
-    status !== 'error' && status !== 'needs_refresh' &&
-    status !== 'interrupted' && status !== 'early_stopped' &&
-    status !== 'budget_limited'
+  const canPause = (actions?.actions ?? []).some((a) => a.name === 'pause')
+  const canResume = (actions?.actions ?? []).some(
+    (a) => a.name === 'resume' || a.name === 'resume_interrupted'
+  )
+  const canCancel = (actions?.actions ?? []).some((a) => a.name === 'cancel')
+  const canDirective = canPause || canResume
 
   const controlActions = (
     <div className="flex items-center gap-1.5">
@@ -229,7 +240,13 @@ export function StudyDetailPage() {
       )}
       {canResume && (
         <button
-          onClick={() => onAction('resume')}
+          onClick={() =>
+            onAction(
+              (actions?.actions ?? []).some((a) => a.name === 'resume_interrupted')
+                ? 'resume_interrupted'
+                : 'resume'
+            )
+          }
           disabled={busy}
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-emerald-500 active:scale-95 disabled:opacity-50"
         >
@@ -391,7 +408,7 @@ export function StudyDetailPage() {
           </div>
 
           {/* Directive input */}
-          {(canPause || canResume) && (
+          {(canDirective) && (
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft space-y-2">
               <label className="block text-[10px] font-medium uppercase tracking-wider text-slate-500">
                 注入研究方向（下一轮 researcher 看到）
