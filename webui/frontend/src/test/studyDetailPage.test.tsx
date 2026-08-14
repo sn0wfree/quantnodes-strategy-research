@@ -15,6 +15,10 @@ vi.mock('../api/client', async () => {
         resume: vi.fn(),
         cancel: vi.fn(),
         directive: vi.fn(),
+        journal: vi.fn().mockResolvedValue({ status: 'ok', study_id: 'st-1', journal: '' }),
+        hangingEvents: vi.fn().mockResolvedValue({
+          status: 'ok', study_id: 'st-1', window_hours: 24, by_type: {}, recent: [],
+        }),
       },
     },
     ApiError: class extends Error {
@@ -40,6 +44,7 @@ vi.mock('lucide-react', () => {
     Settings: Stub, Workflow: Stub, BookOpen: Stub,
     Moon: Stub, Sun: Stub, Network: Stub, Sigma: Stub, Library: Stub, LogOut: Stub,
     Circle: Stub, CheckCircle2: Stub, SlidersHorizontal: Stub, Info: Stub,
+    ShieldAlert: Stub,
   }
 })
 

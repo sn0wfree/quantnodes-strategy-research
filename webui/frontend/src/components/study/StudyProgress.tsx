@@ -240,7 +240,19 @@ export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
       {/* Error */}
       {current.last_error && (
         <div className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300 break-words">
-          {current.last_error}
+          <div className="flex items-start justify-between gap-2">
+            <span className="min-w-0">{current.last_error}</span>
+            {current.trace_id && (
+              <button
+                type="button"
+                title="复制 trace_id 去日志里查对应轮次"
+                onClick={() => navigator.clipboard?.writeText(current.trace_id!)}
+                className="flex-shrink-0 cursor-pointer rounded-md border border-rose-700/60 bg-rose-950/70 px-1.5 py-0.5 font-mono text-[9px] text-rose-400 transition-colors hover:bg-rose-900/50"
+              >
+                {current.trace_id.slice(0, 8)} ⧉
+              </button>
+            )}
+          </div>
         </div>
       )}
 

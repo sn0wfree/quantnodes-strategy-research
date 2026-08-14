@@ -3,8 +3,9 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
   Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
+  ShieldAlert,
 } from 'lucide-react'
-import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse } from '../../api/client'
+import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { RoundHistory } from './RoundHistory'
@@ -56,6 +57,7 @@ export function StudyDetailPage() {
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [directives, setDirectives] = useState<StudyDirectivesResponse | null>(null)
   const [journal, setJournal] = useState<StudyJournalResponse | null>(null)
+  const [hanging, setHanging] = useState<StudyHangingEventsResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -78,6 +80,15 @@ export function StudyDetailPage() {
       setJournal(r)
     } catch {
       // Non-critical — journal may not exist yet
+    }
+  }, [studyId])
+
+  const loadHanging = useCallback(async () => {
+    try {
+      const r = await api.study.hangingEvents(studyId)
+      setHanging(r)
+    } catch {
+      // Non-critical — observability panel can be absent
     }
   }, [studyId])
 
@@ -111,11 +122,12 @@ export function StudyDetailPage() {
     void poll()
     void loadDirectives()
     void loadJournal()
+    void loadHanging()
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, loadDirectives, loadJournal])
+  }, [studyId, loadDirectives, loadJournal, loadHanging])
 
   const onAction = async (action: 'pause' | 'resume' | 'cancel') => {
     setBusy(true)
@@ -401,6 +413,46 @@ export function StudyDetailPage() {
               </button>
             </div>
           )}
+
+          {/* Hanging events (observability) */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                <ShieldAlert className="h-3 w-3" /> 卡死防护事件
+              </div>
+              {hanging && hanging.recent.length > 0 && (
+                <span className="rounded-full border border-rose-700/50 bg-rose-950/40 px-1.5 py-0.5 text-[9px] font-medium text-rose-400">
+                  {hanging.recent.length} 个事件
+                </span>
+              )}
+            </div>
+            {!hanging || hanging.recent.length === 0 ? (
+              <p className="text-xs text-slate-500">近 24h 无异常事件</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {hanging.recent.map((e, i) => (
+                  <li
+                    key={i}
+                    className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-rose-400">
+                        {HANGING_EVENT_LABELS[e.event_type] ?? e.event_type}
+                      </span>
+                      <span className="font-mono text-[9px] text-slate-600">
+                        {new Date(e.created_at_iso).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    {e.detail && (
+                      <p className="mt-0.5 truncate text-[10px] text-slate-500" title={e.detail}>
+                        {e.detail}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           {/* Directives audit trail */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">

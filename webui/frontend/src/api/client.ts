@@ -240,6 +240,11 @@ class APIClient {
 
     adoptRound: (studyId: string, roundNum: number) =>
       this.post<StudyAdoptResponse>(`/study/${studyId}/rounds/${roundNum}/adopt`),
+
+    hangingEvents: (studyId: string, hours = 24, limit = 20) =>
+      this.get<StudyHangingEventsResponse>(
+        `/study/${studyId}/hanging_events?hours=${hours}&limit=${limit}`
+      ),
   }
 
   run = {
@@ -478,6 +483,7 @@ export interface StudyStatusResponse {
   last_metrics?: Record<string, number> | null
   last_verdict?: string | null
   last_error?: string | null
+  trace_id?: string
   heartbeat?: string
   created_at?: string
   updated_at?: string
@@ -660,6 +666,33 @@ export interface StudyAdoptResponse {
   round: number
   adopted_run_dir: string
   note: string
+}
+
+// ── Phase 4: per-study hanging events ───────────────────────────────
+
+export interface HangingEventItem {
+  event_type: string
+  study_id?: string
+  session_id?: string
+  detail?: string
+  created_at: number
+  created_at_iso: string
+}
+
+export interface StudyHangingEventsResponse {
+  status: string
+  study_id: string
+  window_hours: number
+  by_type: Record<string, number>
+  recent: HangingEventItem[]
+}
+
+export const HANGING_EVENT_LABELS: Record<string, string> = {
+  wallclock_timeout: 'LLM 墙钟超时',
+  log_stall: '日志停滞',
+  no_progress: '无进展',
+  circuit_breaker_open: '熔断器打开',
+  watchdog_interrupt: '看门狗中断',
 }
 
 // ── Flow types ─────────────────────────────────────────────────────
