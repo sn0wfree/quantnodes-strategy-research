@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..git import git_commit
 from ..hooks.composite import CompositeHook
@@ -1560,15 +1560,11 @@ class AgentLoop:
     # ── Context compression ─────────────────────────
 
     def _maybe_compact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-        """Apply context compression if over threshold.
+        """Apply context compression if over threshold (sync path).
 
-        3-layer progressive compression (opencode-aligned):
-            L1 (microcompact_ratio=0.9): Smart microcompact
-            L4 (llm_summarize_ratio=0.95): LLM-driven summary
-            L3 (hard_truncate_ratio=0.99): Hard truncate (rare)
-
-        Also checks overflow (overflow_ratio=0.99) to force
-        compression when near context limit.
+        Single source: the shared sync core is ``_maybe_compact_impl``;
+        the async twin (``_amaybe_compact``) runs the same core in a
+        worker thread so the event loop is never blocked.
 
         opencode-aligned trigger formula:
             trigger = threshold_tokens (default derived from model
@@ -1577,6 +1573,36 @@ class AgentLoop:
         If L4 fails (e.g. DB error during persistence), the
         compaction is rolled back and the original messages are
         kept. The LLM doesn't lose context.
+        """
+        return self._maybe_compact_impl(
+            messages, run_compact=self._run_compact_messages
+        )
+
+    def _run_compact_messages(self, messages: list[dict[str, Any]]):
+        """Invoke the compact_messages engine with the loop's config."""
+        return compact_messages(
+            messages,
+            config=self.cc,
+            threshold_tokens=self.threshold_tokens,
+            model_context_tokens=self.config.model_context_tokens,
+            model_max_output_tokens=self.config.model_max_output_tokens,
+            llm_client=self.client,
+            previous_summary=self._previous_summary,
+            session_id=self.session_id,
+        )
+
+    def _maybe_compact_impl(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        run_compact: Callable[[list[dict[str, Any]]], tuple],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Shared sync compaction core (single source for both modes).
+
+        ``run_compact`` is the only divergent point: the sync path calls
+        it directly on the calling thread, the async path runs this whole
+        core in a worker thread (``asyncio.to_thread``) so the loop is
+        never blocked by the sync LLM summary call.
         """
         # Overflow detection: log only (no force compact in this path)
         if self.config.model_context_tokens:
@@ -1598,16 +1624,7 @@ class AgentLoop:
         # passed through to the persistence step. No more NoneType risk
         # in the loop (the recent_count // 100 bug is gone).
         try:
-            messages, applied, l4_summary_text, l4_recent_text = compact_messages(
-                messages,
-                config=self.cc,
-                threshold_tokens=self.threshold_tokens,
-                model_context_tokens=self.config.model_context_tokens,
-                model_max_output_tokens=self.config.model_max_output_tokens,
-                llm_client=self.client,
-                previous_summary=self._previous_summary,
-                session_id=self.session_id,
-            )
+            messages, applied, l4_summary_text, l4_recent_text = run_compact(messages)
         except Exception:
             # Critical: L4 failed. Roll back to keep full history.
             # The LLM is more useful with full history than with
@@ -1765,55 +1782,16 @@ class AgentLoop:
     async def _amaybe_compact(
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Async version of _maybe_compact — runs sync compact_messages
-        in a worker thread so the event loop is never blocked.
+        """Async version of _maybe_compact — runs the shared sync core
+        (``_maybe_compact_impl``) in a worker thread so the event loop is
+        never blocked.
 
-        Previously this used a nested ``_AchatAdapter`` that called
-        ``asyncio.run(asyncio.to_thread(...))`` from inside a running
-        loop, which raised ``RuntimeError`` and produced a
-        "coroutine 'to_thread' was never awaited" warning.  Running
-        the whole ``compact_messages`` call off-loop is simpler and
-        correct: the sync LLM client (``self.client.chat``) is invoked
-        directly from the worker thread, with no nested event loop.
+        The sync LLM client (``self.client.chat``) is invoked directly
+        from the worker thread, with no nested event loop.
         """
-        # Overflow detection
-        if self.config.model_context_tokens:
-            usable = self.config.model_context_tokens - 4096
-            tokens = estimate_tokens(messages)
-            if tokens >= usable * self.cc.overflow_ratio:
-                logger.debug("Overflow detected (async): %d tokens", tokens)
-
-        original_messages = list(messages)
-        try:
-            messages, applied, l4_summary_text, l4_recent_text = await asyncio.to_thread(
-                compact_messages,
-                messages,
-                config=self.cc,
-                threshold_tokens=self.threshold_tokens,
-                model_context_tokens=self.config.model_context_tokens,
-                model_max_output_tokens=self.config.model_max_output_tokens,
-                llm_client=self.client,
-                previous_summary=self._previous_summary,
-                session_id=self.session_id,
-            )
-        except Exception:
-            logger.exception("L4 compaction failed (async); keeping full history")
-            return original_messages, []
-
-        if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
-            self._previous_summary = l4_summary_text
-            try:
-                self._persist_compaction_event(
-                    l4_summary_text, l4_recent_text or "",
-                    compressed_messages=messages,
-                )
-            except Exception:
-                logger.exception(
-                    "compaction persistence failed (async); rolling back",
-                )
-                return original_messages, []
-
-        return messages, applied
+        return await asyncio.to_thread(
+            self._maybe_compact_impl, messages, run_compact=self._run_compact_messages
+        )
 
     # ── Trace helpers ──────────────────────────────
 
