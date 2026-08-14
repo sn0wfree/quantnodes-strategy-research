@@ -475,18 +475,13 @@ def _snapshot(s: dict | None) -> dict | None:
 @router.get("/{study_id}/summary", response_model=StudySummaryResponse)
 async def study_summary(request: Request, study_id: str):
     """Return study summary with recent rounds, scoreboard, and goal snapshot."""
+    # E1: study-id-derived endpoints enforce ownership when
+    # SR_ENFORCE_STUDY_IDOR=1 (multi-tenant). Single-user workspaces
+    # keep working without per-study session rows.
+    study = _owned_study(request, study_id)
     from ...core.goal import GoalStore
     from ...core.study import StudyStore
     with StudyStore() as store:
-        study = store.get_study(study_id)
-        if study is None:
-            raise HTTPException(status_code=404, detail="study not found")
-
-        # Access model: study-id-derived endpoints require authentication
-        # (middleware 401) but NOT owner-session matching — study data is
-        # scoped to this machine's workspace and the list endpoint already
-        # exposes all studies. Multi-tenant deployments should re-add
-        # owner-session IDOR here.
         # Recent rounds (last 5)
         recent_rounds = store.list_rounds(study_id, limit=5)
 
@@ -723,13 +718,39 @@ async def study_directives_list(request: Request, study_id: str):
 
 
 def _owned_study(request: Request, study_id: str):
-    """Fetch a study with IDOR enforcement (owner-session based)."""
+    """Fetch a study with IDOR enforcement (owner-session based).
+
+    When ``SR_ENFORCE_STUDY_IDOR=1`` (multi-tenant deployments), the
+    study's ``owner_session_id`` must belong to the authenticated user
+    (a session row owned by ``request.state.user_id``); otherwise 403.
+    Default off keeps single-user workspaces working without a sessions
+    row for every study.
+    """
+    import os as _os
+
     from ...core.study import StudyStore
     with StudyStore() as store:
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
-        return study
+    if _os.environ.get("SR_ENFORCE_STUDY_IDOR") == "1":
+        user_id = getattr(request.state, "user_id", None) or "anonymous"
+        owner_sid = study.owner_session_id
+        if owner_sid:
+            from .web_session import _fetch_session_owned, _get_db
+            try:
+                _fetch_session_owned(_get_db(), owner_sid, user_id)
+            except HTTPException as exc:
+                if exc.status_code == 403:
+                    raise HTTPException(
+                        status_code=403, detail="Study does not belong to this user",
+                    )
+                raise
+        elif user_id != "anonymous":
+            raise HTTPException(
+                status_code=403, detail="Study does not belong to this user",
+            )
+    return study
 
 
 @router.get("/{study_id}/rounds", response_model=StudyRoundsResponse)
