@@ -224,3 +224,52 @@ def test_scheduler_redo_rejects_running(tmp_path, monkeypatch):
         await sched.shutdown()
 
     asyncio.run(main())
+
+
+# ── G1: per-user concurrency cap ─────────────────────────────────────
+
+
+def test_per_user_cap_blocks_third_study(tmp_path, monkeypatch):
+    """G1: SR_STUDY_MAX_PER_USER=2 — 用户 A 第 3 个 study 被 per-user
+    semaphore 挡住（全局 semaphore 用高值避免干扰）。"""
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
+    monkeypatch.setenv("SR_STUDY_MAX_CONCURRENT", "10")
+    monkeypatch.setenv("SR_STUDY_MAX_PER_USER", "2")
+    import asyncio
+
+    from strategy_research.core.study import StudyScheduler, StudyStore
+
+    store = StudyStore()
+    ids = []
+    for i in range(3):
+        rec = store.create_study(
+            owner_session_id="user-a", goal_id=None, objective=f"o{i}",
+            workspace_path=str(tmp_path), strategy_name="demo",
+        )
+        ids.append(rec.study_id)
+
+    sched = StudyScheduler(store, session_service=None)
+    # 直接占用 2 个 per-user 名额（模拟已在运行）
+    s1 = sched._user_semaphores.setdefault("user-a", asyncio.Semaphore(2))
+    await_got = []
+
+    async def main():
+        await s1.acquire()
+        await s1.acquire()
+        # 第 3 个应该被阻塞 —— 用 wait_for 确认超时
+        owner = "user-a"
+        sem = sched._user_semaphores.setdefault(owner, asyncio.Semaphore(2))
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=0.2)
+            await_got.append(True)
+        except asyncio.TimeoutError:
+            await_got.append(False)
+        # dump 反映 per-user 状态
+        dump = sched.dump_concurrency()
+        assert dump["per_user_limit"] == 2
+        assert dump["per_user_active"].get("user-a") == 2
+        await sched.shutdown()
+
+    asyncio.run(main())
+    assert await_got == [False], "第 3 个 study 不应获得 per-user 名额"

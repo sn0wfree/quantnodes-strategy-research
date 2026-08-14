@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 # v2: global concurrency cap across ALL studies (per-process semaphore).
 # Study directories are autonomous (study/<id>/), so no per-strategy locks.
 SR_STUDY_MAX_CONCURRENT = int(os.environ.get("SR_STUDY_MAX_CONCURRENT", "3"))
+# G1: per-user concurrency ceiling (keyed by owner_session_id) so one
+# user's studies cannot starve another user's queue when the global
+# semaphore is saturated. 0 disables the per-user cap.
+SR_STUDY_MAX_PER_USER = int(os.environ.get("SR_STUDY_MAX_PER_USER", "2"))
 
 # Watchdog: a RUNNING study whose heartbeat is older than this is force-
 # interrupted (heartbeat is bumped once per round; real-LLM rounds can run
@@ -90,6 +94,10 @@ class StudyScheduler:
         self._dispatch_tasks: dict[str, asyncio.Task] = {}
         # v2: global concurrency semaphore (SR_STUDY_MAX_CONCURRENT)
         self._semaphore = asyncio.Semaphore(max(1, SR_STUDY_MAX_CONCURRENT))
+        # G1: per-user concurrency caps (owner_session_id → Semaphore).
+        # LRU-friendly: only users with queued studies get an entry.
+        self._user_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._per_user_limit = max(1, SR_STUDY_MAX_PER_USER) if SR_STUDY_MAX_PER_USER > 0 else 0
         # Dedupe guard: study_ids sitting in a session queue (submitted but
         # not yet picked up). Prevents double-enqueue of the same study.
         self._queued_study_ids: set[str] = set()
@@ -377,6 +385,18 @@ class StudyScheduler:
 
     async def _run_one_study(self, study_id: str) -> None:
         _dlog("sched", "_run_one_study start study=%s", study_id)
+        # G1: per-user cap first, then the global cap. Acquiring the
+        # user slot before the global one means a user at their own
+        # ceiling never consumes global capacity they cannot use anyway.
+        user_sem: asyncio.Semaphore | None = None
+        if self._per_user_limit > 0:
+            study = self.store.get_study(study_id)
+            owner = study.owner_session_id if study else None
+            if owner:
+                user_sem = self._user_semaphores.setdefault(
+                    owner, asyncio.Semaphore(self._per_user_limit)
+                )
+                await user_sem.acquire()
         # Global concurrency cap: holds the slot for the whole study
         # lifetime (rounds + cooldown + review), per design §5.2.
         await self._semaphore.acquire()
@@ -384,6 +404,8 @@ class StudyScheduler:
             await self._run_one_study_locked(study_id)
         finally:
             self._semaphore.release()
+            if user_sem is not None:
+                user_sem.release()
 
     async def _run_one_study_locked(self, study_id: str) -> None:
         _dlog("sched", "_run_one_study_locked study=%s", study_id)
@@ -601,6 +623,11 @@ class StudyScheduler:
         """
         return {
             "semaphore_limit": SR_STUDY_MAX_CONCURRENT,
+            "per_user_limit": self._per_user_limit,
+            "per_user_active": {
+                owner: self._per_user_limit - (sem._value if sem._value is not None else 0)  # noqa: SLF001 — introspection
+                for owner, sem in sorted(self._user_semaphores.items())
+            },
             "queued_study_ids": sorted(self._queued_study_ids),
             "active_executor_ids": sorted(self._active_executors.keys()),
             "active_task_ids": sorted(self._active_tasks.keys()),
