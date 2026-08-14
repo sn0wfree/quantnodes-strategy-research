@@ -31,6 +31,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,6 +54,30 @@ from .tools import TRANSIENT_TOOL_ERRORS, ToolContext, ToolRegistry
 from .trace import TraceWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _run_coro_in_sync(coro: Any) -> Any:
+    """Run a coroutine to completion from synchronous code.
+
+    Works both outside AND inside a running event loop (``AgentLoop.run``
+    is invoked from async contexts by ``role_factory``): when a loop is
+    already running, the coroutine executes on a background thread with
+    its own loop and the caller blocks until it finishes.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: dict[str, Any] = {}
+
+    def _runner() -> None:
+        result["value"] = asyncio.run(coro)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    return result["value"]
 
 
 # ── Tool-level auto-retry (transient errors only) ───────────────────
@@ -844,7 +869,7 @@ class AgentLoop:
         context: str | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> LoopResult:
-        """Run the loop until done.
+        """Run the loop until done (sync path).
 
         Args:
             task: User task description.
@@ -867,83 +892,9 @@ class AgentLoop:
                                   and "<conversation-checkpoint>" in h.get("content", ""))
             logger.info("[AGENT] compaction_in_history=%d", compaction_count)
 
-        full_task, result, messages, t0 = self._prepare_run(task, context, history)
-        self._subagent_count[0] = 0  # reset per-turn delegation counter
-        hook_ctx = self._build_hook_context(0, messages)
-        self._fire_hooks("before_run", hook_ctx)
-
-        for iteration in range(1, self.max_iterations + 1):
-            result.iterations = iteration
-            hook_ctx = self._build_hook_context(iteration, messages)
-            self._fire_hooks("before_iteration", hook_ctx)
-
-            messages, applied = self._maybe_compact(messages)
-            if applied:
-                self._emit_compaction(applied, iteration, result)
-            self._emit_iter_start(iteration, messages)
-            self._inject_todos_snapshot(messages)
-
-            try:
-                if self._stream_mode:
-                    response = self._stream_chat(messages, iteration)
-                else:
-                    tools = self.registry.get_definitions() or None
-                    response = self.client.chat(messages, tools=tools)
-            except LLMError as exc:
-                if self._stream_mode and not self._is_stream_required_error(exc):
-                    try:
-                        tools = self.registry.get_definitions() or None
-                        response = self.client.chat(messages, tools=tools)
-                    except LLMError as exc2:
-                        self._handle_llm_error(exc2, iteration, result)
-                        self._fire_hooks("on_error", hook_ctx, exc2)
-                        break
-                else:
-                    self._handle_llm_error(exc, iteration, result)
-                    self._fire_hooks("on_error", hook_ctx, exc)
-                    break
-
-            self._append_assistant_msg(response, messages, result, iteration)
-
-            if not response.has_tool_calls():
-                if self._check_goal_continuation(response, messages, result, iteration):
-                    continue
-                self._handle_stop(response, result, iteration)
-                self._fire_hooks("after_iteration", hook_ctx)
-                break
-
-            if self._circuit_breaker is not None and self._circuit_breaker.is_open():
-                tool_result_msgs = self._breaker_open_messages(response.tool_calls)
-                self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-                self._fire_hooks("after_iteration", hook_ctx)
-                continue
-
-            self._fire_hooks("before_execute_tools", hook_ctx)
-            tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
-            tool_hashes = self._collect_tool_hashes(response.tool_calls, tool_result_msgs)
-            for tc, tool_result_msg in zip(response.tool_calls, tool_result_msgs):
-                if tool_result_msg.get("content", "").startswith('{"status": "error"'):
-                    self._fire_hooks("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
-                else:
-                    self._fire_hooks("after_tool_executed", hook_ctx, tc, tool_result_msg)
-            self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-            self._fire_hooks("after_iteration", hook_ctx)
-
-            if self._check_no_progress(tool_hashes, response, result, iteration):
-                self._fire_hooks("after_run", hook_ctx, result)
-                return result
-        else:
-            self._handle_max_iter(result)
-
-        self._finalize_metrics(result, messages, t0)
-        self._run_claim_validation(result, messages)
-        self._fire_hooks("after_run", hook_ctx, result)
-        self._git_commit(full_task, result)
-
-        if self._trace_writer is not None:
-            result.trace_path = str(self._trace_writer.path)
-
-        return result
+        return _run_coro_in_sync(
+            self._run_loop_core(task, context, history, async_mode=False)
+        )
 
     # ── Async public API ──────────────────────────
 
@@ -971,44 +922,59 @@ class AgentLoop:
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
+        return await self._run_loop_core(task, context, history, async_mode=True)
+
+    async def _run_loop_core(
+        self,
+        task: str,
+        context: str | None,
+        history: list[dict[str, Any]] | None,
+        *,
+        async_mode: bool,
+    ) -> LoopResult:
+        """Shared run-loop core (single source for ``run``/``arun``).
+
+        ``async_mode`` selects the await-based I/O (achat/astream/ainvoke/
+        gather/afire_hooks) vs the synchronous equivalents (chat/stream/
+        invoke/ThreadPoolExecutor/fire_hooks). Both paths share the same
+        iteration/hook/compact/stop/no-progress semantics.
+        """
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
         self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
-        await self._afire_hooks("before_run", hook_ctx)
+        fire = self._afire_hooks if async_mode else self._fire_hooks
+
+        async def _fire(name: str, ctx: Any, *args: Any) -> None:
+            if async_mode:
+                await fire(name, ctx, *args)
+            else:
+                fire(name, ctx, *args)
+        await _fire("before_run", hook_ctx)
 
         for iteration in range(1, self.max_iterations + 1):
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
-            await self._afire_hooks("before_iteration", hook_ctx)
+            await _fire("before_iteration", hook_ctx)
 
-            messages, applied = await self._amaybe_compact(messages)
+            if async_mode:
+                messages, applied = await self._amaybe_compact(messages)
+            else:
+                messages, applied = self._maybe_compact(messages)
             if applied:
                 self._emit_compaction(applied, iteration, result)
             self._emit_iter_start(iteration, messages)
             self._inject_todos_snapshot(messages)
 
             try:
-                if self._stream_mode:
-                    response = await self._astream_chat(messages, iteration)
-                else:
-                    tools = self.registry.get_definitions() or None
-                    response = await self.client.achat(messages, tools=tools)
+                response = await self._get_response(
+                    messages, iteration, async_mode, hook_ctx, result
+                )
             except LLMError as exc:
-                if self._stream_mode and not self._is_stream_required_error(exc):
-                    # Streaming failed for non-streaming-required reasons
-                    # (e.g. provider doesn't support SSE, parsing error on
-                    # a partial chunk). Fall back to non-streaming achat().
-                    try:
-                        tools = self.registry.get_definitions() or None
-                        response = await self.client.achat(messages, tools=tools)
-                    except LLMError as exc2:
-                        self._handle_llm_error(exc2, iteration, result)
-                        await self._afire_hooks("on_error", hook_ctx, exc2)
-                        break
-                else:
-                    self._handle_llm_error(exc, iteration, result)
-                    await self._afire_hooks("on_error", hook_ctx, exc)
-                    break
+                self._handle_llm_error(exc, iteration, result)
+                await _fire("on_error", hook_ctx, exc)
+                break
+            if response is None:
+                break
 
             self._append_assistant_msg(response, messages, result, iteration)
 
@@ -1016,43 +982,98 @@ class AgentLoop:
                 if self._check_goal_continuation(response, messages, result, iteration):
                     continue
                 self._handle_stop(response, result, iteration)
-                await self._afire_hooks("after_iteration", hook_ctx)
+                await _fire("after_iteration", hook_ctx)
                 break
 
             if self._circuit_breaker is not None and self._circuit_breaker.is_open():
                 tool_result_msgs = self._breaker_open_messages(response.tool_calls)
                 self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-                await self._afire_hooks("after_iteration", hook_ctx)
+                await _fire("after_iteration", hook_ctx)
                 continue
 
-            await self._afire_hooks("before_execute_tools", hook_ctx)
-            tool_result_msgs = await self._aexecute_tool_batch(response.tool_calls, result)
+            await _fire("before_execute_tools", hook_ctx)
+            if async_mode:
+                tool_result_msgs = await self._aexecute_tool_batch(response.tool_calls, result)
+            else:
+                tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
             tool_hashes = self._collect_tool_hashes(response.tool_calls, tool_result_msgs)
-            for tc, tool_result_msg in zip(response.tool_calls, tool_result_msgs):
-                if tool_result_msg.get("content", "").startswith('{"status": "error"'):
-                    await self._afire_hooks("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
-                else:
-                    await self._afire_hooks("after_tool_executed", hook_ctx, tc, tool_result_msg)
+            await self._fire_tool_result_hooks(
+                _fire, hook_ctx, response.tool_calls, tool_result_msgs
+            )
             self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-            await self._afire_hooks("after_iteration", hook_ctx)
+            await _fire("after_iteration", hook_ctx)
 
             if self._check_no_progress(tool_hashes, response, result, iteration):
-                await self._afire_hooks("after_run", hook_ctx, result)
+                await _fire("after_run", hook_ctx, result)
                 return result
         else:
             self._handle_max_iter(result)
 
         self._finalize_metrics(result, messages, t0)
         self._run_claim_validation(result, messages)
-        await self._afire_hooks("after_run", hook_ctx, result)
-        await asyncio.to_thread(self._git_commit, full_task, result)
+        await _fire("after_run", hook_ctx, result)
+        if async_mode:
+            await asyncio.to_thread(self._git_commit, full_task, result)
+        else:
+            self._git_commit(full_task, result)
 
         if self._trace_writer is not None:
             result.trace_path = str(self._trace_writer.path)
 
         return result
 
-    # ── Internal helpers ─────────────────────────
+    async def _get_response(
+        self,
+        messages: list[dict[str, Any]],
+        iteration: int,
+        async_mode: bool,
+        hook_ctx: Any,
+        result: LoopResult,
+    ) -> "LLMResponse | None":
+        """Chat/stream call with the non-streaming fallback.
+
+        Returns the response, or ``None`` when the stream-fallback error
+        path already fired ``on_error`` (caller breaks the loop).
+        Raises ``LLMError`` when the error was NOT stream-fallback-eligible
+        (caller handles + fires ``on_error``).
+        """
+        try:
+            if self._stream_mode:
+                if async_mode:
+                    return await self._astream_chat(messages, iteration)
+                return self._stream_chat(messages, iteration)
+            tools = self.registry.get_definitions() or None
+            if async_mode:
+                return await self.client.achat(messages, tools=tools)
+            return self.client.chat(messages, tools=tools)
+        except LLMError as exc:
+            if not (self._stream_mode and not self._is_stream_required_error(exc)):
+                raise
+            # Streaming failed for non-streaming-required reasons
+            # (e.g. provider doesn't support SSE, parsing error on a
+            # partial chunk). Fall back to non-streaming chat().
+            try:
+                tools = self.registry.get_definitions() or None
+                if async_mode:
+                    return await self.client.achat(messages, tools=tools)
+                return self.client.chat(messages, tools=tools)
+            except LLMError as exc2:
+                self._handle_llm_error(exc2, iteration, result)
+                fire = self._afire_hooks if async_mode else self._fire_hooks
+                if async_mode:
+                    await fire("on_error", hook_ctx, exc2)
+                else:
+                    fire("on_error", hook_ctx, exc2)
+                return None
+
+    @staticmethod
+    async def _fire_tool_result_hooks(_fire, hook_ctx, tool_calls, tool_result_msgs) -> None:
+        """Fire per-tool-result hooks (on_tool_error / after_tool_executed)."""
+        for tc, tool_result_msg in zip(tool_calls, tool_result_msgs):
+            if tool_result_msg.get("content", "").startswith('{"status": "error"'):
+                await _fire("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
+            else:
+                await _fire("after_tool_executed", hook_ctx, tc, tool_result_msg)
 
     def _response_to_assistant_msg(self, response: LLMResponse) -> dict[str, Any]:
         """Convert LLMResponse to an assistant message dict."""
