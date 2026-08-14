@@ -68,6 +68,7 @@
 | P3 | web_session.py 持久层并入 api/session/store.py；AgentLoop sync/async 去重 | ⏸ 推迟：机械搬运/大改，行为价值低、churn 高，宜作独立后续 |
 | P4 | engine CLI 键名 bug 修复（sharpe_ratio→sharpe 等）；删死代码（data_source/cache.py、slash_decorator.py） | ✅ 完成 |
 | P4 | 指标套件（calc_metrics/extended_metrics/portfolio_metrics）全量键名统一；alpha zoo `.py` 双事实源清理；stub agent 移测试；`run_research_round`/`study/executor.py` 退役 | ⏸ 推迟：均需大面积测试改写（test_study_executor 582 行等），宜作独立后续 |
+| P4 | `study/executor.py` 退役（2026-08-14 追加轮完成） | ✅ `ce5fa88`：双实现合一至 runner——acceptance_config_from_targets 移植 runner；workflow.py 引用直改；`__init__` 全量改从 runner 导出；test_study_executor 582 行改写为 runner 版（monitor 旧语义测试删除，由 test_study_monitor.py 覆盖）；`run_research_round` 退役仍推迟 |
 | P5 | CI 加 ruff 门禁；执行记录文档更新；全量测试收尾 | ✅ 完成 |
 
 **额外修复（P3 触发）**：`SQLiteStore` 与 `web_session` 的 sessions/messages DDL 分叉是真实隐患根因（谁先建表谁赢），已统一 schema + user_id 兼容插入 + FK 下先插父行；两个 TUI 流式测试原本依赖该 FK bug 的降级路径才通过，已改为显式 mock 降级。
