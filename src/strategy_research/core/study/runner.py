@@ -189,6 +189,7 @@ class AutoresearchRunner:
         goal_store: Any = None,
     ) -> None:
         self.study = study
+        self.study_id = study.study_id
         self.study_store = store
         self.control = control or ControlToken()
         self.emitter = emitter or NullEmitter()
@@ -202,20 +203,50 @@ class AutoresearchRunner:
         self._round_start_clock: float | None = None
         self._total_used_time: float = 0.0
         self._total_used_turns: int = 0
+        # Study-row cache for live reads: DB is the source of truth for
+        # mutable fields (current_round, last_metrics, last_verdict,
+        # execution_status), but re-reading on every access is wasteful.
+        # 5s TTL keeps monitor-loop snapshots fresh without hammering
+        # SQLite. Writers (cancel/pause/cancel_study) call
+        # ``invalidate_study_cache()`` after ``update_execution_status``.
+        self._study_cache: StudyRecord | None = None
+        self._study_cache_ts: float = 0.0
+
+    def _get_study(self, *, force: bool = False) -> StudyRecord:
+        """Return current ``StudyRecord`` from DB, cached for ~5s.
+
+        The constructor's ``study`` arg is treated as the initial value;
+        subsequent reads pick up DB mutations (current_round,
+        last_metrics, execution_status, etc.) without requiring the
+        caller to manually re-fetch.
+        """
+        now = time.monotonic()
+        if not force and self._study_cache is not None and (now - self._study_cache_ts) < 5.0:
+            return self._study_cache
+        loaded = self.study_store.get_study(self.study_id)
+        if loaded is None:
+            return self.study  # study row vanished; fall back to last known
+        self._study_cache = loaded
+        self._study_cache_ts = now
+        return loaded
+
+    def invalidate_study_cache(self) -> None:
+        self._study_cache = None
+        self._study_cache_ts = 0.0
 
     # ── public entrypoint ───────────────────────────────────────────
 
     async def run(self) -> str:
-        sid = self.study.study_id
-        session = self.study.session_id
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
         _dlog("runner", "run() starting study=%s session=%s max_rounds=%s",
-              sid, session, self.study.max_rounds)
-        self._emit(session, "study_started", {"study_id": sid, "round": self.study.current_round})
+              sid, session, self._get_study().max_rounds)
+        self._emit(session, "study_started", {"study_id": sid, "round": self._get_study().current_round})
         reason = ShutdownReason.ERROR
         try:
             # v2 §15.2 recover: a MONITORING study restarts directly into
             # the monitor phase (no research rounds).
-            if self.study.execution_status == StudyStatus.MONITORING:
+            if self._get_study().execution_status == StudyStatus.MONITORING:
                 reason = await self._monitor_phase()
                 return reason
             reason = await self._run_loop()
@@ -224,7 +255,7 @@ class AutoresearchRunner:
             # Runs in-sequence so the scheduler's control token and semaphore
             # stay alive for pause/resume/cancel during monitoring.
             if reason == ShutdownReason.TARGETS_MET and (
-                self.study.monitor_interval_seconds or 0
+                self._get_study().monitor_interval_seconds or 0
             ) > 0:
                 reason = await self._monitor_phase()
         except Exception as exc:
@@ -267,7 +298,7 @@ class AutoresearchRunner:
             self._complete_goal(result)
             self._mark_terminal(StudyStatus.COMPLETE, last_metrics=metrics, reason=ShutdownReason.TARGETS_MET)
             self._emit(session, "study_completed", {
-                "study_id": sid, "goal_id": self.study.goal_id,
+                "study_id": sid, "goal_id": self._get_study().goal_id,
                 "metrics": metrics, "round": round_num, "recap": verdict,
             })
             return ShutdownReason.TARGETS_MET
@@ -308,7 +339,7 @@ class AutoresearchRunner:
             return review_stop
 
         # discard streak (design §8.2)
-        _st = _ss.load(Path(self.study.workspace_path), sid)
+        _st = _ss.load(Path(self._get_study().workspace_path), sid)
         if _st.discard_streak >= SR_STUDY_MAX_DISCARD:
             self._mark_terminal(
                 StudyStatus.ERROR, last_metrics=metrics,
@@ -324,21 +355,21 @@ class AutoresearchRunner:
         return None
 
     async def _run_loop(self) -> str:
-        sid = self.study.study_id
-        session = self.study.session_id
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
 
         # Load previous summary for cross-round context
         previous_summary = self._maybe_load_previous_summary(self.study)
         # v2: best score comes from state.json (keep-only, design §8.4)
         from strategy_research.core.study import state_store as ss
-        state = ss.load(Path(self.study.workspace_path), sid)
+        state = ss.load(Path(self._get_study().workspace_path), sid)
         best_calmar = (state.best_metrics or {}).get("calmar")
         if best_calmar is not None:
             self._best_score = float(best_calmar)
         elif previous_summary and previous_summary.get("metrics"):
             self._best_score = previous_summary["metrics"].get("calmar", 0.0)
 
-        round_num = self.study.current_round
+        round_num = self._get_study().current_round
 
         while True:
             if self.control.cancelled:
@@ -409,13 +440,13 @@ class AutoresearchRunner:
                 return stop_reason
 
             # ── shutdown: max_rounds ───────────────────────────────
-            if self.study.max_rounds is not None and round_num >= self.study.max_rounds:
+            if self._get_study().max_rounds is not None and round_num >= self._get_study().max_rounds:
                 self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
-                                    last_error=f"max_rounds={self.study.max_rounds}", reason=ShutdownReason.MAX_ROUNDS)
+                                    last_error=f"max_rounds={self._get_study().max_rounds}", reason=ShutdownReason.MAX_ROUNDS)
                 return ShutdownReason.MAX_ROUNDS
 
             # ── AEGIS: Early-stop (only when max_rounds is configured) ──
-            if self.study.max_rounds is not None:
+            if self._get_study().max_rounds is not None:
                 current_score = metrics.get("calmar", 0.0) or 0.0
                 if current_score > self._best_score:
                     self._best_score = current_score
@@ -450,9 +481,9 @@ class AutoresearchRunner:
         3 full repair rounds; success returns to MONITORING, failure stays
         needs_refresh. Cancelled/paused handled via the shared control token.
         """
-        sid = self.study.study_id
-        session = self.study.session_id
-        interval = self.study.monitor_interval_seconds or 0
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
+        interval = self._get_study().monitor_interval_seconds or 0
         self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
         self._emit(session, "study_monitoring_started", {
             "study_id": sid, "interval_seconds": interval,
@@ -466,12 +497,12 @@ class AutoresearchRunner:
             if self.control.paused:
                 self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
                 self._emit(session, "study_paused", {
-                    "study_id": sid, "round": self.study.current_round,
+                    "study_id": sid, "round": self._get_study().current_round,
                 })
                 await self._wait_until_resumed()
                 self.study_store.update_execution_status(sid, StudyStatus.MONITORING)
                 self._emit(session, "study_resumed", {
-                    "study_id": sid, "round": self.study.current_round,
+                    "study_id": sid, "round": self._get_study().current_round,
                 })
 
             await self._monitor_sleep(interval)
@@ -496,7 +527,7 @@ class AutoresearchRunner:
                 "metrics": check["metrics"],
                 "meets_targets": check["meets_targets"],
                 "drift": drift,
-                "drift_count": self.study.monitor_drift_count + (1 if drift else 0),
+                "drift_count": self._get_study().monitor_drift_count + (1 if drift else 0),
             })
             if not drift:
                 continue
@@ -522,12 +553,12 @@ class AutoresearchRunner:
 
     async def _monitor_repair_rounds(self) -> bool:
         """Up to 3 full repair rounds; True when an E2 pass restores the study."""
-        sid = self.study.study_id
-        session = self.study.session_id
-        path = Path(self.study.workspace_path)
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
+        path = Path(self._get_study().workspace_path)
         from strategy_research.core.study import state_store as ss
         state = ss.load(path, sid)
-        base_round = state.last_completed_round or self.study.current_round or 0
+        base_round = state.last_completed_round or self._get_study().current_round or 0
         for attempt in range(3):
             if self._budget_exceeded():
                 self.study_store.update_execution_status(
@@ -570,8 +601,8 @@ class AutoresearchRunner:
         from strategy_research.core.backtest import run_backtest_script
         from strategy_research.core.study import state_store as ss
 
-        sid = self.study.study_id
-        path = Path(self.study.workspace_path).resolve()
+        sid = self._get_study().study_id
+        path = Path(self._get_study().workspace_path).resolve()
         now_iso = datetime.now(timezone.utc).isoformat()
         root = ss.study_root(path, sid)
         state = ss.load(path, sid)
@@ -582,7 +613,7 @@ class AutoresearchRunner:
                 strategy_dir = candidate
         result = run_backtest_script(
             workspace_path=path,
-            strategy_name=self.study.strategy_name,
+            strategy_name=self._get_study().strategy_name,
             action="monitor",
             description="post-completion monitoring re-check",
             run_dir=root / "monitor",
@@ -599,8 +630,8 @@ class AutoresearchRunner:
                 "now_iso": now_iso,
             }
         metrics = result.get("metrics", {}) or {}
-        ok = not self.study.metric_targets or meets_metric_targets(
-            metrics, self.study.metric_targets,
+        ok = not self._get_study().metric_targets or meets_metric_targets(
+            metrics, self._get_study().metric_targets,
         )
         return {
             "metrics": metrics,
@@ -634,7 +665,7 @@ class AutoresearchRunner:
         from ..observability import bind_trace
 
         with bind_trace(
-            study_id=self.study.study_id,
+            study_id=self._get_study().study_id,
             round_num=round_num,
         ):
             return self._run_one_round_impl(
@@ -661,11 +692,11 @@ class AutoresearchRunner:
         from strategy_research.core.study import round_manifest as rm
         from strategy_research.core.study import state_store as ss
 
-        sid = self.study.study_id
-        session = self.study.session_id
-        path = Path(self.study.workspace_path).resolve()
-        strategy = self.study.strategy_name
-        metric_targets = self.study.metric_targets
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
+        path = Path(self._get_study().workspace_path).resolve()
+        strategy = self._get_study().strategy_name
+        metric_targets = self._get_study().metric_targets
         root = ss.study_root(path, sid)
         state = ss.load(path, sid)
 
@@ -679,7 +710,7 @@ class AutoresearchRunner:
         if state.last_review:
             next_focus = str(state.last_review.get("next_focus") or "")
         gap_topics = rl.gap_check(
-            self.study.objective, next_focus, knowledge_text,
+            self._get_study().objective, next_focus, knowledge_text,
         )
         if gap_topics:
             self._collect_knowledge(gap_topics)
@@ -750,10 +781,10 @@ class AutoresearchRunner:
         researcher_result = run_researcher_phase(
             path, strategy, current_state, run_dir,
             session_id=session, run_name=run_name,
-            behavior=self.study.behavior, max_retries=3, max_iterations=10,
+            behavior=self._get_study().behavior, max_retries=3, max_iterations=10,
             directives=directive_text,
-            lazy_detection_interval=self.study.lazy_detection_interval,
-            keep_recent=self.study.keep_recent, round_num=round_num,
+            lazy_detection_interval=self._get_study().lazy_detection_interval,
+            keep_recent=self._get_study().keep_recent, round_num=round_num,
             runs_dir=runs_dir,
         )
         self._emit(session, "study_phase", {
@@ -775,7 +806,7 @@ class AutoresearchRunner:
         exec_result = run_execution_phase(
             path, strategy, current_state, researcher_output, run_dir,
             session_id=session, run_name=run_name,
-            behavior=self.study.behavior, max_retries=3, max_iterations=10,
+            behavior=self._get_study().behavior, max_retries=3, max_iterations=10,
             strategy_dir=run_dir,
             results_tsv=results_tsv,
             round_num=round_num,
@@ -792,7 +823,7 @@ class AutoresearchRunner:
         })
         eval_result = run_evaluation_phase(
             path, strategy, exec_result["backtest_result"], metrics, run_dir,
-            behavior=self.study.behavior, max_retries=3, max_iterations=10,
+            behavior=self._get_study().behavior, max_retries=3, max_iterations=10,
         )
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
@@ -806,8 +837,8 @@ class AutoresearchRunner:
 
         # E2 completion semantics (§15.2): targets ∧ keep ∧ gates pass
         e2_passed = bool(
-            self.study.metric_targets
-            and meets_metric_targets(metrics, self.study.metric_targets)
+            self._get_study().metric_targets
+            and meets_metric_targets(metrics, self._get_study().metric_targets)
             and verdict == "keep"
             and not gate_violations
         )
@@ -878,17 +909,17 @@ class AutoresearchRunner:
                 "turns_used": self._total_used_turns,
                 "time_used_s": round(self._total_used_time, 1),
                 "total": {
-                    "turns": self.study.budget_turn,
-                    "time_s": self.study.budget_time_seconds,
+                    "turns": self._get_study().budget_turn,
+                    "time_s": self._get_study().budget_time_seconds,
                 },
             },
         )
         rm.save_manifest(manifest, path, sid, round_num)
-        summary_md = rm.render_round_markdown(manifest, self.study.objective)
+        summary_md = rm.render_round_markdown(manifest, self._get_study().objective)
         (rm.summary_path(path, sid, round_num)).write_text(
             summary_md, encoding="utf-8",
         )
-        rm.append_journal_md(path, sid, manifest, self.study.objective)
+        rm.append_journal_md(path, sid, manifest, self._get_study().objective)
 
         # ── state.json update (authority; DB mirrors later in _run_loop) ──
         self._update_round_state(
@@ -896,7 +927,7 @@ class AutoresearchRunner:
         )
 
         # ── goal ledger: keep-round evidence + criteria progress (E1) ──
-        if verdict == "keep" and self.study.goal_id:
+        if verdict == "keep" and self._get_study().goal_id:
             self._record_keep_evidence(round_num, run_name, metrics)
 
         # ── v2 review cycle (phase 2: review + collect + todos) ─────
@@ -941,8 +972,8 @@ class AutoresearchRunner:
         if is_novel:
             return True
         self._archive_rejected(round_num, hypothesis, "novelty", novelty_reason)
-        self._emit(self.study.session_id, "study_round_rejected", {
-            "study_id": self.study.study_id, "round": round_num,
+        self._emit(self._get_study().session_id, "study_round_rejected", {
+            "study_id": self._get_study().study_id, "round": round_num,
             "reason": "novelty", "detail": novelty_reason,
         })
         return False
@@ -958,20 +989,20 @@ class AutoresearchRunner:
         attribution,
     ) -> None:
         """AEGIS: append journal entry + run the regression gate."""
-        session = self.study.session_id
+        session = self._get_study().session_id
         self._goal_store.append_journal_entry(
-            self.study.goal_id, session, round_num, hypothesis, hypothesis[:60],
+            self._get_study().goal_id, session, round_num, hypothesis, hypothesis[:60],
             levers=[lever], predicted_affected=predicted_affected,
             changeset=strategist_output.get("changes") if isinstance(strategist_output, dict) else None,
         )
         self._goal_store.fill_journal_attribution(
-            self.study.goal_id, session, round_num, gating_outcome, attribution,
+            self._get_study().goal_id, session, round_num, gating_outcome, attribution,
         )
         passes, regressed = self._check_regression(attribution)
         if not passes:
             self._archive_rejected(round_num, hypothesis, "regression", str(regressed))
             self._emit(session, "study_round_rejected", {
-                "study_id": self.study.study_id, "round": round_num,
+                "study_id": self._get_study().study_id, "round": round_num,
                 "reason": "regression", "regressed": regressed,
             })
 
@@ -1035,9 +1066,9 @@ class AutoresearchRunner:
         from strategy_research.core.study import round_manifest as rm
         from strategy_research.core.study import state_store as ss
 
-        sid = self.study.study_id
-        session = self.study.session_id
-        path = Path(self.study.workspace_path).resolve()
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
+        path = Path(self._get_study().workspace_path).resolve()
         root = ss.study_root(path, sid)
         todos_path = root / "todos.md"
         knowledge_path = root / "knowledge.md"
@@ -1049,8 +1080,8 @@ class AutoresearchRunner:
             if knowledge_path.exists() else ""
         )
         review_input = (
-            f"objective: {self.study.objective}\n"
-            f"metric_targets: {json.dumps(self.study.metric_targets, ensure_ascii=False)}\n"
+            f"objective: {self._get_study().objective}\n"
+            f"metric_targets: {json.dumps(self._get_study().metric_targets, ensure_ascii=False)}\n"
             f"round: {round_num}\n"
             f"verdict: {verdict}\n"
             f"hypothesis: {hypothesis}\n"
@@ -1060,14 +1091,14 @@ class AutoresearchRunner:
             f"todos:\n{todos_path.read_text(encoding='utf-8') if todos_path.exists() else ''}\n"
             f"knowledge (recent):\n{knowledge_text[-3000:]}\n"
         )
-        use_real = self.study.behavior is None and should_use_real_llm()
+        use_real = self._get_study().behavior is None and should_use_real_llm()
         raw_review = ""
         try:
             if use_real:
                 raw_review = run_agent_via_llm(
                     role="study_reviewer",
                     workspace_path=path,
-                    strategy_name=self.study.strategy_name,
+                    strategy_name=self._get_study().strategy_name,
                     task=review_input,
                     max_iterations=3,
                 )
@@ -1102,12 +1133,12 @@ class AutoresearchRunner:
             last_collect_round=state.last_collect_round,
             collect_interval=SR_STUDY_COLLECT_INTERVAL,
         ):
-            topics = review["topics"] or [self.study.objective[:80]]
+            topics = review["topics"] or [self._get_study().objective[:80]]
             self._collect_knowledge(topics)
 
         # ── ③ todos application ────────────────────────────────────
         applied = rl.apply_todos(
-            todos_path, review["todo_updates"], self.study.objective,
+            todos_path, review["todo_updates"], self._get_study().objective,
         )
         if applied:
             self._emit(session, "study_todos_updated", {
@@ -1165,8 +1196,8 @@ class AutoresearchRunner:
         from strategy_research.core.study import review_loop as rl
         from strategy_research.core.study import state_store as ss
 
-        sid = self.study.study_id
-        path = Path(self.study.workspace_path).resolve()
+        sid = self._get_study().study_id
+        path = Path(self._get_study().workspace_path).resolve()
         root = ss.study_root(path, sid)
         knowledge_path = root / "knowledge.md"
         knowledge_text = (
@@ -1174,13 +1205,13 @@ class AutoresearchRunner:
             if knowledge_path.exists() else ""
         )
         try:
-            if self.study.behavior is None and should_use_real_llm():
+            if self._get_study().behavior is None and should_use_real_llm():
                 raw_entries = run_agent_via_llm(
                     role="study_collector",
                     workspace_path=path,
-                    strategy_name=self.study.strategy_name,
+                    strategy_name=self._get_study().strategy_name,
                     task=(
-                        f"objective: {self.study.objective}\n"
+                        f"objective: {self._get_study().objective}\n"
                         f"topics: {json.dumps(topics, ensure_ascii=False)}\n"
                         f"existing knowledge:\n{knowledge_text[-2000:]}\n"
                     ),
@@ -1192,7 +1223,7 @@ class AutoresearchRunner:
             else:
                 entries = []
             collected = rl.append_knowledge(
-                knowledge_path, entries, self.study.objective,
+                knowledge_path, entries, self._get_study().objective,
             )
             state = ss.load(path, sid)
             state.last_collect_round = state.last_completed_round or 0
@@ -1208,14 +1239,14 @@ class AutoresearchRunner:
 
     def _record_keep_evidence(self, round_num: int, run_name: str, metrics: dict) -> None:
         """E1: keep rounds append goal evidence + emit progress (design §16.3)."""
-        sid = self.study.study_id
-        session = self.study.session_id
+        sid = self._get_study().study_id
+        session = self._get_study().session_id
         try:
             from strategy_research.core.goal import EvidenceInput
             ev = self._goal_store.append_evidence(
                 session_id=session,
-                goal_id=self.study.goal_id,
-                expected_goal_id=self.study.goal_id,
+                goal_id=self._get_study().goal_id,
+                expected_goal_id=self._get_study().goal_id,
                 evidence=EvidenceInput(
                     text=(
                         f"Study round {round_num} keep — {run_name}: "
@@ -1230,8 +1261,8 @@ class AutoresearchRunner:
                 "study_id": sid, "evidence_id": ev.evidence_id,
                 "run": run_name,
             })
-            criteria = self._goal_store.list_criteria(self.study.goal_id)
-            evidence = self._goal_store.list_evidence(self.study.goal_id)
+            criteria = self._goal_store.list_criteria(self._get_study().goal_id)
+            evidence = self._goal_store.list_evidence(self._get_study().goal_id)
             seen = {e.criterion_id for e in evidence if e.criterion_id}
             covered = sum(1 for c in criteria if c.criterion_id in seen)
             total = len(criteria)
@@ -1258,28 +1289,28 @@ class AutoresearchRunner:
     # ── AEGIS helpers ──────────────────────────────────────────────
 
     def _check_novelty(self, hypothesis: str, predicted_affected: list[str]) -> tuple[bool, str | None]:
-        if not self.study.goal_id:
+        if not self._get_study().goal_id:
             return True, None
         return self._goal_store.check_novelty(
-            self.study.goal_id, hypothesis, [], predicted_affected,
+            self._get_study().goal_id, hypothesis, [], predicted_affected,
         )
 
     def _check_regression(self, attribution: dict[str, str]) -> tuple[bool, list[str]]:
-        if not self.study.goal_id:
+        if not self._get_study().goal_id:
             return True, []
-        return self._goal_store.check_regression(self.study.goal_id, attribution)
+        return self._goal_store.check_regression(self._get_study().goal_id, attribution)
 
     def _archive_rejected(self, round_num: int, hypothesis: str, reason: str, detail: str) -> None:
-        if not self.study.goal_id:
+        if not self._get_study().goal_id:
             return
         self._goal_store.archive_rejected_edit(
-            self.study.goal_id, round_num, hypothesis, reason, detail,
+            self._get_study().goal_id, round_num, hypothesis, reason, detail,
         )
 
     def _build_journal_context(self) -> str:
-        if not self.study.goal_id:
+        if not self._get_study().goal_id:
             return ""
-        return self._goal_store.build_journal_context(self.study.goal_id, self.study.current_round)
+        return self._goal_store.build_journal_context(self._get_study().goal_id, self._get_study().current_round)
 
     def _build_scoreboard_context(self) -> str:
         if not hasattr(self, "_scoreboard"):
@@ -1308,22 +1339,22 @@ class AutoresearchRunner:
     # ── goal completion ────────────────────────────────────────────
 
     def _complete_goal(self, exec_result: dict) -> None:
-        if not self.study.goal_id:
+        if not self._get_study().goal_id:
             return
         try:
             from strategy_research.core.goal import EvidenceInput
             metrics = exec_result.get("metrics", {})
             run_name = exec_result.get("run_name", "")
-            existing = self._goal_store.list_evidence(self.study.goal_id)
+            existing = self._goal_store.list_evidence(self._get_study().goal_id)
             seen = {ev.criterion_id for ev in existing if ev.criterion_id}
-            criteria = self._goal_store.list_criteria(self.study.goal_id)
+            criteria = self._goal_store.list_criteria(self._get_study().goal_id)
             for c in criteria:
                 if not c.required or c.criterion_id in seen:
                     continue
                 self._goal_store.append_evidence(
-                    session_id=self.study.session_id,
-                    goal_id=self.study.goal_id,
-                    expected_goal_id=self.study.goal_id,
+                    session_id=self._get_study().session_id,
+                    goal_id=self._get_study().goal_id,
+                    expected_goal_id=self._get_study().goal_id,
                     evidence=EvidenceInput(
                         text=f"Study 达标自动覆盖 — {run_name}: Calmar={metrics.get('calmar')} Sharpe={metrics.get('sharpe')} MaxDD={metrics.get('max_dd')}",
                         criterion_id=c.criterion_id, evidence_type="acceptance",
@@ -1331,12 +1362,12 @@ class AutoresearchRunner:
                     ),
                 )
             self._goal_store.complete_lite(
-                session_id=self.study.session_id, goal_id=self.study.goal_id,
-                expected_goal_id=self.study.goal_id,
+                session_id=self._get_study().session_id, goal_id=self._get_study().goal_id,
+                expected_goal_id=self._get_study().goal_id,
                 recap=f"研究达标 — Calmar={metrics.get('calmar')}, Sharpe={metrics.get('sharpe')}, MaxDD={metrics.get('max_dd')}",
             )
         except Exception as exc:
-            logger.exception("study %s goal completion failed: %s", self.study.study_id, exc)
+            logger.exception("study %s goal completion failed: %s", self._get_study().study_id, exc)
 
     # ── results.tsv ────────────────────────────────────────────────
 
@@ -1381,7 +1412,7 @@ class AutoresearchRunner:
     def _round_cooldown(self) -> float:
         from strategy_research.core.autoresearch import get_cooldown_seconds
         return get_cooldown_seconds(
-            self.study.cooldown_base * 2, self.study.cooldown_jitter * 2, self.study.min_cooldown * 2,
+            self._get_study().cooldown_base * 2, self._get_study().cooldown_jitter * 2, self._get_study().min_cooldown * 2,
         )
 
     def _maybe_load_previous_summary(self, study: StudyRecord) -> dict | None:
@@ -1405,7 +1436,7 @@ class AutoresearchRunner:
 
     def _mark_terminal(self, status: StudyStatus, *, last_metrics=None, last_error=None, reason=None):
         err = last_error if reason is None else f"{reason}:{last_error or ''}"
-        self.study_store.update_execution_status(self.study.study_id, status, last_error=err, last_metrics=last_metrics)
+        self.study_store.update_execution_status(self._get_study().study_id, status, last_error=err, last_metrics=last_metrics)
 
     async def _wait_until_resumed(self):
         while self.control.paused and not self.control.cancelled:
