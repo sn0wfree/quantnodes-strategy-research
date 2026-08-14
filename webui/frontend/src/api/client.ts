@@ -220,6 +220,26 @@ class APIClient {
 
     directives: (studyId: string) =>
       this.get<StudyDirectivesResponse>(`/study/${studyId}/directives`),
+
+    journal: (studyId: string) =>
+      this.get<StudyJournalResponse>(`/study/${studyId}/journal`),
+
+    roundArtifacts: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundArtifactsResponse>(`/study/${studyId}/rounds/${roundNum}/artifacts`),
+
+    roundManifest: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundManifestResponse>(`/study/${studyId}/rounds/${roundNum}/manifest`),
+
+    roundDiff: (studyId: string, roundNum: number, against: number) =>
+      this.get<StudyRoundDiffResponse>(
+        `/study/${studyId}/rounds/${roundNum}/diff?against=${against}`
+      ),
+
+    roundSummaryMd: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundSummaryMdResponse>(`/study/${studyId}/rounds/${roundNum}/summary_md`),
+
+    adoptRound: (studyId: string, roundNum: number) =>
+      this.post<StudyAdoptResponse>(`/study/${studyId}/rounds/${roundNum}/adopt`),
   }
 
   run = {
@@ -582,6 +602,64 @@ export interface StudySummaryResponse {
       required: boolean
     }>
   } | null
+}
+
+// ── Phase 3: round detail / artifacts / diff / adopt types ──────────
+
+export interface StudyJournalResponse {
+  status: string
+  study_id: string
+  journal: string
+}
+
+export interface ArtifactItem {
+  path: string
+  size: number
+  mtime?: string
+}
+
+export interface StudyRoundArtifactsResponse {
+  status: string
+  study_id: string
+  round: number
+  round_dir: string
+  artifacts: ArtifactItem[]
+}
+
+export interface StudyRoundManifestResponse {
+  status: string
+  study_id: string
+  round: number
+  manifest: Record<string, unknown>
+}
+
+export interface DiffLine {
+  line: string
+  kind: 'context' | 'add' | 'del'
+}
+
+export interface StudyRoundDiffResponse {
+  status: string
+  study_id: string
+  round_a: number
+  round_b: number
+  diff: DiffLine[]
+  stats: { adds: number; dels: number; context: number }
+}
+
+export interface StudyRoundSummaryMdResponse {
+  status: string
+  study_id: string
+  round: number
+  summary_md: string
+}
+
+export interface StudyAdoptResponse {
+  status: string
+  study_id: string
+  round: number
+  adopted_run_dir: string
+  note: string
 }
 
 // ── Flow types ─────────────────────────────────────────────────────

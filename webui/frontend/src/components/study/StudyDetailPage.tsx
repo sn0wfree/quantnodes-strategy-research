@@ -2,9 +2,9 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
-  Target, Activity, RotateCcw, BarChart3, BookOpen, Info,
+  Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
 } from 'lucide-react'
-import { api, type StudySummaryResponse, type StudyDirectivesResponse } from '../../api/client'
+import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { RoundHistory } from './RoundHistory'
@@ -55,6 +55,7 @@ export function StudyDetailPage() {
   const navigate = useNavigate()
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [directives, setDirectives] = useState<StudyDirectivesResponse | null>(null)
+  const [journal, setJournal] = useState<StudyJournalResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -68,6 +69,15 @@ export function StudyDetailPage() {
       setDirectives(r)
     } catch {
       // Non-critical — audit trail can be absent
+    }
+  }, [studyId])
+
+  const loadJournal = useCallback(async () => {
+    try {
+      const r = await api.study.journal(studyId)
+      setJournal(r)
+    } catch {
+      // Non-critical — journal may not exist yet
     }
   }, [studyId])
 
@@ -100,11 +110,12 @@ export function StudyDetailPage() {
 
     void poll()
     void loadDirectives()
+    void loadJournal()
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, loadDirectives])
+  }, [studyId, loadDirectives, loadJournal])
 
   const onAction = async (action: 'pause' | 'resume' | 'cancel') => {
     setBusy(true)
@@ -164,6 +175,12 @@ export function StudyDetailPage() {
   const progressPercent = summary.goal_snapshot?.progress_percent ?? 0
   const evidenceCount = summary.goal_snapshot?.evidence_count ?? 0
   const lastVerdict = summary.last_verdict ?? '—'
+  const metricTargets = summary.metric_targets ?? []
+
+  const bestCalmar = (summary.recent_rounds ?? [])
+    .map((r) => r.metrics?.calmar)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    .reduce((a, b) => Math.max(a, b), 0)
 
   const openRun = (runName: string) => {
     if (!strategyName) return
@@ -234,7 +251,7 @@ export function StudyDetailPage() {
       )}
 
       {/* KPI band */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
         <KpiCard
           icon={<RotateCcw className="h-4 w-4" />}
           iconCls="border border-sky-500/30 bg-sky-500/10 text-sky-400"
@@ -263,7 +280,31 @@ export function StudyDetailPage() {
           label={`目标进度 · ${evidenceCount} 证据`}
           valueCls="text-primary-400"
         />
+        <KpiCard
+          icon={<BarChart3 className="h-4 w-4" />}
+          iconCls="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          value={bestCalmar.toFixed(2)}
+          label="最佳 Calmar（历史轮次）"
+          valueCls="text-emerald-400"
+        />
       </div>
+
+      {/* Metric targets */}
+      {metricTargets.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            验收线:
+          </span>
+          {metricTargets.map((t, i) => (
+            <span
+              key={i}
+              className="rounded-full border border-primary-500/30 bg-primary-500/10 px-2 py-0.5 font-mono text-[10px] text-primary-400"
+            >
+              {t.name} {t.op} {t.value}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Body */}
       <main className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -278,12 +319,25 @@ export function StudyDetailPage() {
             rounds={summary.recent_rounds ?? []}
             currentRound={summary.current_round ?? 1}
             onOpenRun={openRun}
+            studyId={studyId}
           />
           <MetricsCompare
             rounds={summary.recent_rounds ?? []}
             onOpenRun={openRun}
           />
           <ScoreboardMini scoreboard={summary.scoreboard ?? []} />
+
+          {/* Journal */}
+          {journal?.journal && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                <FileText className="h-3 w-3" /> 研究日志 journal.md
+              </div>
+              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-400">
+                {journal.journal}
+              </pre>
+            </div>
+          )}
         </div>
 
         <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">

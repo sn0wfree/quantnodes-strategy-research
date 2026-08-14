@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { ChevronRight, ChevronDown, AlertTriangle, ExternalLink } from 'lucide-react'
 import type { StudyRoundSummary } from '../../api/client'
+import { RoundDetailDrawer } from './RoundDetailDrawer'
 
 interface Props {
   rounds: StudyRoundSummary[]
   currentRound: number
   /** When provided, renders a per-round link to the run detail page. */
   onOpenRun?: (runName: string) => void
+  /** When provided, clicking a round row opens the detail drawer. */
+  studyId?: string
 }
 
 function formatTime(iso: string): string {
@@ -54,11 +57,13 @@ function RoundItem({
   isCurrent,
   isLast,
   onOpenRun,
+  onOpenDetail,
 }: {
   round: StudyRoundSummary
   isCurrent: boolean
   isLast: boolean
   onOpenRun?: (runName: string) => void
+  onOpenDetail?: (round: StudyRoundSummary) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const hasFailures = round.factor_failures && round.factor_failures.length > 0
@@ -92,7 +97,7 @@ function RoundItem({
         >
           <button
             type="button"
-            onClick={() => setExpanded(!expanded)}
+            onClick={() => (onOpenDetail ? onOpenDetail(round) : setExpanded(!expanded))}
             aria-expanded={expanded}
             className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1.5 pl-1.5 pr-1 text-left"
           >
@@ -171,7 +176,9 @@ function RoundItem({
   )
 }
 
-export function RoundHistory({ rounds, currentRound, onOpenRun }: Props) {
+export function RoundHistory({ rounds, currentRound, onOpenRun, studyId }: Props) {
+  const [detailRound, setDetailRound] = useState<StudyRoundSummary | null>(null)
+
   if (rounds.length === 0) {
     return (
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
@@ -184,21 +191,31 @@ export function RoundHistory({ rounds, currentRound, onOpenRun }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft transition-colors hover:border-slate-700">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-        Round 历史 · 时间线
+    <>
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft transition-colors hover:border-slate-700">
+        <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+          Round 历史 · 时间线
+        </div>
+        <div className="space-y-0">
+          {rounds.map((round, i) => (
+            <RoundItem
+              key={round.round_num}
+              round={round}
+              isCurrent={round.round_num === currentRound}
+              isLast={i === rounds.length - 1}
+              onOpenRun={onOpenRun}
+              onOpenDetail={studyId ? () => setDetailRound(round) : undefined}
+            />
+          ))}
+        </div>
       </div>
-      <div className="space-y-0">
-        {rounds.map((round, i) => (
-          <RoundItem
-            key={round.round_num}
-            round={round}
-            isCurrent={round.round_num === currentRound}
-            isLast={i === rounds.length - 1}
-            onOpenRun={onOpenRun}
-          />
-        ))}
-      </div>
-    </div>
+      {studyId && detailRound && (
+        <RoundDetailDrawer
+          studyId={studyId}
+          round={detailRound}
+          onClose={() => setDetailRound(null)}
+        />
+      )}
+    </>
   )
 }

@@ -14,7 +14,7 @@ vi.mock('lucide-react', () => {
     warningIconCount += 1
     return null
   }
-  return { ChevronRight: Stub, ChevronDown: Stub, AlertTriangle, ExternalLink: Stub }
+  return { ChevronRight: Stub, ChevronDown: Stub, AlertTriangle, ExternalLink: Stub, FileText: Stub, X: Stub, GitCompare: Stub, RotateCcw: Stub, Loader2: Stub, Check: Stub }
 })
 
 function round(overrides: Partial<StudyRoundSummary> = {}): StudyRoundSummary {
@@ -153,5 +153,14 @@ describe('RoundHistory', () => {
   it('does not render open-run buttons when onOpenRun is absent', () => {
     render(<RoundHistory rounds={[round()]} currentRound={1} />)
     expect(screen.queryAllByTitle('查看回测产物')).toHaveLength(0)
+  })
+
+  it('opens the detail drawer when studyId is provided and a round is clicked', () => {
+    // The drawer fires API calls on mount; stub them to resolve nothing.
+    vi.mock('../api/client', () => ({ api: { study: {} } }))
+    render(<RoundHistory rounds={[round()]} currentRound={1} studyId="st-1" />)
+    fireEvent.click(screen.getByText('R1'))
+    // Drawer header appears once the row is opened.
+    expect(screen.getByText('R1 详情')).toBeTruthy()
   })
 })
