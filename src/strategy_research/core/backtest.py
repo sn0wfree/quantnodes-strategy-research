@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -246,30 +245,40 @@ def _extract_warnings(metrics: dict, output: str) -> list[str]:
 def run_strategy(
     strategy_dir: Path,
     timeout: int = 300,
+    log_path: Path | None = None,
 ) -> tuple[bool, str]:
-    """运行策略脚本。"""
+    """运行策略脚本（后台化：日志停滞判定，无墙钟超时）。
+
+    ``timeout`` 语义为**日志停滞窗口**（默认 300s）：只要策略脚本持续向
+    ``log_path`` 输出（run.log 流式追加），就跑多久都行；进程存活但日志
+    停滞超过 timeout → 判定卡死 → 整组 kill。``log_path`` 缺省时落到
+    ``strategy_dir/run.log``。
+    """
     strategy_file = strategy_dir / "strategy.py"
     if not strategy_file.exists():
         return False, f"策略文件不存在: {strategy_file}"
 
+    if log_path is None:
+        log_path = strategy_dir / "run.log"
+
+    from .utils.bg_proc import log_tail, run_bg, wait_bg
+
     try:
         import sys
-        result = subprocess.run(
+        proc = run_bg(
             [sys.executable, str(strategy_file)],
+            log_path,
             cwd=str(strategy_dir),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
             env=_build_restricted_env(),
         )
+        success, output = wait_bg(proc, log_path, stall_timeout=float(timeout))
+        if not success:
+            # stalled → killed; surface the log tail so the caller sees
+            # how far the strategy got before it went silent
+            tail = log_tail(log_path, n=10)
+            return False, f"策略执行停滞 ({timeout}秒无日志输出): {tail}"
+        return proc.returncode == 0, output
 
-        output = result.stdout + "\n" + result.stderr
-        success = result.returncode == 0
-
-        return success, output
-
-    except subprocess.TimeoutExpired:
-        return False, f"策略执行超时 ({timeout}秒)"
     except Exception as e:
         return False, f"策略执行失败: {e}"
 
@@ -317,7 +326,9 @@ def run_backtest_script(
 
     save_run_snapshot(strategy_dir, run_dir)
 
-    success, output = run_strategy(strategy_dir, timeout)
+    # Backgrounded: strategy stdout/stderr streams straight into
+    # run.log (log-progress liveness, no wall-clock ceiling).
+    success, output = run_strategy(strategy_dir, timeout, log_path=run_dir / "run.log")
 
     # 读取因子失败信息
     factor_failures = []
@@ -337,9 +348,6 @@ def run_backtest_script(
             strategy_failures_path.unlink(missing_ok=True)
         except Exception:
             pass
-
-    with open(run_dir / "run.log", "w", encoding="utf-8") as f:
-        f.write(output)
 
     metrics = parse_run_log(run_dir / "run.log")
 
