@@ -238,6 +238,13 @@ class AutoresearchRunner:
                     self._goal_store.close()
                 except Exception:
                     pass
+            # Safety net: drop any background tasks this study left behind
+            # on early/abnormal exits (round-end harvest covers the norm).
+            try:
+                from strategy_research.core.utils.bg_proc import harvest_by_owner
+                harvest_by_owner(sid)
+            except Exception:  # noqa: BLE001
+                pass
             self._emit(session, "study_executor_stopped", {"study_id": sid, "reason": reason})
         return reason
 
@@ -377,6 +384,15 @@ class AutoresearchRunner:
             self._account_round_budget(result)
             self.study_store.update_round_heartbeat(sid, round_num)
             self.study_store.update_last_metrics(sid, metrics, verdict)
+
+            # ── round end: harvest this study's background tasks ──
+            # A backgrounded agent tool (run_backtest background=True /
+            # run_bg_command) abandoned mid-poll must not linger into the
+            # next round (kill live ones, drop finished ones).
+            from strategy_research.core.utils.bg_proc import harvest_by_owner
+            killed = harvest_by_owner(sid)
+            if killed:
+                _dlog("loop", "round %d: harvested %d stale bg tasks", round_num, killed)
 
             # ── SSE: study_round ───────────────────────────────────
             self._emit(session, "study_round", {

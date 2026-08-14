@@ -4,9 +4,10 @@ Manages nohup-style background tasks for agents: start / status / wait
 / log / kill via one tool with an ``action`` parameter (design
 ``docs/study-long-task-background-plan.md`` §5).
 
-The module-level task registry is shared with other tools (e.g.
-``RunBacktestTool`` with ``background=True``) so a task started there
-can be polled here by ``task_id``.
+The task registry lives in ``core/utils/bg_proc.py`` (shared with
+``RunBacktestTool(background=True)`` and ``backtest.run_strategy``), so
+a task started anywhere is pollable here by ``task_id`` — and watchdogs
+/ round-end harvesters sweep the same registry.
 
 Opt-in tool (mirrors shell tools): register via
 ``register_bg_tools(registry)``; roles get it through the tool
@@ -17,14 +18,24 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ...utils.bg_proc import is_stalled, kill_bg, log_tail, run_bg
+from ...utils.bg_proc import (
+    BgTaskHandle,
+    active_tasks,
+    get_task,
+    is_stalled,
+    kill_bg,
+    log_progress,
+    log_tail,
+    register_task,
+    register_thread_task,
+    set_task_result,
+    unregister_task,
+)
 from ..tools import EFFECT_FS, EFFECT_NET, BaseTool, ToolContext, ToolRegistry
 from .shell_tools import _BLOCKED_COMMANDS
 
@@ -33,97 +44,30 @@ logger = logging.getLogger(__name__)
 _STALL_TIMEOUT = 300.0  # seconds without log progress → stalled
 _MAX_WAIT_SECONDS = 120  # clamp for the wait observation window
 
-
-@dataclass
-class _BgHandle:
-    proc: Any  # subprocess.Popen | None（thread 模式为 None）
-    thread: Any  # threading.Thread | None（subprocess 模式为 None）
-    log_path: Path
-    command: str
-    started_at: float
-    result: Any = None  # thread 模式的完成结果（status done 时带回）
-
-
-# Process-wide registry: task_id → handle. Shared with run_backtest
-# (background=True) so tasks started there are pollable here.
-_TASKS: dict[str, _BgHandle] = {}
-_TASKS_LOCK = threading.Lock()
+__all__ = [
+    "RunBgCommandTool",
+    "register_bg_tools",
+    "active_tasks",
+    "get_task",
+    "log_progress",
+    "register_task",
+    "register_thread_task",
+    "set_task_result",
+    "unregister_task",
+]
 
 
-def register_task(proc: Any, log_path: Path, command: str) -> str:
-    """Register a background process; returns the new task_id."""
-    task_id = f"bg_{uuid.uuid4().hex[:8]}"
-    with _TASKS_LOCK:
-        _TASKS[task_id] = _BgHandle(
-            proc=proc, thread=None, log_path=Path(log_path),
-            command=command, started_at=time.time(),
-        )
-    return task_id
-
-
-def register_thread_task(thread: Any, log_path: Path, command: str) -> str:
-    """Register a background *thread* task; returns the new task_id.
-
-    Used by tools that background their own in-process pipeline (e.g.
-    ``RunBacktestTool(background=True)``). Liveness is judged by the log
-    file the thread writes via ``log_progress``.
-    """
-    task_id = f"bg_{uuid.uuid4().hex[:8]}"
-    with _TASKS_LOCK:
-        _TASKS[task_id] = _BgHandle(
-            proc=None, thread=thread, log_path=Path(log_path),
-            command=command, started_at=time.time(),
-        )
-    return task_id
-
-
-def get_task(task_id: str) -> _BgHandle | None:
-    with _TASKS_LOCK:
-        return _TASKS.get(task_id)
-
-
-def unregister_task(task_id: str) -> None:
-    with _TASKS_LOCK:
-        _TASKS.pop(task_id, None)
-
-
-def set_task_result(task_id: str, result: Any) -> None:
-    """Attach a completion result to a task (shown by ``status``)."""
-    with _TASKS_LOCK:
-        handle = _TASKS.get(task_id)
-        if handle is not None:
-            handle.result = result
-
-
-def active_tasks() -> list[tuple[str, _BgHandle]]:
-    """Snapshot of live tasks (watchdog / round-end harvest)."""
-    with _TASKS_LOCK:
-        live: list[tuple[str, _BgHandle]] = []
-        for tid, h in _TASKS.items():
-            if h.proc is not None:
-                if h.proc.poll() is None:
-                    live.append((tid, h))
-            elif h.thread is not None and h.thread.is_alive():
-                live.append((tid, h))
-        return live
-
-
-def _status_payload(task_id: str, handle: _BgHandle) -> dict:
-    if handle.proc is not None:
-        proc = handle.proc
-        if proc.poll() is not None:
-            return {
-                "task_id": task_id, "state": "done",
-                "exit_code": proc.returncode,
-                "log": str(handle.log_path),
-                **({"result": handle.result} if handle.result is not None else {}),
-            }
-    elif handle.thread is not None and not handle.thread.is_alive():
-        return {
+def _status_payload(task_id: str, handle: BgTaskHandle) -> dict:
+    if not handle.is_alive():
+        payload: dict[str, Any] = {
             "task_id": task_id, "state": "done",
             "log": str(handle.log_path),
-            **({"result": handle.result} if handle.result is not None else {}),
         }
+        if handle.proc is not None:
+            payload["exit_code"] = handle.proc.returncode
+        if handle.result is not None:
+            payload["result"] = handle.result
+        return payload
     if is_stalled(handle.log_path, _STALL_TIMEOUT):
         return {
             "task_id": task_id, "state": "stalled",
@@ -263,6 +207,8 @@ class RunBgCommandTool(BaseTool):
                     "status": "error",
                     "error": f"command blocked for safety: contains '{blocked}'",
                 }, ensure_ascii=False)
+
+        from ...utils.bg_proc import run_bg
 
         ws = Path(str(ctx.workspace)).resolve()
         workdir = Path(cwd).resolve() if cwd else ws

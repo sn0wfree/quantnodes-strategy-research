@@ -19,13 +19,142 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import threading
 import time
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 DEFAULT_STALL_TIMEOUT = float(
     os.environ.get("SR_BACKTEST_STALL_TIMEOUT", "300")
 )
+
+
+# ── Task registry ───────────────────────────────────────────────────
+# Process-wide registry for background tasks (subprocess or thread
+# mode). Shared by backtest.run_strategy, the run_bg_command tool and
+# RunBacktestTool(background=True); watchdogs and round-end harvesters
+# sweep it via ``active_tasks`` / ``harvest_all``.
+
+
+@dataclass
+class BgTaskHandle:
+    task_id: str
+    log_path: Path
+    command: str
+    started_at: float
+    proc: Optional[subprocess.Popen] = None   # subprocess mode
+    thread: Optional[threading.Thread] = None  # thread mode
+    result: Any = None                         # thread-mode completion result
+    owner: Optional[str] = None                # e.g. study_id for round-end harvest
+
+    def is_alive(self) -> bool:
+        if self.proc is not None:
+            return self.proc.poll() is None
+        if self.thread is not None:
+            return self.thread.is_alive()
+        return False
+
+
+_TASKS: dict[str, BgTaskHandle] = {}
+_TASKS_LOCK = threading.Lock()
+
+
+def register_task(
+    proc: Any,
+    log_path: Path | str,
+    command: str,
+    *,
+    task_id: str = "",
+    owner: Optional[str] = None,
+) -> str:
+    """Register a background *process*; returns the task_id."""
+    tid = task_id or f"bg_{uuid.uuid4().hex[:8]}"
+    with _TASKS_LOCK:
+        _TASKS[tid] = BgTaskHandle(
+            task_id=tid, proc=proc, thread=None,
+            log_path=Path(log_path), command=command,
+            started_at=time.time(), owner=owner,
+        )
+    return tid
+
+
+def register_thread_task(
+    thread: Any,
+    log_path: Path | str,
+    command: str,
+    *,
+    task_id: str = "",
+    owner: Optional[str] = None,
+) -> str:
+    """Register a background *thread* task; returns the task_id."""
+    tid = task_id or f"bg_{uuid.uuid4().hex[:8]}"
+    with _TASKS_LOCK:
+        _TASKS[tid] = BgTaskHandle(
+            task_id=tid, proc=None, thread=thread,
+            log_path=Path(log_path), command=command,
+            started_at=time.time(), owner=owner,
+        )
+    return tid
+
+
+def get_task(task_id: str) -> Optional[BgTaskHandle]:
+    with _TASKS_LOCK:
+        return _TASKS.get(task_id)
+
+
+def unregister_task(task_id: str) -> None:
+    with _TASKS_LOCK:
+        _TASKS.pop(task_id, None)
+
+
+def set_task_result(task_id: str, result: Any) -> None:
+    with _TASKS_LOCK:
+        handle = _TASKS.get(task_id)
+        if handle is not None:
+            handle.result = result
+
+
+def active_tasks() -> list[BgTaskHandle]:
+    """Snapshot of live tasks (watchdog / round-end harvest)."""
+    with _TASKS_LOCK:
+        return [h for h in _TASKS.values() if h.is_alive()]
+
+
+def harvest_all_tasks() -> int:
+    """Kill + deregister every live background task (round end / shutdown).
+
+    Returns the number of tasks killed.
+    """
+    killed = 0
+    with _TASKS_LOCK:
+        for tid, h in list(_TASKS.items()):
+            if h.is_alive():
+                if h.proc is not None:
+                    kill_bg(h.proc)
+                killed += 1
+            _TASKS.pop(tid, None)
+    return killed
+
+
+def harvest_by_owner(owner: str) -> int:
+    """Kill + deregister all live tasks owned by ``owner`` (e.g. a study
+    round end). Finished tasks are deregistered without killing.
+
+    Returns the number of live tasks killed.
+    """
+    killed = 0
+    with _TASKS_LOCK:
+        for tid, h in list(_TASKS.items()):
+            if h.owner != owner:
+                continue
+            if h.is_alive():
+                if h.proc is not None:
+                    kill_bg(h.proc)
+                killed += 1
+            _TASKS.pop(tid, None)
+    return killed
 
 
 def run_bg(

@@ -13,6 +13,8 @@ not stranded when a subsequent ``asyncio.run`` swaps the loop.
 from __future__ import annotations
 
 import asyncio
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -468,3 +470,73 @@ def test_watchdog_fresh_heartbeat_untouched(store, goal_store, monkeypatch):
 
     asyncio.run(main())
     assert store.get_study(study.study_id).execution_status == StudyStatus.RUNNING
+
+
+def test_watchdog_kills_stalled_bg_task(store, goal_store, monkeypatch, tmp_path):
+    """A live background task with a stalled log is killed + deregistered."""
+    from strategy_research.core.utils import bg_proc
+
+    _patch_round(monkeypatch)
+    goal, study = _setup(store, goal_store)
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+    sched._heartbeat_timeout = 60
+
+    log = tmp_path / "bg.log"
+    log.write_text("start\n", encoding="utf-8")
+    import os
+    old = time.monotonic() - 3600
+    os.utime(log, (old, old))
+
+    proc = bg_proc.run_bg(
+        [sys.executable, "-c", "import time; time.sleep(600)"], log,
+    )
+    bg_proc.register_task(proc, log, "stale task", owner=study.study_id)
+
+    async def main():
+        await sched._watchdog_tick()
+        assert bg_proc.active_tasks() == []
+        await sched.shutdown()
+
+    asyncio.run(main())
+    assert proc.poll() is not None  # killed
+
+
+def test_runner_harvests_owner_tasks_at_round_end(
+    store, goal_store, monkeypatch, tmp_path
+):
+    """Round end kills the study's own live bg tasks, keeps others'."""
+    from strategy_research.core.utils import bg_proc
+
+    rounds = {"n": 0}
+    _patch_round(monkeypatch, metrics={"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
+                 rounds_counter=rounds, e2_passed=False)
+    goal, study = _setup(store, goal_store,
+        metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
+        max_rounds=1,
+    )
+    svc = FakeSessionService()
+    sched = StudyScheduler(store, session_service=svc)
+
+    # a live bg task owned by this study + one owned by another
+    log = tmp_path / "bg.log"
+    log.write_text("start\n", encoding="utf-8")
+    proc_mine = bg_proc.run_bg(
+        [sys.executable, "-c", "import time; time.sleep(600)"], log,
+    )
+    bg_proc.register_task(proc_mine, log, "mine", owner=study.study_id)
+    proc_other = bg_proc.run_bg(
+        [sys.executable, "-c", "import time; time.sleep(600)"], log,
+    )
+    bg_proc.register_task(proc_other, log, "other", owner="study_other")
+
+    async def main():
+        await sched.submit(study)
+        await _await_status(store, study.study_id, StudyStatus.ERROR)
+        await sched.shutdown()
+
+    asyncio.run(main())
+    # mine killed + deregistered; other untouched
+    assert proc_mine.poll() is not None
+    assert proc_other.poll() is None
+    bg_proc.harvest_all_tasks()

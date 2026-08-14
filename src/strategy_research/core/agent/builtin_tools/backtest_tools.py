@@ -212,6 +212,7 @@ class RunBacktestTool(BaseTool):
 
         log_path = _Path(str(workspace)) / "bg_tasks" / f"{_uuid.uuid4().hex[:8]}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        owner = getattr(ctx, "session_id", None) or "cli"
 
         def _run() -> None:
             try:
@@ -290,6 +291,7 @@ class RunBacktestTool(BaseTool):
         thread = threading.Thread(target=_run, daemon=True, name=f"bg-backtest-{strategy_name}")
         task_id = register_thread_task(
             thread, log_path, f"run_backtest(background=True) {strategy_name}",
+            owner=owner,
         )
         thread.start()
         return json.dumps({

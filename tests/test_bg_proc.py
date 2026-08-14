@@ -161,5 +161,40 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("step 2", content)
 
 
+class TestTaskRegistry(unittest.TestCase):
+    """Registry: owner tagging, round-end harvest, done-task cleanup."""
+
+    def setUp(self) -> None:
+        self.tmpdir = TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        self.log = self.root / "run.log"
+
+    def tearDown(self) -> None:
+        bg_proc.harvest_all_tasks()
+        self.tmpdir.cleanup()
+
+    def test_register_and_harvest_by_owner(self) -> None:
+        proc_a = bg_proc.run_bg(_py("import time; time.sleep(60)"), self.log)
+        proc_b = bg_proc.run_bg(_py("import time; time.sleep(60)"), self.log)
+        tid_a = bg_proc.register_task(proc_a, self.log, "cmd A", owner="study_1")
+        tid_b = bg_proc.register_task(proc_b, self.log, "cmd B", owner="study_2")
+        self.assertEqual(len(bg_proc.active_tasks()), 2)
+
+        killed = bg_proc.harvest_by_owner("study_1")
+        self.assertEqual(killed, 1)
+        self.assertIsNone(bg_proc.get_task(tid_a))
+        # other owner untouched
+        self.assertIsNotNone(bg_proc.get_task(tid_b))
+        bg_proc.harvest_by_owner("study_2")
+
+    def test_harvest_drops_finished_without_killing(self) -> None:
+        proc = bg_proc.run_bg(_py("print('quick')"), self.log)
+        tid = bg_proc.register_task(proc, self.log, "quick", owner="study_x")
+        ok, _ = bg_proc.wait_bg(proc, self.log, stall_timeout=5, poll=0.1)
+        self.assertTrue(ok)
+        self.assertEqual(bg_proc.harvest_by_owner("study_x"), 0)  # already done
+        self.assertIsNone(bg_proc.get_task(tid))
+
+
 if __name__ == "__main__":
     unittest.main()

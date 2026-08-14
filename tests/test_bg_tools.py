@@ -38,10 +38,11 @@ class TestRunBgCommandTool(unittest.TestCase):
 
     def tearDown(self) -> None:
         # clean any lingering tasks
-        for tid, h in active_tasks():
-            import subprocess
-            subprocess.Popen.kill(h.proc)  # noqa: E1101
-            unregister_task(tid)
+        for h in active_tasks():
+            if h.proc is not None:
+                import subprocess
+                subprocess.Popen.kill(h.proc)  # noqa: E1101
+            unregister_task(h.task_id)
         self.tmpdir.cleanup()
 
     def test_start_returns_running_with_task_id(self) -> None:

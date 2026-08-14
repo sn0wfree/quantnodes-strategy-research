@@ -458,6 +458,32 @@ class StudyScheduler:
                 "reason": "heartbeat stale",
             })
 
+        # 3. Background-task registry: any live task whose log stopped
+        #    advancing is stuck → kill + deregister (log-progress liveness).
+        from ..utils.bg_proc import (
+            active_tasks,
+            is_stalled,
+            kill_bg,
+            log_tail,
+            unregister_task,
+        )
+        for handle in active_tasks():
+            if not is_stalled(handle.log_path, self._heartbeat_timeout):
+                continue
+            _dlog("sched", "watchdog: bg task stalled task=%s log=%s",
+                  handle.task_id, handle.log_path)
+            if handle.proc is not None:
+                kill_bg(handle.proc)
+            unregister_task(handle.task_id)
+            self._emit_event(
+                handle.owner or "system", "study_interrupted", {
+                    "study_id": handle.owner or "",
+                    "session_id": handle.owner or "",
+                    "reason": f"bg task stalled ({handle.task_id})",
+                    "tail": log_tail(handle.log_path, n=3),
+                },
+            )
+
     def _make_emitter(self, study: StudyRecord):
         """Construct an emitter bound to the study's session event_bus.
 
