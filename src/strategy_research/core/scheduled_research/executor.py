@@ -250,7 +250,9 @@ class ScheduledResearchExecutor:
         logger.info("Dispatching job %s → study (%s/%s)",
                     job.id, job.workspace, job.strategy_name)
         study = create_study_record(
-            owner_session_id=job.owner_session_id,
+            # API-created jobs carry the creator session; CLI jobs fall
+            # back to a stable cli: placeholder (owner must be non-empty).
+            owner_session_id=job.owner_session_id or f"cli:{job.id}",
             objective=job.prompt or f"定时研究 {job.strategy_name}",
             workspace_path=job.workspace,
             strategy_name=job.strategy_name,
