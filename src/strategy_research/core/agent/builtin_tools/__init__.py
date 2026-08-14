@@ -108,6 +108,12 @@ def build_default_registry(workspace: Path | None = None) -> ToolRegistry:
         register_shell_tools(r)
     except Exception:
         pass
+    # Background-command tools (opt-in, same gate; long-task nohup mode)
+    try:
+        from .bg_tools import register_bg_tools
+        register_bg_tools(r)
+    except Exception:
+        pass
     # Tool documentation (self-referential; registered last)
     r.register(ToolHelpTool(r))
     # Sub-agent delegation
