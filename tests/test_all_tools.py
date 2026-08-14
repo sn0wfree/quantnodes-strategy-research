@@ -137,7 +137,7 @@ class TestFactorAnalysisTool:
                     "open": 100, "high": 101, "low": 99,
                     "close": 100, "volume": 1000,
                 })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -177,7 +177,7 @@ class TestPatternRecognitionTool:
                 "low": 99 + i, "close": 100 + i,
                 "volume": 1000,
             })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -228,7 +228,7 @@ class TestFactorCrossSectionalAnalysis:
                 "open": 100, "high": 101, "low": 99,
                 "close": 100, "volume": 1000,
             })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -258,7 +258,7 @@ class TestFactorCrossSectionalAnalysis:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -301,7 +301,7 @@ class TestFactorQuintileReturns:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -345,7 +345,7 @@ class TestFactorICDecay:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 
@@ -388,7 +388,7 @@ class TestFactorTurnover:
                     "low": close - 2, "close": close,
                     "volume": 1000,
                 })
-        pd.DataFrame(data)
+        df = pd.DataFrame(data)  # noqa: F841 (duckdb frame lookup)
         conn.execute("CREATE TABLE ohlcv AS SELECT * FROM df")
         conn.close()
 

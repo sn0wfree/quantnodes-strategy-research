@@ -942,13 +942,14 @@ class AgentLoop:
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
         self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
-        fire = self._afire_hooks if async_mode else self._fire_hooks
 
         async def _fire(name: str, ctx: Any, *args: Any) -> None:
-            if async_mode:
-                await fire(name, ctx, *args)
-            else:
-                fire(name, ctx, *args)
+            # Both modes await hook coroutines on the current loop: the
+            # sync adapter (_fire_hooks) runs them on a throwaway loop,
+            # which raises in 3.10 when the coroutine was created inside
+            # a running loop (the sync `run` bridge thread).
+            await self._afire_hooks(name, ctx, *args)
+
         await _fire("before_run", hook_ctx)
 
         for iteration in range(1, self.max_iterations + 1):
@@ -1059,11 +1060,7 @@ class AgentLoop:
                 return self.client.chat(messages, tools=tools)
             except LLMError as exc2:
                 self._handle_llm_error(exc2, iteration, result)
-                fire = self._afire_hooks if async_mode else self._fire_hooks
-                if async_mode:
-                    await fire("on_error", hook_ctx, exc2)
-                else:
-                    fire("on_error", hook_ctx, exc2)
+                await self._afire_hooks("on_error", hook_ctx, exc2)
                 return None
 
     @staticmethod
