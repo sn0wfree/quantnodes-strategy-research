@@ -369,8 +369,14 @@ class OpenAICompatClient:
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
+        # Wall-clock ceiling for the whole request (retries included):
+        # guards against slow-trickle streams that never trigger the
+        # per-read timeout. deadline=None → disabled.
+        deadline = self._wallclock_deadline()
+
         last_response: httpx.Response | None = None
         for attempt in range(self.config.max_retries):
+            self._check_wallclock(deadline)
             started = False
             try:
                 with httpx.Client(**client_kwargs) as client:
@@ -397,6 +403,7 @@ class OpenAICompatClient:
                         # Stream content
                         try:
                             for line in response.iter_lines():
+                                self._check_wallclock(deadline)
                                 chunk = parse_stream_chunk(line, adapter=adapter)
                                 if chunk is not None:
                                     started = True
@@ -462,8 +469,12 @@ class OpenAICompatClient:
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
+        # Wall-clock ceiling (see sync stream).
+        deadline = self._wallclock_deadline()
+
         last_response: httpx.Response | None = None
         for attempt in range(self.config.max_retries):
+            self._check_wallclock(deadline)
             started = False
             try:
                 async with httpx.AsyncClient(**client_kwargs) as client:
@@ -490,6 +501,7 @@ class OpenAICompatClient:
                         # Stream content
                         try:
                             async for line in response.aiter_lines():
+                                self._check_wallclock(deadline)
                                 if not started and line.startswith("data: "):
                                     logger.debug("[DIAG] astream first raw line: %.200s", line)
                                 chunk = parse_stream_chunk(line, adapter=adapter)
@@ -560,6 +572,23 @@ class OpenAICompatClient:
         if self._transport is not None:
             kwargs["transport"] = self._transport
         return kwargs
+
+    # ── wall-clock ceiling (slow-trickle guard) ────────────────────
+
+    def _wallclock_deadline(self) -> float | None:
+        """Deadline (monotonic) for the whole request, or None if disabled."""
+        wc = getattr(self.config, "wallclock_timeout_s", 0.0) or 0.0
+        if wc <= 0:
+            return None
+        return time.monotonic() + wc
+
+    def _check_wallclock(self, deadline: float | None) -> None:
+        """Raise LLMTimeoutError once the deadline passed (retries included)."""
+        if deadline is not None and time.monotonic() > deadline:
+            raise LLMTimeoutError(
+                f"stream wall-clock timeout after "
+                f"{self.config.wallclock_timeout_s:.0f}s"
+            )
 
     def _request_with_retry(
         self, payload: dict[str, Any], *, stream: bool, adapter: Any = None,

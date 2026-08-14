@@ -125,6 +125,12 @@ class LLMConfig:
 
     # ── Network ──────────────────────────────────
     timeout_s: float = 60.0
+    # Wall-clock ceiling for a single LLM request (streaming included).
+    # Guards against "slow-trickle" streams that keep httpx's per-read
+    # timeout from ever firing while producing no finish_reason. 0/None
+    # disables. Configurable via env SR_AGENT_WALLCLOCK_TIMEOUT (seconds,
+    # default 1800 = 30min).
+    wallclock_timeout_s: float = 1800.0
     max_retries: int = 3                            # total attempts (default 3)
     retry_backoff_s: float = 1.0
     proxy: str | None = None
@@ -549,6 +555,12 @@ def _env_to_overrides(env: Mapping[str, str]) -> dict[str, Any]:
         overrides["base_url"] = env[ENV_BASE_URL]
     if ENV_MODEL in env and env[ENV_MODEL]:
         overrides["model"] = env[ENV_MODEL]
+    wc_raw = env.get("SR_AGENT_WALLCLOCK_TIMEOUT", "").strip()
+    if wc_raw:
+        try:
+            overrides["wallclock_timeout_s"] = float(wc_raw)
+        except ValueError:
+            pass
     return overrides
 
 
