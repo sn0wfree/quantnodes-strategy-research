@@ -15,12 +15,18 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from ...core.permission import PermissionGateway
 
+from ..schemas.chat import (
+    CancelRequest,
+    ChatAttemptsResponse,
+    ChatCancelResponse,
+    ChatMessageRequest as ChatMessage,
+    ChatPersonasResponse,
+    ChatQueueResumeResponse,
+    SendMessageResponse,
+)
 from ..session.service import SessionService
 from ..sse_buffer import sse_buffer
 from .slash_commands import (
-    CancelRequest,
-    ChatMessage,
-    SendMessageResponse,
     _handle_clear_command,
     _handle_compact_command,
     _handle_goal_command,
@@ -642,7 +648,7 @@ async def send_async(body: ChatMessage, request: Request):
     )
 
 
-@router.post("/cancel")
+@router.post("/cancel", response_model=ChatCancelResponse)
 async def cancel_attempt(body: CancelRequest, request: Request):
     """Cancel an in-flight agent attempt for a session.
 
@@ -676,7 +682,7 @@ class QueueResumeRequest(BaseModel):
     session_id: str
 
 
-@router.post("/queue/resume")
+@router.post("/queue/resume", response_model=ChatQueueResumeResponse)
 async def queue_resume(body: QueueResumeRequest, request: Request):
     """Resume a paused per-session queue after an explicit cancel.
 
@@ -760,7 +766,7 @@ async def chat_events(
     )
 
 
-@router.get("/attempts")
+@router.get("/attempts", response_model=ChatAttemptsResponse)
 async def list_active_attempts(
     session_id: str = Query(...),
     request: Request = None,
@@ -785,7 +791,7 @@ async def list_active_attempts(
     return {"attempts": service.list_active_attempts(session_id)}
 
 
-@router.get("/personas")
+@router.get("/personas", response_model=ChatPersonasResponse)
 async def list_personas(request: Request = None):
     """List available chat personas (roles) for the Composer agent selector.
 

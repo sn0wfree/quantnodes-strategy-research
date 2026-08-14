@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Optional
-
-from pydantic import BaseModel
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +29,8 @@ def _get_session_service():
     return _svc()
 
 
-class ChatMessage(BaseModel):
-    session_id: str
-    content: str
-    images: Optional[list[str]] = None
-    agent_id: Optional[str] = None
-    mode: Optional[str] = None          # "plan" | "build" (None = session default)
-    model: Optional[str] = None         # 会话级模型覆盖
-    thinking: Optional[str] = None      # "off" | "on" | "auto"
-
-
-class SendMessageResponse(BaseModel):
-    message_id: str
-    user_message_id: str
-    assistant_message_id: str
-    event_id: str
-    status: str = "queued"
-    attempt_id: Optional[str] = None
-
-
-class CancelRequest(BaseModel):
-    session_id: str
-    attempt_id: Optional[str] = None
+from ..schemas.chat import ChatMessageRequest as ChatMessage
+from ..schemas.chat import SendMessageResponse
 
 
 async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:

@@ -162,7 +162,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChatMessage"
+                "$ref": "#/components/schemas/ChatMessageRequest"
               }
             }
           },
@@ -204,7 +204,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/strategy_research__api__routers__slash_commands__CancelRequest"
+                "$ref": "#/components/schemas/strategy_research__api__schemas__chat__CancelRequest"
               }
             }
           },
@@ -215,7 +215,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCancelResponse"
+                }
               }
             }
           },
@@ -255,7 +257,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatQueueResumeResponse"
+                }
               }
             }
           },
@@ -284,7 +288,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChatMessage"
+                "$ref": "#/components/schemas/ChatMessageRequest"
               }
             }
           },
@@ -425,7 +429,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatAttemptsResponse"
+                }
               }
             }
           },
@@ -455,7 +461,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPersonasResponse"
+                }
               }
             }
           }
@@ -5067,7 +5075,90 @@
         ],
         "title": "ChangePassword"
       },
-      "ChatMessage": {
+      "ChatAttemptItem": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "message_id",
+          "status",
+          "prompt",
+          "created_at"
+        ],
+        "title": "ChatAttemptItem"
+      },
+      "ChatAttemptsResponse": {
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ChatAttemptItem"
+            },
+            "type": "array",
+            "title": "Attempts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempts"
+        ],
+        "title": "ChatAttemptsResponse"
+      },
+      "ChatCancelResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "session_id"
+        ],
+        "title": "ChatCancelResponse"
+      },
+      "ChatMessageRequest": {
         "properties": {
           "session_id": {
             "type": "string",
@@ -5141,7 +5232,75 @@
           "session_id",
           "content"
         ],
-        "title": "ChatMessage"
+        "title": "ChatMessageRequest"
+      },
+      "ChatPersonaItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "ChatPersonaItem"
+      },
+      "ChatPersonasResponse": {
+        "properties": {
+          "personas": {
+            "items": {
+              "$ref": "#/components/schemas/ChatPersonaItem"
+            },
+            "type": "array",
+            "title": "Personas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "personas"
+        ],
+        "title": "ChatPersonasResponse"
+      },
+      "ChatQueueResumeResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "session_id"
+        ],
+        "title": "ChatQueueResumeResponse"
       },
       "DiffLine": {
         "properties": {
@@ -7311,6 +7470,18 @@
                 "type": "null"
               }
             ]
+          },
+          "monitor_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitor State"
           }
         },
         "type": "object",
@@ -7713,7 +7884,25 @@
         ],
         "title": "WorkflowStartRequest"
       },
-      "strategy_research__api__routers__slash_commands__CancelRequest": {
+      "strategy_research__api__routers__study__CancelRequest": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "title": "CancelRequest"
+      },
+      "strategy_research__api__schemas__chat__CancelRequest": {
         "properties": {
           "session_id": {
             "type": "string",
@@ -7735,24 +7924,6 @@
         "required": [
           "session_id"
         ],
-        "title": "CancelRequest"
-      },
-      "strategy_research__api__routers__study__CancelRequest": {
-        "properties": {
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 512
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "type": "object",
         "title": "CancelRequest"
       }
     }

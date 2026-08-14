@@ -420,6 +420,64 @@ class APIClient {
       },
     )
 
+  // ── Chat API (C2: unified object) ───────────────────────────────────
+
+  chat = {
+    sendAsync: (
+      sessionId: string,
+      content: string,
+      opts?: { images?: string[]; agent_id?: string; mode?: string; model?: string; thinking?: string },
+    ) =>
+      this.post<{
+        message_id: string
+        user_message_id: string
+        assistant_message_id: string
+        event_id: string
+        status: string
+        attempt_id?: string
+      }>('/chat/send_async', {
+        session_id: sessionId,
+        content,
+        ...opts,
+      }),
+
+    send: (sessionId: string, content: string, opts?: { images?: string[] }) =>
+      this.post<unknown>('/chat/send', {
+        session_id: sessionId,
+        content,
+        ...opts,
+      }),
+
+    cancel: (sessionId: string, attemptId?: string) =>
+      this.post<{ status: string; session_id: string; attempt_id?: string }>(
+        '/chat/cancel',
+        { session_id: sessionId, attempt_id: attemptId },
+      ),
+
+    resumeQueue: (sessionId: string) =>
+      this.post<{ ok: boolean; session_id: string }>(
+        '/chat/queue/resume',
+        { session_id: sessionId },
+      ),
+
+    attempts: (sessionId: string) =>
+      this.get<{
+        attempts: Array<{
+          attempt_id: string
+          message_id: string
+          status: 'running' | 'queued' | 'failed'
+          prompt: string
+          created_at: string
+          error?: string
+        }>
+      }>(`/chat/attempts?session_id=${sessionId}`),
+
+    personas: () =>
+      this.get<{ personas: Array<{ id: string; name: string; description: string }> }>(
+        '/chat/personas',
+      ),
+  }
+
   definitionRuns = {
     start: (sessionId: string, definitionName: string, objective: string, params?: Record<string, unknown>) =>
       this.post<DefinitionRunStartResponse>('/goal/workflow/start-definition', {

@@ -1,5 +1,16 @@
 """API response/request schemas (Pydantic v2 wire shapes)."""
 
+from .chat import (
+    CancelRequest,
+    ChatAttemptItem,
+    ChatAttemptsResponse,
+    ChatCancelResponse,
+    ChatMessageRequest,
+    ChatPersonaItem,
+    ChatPersonasResponse,
+    ChatQueueResumeResponse,
+    SendMessageResponse,
+)
 from .study import (
     ArtifactItem,
     DiffLine,
@@ -34,12 +45,21 @@ from .study import (
 
 __all__ = [
     "ArtifactItem",
+    "CancelRequest",
+    "ChatAttemptItem",
+    "ChatAttemptsResponse",
+    "ChatCancelResponse",
+    "ChatMessageRequest",
+    "ChatPersonaItem",
+    "ChatPersonasResponse",
+    "ChatQueueResumeResponse",
     "DiffLine",
     "DirectiveModel",
     "GoalCriterionModel",
     "GoalSnapshotModel",
     "HangingEventItem",
     "MetricTargetModel",
+    "SendMessageResponse",
     "StudyActionItem",
     "StudyActionRequest",
     "StudyActionResponse",

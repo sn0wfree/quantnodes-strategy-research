@@ -2288,8 +2288,40 @@ export interface components {
             /** New Password */
             new_password: string;
         };
-        /** ChatMessage */
-        ChatMessage: {
+        /** ChatAttemptItem */
+        ChatAttemptItem: {
+            /** Attempt Id */
+            attempt_id: string;
+            /** Message Id */
+            message_id: string;
+            /** Status */
+            status: string;
+            /** Prompt */
+            prompt: string;
+            /** Created At */
+            created_at: string;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+        };
+        /** ChatAttemptsResponse */
+        ChatAttemptsResponse: {
+            /** Attempts */
+            attempts: components["schemas"]["ChatAttemptItem"][];
+        };
+        /** ChatCancelResponse */
+        ChatCancelResponse: {
+            /** Status */
+            status: string;
+            /** Session Id */
+            session_id: string;
+            /** Attempt Id */
+            attempt_id?: string | null;
+        };
+        /** ChatMessageRequest */
+        ChatMessageRequest: {
             /** Session Id */
             session_id: string;
             /** Content */
@@ -2304,6 +2336,29 @@ export interface components {
             model?: string | null;
             /** Thinking */
             thinking?: string | null;
+        };
+        /** ChatPersonaItem */
+        ChatPersonaItem: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** System Prompt */
+            system_prompt?: string | null;
+        };
+        /** ChatPersonasResponse */
+        ChatPersonasResponse: {
+            /** Personas */
+            personas: components["schemas"]["ChatPersonaItem"][];
+        };
+        /** ChatQueueResumeResponse */
+        ChatQueueResumeResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Session Id */
+            session_id: string;
         };
         /** DiffLine */
         DiffLine: {
@@ -3046,6 +3101,10 @@ export interface components {
             /** Scoreboard */
             scoreboard?: unknown[];
             goal_snapshot?: components["schemas"]["GoalSnapshotModel"] | null;
+            /** Monitor State */
+            monitor_state?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** TokenResponse */
         TokenResponse: {
@@ -3243,16 +3302,16 @@ export interface components {
             objective: string;
         };
         /** CancelRequest */
-        strategy_research__api__routers__slash_commands__CancelRequest: {
+        strategy_research__api__routers__study__CancelRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
+        /** CancelRequest */
+        strategy_research__api__schemas__chat__CancelRequest: {
             /** Session Id */
             session_id: string;
             /** Attempt Id */
             attempt_id?: string | null;
-        };
-        /** CancelRequest */
-        strategy_research__api__routers__study__CancelRequest: {
-            /** Reason */
-            reason?: string | null;
         };
     };
     responses: never;
@@ -3391,7 +3450,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChatMessage"];
+                "application/json": components["schemas"]["ChatMessageRequest"];
             };
         };
         responses: {
@@ -3424,7 +3483,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["strategy_research__api__routers__slash_commands__CancelRequest"];
+                "application/json": components["schemas"]["strategy_research__api__schemas__chat__CancelRequest"];
             };
         };
         responses: {
@@ -3434,7 +3493,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ChatCancelResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3467,7 +3526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ChatQueueResumeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3490,7 +3549,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChatMessage"];
+                "application/json": components["schemas"]["ChatMessageRequest"];
             };
         };
         responses: {
@@ -3566,7 +3625,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ChatAttemptsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3595,7 +3654,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ChatPersonasResponse"];
                 };
             };
         };
