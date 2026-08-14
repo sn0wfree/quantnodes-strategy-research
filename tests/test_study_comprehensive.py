@@ -26,10 +26,10 @@ from strategy_research.core.study.attribution import (
     classify_attribution,
     compute_precision,
 )
-from strategy_research.core.study.executor import (
+from strategy_research.core.study.runner import (
     acceptance_config_from_targets,
 )
-from strategy_research.core.study.executor import (
+from strategy_research.core.study.runner import (
     meets_metric_targets as executor_meets_metric_targets,
 )
 from strategy_research.core.study.models import (

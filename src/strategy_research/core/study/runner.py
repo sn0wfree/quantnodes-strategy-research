@@ -116,6 +116,36 @@ def _metric_pass_set(metrics: dict, targets: list[dict]) -> set[str]:
     return passed
 
 
+def acceptance_config_from_targets(
+    targets: list[dict] | None,
+) -> Any:
+    """Map ``metric_targets`` → an ``AcceptanceConfig`` override.
+
+    Called lazily (imports strategy_acceptance) so importing
+    ``core.study.runner`` does not eagerly load the acceptance module —
+    useful when tests only need pure helpers.
+    """
+
+    from strategy_research.core.strategy_acceptance import DEFAULT_CONFIG
+
+    if not targets:
+        return DEFAULT_CONFIG
+    overrides: dict[str, Any] = {}
+    for t in targets:
+        name = t.get("name")
+        value = t.get("value")
+        if name is None or value is None:
+            continue
+        if name == "calmar":
+            overrides["hard_calmar_min"] = float(value)
+        elif name == "sharpe":
+            overrides["hard_sharpe_min"] = float(value)
+        elif name == "max_dd":
+            # max_dd is negative (drawdown); min ≥ -0.15 means better drawdown
+            overrides["hard_max_dd_min"] = float(value)
+    return DEFAULT_CONFIG.with_overrides(**overrides) if overrides else DEFAULT_CONFIG
+
+
 # ── event emitter protocol ──────────────────────────────────────────
 
 
