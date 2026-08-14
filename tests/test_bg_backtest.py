@@ -144,3 +144,43 @@ def test_foreground_mode_unchanged(ws, fake_steps):
     assert out["status"] == "ok"
     assert out["run"] == "run_0001"
     assert "task_id" not in out
+
+
+# ── prompt/whitelist assertions (agent collaboration surfaces) ───────
+
+
+def test_long_task_rule_exists():
+    from pathlib import Path as P
+    root = P(__file__).resolve().parents[1] / "src" / "strategy_research"
+    rule = root / "templates" / ".prompts" / "_common" / "rules" / "long-task.md"
+    assert rule.exists()
+    content = rule.read_text(encoding="utf-8")
+    assert "run_bg_command" in content
+    assert "background=True" in content
+    assert "观察窗" in content
+
+
+def test_long_task_rule_indexed():
+    from pathlib import Path as P
+    root = P(__file__).resolve().parents[1] / "src" / "strategy_research"
+    index = root / "templates" / ".prompts" / "_common" / "rules" / "INDEX.md"
+    assert "long-task.md" in index.read_text(encoding="utf-8")
+
+
+def test_whitelist_has_bg_tool_for_long_task_roles():
+    from strategy_research.core.agent.role_factory import _ROLE_TOOL_WHITELIST
+    for role in ("strategist", "backtest_diagnostics",
+                 "factor_analyst", "data_quality"):
+        assert "run_bg_command" in _ROLE_TOOL_WHITELIST[role], role
+
+
+def test_study_phase_iteration_budget_raised():
+    """Study 场景三 phase 传 max_iterations=10（观察窗预算），CLI 默认 8 不动."""
+    import inspect
+
+    import strategy_research.core.study.runner as runner_mod
+    src = inspect.getsource(runner_mod.AutoresearchRunner._run_one_round)
+    assert src.count("max_iterations=10") == 3
+    import strategy_research.core.autoresearch as ar
+    sig = inspect.signature(ar.run_researcher_phase)
+    assert sig.parameters["max_iterations"].default == 8  # CLI 默认不变

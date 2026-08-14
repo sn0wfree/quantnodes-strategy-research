@@ -1863,6 +1863,7 @@ def _make_spawn_fn(
     current_state: dict,
     behavior: str | None = None,
     max_retries: int = 3,
+    max_iterations: int = 8,
     inter_agent_sleep: float = 0.0,
     strategy_dir: Path | None = None,
     runs_dir: Path | None = None,
@@ -1881,6 +1882,7 @@ def _make_spawn_fn(
                 results_tsv=results_tsv,
                 write_roots=write_roots,
                 read_roots=read_roots,
+                max_iterations=max_iterations,
             ),
             name,
             max_retries=max_retries,
@@ -1901,6 +1903,7 @@ def run_researcher_phase(
     run_name: str = "",
     behavior: str | None = None,
     max_retries: int = 3,
+    max_iterations: int = 8,
     directives: str | None = None,
     lazy_detection_interval: int = 10,
     keep_recent: int = 10,
@@ -1950,7 +1953,10 @@ def run_researcher_phase(
     if directives:
         state = {**state, "user_directives": directives}
 
-    spawn = _make_spawn_fn(path, strategy_name, state, behavior, max_retries)
+    spawn = _make_spawn_fn(
+        path, strategy_name, state, behavior, max_retries,
+        max_iterations=max_iterations,
+    )
     researcher_output = spawn("researcher", [])
     save_agent_record(run_dir, "researcher", 2, state, researcher_output)
 
@@ -1971,6 +1977,7 @@ def run_execution_phase(
     run_name: str = "",
     behavior: str | None = None,
     max_retries: int = 3,
+    max_iterations: int = 8,
     inter_agent_sleep: float = 0.0,
     strategy_dir: Path | None = None,
     results_tsv: Path | None = None,
@@ -1987,7 +1994,10 @@ def run_execution_phase(
     from strategy_research.core.backtest import run_backtest_script
 
     path = Path(workspace_path).resolve()
-    spawn = _make_spawn_fn(path, strategy_name, current_state, behavior, max_retries, inter_agent_sleep)
+    spawn = _make_spawn_fn(
+        path, strategy_name, current_state, behavior, max_retries,
+        inter_agent_sleep, max_iterations=max_iterations,
+    )
 
     dq = spawn("data_quality", [researcher_output])
     save_agent_record(run_dir, "data_quality", 3, {"researcher": researcher_output}, dq)
@@ -2041,6 +2051,7 @@ def run_evaluation_phase(
     *,
     behavior: str | None = None,
     max_retries: int = 3,
+    max_iterations: int = 8,
     acceptance_config=None,
 ) -> dict:
     """Phase 3: risk_controller → attribution_analyst → anti_overfit → backtest_diag → decide.
@@ -2060,7 +2071,10 @@ def run_evaluation_phase(
     )
 
     path = Path(workspace_path).resolve()
-    spawn = _make_spawn_fn(path, strategy_name, {}, behavior, max_retries)
+    spawn = _make_spawn_fn(
+        path, strategy_name, {}, behavior, max_retries,
+        max_iterations=max_iterations,
+    )
 
     risk = spawn("risk_controller", [metrics])
     save_agent_record(run_dir, "risk_controller", 5, {"metrics": metrics}, risk)

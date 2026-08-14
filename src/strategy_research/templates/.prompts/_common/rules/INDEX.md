@@ -12,6 +12,7 @@
 | 准备调用不熟悉的 tool | [`tools.md`](./tools.md) |
 | 处理 role agent 的 JSON 输出细节 | [`json-output.md`](./json-output.md) |
 | 修复 / 优化迭代 | [`iteration.md`](./iteration.md) |
+| 长命令 / 回测可能超时、需后台化 | [`long-task.md`](./long-task.md) |
 | 不知道该读哪个 | 先读本文件 |
 
 ## 各 rule 内容概览

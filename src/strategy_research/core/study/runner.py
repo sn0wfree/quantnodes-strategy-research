@@ -733,7 +733,7 @@ class AutoresearchRunner:
         researcher_result = run_researcher_phase(
             path, strategy, current_state, run_dir,
             session_id=session, run_name=run_name,
-            behavior=self.study.behavior, max_retries=3,
+            behavior=self.study.behavior, max_retries=3, max_iterations=10,
             directives=directive_text,
             lazy_detection_interval=self.study.lazy_detection_interval,
             keep_recent=self.study.keep_recent, round_num=round_num,
@@ -758,7 +758,7 @@ class AutoresearchRunner:
         exec_result = run_execution_phase(
             path, strategy, current_state, researcher_output, run_dir,
             session_id=session, run_name=run_name,
-            behavior=self.study.behavior, max_retries=3,
+            behavior=self.study.behavior, max_retries=3, max_iterations=10,
             strategy_dir=run_dir,
             results_tsv=results_tsv,
             round_num=round_num,
@@ -775,7 +775,7 @@ class AutoresearchRunner:
         })
         eval_result = run_evaluation_phase(
             path, strategy, exec_result["backtest_result"], metrics, run_dir,
-            behavior=self.study.behavior, max_retries=3,
+            behavior=self.study.behavior, max_retries=3, max_iterations=10,
         )
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
