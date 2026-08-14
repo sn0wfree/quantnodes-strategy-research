@@ -247,13 +247,29 @@ class ScheduledResearchExecutor:
 
 | 步骤 | 内容 | 验收 |
 |---|---|---|
-| S1 | 设计文档（本文档） | git commit |
-| S2 | models.py 扩展 + store.py SQLite 重写 + 迁移 | pytest store/迁移 |
-| S3 | bootstrap.py 抽取 + study.py 改调 | test_study_api 全绿 |
-| S4 | executor.py asyncio-first + study 桥 | pytest executor |
-| S5 | cli.py 改造 | CLI 手动验证 |
-| S6 | api/routers/schedule.py + app.py lifespan | pytest API |
-| S7 | 测试补全 + ruff + 全量回归 | 全绿 |
+| S1 | 设计文档（本文档） | ✅ git commit `5820eb0` |
+| S2 | models.py 扩展 + store.py SQLite 重写 + 迁移 | ✅ `3379671`（41 tests） |
+| S3 | bootstrap.py 抽取 + study.py 改调 | ✅ `6fbcd10`（study 系 1145 tests 回归） |
+| S4 | executor.py asyncio-first + study 桥 | ✅ `27102f9`（55 tests） |
+| S5 | cli.py 改造 | ✅ `c408789` |
+| S6 | api/routers/schedule.py + app.py lifespan | ✅ `856aef6`（12 tests） |
+| S7 | 测试补全 + ruff + 全量回归 | ✅ `4a2c751`；全量 **10769 passed / 0 failed**（auth_tokens 单测 flaky 环境串扰，单独跑通过） |
+
+### 实施记录（S2-S7 落地要点）
+
+- **S2**：`scheduled_jobs` 表进 goals.db（`QUANTNODES_RESEARCH_GOAL_DB_PATH` 同 env）；
+  `migrate_from_json` 幂等（`.migrated` 标记 / `.corrupt-<ts>` 损坏兜底）；存量 target 统一 'study'；
+  旧 `save()`/`DEFAULT_STORE_PATH` 删除（无外部引用）
+- **S3**：`core/study/bootstrap.py` 承接 API 层全部创建编排——`validate_workspace_strategy`（含路径穿越防护）、
+  `init_study_dir`（v2 §6 自治目录引导）、`create_study_record`（同步）、`create_and_queue_study`（async 便捷版）；
+  `study_start` autoresearch 分支改调，保留 create_task+log_task_exception 模式（测试守护）
+- **S4**：executor 双模式（`start(loop)` task 模式 / 无 loop 线程模式）；`dispatch_fn` 支持 sync/async；
+  `_dispatch_by_target` 按 `job.target` 分派（study 桥 / subprocess 兜底）；last_run_id=study_id
+- **S5**：CLI `create` 加 `--metric/--budget-*/--monitor-interval/--guidance-file`；`run`/`start` 改
+  asyncio 单 loop + 内建 `StudyScheduler`（NullEmitter），`run` 等待 study 终态
+- **S6**：`/api/schedule/{create,list,show,cancel,delete,run}` 全 IDOR（owner_session_id 匹配，CLI job 不可 API 变更）；
+  lifespan 启动定时守护 + JSON 迁移；create 校验 workspace 存在 + cron
+- **S7**：CLI job 无 owner → dispatch 回退 `cli:{job_id}`（owner 非空约束）；cron 周期 job dispatch 后重置 PENDING + 重排
 
 ## 9. 文件清单
 
