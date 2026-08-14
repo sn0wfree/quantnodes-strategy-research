@@ -746,7 +746,15 @@ class SessionService:
         mode: str = "build",
         thinking: str = "auto",
     ) -> None:
-        """Execute an Attempt: load history → run AgentLoop → persist result."""
+        """Execute an Attempt: load history -> run AgentLoop -> persist result.
+
+        Runs in its own asyncio task (``asyncio.create_task``), so the
+        trace context set here is task-scoped and auto-discarded on
+        completion -- no manual reset needed.
+        """
+        from ...core.observability.trace import _session_id, _trace_id
+        _trace_id.set(attempt.attempt_id or uuid.uuid4().hex[:12])
+        _session_id.set(session_id)
         logger.info("[EXEC] start attempt=%s session=%s", attempt.attempt_id, session_id)
         attempt.mark_running()
 

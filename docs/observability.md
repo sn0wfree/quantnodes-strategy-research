@@ -114,7 +114,81 @@ Admin token：`SR_ADMIN_TOKEN` 环境变量。未设置时 admin 端点返回 `5
 
 ---
 
-## 4. 埋点与失败容忍
+## 4. 结构化日志 + trace_id（D）
+
+### 4.1 启用 JSON 日志
+
+```
+SR_LOG_JSON=1   # 启用单行 JSON 日志（默认关闭，输出纯文本）
+```
+
+启用后每行日志变为：
+
+```json
+{"ts":"13:45:01","level":"INFO","logger":"strategy_research.core.llm.openai_client",
+ "trace_id":"a1b2c3d4e5f6","session_id":"sess-1","study_id":"st-9","round_num":3,
+ "msg":"stream retryable status 429 (attempt 1/3)"}
+```
+
+`trace_id`/`session_id`/`study_id`/`round_num` 为空时自动省略，减少噪声。
+
+### 4.2 trace_id 传播链
+
+四个 `ContextVar` 在 asyncio task 图中自动传播（`asyncio.create_task`
+拷贝当前 context）：
+
+```
+HTTP /api/chat/send_async
+  └─ SessionService._run_attempt          ← bind: trace_id=attempt_id, session_id
+       └─ AgentLoop._run_loop_core        ← fallback bind: session_id (if not set)
+            └─ client.astream / achat     ← 日志含 trace_id + session_id
+            └─ StudyRunner._run_one_round ← bind: study_id, round_num
+                 └─ client.stream / chat  ← 日志含 study_id + round_num
+```
+
+**绑定点**（代码位置）：
+
+| 层 | 文件:函数 | 绑定的字段 |
+|---|---|---|
+| 会话请求 | `api/session/service.py::_run_attempt` | `trace_id`(=attempt_id), `session_id` |
+| Agent 循环 | `core/agent/loop.py::_run_loop_core` | `trace_id`(fallback), `session_id`(fallback) |
+| Study 轮次 | `core/study/runner.py::_run_one_round` | `study_id`, `round_num` |
+
+`_run_loop_core` 仅在 ContextVar 未被上层设置时才 fallback（`if not _trace_id.get()`），
+所以 study runner 内的 agent 调用会继承 `_run_attempt` 设的 trace_id +
+`_run_one_round` 设的 study_id/round_num。
+
+### 4.3 grep / jq 示例
+
+```bash
+# 所有 LLM 墙钟超时事件（JSON 日志）
+journalctl -u strategy-research | jq 'select(.msg | contains("wall-clock"))'
+
+# 某次 attempt 的完整调用链
+journalctl -u strategy-research | jq 'select(.trace_id=="a1b2c3d4e5f6")'
+
+# 某 study 的所有轮次日志
+journalctl -u strategy-research | jq 'select(.study_id=="st-9")'
+```
+
+### 4.4 TraceFilter + JsonFormatter 内部
+
+- `core/observability/trace.py` -- 全部实现（4 个 ContextVar + `bind_trace`
+  context manager + `TraceFilter` + `JsonFormatter` + `setup_trace_logging`）
+- `TraceFilter` 挂在 root logger 上，每条 LogRecord 经过时注入
+  `record.trace_id/session_id/study_id/round_num`
+- `setup_trace_logging()` 幂等（filter 只挂一次），`SR_LOG_JSON=1` 时
+  把所有 root handler 的 formatter 换成 `JsonFormatter`
+
+### 4.5 已修 bug
+
+`_check_wallclock` 之前读 `getattr(self.config, "session_id", None)`，
+但 `LLMConfig` 无 `session_id` 字段 -> 恒 `None`。改为从 ContextVar
+`_session_id.get()` 读取，wallclock 超时事件现在能正确关联到 session。
+
+---
+
+## 5. 埋点与失败容忍
 
 - 所有事件写入 `best-effort`：写失败吞异常，**不影响主路径**（LLM 流、agent 循环、
   调度器）。
@@ -124,7 +198,7 @@ Admin token：`SR_ADMIN_TOKEN` 环境变量。未设置时 admin 端点返回 `5
   WHERE created_at < strftime('%s','now')-30*24*3600`（30 天），或跑
   `strategy-research hangs` 后手工清。
 
-## 5. 相关代码
+## 6. 相关代码
 
 | 组件 | 文件 |
 |---|---|
@@ -133,4 +207,6 @@ Admin token：`SR_ADMIN_TOKEN` 环境变量。未设置时 admin 端点返回 `5
 | admin metrics | `src/strategy_research/api/routers/admin.py` |
 | 事件表 + 报告 | `src/strategy_research/core/study/hanging_events.py` |
 | 事件埋点 | `core/llm/openai_client.py`、`core/study/scheduler.py`、`core/agent/loop.py`、`core/agent/circuit_breaker.py` |
-| 测试 | `tests/test_study_dump.py`、`tests/test_admin_metrics.py`、`tests/test_hanging_events.py` |
+| trace context + JSON | `core/observability/trace.py` |
+| trace 绑定点 | `api/session/service.py`、`core/agent/loop.py`、`core/study/runner.py` |
+| 测试 | `tests/test_study_dump.py`、`tests/test_admin_metrics.py`、`tests/test_hanging_events.py`、`tests/test_trace_context.py` |

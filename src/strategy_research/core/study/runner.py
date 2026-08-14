@@ -631,6 +631,23 @@ class AutoresearchRunner:
 
         Overridable for tests to stub round execution.
         """
+        from ..observability import bind_trace
+
+        with bind_trace(
+            study_id=self.study.study_id,
+            round_num=round_num,
+        ):
+            return self._run_one_round_impl(
+                round_num, previous_summary, directive_text,
+            )
+
+    def _run_one_round_impl(
+        self,
+        round_num: int,
+        previous_summary: dict | None,
+        directive_text: str | None,
+    ) -> dict:
+        """Actual round implementation (called inside ``bind_trace``)."""
         from strategy_research.core.autoresearch import (
             _create_run_dir,
             generate_run_summary,

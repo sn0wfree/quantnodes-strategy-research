@@ -48,6 +48,11 @@ def create_app(
     )
     # 设置 strategy_research 命名空间日志级别
     logging.getLogger("strategy_research").setLevel(log_level)
+    # Trace context (ContextVar) + optional JSON formatter.
+    # SR_LOG_JSON=1 enables single-line JSON logs with trace_id /
+    # session_id / study_id / round_num for structured log pipelines.
+    from ..core.observability import setup_trace_logging
+    setup_trace_logging(log_level=log_level)
     logger.info("[STARTUP] create_app called")
 
     # Register the core loop's compaction persister (legacy fallback

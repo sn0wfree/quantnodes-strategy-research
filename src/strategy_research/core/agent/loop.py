@@ -934,7 +934,7 @@ class AgentLoop:
         """
         return await self._run_loop_core(task, context, history, async_mode=True)
 
-    async def _run_loop_core(
+    async def _run_loop_core(  # noqa: C901
         self,
         task: str,
         context: str | None,
@@ -949,6 +949,12 @@ class AgentLoop:
         invoke/ThreadPoolExecutor/fire_hooks). Both paths share the same
         iteration/hook/compact/stop/no-progress semantics.
         """
+        from ..observability.trace import _session_id, _trace_id
+
+        if not _trace_id.get():
+            _trace_id.set(uuid.uuid4().hex[:12])
+        if self.session_id and not _session_id.get():
+            _session_id.set(self.session_id)
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
         self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
