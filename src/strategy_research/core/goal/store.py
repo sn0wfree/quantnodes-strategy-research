@@ -1678,6 +1678,7 @@ class GoalStore:
             progress_percent=float(row["progress_percent"]) if row["progress_percent"] is not None else 0.0,
             parent_goal_id=row["parent_goal_id"] if "parent_goal_id" in row.keys() else None,
             workflow_id=row["workflow_id"] if "workflow_id" in row.keys() else None,
+            user_id=row["user_id"] if "user_id" in row.keys() else None,
         )
 
     @staticmethod

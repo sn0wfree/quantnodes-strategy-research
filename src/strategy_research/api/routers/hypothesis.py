@@ -10,17 +10,19 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
-def _user_goal_ids(request: Request) -> set[str]:
+def _user_goal_ids(request: Request) -> set[str] | None:
     """Goal ids the requesting user may access (session scoped).
 
     Resolution chain: user -> owned sessions -> goal rows on those
-    sessions. Hypotheses without a goal_id are legacy orphans and are
-    treated as visible to everyone (no session to scope them against).
+    sessions. Returns ``None`` when isolation is disabled (no filtering);
+    otherwise the caller's allowed goal-id set (possibly empty, meaning
+    the user owns no goals). Hypotheses without a goal_id are legacy
+    orphans and are treated as visible to everyone.
     """
     import os as _os
 
     if _os.environ.get("SR_ENFORCE_STUDY_IDOR", "1") == "0":
-        return set()
+        return None
     user_id = getattr(request.state, "user_id", None) or "anonymous"
     from ...core.goal import GoalStore
     from .web_session import _get_db
@@ -98,7 +100,7 @@ async def hypothesis_list(
         if status:
             items = [h for h in items if h.status == status]
         allowed = _user_goal_ids(request)
-        if allowed:
+        if allowed is not None:
             items = [h for h in items if not h.goal_id or h.goal_id in allowed]
         return {
             "status": "ok",
@@ -124,7 +126,7 @@ async def hypothesis_search(
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)
         results = registry.search(query=q)
         allowed = _user_goal_ids(request)
-        if allowed:
+        if allowed is not None:
             results = [h for h in results if not h.goal_id or h.goal_id in allowed]
         return {
             "status": "ok",
