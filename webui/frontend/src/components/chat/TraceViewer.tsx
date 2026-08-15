@@ -5,6 +5,7 @@ as a scrollable timeline.  Fetches data from GET /api/chat/session/{id}/trace.
 */
 
 import { useCallback, useEffect, useState } from "react";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 interface TraceEvent {
   ts?: number;
@@ -101,6 +102,166 @@ function LLMRequestDetails({ event }: { event: TraceEvent }) {
   );
 }
 
+/** Line-based LCS diff of two texts for the request-envelope comparison. */
+function diffLines(a: string, b: string): { type: "same" | "add" | "del"; text: string }[] {
+  const aa = a.split("\n");
+  const bb = b.split("\n");
+  const n = aa.length;
+  const m = bb.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = aa[i] === bb[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out: { type: "same" | "add" | "del"; text: string }[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (aa[i] === bb[j]) {
+      out.push({ type: "same", text: aa[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: "del", text: aa[i] });
+      i++;
+    } else {
+      out.push({ type: "add", text: bb[j] });
+      j++;
+    }
+  }
+  while (i < n) out.push({ type: "del", text: aa[i++] });
+  while (j < m) out.push({ type: "add", text: bb[j++] });
+  return out;
+}
+
+interface DiffSectionProps {
+  title: string;
+  a: string;
+  b: string;
+}
+
+/** A single section (system prompt / tools schema) of the envelope diff. */
+function DiffSection({ title, a, b }: DiffSectionProps) {
+  const lines = diffLines(a, b);
+  return (
+    <div>
+      <div className="mb-0.5 text-[9px] uppercase tracking-wide text-gray-400">{title}</div>
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-900/60 p-2 font-mono text-[10px] leading-relaxed">
+        {lines.map((l, i) => (
+          <div
+            key={i}
+            className={
+              l.type === "add"
+                ? "bg-green-900/40 text-green-300"
+                : l.type === "del"
+                  ? "bg-red-900/40 text-red-300"
+                  : "text-gray-400"
+            }
+          >
+            {l.type === "add" ? "+ " : l.type === "del" ? "- " : "  "}
+            {l.text || " "}
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+/** Compare two llm_request envelopes (system prompt + tools schema). */
+function LLMRequestDiff({ events }: { events: TraceEvent[] }) {
+  const reqs = events.filter((e) => e.type === "llm_request");
+  const [base, setBase] = useState(0);
+  const [cmp, setCmp] = useState(reqs.length > 1 ? 1 : 0);
+  const safeBase = Math.min(base, Math.max(0, reqs.length - 1));
+  const safeCmp = Math.min(cmp, Math.max(0, reqs.length - 1));
+  const a = reqs[safeBase];
+  const b = reqs[safeCmp];
+
+  if (reqs.length < 2) {
+    return (
+      <div className="px-1 pb-1 text-[10px] text-gray-500">
+        Need at least two LLM requests to diff envelopes.
+      </div>
+    );
+  }
+
+  const text = (e: TraceEvent | undefined, key: string) =>
+    typeof e?.[key] === "string" ? (e[key] as string) : "";
+
+  return (
+    <div className="border-b border-gray-800 px-3 py-2">
+      <div className="mb-1 flex items-center gap-2 text-[10px]">
+        <span className="text-gray-400">Envelope diff</span>
+        <select
+          value={safeBase}
+          onChange={(e) => setBase(Number(e.target.value))}
+          className="rounded border border-gray-700 bg-gray-800 px-1 py-0.5 text-gray-300"
+        >
+          {reqs.map((_, i) => (
+            <option key={i} value={i}>
+              base i{i + 1}
+            </option>
+          ))}
+        </select>
+        <span className="text-gray-600">vs</span>
+        <select
+          value={safeCmp}
+          onChange={(e) => setCmp(Number(e.target.value))}
+          className="rounded border border-gray-700 bg-gray-800 px-1 py-0.5 text-gray-300"
+        >
+          {reqs.map((_, i) => (
+            <option key={i} value={i}>
+              compare i{i + 1}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-2">
+        <DiffSection title={`System prompt (${(a?.system_prompt_len ?? text(a, "system_prompt").length)} chars)`} a={text(a, "system_prompt")} b={text(b, "system_prompt")} />
+        <DiffSection title="Tools schema" a={tryJson(text(a, "tools_schema"))} b={tryJson(text(b, "tools_schema"))} />
+      </div>
+    </div>
+  );
+}
+
+/** Cumulative token-usage chart fed by session_total_tokens events. */
+function TokenUsageChart({ events }: { events: TraceEvent[] }) {
+  const series = events
+    .filter((e) => e.type === "session_total_tokens")
+    .map((e, i) => ({
+      index: i + 1,
+      total: typeof e.total_tokens === "number" ? e.total_tokens : 0,
+    }));
+  if (series.length < 2) return null;
+  return (
+    <div className="border-b border-gray-800 px-3 py-2">
+      <div className="mb-1 text-[9px] uppercase tracking-wide text-gray-400">
+        Cumulative tokens
+      </div>
+      <div className="h-24">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={series} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+            <defs>
+              <linearGradient id="tokenFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="index" tick={{ fontSize: 9, fill: "#6b7280" }} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: "#6b7280" }} tickLine={false} axisLine={false} width={40} />
+            <Tooltip
+              contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 10 }}
+              labelFormatter={(l) => `LLM call #${l}`}
+            />
+            <Area type="monotone" dataKey="total" stroke="#3b82f6" fill="url(#tokenFill)" strokeWidth={1.5} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 function EventCard({ event }: { event: TraceEvent }) {
   const [expanded, setExpanded] = useState(false);
   const color = EVENT_COLORS[event.type] ?? "border-gray-500/40 bg-gray-950/20";
@@ -181,6 +342,7 @@ export function TraceViewer({ sessionId, onClose }: TraceViewerProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("");
+  const [showDiff, setShowDiff] = useState(false);
 
   const fetchTrace = useCallback(async () => {
     if (!sessionId) return;
@@ -224,6 +386,17 @@ export function TraceViewer({ sessionId, onClose }: TraceViewerProps) {
         </select>
         <button
           type="button"
+          onClick={() => setShowDiff((v) => !v)}
+          className={`rounded border px-1.5 py-0.5 text-[10px] ${
+            showDiff
+              ? "border-blue-500 bg-blue-900/40 text-blue-200"
+              : "border-gray-700 text-gray-400 hover:bg-gray-800"
+          }`}
+        >
+          Diff
+        </button>
+        <button
+          type="button"
           onClick={fetchTrace}
           className="rounded border border-gray-700 px-1.5 py-0.5 text-[10px] text-gray-400 hover:bg-gray-800"
         >
@@ -253,6 +426,8 @@ export function TraceViewer({ sessionId, onClose }: TraceViewerProps) {
             No trace events found
           </div>
         )}
+        <TokenUsageChart events={events} />
+        {showDiff && <LLMRequestDiff events={events} />}
         <div className="space-y-1">
           {events.map((event, i) => (
             <EventCard key={`${event.time_created ?? event.ts}-${i}`} event={event} />

@@ -149,13 +149,16 @@ class _LoopEventForwarder:
         return self._usage_state
 
     def __call__(self, event_type: str, data: dict[str, Any]) -> None:
-        # LLM request envelope: offload large fields (system_prompt,
-        # tools_schema) to sidecar blobs so the event_log stays lean;
-        # the small metadata + sidecar refs go into event_log. This lets
-        # a later projection reconstruct the full request envelope from
-        # the event log alone (DSH request-envelope pattern).
-        if event_type == "llm_request" and isinstance(data, dict):
-            data = self._offload_large_fields(data)
+        # Offload large fields (system_prompt, tools_schema, llm response
+        # content) to sidecar blobs so the event_log stays lean; the small
+        # metadata + sidecar refs go into event_log. This lets a later
+        # projection reconstruct the full envelope from the event log
+        # alone (DSH request/response-envelope pattern).
+        if isinstance(data, dict):
+            if event_type == "llm_request":
+                data = self._offload_large_fields(data)
+            elif event_type == "llm_response":
+                data = self._offload_large_fields(data, fields=("content",))
 
         # Accumulate parts for persistence
         _accumulate_part(self.accumulated_parts, event_type, data)

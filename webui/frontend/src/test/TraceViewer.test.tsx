@@ -87,4 +87,45 @@ describe('TraceViewer', () => {
     expect(screen.getByText(/Loop Final — stop, 1 iters, 0.4s/)).toBeTruthy()
     expect(screen.getByText(/Heartbeat — run_backtest \(3.2s\)/)).toBeTruthy()
   })
+
+  it('renders a cumulative token chart from session_total_tokens events', async () => {
+    const events = [
+      { type: 'session_total_tokens', time_created: 1700000000, total_tokens: 1200 },
+      { type: 'session_total_tokens', time_created: 1700000001, total_tokens: 3400 },
+      { type: 'session_total_tokens', time_created: 1700000002, total_tokens: 5100 },
+    ]
+    vi.stubGlobal('fetch', mockFetch(events))
+    render(<TraceViewer sessionId="s-1" />)
+    expect(await screen.findByText('Cumulative tokens')).toBeTruthy()
+  })
+
+  it('renders the envelope diff comparing two llm_requests', async () => {
+    const events = [
+      {
+        type: 'llm_request',
+        time_created: 1700000000,
+        iteration: 1,
+        system_prompt: 'sys A\nshared\nkeep',
+        tools_schema: '[]',
+        system_prompt_len: 17,
+      },
+      {
+        type: 'llm_request',
+        time_created: 1700000001,
+        iteration: 2,
+        system_prompt: 'sys B\nshared\nchanged',
+        tools_schema: '[]',
+        system_prompt_len: 17,
+      },
+    ]
+    vi.stubGlobal('fetch', mockFetch(events))
+    render(<TraceViewer sessionId="s-1" />)
+    await screen.findByText('Diff')
+
+    fireEvent.click(screen.getByText('Diff'))
+    expect(screen.getByText('Envelope diff')).toBeTruthy()
+    expect(screen.getByText(/sys A/)).toBeTruthy()
+    expect(screen.getByText(/sys B/)).toBeTruthy()
+    expect(screen.getByText(/shared/)).toBeTruthy()
+  })
 })

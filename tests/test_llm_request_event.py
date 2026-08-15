@@ -236,3 +236,46 @@ def test_forwarder_injects_attempt_and_message_ids(tmp_path) -> None:
     _, _, data = bus.emitted[0]
     assert data["attempt_id"] == "att-1"
     assert data["message_id"] == "msg-1"
+
+
+def test_forwarder_offloads_large_llm_response_content(tmp_path, monkeypatch) -> None:
+    """A large llm_response ``content`` is offloaded to a sidecar blob and the
+    stored event carries path/preview/size references."""
+    monkeypatch.setenv("SR_LLM_REQUEST_OFFLOAD_THRESHOLD", "64")
+    bus = _FakeBus(db_path=tmp_path / "sessions.db")
+    fwd = _make_forwarder(bus)
+
+    big_content = "A" * 5000
+    fwd("llm_response", {
+        "type": "llm_response", "iteration": 1, "finish_reason": "stop",
+        "has_tool_calls": False, "tool_call_count": 0,
+        "content": big_content, "content_preview": big_content[:200],
+    })
+
+    assert len(bus.emitted) == 1
+    _, _, data = bus.emitted[0]
+    assert "content" not in data
+    assert data["content_path"].startswith("trace-blobs/")
+    assert data["content_size"] == len(big_content)
+    assert data["content_preview"] == big_content[:512]
+
+    blob = tmp_path / data["content_path"]
+    assert blob.exists()
+    assert blob.read_text(encoding="utf-8") == big_content
+
+
+def test_forwarder_keeps_small_llm_response_content_inline(tmp_path) -> None:
+    """A short llm_response content stays inline (no offload)."""
+    bus = _FakeBus(db_path=tmp_path / "sessions.db")
+    fwd = _make_forwarder(bus)
+
+    small = "short answer"
+    fwd("llm_response", {
+        "type": "llm_response", "iteration": 1, "finish_reason": "stop",
+        "has_tool_calls": False, "tool_call_count": 0,
+        "content": small, "content_preview": small,
+    })
+
+    _, _, data = bus.emitted[0]
+    assert data["content"] == small
+    assert "content_path" not in data

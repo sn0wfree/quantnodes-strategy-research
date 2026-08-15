@@ -698,6 +698,7 @@ class AgentLoop:
             "finish_reason": response.finish_reason,
             "has_tool_calls": response.has_tool_calls(),
             "tool_call_count": len(response.tool_calls),
+            "content": response.content or "",
             "content_preview": (response.content or "")[:200],
         })
 

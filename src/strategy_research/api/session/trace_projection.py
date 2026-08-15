@@ -52,6 +52,7 @@ class TraceProjection:
         EventType.COMPACT,
         EventType.AGENT_ERROR,
         EventType.TOOL_HEARTBEAT,
+        EventType.SESSION_TOTAL_TOKENS,
     })
 
     def __init__(self, event_store: EventStore) -> None:

@@ -130,6 +130,34 @@ def test_projection_empty_session(tmp_path) -> None:
     assert TraceProjection(_store(tmp_path)).project("sess-missing") == []
 
 
+def test_projection_reconstructs_llm_response_content(tmp_path, monkeypatch) -> None:
+    """A large llm_response content offloaded by the forwarder is reconstructed
+    by the projection from the sidecar blob."""
+    monkeypatch.setenv("SR_LLM_REQUEST_OFFLOAD_THRESHOLD", "64")
+    store = _store(tmp_path)
+
+    from strategy_research.api.session.service import _LoopEventForwarder
+    from strategy_research.core.llm import LLMConfig
+
+    fwd = _LoopEventForwarder(
+        service=None, attempt=_Attempt(), accumulated_parts=[],
+        event_bus=store, cfg=LLMConfig(api_key="sk-test", model="fake-model"),
+    )
+    big_content = "A" * 5000
+    fwd("llm_response", {
+        "type": "llm_response", "iteration": 1, "finish_reason": "stop",
+        "has_tool_calls": False, "tool_call_count": 0,
+        "content": big_content, "content_preview": big_content[:200],
+    })
+
+    from strategy_research.api.session.trace_projection import TraceProjection
+
+    records = TraceProjection(store).project("sess-1")
+    assert len(records) == 1
+    assert records[0]["type"] == "llm_response"
+    assert records[0]["content"] == big_content
+
+
 def test_projection_no_offload_when_missing_blob(tmp_path, monkeypatch) -> None:
     """A dangling ``_path`` reference (blob missing) is skipped, not fatal."""
     monkeypatch.setenv("SR_LLM_REQUEST_OFFLOAD_THRESHOLD", "64")
