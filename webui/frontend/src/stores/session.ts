@@ -68,6 +68,23 @@ interface SessionState {
 
 /** Backend response type for GET /chat/session/{id}/state (B13 backfill). */
 interface SessionStateResponse {
+  agents: Array<{
+    id: string
+    session_id: string
+    status: string
+    name: string
+    description?: string
+    created_at: number
+    updated_at: number
+    finished_reason?: string
+    tool_calls_count: number
+    compaction_count: number
+    last_compaction?: { layer: string; timestamp: number }
+    context_tokens: number
+    context_tokens_limit: number
+    iterations_detail: Array<{ iteration: number; prompt: string; response: string }>
+    color?: string
+  }> | null
   goal: {
     goal_id: string
     session_id: string
@@ -171,7 +188,7 @@ export const useSessionStore = create<SessionState>()(
           )
           // Agent store
           if (data.agents?.length) {
-            useAgentStore.getState().setAgents(data.agents as any)
+            useAgentStore.getState().setAgents(data.agents)
           } else {
             useAgentStore.getState().setAgents([])
           }
@@ -184,7 +201,7 @@ export const useSessionStore = create<SessionState>()(
                 label: n.label ?? n.id,
                 type: n.type,
                 status: n.status,
-              })) as any,
+              })),
               (wf.edges || []).map((e) => ({
                 id: e.id,
                 source: e.source,
@@ -229,12 +246,12 @@ export const useSessionStore = create<SessionState>()(
               criteria: (data.goal.criteria || []).map((c) => ({
                 criterion_id: c.criterion_id,
                 text: c.text,
-                status: c.status as any,
+                status: c.status,
                 evidence_count: c.evidence_count ?? 0,
               })),
               evidence_count: data.goal.evidence_count ?? 0,
               recap: data.goal.recap,
-            } as any)
+            })
           } else {
             useGoalStore.getState().clearGoal()
           }
