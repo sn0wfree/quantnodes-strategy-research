@@ -61,7 +61,7 @@ async def system_info():
     # LLM status (legacy dict for frontend compat)
     try:
         llm = check_llm_config()
-    except Exception:
+    except (OSError, ValueError, RuntimeError):
         llm = {"configured": False, "provider": "unknown", "model": "unknown", "api_key_source": "unknown"}
 
     # Load full LLMConfig (carries user overrides) and resolve model info
@@ -82,7 +82,7 @@ async def system_info():
             if llm_config.model_max_output_tokens is not None:
                 llm["model_max_output_tokens"] = llm_config.model_max_output_tokens
             model_info = info.to_dict()
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         logger.debug("Failed to load model info: %s", exc)
 
     return {
@@ -119,7 +119,7 @@ async def refresh_model_info(body: ModelInfoRefreshRequest):
         if not provider or not model:
             provider = provider or user_config.provider
             model = model or user_config.model
-    except Exception:
+    except (OSError, ValueError, KeyError):
         pass
 
     if not provider or not model or provider == "auto" or model == "unknown":
@@ -133,7 +133,7 @@ async def refresh_model_info(body: ModelInfoRefreshRequest):
             provider, model, user_config=user_config
         )
         return info.to_dict()
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         logger.exception("Model info refresh failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -174,7 +174,7 @@ async def get_llm_config():
             config["api_key_masked"] = True
         if provider:
             config["key_var"] = _key_var_for(provider)
-    except Exception:
+    except (OSError, ValueError, KeyError):
         logger.debug("Failed to resolve LLM config", exc_info=True)
 
     return config
@@ -306,7 +306,7 @@ def _provider_catalog() -> list[dict]:
         from strategy_research.cli.onboard import PROVIDERS as ONBOARD
         labels = {p.key: (p.label, p.suggested_models)
                   for p in ONBOARD}
-    except Exception:
+    except (ImportError, AttributeError, KeyError):
         labels = {}
 
     names = sorted(set(_REGISTRY) | set(profiles))

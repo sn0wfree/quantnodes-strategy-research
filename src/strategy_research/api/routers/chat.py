@@ -334,7 +334,7 @@ def _auto_title_and_notify(session_id: str, task: str) -> None:
             json.dumps(meta_update, ensure_ascii=False),
             session_id,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — best-effort SSE emit
         logger.warning("Failed to emit session_meta_updated: %s", exc)
 
 
@@ -459,7 +459,7 @@ async def _run_agent_loop_background(
             claim_validation=result.metrics.get("claim_validation"),
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — agent loop can throw anything
         logger.error("AgentLoop failed for session %s: %s", session_id, exc, exc_info=True)
         await _emit_agent_error(session_id, message_id, exc)
         _persist_assistant_message(session_id, f"[error] {exc}", [{"type": "error", "message": str(exc)}], message_id)
@@ -604,7 +604,7 @@ async def send_async(body: ChatMessage, request: Request):
     try:
         _cfg = LLMConfig.load()
         _max_iter = _cfg.max_iterations
-    except Exception:
+    except (OSError, ValueError, KeyError):
         _max_iter = 50
     # Shell tools are opt-in (SR_ALLOW_SHELL_TOOLS=1); plan mode never
     # exposes them (analysis-only, single iteration).
@@ -934,7 +934,7 @@ async def _event_generator(
                     logger.debug("[SSE] event=%s session=%s id=%s", evt.event, session_id, evt.id)
     except asyncio.CancelledError:
         logger.info("[SSE] client disconnected session=%s reason=cancelled events=%d", session_id, event_count)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — defensive catch-and-raise
         logger.error("[SSE] generator error session=%s: %s", session_id, exc)
         raise
     finally:
