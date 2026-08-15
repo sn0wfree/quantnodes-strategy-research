@@ -9,7 +9,6 @@ Usage:
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 import threading
 import time
@@ -140,8 +139,12 @@ def get_user_db(workspace_path: Optional[Path] = None) -> UserDB:
 
 
 def hash_password(password: str) -> str:
-    """SHA-256 password hash (placeholder — upgrade to bcrypt later)."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """SEC-1: PBKDF2-HMAC-SHA256 password hash (260k iterations + salt)."""
+    import hashlib as _hl
+    import os as _os
+    salt = _os.urandom(16)
+    dk = _hl.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
+    return f"pbkdf2:260000:{salt.hex()}:{dk.hex()}"
 
 
 def seed_admin_if_empty(db: UserDB) -> None:
