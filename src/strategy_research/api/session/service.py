@@ -149,6 +149,14 @@ class _LoopEventForwarder:
         return self._usage_state
 
     def __call__(self, event_type: str, data: dict[str, Any]) -> None:
+        # LLM request envelope: offload large fields (system_prompt,
+        # tools_schema) to sidecar blobs so the event_log stays lean;
+        # the small metadata + sidecar refs go into event_log. This lets
+        # a later projection reconstruct the full request envelope from
+        # the event log alone (DSH request-envelope pattern).
+        if event_type == "llm_request" and isinstance(data, dict):
+            data = self._offload_llm_request(data)
+
         # Accumulate parts for persistence
         _accumulate_part(self.accumulated_parts, event_type, data)
 
@@ -202,6 +210,51 @@ class _LoopEventForwarder:
             _emit_goal_event(self.event_bus, self.attempt.session_id, data, self.cfg)
 
         self.event_bus.emit(self.attempt.session_id, event_type, data)
+
+    def _offload_llm_request(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Offload large llm_request fields to sidecar blobs.
+
+        Returns a copy of ``data`` with ``system_prompt`` / ``tools_schema``
+        replaced by ``{field}_path`` / ``{field}_preview`` / ``{field}_size``
+        references when they exceed the inline threshold. The blob dir is
+        derived from the event DB path so the projection can resolve refs
+        without a separate trace file.
+        """
+        import hashlib as _hashlib
+
+        out = dict(data)
+        threshold = int(os.environ.get("SR_LLM_REQUEST_OFFLOAD_THRESHOLD", "4096"))
+
+        # Locate the sidecar dir next to the event DB: <dir>/trace-blobs/.
+        blob_root = None
+        try:
+            db_path = getattr(self.event_bus, "_db_path", None)
+            if db_path is not None:
+                blob_root = Path(db_path).parent / "trace-blobs"
+        except Exception:
+            blob_root = None
+
+        for field in ("system_prompt", "tools_schema"):
+            value = out.get(field)
+            if not isinstance(value, str) or len(value) <= threshold:
+                continue
+            if blob_root is None:
+                # No blob root → keep inline (better full data than loss).
+                continue
+            blob_root.mkdir(parents=True, exist_ok=True)
+            digest = _hashlib.sha256(
+                f"{self.attempt.session_id}\0{field}\0{value}".encode("utf-8")
+            ).hexdigest()
+            path = blob_root / f"{digest[:24]}.txt"
+            try:
+                path.write_text(value, encoding="utf-8")
+            except OSError:
+                continue
+            out[field + "_path"] = f"trace-blobs/{path.name}"
+            out[field + "_preview"] = value[:512]
+            out[field + "_size"] = len(value)
+            out.pop(field, None)
+        return out
 
 
 def _bootstrap_workspace(workspace: Path) -> None:

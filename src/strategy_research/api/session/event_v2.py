@@ -100,6 +100,11 @@ class EventType:
     LLM_USAGE = "llm_usage"
     SESSION_TOTAL_TOKENS = "session_total_tokens"
 
+    # LLM request envelope (DSH request-envelope pattern): recorded once
+    # per LLM call. Large fields (system_prompt, tools_schema) are
+    # offloaded to sidecar blobs; event_log stores metadata + refs.
+    LLM_REQUEST = "llm_request"
+
     # Compaction
     COMPACT = "compact"
     COMPACT_STARTED = "compact.started"

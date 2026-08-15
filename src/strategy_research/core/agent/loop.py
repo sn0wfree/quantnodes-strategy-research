@@ -1737,16 +1737,19 @@ class AgentLoop:
         iteration: int,
         tools: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Log full LLM request envelope to trace (DSH request/header pattern).
+        """Log full LLM request envelope (DSH request/header pattern).
 
         Records system prompt, tools schema, and history metadata for each
         LLM call.  Large fields (system prompt, tools JSON) are offloaded to
         sidecar files when they exceed the threshold.
 
+        Two sinks:
+        1. ``llm_request`` on_event → the B4 forwarder (service.py) offloads
+           large fields and persists to event_log (single source of truth).
+        2. trace.jsonl (optional, backward-compat) if a trace_writer is set.
+
         This provides the foundation for Trajectory View / Trace Viewer.
         """
-        if self._trace_writer is None:
-            return
         try:
             import json as _json
 
@@ -1775,23 +1778,37 @@ class AgentLoop:
                 "history_meta": history_meta,
                 "tools_count": len(tools) if tools else 0,
                 "system_prompt_len": len(system_prompt),
+                "system_prompt": system_prompt,
+                "tools_schema": tools_json,
             }
 
-            # Use sidecar offload for large fields
-            self._trace_writer.write_text_entry(
-                entry,
-                field="system_prompt",
-                value=system_prompt,
-                offload_kind=f"llm-request-system-{iteration}",
-            )
-            # Tools schema goes inline (usually small) or offloaded
-            self._trace_writer.write_text_entry(
-                entry,
-                field="tools_schema",
-                value=tools_json,
-                offload_kind=f"llm-request-tools-{iteration}",
-                threshold=10_000,  # tools schema usually fits inline
-            )
+            # Sink 1: event_log via the on_event forwarder (offloads large
+            # fields itself). Best-effort — never break the loop.
+            try:
+                self._emit("llm_request", dict(entry))
+            except Exception:  # noqa: BLE001
+                logger.debug("llm_request emit failed", exc_info=True)
+
+            # Sink 2: trace.jsonl (optional, backward-compat).
+            if self._trace_writer is not None:
+                try:
+                    # Use sidecar offload for large fields
+                    self._trace_writer.write_text_entry(
+                        dict(entry),
+                        field="system_prompt",
+                        value=system_prompt,
+                        offload_kind=f"llm-request-system-{iteration}",
+                    )
+                    # Tools schema goes inline (usually small) or offloaded
+                    self._trace_writer.write_text_entry(
+                        dict(entry),
+                        field="tools_schema",
+                        value=tools_json,
+                        offload_kind=f"llm-request-tools-{iteration}",
+                        threshold=10_000,  # tools schema usually fits inline
+                    )
+                except Exception:  # noqa: BLE001
+                    pass  # trace failures should never break the loop
         except Exception:                       # noqa: BLE001
             pass  # trace failures should never break the loop
 
