@@ -394,6 +394,8 @@ def _ensure_fts_table_impl(conn: sqlite3.Connection) -> None:
 
 def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) -> None:
     """Add a column if it doesn't exist (SQLite has no IF NOT EXISTS for columns)."""
+    _validate_identifier(table, "table")
+    _validate_identifier(column, "column")
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {spec}")
     except sqlite3.OperationalError:
@@ -403,8 +405,17 @@ def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) ->
 
 def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     """True if the given table has the given column."""
+    _validate_identifier(table, "table")
+    _validate_identifier(column, "column")
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(r[1] == column for r in rows)
+
+
+def _validate_identifier(name: str, kind: str) -> None:
+    """SEC-2: validate table/column names to prevent SQL injection."""
+    import re as _re
+    if not _re.match(r"^[a-zA-Z0-9_]+$", name):
+        raise ValueError(f"Invalid {kind} name: {name!r} (only alphanumeric + underscore allowed)")
 
 
 def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
@@ -420,6 +431,8 @@ def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
 
     This is heavy but correct on any SQLite version.
     """
+    _validate_identifier(table, "table")
+    _validate_identifier(column, "column")
     if not _has_column(conn, table, column):
         return  # already dropped
 
