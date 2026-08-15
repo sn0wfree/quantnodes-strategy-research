@@ -14,59 +14,18 @@ Auto-repair: same SQLite health_check + auto_repair as MemoryManager.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
+from ..events.event_v2 import EventV2
 from .cache import CacheConfig, SessionCache, SessionLockMap
 from .memory_manager import InMemoryStore, SQLiteStore, resolve_db_path
 
 logger = logging.getLogger(__name__)
-
-
-# ── Types ────────────────────────────────────────────────────────────
-
-
-@dataclass
-class EventV2:
-    """Domain event stored in event_log table."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    aggregate_id: str = ""  # session_id
-    seq: int = 0
-    type: str = ""
-    data: dict[str, Any] = field(default_factory=dict)
-    time_created: float = field(default_factory=time.time)
-
-    def to_row(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "aggregate_id": self.aggregate_id,
-            "seq": self.seq,
-            "type": self.type,
-            "data_json": json.dumps(self.data, ensure_ascii=False),
-            "time_created": self.time_created,
-        }
-
-    @classmethod
-    def from_row(cls, row: tuple) -> "EventV2":
-        data = {}
-        try:
-            data = json.loads(row[4])
-        except Exception:
-            pass
-        return cls(
-            id=row[0],
-            aggregate_id=row[1],
-            seq=row[2],
-            type=row[3],
-            data=data,
-            time_created=row[5],
-        )
 
 
 # ── EventStore ──────────────────────────────────────────────────────
@@ -200,7 +159,7 @@ class EventStore:
 
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             seq = self._next_seq(session_id)
-            event = EventV2(
+            event = EventV2.create(
                 aggregate_id=session_id,
                 seq=seq,
                 type=event_type,
@@ -380,7 +339,22 @@ class EventStore:
                     "ORDER BY seq ASC",
                     (session_id, from_seq),
                 ).fetchall()
-                return [EventV2.from_row(r) for r in rows]
+                # SQLiteStore leaves row_factory unset (memory_manager uses
+                # tuple indexing), so map each tuple to the dict shape the
+                # unified EventV2.from_row() expects.
+                return [
+                    EventV2.from_row(
+                        {
+                            "id": r[0],
+                            "aggregate_id": r[1],
+                            "seq": r[2],
+                            "type": r[3],
+                            "data_json": r[4],
+                            "time_created": r[5],
+                        }
+                    )
+                    for r in rows
+                ]
             else:
                 # InMemoryStore
                 data = getattr(self._backend, "_data", {})

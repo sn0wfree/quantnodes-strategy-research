@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
-from strategy_research.api.session.event_v2 import EventType, EventV2
+from strategy_research.core.events.event_v2 import EventType, EventV2
 from strategy_research.api.session.events import EventBus
 from strategy_research.api.session.projector import (
     ProjectedSession,
@@ -900,7 +900,7 @@ class TestProjectorFromRowDataFormats(unittest.TestCase):
 
     def test_from_row_with_string_data_json(self) -> None:
         """data_json is a JSON string (normal case from DB)."""
-        from strategy_research.api.session.event_v2 import EventV2
+        from strategy_research.core.events.event_v2 import EventV2
         # Build a row-like object
         class Row:
             def __init__(self, d):
@@ -917,7 +917,7 @@ class TestProjectorFromRowDataFormats(unittest.TestCase):
 
     def test_from_row_with_dict_data_json(self) -> None:
         """data_json is already a dict (in-memory case)."""
-        from strategy_research.api.session.event_v2 import EventV2
+        from strategy_research.core.events.event_v2 import EventV2
         class Row:
             def __init__(self, d):
                 self._d = d

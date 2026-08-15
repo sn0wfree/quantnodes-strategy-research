@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from .event_v2 import EventType, EventV2, is_known_event_type
+from ...core.events.event_v2 import EventType, EventV2, is_known_event_type
 
 logger = logging.getLogger(__name__)
 

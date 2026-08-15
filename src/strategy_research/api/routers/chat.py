@@ -93,8 +93,8 @@ def _get_permission_gateway(request: Request | None = None) -> "PermissionGatewa
     def _push_sse(tool_call_id, decision, args):
         # Lazy import — sse_buffer is a heavy module.
         try:
-            from ...api.session.event_v2 import EventType
             from ...api.sse_buffer import sse_buffer  # local import
+            from ...core.events.event_v2 import EventType
 
             session_id = args.get("__session_id__") or ""
             if not session_id:

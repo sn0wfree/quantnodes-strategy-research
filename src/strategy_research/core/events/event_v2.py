@@ -1,5 +1,12 @@
 """EventV2 — typed event envelope for the event_log table (Level 3, B1 commit 2).
 
+P0-1 A2 (2026-08-15): moved from ``strategy_research.api.session.event_v2``
+to ``strategy_research.core.events.event_v2`` so ``core/agent/event_store``
+can depend on it without inverting the core/api layering. The public surface
+(EventV2, EventType, is_known_event_type) is unchanged; only the import
+path differs. No shim is kept — update ``from .event_v2 import ...`` →
+``from ...core.events.event_v2 import ...``.
+
 This module defines the data shape that EventBusV2 publishes and the
 projector consumes. It is intentionally thin: just a dataclass, an
 event-type registry, and JSON serialization helpers. No I/O.

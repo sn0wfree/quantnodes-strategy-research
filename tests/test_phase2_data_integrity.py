@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
-from strategy_research.api.session.event_v2 import EventV2
+from strategy_research.core.events.event_v2 import EventV2
 from strategy_research.api.session.events import EventBus
 
 
