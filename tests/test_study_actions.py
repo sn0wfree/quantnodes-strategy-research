@@ -330,6 +330,18 @@ def test_idor_blocks_other_users_study(tmp_path, monkeypatch):
     assert r2.status_code == 403
     r3 = client.post(f"/api/study/{study_id}/actions/cancel")
     assert r3.status_code == 403
+    # Newly-isolated control endpoints must also be 403 for non-owners.
+    r4 = client.post(f"/api/study/{study_id}/pause")
+    assert r4.status_code == 403
+    r5 = client.post(f"/api/study/{study_id}/resume")
+    assert r5.status_code == 403
+    r6 = client.get(f"/api/study/{study_id}/directives")
+    assert r6.status_code == 403
+    r7 = client.post(
+        f"/api/study/{study_id}/directive",
+        json={"content": "redirect"},
+    )
+    assert r7.status_code == 403
 
 
 def test_idor_allows_own_study(tmp_path, monkeypatch):

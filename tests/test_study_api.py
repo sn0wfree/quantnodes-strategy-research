@@ -183,10 +183,9 @@ async def test_status_unknown_session_returns_404(_app_env):
 
 
 @pytest.mark.asyncio
-async def test_summary_other_users_study_allowed(_app_env, tmp_path, monkeypatch):
-    """study-id-derived endpoints require login only, not owner-session
-    matching (personal research tool semantics — study data belongs to
-    the machine's workspace, and /list already exposes all studies)."""
+async def test_summary_other_users_study_denied(_app_env, tmp_path, monkeypatch):
+    """SDOR: study-id-derived endpoints enforce owner-session matching.
+    A different user cannot read another user's study summary (403)."""
     from strategy_research.core.study import StudyStore
 
     db_path = tmp_path / "goals.db"
@@ -210,8 +209,7 @@ async def test_summary_other_users_study_allowed(_app_env, tmp_path, monkeypatch
         headers=_bearer("bob"),  # different user
     ) as client:
         r = await client.get(f"/api/study/{study_id}/summary")
-        assert r.status_code == 200
-        assert r.json()["objective"] == "tester's study"
+        assert r.status_code == 403  # isolated: bob does not own this study
 
 
 @pytest.mark.asyncio
@@ -525,7 +523,7 @@ async def test_list_filter_by_status_returns_matching_only(
 
 @pytest.mark.asyncio
 async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
-    """list?limit=N 应最多返回 N 条 study。"""
+    """list?limit=N 应最多返回 N 条 study（且限定当前用户的 sessions）。"""
     from strategy_research.core.study import StudyStore
 
     db_path = tmp_path / "goals.db"
@@ -540,6 +538,36 @@ async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
 
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    # Seed the 5 owner sessions as owned by 'tester' (the caller) so the
+    # IDOR-scoped list returns them.
+    import sqlite3
+    sessions_db = tmp_path / "sessions.db"
+    conn = sqlite3.connect(str(sessions_db))
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          title TEXT,
+          created_at TEXT,
+          updated_at TEXT,
+          starred INTEGER NOT NULL DEFAULT 0,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          message_count INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    now = "2026-08-01T10:00:00"
+    for i in range(5):
+        conn.execute(
+            "INSERT OR REPLACE INTO sessions (id, user_id, title, created_at, updated_at) "
+            "VALUES (?, 'tester', 't', ?, ?)",
+            (f"sess-{i}", now, now),
+        )
+    conn.commit()
+    conn.close()
 
     async with _api_client() as client:
         r = await client.get("/api/study/list?limit=2")

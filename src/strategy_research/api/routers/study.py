@@ -366,10 +366,27 @@ async def study_list(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"invalid status: {status}")
     with StudyStore() as store:
-        rows = store.list_studies(
-            session_id=session_id, status=status_enum,
-            limit=limit, before_created_at=before_created_at,
-        )
+        if session_id:
+            rows = store.list_studies(
+                session_id=session_id, status=status_enum,
+                limit=limit, before_created_at=before_created_at,
+            )
+        else:
+            # No session filter: scope to the caller's own sessions (IDOR).
+            import os as _os
+            enforce = _os.environ.get("SR_ENFORCE_STUDY_IDOR", "1") != "0"
+            if not enforce:
+                rows = store.list_studies(
+                    session_id=None, status=status_enum,
+                    limit=limit, before_created_at=before_created_at,
+                )
+            else:
+                user_id = getattr(request.state, "user_id", None) or "anonymous"
+                owner_sids = _user_session_ids(user_id)
+                rows = store.list_studies_for_owner_sessions(
+                    owner_sids, status=status_enum,
+                    limit=limit, before_created_at=before_created_at,
+                )
     def _shape(r):
         return {
             "study_id": r.study_id, "session_id": r.session_id,
@@ -580,6 +597,7 @@ def _study_session_id(study_id: str) -> str | None:
 
 @router.post("/{study_id}/pause", response_model=StudyActionResponse)
 async def study_pause(request: Request, study_id: str):
+    _owned_study(request, study_id)  # IDOR: caller must own the study
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not active")
@@ -604,6 +622,7 @@ async def study_pause(request: Request, study_id: str):
 @router.post("/{study_id}/resume", response_model=StudyActionResponse)
 async def study_resume(request: Request, study_id: str):
     """Resume a paused or interrupted study."""
+    _owned_study(request, study_id)  # IDOR: caller must own the study
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not found")
@@ -631,6 +650,7 @@ async def study_resume(request: Request, study_id: str):
 
 @router.post("/{study_id}/cancel", response_model=StudyActionResponse)
 async def study_cancel(request: Request, study_id: str, req: CancelRequest | None = None):
+    _owned_study(request, study_id)  # IDOR: caller must own the study
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not active")
@@ -652,6 +672,7 @@ async def study_directive(request: Request, study_id: str, req: DirectiveRequest
     consumes it and emits ``study_directives_consumed`` once the
     researcher agent has seen it.
     """
+    _owned_study(request, study_id)  # IDOR: caller must own the study
     sid = _study_session_id(study_id)
     if sid is None:
         raise HTTPException(status_code=404, detail="study not found")
@@ -693,6 +714,7 @@ async def study_directive(request: Request, study_id: str, req: DirectiveRequest
 @router.get("/{study_id}/directives", response_model=StudyDirectivesResponse)
 async def study_directives_list(request: Request, study_id: str):
     """List pending + consumed directives for a study (audit trail)."""
+    _owned_study(request, study_id)  # IDOR: caller must own the study
     from ...core.study import StudyStore
     with StudyStore() as store:
         study = store.get_study(study_id)
@@ -717,14 +739,24 @@ async def study_directives_list(request: Request, study_id: str):
 # ── v2 artifacts endpoints (design §17) ────────────────────────────────
 
 
+def _user_session_ids(user_id: str) -> list[str]:
+    """Return the session ids owned by ``user_id`` (for study scoping)."""
+    from .web_session import _get_db
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT id FROM sessions WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
 def _owned_study(request: Request, study_id: str):
     """Fetch a study with IDOR enforcement (owner-session based).
 
-    When ``SR_ENFORCE_STUDY_IDOR=1`` (multi-tenant deployments), the
-    study's ``owner_session_id`` must belong to the authenticated user
+    The study's ``owner_session_id`` must belong to the authenticated user
     (a session row owned by ``request.state.user_id``); otherwise 403.
-    Default off keeps single-user workspaces working without a sessions
-    row for every study.
+    Enforcement is on by default (``SR_ENFORCE_STUDY_IDOR`` defaults to
+    ``"1"``); set ``SR_ENFORCE_STUDY_IDOR=0`` to disable for single-user
+    workspaces.
     """
     import os as _os
 
@@ -733,7 +765,9 @@ def _owned_study(request: Request, study_id: str):
         study = store.get_study(study_id)
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
-    if _os.environ.get("SR_ENFORCE_STUDY_IDOR") == "1":
+
+    enforce = _os.environ.get("SR_ENFORCE_STUDY_IDOR", "1") != "0"
+    if enforce:
         user_id = getattr(request.state, "user_id", None) or "anonymous"
         owner_sid = study.owner_session_id
         if owner_sid:

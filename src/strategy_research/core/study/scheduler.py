@@ -383,9 +383,27 @@ class StudyScheduler:
         self._session_queues.pop(session_id, None)
         logger.info("study session_loop exit session=%s", session_id)
 
+    def _resolve_session_user_id(self, session_id: str) -> str:
+        """Resolve a session's owner user_id (fallback to the session id).
+
+        Used to key the per-user concurrency ceiling by the real user.
+        """
+        try:
+            from ...api.routers.web_session import _get_db
+            conn = _get_db()
+            row = conn.execute(
+                "SELECT user_id FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row and row["user_id"]:
+                return row["user_id"]
+        except Exception:
+            pass
+        return session_id
+
     async def _run_one_study(self, study_id: str) -> None:
         _dlog("sched", "_run_one_study start study=%s", study_id)
         # G1: per-user cap first, then the global cap. Acquiring the
+        # user slot before the global one means a user at their own
         # user slot before the global one means a user at their own
         # ceiling never consumes global capacity they cannot use anyway.
         user_sem: asyncio.Semaphore | None = None
@@ -393,8 +411,12 @@ class StudyScheduler:
             study = self.store.get_study(study_id)
             owner = study.owner_session_id if study else None
             if owner:
+                # Resolve owner session → user id so the per-user ceiling
+                # applies per real user, not per session (a user owning
+                # many sessions could otherwise bypass the cap).
+                uid = self._resolve_session_user_id(owner)
                 user_sem = self._user_semaphores.setdefault(
-                    owner, asyncio.Semaphore(self._per_user_limit)
+                    uid, asyncio.Semaphore(self._per_user_limit)
                 )
                 await user_sem.acquire()
         # Global concurrency cap: holds the slot for the whole study

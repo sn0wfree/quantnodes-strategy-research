@@ -309,10 +309,13 @@ class SessionService:
 
     # ── Session lifecycle ──────────────────────────────────────────────
 
-    def create_session(self, session_id: str, title: str = "") -> dict[str, Any]:
+    def create_session(
+        self, session_id: str, title: str = "", user_id: str = "anonymous"
+    ) -> dict[str, Any]:
         """Create a new session row if it doesn't exist.
 
-        Returns the session metadata dict.
+        ``user_id`` records the owning user (default "anonymous" keeps
+        TUI/CLI callers working). Returns the session metadata dict.
         """
         import time
 
@@ -328,7 +331,7 @@ class SessionService:
                     "INSERT INTO sessions (id, user_id, title, created_at, updated_at, "
                     "starred, tags_json, message_count, archived) "
                     "VALUES (?, ?, ?, ?, ?, 0, '[]', 0, 0)",
-                    (session_id, "anonymous", title or "新会话", now, now),
+                    (session_id, user_id, title or "新会话", now, now),
                 )
                 conn.commit()
 

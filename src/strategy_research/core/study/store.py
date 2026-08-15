@@ -532,6 +532,37 @@ class StudyStore:
         return [self._study_from_row(row) for row in rows]
 
     @synchronized
+    def list_studies_for_owner_sessions(
+        self,
+        owner_session_ids: list[str],
+        status: StudyStatus | None = None,
+        limit: int = 100,
+        before_created_at: str | None = None,
+    ) -> list[StudyRecord]:
+        """List studies owned by any of the given owner sessions (newest first).
+
+        Used to scope study listing to a user's sessions (IDOR isolation).
+        """
+        if not owner_session_ids:
+            return []
+        placeholders = ",".join("?" for _ in owner_session_ids)
+        query = (
+            f"SELECT * FROM studies WHERE owner_session_id IN ({placeholders})"
+        )
+        params: list[Any] = list(owner_session_ids)
+        if status:
+            query += " AND execution_status = ?"
+            params.append(status.value)
+        if before_created_at:
+            query += " AND created_at < ?"
+            params.append(before_created_at)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._study_from_row(row) for row in rows]
+
+    @synchronized
     def list_active_studies(self) -> list[StudyRecord]:
         """Return all studies in a non-terminal execution status.
 
