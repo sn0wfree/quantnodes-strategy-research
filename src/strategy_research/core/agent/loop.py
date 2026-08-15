@@ -28,6 +28,7 @@ Exception handling policy:
 from __future__ import annotations
 
 import asyncio
+import os
 import hashlib
 import json
 import logging
@@ -91,6 +92,11 @@ _TOOL_RETRY_DELAY = 2.0
 # （run_backtest metrics → 右侧面板）；超大输出（如 read_file 大文件）截断
 # 防撑爆 SSE/DB。preview 字段始终为 200 字符截断（兼容旧消费方）。
 _TOOL_RESULT_MAX = 50_000
+
+# Tool result 入 LLM history 前的统一截断上限（字符）。
+# 超长输出在中间截断，保留头尾并标记 [truncated]。
+# 环境变量 SR_TOOL_RESULT_MAX_CHARS 可覆盖（0 = 不截断）。
+_TOOL_RESULT_HISTORY_MAX = int(os.environ.get("SR_TOOL_RESULT_MAX_CHARS", "30000"))
 
 
 # ── Cached GoalStore (goal-snapshot injection) ─────────────────────
@@ -1277,10 +1283,24 @@ class AgentLoop:
             "output_preview": output_preview,
         })
 
+        # Truncate tool output for LLM history (keep head + tail, mark middle)
+        history_output = output
+        if (
+            _TOOL_RESULT_HISTORY_MAX > 0
+            and isinstance(output, str)
+            and len(output) > _TOOL_RESULT_HISTORY_MAX
+        ):
+            half = _TOOL_RESULT_HISTORY_MAX // 2
+            history_output = (
+                output[:half]
+                + f"\n\n[truncated {len(output) - _TOOL_RESULT_HISTORY_MAX} chars]\n\n"
+                + output[-half:]
+            )
+
         return {
             "role": "tool",
             "tool_call_id": tc.id,
-            "content": output,
+            "content": history_output,
         }
 
     def _execute_tool_call(
