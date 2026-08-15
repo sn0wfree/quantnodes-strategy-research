@@ -872,20 +872,37 @@ async def get_session_trace(
 ):
     """Read trace events for a session (DSH session-query pattern).
 
-    Returns the last ``limit`` trace events from the session's trace.jsonl,
-    optionally filtered by event type. Large fields (system_prompt,
-    tools_schema) are resolved from sidecar files.
+    A2: the event_log is the single source of truth. ``llm_request``
+    events are projected out of it (TraceProjection), reconstructing large
+    offloaded fields (system_prompt, tools_schema) from their sidecar
+    blobs. trace.jsonl is used only as a backward-compat fallback for
+    sessions that predate A1 (no llm_request events in the event_log).
     """
-    from pathlib import Path
-
     from ...core.agent.trace import TraceWriter
+    from ..session.trace_projection import TraceProjection
 
-    # Find trace dir for this session
+    type_filter = set(types.split(",")) if types else None
+
+    # Primary: project from event_log (single source of truth).
+    try:
+        service = _get_session_service()
+        events = TraceProjection(service.event_bus).project(
+            session_id, limit=limit, types=types,
+        )
+        if events:
+            return {
+                "events": events,
+                "session_id": session_id,
+                "total": len(events),
+                "source": "event_log",
+            }
+    except Exception:
+        logger.exception("TraceProjection failed for session %s", session_id)
+
+    # Fallback: legacy trace.jsonl (backward compat for pre-A2 sessions).
     trace_dir = TraceWriter.find_trace_dir(session_id)
     if trace_dir is None:
         return {"events": [], "session_id": session_id}
-
-    type_filter = set(types.split(",")) if types else None
 
     try:
         records = TraceWriter.read(
@@ -893,12 +910,15 @@ async def get_session_trace(
             resolve_offloads=True,
             resolve_fields={"system_prompt", "tools_schema"},
         )
-        # Filter by type if requested
         if type_filter:
             records = [r for r in records if r.get("type") in type_filter]
-        # Return last N events
         records = records[-limit:]
-        return {"events": records, "session_id": session_id, "total": len(records)}
+        return {
+            "events": records,
+            "session_id": session_id,
+            "total": len(records),
+            "source": "trace.jsonl",
+        }
     except Exception:
         logger.exception("Failed to read trace for session %s", session_id)
         return {"events": [], "session_id": session_id, "error": "failed to read trace"}

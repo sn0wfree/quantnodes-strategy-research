@@ -8,9 +8,20 @@ import { useCallback, useEffect, useState } from "react";
 
 interface TraceEvent {
   ts?: number;
+  /** event_log projection uses wall-clock time_created (seconds). */
+  time_created?: number;
   type: string;
   iteration?: number;
   [key: string]: unknown;
+}
+
+/** Pretty-print a JSON string (tools_schema); fall back to raw text. */
+function tryJson(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }
 
 interface TraceViewerProps {
@@ -50,10 +61,49 @@ function formatTimestamp(ts?: number): string {
   return d.toLocaleTimeString("zh-CN", { hour12: false });
 }
 
+/** Readable rendering of a reconstructed llm_request envelope. */
+function LLMRequestDetails({ event }: { event: TraceEvent }) {
+  const systemPrompt = typeof event.system_prompt === "string" ? event.system_prompt : "";
+  const toolsSchema = typeof event.tools_schema === "string" ? event.tools_schema : "";
+  const historyMeta: unknown[] = Array.isArray(event.history_meta)
+    ? (event.history_meta as unknown[])
+    : [];
+  return (
+    <div className="mt-1 space-y-2 font-mono text-[10px] leading-relaxed">
+      {systemPrompt && (
+        <div>
+          <div className="mb-0.5 text-[9px] uppercase tracking-wide text-blue-400">
+            System prompt ({event.system_prompt_len ?? systemPrompt.length} chars)
+          </div>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-900/60 p-2 text-gray-300">
+            {systemPrompt}
+          </pre>
+        </div>
+      )}
+      {toolsSchema && (
+        <div>
+          <div className="mb-0.5 text-[9px] uppercase tracking-wide text-violet-400">
+            Tools schema ({event.tools_count ?? 0} tools)
+          </div>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-900/60 p-2 text-gray-300">
+            {tryJson(toolsSchema)}
+          </pre>
+        </div>
+      )}
+      {historyMeta.length > 0 && (
+        <div className="text-gray-500">
+          {historyMeta.length} history entries · {event.history_count ?? "?"} messages total
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EventCard({ event }: { event: TraceEvent }) {
   const [expanded, setExpanded] = useState(false);
   const color = EVENT_COLORS[event.type] ?? "border-gray-500/40 bg-gray-950/20";
   const icon = EVENT_ICONS[event.type] ?? "•";
+  const ts = event.time_created ?? event.ts;
 
   const summary = (() => {
     switch (event.type) {
@@ -93,7 +143,7 @@ function EventCard({ event }: { event: TraceEvent }) {
           {icon}
         </span>
         <span className="flex-shrink-0 font-mono text-[9px] text-gray-500">
-          {formatTimestamp(event.ts)}
+          {formatTimestamp(ts)}
         </span>
         {event.iteration != null && (
           <span className="flex-shrink-0 rounded bg-gray-800 px-1 py-0.5 font-mono text-[9px] text-gray-400">
@@ -106,9 +156,13 @@ function EventCard({ event }: { event: TraceEvent }) {
         </span>
       </button>
       {expanded && (
-        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-gray-400">
-          {JSON.stringify(event, null, 2)}
-        </pre>
+        event.type === "llm_request" ? (
+          <LLMRequestDetails event={event} />
+        ) : (
+          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-gray-400">
+            {JSON.stringify(event, null, 2)}
+          </pre>
+        )
       )}
     </div>
   );
@@ -126,7 +180,7 @@ export function TraceViewer({ sessionId, onClose }: TraceViewerProps) {
     setError(null);
     try {
       const params = new URLSearchParams({ limit: "200" });
-      if (filter) params.set("type", filter);
+      if (filter) params.set("types", filter);
       const res = await fetch(
         `/api/chat/session/${encodeURIComponent(sessionId)}/trace?${params}`
       );
@@ -193,7 +247,7 @@ export function TraceViewer({ sessionId, onClose }: TraceViewerProps) {
         )}
         <div className="space-y-1">
           {events.map((event, i) => (
-            <EventCard key={`${event.ts}-${i}`} event={event} />
+            <EventCard key={`${event.time_created ?? event.ts}-${i}`} event={event} />
           ))}
         </div>
       </div>
