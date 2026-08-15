@@ -202,6 +202,8 @@ def create_app(
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(web_session.router, prefix="/api/chat/session", tags=["chat-session"])
     app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+    from .routers import admin_users
+    app.include_router(admin_users.router, prefix="/api/admin", tags=["admin-users"])
 
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
     app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
