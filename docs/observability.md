@@ -211,6 +211,23 @@ journalctl -u strategy-research | jq 'select(.study_id=="st-9")'
 
 ### 6.2 事件与 trace 接 UI（Phase 4）
 
+#### 6.2.1 Trace 单一事实源（A1–A3）
+
+`event_log` 是 agent 轨迹（Trajectory View）的单一事实源。AgentLoop 每个
+LLM 调用发 `llm_request`（大字段 `system_prompt`/`tools_schema` 侧车 offload
+到 `<event-db>/trace-blobs/`），并把生命周期事件（`loop_start`/`loop_end`/
+`loop_final`/`iter_start`/`llm_response`/`compression`/`tool_error`）也写入
+event_log。`GET /api/chat/session/{id}/trace` 由 `TraceProjection` 从
+event_log 投影出总结级事件并还原 offload 大字段；`trace.jsonl` 仅作
+A1 之前旧会话的后向兼容回退。
+
+- 投影默认返回总结级词汇（不含 `text_delta`/`thinking_delta` 等高频原始流）；
+  传 `types=a,b` 白名单可过滤。
+- 实现：`api/session/trace_projection.py`（投影）、`api/session/service.py`
+  `_LoopEventForwarder._offload_large_fields`（offload）、
+  `core/agent/loop.py::_trace_and_emit`（双写）。
+- 前端 `TraceViewer`（`webui/.../chat/TraceViewer.tsx`）消费该端点渲染时间线。
+
 - `GET /api/study/{id}/hanging_events?hours=24&limit=20`：该 study 近 N 小时
   卡死事件（`by_type` 计数 + `recent` 列表，含 `created_at_iso`）。
 - 所有 `study_*` SSE 事件（`study_started` / `study_round` / `study_failed` …）

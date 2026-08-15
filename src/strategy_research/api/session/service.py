@@ -155,7 +155,7 @@ class _LoopEventForwarder:
         # a later projection reconstruct the full request envelope from
         # the event log alone (DSH request-envelope pattern).
         if event_type == "llm_request" and isinstance(data, dict):
-            data = self._offload_llm_request(data)
+            data = self._offload_large_fields(data)
 
         # Accumulate parts for persistence
         _accumulate_part(self.accumulated_parts, event_type, data)
@@ -211,14 +211,16 @@ class _LoopEventForwarder:
 
         self.event_bus.emit(self.attempt.session_id, event_type, data)
 
-    def _offload_llm_request(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Offload large llm_request fields to sidecar blobs.
+    def _offload_large_fields(
+        self, data: dict[str, Any], fields: tuple[str, ...] = ("system_prompt", "tools_schema"),
+    ) -> dict[str, Any]:
+        """Offload large llm fields to sidecar blobs.
 
-        Returns a copy of ``data`` with ``system_prompt`` / ``tools_schema``
-        replaced by ``{field}_path`` / ``{field}_preview`` / ``{field}_size``
-        references when they exceed the inline threshold. The blob dir is
-        derived from the event DB path so the projection can resolve refs
-        without a separate trace file.
+        Returns a copy of ``data`` with any of ``fields`` that exceed the
+        inline threshold replaced by ``{field}_path`` / ``{field}_preview`` /
+        ``{field}_size`` references. The blob dir is derived from the event
+        DB path so the projection can resolve refs without a separate trace
+        file.
         """
         import hashlib as _hashlib
 
@@ -234,7 +236,7 @@ class _LoopEventForwarder:
         except Exception:
             blob_root = None
 
-        for field in ("system_prompt", "tools_schema"):
+        for field in fields:
             value = out.get(field)
             if not isinstance(value, str) or len(value) <= threshold:
                 continue

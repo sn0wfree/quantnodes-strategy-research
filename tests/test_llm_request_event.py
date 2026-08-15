@@ -96,6 +96,32 @@ def test_loop_emits_llm_request_with_tools_metadata() -> None:
     assert "name" in r["tools_schema"]
 
 
+def test_loop_emits_trajectory_lifecycle_events() -> None:
+    """The loop routes lifecycle events (loop_start, iter_start, llm_response,
+    loop_end, loop_final) into the event stream, not just trace.jsonl."""
+    sink = EventSink()
+    loop = _make_loop(sink)
+    _stub_chat(loop)
+    loop.run("hello")
+
+    types = {et for et, _ in sink.events}
+    assert "loop_start" in types
+    assert "loop_end" in types
+    assert "loop_final" in types
+    assert "llm_response" in types
+    assert "iter_start" in types
+
+    # llm_response carries the response envelope metadata.
+    resp = sink.of_type("llm_response")[-1]
+    assert resp["finish_reason"] == "stop"
+    assert resp["has_tool_calls"] is False
+    assert resp["tool_call_count"] == 0
+
+    # iter_start now carries an estimated token count.
+    iters = sink.of_type("iter_start")
+    assert iters and "tokens" in iters[0]
+
+
 # ── _LoopEventForwarder offload ──────────────────────────────────
 
 

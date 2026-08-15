@@ -40,6 +40,7 @@ const EVENT_COLORS: Record<string, string> = {
   compression: "border-cyan-500/60 bg-cyan-950/30",
   error: "border-red-500/60 bg-red-950/30",
   heartbeat: "border-gray-500/40 bg-gray-950/20",
+  tool_heartbeat: "border-gray-500/40 bg-gray-950/20",
 };
 
 const EVENT_ICONS: Record<string, string> = {
@@ -53,6 +54,7 @@ const EVENT_ICONS: Record<string, string> = {
   compression: "◆",
   error: "⚠",
   heartbeat: "♡",
+  tool_heartbeat: "♡",
 };
 
 function formatTimestamp(ts?: number): string {
@@ -113,12 +115,16 @@ function EventCard({ event }: { event: TraceEvent }) {
         return `LLM Response — ${event.finish_reason ?? "?"}, ${event.tool_call_count ?? 0} tool calls`;
       case "tool_result":
         return `${event.tool ?? "?"} — ${event.status ?? "?"} (${event.elapsed_ms ?? 0}ms)`;
+      case "tool_call":
+        return `Tool Call — ${(event.name as string) ?? event.tool ?? "?"}`;
       case "tool_error":
         return `Tool Error — ${event.tool ?? "?"}`;
       case "loop_start":
         return `Loop Start — max ${event.max_iterations ?? "?"} iterations`;
       case "loop_end":
-        return `Loop End — ${event.reason ?? "?"}, ${event.iterations ?? "?"} iters`;
+        return `Loop End — ${event.reason ?? "?"}, ${event.iteration ?? "?"} iters`;
+      case "loop_final":
+        return `Loop Final — ${event.reason ?? "?"}, ${event.iterations ?? "?"} iters, ${event.elapsed_s ?? "?"}s`;
       case "iter_start":
         return `Iteration ${event.iteration ?? "?"} — ~${event.tokens ?? "?"} tokens`;
       case "compression":
@@ -127,6 +133,8 @@ function EventCard({ event }: { event: TraceEvent }) {
         return `Error — ${event.error ?? "?"}`;
       case "heartbeat":
         return `Heartbeat — iteration ${event.iteration ?? "?"}`;
+      case "tool_heartbeat":
+        return `Heartbeat — ${event.tool ?? "?"} (${event.elapsed_s ?? "?"}s)`;
       default:
         return event.type;
     }

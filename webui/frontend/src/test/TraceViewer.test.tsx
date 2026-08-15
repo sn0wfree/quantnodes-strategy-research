@@ -63,4 +63,28 @@ describe('TraceViewer', () => {
     // 1700000000s epoch → a local time string; just assert it rendered the card.
     expect(await screen.findByText(/LLM Request/)).toBeTruthy()
   })
+
+  it('renders trajectory lifecycle events from the event_log projection', async () => {
+    const events = [
+      { type: 'loop_start', time_created: 1700000001, max_iterations: 5 },
+      { type: 'iter_start', time_created: 1700000002, iteration: 1, tokens: 1200 },
+      { type: 'tool_call', time_created: 1700000003, name: 'ls' },
+      { type: 'tool_result', time_created: 1700000004, tool: 'ls', status: 'ok', elapsed_ms: 12 },
+      { type: 'llm_response', time_created: 1700000005, finish_reason: 'stop', tool_call_count: 0 },
+      { type: 'loop_end', time_created: 1700000006, reason: 'stop', iteration: 1 },
+      { type: 'loop_final', time_created: 1700000007, reason: 'stop', iterations: 1, elapsed_s: 0.4 },
+      { type: 'tool_heartbeat', time_created: 1700000008, tool: 'run_backtest', elapsed_s: 3.2 },
+    ]
+    vi.stubGlobal('fetch', mockFetch(events))
+    render(<TraceViewer sessionId="s-1" />)
+
+    expect(await screen.findByText(/Loop Start — max 5 iterations/)).toBeTruthy()
+    expect(screen.getByText(/Iteration 1 — ~1200 tokens/)).toBeTruthy()
+    expect(screen.getByText(/Tool Call — ls/)).toBeTruthy()
+    expect(screen.getByText(/ls — ok \(12ms\)/)).toBeTruthy()
+    expect(screen.getByText(/LLM Response — stop, 0 tool calls/)).toBeTruthy()
+    expect(screen.getByText(/Loop End — stop, 1 iters/)).toBeTruthy()
+    expect(screen.getByText(/Loop Final — stop, 1 iters, 0.4s/)).toBeTruthy()
+    expect(screen.getByText(/Heartbeat — run_backtest \(3.2s\)/)).toBeTruthy()
+  })
 })

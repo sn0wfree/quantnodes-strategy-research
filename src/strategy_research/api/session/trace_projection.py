@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class TraceProjection:
-    """Project ``llm_request`` trace records out of a session's event_log.
+    """Project trajectory trace records out of a session's event_log.
 
     Reads the event_log (append-ordered by seq) and returns the trace
     records, resolving any offloaded large fields back from their sidecar
@@ -33,6 +33,26 @@ class TraceProjection:
 
     # Sidecar subdir (relative to the event DB) where offloaded blobs live.
     _BLOB_SUBDIR = "trace-blobs"
+
+    # Summary-level events that make up the Trajectory View. Deliberately
+    # excludes the high-frequency text/thinking deltas so the timeline stays
+    # readable. Used as the default when no ``types`` filter is supplied.
+    DEFAULT_TRACE_TYPES = frozenset({
+        EventType.LLM_REQUEST,
+        EventType.LLM_RESPONSE,
+        EventType.LOOP_START,
+        EventType.LOOP_END,
+        EventType.LOOP_FINAL,
+        EventType.ITER_START,
+        EventType.ITER_END,
+        EventType.TOOL_CALL,
+        EventType.TOOL_RESULT,
+        EventType.TOOL_ERROR,
+        EventType.COMPRESSION,
+        EventType.COMPACT,
+        EventType.AGENT_ERROR,
+        EventType.TOOL_HEARTBEAT,
+    })
 
     def __init__(self, event_store: EventStore) -> None:
         self._event_store = event_store
@@ -52,11 +72,10 @@ class TraceProjection:
 
         Records are ordered by event seq (append order, oldest first) and
         truncated to the last ``limit``. ``types`` is a comma-separated
-        allowlist matched against the event type; when omitted, only
-        ``llm_request`` records are returned (the DSH request-envelope
-        pattern this projection serves).
+        allowlist matched against the event type; when omitted, the curated
+        ``DEFAULT_TRACE_TYPES`` vocabulary is returned (the Trajectory View).
         """
-        type_filter = set(types.split(",")) if types else {EventType.LLM_REQUEST}
+        type_filter = set(types.split(",")) if types else set(self.DEFAULT_TRACE_TYPES)
 
         records: list[dict[str, Any]] = []
         for ev in self._event_store.replay(session_id):

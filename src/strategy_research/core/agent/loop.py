@@ -331,6 +331,16 @@ class AgentLoop:
             except Exception:  # noqa: BLE001
                 logger.warning("on_event callback failed for %s", event_type, exc_info=True)
 
+    def _trace_and_emit(self, event_type: str, data: dict | None = None) -> None:
+        """Write a trace entry AND emit it onto the event bus.
+
+        Keeps ``trace.jsonl`` (backward-compat) and the event_log in sync
+        for the same logical event, so the Trajectory View can be derived
+        from the event_log alone (single source of truth).
+        """
+        self._trace({"type": event_type, **(data or {})})
+        self._emit(event_type, data or {})
+
     def emit_tool_progress(
         self,
         *,
@@ -621,8 +631,7 @@ class AgentLoop:
         messages = self.context_builder.build_initial_messages(full_task, history=history)
         result.messages = list(messages)
         t0 = time.perf_counter()
-        self._trace({
-            "type": "loop_start",
+        self._trace_and_emit("loop_start", {
             "task": task,
             "max_iterations": self.max_iterations,
             "tokens": estimate_tokens(messages),
@@ -634,7 +643,7 @@ class AgentLoop:
     ) -> None:
         """Extend compression_applied, emit compression trace + compact events."""
         result.compression_applied.extend(applied)
-        self._trace({"type": "compression", "applied": applied, "iteration": iteration})
+        self._trace_and_emit("compression", {"applied": applied, "iteration": iteration})
         for layer in applied:
             self._emit("compact", {
                 "layer": layer,
@@ -644,8 +653,11 @@ class AgentLoop:
 
     def _emit_iter_start(self, iteration: int, messages: list[dict[str, Any]]) -> None:
         """Emit iter_start trace + event, set _current_iter."""
-        self._trace({"type": "iter_start", "iteration": iteration, "tokens": estimate_tokens(messages)})
-        self._emit("iter_start", {"iteration": iteration, "max_iterations": self.max_iterations})
+        self._trace_and_emit("iter_start", {
+            "iteration": iteration,
+            "tokens": estimate_tokens(messages),
+            "max_iterations": self.max_iterations,
+        })
         self._current_iter = iteration
 
     def _handle_llm_error(
@@ -681,8 +693,7 @@ class AgentLoop:
         assistant_msg = self._response_to_assistant_msg(response)
         messages.append(assistant_msg)
         result.messages.append(assistant_msg)
-        self._trace({
-            "type": "llm_response",
+        self._trace_and_emit("llm_response", {
             "iteration": iteration,
             "finish_reason": response.finish_reason,
             "has_tool_calls": response.has_tool_calls(),
@@ -788,7 +799,7 @@ class AgentLoop:
             response.content or
             f"No progress detected (last {self.no_progress_window} tool calls identical)"
         )
-        self._trace({"type": "loop_end", "reason": "no_progress", "iteration": iteration})
+        self._trace_and_emit("loop_end", {"reason": "no_progress", "iteration": iteration})
         self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
             "iteration": iteration,
@@ -804,7 +815,7 @@ class AgentLoop:
             result.answer = (
                 f"Reached max_iterations={self.max_iterations} without a final answer."
             )
-        self._trace({"type": "loop_end", "reason": "max_iter", "iteration": result.iterations})
+        self._trace_and_emit("loop_end", {"reason": "max_iter", "iteration": result.iterations})
         self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
             "iteration": result.iterations,
@@ -818,7 +829,7 @@ class AgentLoop:
         """Populate stop result fields, emit trace + event."""
         result.answer = response.content
         result.finished_reason = "stop"
-        self._trace({"type": "loop_end", "reason": "stop", "iteration": iteration})
+        self._trace_and_emit("loop_end", {"reason": "stop", "iteration": iteration})
         self._emit("assistant_message", {"content": response.content or ""})
         self._emit("iter_end", {
             "iteration": iteration,
@@ -833,8 +844,7 @@ class AgentLoop:
         elapsed = time.perf_counter() - t0
         result.metrics["elapsed_s"] = round(elapsed, 2)
         result.metrics["tokens"] = estimate_tokens(messages)
-        self._trace({
-            "type": "loop_final",
+        self._trace_and_emit("loop_final", {
             "reason": result.finished_reason,
             "iterations": result.iterations,
             "tool_calls_made": result.tool_calls_made,
@@ -1135,7 +1145,7 @@ class AgentLoop:
         tool = self.registry.get(tc.name)
         if tool is None:
             logger.warning("tool '%s' not in registry", tc.name)
-            self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
+            self._trace_and_emit("tool_error", {"tool": tc.name, "error": "not in registry"})
             self._emit("tool_result", {
                 "tool": tc.name,
                 "id": tc.id,

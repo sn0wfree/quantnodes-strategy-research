@@ -106,16 +106,21 @@ def test_projection_type_filter(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SR_LLM_REQUEST_OFFLOAD_THRESHOLD", "64")
     store = _store(tmp_path)
     _emit_llm_request(store, system_prompt=_big(5000), tools_schema="[]")
-    # A non-llm_request event should be excluded by the default filter.
+    # A non-trace event (text_delta) should be excluded by the default
+    # curated vocabulary; explicit types still wins.
+    store.emit("sess-1", "text_delta", {"delta": "hi"})
     store.emit("sess-1", "tool_result", {"name": "ls", "result": "ok"})
 
     from strategy_research.api.session.trace_projection import TraceProjection
 
     recs = TraceProjection(store).project("sess-1")
-    assert [r["type"] for r in recs] == ["llm_request"]
+    assert [r["type"] for r in recs] == ["llm_request", "tool_result"]
 
     recs2 = TraceProjection(store).project("sess-1", types="tool_result")
     assert [r["type"] for r in recs2] == ["tool_result"]
+
+    # text_delta excluded by default (raw delta, not trajectory-level).
+    assert "text_delta" not in [r["type"] for r in recs]
 
 
 def test_projection_empty_session(tmp_path) -> None:

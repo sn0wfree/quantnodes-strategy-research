@@ -96,6 +96,14 @@ class EventType:
     ITER_START = "iter_start"
     ITER_END = "iter_end"
 
+    # AgentLoop lifecycle (Trajectory View). Routed into event_log so the
+    # timeline has the full loop vocabulary, not just LLM requests.
+    LOOP_START = "loop_start"
+    LOOP_END = "loop_end"
+    LOOP_FINAL = "loop_final"
+    COMPRESSION = "compression"
+    TOOL_ERROR = "tool_error"
+
     # LLM usage
     LLM_USAGE = "llm_usage"
     SESSION_TOTAL_TOKENS = "session_total_tokens"
@@ -104,6 +112,10 @@ class EventType:
     # per LLM call. Large fields (system_prompt, tools_schema) are
     # offloaded to sidecar blobs; event_log stores metadata + refs.
     LLM_REQUEST = "llm_request"
+
+    # LLM response envelope (Trajectory View): finish reason, tool-call
+    # count, and a short content preview.
+    LLM_RESPONSE = "llm_response"
 
     # Compaction
     COMPACT = "compact"
