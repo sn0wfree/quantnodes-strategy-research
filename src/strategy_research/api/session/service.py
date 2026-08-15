@@ -532,7 +532,19 @@ class SessionService:
 
         Used when the caller knows the session but not the attempt id
         (e.g. the frontend's Cancel button). Returns True if cancelled.
+
+        Also cancels the in-flight attempt task directly to prevent orphan
+        tasks when the consumer is cancelled while an attempt is running.
         """
+        # First, cancel the in-flight attempt task (if any) to prevent orphans
+        for aid, task in list(self._active_loops.items()):
+            # Find the attempt task belonging to this session
+            # (check via store lookup since _active_loops keys by attempt_id)
+            attempt = self.store.get_attempt(session_id, aid)
+            if attempt is not None and not task.done():
+                task.cancel()
+                break
+
         consumer = self._queue_consumers.get(session_id)
         if consumer is None:
             return False
