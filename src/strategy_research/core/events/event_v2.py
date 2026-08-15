@@ -197,6 +197,19 @@ def is_known_event_type(event_type: str) -> bool:
     return event_type in _ALL_EVENT_TYPES
 
 
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    """Tolerant key lookup for event_log rows.
+
+    sqlite3.Row supports bracket access but not ``.keys()``; plain dicts
+    support both. Forward-compat for rows that lack the P0-1 A3 columns
+    falls back to ``default`` so pre-A3 events keep reconstructing cleanly.
+    """
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 # ── Event envelope ───────────────────────────────────────────────────
 
 @dataclass
@@ -211,6 +224,14 @@ class EventV2:
             (aggregate_id, seq) in the event_log table.
         type: Event type string (e.g. "text.started"). See EventType.
         data: Freeform event payload (any JSON-serializable dict).
+        parent_event_id: P0-1 A3 — parent event ID for trace-tree
+            relationships (iter_start → tool_call → tool_result,
+            subagent_started → parent agent event). ``None`` for root
+            events. Persisted as a nullable column.
+        branch_id: P0-1 A3 — fork branch identifier. ``"main"`` for the
+            default branch; populated by EventStore.fork() in a later
+            phase. Schema enforces ``NOT NULL DEFAULT 'main'`` so this
+            default mirrors the DDL.
         time_created: Wall-clock timestamp (server time.time()).
     """
 
@@ -219,6 +240,8 @@ class EventV2:
     seq: int
     type: str
     data: Dict[str, Any]
+    parent_event_id: Optional[str] = None
+    branch_id: str = "main"
     time_created: float = field(default_factory=time.time)
 
     @classmethod
@@ -228,6 +251,9 @@ class EventV2:
         seq: int,
         type: str,
         data: Optional[Dict[str, Any]] = None,
+        *,
+        parent_event_id: Optional[str] = None,
+        branch_id: str = "main",
     ) -> "EventV2":
         """Factory method that assigns id and timestamp.
 
@@ -236,6 +262,8 @@ class EventV2:
             seq: Per-aggregate sequence number (caller-managed).
             type: Event type (should be a constant from EventType).
             data: Optional event payload.
+            parent_event_id: Optional parent event ID for trace trees.
+            branch_id: Fork branch identifier (``"main"`` by default).
 
         Returns:
             A new EventV2 instance.
@@ -246,12 +274,16 @@ class EventV2:
             raise ValueError(f"seq must be positive, got {seq}")
         if not type:
             raise ValueError("type must be non-empty")
+        if not branch_id:
+            raise ValueError("branch_id must be non-empty")
         return cls(
             id=str(uuid.uuid4()),
             aggregate_id=aggregate_id,
             seq=seq,
             type=type,
             data=data or {},
+            parent_event_id=parent_event_id,
+            branch_id=branch_id,
             time_created=time.time(),
         )
 
@@ -263,6 +295,8 @@ class EventV2:
             "seq": self.seq,
             "type": self.type,
             "data": self.data,
+            "parent_event_id": self.parent_event_id,
+            "branch_id": self.branch_id,
             "time_created": self.time_created,
         }
 
@@ -276,6 +310,9 @@ class EventV2:
 
         Defensive: missing fields raise ValueError (no silent defaults
         for required fields). Extra fields are ignored (forward-compat).
+        The P0-1 A3 fields ``parent_event_id`` and ``branch_id`` are
+        optional for backward compatibility with pre-A3 dicts — missing
+        values use the same defaults as the dataclass / schema.
         """
         required = ("id", "aggregate_id", "seq", "type", "time_created")
         missing = [f for f in required if f not in d]
@@ -287,6 +324,8 @@ class EventV2:
             seq=int(d["seq"]),
             type=d["type"],
             data=d.get("data") or {},
+            parent_event_id=d.get("parent_event_id"),
+            branch_id=d.get("branch_id") or "main",
             time_created=float(d["time_created"]),
         )
 
@@ -309,6 +348,8 @@ class EventV2:
             "seq": self.seq,
             "type": self.type,
             "data_json": json.dumps(self.data, ensure_ascii=False),
+            "parent_event_id": self.parent_event_id,
+            "branch_id": self.branch_id,
             "time_created": self.time_created,
         }
 
@@ -318,6 +359,9 @@ class EventV2:
 
         Accepts sqlite3.Row, dict, or any object that supports
         bracket access. data_json is parsed and merged into data.
+        P0-1 A3 fields use ``.get`` semantics to stay tolerant of
+        pre-A3 rows that lack the columns (the schema-level DEFAULT
+        ``'main'`` would have applied at INSERT time anyway).
         """
         return cls(
             id=row["id"],
@@ -325,6 +369,8 @@ class EventV2:
             seq=row["seq"],
             type=row["type"],
             data=json.loads(row["data_json"]) if isinstance(row["data_json"], str) else row["data_json"],
+            parent_event_id=_row_get(row, "parent_event_id"),
+            branch_id=_row_get(row, "branch_id") or "main",
             time_created=row["time_created"],
         )
 

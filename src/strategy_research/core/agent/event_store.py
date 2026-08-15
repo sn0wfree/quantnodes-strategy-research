@@ -118,6 +118,9 @@ class EventStore:
         session_id: str,
         event_type: str,
         data: dict[str, Any] | None = None,
+        *,
+        parent_event_id: str | None = None,
+        branch_id: str = "main",
     ) -> EventV2:
         """Emit event: SQLite → cache → SSE push + live subscribers.
 
@@ -164,6 +167,8 @@ class EventStore:
                 seq=seq,
                 type=event_type,
                 data=merged,
+                parent_event_id=parent_event_id,
+                branch_id=branch_id,
             )
             try:
                 self._persist(event)
@@ -321,11 +326,17 @@ class EventStore:
             return
         conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
         row = event.to_row()
+        # P0-1 A3: include parent_event_id / branch_id so trace trees and
+        # fork branches survive the SQLite round-trip. branch_id has
+        # schema-level DEFAULT 'main' so omitting it (in pre-A3 callers)
+        # is still safe — but the unified EventV2 always carries it now.
         conn.execute(
             "INSERT INTO event_log (id, aggregate_id, seq, type, data_json, "
-            "time_created) VALUES (?, ?, ?, ?, ?, ?)",
+            "time_created, parent_event_id, branch_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (row["id"], row["aggregate_id"], row["seq"], row["type"],
-             row["data_json"], row["time_created"]),
+             row["data_json"], row["time_created"],
+             row["parent_event_id"], row["branch_id"]),
         )
         conn.commit()
 
@@ -334,27 +345,32 @@ class EventStore:
             if hasattr(self._backend, "_ensure_conn"):
                 conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
                 rows = conn.execute(
-                    "SELECT id, aggregate_id, seq, type, data_json, time_created "
+                    "SELECT id, aggregate_id, seq, type, data_json, time_created, "
+                    "parent_event_id, branch_id "
                     "FROM event_log WHERE aggregate_id = ? AND seq > ? "
                     "ORDER BY seq ASC",
                     (session_id, from_seq),
                 ).fetchall()
                 # SQLiteStore leaves row_factory unset (memory_manager uses
                 # tuple indexing), so map each tuple to the dict shape the
-                # unified EventV2.from_row() expects.
-                return [
-                    EventV2.from_row(
-                        {
-                            "id": r[0],
-                            "aggregate_id": r[1],
-                            "seq": r[2],
-                            "type": r[3],
-                            "data_json": r[4],
-                            "time_created": r[5],
-                        }
-                    )
-                    for r in rows
-                ]
+                # unified EventV2.from_row() expects. The P0-1 A3 columns
+                # (7 = parent_event_id, 8 = branch_id) are always SELECTed
+                # here; rows written by pre-A3 code will simply have NULL /
+                # the schema DEFAULT for those positions, and EventV2.from_row
+                # maps them to None / "main".
+                def _row_to_dict(r: tuple) -> dict[str, Any]:
+                    return {
+                        "id": r[0],
+                        "aggregate_id": r[1],
+                        "seq": r[2],
+                        "type": r[3],
+                        "data_json": r[4],
+                        "time_created": r[5],
+                        "parent_event_id": r[6],
+                        "branch_id": r[7] or "main",
+                    }
+
+                return [EventV2.from_row(_row_to_dict(r)) for r in rows]
             else:
                 # InMemoryStore
                 data = getattr(self._backend, "_data", {})

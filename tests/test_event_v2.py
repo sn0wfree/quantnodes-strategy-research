@@ -367,3 +367,84 @@ def test_study_events_registered():
         "study_knowledge_compacted", "study_directives_consumed",
     ):
         assert is_known_event_type(name), f"{name} not registered"
+
+
+# ── P0-1 A3 — parent_event_id + branch_id fields ──────────────────────
+
+
+class TestParentAndBranchFields(unittest.TestCase):
+    """P0-1 A3: the unified EventV2 carries ``parent_event_id`` and
+    ``branch_id`` for trace trees and fork support.
+    """
+
+    def test_default_parent_none(self) -> None:
+        e = EventV2.create("s", 1, EventType.LOOP_START, {})
+        self.assertIsNone(e.parent_event_id)
+        self.assertEqual(e.branch_id, "main")
+
+    def test_explicit_parent_and_branch(self) -> None:
+        e = EventV2.create(
+            "s", 2, EventType.TOOL_CALL, {"x": 1},
+            parent_event_id="abc-123", branch_id="exp1",
+        )
+        self.assertEqual(e.parent_event_id, "abc-123")
+        self.assertEqual(e.branch_id, "exp1")
+
+    def test_branch_id_must_be_nonempty(self) -> None:
+        with self.assertRaises(ValueError):
+            EventV2.create("s", 1, EventType.LOOP_START, {}, branch_id="")
+
+    def test_to_dict_round_trip_includes_new_fields(self) -> None:
+        e = EventV2.create(
+            "s", 1, EventType.TOOL_CALL, {"k": 1},
+            parent_event_id="p1", branch_id="b1",
+        )
+        e2 = EventV2.from_dict(e.to_dict())
+        self.assertEqual(e2.parent_event_id, "p1")
+        self.assertEqual(e2.branch_id, "b1")
+
+    def test_from_dict_backfills_defaults_for_missing_fields(self) -> None:
+        # Pre-A3 dicts lack the new keys — round-tripping them must still
+        # produce a valid EventV2 with default values.
+        e = EventV2.create("s", 1, EventType.LOOP_START, {"k": 1})
+        d = e.to_dict()
+        d.pop("parent_event_id", None)
+        d.pop("branch_id", None)
+        e2 = EventV2.from_dict(d)
+        self.assertIsNone(e2.parent_event_id)
+        self.assertEqual(e2.branch_id, "main")
+
+    def test_to_row_includes_new_columns(self) -> None:
+        e = EventV2.create(
+            "s", 1, EventType.TOOL_CALL, {"k": 1},
+            parent_event_id="p1", branch_id="b1",
+        )
+        row = e.to_row()
+        self.assertEqual(row["parent_event_id"], "p1")
+        self.assertEqual(row["branch_id"], "b1")
+
+    def test_from_row_tolerates_missing_columns(self) -> None:
+        # Pre-A3 rows have only the original 6 columns.
+        legacy_row = {
+            "id": "x", "aggregate_id": "s", "seq": 1, "type": "t",
+            "data_json": "{}", "time_created": 0.0,
+        }
+        e = EventV2.from_row(legacy_row)
+        self.assertIsNone(e.parent_event_id)
+        self.assertEqual(e.branch_id, "main")
+
+    def test_from_row_accepts_sqlite3_row(self) -> None:
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE t (id TEXT, aggregate_id TEXT, seq INT, "
+                     "type TEXT, data_json TEXT, time_created REAL, "
+                     "parent_event_id TEXT, branch_id TEXT)")
+        conn.execute(
+            "INSERT INTO t VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("e1", "s1", 1, "t", "{}", 1.0, "p1", "b1"),
+        )
+        row = conn.execute("SELECT * FROM t").fetchone()
+        e = EventV2.from_row(row)
+        self.assertEqual(e.parent_event_id, "p1")
+        self.assertEqual(e.branch_id, "b1")
