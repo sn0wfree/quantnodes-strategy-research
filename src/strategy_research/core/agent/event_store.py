@@ -91,6 +91,14 @@ class EventStore:
         self._live_queues: dict[str, list[asyncio.Queue]] = {}
         self._live_lock = threading.RLock()
 
+        # P0-1 B3: when the backend is the InMemoryStore (SQLite
+        # auto-repair failed), event_log has no real table. We keep a
+        # per-process dict of ``[EventV2]`` here so ``_replay`` can
+        # still serve the same from_seq / types / branch_id / limit
+        # contract. Production runs use SQLite so this stays empty;
+        # degraded-mode runs at least have a working read path.
+        self._in_memory_events: dict[str, list[EventV2]] = {}
+
         # 5. Initialize schema (idempotent)
         self._init_event_log_schema()
 
@@ -350,7 +358,12 @@ class EventStore:
 
     def _persist(self, event: EventV2) -> None:
         if isinstance(self._backend, InMemoryStore):
-            # In-memory store: skip persistence
+            # P0-1 B3: degraded-mode fallback keeps EventV2 in a
+            # per-process dict so _replay() can serve the same contract
+            # (from_seq / types / branch_id / limit) without SQLite.
+            self._in_memory_events.setdefault(
+                event.aggregate_id, []
+            ).append(event)
             return
         conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
         row = event.to_row()
@@ -420,10 +433,12 @@ class EventStore:
                 return [EventV2.from_row(_row_to_dict(r)) for r in rows]
             else:
                 # InMemoryStore — apply the same filters in Python so the
-                # contract is consistent across backends.
-                data = getattr(self._backend, "_data", {})
+                # contract is consistent across backends. ``_persist``
+                # mirrors every EventV2 into ``_in_memory_events`` so
+                # _replay has the same shape as the SQLite path
+                # (events carry .seq / .type / .branch_id).
                 events = [
-                    ev for ev in data.get(session_id, [])
+                    ev for ev in self._in_memory_events.get(session_id, [])
                     if ev.seq > from_seq
                 ]
                 if types:
@@ -449,10 +464,11 @@ class EventStore:
                 ).fetchone()
                 return (row[0] if row else 0) + 1
             else:
-                # InMemoryStore
-                data = getattr(self._backend, "_data", {})
-                msgs = data.get(session_id, [])
-                return max((m.seq for m in msgs), default=0) + 1
+                # InMemoryStore — count from the EventV2 mirror that
+                # ``_persist`` writes, not the backend's Message dict
+                # (which holds projected messages, not raw events).
+                events = self._in_memory_events.get(session_id, [])
+                return max((ev.seq for ev in events), default=0) + 1
         except Exception:
             return 1
 
@@ -491,6 +507,9 @@ class EventStore:
         return event_type in boundary_types
 
     def health_report(self) -> dict[str, Any]:
+        # P0-1 B4: surface the SessionCache hit rate so operators can
+        # tell whether the LRU cap is sized for the working set.
+        stats = self._cache.stats
         return {
             "event_store": {
                 "degraded": self.is_degraded,
@@ -499,6 +518,11 @@ class EventStore:
                     len(q) for q in self._live_queues.values()
                 ),
                 "cache_session_count": self._cache.session_count,
+                "cache_hits": stats.hits,
+                "cache_misses": stats.misses,
+                "cache_hit_rate": stats.hit_rate,
+                "cache_evictions": stats.evictions,
+                "cache_invalidations": stats.invalidations,
             },
         }
 

@@ -399,6 +399,17 @@ class CacheStats:
     last_resolve_at: float = 0.0
     last_resolve_value: int = 0
 
+    @property
+    def hit_rate(self) -> float:
+        """P0-1 B4 — fraction of ``get`` calls that found the entry cached.
+
+        Returns 0.0 when no reads have happened yet (avoids ZeroDivisionError).
+        Useful as a sizing signal: a low hit rate suggests the cap is too
+        small (working set exceeds LRU capacity).
+        """
+        total = self.hits + self.misses
+        return self.hits / total if total > 0 else 0.0
+
 
 class SessionCache:
     """LRU/TTL per-session cache. Bounded by config-driven max_entries."""
