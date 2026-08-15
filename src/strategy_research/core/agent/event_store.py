@@ -99,9 +99,16 @@ class EventStore:
             # In-memory store doesn't persist; event_log lives only in cache
             return
         conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-        from ..storage.event_schema import ensure_event_log_schema
+        from ..storage.event_schema import (
+            ensure_event_log_schema,
+            migrate_event_log_unique,
+        )
 
+        # P0-1 A1+A3+A4: create / reconcile the table, then upgrade the
+        # UNIQUE constraint for fork-aware seq spaces. Both are idempotent;
+        # fresh DBs go straight to the new schema.
         ensure_event_log_schema(conn)
+        migrate_event_log_unique(conn)
 
     @property
     def is_degraded(self) -> bool:

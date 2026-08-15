@@ -279,6 +279,17 @@ def _run_schema_migrations(
         _add_column(conn, "attempts", "model_override", "TEXT")
         _add_column(conn, "attempts", "thinking", "TEXT NOT NULL DEFAULT 'auto'")
         conn.execute("PRAGMA user_version = 5")
+    if version < 6:
+        # P0-1 A4: event_log UNIQUE upgraded to (aggregate_id, branch_id,
+        # seq) so multiple fork branches can share the same seq space.
+        # Fresh DBs already have the new constraint via the canonical DDL;
+        # pre-A4 tables are rebuilt in place (idempotent: skips itself when
+        # the new UNIQUE is already present). parent_event_id and
+        # branch_id columns are backfilled inside ensure_event_log_schema,
+        # which runs unconditionally in _ensure_schema above.
+        from ...core.storage.event_schema import migrate_event_log_unique
+        migrate_event_log_unique(conn)
+        conn.execute("PRAGMA user_version = 6")
 
 
 def _ensure_fts_table(conn: sqlite3.Connection) -> None:
