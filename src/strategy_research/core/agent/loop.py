@@ -1679,12 +1679,21 @@ class AgentLoop:
         (``_maybe_compact_impl``) in a worker thread so the event loop is
         never blocked.
 
+        Acquires per-session compact lock to prevent concurrent compaction
+        (auto from agent loop + manual /compact) on the same session.
         The sync LLM client (``self.client.chat``) is invoked directly
         from the worker thread, with no nested event loop.
         """
-        return await asyncio.to_thread(
-            self._maybe_compact_impl, messages, run_compact=self._run_compact_messages
-        )
+        if not self.session_id:
+            return await asyncio.to_thread(
+                self._maybe_compact_impl, messages, run_compact=self._run_compact_messages
+            )
+        from .compact import _compact_locks
+        lock = await _compact_locks.get(self.session_id)
+        async with lock:
+            return await asyncio.to_thread(
+                self._maybe_compact_impl, messages, run_compact=self._run_compact_messages
+            )
 
     # ── Trace helpers ──────────────────────────────
 

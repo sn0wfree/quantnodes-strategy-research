@@ -18,6 +18,7 @@ Phase A simplification (chore):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -46,6 +47,32 @@ _compaction_metrics: dict[str, int] = {
     "l4_aborts": 0,              # L4 safety aborts (would produce empty context)
     "filter_calls": 0,           # Total _convert_messages_to_history calls
 }
+
+
+# ── Per-session compaction lock ──────────────────────────────────────
+# Prevents concurrent compaction (auto from agent loop + manual /compact)
+# on the same session.  Both paths must acquire this lock before calling
+# compact_messages().  The lock is per-session (different sessions can
+# compact concurrently).
+class _CompactLockMap:
+    """Per-session asyncio.Lock for compaction serialization."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._meta_lock = asyncio.Lock()
+
+    async def get(self, session_id: str) -> asyncio.Lock:
+        async with self._meta_lock:
+            if session_id not in self._locks:
+                self._locks[session_id] = asyncio.Lock()
+            return self._locks[session_id]
+
+    async def clear(self, session_id: str) -> None:
+        async with self._meta_lock:
+            self._locks.pop(session_id, None)
+
+
+_compact_locks = _CompactLockMap()
 
 
 def get_compaction_metrics() -> dict[str, int]:

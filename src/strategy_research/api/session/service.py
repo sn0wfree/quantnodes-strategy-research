@@ -1398,107 +1398,112 @@ class SessionService:
 
         Writes compressed results back to the database.
         Returns dict with keys: layers, before_tokens, after_tokens, summary.
+
+        Acquires per-session compact lock to prevent concurrent compaction
+        (auto from agent loop + manual /compact) on the same session.
         """
         from ..routers.chat import _build_llm_config
+        from ...core.agent.compact import _compact_locks
 
-        messages = self.store.get_messages(session_id, limit=10000)
-        # keep_all_compactions from the caller-supplied CompactConfig
-        keep_all = bool(
-            config
-            and config.keep_all_compactions_in_history
-        )
-        history = self._convert_messages_to_history(
-            messages, keep_all_compactions=keep_all
-        )
+        async with await _compact_locks.get(session_id):
+            messages = self.store.get_messages(session_id, limit=10000)
+            # keep_all_compactions from the caller-supplied CompactConfig
+            keep_all = bool(
+                config
+                and config.keep_all_compactions_in_history
+            )
+            history = self._convert_messages_to_history(
+                messages, keep_all_compactions=keep_all
+            )
 
-        if not history:
-            return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
+            if not history:
+                return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
 
-        cfg = _build_llm_config()
-        llm_client = None
-        model_context_tokens = None
-        if cfg:
-            model_context_tokens = cfg.model_context_tokens
-            try:
-                from strategy_research.core.llm import OpenAICompatClient
-                llm_client = OpenAICompatClient(cfg)
-            except Exception:
-                pass
+            cfg = _build_llm_config()
+            llm_client = None
+            model_context_tokens = None
+            if cfg:
+                model_context_tokens = cfg.model_context_tokens
+                try:
+                    from strategy_research.core.llm import OpenAICompatClient
+                    llm_client = OpenAICompatClient(cfg)
+                except Exception:
+                    pass
 
-        compressed, layers, _l4_summary, _l4_recent = compact_messages(
-            history,
-            config=config,
-            threshold_tokens=0,  # force all layers for manual /compact
-            model_context_tokens=model_context_tokens,
-            llm_client=llm_client,
-        )
+            compressed, layers, _l4_summary, _l4_recent = compact_messages(
+                history,
+                config=config,
+                threshold_tokens=0,  # force all layers for manual /compact
+                model_context_tokens=model_context_tokens,
+                llm_client=llm_client,
+            )
 
-        before_tokens = sum(len(m.get("content", "")) for m in history)
-        after_tokens = sum(len(m.get("content", "")) for m in compressed)
+            before_tokens = sum(len(m.get("content", "")) for m in history)
+            after_tokens = sum(len(m.get("content", "")) for m in compressed)
 
-        # Build summary: prefer LLM-generated [context summary], fallback to extraction
-        summary = self._extract_summary(compressed)
-        if not summary and layers:
-            summary = self._build_fallback_summary(compressed, history)
+            # Build summary: prefer LLM-generated [context summary], fallback to extraction
+            summary = self._extract_summary(compressed)
+            if not summary and layers:
+                summary = self._build_fallback_summary(compressed, history)
 
-        # Persist compressed history via event-sourcing (B4/B5)
-        # Emit compact.ended event with the compressed message set.
-        # The projector keeps ALL original messages (chat record) and
-        # adds a compaction marker carrying compacted_until_seq.
-        # EventBusV2.flush_to_messages=True ensures messages table is updated.
-        if layers:
-            try:
-                # C4.2: emit compact.count with message counts for observability
-                msg_count_before = len(messages)
-                msg_count_after = len(compressed) if compressed else msg_count_before
-                self.event_bus.emit(
-                    session_id,
-                    "compact.count",
-                    {
-                        "messages_before": msg_count_before,
-                        "messages_after": msg_count_after,
-                        "tokens_before": before_tokens,
-                        "tokens_after": after_tokens,
-                        "layers": layers,
-                    },
-                )
+            # Persist compressed history via event-sourcing (B4/B5)
+            # Emit compact.ended event with the compressed message set.
+            # The projector keeps ALL original messages (chat record) and
+            # adds a compaction marker carrying compacted_until_seq.
+            # EventBusV2.flush_to_messages=True ensures messages table is updated.
+            if layers:
+                try:
+                    # C4.2: emit compact.count with message counts for observability
+                    msg_count_before = len(messages)
+                    msg_count_after = len(compressed) if compressed else msg_count_before
+                    self.event_bus.emit(
+                        session_id,
+                        "compact.count",
+                        {
+                            "messages_before": msg_count_before,
+                            "messages_after": msg_count_after,
+                            "tokens_before": before_tokens,
+                            "tokens_after": after_tokens,
+                            "layers": layers,
+                        },
+                    )
 
-                # opencode-aligned: emit compact.ended with the
-                # compressed set. The projector KEEPS all original
-                # messages in the projection (chat record preserved)
-                # and records compacted_until_seq on the marker so the
-                # LLM context builder can hide the covered messages.
-                # The boundary is computed from the compressed recent
-                # messages' seqs (attached during history conversion).
-                compacted_until_seq = None
-                recent_seqs = [
-                    m.get("seq") for m in (compressed or [])
-                    if m.get("role") != "system" and isinstance(m.get("seq"), int)
-                ]
-                if recent_seqs:
-                    compacted_until_seq = min(recent_seqs) - 1
-                self.event_bus.emit(
-                    session_id,
-                    "compact.ended",
-                    {
-                        "summary": summary or f"Compressed {before_tokens} → {after_tokens} tokens",
-                        "before_tokens": before_tokens,
-                        "after_tokens": after_tokens,
-                        "layers": layers,
-                        "messages": compressed,
-                        "compacted_until_seq": compacted_until_seq,
-                    },
-                )
-            except Exception:
-                logger.exception("failed to emit compact event")
+                    # opencode-aligned: emit compact.ended with the
+                    # compressed set. The projector KEEPS all original
+                    # messages in the projection (chat record preserved)
+                    # and records compacted_until_seq on the marker so the
+                    # LLM context builder can hide the covered messages.
+                    # The boundary is computed from the compressed recent
+                    # messages' seqs (attached during history conversion).
+                    compacted_until_seq = None
+                    recent_seqs = [
+                        m.get("seq") for m in (compressed or [])
+                        if m.get("role") != "system" and isinstance(m.get("seq"), int)
+                    ]
+                    if recent_seqs:
+                        compacted_until_seq = min(recent_seqs) - 1
+                    self.event_bus.emit(
+                        session_id,
+                        "compact.ended",
+                        {
+                            "summary": summary or f"Compressed {before_tokens} → {after_tokens} tokens",
+                            "before_tokens": before_tokens,
+                            "after_tokens": after_tokens,
+                            "layers": layers,
+                            "messages": compressed,
+                            "compacted_until_seq": compacted_until_seq,
+                        },
+                    )
+                except Exception:
+                    logger.exception("failed to emit compact event")
 
-        return {
-            "layers": layers,
-            "before_tokens": before_tokens,
-            "after_tokens": after_tokens,
-            "summary": summary,
-            "compressed": compressed,
-        }
+            return {
+                "layers": layers,
+                "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "summary": summary,
+                "compressed": compressed,
+            }
 
     # ── History conversion ────────────────────────────────────────────
 
