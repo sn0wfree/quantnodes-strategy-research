@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useGoalStore } from '../../stores/goal'
 import { useSessionStore } from '../../stores/session'
 import { useChatStore } from '../../stores/chat'
@@ -10,6 +10,7 @@ import {
 import { TokenCard } from '../context/TokenCard'
 import { GoalCard } from '../goal/GoalCard'
 import { PanelRenderCard } from './PanelRenderCard'
+import { TraceViewer } from '../chat/TraceViewer'
 import type { GoalTabGoal } from '../goal/GoalTab'
 
 /**
@@ -26,6 +27,9 @@ export function RightPanel() {
   // Session / messages
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const messages = useChatStore((s) => s.messages)
+
+  // Trace viewer toggle
+  const [showTrace, setShowTrace] = useState(false)
 
   const sessionMessages = useMemo(() => {
     return Array.from(messages.values())
@@ -81,6 +85,24 @@ export function RightPanel() {
       <GoalCard goal={goalTabGoal} />
       {/* 表现曲线 — 由 chat agent 决定显示什么 (show_chart / show_report) */}
       <PanelRenderCard item={panelItem} metrics={metrics} curve={curve} />
+      {/* Trace Timeline — agent trace events */}
+      {currentSessionId && (
+        <div className="rounded-lg border border-gray-800 bg-slate-950">
+          <button
+            type="button"
+            onClick={() => setShowTrace(!showTrace)}
+            className="flex w-full items-center justify-between px-3 py-2 text-xs text-gray-400 hover:text-gray-200"
+          >
+            <span>Trace Timeline</span>
+            <span className="text-[10px] text-gray-600">{showTrace ? "▾" : "▸"}</span>
+          </button>
+          {showTrace && (
+            <div className="h-80 border-t border-gray-800">
+              <TraceViewer sessionId={currentSessionId} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
