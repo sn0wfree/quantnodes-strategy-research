@@ -334,6 +334,75 @@ class EventStore:
         """Return the highest seq for session (or 0)."""
         return self._next_seq(session_id) - 1
 
+    def fork(
+        self,
+        session_id: str,
+        at_seq: int,
+        *,
+        new_session_id: str | None = None,
+    ) -> tuple[str, int]:
+        """Copy events ``[0, at_seq]`` of ``session_id`` into a new session.
+
+        P0-1 C1. The new session starts its own seq space at 1 (the source
+        session's seq numbers are not preserved). Branch is always
+        ``"main"`` — multi-branch forks land in Phase D. Returns
+        ``(new_session_id, copied_event_count)``.
+
+        Raises ``ValueError`` for invalid ``at_seq`` or pre-existing
+        ``new_session_id``. Operates under the backend lock so concurrent
+        emits on the source can't tear the snapshot mid-copy.
+        """
+        if at_seq <= 0:
+            raise ValueError(
+                f"at_seq must be positive, got {at_seq}"
+            )
+
+        if isinstance(self._backend, InMemoryStore):
+            raise RuntimeError(
+                "fork() requires a SQLite backend; InMemoryStore is "
+                "degraded mode and cannot host forkable sessions."
+            )
+
+        conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
+        max_seq = self.last_seq(session_id)
+        if at_seq > max_seq:
+            raise ValueError(
+                f"at_seq={at_seq} exceeds last_seq={max_seq} for "
+                f"session {session_id!r}"
+            )
+
+        new_sid = new_session_id or f"{session_id}-fork-{uuid.uuid4().hex[:8]}"
+        if self.last_seq(new_sid) > 0:
+            raise ValueError(
+                f"new_session_id {new_sid!r} already has events"
+            )
+
+        with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
+            # Copy [0, at_seq] events into the new session. The new
+            # session's seq space is 1..N where N == at_seq (a
+            # contiguous prefix). Re-id each row so the EventV2 PKs
+            # don't collide with the source session.
+            copied = conn.execute(
+                """
+                INSERT INTO event_log
+                    (id, aggregate_id, seq, type, data_json,
+                     time_created, parent_event_id, branch_id)
+                SELECT
+                    lower(hex(randomblob(16))),
+                    ?,
+                    ROW_NUMBER() OVER (ORDER BY seq ASC),
+                    type, data_json, time_created,
+                    parent_event_id, branch_id
+                FROM event_log
+                WHERE aggregate_id = ? AND seq <= ?
+                  AND branch_id = 'main'
+                ORDER BY seq ASC
+                """,
+                (new_sid, session_id, at_seq),
+            ).rowcount
+            conn.commit()
+        return new_sid, int(copied)
+
     def count(self, session_id: str | None = None) -> int:
         """Total events (optionally filtered by session)."""
         try:
