@@ -196,3 +196,56 @@ def test_user_data_returns_counts(client: TestClient) -> None:
     assert data["user_id"] == created["id"]
     assert data["sessions"] == 0 or data["sessions"] is None
     assert data["studies"] == 0 or data["studies"] is None
+
+
+# ── X-Admin-Token static-token path ────────────────────────────
+
+
+def test_static_admin_token_can_manage(monkeypatch, client: TestClient) -> None:
+    """The static X-Admin-Token (SR_ADMIN_TOKEN) is accepted as admin."""
+    monkeypatch.setenv("SR_ADMIN_TOKEN", "static-secret")
+    resp = client.get("/api/admin/users", headers={"X-Admin-Token": "static-secret"})
+    assert resp.status_code == 200
+    assert "users" in resp.json()
+
+
+def test_static_admin_token_wrong_rejected(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("SR_ADMIN_TOKEN", "static-secret")
+    resp = client.get("/api/admin/users", headers={"X-Admin-Token": "wrong"})
+    assert resp.status_code == 401
+
+
+def test_static_admin_token_self_protection(
+    monkeypatch, client: TestClient
+) -> None:
+    """Token-based admin (acting='__token__') is exempt from the
+    self-protection guard (no single user to protect)."""
+    monkeypatch.setenv("SR_ADMIN_TOKEN", "static-secret")
+    headers = {"X-Admin-Token": "static-secret"}
+
+    # token admin can create and disable a named user
+    resp = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={"username": "jane", "password": "pw"},
+    )
+    assert resp.status_code == 201
+    created = resp.json()
+    resp = client.post(
+        f"/api/admin/users/{created['id']}/disable", headers=headers,
+    )
+    assert resp.status_code == 200
+
+
+def test_static_admin_token_create_uses_token_actor(
+    monkeypatch, client: TestClient
+) -> None:
+    monkeypatch.setenv("SR_ADMIN_TOKEN", "static-secret")
+    resp = client.post(
+        "/api/admin/users",
+        headers={"X-Admin-Token": "static-secret"},
+        json={"username": "kane", "password": "pw", "role": "admin"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "admin"
+    _login(client, "kane", "pw")

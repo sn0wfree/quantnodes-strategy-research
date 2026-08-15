@@ -387,3 +387,108 @@ def test_idor_allows_own_study(tmp_path, monkeypatch):
     r = client.get(f"/api/study/{rec.study_id}/summary")
     assert r.status_code == 200
     assert r.json()["objective"] == "alice's study"
+
+
+def test_idor_enforcement_off_allows_cross_user(tmp_path, monkeypatch):
+    """SR_ENFORCE_STUDY_IDOR=0 disables ownership checks (single-user)."""
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
+    monkeypatch.setenv("SR_ENFORCE_STUDY_IDOR", "0")
+    import sqlite3
+    from strategy_research.api.auth_tokens import create_token
+    from strategy_research.core.study import StudyStore
+
+    conn = sqlite3.connect(str(tmp_path / "sessions.db"))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT,
+          created_at TEXT, updated_at TEXT, starred INTEGER NOT NULL DEFAULT 0,
+          tags_json TEXT NOT NULL DEFAULT '[]', message_count INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, user_id, created_at, updated_at) "
+        "VALUES ('owner-9', 'bob', '2026-08-01T10:00:00', '2026-08-01T10:00:00')"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("SR_SESSIONS_DB", str(tmp_path / "sessions.db"))
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="owner-9", goal_id=None, objective="bob's",
+        workspace_path=str(tmp_path), strategy_name="demo",
+    )
+    from strategy_research.api.app import create_app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(
+        create_app(),
+        headers={"Authorization": f"Bearer {create_token('alice')}"},
+    )
+    r = client.get(f"/api/study/{rec.study_id}/summary")
+    assert r.status_code == 200
+
+
+def test_idor_unknown_study_404(tmp_path, monkeypatch):
+    """A study id that doesn't exist → 404 even for an authenticated user."""
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
+    monkeypatch.setenv("SR_ENFORCE_STUDY_IDOR", "1")
+    monkeypatch.setenv("SR_SESSIONS_DB", str(tmp_path / "sessions.db"))
+    from strategy_research.api.auth_tokens import create_token
+    from strategy_research.api.app import create_app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(
+        create_app(),
+        headers={"Authorization": f"Bearer {create_token('alice')}"},
+    )
+    r = client.get("/api/study/does-not-exist/summary")
+    assert r.status_code == 404
+
+
+def test_idor_empty_owner_denied_for_named_user(tmp_path, monkeypatch):
+    """A study with an empty owner session id is denied to a named
+    (non-anonymous) user — it cannot be attributed to them."""
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
+    monkeypatch.setenv("SR_ENFORCE_STUDY_IDOR", "1")
+    from strategy_research.api.auth_tokens import create_token
+    from strategy_research.core.study import StudyStore
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="orphan-missing-session", goal_id=None, objective="orphan",
+        workspace_path=str(tmp_path), strategy_name="demo",
+    )
+    # Point the study at a session that does not exist in the session DB.
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / "sessions.db"))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT,
+          created_at TEXT, updated_at TEXT, starred INTEGER NOT NULL DEFAULT 0,
+          tags_json TEXT NOT NULL DEFAULT '[]', message_count INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("SR_SESSIONS_DB", str(tmp_path / "sessions.db"))
+
+    from strategy_research.api.app import create_app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(
+        create_app(),
+        headers={"Authorization": f"Bearer {create_token('alice')}"},
+    )
+    # owner session doesn't exist for alice → 404 (session not found) or 403.
+    r = client.get(f"/api/study/{rec.study_id}/summary")
+    assert r.status_code in (403, 404)

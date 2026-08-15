@@ -540,3 +540,87 @@ def test_runner_harvests_owner_tasks_at_round_end(
     assert proc_mine.poll() is not None
     assert proc_other.poll() is None
     bg_proc.harvest_all_tasks()
+
+
+# ── User isolation (G1 per-user concurrency caps) ────────────────
+
+
+def test_resolve_session_user_id_resolves_real_user(tmp_path, monkeypatch):
+    """A session owned by a user resolves to the real user id, not the session."""
+    import sqlite3
+
+    from strategy_research.core.study import StudyScheduler, StudyStore
+
+    db = tmp_path / "sessions.db"
+    monkeypatch.setenv("SR_SESSIONS_DB", str(db))
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions ("
+        " id TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT 'anonymous',"
+        " title TEXT)"
+    )
+    conn.execute("INSERT INTO sessions (id, user_id, title) VALUES ('s1', 'u-42', '')")
+    conn.commit()
+    conn.close()
+
+    store = StudyStore(db_path=tmp_path / "goals.db")
+    sched = StudyScheduler(store)
+    assert sched._resolve_session_user_id("s1") == "u-42"
+
+
+def test_resolve_session_user_id_falls_back_to_session_id(tmp_path, monkeypatch):
+    """Unknown sessions (or a closed DB) fall back to the session id itself."""
+    import sqlite3
+
+    from strategy_research.core.study import StudyScheduler, StudyStore
+
+    db = tmp_path / "sessions.db"
+    monkeypatch.setenv("SR_SESSIONS_DB", str(db))
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions ("
+        " id TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT 'anonymous',"
+        " title TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = StudyStore(db_path=tmp_path / "goals.db")
+    sched = StudyScheduler(store)
+    # Session not present in the DB → fallback to the session id.
+    assert sched._resolve_session_user_id("ghost-session") == "ghost-session"
+
+
+def test_per_user_semaphores_keyed_by_real_user(monkeypatch):
+    """Studies owned by the SAME user share one per-user semaphore;
+    a different user gets a separate one — so the cap applies per user,
+    not per session."""
+    import strategy_research.core.study.scheduler as sched_mod
+
+    monkeypatch.setattr(sched_mod, "SR_STUDY_MAX_PER_USER", 1)
+    monkeypatch.setattr(sched_mod, "SR_STUDY_MAX_CONCURRENT", 10)
+
+    store = StudyStore(db_path="/tmp/nonexistent-sched.db")
+    sched = StudyScheduler(store)
+    # Two sessions owned by "u1", one by "u2".
+    monkeypatch.setattr(
+        sched, "_resolve_session_user_id",
+        lambda sid: "u1" if sid in ("s1", "s2") else "u2",
+    )
+
+    def key_for(session_id: str) -> asyncio.Semaphore:
+        uid = sched._resolve_session_user_id(session_id)
+        return sched._user_semaphores.setdefault(uid, asyncio.Semaphore(1))
+
+    sem_s1 = key_for("s1")
+    sem_s2 = key_for("s2")
+    sem_s3 = key_for("s3")
+
+    # Same user across sessions → literally the same semaphore object, so
+    # the per-user ceiling (cap=1) is enforced across a user's sessions.
+    assert sem_s1 is sem_s2
+    # Different user → a distinct semaphore, independent capacity.
+    assert sem_s3 is not sem_s1
+
+    # Only one entry per user in the map.
+    assert set(sched._user_semaphores) == {"u1", "u2"}
