@@ -100,6 +100,17 @@ def _create_token(user_id: str) -> str:
     return create_token(user_id)
 
 
+def _user_public(user: dict) -> dict:
+    """Return the public-facing user dict (id/username/display_name/role/is_active)."""
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "display_name": user["display_name"],
+        "role": user.get("role", "user"),
+        "is_active": bool(user.get("is_active", 1)),
+    }
+
+
 def _verify_token(token: str) -> Optional[str]:
     """Verify signed token and return user_id, or None."""
     from ..auth_tokens import verify_token
@@ -164,11 +175,7 @@ async def register(body: UserCreate):
     token = _create_token(user["id"])
     return TokenResponse(
         access_token=token,
-        user={
-            "id": user["id"],
-            "username": user["username"],
-            "display_name": user["display_name"],
-        },
+        user=_user_public(user),
     )
 
 
@@ -180,6 +187,10 @@ async def login(body: UserLogin):
     if not user or not _verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Disabled accounts cannot log in.
+    if not bool(user.get("is_active", 1)):
+        raise HTTPException(status_code=403, detail="Account is disabled")
+
     # SEC-1: auto-upgrade legacy SHA-256 hashes on successful login
     if _is_legacy_hash(user["password_hash"]):
         db.update_password(user["id"], _hash_password(body.password))
@@ -187,28 +198,26 @@ async def login(body: UserLogin):
     token = _create_token(user["id"])
     return TokenResponse(
         access_token=token,
-        user={
-            "id": user["id"],
-            "username": user["username"],
-            "display_name": user["display_name"],
-        },
+        user=_user_public(user),
     )
 
 
 @router.get("/me")
 async def me(user_id: str = Depends(get_current_user_id)):
-    """Get current user info (requires a valid token)."""
+    """Get current user info (requires a valid token).
+
+    Reads the live user row so role/is_active changes take effect without
+    a token refresh (e.g. an admin manually disables the account).
+    """
     if not user_id or user_id == "anonymous":
         raise HTTPException(status_code=401, detail="Not authenticated")
     db = _get_user_db()
     user = db.get_user_by_id(user_id)
-    if user:
-        return {
-            "id": user["id"],
-            "username": user["username"],
-            "display_name": user["display_name"],
-        }
-    raise HTTPException(status_code=404, detail="User not found")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not bool(user.get("is_active", 1)):
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    return _user_public(user)
 
 
 @router.post("/change-password")

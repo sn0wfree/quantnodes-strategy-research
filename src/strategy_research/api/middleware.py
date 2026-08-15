@@ -98,6 +98,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Invalid or expired token"},
             )
 
+        # Disabled accounts are rejected at every request.
+        if not self._is_active(user_id):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Account is disabled"},
+            )
+
         request.state.user_id = user_id
         response = await call_next(request)
         return response
@@ -123,3 +130,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """Verify signed token and return user_id, or None."""
         from .auth_tokens import verify_token
         return verify_token(token)
+
+    def _is_active(self, user_id: str) -> bool:
+        """Return False if the user exists but is disabled."""
+        try:
+            from .user_db import get_user_db
+            db = get_user_db()
+            user = db.get_user_by_id(user_id)
+            if user is not None:
+                return bool(user.get("is_active", 1))
+            return True  # unknown user id → let downstream 401/404
+        except Exception:
+            return True  # never fail-open on DB errors blocking requests
