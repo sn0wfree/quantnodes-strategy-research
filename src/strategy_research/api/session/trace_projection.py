@@ -79,9 +79,14 @@ class TraceProjection:
         type_filter = set(types.split(",")) if types else set(self.DEFAULT_TRACE_TYPES)
 
         records: list[dict[str, Any]] = []
-        for ev in self._event_store.replay(session_id):
-            if ev.type not in type_filter:
-                continue
+        # P0-1 B1: push the type allow-list down to SQLite so we only
+        # deserialize the events that survive the filter. With ~5% of
+        # events matching DEFAULT_TRACE_TYPES, this is a 20x reduction in
+        # JSON parsing for a typical session.
+        for ev in self._event_store.replay(
+            session_id,
+            types=list(type_filter) if type_filter else None,
+        ):
             record = self._resolve_offloads(dict(ev.data))
             record.setdefault("type", ev.type)
             record.setdefault("seq", ev.seq)

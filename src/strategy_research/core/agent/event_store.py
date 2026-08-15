@@ -297,9 +297,30 @@ class EventStore:
                 if queue in queues:
                     queues.remove(queue)
 
-    def replay(self, session_id: str, from_seq: int = 0) -> list[EventV2]:
-        """Return all events for session with seq > from_seq."""
-        return self._replay(session_id, from_seq=from_seq)
+    def replay(
+        self,
+        session_id: str,
+        from_seq: int = 0,
+        *,
+        types: list[str] | tuple[str, ...] | None = None,
+        branch_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[EventV2]:
+        """Return events for session with seq > from_seq.
+
+        P0-1 B1 — optional filters pushed down to SQLite WHERE clauses:
+        - ``types``: ``type IN (...)`` — primary win for Trajectory View
+          (which only consumes ~5% of total events).
+        - ``branch_id``: ``branch_id = ?`` — A4 fork-aware scoping.
+        - ``limit``: row cap (SQLite returns at most this many events).
+        """
+        return self._replay(
+            session_id,
+            from_seq=from_seq,
+            types=types,
+            branch_id=branch_id,
+            limit=limit,
+        )
 
     def last_seq(self, session_id: str) -> int:
         """Return the highest seq for session (or 0)."""
@@ -347,17 +368,36 @@ class EventStore:
         )
         conn.commit()
 
-    def _replay(self, session_id: str, from_seq: int = 0) -> list[EventV2]:
+    def _replay(
+        self,
+        session_id: str,
+        from_seq: int = 0,
+        *,
+        types: list[str] | tuple[str, ...] | None = None,
+        branch_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[EventV2]:
         try:
             if hasattr(self._backend, "_ensure_conn"):
                 conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-                rows = conn.execute(
+                clauses = ["aggregate_id = ?", "seq > ?"]
+                params: list[Any] = [session_id, from_seq]
+                if types:
+                    placeholders = ",".join("?" for _ in types)
+                    clauses.append(f"type IN ({placeholders})")
+                    params.extend(types)
+                if branch_id is not None:
+                    clauses.append("branch_id = ?")
+                    params.append(branch_id)
+                sql = (
                     "SELECT id, aggregate_id, seq, type, data_json, time_created, "
-                    "parent_event_id, branch_id "
-                    "FROM event_log WHERE aggregate_id = ? AND seq > ? "
-                    "ORDER BY seq ASC",
-                    (session_id, from_seq),
-                ).fetchall()
+                    "parent_event_id, branch_id FROM event_log "
+                    f"WHERE {' AND '.join(clauses)} ORDER BY seq ASC"
+                )
+                if limit is not None:
+                    sql += " LIMIT ?"
+                    params.append(limit)
+                rows = conn.execute(sql, params).fetchall()
                 # SQLiteStore leaves row_factory unset (memory_manager uses
                 # tuple indexing), so map each tuple to the dict shape the
                 # unified EventV2.from_row() expects. The P0-1 A3 columns
@@ -379,9 +419,22 @@ class EventStore:
 
                 return [EventV2.from_row(_row_to_dict(r)) for r in rows]
             else:
-                # InMemoryStore
+                # InMemoryStore — apply the same filters in Python so the
+                # contract is consistent across backends.
                 data = getattr(self._backend, "_data", {})
-                return list(data.get(session_id, []))
+                events = [
+                    ev for ev in data.get(session_id, [])
+                    if ev.seq > from_seq
+                ]
+                if types:
+                    type_set = set(types)
+                    events = [ev for ev in events if ev.type in type_set]
+                if branch_id is not None:
+                    events = [ev for ev in events if ev.branch_id == branch_id]
+                events.sort(key=lambda ev: ev.seq)
+                if limit is not None:
+                    events = events[:limit]
+                return events
         except Exception:
             return []
 
