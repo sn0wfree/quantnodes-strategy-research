@@ -864,6 +864,46 @@ async def chat_export(
     )
 
 
+@router.get("/session/{session_id}/trace")
+async def get_session_trace(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    types: str | None = Query(None, description="Comma-separated event types to filter"),
+):
+    """Read trace events for a session (DSH session-query pattern).
+
+    Returns the last ``limit`` trace events from the session's trace.jsonl,
+    optionally filtered by event type. Large fields (system_prompt,
+    tools_schema) are resolved from sidecar files.
+    """
+    from pathlib import Path
+
+    from ...core.agent.trace import TraceWriter
+
+    # Find trace dir for this session
+    trace_dir = TraceWriter.find_trace_dir(session_id)
+    if trace_dir is None:
+        return {"events": [], "session_id": session_id}
+
+    type_filter = set(types.split(",")) if types else None
+
+    try:
+        records = TraceWriter.read(
+            trace_dir,
+            resolve_offloads=True,
+            resolve_fields={"system_prompt", "tools_schema"},
+        )
+        # Filter by type if requested
+        if type_filter:
+            records = [r for r in records if r.get("type") in type_filter]
+        # Return last N events
+        records = records[-limit:]
+        return {"events": records, "session_id": session_id, "total": len(records)}
+    except Exception:
+        logger.exception("Failed to read trace for session %s", session_id)
+        return {"events": [], "session_id": session_id, "error": "failed to read trace"}
+
+
 @router.get("/personas", response_model=ChatPersonasResponse)
 async def list_personas(request: Request = None):
     """List available chat personas (roles) for the Composer agent selector.

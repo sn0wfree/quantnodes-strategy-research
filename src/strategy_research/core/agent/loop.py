@@ -1062,10 +1062,14 @@ class AgentLoop:
         """
         try:
             if self._stream_mode:
+                # Trace LLM request envelope before streaming
+                self._trace_llm_request(messages, iteration, tools=None)
                 if async_mode:
                     return await self._astream_chat(messages, iteration)
                 return self._stream_chat(messages, iteration)
             tools = self.registry.get_definitions() or None
+            # Trace LLM request envelope before non-streaming call
+            self._trace_llm_request(messages, iteration, tools=tools)
             if async_mode:
                 return await self.client.achat(messages, tools=tools)
             return self.client.chat(messages, tools=tools)
@@ -1077,6 +1081,8 @@ class AgentLoop:
             # partial chunk). Fall back to non-streaming chat().
             try:
                 tools = self.registry.get_definitions() or None
+                # Trace fallback LLM request
+                self._trace_llm_request(messages, iteration, tools=tools)
                 if async_mode:
                     return await self.client.achat(messages, tools=tools)
                 return self.client.chat(messages, tools=tools)
@@ -1724,6 +1730,70 @@ class AgentLoop:
                 self._trace_writer.write(entry)
             except Exception:                       # noqa: BLE001
                 pass  # trace failures should never break the loop
+
+    def _trace_llm_request(
+        self,
+        messages: list[dict[str, Any]],
+        iteration: int,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Log full LLM request envelope to trace (DSH request/header pattern).
+
+        Records system prompt, tools schema, and history metadata for each
+        LLM call.  Large fields (system prompt, tools JSON) are offloaded to
+        sidecar files when they exceed the threshold.
+
+        This provides the foundation for Trajectory View / Trace Viewer.
+        """
+        if self._trace_writer is None:
+            return
+        try:
+            import json as _json
+
+            # Extract system prompt from first message
+            system_prompt = ""
+            if messages and messages[0].get("role") == "system":
+                system_prompt = messages[0].get("content", "")
+
+            # Tools schema as JSON
+            tools_json = _json.dumps(tools, ensure_ascii=False) if tools else "[]"
+
+            # History metadata (don't log full content — too large)
+            history_meta = []
+            for m in messages[1:]:  # skip system prompt
+                history_meta.append({
+                    "role": m.get("role", "?"),
+                    "content_len": len(m.get("content", "")),
+                    "has_tool_calls": bool(m.get("tool_calls")),
+                })
+
+            entry: dict[str, Any] = {
+                "type": "llm_request",
+                "iteration": iteration,
+                "session_id": self.session_id or "",
+                "history_count": len(messages),
+                "history_meta": history_meta,
+                "tools_count": len(tools) if tools else 0,
+                "system_prompt_len": len(system_prompt),
+            }
+
+            # Use sidecar offload for large fields
+            self._trace_writer.write_text_entry(
+                entry,
+                field="system_prompt",
+                value=system_prompt,
+                offload_kind=f"llm-request-system-{iteration}",
+            )
+            # Tools schema goes inline (usually small) or offloaded
+            self._trace_writer.write_text_entry(
+                entry,
+                field="tools_schema",
+                value=tools_json,
+                offload_kind=f"llm-request-tools-{iteration}",
+                threshold=10_000,  # tools schema usually fits inline
+            )
+        except Exception:                       # noqa: BLE001
+            pass  # trace failures should never break the loop
 
     # ── P3-d: Goal + Hypothesis integration ────────
 
