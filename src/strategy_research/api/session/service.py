@@ -259,6 +259,31 @@ class _LoopEventForwarder:
             out[field + "_preview"] = value[:512]
             out[field + "_size"] = len(value)
             out.pop(field, None)
+            # P0-1 C3: track this offload in blob_refs so the TTL-based
+            # cleanup has a single source of truth. Done outside the
+            # file write above so a write failure doesn't leave a
+            # dangling ref_count=1.
+            try:
+                from ...core.storage.blob_schema import (
+                    ensure_blob_refs_schema,
+                    record_blob_offload,
+                )
+                blob_conn = getattr(
+                    self.event_bus, "_backend", None
+                )
+                if blob_conn is not None and hasattr(
+                    blob_conn, "_ensure_conn"
+                ):
+                    conn_refs = blob_conn._ensure_conn()  # type: ignore[attr-defined]
+                    ensure_blob_refs_schema(conn_refs)
+                    record_blob_offload(conn_refs, out[field + "_path"])
+                    conn_refs.commit()
+            except Exception:
+                logger.debug(
+                    "blob_refs record failed for %s; cleanup will not "
+                    "track this offload until the next one",
+                    out[field + "_path"],
+                )
         return out
 
 
