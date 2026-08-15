@@ -61,22 +61,10 @@ def backfill_event_log(
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
-        # Ensure event_log table exists
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS event_log ("
-            "id TEXT PRIMARY KEY, "
-            "aggregate_id TEXT NOT NULL, "
-            "seq INTEGER NOT NULL, "
-            "type TEXT NOT NULL, "
-            "data_json TEXT NOT NULL, "
-            "time_created REAL NOT NULL, "
-            "UNIQUE (aggregate_id, seq))"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_event_log_aggregate_seq "
-            "ON event_log(aggregate_id, seq)"
-        )
-        conn.commit()
+        # Ensure event_log table exists (canonical schema — P0-1 A1).
+        from ...core.storage.event_schema import ensure_event_log_schema
+
+        ensure_event_log_schema(conn)
 
         # Get sessions to process
         if session_id:

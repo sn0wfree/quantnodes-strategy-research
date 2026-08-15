@@ -140,23 +140,9 @@ class EventStore:
             # In-memory store doesn't persist; event_log lives only in cache
             return
         conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS event_log (
-                id TEXT PRIMARY KEY,
-                aggregate_id TEXT NOT NULL,
-                seq INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                data_json TEXT,
-                time_created REAL NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_event_log_aggregate "
-            "ON event_log(aggregate_id, seq)"
-        )
-        conn.commit()
+        from ..storage.event_schema import ensure_event_log_schema
+
+        ensure_event_log_schema(conn)
 
     @property
     def is_degraded(self) -> bool:
