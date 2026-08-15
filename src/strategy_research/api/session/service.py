@@ -303,6 +303,9 @@ class SessionService:
         self._processing_sessions: set[str] = set()
         self._paused_sessions: dict[str, asyncio.Event] = {}
         self._queue_consumers: dict[str, "asyncio.Task"] = {}
+        # PERF-1: event-driven attempt completion (replaces 250ms polling)
+        self._attempt_events: dict[str, asyncio.Event] = {}
+        self._attempt_results: dict[str, dict[str, str]] = {}
 
     # ── Session lifecycle ──────────────────────────────────────────────
 
@@ -654,27 +657,29 @@ class SessionService:
     ) -> Optional[dict[str, str]]:
         """Wait for a background attempt to finish; return its outcome.
 
-        Polls the attempts table (the source of truth for status).
-        Used by the synchronous /api/chat/send path, which must block
-        until the per-session FIFO consumer has run the attempt.
+        Uses asyncio.Event (PERF-1) for zero-latency wakeup on
+        completion instead of polling. The event is set by
+        ``_signal_attempt_done`` when the attempt reaches a terminal state.
 
         Returns ``{"status", "summary", "error"}`` on completion, or
         None when the timeout elapses while the attempt is still
         pending/running (e.g. a long queue ahead of it).
         """
-        terminal = ("completed", "failed", "cancelled")
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            attempt = self.store.get_attempt(session_id, attempt_id)
-            if attempt is not None and attempt.status in terminal:
-                return {
-                    "status": attempt.status,
-                    "summary": attempt.summary or "",
-                    "error": attempt.error or "",
-                }
-            if asyncio.get_event_loop().time() > deadline:
-                return None
-            await asyncio.sleep(0.25)
+        # Fast path: already completed
+        result = self._attempt_results.get(attempt_id)
+        if result is not None:
+            return result
+
+        # Create event for this attempt
+        event = asyncio.Event()
+        self._attempt_events[attempt_id] = event
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._attempt_events.pop(attempt_id, None)
+        return self._attempt_results.pop(attempt_id, None)
 
     async def _process_session_queue(self, session_id: str) -> None:
         """Consumer coroutine for a session's message queue.
@@ -883,6 +888,10 @@ class SessionService:
                         )
                     except Exception:  # noqa: BLE001 — best-effort
                         pass
+                    self._signal_attempt_done(attempt.attempt_id, {
+                        "status": "error", "summary": "",
+                        "error": f"attempt timed out after {_CHAT_ATTEMPT_TIMEOUT}s",
+                    })
                     return
             else:
                 result_dict = await self._run_with_agent(
@@ -993,6 +1002,12 @@ class SessionService:
                     "asked_user": bool(result_dict.get("asked_user")),
                 },
             )
+            # PERF-1: signal event-driven wait_for_attempt
+            self._signal_attempt_done(attempt.attempt_id, {
+                "status": attempt.status.value,
+                "summary": attempt.summary or "",
+                "error": attempt.error or "",
+            })
         except asyncio.CancelledError:
             attempt.mark_failed(error="cancelled")
             self.store.update_attempt(attempt)
@@ -1006,6 +1021,9 @@ class SessionService:
                 "agent_done",
                 {"message_id": attempt.message_id, "status": "cancelled"},
             )
+            self._signal_attempt_done(attempt.attempt_id, {
+                "status": "cancelled", "summary": "", "error": "cancelled",
+            })
             raise
         except Exception as exc:
             logger.exception("AgentLoop failed for attempt %s", attempt.attempt_id)
@@ -1021,6 +1039,16 @@ class SessionService:
                 "agent_done",
                 {"message_id": attempt.message_id, "status": "error", "error": str(exc)},
             )
+            self._signal_attempt_done(attempt.attempt_id, {
+                "status": "error", "summary": "", "error": str(exc),
+            })
+
+    def _signal_attempt_done(self, attempt_id: str, result: dict[str, str]) -> None:
+        """PERF-1: signal an event-driven wait_for_attempt that the attempt is done."""
+        self._attempt_results[attempt_id] = result
+        event = self._attempt_events.get(attempt_id)
+        if event is not None:
+            event.set()
 
     async def _run_with_agent(
         self,
