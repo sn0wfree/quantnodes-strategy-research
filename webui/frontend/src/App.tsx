@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/auth'
 import { LoginPage } from './components/auth/LoginPage'
 import { RegisterPage } from './components/auth/RegisterPage'
+import { AdminGuard } from './components/auth/AdminGuard'
 import { StudyDetailPage } from './components/study/StudyDetailPage'
 import { RunDetailPage } from './components/run/RunDetailPage'
 import { AppShell } from './components/layout/AppShell'
@@ -13,6 +14,7 @@ import { CatalogPage } from './catalog/CatalogPage'
 import { CatalogItem } from './catalog/CatalogItem'
 import { SettingsModal } from './components/common/SettingsModal'
 import { StudyPage } from './pages/StudyPage'
+import { AdminUsersPage } from './pages/AdminUsersPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -102,6 +104,14 @@ export default function App() {
             <AuthGuard>
               <StrategyLibraryPage />
             </AuthGuard>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <AdminGuard>
+              <AdminUsersPage />
+            </AdminGuard>
           }
         />
         <Route

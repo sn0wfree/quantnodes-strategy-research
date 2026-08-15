@@ -8,6 +8,7 @@ import {
   Library,
   Settings,
   LogOut,
+  ShieldCheck,
 } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout'
 import { useAuthStore } from '../../stores/auth'
@@ -32,9 +33,11 @@ export function IconNav() {
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
   const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
   const logout = useAuthStore((s) => s.logout)
+  const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const location = useLocation()
   const isHome = location.pathname === '/'
+  const isAdmin = user?.role === 'admin'
 
   return (
     <nav className="flex h-screen w-16 flex-col items-center gap-1 border-r border-slate-800 bg-slate-900/50 py-3">
@@ -95,6 +98,30 @@ export function IconNav() {
       >
         <Library className="h-5 w-5" />
       </button>
+
+      {isAdmin && (
+        <NavLink
+          to="/admin/users"
+          title="用户管理"
+          className={({ isActive }) =>
+            `group relative mt-1 flex h-10 w-10 items-center justify-center rounded-lg transition-colors
+            ${
+              isActive
+                ? 'bg-primary-600/30 text-primary-300'
+                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <>
+              {isActive && (
+                <span className="absolute -left-[9px] top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary-500 shadow-glow" />
+              )}
+              <ShieldCheck className="h-5 w-5" />
+            </>
+          )}
+        </NavLink>
+      )}
 
       <div className="flex-1" />
 

@@ -517,6 +517,40 @@ class APIClient {
         `/goal/workflow/run/${encodeURIComponent(runId)}`,
       ),
   }
+
+  // ── Admin user management (superuser) ──────────────────────────────
+
+  adminUsers = {
+    list: (params: { limit?: number; offset?: number } = {}) =>
+      this.get<AdminUsersListResponse>('/admin/users' + qs(params)),
+
+    create: (body: {
+      username: string
+      password: string
+      display_name?: string
+      role?: string
+    }) => this.post<AdminUser>(`/admin/users`, body),
+
+    update: (userId: string, body: { role?: string; display_name?: string; is_active?: boolean }) =>
+      this.patch<AdminUser>(`/admin/users/${encodeURIComponent(userId)}`, body),
+
+    resetPassword: (userId: string, newPassword: string) =>
+      this.post<{ message: string }>(
+        `/admin/users/${encodeURIComponent(userId)}/reset-password`,
+        { new_password: newPassword },
+      ),
+
+    disable: (userId: string) =>
+      this.post<{ message: string }>(`/admin/users/${encodeURIComponent(userId)}/disable`),
+
+    enable: (userId: string) =>
+      this.post<{ message: string }>(`/admin/users/${encodeURIComponent(userId)}/enable`),
+
+    data: (userId: string) =>
+      this.get<{ user_id: string; sessions?: number | null; studies?: number | null }>(
+        `/admin/users/${encodeURIComponent(userId)}/data`,
+      ),
+  }
 }
 
 // ── Study API types ──────────────────────────────────────────────────
@@ -1015,6 +1049,23 @@ export interface DefinitionRunDetailResponse {
   segments: Array<Record<string, unknown>>
   node_outputs: DefinitionNodeOutput[]
   approvals: Array<Record<string, unknown>>
+}
+
+// ── Admin user management types ────────────────────────────────────
+
+export interface AdminUser {
+  id: string
+  username: string
+  display_name: string
+  role: string
+  is_active: boolean
+}
+
+export interface AdminUsersListResponse {
+  users: AdminUser[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export const api = new APIClient()
