@@ -19,9 +19,36 @@ from strategy_research.api.routers.goal import router as goal_router
 
 
 @pytest.fixture
-def app(tmp_path):
+def app(tmp_path, monkeypatch):
     """构造测试 app，goal DB 指向临时目录。"""
+    import sqlite3
+
     db_path = str(tmp_path / "goals.db")
+    session_db = str(tmp_path / "sessions.db")
+    monkeypatch.setenv("SR_SESSIONS_DB", session_db)
+    conn = sqlite3.connect(session_db)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions ("
+        " id TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT 'anonymous',"
+        " title TEXT, created_at REAL, updated_at REAL, starred INTEGER DEFAULT 0,"
+        " tags_json TEXT DEFAULT '[]', message_count INTEGER DEFAULT 0,"
+        " archived INTEGER DEFAULT 0)"
+    )
+    user_id = "tester"
+    for sid in (
+        "sessions", "sess-0", "sess-1", "sess-2", "sess-3", "sess-bad",
+        "sess-status", "sess-A", "sess-B", "sess-ev", "sess-done",
+        "sess-wf", "x", "s", "no-active", "sess-empty", "sess-stale",
+    ):
+        now = 1.0
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions "
+            "(id, user_id, title, created_at, updated_at, starred, tags_json, message_count, archived) "
+            "VALUES (?, ?, '', ?, ?, 0, '[]', 0, 0)",
+            (sid, user_id, now, now),
+        )
+    conn.commit()
+    conn.close()
     app = FastAPI()
     app.add_middleware(AuthMiddleware)
     app.state.goal_db_path = db_path
@@ -464,3 +491,84 @@ class TestErrorBranches:
         )
         assert res.status_code == 409
         assert "stale" in res.json()["detail"].lower()
+
+
+# ────────────────────────── IDOR isolation ──────────────────────────
+
+
+class TestGoalIsolation:
+    def test_other_users_session_denied(self, app, client):
+        """非所属用户的 session 上读写 goal → 403。
+
+        第一条 session 属于默认 tester；创建一条属于 other 的 session，
+        确认 tester 无法在它上面 start/status/evidence/complete。
+        """
+        import sqlite3
+
+        from strategy_research.api.routers.web_session import _get_db_path
+
+        with sqlite3.connect(str(_get_db_path())) as conn:
+            now = 1.0
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions "
+                "(id, user_id, title, created_at, updated_at, starred, tags_json, message_count, archived) "
+                "VALUES ('other-sess', 'other', '', ?, ?, 0, '[]', 0, 0)",
+                (now, now),
+            )
+            conn.commit()
+
+        r = client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "other-sess", "objective": "prying"},
+        )
+        assert r.status_code == 403
+        r2 = client.get(
+            "/api/goal/status?session_id=other-sess", headers=auth_header()
+        )
+        assert r2.status_code == 403
+        r3 = client.post(
+            "/api/goal/evidence",
+            headers=auth_header(),
+            json={"session_id": "other-sess", "evidence": "x"},
+        )
+        assert r3.status_code == 403
+        r4 = client.post(
+            "/api/goal/complete",
+            headers=auth_header(),
+            json={"session_id": "other-sess", "outcome": "complete"},
+        )
+        assert r4.status_code == 403
+
+    def test_list_scopes_to_owner(self, app, client):
+        """无 session_id 的全局 list 只返回本用户的 goals。"""
+        client.post(
+            "/api/goal/start",
+            headers=auth_header(),
+            json={"session_id": "sess-1", "objective": "mine"},
+        )
+        # other 用户在自己的 session 建 goal
+        import sqlite3
+
+        from strategy_research.api.routers.web_session import _get_db_path
+
+        with sqlite3.connect(str(_get_db_path())) as conn:
+            now = 1.0
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions "
+                "(id, user_id, title, created_at, updated_at, starred, tags_json, message_count, archived) "
+                "VALUES ('other-sess2', 'other', '', ?, ?, 0, '[]', 0, 0)",
+                (now, now),
+            )
+            conn.commit()
+        client.post(
+            "/api/goal/start",
+            headers=auth_header("other"),
+            json={"session_id": "other-sess2", "objective": "theirs"},
+        )
+
+        res = client.get("/api/goal/list", headers=auth_header())
+        assert res.status_code == 200
+        goals = res.json()["goals"]
+        assert all(g["session_id"] != "other-sess2" for g in goals)
+        assert any(g["objective"] == "mine" for g in goals)

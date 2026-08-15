@@ -301,6 +301,10 @@ class GoalStore:
         # P3-B migration: add progress_percent and parent_goal_id columns if missing
         self._migrate_p3b()
 
+        # Isolation migration: add user_id column and backfill ownership
+        # from the unified session DB (D1).
+        self._migrate_user_id()
+
     def _migrate_p3b(self) -> None:
         """Add progress_percent and parent_goal_id columns to existing goals table."""
         cols = table_columns(self._conn, "goals")
@@ -329,6 +333,61 @@ class GoalStore:
             )
         self._conn.commit()
 
+    def _migrate_user_id(self) -> None:
+        """Add user_id column to goals and backfill ownership (isolation D1).
+
+        Goals are owned through their session: resolve each goal's
+        ``session_id`` to the owning ``user_id`` via the unified session
+        DB. Resolve failures default to ``anonymous`` so legacy rows never
+        block listing.
+        """
+        cols = table_columns(self._conn, "goals")
+        if "user_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE goals ADD COLUMN user_id TEXT NOT NULL DEFAULT 'anonymous'"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_goals_user "
+                "ON goals(user_id, created_at)"
+            )
+            rows = self._conn.execute(
+                "SELECT goal_id, session_id FROM goals"
+            ).fetchall()
+            if rows:
+                session_to_user = self._resolve_session_owners()
+                for goal_id, session_id in rows:
+                    user_id = session_to_user.get(session_id, "anonymous")
+                    self._conn.execute(
+                        "UPDATE goals SET user_id = ? WHERE goal_id = ?",
+                        (user_id, goal_id),
+                    )
+        self._conn.commit()
+
+    @staticmethod
+    def _resolve_session_owners() -> dict[str, str]:
+        """Map session_id -> user_id across the unified session DB.
+
+        Best-effort: reads the same session DB resolved by the web_session
+        projector (``SR_SESSIONS_DB`` / workspace / home fallback). Returns
+        an empty dict if the DB is unreadable so callers default to
+        "anonymous".
+        """
+        try:
+            from ..agent.memory_manager import resolve_session_db_path
+
+            db_path = resolve_session_db_path()
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT id, user_id FROM sessions"
+                ).fetchall()
+                return {r["id"]: (r["user_id"] or "anonymous") for r in rows}
+            finally:
+                conn.close()
+        except Exception:
+            return {}
+
     @synchronized
     def replace_goal(
         self,
@@ -346,6 +405,7 @@ class GoalStore:
         time_budget_seconds: int | None = None,
         parent_goal_id: str | None = None,
         workflow_id: str | None = None,
+        user_id: str = "anonymous",
     ) -> GoalRecord:
         """Supersede the current goal and create a new active goal.
 
@@ -417,9 +477,9 @@ class GoalStore:
                     goal_id, session_id, status, objective, ui_summary, source,
                     protocol, risk_tier, token_budget, turn_budget,
                     time_budget_seconds, created_at, updated_at, progress_percent,
-                    parent_goal_id, workflow_id
+                    parent_goal_id, workflow_id, user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     goal_id,
@@ -438,6 +498,7 @@ class GoalStore:
                     0.0,
                     parent_goal_id,
                     workflow_id,
+                    user_id,
                 ),
             )
             self._conn.execute(
@@ -643,6 +704,7 @@ class GoalStore:
         session_id: str | None = None,
         status: GoalStatus | None = None,
         limit: int = 100,
+        user_id: str | None = None,
     ) -> list[GoalRecord]:
         """List goals, optionally filtered by session_id and/or status.
 
@@ -650,6 +712,8 @@ class GoalStore:
             session_id: If provided, filter to this session only.
             status: If provided, filter to this status only.
             limit: Maximum number of goals to return (default 100).
+            user_id: If provided and ``session_id`` is None, filter to this
+                owner's goals only (isolation listing).
 
         Returns:
             List of GoalRecord objects, ordered by created_at DESC.
@@ -659,6 +723,9 @@ class GoalStore:
         if session_id:
             query += " AND session_id = ?"
             params.append(session_id)
+        if not session_id and user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
         if status:
             query += " AND status = ?"
             params.append(status.value)

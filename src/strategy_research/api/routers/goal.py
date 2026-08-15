@@ -10,6 +10,22 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+def _session_owned(request: Request, session_id: str) -> None:
+    """Enforce that ``session_id`` belongs to the requesting user (IDOR).
+
+    Reuses web_session's ownership check so goal endpoints scoped to a
+    session can't read/mutate another user's goals. Same opt-out env as
+    study isolation (``SR_ENFORCE_STUDY_IDOR=0``).
+    """
+    import os as _os
+
+    if _os.environ.get("SR_ENFORCE_STUDY_IDOR", "1") == "0":
+        return
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    _fetch_session_owned(_get_db(), session_id, user_id)
+
+
 class GoalStartRequest(BaseModel):
     session_id: str
     objective: str
@@ -50,6 +66,7 @@ async def goal_start(req: GoalStartRequest, request: Request):
         db_path = getattr(request.app.state, "goal_db_path", None)
         criteria = req.criteria or default_goal_criteria()
         risk_tier = RiskTier(req.risk_tier)
+        _session_owned(request, req.session_id)
 
         with GoalStore(db_path=db_path) as store:
             goal = store.replace_goal(
@@ -57,6 +74,7 @@ async def goal_start(req: GoalStartRequest, request: Request):
                 objective=req.objective,
                 criteria=criteria,
                 risk_tier=risk_tier,
+                user_id=getattr(request.state, "user_id", "anonymous"),
             )
             # Full-snapshot SSE so the chat panel + message stream
             # update immediately (same event as the chat-tool path).
@@ -64,6 +82,8 @@ async def goal_start(req: GoalStartRequest, request: Request):
                 request, store, req.session_id, CHANGE_TYPE_CREATE,
             )
         return {"status": "ok", "goal_id": goal.goal_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -74,6 +94,7 @@ async def goal_status(session_id: str, request: Request):
     try:
         from ...core.goal import GoalStore
 
+        _session_owned(request, session_id)
         db_path = getattr(request.app.state, "goal_db_path", None)
         with GoalStore(db_path=db_path) as store:
             snapshot = store.get_current_snapshot(session_id)
@@ -102,6 +123,8 @@ async def goal_status(session_id: str, request: Request):
             "criteria_count": len(criteria),
             "evidence_count": snapshot.get("evidence_count", 0),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -124,6 +147,7 @@ async def goal_list(
                 session_id=session_id,
                 status=status_filter,
                 limit=limit,
+                user_id=getattr(request.state, "user_id", "anonymous"),
             )
         return {
             "status": "ok",
@@ -153,6 +177,7 @@ async def goal_evidence(req: GoalEvidenceRequest, request: Request):
         )
 
         db_path = getattr(request.app.state, "goal_db_path", None)
+        _session_owned(request, req.session_id)
         evidence_input = EvidenceInput(
             text=req.evidence,
             source_type=req.source,
@@ -192,6 +217,7 @@ async def goal_complete(req: GoalCompleteRequest, request: Request):
 
     try:
         db_path = getattr(request.app.state, "goal_db_path", None)
+        _session_owned(request, req.session_id)
         try:
             target_status = GoalStatus(req.outcome)
         except ValueError:
