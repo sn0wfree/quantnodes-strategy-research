@@ -435,3 +435,24 @@ L7 v0.1 把 `AgentLoop._run_loop_core` 接入 `LoopStrategy` step 链，**不破
 行为保证：默认 ReAct 行为 100% 等价；240+ 现有 AgentLoop 测试全绿。
 
 完整 `_run_loop_core` 重写（60+ 行 for 循环拆为 step chain）留作 v0.2。详情见 `docs/l7-agent-loop-migration.md`。
+
+---
+
+## 附录：L7 v0.2 — 循环决策点迁移（4 个）
+
+`AgentLoop._run_loop_core` 的 4 个控制流决策点全部委托给 `LoopStrategy` 的 Step：
+
+| 决策点 | 委托 | 副作用保留处 |
+|--------|------|--------------|
+| 停止判定 | `strategy.stop.evaluate` + `strategy.continuation.evaluate` | AgentLoop `_handle_stop` / `_check_goal_continuation` |
+| 无进展检测 | `strategy.progress.record_hash` + `is_no_progress` | AgentLoop `_check_no_progress`（`hashes_pre_recorded=True` 防双份） |
+| 断路器 | `strategy.resilience.is_open` | AgentLoop `_breaker_open_messages` |
+| 迭代上限 | `strategy.config.max_iterations`（显式策略时） | 构造参数 `self.max_iterations` 兜底 |
+
+框架决策：
+
+- **`_call_step()`** — step 统一 try/except 隔离，失败 → `ctx.should_stop = True`
+- **`_make_strategy_ctx(hook_ctx=)`** — 瞬时 LoopContext 透传 AgentHookContext 实例（共享同一对象）
+- **`DefaultProgressStep` / `DefaultResilienceStep`** — 新增 `bind_agent_loop`，复用 AgentLoop 状态（`_recent_hashes` / `_circuit_breaker`）
+
+Hook 触发迁移（step 自触发 `_afire_hooks`）留待 v0.3。详情见 `docs/l7-v0.2-decision-migration.md`。
