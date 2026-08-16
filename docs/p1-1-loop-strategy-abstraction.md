@@ -1,9 +1,45 @@
 # P1-1 Loop 策略抽象
 
-> **Status:** Draft (branch `p1-1-loop-strategy-abstraction`)
+> **Status:** Completed (branch `p1-1-loop-strategy-abstraction`, merged to `main` as `94482c6`)
 > **承接:** P0-1/P0-2/P0-3 完成事件源 + capability seams。本步把
 > `AgentLoop._run_loop_core` 中的硬编码决策点抽出为 Step Protocol，
 > 由 `LoopStrategy` 组合 Step 实现不同循环策略。
+
+## 完成状态
+
+| 阶段 | 标题 | 状态 | 提交 |
+|------|------|------|------|
+| 母文档 | 设计 | ✅ | `4c7d732` |
+| L1 | LoopContext | ✅ | `0f0e7ec` |
+| L2 | 9 个 Step Protocol | ✅ | `0f0e7ec` |
+| L3 | 默认 Step 实现 | ✅ | `0f0e7ec` |
+| L4 | LoopStrategy + LoopConfig | ✅ | `0f0e7ec` |
+| L5 | Factory + ReActStrategy | ✅ | `0f0e7ec` |
+| L6 | CustomStrategy | ✅ | `0f0e7ec` |
+| L7-L8 | AgentLoop 实际迁移 | ⏭ 后续迭代 | - |
+| 合并 | merge commit | ✅ | `94482c6` |
+
+**测试**：20 个 P1-1 新增测试 + 240 个回归（合计 260）全绿。
+**ruff**：P1-1 新增文件 0 错误。
+
+## v0.1 范围说明
+
+P1-1 提交的是**基础设施**（types + factory + no-op Step stubs）。
+`AgentLoop._run_loop_core` 实际迁移到驱动 `LoopStrategy` 的
+work 是**后续迭代**（设计文档中的 L7-L8 步骤）：
+- L7：`_run_loop_core` 重写为 `for iteration in ...: ctx = strategy.<step>.execute(ctx)`
+- L8：把现有 ReAct 行为逐一迁入对应 Step（CompactionStep、ProgressStep 等已有真实逻辑）
+
+P1-1 完成的是"所有脚手架就位 + 测试验证组合语义 + CustomStrategy
+override 可用"。`StrategyFactory.create("react")` 当前等价于
+直接调 `ReActStrategyFactory.create()`。
+
+## 后续（P1-2/3/4 候选）
+
+- 实际替换 `AgentLoop._run_loop_core`（L7）
+- 迁移 ReAct 行为到各 Step（L8）
+- 新增 ExplorerStrategy / ValidatorStrategy / MinimalStrategy（每个是 P1-2/3/4 一周）
+- Profile 集成（`LoopStrategy` 通过 Profile YAML 配置）
 
 ## 目标
 

@@ -356,3 +356,22 @@ Protocol：
 - 后续 P0-3+ 可加入 `BaseEngineAdapter` 把 `engine/runner.py` 的 bar-by-bar 路径也接进来
 
 详情见 `docs/p0-3-backtest-engine-protocol.md`。
+
+---
+
+## 附录：LoopStrategy 抽象（P1-1）
+
+`AgentLoop._run_loop_core` 中的硬编码决策点被抽出为 Step Protocol，
+由 `LoopStrategy` 组合实现不同循环策略：
+
+- **`LoopContext`** (`core/agent/strategy/loop_context.py`) — Step 间共享的 dataclass（task, messages, iteration, recent_hashes, should_stop, metadata）。
+- **9 个 Step Protocol** (`protocol.py`) — PreRunStep / LLMCallStep / CompactionStep / StopStep / ContinuationStep / ProgressStep / ResilienceStep / ToolExecutionStep / FinalizationStep，均 `runtime_checkable`。
+- **`LoopStrategy`** + **`LoopConfig`** (`loop_strategy.py`) — 9 个 step 的组合容器；`should_continue` 读 `ctx.should_stop`。
+- **`StrategyFactory`** (`factory.py`) — 默认注册 `"react"`；`create_strategy(name=None, config=None)` 入口；`CustomStrategy` 基类允许覆盖特定 step。
+- 默认 Step 实现 (`steps/`) — 每个 step 是 v0.1 stub，Progress 和 Resilience 已实现真实逻辑；其他 step 等待 L7 迁移 AgentLoop 时填实现。
+
+v0.1 状态：**基础设施已落地**（types + factory + no-op stubs）；
+AgentLoop 实际迁移留作后续迭代。现有 260 个 AgentLoop / EventStore /
+tools / bus 测试全绿，证明引入的抽象层未破坏现有行为。
+
+详情见 `docs/p1-1-loop-strategy-abstraction.md`。
