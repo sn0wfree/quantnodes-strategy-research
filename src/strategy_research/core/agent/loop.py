@@ -2043,6 +2043,16 @@ class AgentLoop:
                     "has_tool_calls": bool(m.get("tool_calls")),
                 })
 
+            # DSH-inspired: hash fields for fast diff detection
+            system_prompt_hash = hashlib.sha256(system_prompt.encode()).hexdigest()[:16]
+            tools_hash = hashlib.sha256(tools_json.encode()).hexdigest()[:16]
+            # History hash: content-length fingerprint (cheap, no full-text hash)
+            history_fingerprint = "|".join(
+                f"{m.get('role', '?')}:{len(m.get('content', ''))}"
+                for m in messages[1:]
+            )
+            history_hash = hashlib.sha256(history_fingerprint.encode()).hexdigest()[:16]
+
             entry: dict[str, Any] = {
                 "type": "llm_request",
                 "iteration": iteration,
@@ -2053,6 +2063,11 @@ class AgentLoop:
                 "system_prompt_len": len(system_prompt),
                 "system_prompt": system_prompt,
                 "tools_schema": tools_json,
+                # DSH-inspired: hash fields
+                "system_prompt_hash": system_prompt_hash,
+                "tools_hash": tools_hash,
+                "history_hash": history_hash,
+                "estimated_tokens": estimate_tokens(messages),
             }
 
             # Sink 1: event_log via the on_event forwarder (offloads large
