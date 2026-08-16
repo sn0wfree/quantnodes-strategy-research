@@ -28,10 +28,10 @@ Exception handling policy:
 from __future__ import annotations
 
 import asyncio
-import os
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -612,6 +612,42 @@ class AgentLoop:
     ) -> AgentHookContext:
         """Build AgentHookContext for the current iteration."""
         return AgentHookContext(iteration=iteration, messages=messages)
+
+    # ── P0-2 D: capability seam builders ────────────────────────
+
+    def _build_data_store(self):
+        """Return the default DataStore for this AgentLoop instance.
+
+        v0.1 always returns ``get_store("duckdb")`` — the registry's
+        default provider. Tests / callers can override by setting
+        ``self._data_store_override`` before ainvoke runs.
+        """
+        override = getattr(self, "_data_store_override", None)
+        if override is not None:
+            return override
+        from ..storage import get_store
+        return get_store()
+
+    def _build_sandbox(self):
+        """Return the default ExecutionSandbox for this AgentLoop instance.
+
+        v0.1 always returns a fresh ``StaticSandbox`` rooted at
+        ``self.workspace``. Overridable via
+        ``self._sandbox_override``.
+        """
+        override = getattr(self, "_sandbox_override", None)
+        if override is not None:
+            return override
+        from .sandbox import StaticSandbox
+        workspace = self.workspace or getattr(self, "_fallback_workspace", None)
+        if workspace is None:
+            # StaticSandbox needs a workspace; in tests where workspace
+            # isn't set we still return a sandbox bound to cwd. Tools
+            # that call resolve_write/read without a real workspace
+            # already raise PathValidationError, so this is safe.
+            from pathlib import Path
+            workspace = Path.cwd()
+        return StaticSandbox(workspace)
 
     # ── Shared logic (sync-safe: pure logic + trace + emit, no I/O) ──
 
@@ -1197,6 +1233,9 @@ class AgentLoop:
         # legacy tools until P3 migration removes them). The
         # permission_evaluator / permission_gateway / tool_call_id
         # fields wire the Tier 1 A1 permission gate into ainvoke().
+        # P0-2 D: data_store + sandbox are auto-injected as the default
+        # capability seams. Tools consume them via tools_capability
+        # helpers; existing tools that don't use them are unaffected.
         kwargs["ctx"] = ToolContext(
             workspace=self.workspace,
             session_id=self.session_id,
@@ -1211,6 +1250,8 @@ class AgentLoop:
             permission_evaluator=getattr(self, "_permission_evaluator", None),
             permission_gateway=getattr(self, "_permission_gateway", None),
             tool_call_id=tc.id,
+            data_store=self._build_data_store(),
+            sandbox=self._build_sandbox(),
         )
 
         # SubAgentTool injection: emit_event, message_id, count ref, parent registry

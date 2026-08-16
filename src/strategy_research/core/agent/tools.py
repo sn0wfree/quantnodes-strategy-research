@@ -74,11 +74,19 @@ class ToolContext:
     # ── Tier 1 A1: permission plumbing ─────────────────────────
     # Set by AgentLoop per-attempt. ``permission_evaluator`` is the
     # ruleset source of truth; ``permission_gateway`` is the async
-    # handshake (ask → SSE → user response). ``tool_call_id`` keys
+    # handshake (ask → user response). ``tool_call_id`` keys
     # the request/response pairing in the gateway.
     permission_evaluator: Optional[Any] = None
     permission_gateway: Optional[Any] = None
     tool_call_id: Optional[str] = None
+    # ── P0-2 D: capability seam injection ─────────────────────
+    # Optional fields — set by AgentLoop when the tool needs them.
+    # Tools consume them through ``tools_capability.get_data_store`` /
+    # ``tools_capability.get_sandbox`` (helper module) which raise a
+    # helpful error when the seam is missing. ``backtest_engine`` is
+    # deferred to P0-3 once the BacktestEngine Protocol ships.
+    data_store: Optional[Any] = None
+    sandbox: Optional[Any] = None
 
 
 class ToolError(Exception):
