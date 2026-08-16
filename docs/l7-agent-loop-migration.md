@@ -1,6 +1,6 @@
 # L7 — AgentLoop._run_loop_core 迁移到 LoopStrategy
 
-> **Status:** Draft (branch `p1-5-6-profile-and-migration` + L7 patch)
+> **Status:** Completed (branch `p1-5-6-profile-and-migration`, merged to `main` as `060c439`)
 > **承接:** P1-1 基础设施 + P1-5 AgentLoop 接入 + P1-2/3/4 三策略。本步把
 > `_run_loop_core` 中 60+ 行硬编码 for 循环改为驱动 `LoopStrategy` step 链。
 
@@ -108,19 +108,22 @@ self._strategy = _inject_agent_loop(self._strategy, self)
 | sync/async 路径分裂 | `async_mode` 参数贯穿；step 接受 `*` kw-only |
 | `LoopStrategy` 实例的 step 在 v0.1 是 class-level 实例（`ReActStrategyFactory.create()` 创建新实例） | `_inject_agent_loop` 在 AgentLoop.__init__ 末尾统一调用 |
 
-## 落地策略（更稳健的 v0.1）
+## v0.1 完成情况
 
-为了**严格保证**现有 260+ 测试不被破坏，L7 v0.1 采用**双轨**策略：
+实际采用的策略比原设计更务实——**保留原 `_run_loop_core` 主体不动**，仅在两个决策点（text-only response / no-tool-call）**先**咨询 strategy 的 `continuation` / `stop` step，再走 legacy 路径：
 
-1. **保留**现有 `_run_loop_core` 原代码（600 行）
-2. **新增**`_run_loop_core_v2` 用 step chain，行为完全等价
-3. **新增**`_run_loop_v2_enabled` flag（环境变量 `SR_LOOP_V2=1` 启用），默认 False
-4. 测试用 monkeypatch 强制 flag 为 True 跑 step-chain 路径
+- `DefaultPreRunStep` 和 `DefaultLLMCallStep` 真实实现（调 AgentLoop 方法）
+- 其他 step 保持 no-op（Step 协议已就位，等后续迭代）
+- `_inject_agent_loop(strategy, loop)` 在 AgentLoop.__init__ 末尾调用，把 self 注入到每个支持 `bind_agent_loop` 的 step
+- `_make_strategy_ctx` helper 用于构建瞬时 LoopContext 给 strategy step 读
+- `LoopContext` 新增 `result` / `hook_ctx` 可选字段
 
-这样：
-- 默认所有现有测试跑原代码（**不破坏任何东西**）
-- 单独 L7 测试覆盖 `_run_loop_core_v2`
-- L7 后续迭代（v2 release）把 flag 翻为 True
+行为保证：
+- 默认 ReAct 行为 100% 等价（Default*Step.evaluate 是 no-op，legacy 路径照常跑）
+- Custom Strategy（`should_stop=True`）立即短路 legacy 路径
+- 240+ 现有 AgentLoop 测试全绿
+
+完整 `_run_loop_core` 重写（60+ 行 for 循环全拆为 step chain）留作 v0.2。
 
 ## 不在 L7 范围
 

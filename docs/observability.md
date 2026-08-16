@@ -419,3 +419,19 @@ P1-6（`_run_loop_core` 实际驱动 strategy）延期到 L7：
  涉及 60+ 行 for 循环的拆解，独立 PR 更安全。
 
 详情见 `docs/p1-5-6-profile-and-migration.md`。
+
+---
+
+## 附录：AgentLoop → LoopStrategy 接线（L7）
+
+L7 v0.1 把 `AgentLoop._run_loop_core` 接入 `LoopStrategy` step 链，**不破坏** 240+ 现有测试：
+
+- **`_inject_agent_loop(strategy, loop)`**（`core/agent/loop.py`）— 遍历 9 个 step slot，调用支持 `bind_agent_loop` 的 step 实现。
+- **`_make_strategy_ctx(loop, messages, response, result, iteration)`** — 构建瞬时 `LoopContext`（让 strategy step 在不修改 legacy 状态的前提下读取）。
+- **`DefaultPreRunStep`** + **`DefaultLLMCallStep`** — 真实实现，`execute` 直接调 AgentLoop 的 `_prepare_run` / `_get_response` / `_append_assistant_msg`。其他 step 仍是 v0.1 no-op stub。
+- **`LoopContext`** 新增 `result` / `hook_ctx` 可选字段（向后兼容）。
+- **`AgentLoop._run_loop_core`** 在两个关键决策点（text-only response / no-tool-call）**先**咨询 `self._strategy.continuation` / `self._strategy.stop`，再走 legacy 路径。Default 是 no-op，Custom 返回 `should_stop=True` 立即短路。
+
+行为保证：默认 ReAct 行为 100% 等价；240+ 现有 AgentLoop 测试全绿。
+
+完整 `_run_loop_core` 重写（60+ 行 for 循环拆为 step chain）留作 v0.2。详情见 `docs/l7-agent-loop-migration.md`。
