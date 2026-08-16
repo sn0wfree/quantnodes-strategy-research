@@ -1,6 +1,11 @@
 """SSE event bus with support for last_event_id recovery and buffering.
 
-V5: Fixes the thread-safety issue caused by calling queue.put_nowait() on asyncio.Queue from a background thread.
+.. deprecated::
+    Legacy EventBus — production code should use ``EventStore`` instead.
+    This module is retained only for backward-compat tests that exercise
+    the in-memory EventBus path. The SSE delivery pipeline is now
+    unified: ``EventStore.emit()`` → ``bridge_v2`` → ``SSEEventBuffer``.
+    The legacy ``bridge.py`` (EventBus → SSEEventBuffer) has been removed.
 """
 
 from __future__ import annotations

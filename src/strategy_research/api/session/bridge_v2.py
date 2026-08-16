@@ -1,14 +1,12 @@
 """Bridge: forward EventStore events to the legacy SSEEventBuffer.
 
-Phase 7+8 replacement for the EventBus → SSEEventBuffer bridge. Now uses
-EventStore.sse_pusher callback (single integration point).
+EventStore is the single event source. This bridge lets the
+``/api/chat/events`` FastAPI endpoint (which reads from SSEEventBuffer)
+keep working until that endpoint is migrated to read directly from
+EventStore.subscribe().
 
-The legacy ``EventBus`` + ``EventBusV2`` classes in ``events.py`` /
-``event_bus_v2.py`` are kept for backward compatibility but new code should
-use ``EventStore`` (Phase 7+8).
-
-This bridge lets the new EventStore coexist with the existing FastAPI SSE
-endpoint (which uses SSEEventBuffer) until that endpoint is migrated.
+Idempotent per EventStore instance via the ``_sse_bridge_attached``
+attribute.
 """
 from __future__ import annotations
 
