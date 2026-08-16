@@ -1209,16 +1209,25 @@ class AgentLoop:
                 await _fire("after_iteration", hook_ctx)
                 continue
 
-            await _fire("before_execute_tools", hook_ctx)
-            if async_mode:
-                tool_result_msgs = await self._aexecute_tool_batch(response.tool_calls, result)
-            else:
-                tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
-            tool_hashes = self._collect_tool_hashes(response.tool_calls, tool_result_msgs)
-            await self._fire_tool_result_hooks(
-                _fire, hook_ctx, response.tool_calls, tool_result_msgs
+            # L7 v0.3: tool execution + tool lifecycle hooks delegated
+            # to the strategy's ToolExecutionStep. The step fires
+            # before_execute_tools / on_tool_error / after_tool_executed
+            # and collects hashes into ctx.metadata["tool_hashes"].
+            tool_ctx = _make_strategy_ctx(
+                self, messages, response, result, iteration, hook_ctx
             )
-            self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
+            tool_ctx = await self._call_step(
+                self._strategy.tool_execution, tool_ctx, async_mode=async_mode,
+            )
+            if tool_ctx.should_stop:
+                await _fire("after_iteration", hook_ctx)
+                break
+            tool_result_msgs = tool_ctx.metadata.get("tool_result_msgs") or []
+            tool_hashes = tool_ctx.metadata.get("tool_hashes") or []
+            # The step already appended tool results into ctx.messages
+            # via _append_tool_results; messages = tool_ctx.messages to
+            # pick them up.
+            messages = tool_ctx.messages
             await _fire("after_iteration", hook_ctx)
 
             # L7 v0.2 decision point 2: no-progress detection delegated
