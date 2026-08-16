@@ -101,6 +101,9 @@ def build_agent_loop(
     results_tsv: Path | None = None,
     write_roots: tuple[str, ...] | None = None,
     read_roots: tuple[str, ...] | None = None,
+    # P1-5+: accept a LoopStrategy spec (str / dict / LoopStrategy instance
+    # / None). Resolved via resolve_loop_strategy(); None defaults to "react".
+    loop_strategy: Any | None = None,
 ) -> "AgentLoop | None":  # noqa: F821
     """为 role 构造 AgentLoop.
 
@@ -114,12 +117,17 @@ def build_agent_loop(
         enable_claim_validation: 开启 claim 验证 (truthfulness L2), 默认关
         strict_claim_validation: strict 模式, 未验证数字追加警告, 默认关
         tools_override: 覆盖角色默认工具白名单 (None=角色白名单).
+        loop_strategy: P1-5+ — LoopStrategy spec (str / dict / LoopStrategy / None).
+            None → "react" (default). Pass e.g. "explorer" or
+            {"name": "validator", "config": {"max_iterations": 5}} to
+            override the AgentLoop's loop strategy.
 
     Returns:
         AgentLoop 实例. 如果系统提示词为空, 返回 None (调用方走 stub fallback).
     """
     from ...core.agent.builtin_tools import build_default_registry
     from ...core.agent.loop import AgentLoop
+    from ...core.agent.strategy.profile_resolver import resolve_loop_strategy
     from ...core.llm import LLMConfig
     from .prompt_builder import PromptBuilderFactory
 
@@ -130,6 +138,7 @@ def build_agent_loop(
     cfg = llm_config or LLMConfig.load()
     registry = build_default_registry()
     whitelist = tools_override if tools_override is not None else _get_tool_whitelist(role)
+    strategy = resolve_loop_strategy(loop_strategy)
 
     return AgentLoop(
         config=cfg,
@@ -147,6 +156,7 @@ def build_agent_loop(
         auto_git_commit=False,  # git commit 由 autoresearch 主循环统一控制
         enable_claim_validation=enable_claim_validation,
         strict_claim_validation=strict_claim_validation,
+        strategy=strategy,
     )
 
 
@@ -167,6 +177,8 @@ def run_agent_via_llm(
     results_tsv: Path | None = None,
     write_roots: tuple[str, ...] | None = None,
     read_roots: tuple[str, ...] | None = None,
+    # P1-5+: forward loop_strategy spec to build_agent_loop → AgentLoop.
+    loop_strategy: Any | None = None,
 ) -> str:
     """调用 AgentLoop.run() 完成 role 任务, 返回 JSON 字符串.
 
@@ -180,6 +192,7 @@ def run_agent_via_llm(
         llm_config: LLM 配置
         session_manager: 跨调用 session 共享
         max_iterations: ReAct 迭代上限
+        loop_strategy: P1-5+ — LoopStrategy spec (str / dict / LoopStrategy / None).
 
     Returns:
         AgentLoop.run() 输出的 answer 字段. 期望是合法 JSON 字符串.
@@ -201,6 +214,7 @@ def run_agent_via_llm(
         results_tsv=results_tsv,
         write_roots=write_roots,
         read_roots=read_roots,
+        loop_strategy=loop_strategy,
     )
     if loop is None:
         raise RuntimeError(f"无法构造 AgentLoop for role={role!r} (prompt 不存在)")
