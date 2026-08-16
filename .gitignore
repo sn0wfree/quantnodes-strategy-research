@@ -71,3 +71,6 @@ webui/static/
 coverage/
 # 会话笔记/本地记忆（不提交）
 memory/
+
+# P0-1: trace-blobs runtime directory (per-event-DB sidecar files)
+trace-blobs/
