@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -171,12 +172,17 @@ def _make_strategy_ctx(
     response: Any,
     result: Any,
     iteration: int,
+    hook_ctx: Any = None,
 ) -> Any:
     """Build a transient ``LoopContext`` for consulting Stop /
-    Continuation steps without disturbing the legacy hard-coded
-    control flow. v0.1 keeps the strategy steps read-only — the
-    legacy path still drives everything; a custom step can only flip
-    ``ctx.should_stop`` (the loop body honours it).
+    Continuation / Progress / Resilience steps without disturbing the
+    legacy hard-coded control flow. v0.2 keeps the strategy steps
+    read-only — the legacy path still drives everything; a custom
+    step can only flip ``ctx.should_stop`` (the loop body honours it).
+
+    ``hook_ctx`` is carried through so a step that wants AgentHookContext
+    access (e.g. to read usage) gets the same instance the hook system
+    uses — zero extra synchronisation.
     """
     from .strategy.loop_context import LoopContext
 
@@ -188,6 +194,7 @@ def _make_strategy_ctx(
         response_was_tool_call=bool(getattr(response, "tool_calls", None)),
         response_content=getattr(response, "content", "") or "",
         result=result,
+        hook_ctx=hook_ctx,
     )
 
 
@@ -326,6 +333,12 @@ class AgentLoop:
         # consult it (that's L7's job).
         from .strategy.profile_resolver import resolve_loop_strategy
         self._strategy = resolve_loop_strategy(strategy)
+        # L7 v0.2: when the caller passed an explicit strategy, its
+        # config drives the loop (max_iterations etc.); otherwise we
+        # fall back to the constructor kwargs. This keeps existing
+        # ``AgentLoop(max_iterations=2)`` tests working while letting
+        # an explicit profile/strategy override the cap.
+        self._strategy_explicit = strategy is not None
         # L7: inject self into every Default*Step so steps that opt
         # in (currently DefaultPreRunStep + DefaultLLMCallStep) can
         # call AgentLoop methods. Custom steps ignore the binding.
@@ -722,6 +735,28 @@ class AgentLoop:
         ``_run_loop_core`` does not yet consult it (L7 work)."""
         return self._strategy
 
+    # ── L7 v0.2: step execution with uniform error isolation ──────
+
+    async def _call_step(self, step: Any, ctx: Any, *, async_mode: bool) -> Any:
+        """Execute a strategy Step with try/except isolation.
+
+        A failing Step must not crash the agent loop: we log the error,
+        set ``ctx.should_stop`` so the caller can break safely, and
+        return the (possibly partially-mutated) context. Sync steps
+        (evaluate / is_no_progress / is_open) are handled transparently
+        via ``inspect.isawaitable``.
+        """
+        try:
+            result = step.execute(ctx, async_mode=async_mode)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        except Exception as exc:  # noqa: BLE001 — isolated per-step
+            logger.warning("step %s failed: %s", step.name, exc)
+            ctx.should_stop = True
+            ctx.stop_reason = f"step_{step.name}"
+            return ctx
+
     # ── Shared logic (sync-safe: pure logic + trace + emit, no I/O) ──
 
     def _prepare_run(
@@ -885,11 +920,21 @@ class AgentLoop:
     def _check_no_progress(
         self, tool_hashes: list[str], response: LLMResponse,
         result: LoopResult, iteration: int,
+        *,
+        hashes_pre_recorded: bool = False,
     ) -> bool:
-        """Update _recent_hashes, detect no_progress. If triggered, fill result + emit. Return True if triggered."""
-        self._recent_hashes.extend(tool_hashes)
-        if len(self._recent_hashes) > self.no_progress_window:
-            self._recent_hashes = self._recent_hashes[-self.no_progress_window:]
+        """Update _recent_hashes, detect no_progress. If triggered, fill result + emit. Return True if triggered.
+
+        L7 v0.2: when ``hashes_pre_recorded=True`` (the strategy's
+        ProgressStep already recorded the hashes into ``_recent_hashes``),
+        skip the ``extend`` so the window isn't double-counted. The
+        side-effects (record_event / circuit_breaker / emit) still run
+        here.
+        """
+        if not hashes_pre_recorded:
+            self._recent_hashes.extend(tool_hashes)
+            if len(self._recent_hashes) > self.no_progress_window:
+                self._recent_hashes = self._recent_hashes[-self.no_progress_window:]
         if not self._detect_no_progress():
             return False
         from ..study.hanging_events import record_event
@@ -1094,7 +1139,14 @@ class AgentLoop:
 
         await _fire("before_run", hook_ctx)
 
-        for iteration in range(1, self.max_iterations + 1):
+        # L7 v0.2: iteration cap — an explicit strategy config drives
+        # it (a profile said max_iterations=N); otherwise fall back to
+        # the constructor ``self.max_iterations`` so existing tests /
+        # callers that pass max_iterations=2 keep working unchanged.
+        max_iter = getattr(
+            self._strategy.config, "max_iterations", self.max_iterations,
+        ) if self._strategy_explicit else self.max_iterations
+        for iteration in range(1, max_iter + 1):
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
             await _fire("before_iteration", hook_ctx)
@@ -1126,7 +1178,7 @@ class AgentLoop:
                 # the hard-coded goal check. DefaultContinuationStep is
                 # a no-op (returns False); the legacy path still runs.
                 should_continue, _ = self._strategy.continuation.evaluate(
-                    _make_strategy_ctx(self, messages, response, result, iteration)
+                    _make_strategy_ctx(self, messages, response, result, iteration, hook_ctx)
                 )
                 if should_continue:
                     continue
@@ -1136,7 +1188,7 @@ class AgentLoop:
                 # _handle_stop. DefaultStopStep is a no-op; the legacy
                 # path still runs.
                 should_stop, _stop_reason = self._strategy.stop.evaluate(
-                    _make_strategy_ctx(self, messages, response, result, iteration)
+                    _make_strategy_ctx(self, messages, response, result, iteration, hook_ctx)
                 )
                 if should_stop:
                     await _fire("after_iteration", hook_ctx)
@@ -1145,7 +1197,13 @@ class AgentLoop:
                 await _fire("after_iteration", hook_ctx)
                 break
 
-            if self._circuit_breaker is not None and self._circuit_breaker.is_open():
+            # L7 v0.2 decision point 3: circuit-breaker gate delegated to
+            # the strategy's ResilienceStep. DefaultResilienceStep reads
+            # ``self._circuit_breaker`` directly, so behaviour is
+            # identical unless a custom strategy overrides is_open().
+            if self._strategy.resilience.is_open(
+                _make_strategy_ctx(self, messages, response, result, iteration, hook_ctx)
+            ):
                 tool_result_msgs = self._breaker_open_messages(response.tool_calls)
                 self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
                 await _fire("after_iteration", hook_ctx)
@@ -1163,7 +1221,26 @@ class AgentLoop:
             self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
             await _fire("after_iteration", hook_ctx)
 
-            if self._check_no_progress(tool_hashes, response, result, iteration):
+            # L7 v0.2 decision point 2: no-progress detection delegated
+            # to the strategy's ProgressStep. We record the hashes into
+            # the step's window, then ask it whether the window shows
+            # no progress. DefaultProgressStep mirrors AgentLoop's
+            # legacy _recent_hashes / _detect_no_progress, so behaviour
+            # is identical unless a custom strategy overrides it.
+            progress_ctx = _make_strategy_ctx(
+                self, messages, response, result, iteration, hook_ctx
+            )
+            for h in tool_hashes:
+                self._strategy.progress.record_hash(progress_ctx, h)
+            if self._strategy.progress.is_no_progress(progress_ctx):
+                # Keep the legacy side-effect path (record_event,
+                # circuit_breaker.record_no_progress, emit) intact.
+                # hashes_pre_recorded=True avoids double-counting the
+                # window (record_hash already did the extend above).
+                self._check_no_progress(
+                    tool_hashes, response, result, iteration,
+                    hashes_pre_recorded=True,
+                )
                 await _fire("after_run", hook_ctx, result)
                 return result
         else:
