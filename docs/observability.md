@@ -456,3 +456,21 @@ L7 v0.1 把 `AgentLoop._run_loop_core` 接入 `LoopStrategy` step 链，**不破
 - **`DefaultProgressStep` / `DefaultResilienceStep`** — 新增 `bind_agent_loop`，复用 AgentLoop 状态（`_recent_hashes` / `_circuit_breaker`）
 
 Hook 触发迁移（step 自触发 `_afire_hooks`）留待 v0.3。详情见 `docs/l7-v0.2-decision-migration.md`。
+
+---
+
+## 附录：L7 v0.3 — ToolExecutionStep 自触发工具 Hook
+
+首个 "Step 自触发 Hook" 模式落地（框架决策 #1）：
+
+- **`DefaultToolExecutionStep`**（`core/agent/strategy/steps/tool_execution.py`）真实执行工具：
+  - 触发 `before_execute_tools`（dispatch 前）
+  - 每工具结果后触发 `on_tool_error`（error）或 `after_tool_executed`（成功），顺序与 legacy `_fire_tool_result_hooks` 一致
+  - hashes + 结果存入 `ctx.metadata`（`tool_hashes` / `tool_result_msgs`）
+- **`_run_loop_core`** 的工具执行块收敛为单次 `_call_step(self._strategy.tool_execution, tool_ctx, async_mode)`；骨架移除 `before_execute_tools` / `_fire_tool_result_hooks` 调用
+
+**推迟到 v0.4**：
+- `LLMCallStep` 的 `before_iteration` + `on_error`（需 LLM 调用执行迁移）
+- `FinalizationStep` 的 `after_run`（`after_run` 有 2 处调用点，no-progress 早返回绕过 FinalizationStep）
+
+详情见 `docs/l7-v0.3-hook-migration.md`。
