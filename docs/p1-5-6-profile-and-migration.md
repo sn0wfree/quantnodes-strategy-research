@@ -1,6 +1,6 @@
 # P1-5/6 — Profile 集成 + AgentLoop 迁移
 
-> **Status:** Draft (branch `p1-5-6-profile-and-migration`)
+> **Status:** P1-5 completed; P1-6 deferred to L7
 > **承接:** P1-1 基础设施 + P1-2/3/4 三策略落地。本步把 Profile YAML
 > 与 LoopStrategy 串联，并把 `AgentLoop._run_loop_core` 实际驱动
 > `LoopStrategy`。
@@ -154,12 +154,11 @@ async def _run_loop_core(self, task, context, history, *, async_mode):
 
 ## 实施步骤
 
-| 步骤 | 内容 | 验证 |
-|------|------|------|
-| 5A | `resolve_loop_strategy(profile)` helper | 单元测试 6+ |
-| 5B | AgentLoop `__init__` 接受 `strategy` + `profile` 参数 | 现有 260+ 测试通过 |
-| 5C | 测试：Profile YAML 指定 explorer/validator/minimal，AgentLoop 构建对应 strategy | 集成测试 |
-| 6A | （可选 v0.1）`AgentLoop.get_strategy()` 返回 strategy | 简单测试 |
+| 步骤 | 内容 | 验证 | 提交 |
+|------|------|------|------|
+| 5A | `resolve_loop_strategy(profile)` helper | 14 个测试 | `0d2d8da` |
+| 5B | AgentLoop `__init__` 接受 `strategy` + `get_strategy()` accessor | 现有 240+ 测试通过 | `0d2d8da` |
+| 6A | `_run_loop_core` 实际驱动 strategy（**L7 大改留作后续**） | ⏭ | - |
 
 ## v0.1 范围
 
