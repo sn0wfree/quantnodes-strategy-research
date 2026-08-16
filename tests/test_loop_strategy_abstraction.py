@@ -147,7 +147,10 @@ class TestResilienceStep:
 
 class TestFactory:
     def test_default_is_react(self):
-        assert StrategyFactory.available() == ["react"]
+        # P1-2/3/4 added explorer/validator/minimal; P1-1's strict
+        # expectation is relaxed to a set membership check.
+        available = set(StrategyFactory.available())
+        assert {"react", "explorer", "validator", "minimal"}.issubset(available)
         s = create_strategy()
         assert s.name == "react"
 
@@ -173,6 +176,11 @@ class TestFactory:
         cfg = LoopConfig(max_iterations=42)
         s = create_strategy("react", cfg)
         assert s.config.max_iterations == 42
+
+    def test_create_strategy_by_name(self):
+        for name in ("react", "explorer", "validator", "minimal"):
+            s = create_strategy(name)
+            assert s.name == name
 
 
 class TestCustomStrategy:

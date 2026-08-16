@@ -153,3 +153,8 @@ class CustomStrategy(LoopStrategy):
 
 # ── Default registration at import time ──────────────────────────
 register_strategy("react", ReActStrategyFactory.create)
+
+# P1-2/3/4 built-in strategies (explorer/validator/minimal) are
+# registered by the subpackage ``__init__`` after every module in
+# this directory has loaded — avoids a circular import where
+# ``factory`` triggers ``explorer`` before its own types exist.
