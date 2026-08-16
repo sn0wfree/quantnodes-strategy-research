@@ -474,3 +474,28 @@ Hook 触发迁移（step 自触发 `_afire_hooks`）留待 v0.3。详情见 `doc
 - `FinalizationStep` 的 `after_run`（`after_run` 有 2 处调用点，no-progress 早返回绕过 FinalizationStep）
 
 详情见 `docs/l7-v0.3-hook-migration.md`。
+
+---
+
+## 附录：L7 v0.4 — LLM + 终化执行迁移
+
+`LLMCallStep` 与 `FinalizationStep` 的执行迁入 Step（与 v0.3 的 ToolExecutionStep 同模式）：
+
+- **`DefaultLLMCallStep`**（`core/agent/strategy/steps/llm_call.py`）：
+  - `execute` 从 sync def 改为 `async def`，await `_get_response`
+  - `before_iteration` 在 LLM 调用前触发；`on_error` 在 `_handle_llm_error` 后触发
+  - 填充 `ctx.response` / `response_was_tool_call` / `response_content` + append assistant msg
+
+- **`DefaultFinalizationStep`**（`core/agent/strategy/steps/finalization.py`）：
+  - 调用 `_finalize_metrics(result, messages, t0)` + `_run_claim_validation(result, messages)`
+  - `after_run` hook 在此处触发（正常结束路径）
+
+- **`_run_loop_core` 骨架收敛**：
+  - `before_iteration` + `on_error` 从骨架删除（LLMCallStep 自触发）
+  - 正常结束 `after_run` + metrics/claim 迁入 FinalizationStep
+  - no_progress 早返回路径的 `after_run` 保留在骨架（不经过 FinalizationStep）
+  - `response = None` 初始化避免 `UnboundLocalError`
+
+CompactionStep 仍是 no-op stub（其内部调用 `_amaybe_compact` 是压缩引擎，与 LLM/工具执行同属"执行迁移"但压缩逻辑有独立 O(N) token 估算，留作后续单独处理）。
+
+详情见 `docs/l7-v0.4-exec-migration.md`。
