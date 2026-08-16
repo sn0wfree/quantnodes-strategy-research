@@ -48,6 +48,7 @@ from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
+from ..utils.ids import SessionId, AttemptId
 from .circuit_breaker import RetryPolicy, ToolLoopCircuitBreaker
 from .compact import CompactConfig, compact_messages
 from .context import ContextBuilder, estimate_tokens
@@ -277,7 +278,7 @@ class AgentLoop:
         system_prompt: str | None = None,
         allowed_tools: list[str] | None = None,
         readonly: bool = False,
-        session_id: str | None = None,
+        session_id: SessionId | None = None,
         strategy_name: str | None = None,
         # ── v2 path parameterization (study scenario) ────────────────
         strategy_dir: Path | None = None,

@@ -26,7 +26,7 @@ from strategy_research.core.agent.compact import CompactConfig, compact_messages
 from strategy_research.core.agent.event_store import EventStore
 from strategy_research.core.llm import LLMConfig
 
-from .models import Attempt, AttemptStatus, Message
+from .models import Attempt, AttemptId, AttemptStatus, Message, SessionId
 from .store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -600,7 +600,7 @@ class SessionService:
             "status": status,
         }
 
-    def cancel(self, attempt_id: str) -> bool:
+    def cancel(self, attempt_id: AttemptId) -> bool:
         """Cancel an in-flight Attempt by its id.
 
         Looks up the per-attempt task created inside ``_process_session_queue``
@@ -613,7 +613,7 @@ class SessionService:
         task.cancel()
         return True
 
-    def cancel_session(self, session_id: str) -> bool:
+    def cancel_session(self, session_id: SessionId) -> bool:
         """Cancel the in-flight attempt for a session (if any).
 
         Used when the caller knows the session but not the attempt id
