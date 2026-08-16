@@ -1,8 +1,37 @@
 # P0-2 Capability Seam 接口分离（2026-08-16）
 
-> **Status:** Draft (branch `p0-2-capability-seams`, fork from `main` post-P0-1)
+> **Status:** Completed (branch `p0-2-capability-seams`, merged to `main` as `a4c2897`)
 > **承接:** P0-1 完成事件源架构（fork/resume/replay）。P0-2 解决"换 Provider = 整套能力迁移"的接口定义问题。
 > **用户决策:** ① P0-1 先于 P0-2 ✅ 完成 ② git first doc first ③ 预算 2 周
+
+## 完成状态
+
+| 阶段 | 标题 | 状态 | 提交 |
+|------|------|------|------|
+| 母文档 | 设计（本文档） | ✅ | `d250788` |
+| **Phase A** | DataStore Protocol | ✅ | `d474afb` |
+| **Phase B** | 统一 BacktestResult | ✅ | `0b4a186` |
+| **Phase C** | ExecutionSandbox Protocol | ✅ | `af98489` |
+| **Phase D** | ToolContext DI 注入 | ✅ | `6a9f7b0` |
+| 合并 | merge commit | ✅ | `a4c2897` |
+
+**测试**：38 个 P0-2 新增测试 + 350+ 回归测试全绿（合计 365+）。
+**ruff**：4 存量错误（C901 + 2×I001 + W292），P0-2 未引入新告警。
+
+## 用户价值兑现
+
+✅ DataStore Protocol —— 45 个 DuckDB 耦合点有了抽象边界；测试可用 in-memory provider
+✅ BacktestResult 统一 —— 双 dataclass 收敛到一个 5 字段权威定义，向后兼容 shim
+✅ ExecutionSandbox Protocol —— 为 RestrictedPython / Docker 沙箱留好锚点
+✅ ToolContext DI —— `data_store` / `sandbox` 自动注入，工具通过 helper 消费
+
+## 后续（P0-3 / P1 候选）
+
+- BacktestEngine Protocol（合并 `BacktestCallbacks` 与 `BaseStrategy`）
+- 三条回测路径完全收敛（YAML / Callback / Bar-by-bar）
+- SubprocessSandbox 实现 v0.1（带 timeout + env whitelist）
+- DuckDB → SQLite/PostgreSQL Provider 实现
+- ToolContext → Component Container 重构
 
 ---
 
