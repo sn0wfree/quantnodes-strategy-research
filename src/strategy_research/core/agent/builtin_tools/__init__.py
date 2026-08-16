@@ -128,7 +128,44 @@ def build_default_registry(workspace: Path | None = None) -> ToolRegistry:
         from ..combo import load_combo_tools
         load_combo_tools(workspace, r)
 
+    # DSH-inspired: plugin discovery via entry_points
+    _discover_tool_plugins(r)
+
     return r
+
+
+def _discover_tool_plugins(registry: ToolRegistry) -> None:
+    """Discover and register tool plugins via importlib.metadata entry_points.
+
+    Plugins register under the ``strategy_research.tools`` group::
+
+        # pyproject.toml
+        [project.entry-points."strategy_research.tools"]
+        my_tools = "my_package.tools:register_tools"
+
+    The entry point must be a callable that takes a ToolRegistry and
+    registers tools on it.  Failures are logged and swallowed.
+    """
+    try:
+        from importlib.metadata import entry_points
+    except ImportError:
+        return  # Python < 3.10 fallback
+
+    eps = entry_points()
+    # Python 3.12+ returns a SelectableGroups; 3.10-3.11 returns dict
+    if hasattr(eps, "select"):
+        tool_eps = eps.select(group="strategy_research.tools")
+    elif isinstance(eps, dict):
+        tool_eps = eps.get("strategy_research.tools", [])
+    else:
+        tool_eps = []
+
+    for ep in tool_eps:
+        try:
+            register_fn = ep.load()
+            register_fn(registry)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to load tool plugin '%s': %s", ep.name, exc)
 
 
 __all__ = [
