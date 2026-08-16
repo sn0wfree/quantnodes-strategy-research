@@ -302,6 +302,9 @@ class PromptBuilderFactory:
     Unknown roles return ``_NullBuilder()`` (empty prompt) instead of
     raising — preserves backward compatibility with callers that pass
     arbitrary role names (e.g. ``role_factory.build_agent_loop``).
+
+    DSH-inspired: auto-discovers prompts from ``templates/.prompts/*.md``
+    at first lookup for unknown roles (cached).
     """
 
     _BUILDERS: dict[str, PromptBuilder] = {
@@ -328,20 +331,47 @@ class PromptBuilderFactory:
     # prepend). Reserved slot for future opt-out use; currently empty.
     _COMMON_OPT_OUT: set[str] = set()
 
+    # DSH-inspired: auto-discovered prompts (cached after first scan)
+    _discovered: dict[str, PromptBuilder] | None = None
+
     @classmethod
     def get(cls, role: str) -> PromptBuilder:
-        if role not in cls._BUILDERS:
-            return _NullBuilder()
-        return cls._BUILDERS[role]
+        if role in cls._BUILDERS:
+            return cls._BUILDERS[role]
+        # DSH-inspired: auto-discover from templates/.prompts/*.md
+        if cls._discovered is None:
+            cls._discovered = cls._discover_prompts()
+        return cls._discovered.get(role, _NullBuilder())
 
     @classmethod
     def list_roles(cls) -> list[str]:
-        return list(cls._BUILDERS.keys())
+        # Include discovered roles
+        discovered = cls._discovered or cls._discover_prompts()
+        return list(set(cls._BUILDERS.keys()) | set(discovered.keys()))
 
     @classmethod
     def register(cls, role: str, builder: PromptBuilder) -> None:
         """Register a new builder at runtime (mirrors ``AgentRunnerRegistry``)."""
         cls._BUILDERS[role] = builder
+
+    @classmethod
+    def _discover_prompts(cls) -> dict[str, PromptBuilder]:
+        """Scan templates/.prompts/*.md for role prompt files."""
+        import logging
+        import pathlib
+
+        logger = logging.getLogger(__name__)
+        prompts_dir = pathlib.Path(__file__).parent.parent / "templates" / ".prompts"
+        if not prompts_dir.exists():
+            return {}
+
+        builders: dict[str, PromptBuilder] = {}
+        for md_file in prompts_dir.glob("*.md"):
+            role = md_file.stem  # "researcher.md" → "researcher"
+            if role not in cls._BUILDERS:  # don't override hardcoded
+                builders[role] = StaticFilePromptBuilder(role)
+                logger.debug("Auto-discovered prompt: %s", role)
+        return builders
 
 
 __all__ = [
