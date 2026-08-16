@@ -50,16 +50,22 @@ export function ComposerToolbar({ sessionId, onApplyMarkdown }: ComposerToolbarP
     <div className="mb-2 flex items-center gap-1">
       {/* Persona selector */}
       <div className="relative" ref={menuRef}>
+        {(() => {
+          const isOrchestrator = sessionId?.startsWith('dag:') ?? false
+          return (
+            <>
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => !isOrchestrator && setOpen((o) => !o)}
           className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700/40 disabled:opacity-40"
           disabled={!sessionId}
-          title="选择对话智能体"
+          title={isOrchestrator ? '编排会话固定使用编排助手人设' : '选择对话智能体'}
         >
           <Bot className="h-3.5 w-3.5 text-primary-400" />
-          <span className="font-medium">{selected?.name ?? '通用助手'}</span>
-          <ChevronDown className={`h-3 w-3 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <span className="font-medium">{selected?.name ?? (isOrchestrator ? '编排助手' : '通用助手')}</span>
+          {!isOrchestrator && (
+            <ChevronDown className={`h-3 w-3 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+          )}
         </button>
         {open && (
           <div className="glass absolute left-0 bottom-full z-50 mb-1 w-64 overflow-hidden rounded-xl border border-slate-700/60 shadow-2xl">
@@ -93,6 +99,9 @@ export function ComposerToolbar({ sessionId, onApplyMarkdown }: ComposerToolbarP
             </ul>
           </div>
         )}
+            </>
+          )
+        })()}
       </div>
 
       <div className="mx-1 h-4 w-px bg-slate-700/60" />

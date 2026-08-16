@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 
 class TestReadDocument:
     def test_extract_requires_path(self):

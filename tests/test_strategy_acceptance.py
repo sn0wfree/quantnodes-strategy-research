@@ -10,9 +10,9 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.strategy_acceptance import (
+    DEFAULT_CONFIG,
     AcceptanceConfig,
     AcceptanceDecision,
-    DEFAULT_CONFIG,
     decide,
     load_config,
 )
@@ -163,7 +163,6 @@ class TestLoadConfig(unittest.TestCase):
         self.assertEqual(cfg.hard_calmar_min, 0.9)
 
     def test_workspace_config(self) -> None:
-        import yaml
         with TemporaryDirectory() as tmpdir:
             ws_path = Path(tmpdir) / "acceptance.yaml"
             ws_path.write_text("hard_calmar_min: 0.7\n", encoding="utf-8")
@@ -171,7 +170,6 @@ class TestLoadConfig(unittest.TestCase):
             self.assertEqual(cfg.hard_calmar_min, 0.7)
 
     def test_cli_overrides_workspace(self) -> None:
-        import yaml
         with TemporaryDirectory() as tmpdir:
             ws_path = Path(tmpdir) / "acceptance.yaml"
             ws_path.write_text("hard_calmar_min: 0.7\n", encoding="utf-8")
@@ -182,7 +180,6 @@ class TestLoadConfig(unittest.TestCase):
             self.assertEqual(cfg.hard_calmar_min, 0.9)
 
     def test_workspace_yaml_with_nested_dict(self) -> None:
-        import yaml
         with TemporaryDirectory() as tmpdir:
             ws_path = Path(tmpdir) / "acceptance.yaml"
             ws_path.write_text("hard_calmar_min: 0.7\nhard_sharpe_min: 0.5\n", encoding="utf-8")

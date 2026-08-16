@@ -71,8 +71,14 @@ class SSEEventBuffer:
                     asyncio.get_running_loop()
                     evt.set()
                 except RuntimeError:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # No current event loop (e.g. main thread detached
+                        # after asyncio.set_event_loop(None)): Event.set()
+                        # does not need a loop in py3.10+, just set.
+                        loop = None
+                    if loop is not None and loop.is_running():
                         loop.call_soon_threadsafe(evt.set)
                     else:
                         evt.set()

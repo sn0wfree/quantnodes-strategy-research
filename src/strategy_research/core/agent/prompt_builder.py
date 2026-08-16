@@ -319,6 +319,9 @@ class PromptBuilderFactory:
         "backtest_diagnostics": StaticFilePromptBuilder("backtest_diagnostics"),
         "workflow_orchestrator": StaticFilePromptBuilder("workflow_orchestrator"),
         "critic": StaticFilePromptBuilder("critic"),
+        # Study v2 inter-round roles (design §10-11)
+        "study_reviewer": StaticFilePromptBuilder("study_reviewer"),
+        "study_collector": StaticFilePromptBuilder("study_collector"),
     }
 
     # Roles in this set skip the common layer entirely (no principles.md

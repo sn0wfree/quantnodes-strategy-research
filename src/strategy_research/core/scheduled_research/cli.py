@@ -3,16 +3,50 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import time
 from pathlib import Path
 
 from .cron_parser import next_cron_trigger, validate_cron
+from .executor import ScheduledResearchExecutor
 from .models import JobStatus, ScheduledResearchJob
 from .store import ScheduledResearchStore
 
+_TERMINAL_STATUSES = (
+    "complete", "cancelled", "error", "budget_limited",
+    "early_stopped", "monitoring",
+)
+
+
+def _parse_metric_targets(spec: str | None) -> list[dict] | None:
+    """Parse ``calmar>=0.5,sharpe>=0.3`` → [{name,op,value}, ...].
+
+    Supports ops ``>= <= > < ==``. Returns None for empty/None input.
+    """
+    if not spec:
+        return None
+    targets: list[dict] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        op = None
+        for candidate in (">=", "<=", "==", ">", "<"):
+            if candidate in part:
+                op = candidate
+                break
+        if op is None:
+            raise ValueError(f"无效的指标表达式: {part}（支持 >= <= > < ==）")
+        name, _, value = part.partition(op)
+        try:
+            targets.append({"name": name.strip(), "op": op, "value": float(value)})
+        except ValueError:
+            raise ValueError(f"无效的指标值: {part}")
+    return targets or None
+
 
 def cmd_schedule_create(args) -> int:
-    """Create a new scheduled research job."""
+    """Create a new scheduled research job (dispatch target: study)."""
     store = ScheduledResearchStore()
 
     workspace = str(Path(args.workspace).resolve())
@@ -33,6 +67,30 @@ def cmd_schedule_create(args) -> int:
     else:
         next_run = time.time() + interval_ms / 1000
 
+    config: dict = {}
+    try:
+        targets = _parse_metric_targets(args.metric)
+        if targets:
+            config["metric_targets"] = targets
+    except ValueError as e:
+        print(f"错误: {e}")
+        return 1
+
+    if args.budget_turn is not None:
+        config["budget_turn"] = args.budget_turn
+    if args.budget_token is not None:
+        config["budget_token"] = args.budget_token
+    if args.budget_time is not None:
+        config["budget_time_seconds"] = args.budget_time
+    if args.monitor_interval is not None:
+        config["monitor_interval_seconds"] = args.monitor_interval
+    if args.guidance_file:
+        guidance_path = Path(args.guidance_file)
+        if not guidance_path.exists():
+            print(f"错误: guidance 文件不存在: {guidance_path}")
+            return 1
+        config["guidance_md"] = guidance_path.read_text(encoding="utf-8")
+
     job = ScheduledResearchJob(
         workspace=workspace,
         strategy_name=args.strategy,
@@ -41,19 +99,24 @@ def cmd_schedule_create(args) -> int:
         interval_ms=interval_ms,
         next_run_at=next_run,
         max_rounds=args.max_rounds or 1,
+        target="study",
     )
+    job.config = config
 
     store.add(job)
     print(f"✓ 已创建定时任务: {job.id}")
     print(f"  工作区: {workspace}")
     print(f"  策略: {job.strategy_name}")
+    print("  目标: study（到点创建长程研究任务）")
     if cron_expr:
         print(f"  Cron: {cron_expr}")
     else:
         print(f"  间隔: {args.interval}s")
     print(f"  下次执行: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(next_run))}")
     if job.prompt:
-        print(f"  提示: {job.prompt[:80]}")
+        print(f"  研究目标: {job.prompt[:80]}")
+    if config:
+        print(f"  附加配置: {', '.join(sorted(config))}")
 
     return 0
 
@@ -99,13 +162,14 @@ def cmd_schedule_show(args) -> int:
     print(f"  ID:        {job.id}")
     print(f"  工作区:    {job.workspace}")
     print(f"  策略:      {job.strategy_name}")
+    print(f"  目标:      {job.target}")
     print(f"  状态:      {job.status.value}")
     if job.cron:
         print(f"  Cron:      {job.cron}")
     if job.interval_ms:
         print(f"  间隔:      {job.interval_ms / 1000}s")
     if job.prompt:
-        print(f"  提示:      {job.prompt}")
+        print(f"  研究目标:  {job.prompt}")
     print(f"  最大轮数:  {job.max_rounds}")
     print(f"  创建时间:  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.created_at))}")
     if job.last_run_at:
@@ -113,7 +177,9 @@ def cmd_schedule_show(args) -> int:
     if job.next_run_at:
         print(f"  下次执行:  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.next_run_at))}")
     if job.last_run_id:
-        print(f"  上次Run:   {job.last_run_id}")
+        print(f"  上次Study: {job.last_run_id}")
+    if job.config:
+        print(f"  配置:      {job.config}")
     if job.config.get("last_error"):
         print(f"  最后错误:  {job.config['last_error'][:200]}")
 
@@ -149,54 +215,99 @@ def cmd_schedule_delete(args) -> int:
     return 0
 
 
-def cmd_schedule_run(args) -> int:
-    """Immediately run a scheduled job once."""
-    from .executor import ScheduledResearchExecutor
+def _build_study_scheduler():
+    """In-process StudyScheduler (NullEmitter — no SSE in CLI context)."""
+    from ...study import StudyScheduler, StudyStore
+
+    return StudyScheduler(StudyStore(), session_service=None)
+
+
+async def _run_job_and_wait(job_id: str) -> int:
+    """Dispatch a job once and wait for its study to reach a terminal state."""
+    from ...study import StudyStatus, StudyStore
 
     store = ScheduledResearchStore()
-    executor = ScheduledResearchExecutor(store)
-    ok = executor.run_once(args.job_id)
-
-    if ok:
-        print(f"✓ 已触发任务 {args.job_id}")
-    else:
-        print(f"任务 '{args.job_id}' 不存在")
+    job = store.get(job_id)
+    if job is None:
+        print(f"任务 '{job_id}' 不存在")
         return 1
 
+    scheduler = _build_study_scheduler()
+    executor = ScheduledResearchExecutor(store, scheduler=scheduler)
+    await executor.run_once_async(job_id)
+    print(f"✓ 已触发任务 {job.id}")
+
+    study_id = store.get(job_id).last_run_id
+    if not study_id:
+        print("  任务未产生 study（检查上方错误）")
+        return 1
+
+    print(f"  等待 study {study_id} 完成（Ctrl+C 中断等待，任务在后台继续）...")
+    terminal = {s.value for s in StudyStatus if s.value in _TERMINAL_STATUSES}
+    with StudyStore() as sstore:
+        while True:
+            record = sstore.get_study(study_id)
+            if record is None or record.execution_status.value in terminal:
+                break
+            await asyncio.sleep(1)
+        final = sstore.get_study(study_id)
+    status = final.execution_status.value if final else "gone"
+    print(f"  Study {study_id} 终态: {status}"
+          + (f"（rounds={final.current_round}）" if final else ""))
+    if final and final.last_metrics:
+        print(f"  指标: {final.last_metrics}")
+    if final and final.last_error:
+        print(f"  错误: {final.last_error}")
     return 0
 
 
+def cmd_schedule_run(args) -> int:
+    """Immediately run a scheduled job once (in-process study)."""
+    return asyncio.run(_run_job_and_wait(args.job_id))
+
+
 def cmd_schedule_start(args) -> int:
-    """Start the scheduler."""
-    from .executor import ScheduledResearchExecutor
+    """Start the scheduler (single asyncio loop, in-process studies)."""
 
-    store = ScheduledResearchStore()
-    executor = ScheduledResearchExecutor(store)
+    async def _main() -> None:
+        store = ScheduledResearchStore()
+        scheduler = _build_study_scheduler()
+        executor = ScheduledResearchExecutor(
+            store, scheduler=scheduler, tick_interval=args.tick,
+        )
+        loop = asyncio.get_running_loop()
+        for sig in ("SIGINT", "SIGTERM"):
+            try:
+                loop.add_signal_handler(
+                    getattr(__import__("signal"), sig),
+                    executor.stop,
+                )
+            except NotImplementedError:
+                pass  # Windows — Ctrl+C path below still works
 
-    recovered = store.recover_stale_running()
-    if recovered:
-        print(f"恢复了 {recovered} 个中断的任务")
-
-    jobs = store.list_jobs(status=JobStatus.PENDING)
-    print("=== 启动调度器 ===")
-    print(f"  待执行任务: {len(jobs)} 个")
-    print(f"  Tick 间隔:  {args.tick}s")
-    print("  按 Ctrl+C 停止")
-    print()
-
-    executor.start()
+        recovered = store.recover_stale_running()
+        if recovered:
+            print(f"恢复了 {recovered} 个中断的任务")
+        jobs = store.list_jobs(status=JobStatus.PENDING)
+        print("=== 启动调度器 ===")
+        print(f"  待执行任务: {len(jobs)} 个")
+        print(f"  Tick 间隔:  {args.tick}s")
+        print("  并发上限:   SR_STUDY_MAX_CONCURRENT（默认 3）")
+        print("  按 Ctrl+C 停止")
+        print()
+        executor.start(loop=loop)
+        try:
+            while executor._running:
+                await asyncio.sleep(1)
+        finally:
+            executor.stop()
+            await scheduler.shutdown()
+            print("\n调度器已停止")
 
     try:
-        import signal
-        signal.signal(signal.SIGINT, lambda *_: executor.stop())
-        signal.signal(signal.SIGTERM, lambda *_: executor.stop())
-        # Keep main thread alive
-        while executor._running:
-            time.sleep(1)
+        asyncio.run(_main())
     except KeyboardInterrupt:
-        executor.stop()
-        print("\n调度器已停止")
-
+        pass
     return 0
 
 
@@ -211,8 +322,15 @@ def add_schedule_subparsers(subparsers: argparse._SubParsersAction) -> None:
     create_p.add_argument("--strategy", "-s", required=True, help="策略名称")
     create_p.add_argument("--cron", "-c", help="Cron 表达式 (5字段)")
     create_p.add_argument("--interval", "-i", type=int, help="间隔秒数")
-    create_p.add_argument("--prompt", "-p", help="研究提示")
+    create_p.add_argument("--prompt", "-p", help="研究目标（映射 study objective）")
     create_p.add_argument("--max-rounds", "-m", type=int, default=1, help="每次最大轮数")
+    create_p.add_argument("--metric", help="验收指标: calmar>=0.5,sharpe>=0.3")
+    create_p.add_argument("--budget-turn", type=int, help="轮数预算")
+    create_p.add_argument("--budget-token", type=int, help="token 预算")
+    create_p.add_argument("--budget-time", type=int, help="时间预算（秒）")
+    create_p.add_argument("--monitor-interval", type=int,
+                          help="达标后监控间隔（秒）；不传则完成即止")
+    create_p.add_argument("--guidance-file", help="研究指引文件路径（guidance.md 覆盖）")
 
     # schedule list
     list_p = schedule_sub.add_parser("list", help="列出定时任务")

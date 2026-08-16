@@ -86,6 +86,9 @@ def cmd_engine_run_backtest(args: argparse.Namespace) -> int:
             signal_engine_path=Path(args.signal_engine).resolve(),
             bars_per_year=args.bars_per_year,
             optimizer=args.optimizer if args.optimizer != "none" else None,
+            # progress lines on stdout → captured into run.log in the
+            # backgrounded mode (log-progress liveness for long backtests)
+            progress_every=0,
         )
     except Exception as e:
         print(f"❌ 回测失败: {e}")
@@ -96,12 +99,11 @@ def cmd_engine_run_backtest(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, default=str))
     else:
         print("✅ 回测完成")
-        print(f"   sharpe:   {result.get('sharpe_ratio', 'N/A')}")
+        print(f"   sharpe:   {result.get('sharpe', 'N/A')}")
         print(f"   max_dd:   {result.get('max_drawdown', 'N/A')}")
-        print(f"   calmar:   {result.get('calmar_ratio', 'N/A')}")
+        print(f"   calmar:   {result.get('calmar', 'N/A')}")
         print(f"   total_return: {result.get('total_return', 'N/A')}")
-        print(f"   bars:     {result.get('bars_executed', 'N/A')}")
-        print(f"   trades:   {result.get('total_trades', 'N/A')}")
+        print(f"   trades:   {result.get('trade_count', 'N/A')}")
 
     return 0
 

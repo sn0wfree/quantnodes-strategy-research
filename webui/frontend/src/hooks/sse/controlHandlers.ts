@@ -73,6 +73,23 @@ export const compact: SSEHandler = (data, ctx) => {
   })
 }
 
+/** C4.2: compact.count — observability event for compact operations. */
+export const compactCount: SSEHandler = (data) => {
+  const { messages_before, messages_after, tokens_before, tokens_after } = data as {
+    messages_before?: number
+    messages_after?: number
+    tokens_before?: number
+    tokens_after?: number
+  }
+  if (messages_before != null && messages_after != null) {
+    // Log for debugging — the banner already shows via compact.ended
+    console.log(
+      `[compact] ${messages_before} → ${messages_after} messages, ` +
+      `${tokens_before ?? '?'} → ${tokens_after ?? '?'} tokens`,
+    )
+  }
+}
+
 /**
  * Defensive cleanup: clear `isStreaming` on every part of every
  * assistant message. The per-protocol handlers (text.ended /
@@ -82,21 +99,43 @@ export const compact: SSEHandler = (data, ctx) => {
  * expanding thinking blocks.
  */
 function clearAllStreamingParts(ctx: Parameters<SSEHandler>[1]): void {
+  // Iterate the live messages and clear isStreaming on every part via
+  // the store's `updateMessage` action (which runs inside immer's
+  // `set` so the part object is a mutable draft). Direct assignment
+  // throws TypeError because the part is a frozen object from immer's
+  // auto-freeze — this function is the safety net for disconnect /
+  // cancel / error paths where the terminal event never arrives.
   for (const msg of ctx.state.getMessages()) {
     if (msg.role !== 'assistant') continue
+    let touched = false
     for (const part of msg.parts) {
       if ((part as { isStreaming?: boolean }).isStreaming) {
         ;(part as { isStreaming?: boolean }).isStreaming = false
+        touched = true
       }
     }
+    if (!touched) continue
+    const id = msg.id
+    ctx.updateMessage(id, (draft) => {
+      for (const part of draft.parts) {
+        ;(part as { isStreaming?: boolean }).isStreaming = false
+      }
+    })
   }
 }
 
 /** agent_done: AgentLoop finished — clear streaming state. */
-export const agentDone: SSEHandler = (_data, ctx) => {
+export const agentDone: SSEHandler = (data, ctx) => {
   clearAllStreamingParts(ctx)
   ctx.setStreamingMessage(null)
   ctx.setActiveAttempt(null)
+  // The orchestrator flags attempts that ended with a question to the
+  // user (backend runs a continuation guard; this flag survives only
+  // when the guard gave up). The orchestrator panel surfaces a
+  // "keep going" action from it.
+  if (ctx.sessionId) {
+    ctx.setAskedUser(ctx.sessionId, Boolean((data as { asked_user?: boolean }).asked_user))
+  }
 }
 
 /** error: backend surfaced a fatal error — toast + clear streaming. */

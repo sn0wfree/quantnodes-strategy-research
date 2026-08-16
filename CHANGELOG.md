@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Chat 智能体 `run_command`（bash/python）能力：`SR_ALLOW_SHELL_TOOLS=1`
+  环境变量开启（支持 cwd `.env` 配置），plan mode 始终禁用；
+  抽出 `chat._shell_tools_enabled()` 统一开关决策。
+- `tests/test_chat_shell_tools.py` — shell 工具门控决策测试。
+
+### Fixed
+- `.env` 加载：`LLMConfig._try_load_dotenv` 显式加载进程 cwd 的 `.env`。
+  原实现使用无参 `load_dotenv()`，其 `find_dotenv()` 从库文件位置向上
+  搜索而非 cwd，导致 serve 进程永远读不到工作区 `.env`。
+- `chat.md` 提示词：移除「不要执行 shell 命令」禁令，改为指引经
+  `run_command` 在工作区内执行。
+- `workspace_setup.smart_init_workspace_templates`：排除 `__pycache__`，
+  不再把编译缓存 `.pyc` 复制进用户工作区。
+
+### Tests
+- 工具测试迁移 v2 调用（`execute(ctx=ToolContext(...), ...)`）：
+  `test_tools_integration.py`（20）、`test_goal_e2e.py`（15）。
+- `test_persona_threading.py` / `test_iteration_budget_wiring.py`：
+  attempts 表补齐 `mode/model_override/thinking` 列、`_Body` 补齐
+  `mode/model/thinking` 字段（web_session v5 迁移后同步）。
+- `test_workspace_setup.py`：文件计数改为动态计算（模板目录实扫）。
+- compact 测试同步新默认（`llm_summarize_ratio=0.80`）与 L4 触发条件
+  （消息需超出 recent 保留预算、user/assistant 交替）。
+- `test_common_prompts.py`：`study_collector`/`study_reviewer`/
+  `workflow_orchestrator` 补 common 层引用。
+- swarm worker / projector / run_backtest 测试同步 v2 行为
+  （ctx 注入、compaction 标记保留原消息、结构化错误 envelope）。
+- `auth.py`：注册端点恢复为可配置开关
+  （`SR_ALLOW_REGISTRATION=1` 开启，默认仍禁用；E2E 测试启用）。
+- `conftest_e2e.py`：前端构建检测 E2E hooks（`VITE_E2E=1`），缺失自动重建。
+- `test_webui_e2e_playwright.py`：适配 Chat 路由 `/chat`（`/` 现为 Dashboard）、
+  自动创建会话行为、发送按钮新选择器。
+
+### Fixed（测试套件顺序污染——全套 391 失败归零）
+- **浏览器测试默认跳过**（`SR_RUN_BROWSER_TESTS=1` 开启，e2e.yml 显式设置）：
+  Playwright sync API 会在主线程保留运行中的 asyncio loop，导致后续所有
+  async 测试报 ``Runner.run() cannot be called from a running event loop``
+  （波及 300+ 测试）。
+- **`sse_buffer.push`**：无当前 event loop 时（主线程被
+  `asyncio.set_event_loop(None)` 分离）直接 `evt.set()`，不再因
+  `get_event_loop()` 抛错而静默吞掉通知。
+- **`test_event_log_schema`**：tearDown 还原 `SR_WORKSPACE_PATH`
+  （泄漏后整套 session DB 被重定向到共享临时库 → 级联 `database is locked`）。
+- **conftest 隔离**：每测试快照/还原 `SR_WORKSPACE_PATH`/`SR_SESSIONS_DB`/
+  `HYPOTHESIS_USE_SQLITE`/`STATIC_DIR`；清理 SessionService 缓存 +
+  MemoryManager 单例 + 主线程 SQLite 连接 + logging 级别 + asyncio loop 绑定。
+- **`test_hypothesis_registry_sqlite` 后的日志污染**：`create_app()` 会把
+  `strategy_research` 命名空间日志级别设为 INFO，过滤后续测试的 DEBUG
+  断言（`assertLogs`）——conftest 测试后还原日志级别。
+- **`test_chat_loop` 后的 AgentLoop mock 失效**：`chat_loop` 模块级绑定
+  `AgentLoop`，patch `loop.AgentLoop` 对已 import 的 `chat_loop` 无效——
+  `test_cli_llm_streaming` 改为 patch `chat_loop.AgentLoop`。
+- **`test_cli_registry` 清空全局命令表**：`reset_registry()` 后未重注册核心
+  命令，后续 `init` 等 CLI 分发全部失效——模块级 setup/teardown 重载
+  core_commands。
+- **`test_init_e2e`**：同时 patch `_auto_onboard.run_onboarding`（模块级
+  绑定，patch `onboard.run_onboarding` 对其无效）。
+- **`test_webui_visual`**：适配新版前端——聊天/DAG 路由（`/chat`、`/dag`）、
+  整页截图替代失效的元素选择器、DAG 可视化类改为 skip（被
+  `test_webui_catalog` 的 `catalog_dag-*` 覆盖）；视觉基线刷新。
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

@@ -329,7 +329,6 @@ class TestHistoryBuilderHidesCovered(unittest.TestCase):
         self._emit("message_received", {"message_id": "msg_cur2", "content": "current turn 2"}, 4500)
         self.proj.flush(self.proj.project("s1"))
 
-        from strategy_research.api.session.service import SessionService
 
         messages = self.proj.project_to_messages("s1", limit=100)
         history = SessionService._convert_messages_to_history(messages)
@@ -354,7 +353,7 @@ def _make_event(
     time_created: float,
 ) -> object:
     """Build a minimal EventV2-like object for projector._apply."""
-    from strategy_research.api.session.event_v2 import EventV2
+    from strategy_research.core.events.event_v2 import EventV2
 
     return EventV2(
         id=event_id,

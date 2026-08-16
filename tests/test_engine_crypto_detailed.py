@@ -7,12 +7,6 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.engine.crypto import CryptoEngine
-from strategy_research.core.engine.market_hooks import (
-    FUNDING_HOURS,
-    _maintenance_rate,
-    calc_crypto_funding_fee,
-    check_crypto_liquidation,
-)
 from strategy_research.core.engine.models import Position
 
 

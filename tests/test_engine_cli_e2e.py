@@ -9,15 +9,11 @@ from __future__ import annotations
 
 import argparse
 import textwrap
-from io import StringIO
-from unittest.mock import patch
-
-import pytest
 
 from strategy_research.core.engine.cli import (
+    add_engine_subparsers,
     cmd_engine_list_engines,
     cmd_engine_validate_signal,
-    add_engine_subparsers,
 )
 
 
@@ -28,7 +24,8 @@ class TestListEngines:
     def test_list_output(self):
         args = argparse.Namespace()
         # Capture stdout
-        import io, sys
+        import io
+        import sys
         old_stdout = sys.stdout
         sys.stdout = buffer = io.StringIO()
         try:
@@ -41,9 +38,10 @@ class TestListEngines:
 
     def test_list_engines_returns_0(self):
         args = argparse.Namespace()
-        import io, sys
+        import io
+        import sys
         old_stdout = sys.stdout
-        sys.stdout = buffer = io.StringIO()
+        sys.stdout = io.StringIO()
         try:
             rc = cmd_engine_list_engines(args)
         finally:
@@ -66,9 +64,10 @@ class TestValidateSignal:
                     return {code: pd.Series(1.0, index=df.index) for code, df in data_map.items()}
         """))
         args = argparse.Namespace(file=str(f))
-        import io, sys
+        import io
+        import sys
         old_stdout = sys.stdout
-        sys.stdout = buffer = io.StringIO()
+        sys.stdout = io.StringIO()
         try:
             rc = cmd_engine_validate_signal(args)
         finally:
@@ -79,9 +78,10 @@ class TestValidateSignal:
         f = tmp_path / "bad.py"
         f.write_text("import os\n")
         args = argparse.Namespace(file=str(f))
-        import io, sys
+        import io
+        import sys
         old_stdout = sys.stdout
-        sys.stdout = buffer = io.StringIO()
+        sys.stdout = io.StringIO()
         try:
             rc = cmd_engine_validate_signal(args)
         finally:
@@ -90,9 +90,10 @@ class TestValidateSignal:
 
     def test_nonexistent_file(self, tmp_path):
         args = argparse.Namespace(file=str(tmp_path / "nope.py"))
-        import io, sys
+        import io
+        import sys
         old_stdout = sys.stdout
-        sys.stdout = buffer = io.StringIO()
+        sys.stdout = io.StringIO()
         try:
             rc = cmd_engine_validate_signal(args)
         finally:

@@ -13,7 +13,6 @@ from strategy_research.cli.halt import (
     trip_halt,
 )
 
-
 # ─── Trip / clear / is_halted ──────────────────────────────────────────
 
 

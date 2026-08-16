@@ -14,59 +14,18 @@ Auto-repair: same SQLite health_check + auto_repair as MemoryManager.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
+from ..events.event_v2 import EventV2
 from .cache import CacheConfig, SessionCache, SessionLockMap
 from .memory_manager import InMemoryStore, SQLiteStore, resolve_db_path
 
 logger = logging.getLogger(__name__)
-
-
-# ── Types ────────────────────────────────────────────────────────────
-
-
-@dataclass
-class EventV2:
-    """Domain event stored in event_log table."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    aggregate_id: str = ""  # session_id
-    seq: int = 0
-    type: str = ""
-    data: dict[str, Any] = field(default_factory=dict)
-    time_created: float = field(default_factory=time.time)
-
-    def to_row(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "aggregate_id": self.aggregate_id,
-            "seq": self.seq,
-            "type": self.type,
-            "data_json": json.dumps(self.data, ensure_ascii=False),
-            "time_created": self.time_created,
-        }
-
-    @classmethod
-    def from_row(cls, row: tuple) -> "EventV2":
-        data = {}
-        try:
-            data = json.loads(row[4])
-        except Exception:
-            pass
-        return cls(
-            id=row[0],
-            aggregate_id=row[1],
-            seq=row[2],
-            type=row[3],
-            data=data,
-            time_created=row[5],
-        )
 
 
 # ── EventStore ──────────────────────────────────────────────────────
@@ -132,6 +91,14 @@ class EventStore:
         self._live_queues: dict[str, list[asyncio.Queue]] = {}
         self._live_lock = threading.RLock()
 
+        # P0-1 B3: when the backend is the InMemoryStore (SQLite
+        # auto-repair failed), event_log has no real table. We keep a
+        # per-process dict of ``[EventV2]`` here so ``_replay`` can
+        # still serve the same from_seq / types / branch_id / limit
+        # contract. Production runs use SQLite so this stays empty;
+        # degraded-mode runs at least have a working read path.
+        self._in_memory_events: dict[str, list[EventV2]] = {}
+
         # 5. Initialize schema (idempotent)
         self._init_event_log_schema()
 
@@ -140,23 +107,16 @@ class EventStore:
             # In-memory store doesn't persist; event_log lives only in cache
             return
         conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS event_log (
-                id TEXT PRIMARY KEY,
-                aggregate_id TEXT NOT NULL,
-                seq INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                data_json TEXT,
-                time_created REAL NOT NULL
-            )
-            """
+        from ..storage.event_schema import (
+            ensure_event_log_schema,
+            migrate_event_log_unique,
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_event_log_aggregate "
-            "ON event_log(aggregate_id, seq)"
-        )
-        conn.commit()
+
+        # P0-1 A1+A3+A4: create / reconcile the table, then upgrade the
+        # UNIQUE constraint for fork-aware seq spaces. Both are idempotent;
+        # fresh DBs go straight to the new schema.
+        ensure_event_log_schema(conn)
+        migrate_event_log_unique(conn)
 
     @property
     def is_degraded(self) -> bool:
@@ -173,6 +133,9 @@ class EventStore:
         session_id: str,
         event_type: str,
         data: dict[str, Any] | None = None,
+        *,
+        parent_event_id: str | None = None,
+        branch_id: str = "main",
     ) -> EventV2:
         """Emit event: SQLite → cache → SSE push + live subscribers.
 
@@ -180,14 +143,47 @@ class EventStore:
         seq per session. When ``flush_to_messages=True``, also calls
         Projector.flush() to update messages + message_parts tables
         (best-effort — failures are logged and ignored).
+
+        C3: automatically injects ``trace_id`` / ``session_id`` /
+        ``study_id`` / ``round_num`` from the current trace ContextVar
+        into every event's data dict (if not already present), so SSE
+        clients can correlate events without explicit binding at each
+        emit site.
         """
+        # C3: inject trace context into event data
+        merged = dict(data or {})
+        try:
+            from ...core.observability.trace import (
+                _round_num, _session_id as _ctx_session, _study_id, _trace_id,
+            )
+            if "trace_id" not in merged:
+                tid = _trace_id.get()
+                if tid:
+                    merged["trace_id"] = tid
+            if "session_id" not in merged:
+                sid = _ctx_session.get()
+                if sid:
+                    merged["session_id"] = sid
+            if "study_id" not in merged:
+                stid = _study_id.get()
+                if stid:
+                    merged["study_id"] = stid
+            if "round_num" not in merged:
+                rn = _round_num.get()
+                if rn is not None:
+                    merged["round_num"] = rn
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             seq = self._next_seq(session_id)
-            event = EventV2(
+            event = EventV2.create(
                 aggregate_id=session_id,
                 seq=seq,
                 type=event_type,
-                data=data or {},
+                data=merged,
+                parent_event_id=parent_event_id,
+                branch_id=branch_id,
             )
             try:
                 self._persist(event)
@@ -227,11 +223,37 @@ class EventStore:
         return event
 
     def publish(self, event: EventV2) -> None:
-        """Lower-level publish: takes a pre-built EventV2."""
+        """Lower-level publish: takes a pre-built EventV2.
+
+        C3: injects trace context into event data if not already present.
+        """
         if not event.id:
             event.id = str(uuid.uuid4())
         if not event.time_created:
             event.time_created = time.time()
+        # C3: inject trace context
+        try:
+            from ...core.observability.trace import (
+                _round_num, _session_id as _ctx_session, _study_id, _trace_id,
+            )
+            if "trace_id" not in event.data:
+                tid = _trace_id.get()
+                if tid:
+                    event.data["trace_id"] = tid
+            if "session_id" not in event.data:
+                sid = _ctx_session.get()
+                if sid:
+                    event.data["session_id"] = sid
+            if "study_id" not in event.data:
+                stid = _study_id.get()
+                if stid:
+                    event.data["study_id"] = stid
+            if "round_num" not in event.data:
+                rn = _round_num.get()
+                if rn is not None:
+                    event.data["round_num"] = rn
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             try:
                 self._persist(event)
@@ -283,13 +305,103 @@ class EventStore:
                 if queue in queues:
                     queues.remove(queue)
 
-    def replay(self, session_id: str, from_seq: int = 0) -> list[EventV2]:
-        """Return all events for session with seq > from_seq."""
-        return self._replay(session_id, from_seq=from_seq)
+    def replay(
+        self,
+        session_id: str,
+        from_seq: int = 0,
+        *,
+        types: list[str] | tuple[str, ...] | None = None,
+        branch_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[EventV2]:
+        """Return events for session with seq > from_seq.
+
+        P0-1 B1 — optional filters pushed down to SQLite WHERE clauses:
+        - ``types``: ``type IN (...)`` — primary win for Trajectory View
+          (which only consumes ~5% of total events).
+        - ``branch_id``: ``branch_id = ?`` — A4 fork-aware scoping.
+        - ``limit``: row cap (SQLite returns at most this many events).
+        """
+        return self._replay(
+            session_id,
+            from_seq=from_seq,
+            types=types,
+            branch_id=branch_id,
+            limit=limit,
+        )
 
     def last_seq(self, session_id: str) -> int:
         """Return the highest seq for session (or 0)."""
         return self._next_seq(session_id) - 1
+
+    def fork(
+        self,
+        session_id: str,
+        at_seq: int,
+        *,
+        new_session_id: str | None = None,
+    ) -> tuple[str, int]:
+        """Copy events ``[0, at_seq]`` of ``session_id`` into a new session.
+
+        P0-1 C1. The new session starts its own seq space at 1 (the source
+        session's seq numbers are not preserved). Branch is always
+        ``"main"`` — multi-branch forks land in Phase D. Returns
+        ``(new_session_id, copied_event_count)``.
+
+        Raises ``ValueError`` for invalid ``at_seq`` or pre-existing
+        ``new_session_id``. Operates under the backend lock so concurrent
+        emits on the source can't tear the snapshot mid-copy.
+        """
+        if at_seq <= 0:
+            raise ValueError(
+                f"at_seq must be positive, got {at_seq}"
+            )
+
+        if isinstance(self._backend, InMemoryStore):
+            raise RuntimeError(
+                "fork() requires a SQLite backend; InMemoryStore is "
+                "degraded mode and cannot host forkable sessions."
+            )
+
+        conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
+        max_seq = self.last_seq(session_id)
+        if at_seq > max_seq:
+            raise ValueError(
+                f"at_seq={at_seq} exceeds last_seq={max_seq} for "
+                f"session {session_id!r}"
+            )
+
+        new_sid = new_session_id or f"{session_id}-fork-{uuid.uuid4().hex[:8]}"
+        if self.last_seq(new_sid) > 0:
+            raise ValueError(
+                f"new_session_id {new_sid!r} already has events"
+            )
+
+        with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
+            # Copy [0, at_seq] events into the new session. The new
+            # session's seq space is 1..N where N == at_seq (a
+            # contiguous prefix). Re-id each row so the EventV2 PKs
+            # don't collide with the source session.
+            copied = conn.execute(
+                """
+                INSERT INTO event_log
+                    (id, aggregate_id, seq, type, data_json,
+                     time_created, parent_event_id, branch_id)
+                SELECT
+                    lower(hex(randomblob(16))),
+                    ?,
+                    ROW_NUMBER() OVER (ORDER BY seq ASC),
+                    type, data_json, time_created,
+                    parent_event_id, branch_id
+                FROM event_log
+                WHERE aggregate_id = ? AND seq <= ?
+                  AND branch_id = 'main'
+                ORDER BY seq ASC
+                """,
+                (new_sid, session_id, at_seq),
+            ).rowcount
+            conn.commit()
+        return new_sid, int(copied)
 
     def count(self, session_id: str | None = None) -> int:
         """Total events (optionally filtered by session)."""
@@ -315,33 +427,98 @@ class EventStore:
 
     def _persist(self, event: EventV2) -> None:
         if isinstance(self._backend, InMemoryStore):
-            # In-memory store: skip persistence
+            # P0-1 B3: degraded-mode fallback keeps EventV2 in a
+            # per-process dict so _replay() can serve the same contract
+            # (from_seq / types / branch_id / limit) without SQLite.
+            self._in_memory_events.setdefault(
+                event.aggregate_id, []
+            ).append(event)
             return
         conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
         row = event.to_row()
+        # P0-1 A3: include parent_event_id / branch_id so trace trees and
+        # fork branches survive the SQLite round-trip. branch_id has
+        # schema-level DEFAULT 'main' so omitting it (in pre-A3 callers)
+        # is still safe — but the unified EventV2 always carries it now.
         conn.execute(
             "INSERT INTO event_log (id, aggregate_id, seq, type, data_json, "
-            "time_created) VALUES (?, ?, ?, ?, ?, ?)",
+            "time_created, parent_event_id, branch_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (row["id"], row["aggregate_id"], row["seq"], row["type"],
-             row["data_json"], row["time_created"]),
+             row["data_json"], row["time_created"],
+             row["parent_event_id"], row["branch_id"]),
         )
         conn.commit()
 
-    def _replay(self, session_id: str, from_seq: int = 0) -> list[EventV2]:
+    def _replay(
+        self,
+        session_id: str,
+        from_seq: int = 0,
+        *,
+        types: list[str] | tuple[str, ...] | None = None,
+        branch_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[EventV2]:
         try:
             if hasattr(self._backend, "_ensure_conn"):
                 conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-                rows = conn.execute(
-                    "SELECT id, aggregate_id, seq, type, data_json, time_created "
-                    "FROM event_log WHERE aggregate_id = ? AND seq > ? "
-                    "ORDER BY seq ASC",
-                    (session_id, from_seq),
-                ).fetchall()
-                return [EventV2.from_row(r) for r in rows]
+                clauses = ["aggregate_id = ?", "seq > ?"]
+                params: list[Any] = [session_id, from_seq]
+                if types:
+                    placeholders = ",".join("?" for _ in types)
+                    clauses.append(f"type IN ({placeholders})")
+                    params.extend(types)
+                if branch_id is not None:
+                    clauses.append("branch_id = ?")
+                    params.append(branch_id)
+                sql = (
+                    "SELECT id, aggregate_id, seq, type, data_json, time_created, "
+                    "parent_event_id, branch_id FROM event_log "
+                    f"WHERE {' AND '.join(clauses)} ORDER BY seq ASC"
+                )
+                if limit is not None:
+                    sql += " LIMIT ?"
+                    params.append(limit)
+                rows = conn.execute(sql, params).fetchall()
+                # SQLiteStore leaves row_factory unset (memory_manager uses
+                # tuple indexing), so map each tuple to the dict shape the
+                # unified EventV2.from_row() expects. The P0-1 A3 columns
+                # (7 = parent_event_id, 8 = branch_id) are always SELECTed
+                # here; rows written by pre-A3 code will simply have NULL /
+                # the schema DEFAULT for those positions, and EventV2.from_row
+                # maps them to None / "main".
+                def _row_to_dict(r: tuple) -> dict[str, Any]:
+                    return {
+                        "id": r[0],
+                        "aggregate_id": r[1],
+                        "seq": r[2],
+                        "type": r[3],
+                        "data_json": r[4],
+                        "time_created": r[5],
+                        "parent_event_id": r[6],
+                        "branch_id": r[7] or "main",
+                    }
+
+                return [EventV2.from_row(_row_to_dict(r)) for r in rows]
             else:
-                # InMemoryStore
-                data = getattr(self._backend, "_data", {})
-                return list(data.get(session_id, []))
+                # InMemoryStore — apply the same filters in Python so the
+                # contract is consistent across backends. ``_persist``
+                # mirrors every EventV2 into ``_in_memory_events`` so
+                # _replay has the same shape as the SQLite path
+                # (events carry .seq / .type / .branch_id).
+                events = [
+                    ev for ev in self._in_memory_events.get(session_id, [])
+                    if ev.seq > from_seq
+                ]
+                if types:
+                    type_set = set(types)
+                    events = [ev for ev in events if ev.type in type_set]
+                if branch_id is not None:
+                    events = [ev for ev in events if ev.branch_id == branch_id]
+                events.sort(key=lambda ev: ev.seq)
+                if limit is not None:
+                    events = events[:limit]
+                return events
         except Exception:
             return []
 
@@ -356,10 +533,11 @@ class EventStore:
                 ).fetchone()
                 return (row[0] if row else 0) + 1
             else:
-                # InMemoryStore
-                data = getattr(self._backend, "_data", {})
-                msgs = data.get(session_id, [])
-                return max((m.seq for m in msgs), default=0) + 1
+                # InMemoryStore — count from the EventV2 mirror that
+                # ``_persist`` writes, not the backend's Message dict
+                # (which holds projected messages, not raw events).
+                events = self._in_memory_events.get(session_id, [])
+                return max((ev.seq for ev in events), default=0) + 1
         except Exception:
             return 1
 
@@ -398,6 +576,9 @@ class EventStore:
         return event_type in boundary_types
 
     def health_report(self) -> dict[str, Any]:
+        # P0-1 B4: surface the SessionCache hit rate so operators can
+        # tell whether the LRU cap is sized for the working set.
+        stats = self._cache.stats
         return {
             "event_store": {
                 "degraded": self.is_degraded,
@@ -406,6 +587,11 @@ class EventStore:
                     len(q) for q in self._live_queues.values()
                 ),
                 "cache_session_count": self._cache.session_count,
+                "cache_hits": stats.hits,
+                "cache_misses": stats.misses,
+                "cache_hit_rate": stats.hit_rate,
+                "cache_evictions": stats.evictions,
+                "cache_invalidations": stats.invalidations,
             },
         }
 

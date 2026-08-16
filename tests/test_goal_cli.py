@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -25,7 +23,6 @@ from strategy_research.core.goal.cli import (
     cmd_goal_start,
     cmd_goal_status,
 )
-
 
 # ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -287,7 +284,6 @@ class TestCmdComplete:
 
     def test_incomplete_audit_rejected(self, store_db: Path):
         """Complete with missing audit rows raises (validation error)."""
-        from strategy_research.core.goal.models import StaleGoalError
         cmd_goal_start(_make_args(objective="x"))
         # Single criterion audit row but unverified evidence → should fail
         args = _make_args(criterion_id="crit_x", result="satisfied")

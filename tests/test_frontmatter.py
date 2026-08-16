@@ -1,9 +1,13 @@
 """Tests for frontmatter.py — YAML-like frontmatter parser."""
 from __future__ import annotations
-import sys, unittest
+
+import sys
+import unittest
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from strategy_research.core.agent.frontmatter import parse_frontmatter
+
 
 class TestParseFrontmatter(unittest.TestCase):
 

@@ -31,22 +31,27 @@ _ROLE_PROMPT_FILES = {
     # planner 生成研究计划子图; evaluator 评估进度并决策.
     "planner": "planner.md",
     "evaluator": "evaluator.md",
+    # Study v2: inter-round review + knowledge collection (design §10-11)
+    "study_reviewer": "study_reviewer.md",
+    "study_collector": "study_collector.md",
 }
 
 # 角色对应的工具白名单 (用 build_default_registry() 注册的 9 个工具名)
 _ROLE_TOOL_WHITELIST = {
     "researcher":            ["read_file", "list_history", "factor_analysis", "web_search", "read_url", "get_market_data", "search_symbol", "show_chart"],
-    "data_quality":          ["read_file", "web_search", "read_url", "get_market_data", "list_data_sources", "check_data", "clean_data"],
-    "factor_analyst":        ["read_file", "compute_factor", "factor_analysis", "get_market_data"],
-    "strategist":            ["read_file", "write_file", "run_backtest", "git_diff", "web_search", "read_url", "get_market_data", "show_chart", "show_report"],
+    "data_quality":          ["read_file", "web_search", "read_url", "get_market_data", "list_data_sources", "check_data", "clean_data", "run_bg_command"],
+    "factor_analyst":        ["read_file", "compute_factor", "factor_analysis", "get_market_data", "run_bg_command"],
+    "strategist":            ["read_file", "write_file", "run_backtest", "git_diff", "web_search", "read_url", "get_market_data", "show_chart", "show_report", "run_bg_command"],
     "portfolio_construction":["read_file", "get_market_data"],
     "risk_controller":       ["read_file", "factor_analysis", "get_market_data"],
     "attribution_analyst":   ["read_file", "factor_analysis"],
     "anti_overfit_analyst":  ["read_file", "list_history", "factor_analysis"],
-    "backtest_diagnostics":  ["read_file", "run_backtest", "git_diff", "show_chart", "show_report"],
+    "backtest_diagnostics":  ["read_file", "run_backtest", "git_diff", "show_chart", "show_report", "run_bg_command"],
     "critic":                ["read_file", "list_history"],
     "planner":               ["read_file", "web_search", "read_url", "list_goals", "get_market_data"],
     "evaluator":             ["read_file", "list_history", "factor_analysis"],
+    "study_reviewer":        ["read_file"],
+    "study_collector":       ["read_file", "web_search", "read_url", "list_history"],
 }
 
 
@@ -91,6 +96,11 @@ def build_agent_loop(
     enable_claim_validation: bool = False,
     strict_claim_validation: bool = False,
     tools_override: list[str] | None = None,
+    strategy_dir: Path | None = None,
+    runs_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    write_roots: tuple[str, ...] | None = None,
+    read_roots: tuple[str, ...] | None = None,
 ) -> "AgentLoop | None":  # noqa: F821
     """为 role 构造 AgentLoop.
 
@@ -130,6 +140,10 @@ def build_agent_loop(
         allowed_tools=whitelist,
         session_manager=session_manager,
         strategy_name=strategy_name,
+        strategy_dir=strategy_dir,
+        runs_dir=runs_dir,
+        results_tsv=results_tsv,
+        write_roots=write_roots,
         auto_git_commit=False,  # git commit 由 autoresearch 主循环统一控制
         enable_claim_validation=enable_claim_validation,
         strict_claim_validation=strict_claim_validation,
@@ -148,6 +162,11 @@ def run_agent_via_llm(
     session_manager: Any | None = None,
     max_iterations: int = 8,
     tools_override: list[str] | None = None,
+    strategy_dir: Path | None = None,
+    runs_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    write_roots: tuple[str, ...] | None = None,
+    read_roots: tuple[str, ...] | None = None,
 ) -> str:
     """调用 AgentLoop.run() 完成 role 任务, 返回 JSON 字符串.
 
@@ -177,6 +196,11 @@ def run_agent_via_llm(
         session_manager=session_manager,
         max_iterations=max_iterations,
         tools_override=tools_override,
+        strategy_dir=strategy_dir,
+        runs_dir=runs_dir,
+        results_tsv=results_tsv,
+        write_roots=write_roots,
+        read_roots=read_roots,
     )
     if loop is None:
         raise RuntimeError(f"无法构造 AgentLoop for role={role!r} (prompt 不存在)")

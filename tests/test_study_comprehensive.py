@@ -17,25 +17,29 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import tempfile
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
+from strategy_research.core.study.attribution import (
+    AttributionOutcome,
+    classify_attribution,
+    compute_precision,
+)
+from strategy_research.core.study.runner import (
+    acceptance_config_from_targets,
+)
+from strategy_research.core.study.runner import (
+    meets_metric_targets as executor_meets_metric_targets,
+)
 from strategy_research.core.study.models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,
     StudyDirective,
-    StudyRecord,
     StudyRoundRecord,
     StudyStatus,
     default_metric_targets,
 )
-from strategy_research.core.study.store import StudyStore
 from strategy_research.core.study.runner import (
     AutoresearchRunner,
     ControlToken,
@@ -44,21 +48,12 @@ from strategy_research.core.study.runner import (
     _metric_pass_set,
     meets_metric_targets,
 )
-from strategy_research.core.study.executor import (
-    acceptance_config_from_targets,
-    meets_metric_targets as executor_meets_metric_targets,
-)
 from strategy_research.core.study.scheduler import (
     StudyScheduler,
-    make_event_bus_emitter,
     _EventBusEmitter,
+    make_event_bus_emitter,
 )
-from strategy_research.core.study.attribution import (
-    AttributionOutcome,
-    classify_attribution,
-    compute_precision,
-)
-
+from strategy_research.core.study.store import StudyStore
 
 # ── fixtures ────────────────────────────────────────────────────────
 
@@ -128,7 +123,7 @@ def _make_study(store, goal_store, **overrides):
         criteria=["calmar >= 0.5"],
     )
     kw = dict(
-        session_id="sess-comp", goal_id=goal.goal_id, objective="comprehensive test",
+        owner_session_id="sess-comp", goal_id=goal.goal_id, objective="comprehensive test",
         workspace_path="/tmp/ws", strategy_name="test_strat",
         behavior="improving",
         metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
@@ -460,7 +455,7 @@ class TestStudyStoreEdgeCases:
 
     def test_create_study_workflow_executor(self, store):
         study = store.create_study(
-            session_id="s1", goal_id=None, objective="test",
+            owner_session_id="s1", goal_id=None, objective="test",
             workspace_path="/tmp/ws", strategy_name="strat",
             executor_type="workflow",
         )
@@ -468,26 +463,26 @@ class TestStudyStoreEdgeCases:
 
     def test_create_study_manual_executor(self, store):
         study = store.create_study(
-            session_id="s1", goal_id=None, objective="test",
+            owner_session_id="s1", goal_id=None, objective="test",
             workspace_path="/tmp/ws", strategy_name="strat",
             executor_type="manual",
         )
         assert study.executor_type == "manual"
 
-    def test_concurrent_create_supersedes(self, store):
-        """Two studies for same session — first gets cancelled."""
+    def test_concurrent_create_no_supersede(self, store):
+        """v2: two studies under the same owner coexist (no same-session
+        cancellation); newest wins "active study" lookups."""
         s1 = store.create_study(
-            session_id="sess-concurrent", goal_id=None, objective="first",
+            owner_session_id="sess-concurrent", goal_id=None, objective="first",
             workspace_path="/tmp/ws", strategy_name="strat1",
         )
         s2 = store.create_study(
-            session_id="sess-concurrent", goal_id=None, objective="second",
+            owner_session_id="sess-concurrent", goal_id=None, objective="second",
             workspace_path="/tmp/ws", strategy_name="strat2",
         )
-        # First should be cancelled
+        # Both stay active (parallel studies)
         updated = store.get_study(s1.study_id)
-        assert updated.execution_status == StudyStatus.CANCELLED
-        # Second should be active
+        assert updated.execution_status == StudyStatus.QUEUED
         active = store.get_active_study("sess-concurrent")
         assert active is not None
         assert active.study_id == s2.study_id
@@ -521,15 +516,15 @@ class TestStudyStoreEdgeCases:
     def test_list_studies_limit(self, store, goal_store):
         for i in range(5):
             store.create_study(
-                session_id=f"s{i}", goal_id=None, objective=f"obj{i}",
+                owner_session_id=f"s{i}", goal_id=None, objective=f"obj{i}",
                 workspace_path="/tmp/ws", strategy_name=f"strat{i}",
             )
         result = store.list_studies(limit=3)
         assert len(result) == 3
 
     def test_list_studies_by_status(self, store, goal_store):
-        _, s1 = _make_study(store, goal_store, session_id="s1")
-        _, s2 = _make_study(store, goal_store, session_id="s2")
+        _, s1 = _make_study(store, goal_store, owner_session_id="s1")
+        _, s2 = _make_study(store, goal_store, owner_session_id="s2")
         store.update_execution_status(s1.study_id, StudyStatus.RUNNING)
         running = store.list_studies(status=StudyStatus.RUNNING)
         assert len(running) == 1
@@ -963,6 +958,7 @@ class TestSchedulerEmitter:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -987,7 +983,9 @@ class TestSchedulerEmitter:
             await sched.submit(study)
             cur = await _await_status(store, study.study_id, StudyStatus.COMPLETE)
             assert cur is not None
-            assert "sess-comp" in factory_calls
+            # v2 single identity: emitter is bound to the study's own
+            # session_id (== study_id), not the owner chat session.
+            assert study.study_id in factory_calls
             await sched.shutdown()
 
         asyncio.run(main())
@@ -1029,6 +1027,7 @@ class TestSchedulerRecover:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1077,6 +1076,7 @@ class TestSchedulerRecover:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1096,12 +1096,12 @@ class TestSchedulerRecover:
         # Create studies in different sessions, all RUNNING
         goal1 = goal_store.replace_goal(session_id="s1", objective="obj1", criteria=["c1"])
         s1 = store.create_study(
-            session_id="s1", goal_id=goal1.goal_id, objective="obj1",
+            owner_session_id="s1", goal_id=goal1.goal_id, objective="obj1",
             workspace_path="/tmp/ws", strategy_name="strat1",
         )
         goal2 = goal_store.replace_goal(session_id="s2", objective="obj2", criteria=["c2"])
         s2 = store.create_study(
-            session_id="s2", goal_id=goal2.goal_id, objective="obj2",
+            owner_session_id="s2", goal_id=goal2.goal_id, objective="obj2",
             workspace_path="/tmp/ws", strategy_name="strat2",
         )
         store.update_execution_status(s1.study_id, StudyStatus.RUNNING)
@@ -1358,6 +1358,7 @@ class TestRunnerGoalStoreClose:
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {k: {"ok": True} for k in
@@ -1406,7 +1407,8 @@ class TestSchedulerShutdown:
         def _round(self, r, prev, directives_text=None):
             return {
                 "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
-                "metrics": {"calmar": 0.1}, "verdict": "discard",
+                "metrics": {"calmar": 0.6}, "verdict": "keep",
+                "e2_passed": False,
                 "decision": {"stagnation_triggered": False, "reason": "",
                              "to_dict": lambda: {"stagnation_triggered": False}},
                 "agent_outputs": {},

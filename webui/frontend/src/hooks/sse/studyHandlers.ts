@@ -36,6 +36,7 @@ const patch = (data: Record<string, unknown>) => {
   if (data.metrics !== undefined) merged.last_metrics = data.metrics as Record<string, number>
   if (data.verdict !== undefined) merged.last_verdict = data.verdict as string
   if (data.error !== undefined) merged.last_error = data.error as string
+  if (data.trace_id !== undefined) merged.trace_id = data.trace_id as string
   useStudyStore.getState().setCurrent(merged as never)
 }
 

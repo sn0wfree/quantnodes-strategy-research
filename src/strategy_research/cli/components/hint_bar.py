@@ -15,7 +15,11 @@ from rich.text import Text
 # Mode-aware ellipsis: "…" in Unicode mode, "..." in ASCII mode.
 from strategy_research.cli.utils.ascii_compat import (
     ELLIPSIS_ASCII as _ELL_ASCII,
+)
+from strategy_research.cli.utils.ascii_compat import (
     ELLIPSIS_UNICODE as _ELL_UNI,
+)
+from strategy_research.cli.utils.ascii_compat import (
     is_ascii_mode,
 )
 

@@ -15,13 +15,8 @@ This module covers:
 
 from __future__ import annotations
 
-import logging
-
-import pytest
-
-from strategy_research.api.session.service import SessionService
 from strategy_research.api.session.models import Message
-
+from strategy_research.api.session.service import SessionService
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

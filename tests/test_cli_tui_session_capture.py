@@ -18,13 +18,9 @@ from unittest import mock
 
 import pytest
 
-from strategy_research.cli.halt import clear_halt, is_halted, trip_halt
+from strategy_research.cli.halt import is_halted, trip_halt
 from strategy_research.cli.interactive.main import InteractiveContext
-from strategy_research.cli.tui.messages import (
-    SynthesizeInput,
-    WriteTranscript,
-)
-from strategy_research.cli.tui.session import ChatSession, QUIT_RC
+from strategy_research.cli.tui.session import QUIT_RC, ChatSession
 
 
 class _StubApp:

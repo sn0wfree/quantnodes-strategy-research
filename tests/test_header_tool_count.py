@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 from strategy_research.cli.tui.app import ResearchApp
 
 
@@ -97,8 +95,8 @@ class TestSessionReadsToolCountFromApp:
     """ChatSession._update_header_stats reads from app, not from rail."""
 
     def test_update_header_stats_uses_app_tool_total(self):
-        from strategy_research.cli.tui.session import ChatSession
         from strategy_research.cli.interactive.main import InteractiveContext
+        from strategy_research.cli.tui.session import ChatSession
 
         ctx = InteractiveContext()
         app = mock.MagicMock()
@@ -120,6 +118,7 @@ class TestSessionReadsToolCountFromApp:
     def test_session_does_not_query_tools_rail_for_tool_count(self):
         """The source should NOT call app.query_one(ToolsRail) for tool count."""
         import inspect
+
         from strategy_research.cli.tui.session import ChatSession
 
         src = inspect.getsource(ChatSession._update_header_stats)

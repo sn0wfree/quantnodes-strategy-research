@@ -1,4 +1,4 @@
-"""Tests for api/container.py (Phase 3.2)."""
+"""Tests for api/container.py (production-wired DI container)."""
 
 from __future__ import annotations
 
@@ -24,13 +24,12 @@ class TestBuildContainer(unittest.TestCase):
             )
             self.assertEqual(container.workspace_path, Path(tmpdir))
             self.assertEqual(container.db_path, db_path)
-            self.assertIsNotNone(container.event_bus)
-            self.assertIsNotNone(container.event_bus_v2)
+            self.assertIsNotNone(container.event_store)
             self.assertIsNotNone(container.session_store)
             self.assertIsNotNone(container.session_service)
 
     def test_services_wired_correctly(self):
-        """Services share the same EventBus / EventBusV2 instances."""
+        """Services share the same EventStore instance."""
         from strategy_research.api.container import build_container
 
         with TemporaryDirectory() as tmpdir:
@@ -38,23 +37,27 @@ class TestBuildContainer(unittest.TestCase):
                 workspace_path=Path(tmpdir),
                 db_path=Path(tmpdir) / "test.db",
             )
-            # EventBusV2 should wrap the legacy EventBus
-            self.assertIs(container.event_bus_v2.event_bus, container.event_bus)
-            # SessionService should use EventBusV2
-            self.assertIs(container.session_service.event_bus, container.event_bus_v2)
+            # SessionService is wired with the EventStore
+            self.assertIs(container.session_service.event_bus, container.event_store)
             # SessionStore should match db_path
             self.assertEqual(container.session_store.db_path, Path(tmpdir) / "test.db")
 
     def test_default_db_path(self):
-        """When db_path is not given, derive from workspace_path."""
+        """When db_path is not given, use the unified session DB resolver."""
         from strategy_research.api.container import build_container
 
         with TemporaryDirectory() as tmpdir:
-            container = build_container(workspace_path=Path(tmpdir))
-            self.assertEqual(
-                container.db_path,
-                Path(tmpdir) / "quantnodes_strategy_research_user.db",
-            )
+            import os
+
+            os.environ["SR_WORKSPACE_PATH"] = tmpdir
+            try:
+                container = build_container()
+                self.assertEqual(
+                    container.db_path,
+                    (Path(tmpdir) / ".quantnodes_strategy_research_session.db").resolve(),
+                )
+            finally:
+                del os.environ["SR_WORKSPACE_PATH"]
 
     def test_no_workspace(self):
         """build_container works without workspace_path."""
@@ -67,16 +70,16 @@ class TestBuildContainer(unittest.TestCase):
 
 class TestBuildContainerWithFactories(unittest.TestCase):
 
-    def test_event_bus_factory_override(self):
+    def test_event_store_factory_override(self):
         from strategy_research.api.container import build_container
 
-        fake_bus = MagicMock(name="fake_event_bus")
-        fake_bus._sse_attached = True  # Skip SSE attach
+        fake_store = MagicMock(name="fake_event_store")
+        fake_store._sse_bridge_attached = True  # Skip SSE attach
         container = build_container(
             db_path=Path("/tmp/x.db"),
-            event_bus_factory=lambda: fake_bus,
+            event_store_factory=lambda db_path: fake_store,
         )
-        self.assertIs(container.event_bus, fake_bus)
+        self.assertIs(container.event_store, fake_store)
 
     def test_session_service_factory_override(self):
         from strategy_research.api.container import build_container
@@ -162,12 +165,12 @@ class TestServicesFromContainer(unittest.TestCase):
 
         container = build_container(db_path=Path("/tmp/x.db"))
         services = services_from_container(container)
-        self.assertIn("_event_bus", services)
-        self.assertIn("_event_bus_v2", services)
+        self.assertIn("_event_store", services)
+        self.assertIn("_session_store", services)
         self.assertIn("_session_service", services)
         # Same instances
-        self.assertIs(services["_event_bus"], container.event_bus)
-        self.assertIs(services["_event_bus_v2"], container.event_bus_v2)
+        self.assertIs(services["_event_store"], container.event_store)
+        self.assertIs(services["_session_store"], container.session_store)
         self.assertIs(services["_session_service"], container.session_service)
 
 

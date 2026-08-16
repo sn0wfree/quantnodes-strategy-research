@@ -5,7 +5,6 @@ DELETE-CANDIDATE v0.6: 0 callers for the two endpoints below (frontend + tests).
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query

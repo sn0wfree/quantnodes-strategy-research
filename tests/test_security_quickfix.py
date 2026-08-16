@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
 
 # ────────────────────────── A3: validation.py containment ──────────────────────────
 
 
 def _build_app():
     from fastapi import FastAPI
+
     from strategy_research.api.middleware import AuthMiddleware
     from strategy_research.api.routers.validation import router as v_router
 
@@ -24,6 +24,7 @@ def _build_app():
 
 def _client(app):
     import httpx
+
     from strategy_research.api.auth_tokens import create_token
 
     return httpx.AsyncClient(

@@ -14,7 +14,6 @@ Captured states:
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,11 +22,8 @@ import pytest
 from strategy_research.cli.tui.app import ResearchApp
 from strategy_research.cli.tui.messages import (
     AgentStreamDelta,
-    WriteRail,
-    WriteTranscript,
 )
 from strategy_research.cli.tui.widgets import (
-    Banner,
     CommandSidebar,
     HintFooter,
     ToolsRail,
@@ -215,7 +211,7 @@ async def test_capture_halt_state():
 
         # The hint footer should reflect the halted state
         hint = app.query_one(HintFooter)
-        hint_text = str(hint.render()) if hasattr(hint, 'render') else ""
+        str(hint.render()) if hasattr(hint, 'render') else ""
         # Hint footer is mounted (we can verify this)
         assert hint.is_mounted
 

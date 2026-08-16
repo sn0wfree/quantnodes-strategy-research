@@ -93,6 +93,7 @@ export function useSSE(sessionId: string | null) {
         setTokensUsed,
         markTotalTokensSeen,
         setActiveAttempt: (id) => useChatStore.getState().setActiveAttempt(id),
+        setAskedUser: (sid, asked) => useChatStore.getState().setAskedUser(sid, asked),
         setLastCompaction: (c) => useChatStore.getState().setLastCompaction(c),
         accumulatePartText,
         clearPartAccum,
@@ -130,6 +131,12 @@ export function useSSE(sessionId: string | null) {
 
       const handler = HANDLERS[event]
       if (handler) handler(data, ctx)
+
+      // C3: store trace_id from any SSE event for log correlation
+      const tid = data?.trace_id as string | undefined
+      if (tid && typeof tid === 'string') {
+        useChatStore.getState().setTraceId(tid)
+      }
     },
     [
       sessionId,

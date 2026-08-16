@@ -16,8 +16,8 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.engine.china_futures import (
-    ChinaFuturesEngine,
     _CN_FUTURES_MULTIPLIERS,
+    ChinaFuturesEngine,
     _get_product_code,
 )
 

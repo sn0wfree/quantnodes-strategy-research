@@ -18,7 +18,6 @@ import pytest
 
 from strategy_research.core.goal.workflow_config import load_goal_workflow
 
-
 # ─── Prompt directory ──────────────────────────────────────────────────
 
 PROMPTS_DIR = Path(__file__).parent.parent / "src" / "strategy_research" / "templates" / ".prompts"

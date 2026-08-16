@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from strategy_research.api.session.event_v2 import EventType, EventV2
+from strategy_research.core.events.event_v2 import EventType, EventV2
 from strategy_research.api.session.projector import ProjectedSession, Projector
 from strategy_research.core.goal.events import (
     CHANGE_TYPE_COMPLETE,
@@ -182,7 +182,7 @@ class TestProjectorGoalMessage(unittest.TestCase):
         import sqlite3
         import tempfile
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory():
             db = Path(self._tmpdir.name) / "goal_test.db"
             conn = sqlite3.connect(str(db))
             conn.execute(

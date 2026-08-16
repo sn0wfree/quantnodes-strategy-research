@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ============================================================
 # 1. cmd_evaluate 端到端
 # ============================================================
@@ -34,8 +33,8 @@ def _build_workspace(workspace_path: Path, strategy_name: str = "eval_strat") ->
     Mirror of ``tests/test_autoresearch.py::_build_workspace`` so the
     cmd_evaluate integration test suite has a deterministic fixture.
     """
-    from strategy_research.core.db import init_db, save_ohlcv_to_db
     from strategy_research.core.data_import import generate_sample_ohlcv_data
+    from strategy_research.core.db import init_db, save_ohlcv_to_db
 
     workspace_path.mkdir(exist_ok=True)
 

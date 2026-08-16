@@ -13,10 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from strategy_research.core.agent.compact import CompactConfig, compact_messages
+from strategy_research.core.agent.compact import CompactConfig
 from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.llm.config import LLMConfig
-
 
 # ── _persist_compaction_event propagates errors ──────────────
 
@@ -163,10 +162,12 @@ class TestMaybeCompactRollsBack:
         messages are returned (not original)."""
         # Properly alternated user/assistant turns so L4 produces a
         # smaller message set (the safety check requires a user role).
+        # Messages are large enough to overflow the recent-preserve
+        # budget (8k tokens) so head selection is non-empty and L4 fires.
         msgs = []
         for i in range(25):
-            msgs.append({"role": "user", "content": f"msg {i} " * 30})
-            msgs.append({"role": "assistant", "content": f"reply {i} " * 30})
+            msgs.append({"role": "user", "content": f"msg {i} " * 500})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 500})
 
         loop = self._make_loop(msgs)
         mock_llm = MagicMock()

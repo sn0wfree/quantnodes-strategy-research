@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.cli.utils.format import (
     abbreviate_num,
     format_duration,
     format_tokens,
 )
-
 
 # ─── format_duration (ms) ───────────────────────────────────────────────
 

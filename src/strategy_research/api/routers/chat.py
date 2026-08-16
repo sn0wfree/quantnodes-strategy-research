@@ -5,22 +5,54 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
-from typing import Any, Optional
+import os
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+if TYPE_CHECKING:
+    from ...core.permission import PermissionGateway
+
+from ..schemas.chat import (
+    CancelRequest,
+    ChatAttemptsResponse,
+    ChatCancelResponse,
+    ChatPersonasResponse,
+    ChatQueueResumeResponse,
+    SendMessageResponse,
+)
+from ..schemas.chat import (
+    ChatMessageRequest as ChatMessage,
+)
 from ..session.service import SessionService
-from ..session.store import SessionStore
 from ..sse_buffer import sse_buffer
-from ._task_utils import log_task_exception
-from strategy_research.core.agent.event_store import EventStore
+from .slash_commands import (
+    _handle_clear_command,
+    _handle_compact_command,
+    _handle_goal_command,
+    _handle_help_command,
+    _handle_study_command,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _shell_tools_enabled(mode: str | None = None) -> bool:
+    """Whether the ``run_command`` shell tool should be offered to the agent.
+
+    Shell tools are opt-in: set ``SR_ALLOW_SHELL_TOOLS=1`` (accepts
+    1/true/yes, case-insensitive) in the server environment to enable
+    ``run_command``. Plan mode never exposes shell tools (analysis-only,
+    single iteration), regardless of the env var.
+    """
+    enabled = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in (
+        "1", "true", "yes",
+    )
+    return False if mode == "plan" else enabled
 
 # ── Shared EventStore + SessionService (singleton) ──────────────────────────
 # The EventStore is created per-DB-path inside _get_session_service()
@@ -62,7 +94,7 @@ def _get_permission_gateway(request: Request | None = None) -> "PermissionGatewa
         # Lazy import — sse_buffer is a heavy module.
         try:
             from ...api.sse_buffer import sse_buffer  # local import
-            from ...api.session.event_v2 import EventType
+            from ...core.events.event_v2 import EventType
 
             session_id = args.get("__session_id__") or ""
             if not session_id:
@@ -111,21 +143,23 @@ def _safe_payload(args: dict) -> dict:
 def _get_session_service() -> SessionService:
     """Return the process-wide singleton SessionService for the DB.
 
-    Uses EventStore for triple-write:
+    The DI container is the single construction point: ``create_app``
+    attaches it and pre-seeds this cache; the lazy fallback here (only
+    reached in tests/scripts without an app) builds a fresh container
+    with the same production wiring:
+
     1. event_log (persistent source of truth)
     2. SSE push (via sse_pusher callback → SSEEventBuffer)
     3. messages + message_parts tables via Projector.flush (flush_to_messages=True)
     """
+    from ..container import build_container
     from .web_session import _get_db_path
-    from ..session.bridge_v2 import attach_eventstore_to_sse
 
-    db_path = _get_db_path()
+    db_path = str(_get_db_path())
     service = _session_service_cache.get(db_path)
     if service is None:
-        store = SessionStore(db_path=db_path)
-        es = EventStore(db_path=db_path, flush_to_messages=True)
-        attach_eventstore_to_sse(es)
-        service = SessionService(store=store, event_bus=es)
+        container = build_container(db_path=db_path)
+        service = container.session_service
         _session_service_cache[db_path] = service
     return service
 
@@ -151,23 +185,10 @@ def _build_llm_config():
         return None
 
 
-class ChatMessage(BaseModel):
-    session_id: str
-    content: str
-    images: Optional[list[str]] = None
-    agent_id: Optional[str] = None
-    mode: Optional[str] = None          # "plan" | "build" (None = session default)
-    model: Optional[str] = None         # 会话级模型覆盖
-    thinking: Optional[str] = None      # "off" | "on" | "auto"
 
 
-class SendMessageResponse(BaseModel):
-    message_id: str
-    user_message_id: str
-    assistant_message_id: str
-    event_id: str
-    status: str = "queued"
-    attempt_id: Optional[str] = None
+
+
 
 
 # ── PartAccumulator (replaces inline on_event closure) ──────────────────────
@@ -313,7 +334,7 @@ def _auto_title_and_notify(session_id: str, task: str) -> None:
             json.dumps(meta_update, ensure_ascii=False),
             session_id,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — best-effort SSE emit
         logger.warning("Failed to emit session_meta_updated: %s", exc)
 
 
@@ -407,7 +428,6 @@ async def _run_agent_loop_background(
         )
 
         mm = get_default_memory_manager()
-        history = await mm.get(session_id) or []
 
         loop = build_chat_agent_loop(
             config=cfg,
@@ -439,7 +459,7 @@ async def _run_agent_loop_background(
             claim_validation=result.metrics.get("claim_validation"),
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — agent loop can throw anything
         logger.error("AgentLoop failed for session %s: %s", session_id, exc, exc_info=True)
         await _emit_agent_error(session_id, message_id, exc)
         _persist_assistant_message(session_id, f"[error] {exc}", [{"type": "error", "message": str(exc)}], message_id)
@@ -584,16 +604,13 @@ async def send_async(body: ChatMessage, request: Request):
     try:
         _cfg = LLMConfig.load()
         _max_iter = _cfg.max_iterations
-    except Exception:
+    except (OSError, ValueError, KeyError):
         _max_iter = 50
-    # Shell tools are opt-in: off by default. Set SR_ALLOW_SHELL_TOOLS=1
-    # in the server environment to enable run_command for the agent.
-    import os
-    _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
-    # Plan mode: single iteration (analysis only), no shell tools
+    # Shell tools are opt-in (SR_ALLOW_SHELL_TOOLS=1); plan mode never
+    # exposes them (analysis-only, single iteration).
     _mode = body.mode or "build"
     _max_iter_eff = 1 if _mode == "plan" else _max_iter
-    _allow_shell_eff = False if _mode == "plan" else _allow_shell
+    _allow_shell_eff = _shell_tools_enabled(_mode)
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
@@ -633,968 +650,7 @@ async def send_async(body: ChatMessage, request: Request):
     )
 
 
-# ── /goal command handler ────────────────────────────────────────────
-
-
-async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
-    """Handle /goal slash commands without going through AgentLoop.
-
-    B5: All persistence via EventStore → projector.flush(). No direct
-    persist_message / sse_buffer.push calls.
-    """
-    from ...core.goal import EvidenceInput, GoalStatus, GoalStore
-    from ...core.goal.context import default_goal_criteria
-
-    session_id = body.session_id
-    content = body.content.strip()
-
-    parts = content.split(None, 2)
-    subcmd = parts[1].lower() if len(parts) > 1 else "status"
-    args = parts[2] if len(parts) > 2 else ""
-
-    user_msg_id = str(uuid.uuid4())
-    assistant_msg_id = str(uuid.uuid4())
-
-    service = _get_session_service()
-    event_bus = service.event_bus
-
-    event_bus.emit(session_id, "message_received", {
-        "message_id": user_msg_id,
-        "user_message_id": user_msg_id,
-        "assistant_message_id": assistant_msg_id,
-        "content": content,
-        "role": "user",
-    })
-
-    try:
-        with GoalStore() as store:
-            response_text = _dispatch_goal_command(subcmd, args, session_id, store)
-    except Exception as exc:
-        logger.exception("goal command failed: %s", subcmd)
-        response_text = f"Goal command failed: {exc}"
-
-    # Emit goal SSE events so the frontend GoalTab updates in real-time
-    _emit_goal_sse_event(event_bus, session_id, subcmd)
-
-    _emit_goal_response(event_bus, session_id, assistant_msg_id, response_text)
-
-    return SendMessageResponse(
-        message_id=user_msg_id,
-        user_message_id=user_msg_id,
-        assistant_message_id=assistant_msg_id,
-        event_id="",
-        status="done",
-    )
-
-
-def _dispatch_goal_command(
-    subcmd: str, args: str, session_id: str, store: Any,
-) -> str:
-    """Dispatch goal subcommand to handler."""
-    handlers = {
-        "start": _goal_start,
-        "create": _goal_start,
-        "status": _goal_status,
-        "": _goal_status,
-        "evidence": _goal_evidence,
-        "ev": _goal_evidence,
-        "complete": _goal_complete,
-        "done": _goal_complete,
-        "cancel": _goal_cancel,
-        "help": _goal_help,
-    }
-    handler = handlers.get(subcmd)
-    if handler is None:
-        return f"Unknown subcommand: {subcmd}. Use /goal help for usage."
-    if handler is _goal_help:
-        return handler()
-    return handler(args, session_id, store)
-
-
-def _goal_start(args: str, session_id: str, store: Any) -> str:
-    """Create a goal + study (manual executor_type, no auto-submit).
-
-    /goal start = /study start without automatic execution.
-    The study record is created for tracking but not submitted to the scheduler.
-    """
-    from ...core.goal.context import default_goal_criteria
-    from ...core.study import StudyStore
-
-    objective = args or "Research goal"
-
-    # Check for active study first
-    with StudyStore() as study_store:
-        active = study_store.get_active_study(session_id)
-        if active is not None:
-            return (
-                f"Session already has an active study: {active.study_id[:12]}...\n"
-                f"Status: {active.execution_status.value}\n"
-                f"Cancel it first with /study cancel or wait for it to complete."
-            )
-
-    goal = store.replace_goal(
-        session_id=session_id, objective=objective,
-        criteria=default_goal_criteria(),
-    )
-    # Create a study record (manual executor, not submitted to scheduler)
-    with StudyStore() as study_store:
-        study = study_store.create_study(
-            session_id=session_id, goal_id=goal.goal_id,
-            objective=objective, workspace_path=_default_workspace(),
-            strategy_name="manual", executor_type="manual",
-            metric_targets=[],
-        )
-    return (
-        f"Goal created: {goal.goal_id[:12]}...\n"
-        f"Study created: {study.study_id[:12]}...\n"
-        f"Objective: {goal.objective}\n"
-        f"Status: {goal.status.value} (manual mode, no auto-execution)\n"
-        f"Use /goal evidence <text> to add evidence manually."
-    )
-
-
-def _goal_status(args: str, session_id: str, store: Any) -> str:
-    current = store.get_current_goal(session_id)
-    if current is None:
-        return "No active goal. Use /goal start <objective> to create one."
-    snapshot = store.get_current_snapshot(session_id)
-    criteria = snapshot.get("criteria", []) if snapshot else []
-    evidence_count = snapshot.get("evidence_count", 0) if snapshot else 0
-    return (
-        f"Goal: {current.goal_id[:12]}...\n"
-        f"Objective: {current.objective}\n"
-        f"Status: {current.status.value}\n"
-        f"Progress: {current.progress_percent:.0f}%\n"
-        f"Criteria: {len(criteria)} | Evidence: {evidence_count}"
-    )
-
-
-def _goal_evidence(args: str, session_id: str, store: Any) -> str:
-    from ...core.goal import EvidenceInput
-    current = store.get_current_goal(session_id)
-    if current is None:
-        return "No active goal. Create one first with /goal start <objective>."
-    text = args or "No evidence text provided"
-    evidence = EvidenceInput(text=text, source_type="chat")
-    record = store.append_evidence(
-        session_id=session_id, goal_id=current.goal_id,
-        expected_goal_id=current.goal_id, evidence=evidence,
-    )
-    updated = store.get_current_goal(session_id)
-    return (
-        f"Evidence added: {record.evidence_id[:12]}...\n"
-        f"Progress: {updated.progress_percent:.0f}%"
-    )
-
-
-def _goal_complete(args: str, session_id: str, store: Any) -> str:
-    current = store.get_current_goal(session_id)
-    if current is None:
-        return "No active goal to complete."
-    recap = args or None
-    updated = store.complete_lite(
-        session_id=session_id, goal_id=current.goal_id,
-        expected_goal_id=current.goal_id, recap=recap,
-    )
-    return (
-        f"Goal completed: {updated.goal_id[:12]}...\n"
-        f"Status: {updated.status.value}"
-    )
-
-
-def _goal_cancel(args: str, session_id: str, store: Any) -> str:
-    from ...core.goal import GoalStatus
-    current = store.get_current_goal(session_id)
-    if current is None:
-        return "No active goal to cancel."
-    recap = args or None
-    updated = store.update_status(
-        session_id=session_id, goal_id=current.goal_id,
-        expected_goal_id=current.goal_id,
-        status=GoalStatus.CANCELLED, recap=recap,
-    )
-    return (
-        f"Goal cancelled: {updated.goal_id[:12]}...\n"
-        f"Status: {updated.status.value}"
-    )
-
-
-def _goal_help() -> str:
-    return (
-        "/goal start <objective>  — create a new goal\n"
-        "/goal status             — show current goal\n"
-        "/goal evidence <text>    — add evidence\n"
-        "/goal complete [recap]   — mark complete\n"
-        "/goal cancel [recap]     — cancel goal\n"
-        "/goal help               — this message"
-    )
-
-
-def _emit_goal_sse_event(event_bus: Any, session_id: str, subcmd: str) -> None:
-    """Emit goal SSE event after /goal command execution.
-
-    Reads the current goal snapshot from GoalStore and emits a single
-    full-snapshot ``goal_updated`` event (same payload builder as the
-    chat-tool path — core/goal/events.py) so the frontend panel and
-    the message-stream projector stay in sync.
-    """
-    from ...core.goal import GoalStore
-    from ...core.goal.events import (
-        CHANGE_TYPE_COMPLETE,
-        CHANGE_TYPE_CREATE,
-        CHANGE_TYPE_EVIDENCE,
-        build_goal_updated_payload,
-    )
-
-    # Only emit for mutation commands
-    if subcmd not in ("start", "create", "evidence", "ev", "complete", "done"):
-        return
-
-    if subcmd in ("start", "create"):
-        change_type = CHANGE_TYPE_CREATE
-    elif subcmd in ("evidence", "ev"):
-        change_type = CHANGE_TYPE_EVIDENCE
-    else:
-        change_type = CHANGE_TYPE_COMPLETE
-
-    payload = None
-    try:
-        with GoalStore() as store:
-            payload = build_goal_updated_payload(
-                session_id, store, change_type,
-            )
-    except Exception:
-        logger.debug("failed to read goal for SSE emit", exc_info=True)
-        return
-
-    if payload is not None:
-        event_bus.emit(session_id, "goal_updated", payload)
-
-
-def _emit_goal_response(
-    event_bus: Any, session_id: str, assistant_msg_id: str, response_text: str,
-) -> None:
-    """Emit goal response as 3-step text protocol."""
-    goal_text_id = str(uuid.uuid4())
-    event_bus.emit(session_id, "text.started", {
-        "message_id": assistant_msg_id, "text_id": goal_text_id,
-    })
-    event_bus.emit(session_id, "text_delta", {
-        "message_id": assistant_msg_id, "text_id": goal_text_id, "text": response_text,
-    })
-    event_bus.emit(session_id, "text.ended", {
-        "message_id": assistant_msg_id, "text_id": goal_text_id, "text": response_text,
-    })
-    event_bus.emit(session_id, "assistant_message", {
-        "message_id": assistant_msg_id, "content": response_text,
-        "message_type": "assistant", "metadata": {"model": "goal-handler"},
-    })
-    event_bus.emit(session_id, "agent_done", {
-        "message_id": assistant_msg_id, "status": "success",
-    })
-
-
-# ── /study command handler ──────────────────────────────────────────
-
-
-async def _handle_study_command(body: ChatMessage) -> SendMessageResponse:
-    """Handle ``/study`` slash commands (light wrapper around the API).
-
-    Supported:
-        ``/study start "objective" [--workspace W] [--strategy S]
-                       [--metric calmar>=0.5,sharpe>=0.3]
-                       [--budget-turn N] [--budget-time S]
-                       [--max-rounds N] [--behavior static|varying|improving]``
-        ``/study status``
-        ``/study list``
-        ``/study pause <study_id>``
-        ``/study resume <study_id>``
-        ``/study cancel <study_id>``
-        ``/study help``
-
-    Uses the same TXT-style response protocol as /goal handlers (text
-    started / delta / ended). State changes happen via the study router
-    helpers so the scheduler emits study_* events upstream too.
-    """
-    import shlex
-    import uuid
-
-    session_id = body.session_id
-    content = body.content.strip()
-
-    user_msg_id = str(uuid.uuid4())
-    assistant_msg_id = str(uuid.uuid4())
-    service = _get_session_service()
-    event_bus = service.event_bus
-
-    # Persist the user message before running the command (same triple as
-    # chat: EventStore → projector.flush → messages table).
-    event_bus.emit(session_id, "message_received", {
-        "message_id": user_msg_id,
-        "user_message_id": user_msg_id,
-        "assistant_message_id": assistant_msg_id,
-        "content": content,
-        "role": "user",
-    })
-
-    try:
-        response_text = _dispatch_study_command(content, session_id)
-    except Exception as exc:
-        logger.exception("study command failed")
-        response_text = f"Study command failed: {exc}"
-    print(f"[STUDY:chat] command response: {response_text[:100]}", flush=True)
-
-    # Flush any pending workflow submits (created by ``/study start``)
-    # on this loop before the response round-trips to the user.
-    if _study_pending_submits:
-        session_service = _get_session_service()
-        for study, config, goal_id, objective, ws in _study_pending_submits:
-            if config is None:
-                # AEGIS: autoresearch → scheduler
-                sched = _get_study_scheduler()
-                import asyncio as _asyncio
-                task = _asyncio.create_task(sched.submit(study))
-                task.add_done_callback(log_task_exception)
-            else:
-                await _start_workflow_runner(
-                    config, session_id, goal_id, objective, ws, session_service,
-                )
-        _study_pending_submits.clear()
-
-    _emit_goal_response(event_bus, session_id, assistant_msg_id, response_text)
-
-    return SendMessageResponse(
-        message_id=user_msg_id, user_message_id=user_msg_id,
-        assistant_message_id=assistant_msg_id,
-        event_id="", status="done",
-    )
-
-
-def _dispatch_study_command(content: str, session_id: str) -> str:
-    """Parse and run a /study subcommand. ``content`` is the raw user text."""
-
-    import shlex
-
-    # Strip leading "/study"
-    body = content[len("/study"):].strip()
-    if not body:
-        return _study_help()
-
-    # Split into subcommand + rest (shlex to keep quoted objective intact).
-    try:
-        tokens = shlex.split(body)
-    except ValueError as exc:
-        return f"Parse error: {exc}"
-    subcmd = tokens[0].lower()
-    rest = tokens[1:]
-
-    if subcmd in ("help", "?"):
-        return _study_help()
-    if subcmd == "start":
-        return _study_start_cmd(rest, session_id)
-    if subcmd == "status":
-        return _study_status_cmd(session_id)
-    if subcmd == "list":
-        return _study_list_cmd(rest)
-    if subcmd in ("pause", "resume", "cancel"):
-        if not rest:
-            return f"/study {subcmd} requires a study_id"
-        return _study_control_cmd(subcmd, rest[0])
-
-    if subcmd in ("redirect", "directive"):
-        # /study redirect <study_id> "<directive content>"
-        if not rest:
-            return "/study redirect requires a study_id and quoted content"
-        target_study = rest[0]
-        # Re-join remaining tokens so multi-word directives work without
-        # having to escape every space.
-        directive_text = " ".join(rest[1:]).strip().strip('"\'')
-        if not directive_text:
-            return "/study redirect requires quoted content after study_id"
-        return _study_redirect_cmd(target_study, directive_text, session_id)
-
-    # Else: unknown — show help. (Allows the user to say "/study foo bar".)
-    return f"Unknown subcommand: {subcmd}\n" + _study_help()
-
-
-def _study_help() -> str:
-    return (
-        "/study start \"<objective>\" [--workspace W] [--strategy S]\n"
-        "            [--metric calmar>=0.5,sharpe>=0.3]\n"
-        "            [--budget-turn N] [--budget-time S] [--max-rounds N]\n"
-        "            [--monitor-interval S]   (Phase 3: post-completion drift check)\n"
-        "            [--behavior static|varying|improving]\n"
-        "  Create a study. The active session's goal ledger is created.\n"
-        "/study status   — current study for this session\n"
-        "/study list [status=queued|running|monitoring|complete|cancelled]\n"
-        "/study pause <study_id>\n"
-        "/study resume <study_id>\n"
-        "/study cancel <study_id>\n"
-        "/study redirect <study_id> \"<directive>\" — mid-exec redirect\n"
-        "/study help     — this message"
-    )
-
-
-def _parse_study_flags(rest: list[str]) -> dict:
-    """Tokenize free-form ``--flag value`` style flags."""
-    flags = {
-        "workspace_path": None, "strategy_name": None,
-        "metric_targets": None, "executor_type": "autoresearch",
-        "budget_turn": None, "budget_time_seconds": None, "max_rounds": None,
-        "behavior": None, "monitor_interval_seconds": None,
-    }
-    i = 0
-    while i < len(rest):
-        tok = rest[i]
-        if tok.startswith("--") and i + 1 < len(rest):
-            key, val = tok[2:], rest[i + 1]
-            if key in ("workspace", "workspace_path"):
-                flags["workspace_path"] = val
-            elif key in ("strategy", "strategy_name"):
-                flags["strategy_name"] = val
-            elif key == "metric":
-                flags["metric_targets"] = _parse_metric_targets(val)
-            elif key in ("budget-turn",):
-                try:
-                    flags["budget_turn"] = int(val)
-                except ValueError:
-                    pass
-            elif key in ("budget-time",):
-                try:
-                    flags["budget_time_seconds"] = int(val)
-                except ValueError:
-                    pass
-            elif key in ("max-rounds",):
-                try:
-                    flags["max_rounds"] = int(val)
-                except ValueError:
-                    pass
-            elif key in ("monitor-interval",):
-                try:
-                    flags["monitor_interval_seconds"] = int(val)
-                except ValueError:
-                    pass
-            elif key == "behavior":
-                flags["behavior"] = val
-            elif key in ("executor", "executor_type"):
-                if val in ("autoresearch", "workflow"):
-                    flags["executor_type"] = val
-            i += 2
-        else:
-            i += 1
-    return flags
-
-
-def _parse_metric_targets(spec: str) -> list[dict] | None:
-    """Parse a comma-separated ``calmar>=0.5`` spec → list of target dicts."""
-    import re
-    targets: list[dict] = []
-    for chunk in spec.split(","):
-        m = re.match(r"\s*([A-Za-z_]+)\s*(>=|<=|>|<|==)\s*(-?\d+(\.\d+)?)\s*$", chunk)
-        if not m:
-            continue
-        targets.append({
-            "name": m.group(1), "op": m.group(2), "value": float(m.group(3)),
-        })
-    return targets or None
-
-
-def _default_workspace() -> str:
-    """Return the process-default workspace path for /study defaults."""
-    import os
-    return os.environ.get("SR_WORKSPACE_PATH") or str(
-        Path.home() / ".quantnodes-research"
-    )
-
-
-def _study_start_cmd(rest: list[str], session_id: str) -> str:
-    from ...core.study import StudyStore, StudyStatus, default_metric_targets
-
-    # Check for active study first (one task per session)
-    with StudyStore() as _chk:
-        active = _chk.get_active_study(session_id)
-        if active is not None:
-            return (
-                f"Session already has an active study: {active.study_id[:12]}...\n"
-                f"Status: {active.execution_status.value}\n"
-                f"Cancel it first with /study cancel or wait for it to complete."
-            )
-
-    flags = _parse_study_flags(rest)
-    # Objective = remaining positional tail (everything not consumed by flags)
-    positional = [t for t in rest
-                  if not (t.startswith("--") or _is_flag_value(rest, t))]
-    objective = " ".join(positional).strip(' "\'') or "Research goal"
-    ws = flags["workspace_path"] or _default_workspace()
-    strategy = flags["strategy_name"]
-    if not strategy:
-        return (
-            "/study start requires --strategy <name>. "
-            "Use ``/study list strategies`` once we expose preset discovery."
-        )
-    targets = flags["metric_targets"] or default_metric_targets()
-
-    try:
-        from ...core.goal import GoalStore
-        from ...core.goal.context import default_goal_criteria
-        goal_store = GoalStore()
-        goal = goal_store.replace_goal(
-            session_id=session_id, objective=objective,
-            criteria=default_goal_criteria(),
-        )
-        with StudyStore() as store:
-            study = store.create_study(
-                session_id=session_id, goal_id=goal.goal_id,
-                objective=objective, workspace_path=ws, strategy_name=strategy,
-                metric_targets=targets,
-                budget_token=None, budget_turn=flags["budget_turn"],
-                budget_time_seconds=flags["budget_time_seconds"],
-                cooldown_base=30.0, cooldown_jitter=10.0, min_cooldown=1.0,
-                max_rounds=flags["max_rounds"], behavior=flags["behavior"],
-                monitor_interval_seconds=flags["monitor_interval_seconds"],
-            )
-
-        # Phase 3: Build GoalWorkflowConfig for the 9-agent preset
-        from ...core.goal.workflow import (
-            GoalWorkflowConfig, GoalWorkflowGoalConfig, GoalAgentConfig,
-            CompletionConfig,
-        )
-        from pathlib import Path
-
-        # Create a config that maps study parameters to the workflow
-        agent_configs = [
-            GoalAgentConfig(id="researcher", prompt_file=".prompts/researcher.md",
-                           tools=["read_file", "list_history", "factor_analysis", "web_search",
-                                  "read_url", "get_market_data", "search_symbol"],
-                           input_from=[], evidence_criterion=0, timeout=180, max_retries=3),
-            GoalAgentConfig(id="data_quality", prompt_file=".prompts/data_quality.md",
-                           tools=["read_file", "web_search", "read_url", "get_market_data",
-                                  "list_data_sources"],
-                           input_from=["researcher"], evidence_criterion=1, timeout=120, max_retries=2),
-            GoalAgentConfig(id="factor_analyst", prompt_file=".prompts/factor_analyst.md",
-                           tools=["read_file", "compute_factor", "factor_analysis", "get_market_data"],
-                           input_from=["researcher", "data_quality"], evidence_criterion=1,
-                           timeout=180, max_retries=3),
-            GoalAgentConfig(id="strategist", prompt_file=".prompts/strategist.md",
-                           tools=["read_file", "write_file", "run_backtest", "git_diff",
-                                  "web_search", "read_url", "get_market_data"],
-                           input_from=["researcher", "data_quality", "factor_analyst"],
-                           evidence_criterion=2, timeout=240, max_retries=3),
-            GoalAgentConfig(id="portfolio_construction", prompt_file=".prompts/portfolio_construction.md",
-                           tools=["read_file", "get_market_data"],
-                           input_from=["strategist"], evidence_criterion=2, timeout=120, max_retries=2),
-            GoalAgentConfig(id="backtest", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=[], input_from=["portfolio_construction"], evidence_criterion=2,
-                           timeout=300, max_retries=1, executor_type="python_executor",
-                           python_function="run_backtest_script"),
-            GoalAgentConfig(id="risk_controller", prompt_file=".prompts/risk_controller.md",
-                           tools=["read_file", "factor_analysis", "get_market_data"],
-                           input_from=["backtest"], evidence_criterion=3, timeout=180, max_retries=2),
-            GoalAgentConfig(id="attribution_analyst", prompt_file=".prompts/attribution_analyst.md",
-                           tools=["read_file", "factor_analysis"],
-                           input_from=["backtest", "risk_controller"], evidence_criterion=3,
-                           timeout=180, max_retries=2),
-            GoalAgentConfig(id="anti_overfit_analyst", prompt_file=".prompts/anti_overfit_analyst.md",
-                           tools=["read_file", "list_history", "factor_analysis"],
-                           input_from=["backtest", "risk_controller", "attribution_analyst"],
-                           evidence_criterion=4, timeout=180, max_retries=2),
-            GoalAgentConfig(id="backtest_diagnostics", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=["read_file", "run_backtest", "git_diff"],
-                           input_from=["anti_overfit_analyst"], evidence_criterion=4,
-                           timeout=120, max_retries=2),
-            GoalAgentConfig(id="decide", prompt_file=".prompts/backtest_diagnostics.md",
-                           tools=[], input_from=["backtest", "anti_overfit_analyst", "backtest_diagnostics"],
-                           evidence_criterion=4, timeout=60, max_retries=1,
-                           executor_type="evaluator", python_function="decide"),
-        ]
-
-        config = GoalWorkflowConfig(
-            name=f"autoresearch_{strategy}",
-            description=f"9-agent autoresearch: {objective}",
-            goal=GoalWorkflowGoalConfig(
-                default_criteria=default_goal_criteria(),
-                risk_tier="research_general",
-            ),
-            agents=agent_configs,
-            dag={
-                "researcher": [],
-                "data_quality": ["researcher"],
-                "factor_analyst": ["researcher", "data_quality"],
-                "strategist": ["researcher", "data_quality", "factor_analyst"],
-                "portfolio_construction": ["strategist"],
-                "backtest": ["portfolio_construction"],
-                "risk_controller": ["backtest"],
-                "attribution_analyst": ["backtest", "risk_controller"],
-                "anti_overfit_analyst": ["backtest", "risk_controller", "attribution_analyst"],
-                "backtest_diagnostics": ["anti_overfit_analyst"],
-                "decide": ["backtest", "anti_overfit_analyst", "backtest_diagnostics"],
-            },
-            completion=CompletionConfig(
-                mode="auto",
-                metric_targets=targets,
-                monitor_interval_seconds=flags.get("monitor_interval_seconds"),
-            ),
-            budget_turn=flags.get("budget_turn"),
-            budget_time_seconds=flags.get("budget_time_seconds"),
-        )
-
-        # Queue for async submission by _handle_study_command
-        if flags["executor_type"] == "autoresearch":
-            # AEGIS: autoresearch → scheduler → AutoresearchRunner (round-based)
-            _study_pending_submits.append((study, None, goal.goal_id, objective, ws))
-        else:
-            # workflow → GoalWorkflowRunner (single DAG)
-            _study_pending_submits.append((study, config, goal.goal_id, objective, ws))
-
-    except ValueError as e:
-        return f"Cannot create study: {e}"
-    return (
-        f"Study created: {study.study_id[:12]}...\n"
-        f"Goal: {goal.goal_id[:12]}...\n"
-        f"Objective: {study.objective}\n"
-        f"Strategy: {study.strategy_name} @ {study.workspace_path}\n"
-        f"Targets: {targets}\n"
-        f"Status: {StudyStatus.QUEUED.value}"
-    )
-
-
-# Studies created by /study start need to be submitted to the scheduler on
-# the FastAPI event loop. _handle_study_command awaits these after the
-# dispatcher returns so the response text + the queued task both happen.
-_study_pending_submits: list = []
-
-
-async def _start_workflow_runner(
-    config, session_id, goal_id, objective, workspace, session_service,
-) -> None:
-    """Start a GoalWorkflowRunner for a /study start command."""
-    from ...core.goal.workflow import GoalWorkflowRunner
-    from pathlib import Path
-
-    runner = GoalWorkflowRunner(
-        config=config,
-        session_id=session_id,
-        session_service=session_service,
-        workspace=Path(workspace),
-    )
-    runner.set_goal_id(goal_id)
-    await runner.start(objective)
-
-
-def _is_flag_value(tokens, t) -> bool:
-    """Return True if ``t`` follows a ``--flag`` token in ``tokens``."""
-    i = tokens.index(t)
-    return i > 0 and tokens[i - 1].startswith("--")
-
-
-def _study_status_cmd(session_id: str) -> str:
-    from .study import _get_study_scheduler  # for access consistency
-    from ...core.study import StudyStore
-    with StudyStore() as store:
-        study = store.get_active_study(session_id)
-    if study is None:
-        return "No active study for this session. Use /study start ..."
-    mon = (
-        f"Monitor interval: {study.monitor_interval_seconds}s "
-        f"last_check={study.last_monitor_check_at} "
-        f"drift_count={study.monitor_drift_count}\n"
-        if study.monitor_interval_seconds else ""
-    )
-    return (
-        f"Study: {study.study_id[:12]}...\n"
-        f"Objective: {study.objective}\n"
-        f"Executor: {study.executor_type}\n"
-        f"Status: {study.execution_status.value}\n"
-        f"Round: {study.current_round}\n"
-        f"Last metrics: {study.last_metrics}\n"
-        f"Last verdict: {study.last_verdict}\n"
-        f"Last error: {study.last_error}\n"
-        f"{mon}"
-    )
-
-
-def _study_list_cmd(rest: list[str]) -> str:
-    from ...core.study import StudyStore, StudyStatus
-    status = None
-    for tok in rest:
-        if tok.startswith("status=") or tok.startswith("s="):
-            val = tok.split("=", 1)[1]
-            try:
-                status = StudyStatus(val)
-            except ValueError:
-                return f"Invalid status: {val}"
-    with StudyStore() as store:
-        rows = store.list_studies(status=status, limit=20)
-    if not rows:
-        return "No studies found."
-    out = [f"Found {len(rows)} study/studies (newest first):"]
-    for r in rows:
-        out.append(
-            f"- {r.study_id[:12]}... [{r.execution_status.value}] "
-            f"obj={r.objective[:40]} round={r.current_round}"
-        )
-    return "\n".join(out)
-
-
-def _study_control_cmd(action: str, study_id: str) -> str:
-    from .study import _get_study_scheduler
-    sched = _get_study_scheduler()
-    fn = {"pause": sched.pause, "resume": sched.resume,
-          "cancel": sched.cancel}[action]
-    if not fn(study_id):
-        return f"Study {study_id} not found or not active — cannot {action}."
-    return f"Study {study_id}: {action} requested."
-
-
-def _study_redirect_cmd(study_id: str, directive: str, session_id: str) -> str:
-    """Append a mid-execution directive to a study."""
-    from ...core.study import StudyStore
-    issued_by = f"chat:{session_id}"
-    try:
-        with StudyStore() as store:
-            d = store.add_directive(
-                study_id=study_id, content=directive,
-                issued_by=issued_by,
-            )
-    except ValueError as e:
-        return f"Cannot redirect: {e}"
-    return (
-        f"Directive recorded: {d.directive_id[:12]}...\n"
-        f"Will apply to the next research round.\n"
-        f"Content: {directive}"
-    )
-
-
-# ── /compact command handler ──────────────────────────────────────
-
-
-async def _handle_compact_command(body: ChatMessage) -> SendMessageResponse:
-    """Handle /compact command — compress session history in-place."""
-    import uuid
-
-    service = _get_session_service()
-    cfg = _build_llm_config()
-
-    # B5: user message persisted via EventStore → projector.flush()
-    user_msg_id = str(uuid.uuid4())
-
-    # Execute compaction
-    try:
-        result = await service.compact_history(
-            session_id=body.session_id,
-            config=cfg.compact_config if cfg else None,
-        )
-        layers = result.get("layers", [])
-        before = result.get("before_tokens", 0)
-        after = result.get("after_tokens", 0)
-        summary = result.get("summary", "")
-
-        if layers:
-            response_text = f"✅ 上下文已压缩: {', '.join(layers)}（{before} → {after} tokens）"
-            if summary:
-                response_text += f"\n\n{summary}"
-        else:
-            response_text = "ℹ️ 上下文无需压缩，当前 token 使用量在阈值以下。"
-    except Exception as exc:
-        logger.exception("compact_history failed")
-        response_text = f"❌ 压缩失败: {exc}"
-
-    # B5: assistant message persisted via EventStore → projector.flush()
-    assistant_msg_id = str(uuid.uuid4())
-
-    # Emit SSE events (3-step text protocol) — also flushes to messages table
-    event_bus = service.event_bus
-    compact_text_id = str(uuid.uuid4())
-    event_bus.emit(body.session_id, "message_received", {
-        "message_id": user_msg_id,
-        "user_message_id": user_msg_id,
-        "assistant_message_id": assistant_msg_id,
-        "content": body.content,
-        "role": "user",
-        "status": "done",
-    })
-    event_bus.emit(body.session_id, "text.started", {
-        "text_id": compact_text_id,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "text_delta", {
-        "text": response_text,
-        "text_id": compact_text_id,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "text.ended", {
-        "text_id": compact_text_id,
-        "text": response_text,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "assistant_message", {
-        "message_id": assistant_msg_id,
-        "content": response_text,
-        "message_type": "assistant",
-    })
-    event_bus.emit(body.session_id, "agent_done", {
-        "message_id": assistant_msg_id,
-        "status": "completed",
-    })
-
-    return SendMessageResponse(
-        message_id=user_msg_id,
-        user_message_id=user_msg_id,
-        assistant_message_id=assistant_msg_id,
-        event_id="",
-        status="done",
-    )
-
-
-# ── /clear command handler (webui only) ─────────────────────────────
-
-
-_HELP_TEXT = (
-    "## 可用命令\n"
-    "\n"
-    "- `/goal <目标描述>` — 创建并跟踪一个复合目标\n"
-    "- `/study <目标描述>` — 启动一个研究任务（多轮迭代）\n"
-    "- `/compact` — 压缩当前会话的上下文\n"
-    "- `/clear` — 清空当前会话的 LLM 上下文（保留历史消息）\n"
-    "- `/help` — 显示本帮助\n"
-    "\n"
-    "## 快捷键\n"
-    "\n"
-    "- ⌘K — 搜索会话\n"
-    "- ⌘P — 打开命令面板\n"
-    "- ⌘T — 新建会话\n"
-    "- ⌘B — 切换右栏\n"
-    "- ⌘1–9 — 切换会话 tab\n"
-    "- Enter — 发送 · Shift+Enter — 换行\n"
-)
-
-
-async def _handle_clear_command(body: ChatMessage) -> SendMessageResponse:
-    """Handle ``/clear`` — drop the LLM-visible history for this session.
-
-    Implementation: calls ``MemoryManager.clear`` which truncates the
-    session's memory backend rows (the buffer the AgentLoop reads at
-    attempt start). The persisted message log (the ``messages`` table
-    populated by the projector) is intentionally NOT touched so the
-    user can still scroll their conversation. The UI sees a synthetic
-    assistant acknowledgement via the same text-event flow as
-    ``/compact``.
-    """
-    import uuid
-
-    try:
-        from strategy_research.core.agent.memory_manager import (
-            get_default_memory_manager,
-        )
-        mm = get_default_memory_manager()
-        await mm.clear(body.session_id)
-        response_text = "✅ 已清空当前会话的上下文。历史消息保留可见。"
-    except Exception as exc:
-        logger.exception("clear failed")
-        response_text = f"❌ 清空失败: {exc}"
-
-    user_msg_id = str(uuid.uuid4())
-    assistant_msg_id = str(uuid.uuid4())
-    service = _get_session_service()
-    event_bus = service.event_bus
-    text_id = str(uuid.uuid4())
-
-    event_bus.emit(body.session_id, "message_received", {
-        "message_id": user_msg_id,
-        "user_message_id": user_msg_id,
-        "assistant_message_id": assistant_msg_id,
-        "content": body.content,
-        "role": "user",
-        "status": "done",
-    })
-    event_bus.emit(body.session_id, "text.started", {
-        "text_id": text_id,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "text_delta", {
-        "text": response_text,
-        "text_id": text_id,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "text.ended", {
-        "text_id": text_id,
-        "text": response_text,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "assistant_message", {
-        "message_id": assistant_msg_id,
-        "content": response_text,
-        "message_type": "assistant",
-    })
-    event_bus.emit(body.session_id, "agent_done", {
-        "message_id": assistant_msg_id,
-        "status": "completed",
-    })
-    return SendMessageResponse(
-        message_id=user_msg_id,
-        user_message_id=user_msg_id,
-        assistant_message_id=assistant_msg_id,
-        event_id="",
-        status="done",
-    )
-
-
-async def _handle_help_command(body: ChatMessage) -> SendMessageResponse:
-    """Handle ``/help`` — return the static cheat-sheet as an assistant message."""
-    import uuid
-
-    user_msg_id = str(uuid.uuid4())
-    assistant_msg_id = str(uuid.uuid4())
-    service = _get_session_service()
-    event_bus = service.event_bus
-    text_id = str(uuid.uuid4())
-
-    event_bus.emit(body.session_id, "message_received", {
-        "message_id": user_msg_id,
-        "user_message_id": user_msg_id,
-        "assistant_message_id": assistant_msg_id,
-        "content": body.content,
-        "role": "user",
-        "status": "done",
-    })
-    event_bus.emit(body.session_id, "text.started", {
-        "text_id": text_id,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "text_delta", {
-        "text": _HELP_TEXT,
-        "text_id": text_id,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "text.ended", {
-        "text_id": text_id,
-        "text": _HELP_TEXT,
-        "message_id": assistant_msg_id,
-    })
-    event_bus.emit(body.session_id, "assistant_message", {
-        "message_id": assistant_msg_id,
-        "content": _HELP_TEXT,
-        "message_type": "assistant",
-    })
-    event_bus.emit(body.session_id, "agent_done", {
-        "message_id": assistant_msg_id,
-        "status": "completed",
-    })
-    return SendMessageResponse(
-        message_id=user_msg_id,
-        user_message_id=user_msg_id,
-        assistant_message_id=assistant_msg_id,
-        event_id="",
-        status="done",
-    )
-
-
-class CancelRequest(BaseModel):
-    session_id: str
-    attempt_id: Optional[str] = None
-
-
-@router.post("/cancel")
+@router.post("/cancel", response_model=ChatCancelResponse)
 async def cancel_attempt(body: CancelRequest, request: Request):
     """Cancel an in-flight agent attempt for a session.
 
@@ -1628,7 +684,7 @@ class QueueResumeRequest(BaseModel):
     session_id: str
 
 
-@router.post("/queue/resume")
+@router.post("/queue/resume", response_model=ChatQueueResumeResponse)
 async def queue_resume(body: QueueResumeRequest, request: Request):
     """Resume a paused per-session queue after an explicit cancel.
 
@@ -1660,12 +716,10 @@ async def send_sync(body: ChatMessage, request: Request):
     _fetch_session_owned(_get_db(), body.session_id, user_id)
 
     service = _get_session_service()
-    import os
-    _allow_shell = os.environ.get("SR_ALLOW_SHELL_TOOLS", "").lower() in ("1", "true", "yes")
     result = await service.send_message(
         session_id=body.session_id,
         content=body.content,
-        allow_shell_tools=_allow_shell,
+        allow_shell_tools=_shell_tools_enabled(),
     )
     if result.get("error") == "queue_full":
         raise HTTPException(status_code=429, detail=result)
@@ -1714,7 +768,7 @@ async def chat_events(
     )
 
 
-@router.get("/attempts")
+@router.get("/attempts", response_model=ChatAttemptsResponse)
 async def list_active_attempts(
     session_id: str = Query(...),
     request: Request = None,
@@ -1739,7 +793,138 @@ async def list_active_attempts(
     return {"attempts": service.list_active_attempts(session_id)}
 
 
-@router.get("/personas")
+@router.get("/session/{session_id}/available_actions")
+async def chat_available_actions(session_id: str, request: Request):
+    """C3: actions the current session state permits (drives the UI's buttons)."""
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _fetch_session_owned(_get_db(), session_id, user_id)
+    service = _get_session_service()
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "actions": service.get_available_actions(session_id),
+    }
+
+
+@router.get("/session/{session_id}/export")
+async def chat_export(
+    session_id: str,
+    request: Request,
+    format: str = Query("markdown", regex="^(markdown|json)$"),
+):
+    """C4: export chat history as markdown or JSON.
+
+    Returns the formatted content as a plain-text response (not JSON)
+    so the browser can offer a download.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _fetch_session_owned(_get_db(), session_id, user_id)
+    service = _get_session_service()
+    messages = service.store.get_messages(session_id, limit=10000)
+
+    if format == "json":
+        import json
+        data = [
+            {
+                "role": m.role,
+                "content": m.content,
+                "message_type": m.message_type,
+                "created_at": m.created_at,
+                "message_id": m.message_id,
+            }
+            for m in messages
+        ]
+        return PlainTextResponse(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            media_type="application/json",
+        )
+
+    # Markdown format
+    lines: list[str] = []
+    for m in messages:
+        if m.message_type == "compaction":
+            lines.append(f"\n---\n*{m.content[:200]}*\n---\n")
+            continue
+        if m.message_type == "error":
+            lines.append(f"**Error:** {m.content}\n")
+            continue
+        if m.role == "user":
+            lines.append(f"**User:** {m.content}\n")
+        elif m.role == "assistant":
+            lines.append(f"**Assistant:** {m.content}\n")
+        else:
+            lines.append(f"**{m.role.title()}:** {m.content}\n")
+    return PlainTextResponse(
+        "\n".join(lines),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
+@router.get("/session/{session_id}/trace")
+async def get_session_trace(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    types: str | None = Query(None, description="Comma-separated event types to filter"),
+):
+    """Read trace events for a session (DSH session-query pattern).
+
+    A2: the event_log is the single source of truth. ``llm_request``
+    events are projected out of it (TraceProjection), reconstructing large
+    offloaded fields (system_prompt, tools_schema) from their sidecar
+    blobs. trace.jsonl is used only as a backward-compat fallback for
+    sessions that predate A1 (no llm_request events in the event_log).
+    """
+    from ...core.agent.trace import TraceWriter
+    from ..session.trace_projection import TraceProjection
+
+    type_filter = set(types.split(",")) if types else None
+
+    # Primary: project from event_log (single source of truth).
+    try:
+        service = _get_session_service()
+        events = TraceProjection(service.event_bus).project(
+            session_id, limit=limit, types=types,
+        )
+        if events:
+            return {
+                "events": events,
+                "session_id": session_id,
+                "total": len(events),
+                "source": "event_log",
+            }
+    except Exception:
+        logger.exception("TraceProjection failed for session %s", session_id)
+
+    # Fallback: legacy trace.jsonl (backward compat for pre-A2 sessions).
+    trace_dir = TraceWriter.find_trace_dir(session_id)
+    if trace_dir is None:
+        return {"events": [], "session_id": session_id}
+
+    try:
+        records = TraceWriter.read(
+            trace_dir,
+            resolve_offloads=True,
+            resolve_fields={"system_prompt", "tools_schema"},
+        )
+        if type_filter:
+            records = [r for r in records if r.get("type") in type_filter]
+        records = records[-limit:]
+        return {
+            "events": records,
+            "session_id": session_id,
+            "total": len(records),
+            "source": "trace.jsonl",
+        }
+    except Exception:
+        logger.exception("Failed to read trace for session %s", session_id)
+        return {"events": [], "session_id": session_id, "error": "failed to read trace"}
+
+
+@router.get("/personas", response_model=ChatPersonasResponse)
 async def list_personas(request: Request = None):
     """List available chat personas (roles) for the Composer agent selector.
 
@@ -1761,6 +946,10 @@ async def list_personas(request: Request = None):
         "anti_overfit_analyst": ("反过拟合", "过拟合诊断与稳健性检验"),
         "backtest_diagnostics": ("回测诊断", "回测结果核查与诊断"),
         "critic": ("评审", "对结论与策略进行批判性审查"),
+        "workflow_orchestrator": (
+            "编排助手",
+            "DAG 编排专用：把任务拆解为节点并通过 submit_dag_step 提交；固定用于 dag:{name} 会话",
+        ),
     }
     persona = PromptBuilderFactory.list_roles()
     personas = []
@@ -1805,7 +994,7 @@ async def _event_generator(
                     logger.debug("[SSE] event=%s session=%s id=%s", evt.event, session_id, evt.id)
     except asyncio.CancelledError:
         logger.info("[SSE] client disconnected session=%s reason=cancelled events=%d", session_id, event_count)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — defensive catch-and-raise
         logger.error("[SSE] generator error session=%s: %s", session_id, exc)
         raise
     finally:

@@ -13,13 +13,12 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.alpha_zoo_convert import (
+    _normalize_yaml,
     analyze_compute_function,
     convert_all_zoos,
     convert_py_to_yaml,
     convert_zoo,
     yaml_to_string,
-    _normalize_yaml,
-    ComputeFunctionAnalyzer,
 )
 
 warnings.filterwarnings("ignore")

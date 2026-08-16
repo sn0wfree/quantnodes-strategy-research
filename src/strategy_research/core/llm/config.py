@@ -125,6 +125,12 @@ class LLMConfig:
 
     # ── Network ──────────────────────────────────
     timeout_s: float = 60.0
+    # Wall-clock ceiling for a single LLM request (streaming included).
+    # Guards against "slow-trickle" streams that keep httpx's per-read
+    # timeout from ever firing while producing no finish_reason. 0/None
+    # disables. Configurable via env SR_AGENT_WALLCLOCK_TIMEOUT (seconds,
+    # default 1800 = 30min).
+    wallclock_timeout_s: float = 1800.0
     max_retries: int = 3                            # total attempts (default 3)
     retry_backoff_s: float = 1.0
     proxy: str | None = None
@@ -309,7 +315,14 @@ def _try_load_dotenv() -> None:
         logger.debug("python-dotenv not installed; skipping .env load")
         return
     try:
-        _ld()  # load from cwd by default
+        _ld()  # find_dotenv from the caller frame (best-effort)
+        # Explicitly load cwd's .env: bare load_dotenv() searches from the
+        # library file's location, not the process cwd, so a workspace
+        # .env (e.g. qn-research/.env with SR_ALLOW_SHELL_TOOLS) would
+        # otherwise never be picked up in the serve process.
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            _ld(cwd_env)
         quantnodes_env = Path.home() / ".quantnodes" / ".env"
         if quantnodes_env.exists():
             _ld(quantnodes_env)
@@ -350,35 +363,7 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
         return {}
 
     # ── Provider profile resolution ─────────────────────────────────
-    # llm.json["llm"]["profiles"] holds named provider presets. The
-    # active one (env LLM_PROFILE > file "active_profile") is merged ON
-    # TOP of the base llm fields, but NEVER overrides a field that came
-    # from a QUANTNODES__LLM__* env override (those already won inside
-    # the bridge loader). Priority: env overrides > profile > base.
-    profile_name = os.environ.get(ENV_PROFILE_ACTIVE) or raw.get("active_profile")
-    if profile_name:
-        profiles = raw.get("profiles")
-        profile = (
-            profiles.get(profile_name)
-            if isinstance(profiles, dict) else None
-        )
-        if isinstance(profile, dict):
-            env_overridden = _bridge_env_override_fields()
-            merged = dict(raw)
-            for key, value in profile.items():
-                if key in ("profiles", "active_profile"):
-                    continue
-                if key in env_overridden:
-                    continue
-                if value is None or value == "":
-                    continue
-                merged[key] = value
-            raw = merged
-        else:
-            logger.warning(
-                "LLM profile %r not found in llm.json profiles; "
-                "using base config", profile_name,
-            )
+    raw = _resolve_active_profile(raw)
 
     out: dict[str, Any] = {}
 
@@ -416,48 +401,84 @@ def _load_bridge_dict(path: Path) -> dict[str, Any]:
         _coerce_bool(out, bool_field, raw.get(bool_field))
 
     # ── CompactConfig from "compact" section ───────────────────────
-    compact_raw = raw.get("compact")
-    if isinstance(compact_raw, dict):
-        valid_fields = {f.name for f in dataclasses.fields(CompactConfig)}
-        compact_kwargs: dict[str, Any] = {}
-        for k, v in compact_raw.items():
-            if k in valid_fields and v is not None:
-                compact_kwargs[k] = v
-        if compact_kwargs:
-            out["compact_config"] = CompactConfig(**compact_kwargs)
+    _build_compact_config(out, raw)
 
     # Provider→base_url/model/max_tokens fallback when the JSON omitted them.
-    if (p := out.get("provider")):
-        defaults = PROVIDER_DEFAULTS.get(p)
-        if defaults:
-            if not out.get("base_url"):
-                out["base_url"] = defaults["base_url"]
-            if not out.get("model") and defaults.get("model"):
-                out["model"] = defaults["model"]
-            if out.get("max_tokens") is None and defaults.get("max_tokens"):
-                out["max_tokens"] = defaults["max_tokens"]
-            # Context/output window fallback chain (profile → catalog →
-            # adapter default) so compaction thresholds match the real
-            # model window instead of the conservative 8192:
-            #   1. catalog bundled/cached data is authoritative when it
-            #      exists (core/llm/data/providers/<id>/<model>.toml)
-            #   2. otherwise the provider adapter's default_context_tokens
-            #      (siliconflow, nvidia override it)
-            #   3. otherwise leave unset (compact falls back to 8192)
-            if out.get("model_context_tokens") is None:
-                ctx = _catalog_window(p, out.get("model") or defaults.get("model"))
-                if ctx is None and defaults.get("context_tokens"):
-                    ctx = defaults["context_tokens"]
-                if ctx:
-                    out["model_context_tokens"] = ctx
-            if out.get("model_max_output_tokens") is None:
-                out_ctx = _catalog_window(
-                    p, out.get("model") or defaults.get("model"), output=True
-                )
-                if out_ctx:
-                    out["model_max_output_tokens"] = out_ctx
+    _apply_provider_defaults(out)
 
     return out
+
+
+def _resolve_active_profile(raw: dict[str, Any]) -> dict[str, Any]:
+    """Merge the active provider profile on top of the base llm fields.
+
+    Priority: env overrides > profile > base.
+    """
+    profile_name = os.environ.get(ENV_PROFILE_ACTIVE) or raw.get("active_profile")
+    if not profile_name:
+        return raw
+    profiles = raw.get("profiles")
+    profile = profiles.get(profile_name) if isinstance(profiles, dict) else None
+    if not isinstance(profile, dict):
+        logger.warning(
+            "LLM profile %r not found in llm.json profiles; "
+            "using base config", profile_name,
+        )
+        return raw
+    env_overridden = _bridge_env_override_fields()
+    merged = dict(raw)
+    for key, value in profile.items():
+        if key in ("profiles", "active_profile"):
+            continue
+        if key in env_overridden:
+            continue
+        if value is None or value == "":
+            continue
+        merged[key] = value
+    return merged
+
+
+def _build_compact_config(out: dict[str, Any], raw: dict[str, Any]) -> None:
+    """Populate ``out[\"compact_config\"]`` from the raw ``compact`` section."""
+    compact_raw = raw.get("compact")
+    if not isinstance(compact_raw, dict):
+        return
+    valid_fields = {f.name for f in dataclasses.fields(CompactConfig)}
+    compact_kwargs: dict[str, Any] = {}
+    for k, v in compact_raw.items():
+        if k in valid_fields and v is not None:
+            compact_kwargs[k] = v
+    if compact_kwargs:
+        out["compact_config"] = CompactConfig(**compact_kwargs)
+
+
+def _apply_provider_defaults(out: dict[str, Any]) -> None:
+    """Fill provider→base_url/model/max_tokens/window fallbacks."""
+    p = out.get("provider")
+    if not p:
+        return
+    defaults = PROVIDER_DEFAULTS.get(p)
+    if not defaults:
+        return
+    if not out.get("base_url"):
+        out["base_url"] = defaults["base_url"]
+    if not out.get("model") and defaults.get("model"):
+        out["model"] = defaults["model"]
+    if out.get("max_tokens") is None and defaults.get("max_tokens"):
+        out["max_tokens"] = defaults["max_tokens"]
+    # Context/output window fallback chain (profile → catalog → adapter default).
+    if out.get("model_context_tokens") is None:
+        ctx = _catalog_window(p, out.get("model") or defaults.get("model"))
+        if ctx is None and defaults.get("context_tokens"):
+            ctx = defaults["context_tokens"]
+        if ctx:
+            out["model_context_tokens"] = ctx
+    if out.get("model_max_output_tokens") is None:
+        out_ctx = _catalog_window(
+            p, out.get("model") or defaults.get("model"), output=True
+        )
+        if out_ctx:
+            out["model_max_output_tokens"] = out_ctx
 
 
 def _catalog_window(
@@ -534,6 +555,12 @@ def _env_to_overrides(env: Mapping[str, str]) -> dict[str, Any]:
         overrides["base_url"] = env[ENV_BASE_URL]
     if ENV_MODEL in env and env[ENV_MODEL]:
         overrides["model"] = env[ENV_MODEL]
+    wc_raw = env.get("SR_AGENT_WALLCLOCK_TIMEOUT", "").strip()
+    if wc_raw:
+        try:
+            overrides["wallclock_timeout_s"] = float(wc_raw)
+        except ValueError:
+            pass
     return overrides
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
-from strategy_research.api.session.event_v2 import EventV2
+from strategy_research.core.events.event_v2 import EventV2
 from strategy_research.api.session.events import EventBus
 
 
@@ -167,6 +167,7 @@ class TestFlushPreservesMetadata(unittest.TestCase):
             db = self._db_with_messages(Path(tmp))
             state = MagicMock()
             state.session_id = "s0"
+            state.last_seq = 2  # P0-1 B2: flush() reads this for snapshot trigger
             state.to_message_rows.return_value = [{
                 "id": "m1", "session_id": "s0", "role": "assistant",
                 "content": "hello v2", "message_type": "assistant",

@@ -22,21 +22,17 @@ Gaps covered in this file (vs. existing test suites):
 """
 from __future__ import annotations
 
-import json
-import os
 import sqlite3
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2
-from strategy_research.api.session.event_v2 import EventType, EventV2
+from strategy_research.core.events.event_v2 import EventType, EventV2
 from strategy_research.api.session.events import EventBus
 from strategy_research.api.session.projector import (
     ProjectedMessage,

@@ -101,7 +101,6 @@ def register_builtin_tool_executors() -> int:
     (workspace injected).  Returns the number registered.
     """
     from ..agent.builtin_tools import build_default_registry
-    from ..agent.tools import ToolContext
 
     registry = build_default_registry()
     count = 0

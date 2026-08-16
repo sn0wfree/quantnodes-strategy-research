@@ -220,6 +220,42 @@ class APIClient {
 
     directives: (studyId: string) =>
       this.get<StudyDirectivesResponse>(`/study/${studyId}/directives`),
+
+    journal: (studyId: string) =>
+      this.get<StudyJournalResponse>(`/study/${studyId}/journal`),
+
+    roundArtifacts: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundArtifactsResponse>(`/study/${studyId}/rounds/${roundNum}/artifacts`),
+
+    roundManifest: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundManifestResponse>(`/study/${studyId}/rounds/${roundNum}/manifest`),
+
+    roundDiff: (studyId: string, roundNum: number, against: number) =>
+      this.get<StudyRoundDiffResponse>(
+        `/study/${studyId}/rounds/${roundNum}/diff?against=${against}`
+      ),
+
+    roundSummaryMd: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundSummaryMdResponse>(`/study/${studyId}/rounds/${roundNum}/summary_md`),
+
+    adoptRound: (studyId: string, roundNum: number) =>
+      this.post<StudyAdoptResponse>(`/study/${studyId}/rounds/${roundNum}/adopt`),
+
+    hangingEvents: (studyId: string, hours = 24, limit = 20) =>
+      this.get<StudyHangingEventsResponse>(
+        `/study/${studyId}/hanging_events?hours=${hours}&limit=${limit}`
+      ),
+
+    availableActions: (studyId: string) =>
+      this.get<StudyAvailableActionsResponse>(`/study/${studyId}/available_actions`),
+
+    dispatchAction: (studyId: string, name: string, reason?: string) =>
+      this.post<StudyActionResponse>(`/study/${studyId}/actions/${name}`, {
+        reason,
+      }),
+
+    redoRound: (studyId: string, roundNum: number) =>
+      this.post<StudyActionResponse>(`/study/${studyId}/rounds/${roundNum}/redo`),
   }
 
   run = {
@@ -384,6 +420,76 @@ class APIClient {
       },
     )
 
+  // ── Chat API (C2: unified object) ───────────────────────────────────
+
+  chat = {
+    sendAsync: (
+      sessionId: string,
+      content: string,
+      opts?: { images?: string[]; agent_id?: string; mode?: string; model?: string; thinking?: string },
+    ) =>
+      this.post<{
+        message_id: string
+        user_message_id: string
+        assistant_message_id: string
+        event_id: string
+        status: string
+        attempt_id?: string
+      }>('/chat/send_async', {
+        session_id: sessionId,
+        content,
+        ...opts,
+      }),
+
+    send: (sessionId: string, content: string, opts?: { images?: string[] }) =>
+      this.post<unknown>('/chat/send', {
+        session_id: sessionId,
+        content,
+        ...opts,
+      }),
+
+    cancel: (sessionId: string, attemptId?: string) =>
+      this.post<{ status: string; session_id: string; attempt_id?: string }>(
+        '/chat/cancel',
+        { session_id: sessionId, attempt_id: attemptId },
+      ),
+
+    resumeQueue: (sessionId: string) =>
+      this.post<{ ok: boolean; session_id: string }>(
+        '/chat/queue/resume',
+        { session_id: sessionId },
+      ),
+
+    attempts: (sessionId: string) =>
+      this.get<{
+        attempts: Array<{
+          attempt_id: string
+          message_id: string
+          status: 'running' | 'queued' | 'failed'
+          prompt: string
+          created_at: string
+          error?: string
+        }>
+      }>(`/chat/attempts?session_id=${sessionId}`),
+
+    personas: () =>
+      this.get<{ personas: Array<{ id: string; name: string; description: string }> }>(
+        '/chat/personas',
+      ),
+
+    availableActions: (sessionId: string) =>
+      this.get<{
+        status: string
+        session_id: string
+        actions: Array<{ name: string; label: string; destructive: string }>
+      }>(`/chat/session/${sessionId}/available_actions`),
+
+    export: (sessionId: string, format: 'markdown' | 'json' = 'markdown') =>
+      this.get<string>(
+        `/chat/session/${sessionId}/export?format=${format}`,
+      ),
+  }
+
   definitionRuns = {
     start: (sessionId: string, definitionName: string, objective: string, params?: Record<string, unknown>) =>
       this.post<DefinitionRunStartResponse>('/goal/workflow/start-definition', {
@@ -409,6 +515,40 @@ class APIClient {
     remove: (runId: string) =>
       this.delete<{ status: string; deleted: string }>(
         `/goal/workflow/run/${encodeURIComponent(runId)}`,
+      ),
+  }
+
+  // ── Admin user management (superuser) ──────────────────────────────
+
+  adminUsers = {
+    list: (params: { limit?: number; offset?: number } = {}) =>
+      this.get<AdminUsersListResponse>('/admin/users' + qs(params)),
+
+    create: (body: {
+      username: string
+      password: string
+      display_name?: string
+      role?: string
+    }) => this.post<AdminUser>(`/admin/users`, body),
+
+    update: (userId: string, body: { role?: string; display_name?: string; is_active?: boolean }) =>
+      this.patch<AdminUser>(`/admin/users/${encodeURIComponent(userId)}`, body),
+
+    resetPassword: (userId: string, newPassword: string) =>
+      this.post<{ message: string }>(
+        `/admin/users/${encodeURIComponent(userId)}/reset-password`,
+        { new_password: newPassword },
+      ),
+
+    disable: (userId: string) =>
+      this.post<{ message: string }>(`/admin/users/${encodeURIComponent(userId)}/disable`),
+
+    enable: (userId: string) =>
+      this.post<{ message: string }>(`/admin/users/${encodeURIComponent(userId)}/enable`),
+
+    data: (userId: string) =>
+      this.get<{ user_id: string; sessions?: number | null; studies?: number | null }>(
+        `/admin/users/${encodeURIComponent(userId)}/data`,
       ),
   }
 }
@@ -458,6 +598,7 @@ export interface StudyStatusResponse {
   last_metrics?: Record<string, number> | null
   last_verdict?: string | null
   last_error?: string | null
+  trace_id?: string
   heartbeat?: string
   created_at?: string
   updated_at?: string
@@ -582,6 +723,112 @@ export interface StudySummaryResponse {
       required: boolean
     }>
   } | null
+  monitor_state?: {
+    drift_count: number
+    last_check_at?: string | null
+    interval_seconds?: number | null
+  } | null
+}
+
+// ── Phase 3: round detail / artifacts / diff / adopt types ──────────
+
+export interface StudyJournalResponse {
+  status: string
+  study_id: string
+  journal: string
+}
+
+export interface ArtifactItem {
+  path: string
+  size: number
+  mtime?: string
+}
+
+export interface StudyRoundArtifactsResponse {
+  status: string
+  study_id: string
+  round: number
+  round_dir: string
+  artifacts: ArtifactItem[]
+}
+
+export interface StudyRoundManifestResponse {
+  status: string
+  study_id: string
+  round: number
+  manifest: Record<string, unknown>
+}
+
+export interface DiffLine {
+  line: string
+  kind: 'context' | 'add' | 'del'
+}
+
+export interface StudyRoundDiffResponse {
+  status: string
+  study_id: string
+  round_a: number
+  round_b: number
+  diff: DiffLine[]
+  stats: { adds: number; dels: number; context: number }
+}
+
+export interface StudyRoundSummaryMdResponse {
+  status: string
+  study_id: string
+  round: number
+  summary_md: string
+}
+
+export interface StudyAdoptResponse {
+  status: string
+  study_id: string
+  round: number
+  adopted_run_dir: string
+  note: string
+}
+
+// ── Phase 4: per-study hanging events ───────────────────────────────
+
+export interface HangingEventItem {
+  event_type: string
+  study_id?: string
+  session_id?: string
+  detail?: string
+  created_at: number
+  created_at_iso: string
+}
+
+export interface StudyHangingEventsResponse {
+  status: string
+  study_id: string
+  window_hours: number
+  by_type: Record<string, number>
+  recent: HangingEventItem[]
+}
+
+export const HANGING_EVENT_LABELS: Record<string, string> = {
+  wallclock_timeout: 'LLM 墙钟超时',
+  log_stall: '日志停滞',
+  no_progress: '无进展',
+  circuit_breaker_open: '熔断器打开',
+  watchdog_interrupt: '看门狗中断',
+  chat_attempt_stall: '会话尝试超时',
+}
+
+// ── Phase 5: action matrix ──────────────────────────────────────────
+
+export interface StudyActionItem {
+  name: string
+  label: string
+  destructive: boolean
+}
+
+export interface StudyAvailableActionsResponse {
+  status: string
+  study_id: string
+  execution_status: string
+  actions: StudyActionItem[]
 }
 
 // ── Flow types ─────────────────────────────────────────────────────
@@ -802,6 +1049,23 @@ export interface DefinitionRunDetailResponse {
   segments: Array<Record<string, unknown>>
   node_outputs: DefinitionNodeOutput[]
   approvals: Array<Record<string, unknown>>
+}
+
+// ── Admin user management types ────────────────────────────────────
+
+export interface AdminUser {
+  id: string
+  username: string
+  display_name: string
+  role: string
+  is_active: boolean
+}
+
+export interface AdminUsersListResponse {
+  users: AdminUser[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export const api = new APIClient()

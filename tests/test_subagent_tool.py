@@ -25,7 +25,6 @@ from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.agent.tools import BaseTool, ToolRegistry
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -453,7 +452,7 @@ class TestCountLimitIntegration:
     @pytest.mark.asyncio
     async def test_count_resets_between_arun_calls(self, workspace, patch_child_client):
         """The per-turn counter resets on each arun() invocation."""
-        child_clients = patch_child_client([text_resp("child ok")])
+        patch_child_client([text_resp('child ok')])
         parent = AsyncMockLLM([
             delegate_resp("a", call_id="c1"),
             text_resp("done1"),

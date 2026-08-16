@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -192,30 +191,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # have been run BEFORE this code on existing DBs, otherwise
     # result-bearing tool results are lost (same caveat, now only once).
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version < 2:
-        # Backfill text-part ids while parts_json still exists
-        _migrate_text_part_ids(conn)
-        conn.execute("DELETE FROM messages WHERE role = 'tool'")
-        if _has_column(conn, "messages", "tool_call_id"):
-            _drop_column(conn, "messages", "tool_call_id")
-        if _has_column(conn, "messages", "parts_json"):
-            _drop_column(conn, "messages", "parts_json")
-        conn.execute("PRAGMA user_version = 2")
-    if version < 3:
-        # One-time compaction-type backfill (full-table LIKE scan)
-        _migrate_message_types(conn)
-        conn.execute("PRAGMA user_version = 3")
-    if version < 4:
-        # Chat persona column (Composer agent selector). Nullable so old
-        # rows start as the default chat persona.
-        _add_column(conn, "attempts", "persona", "TEXT")
-        conn.execute("PRAGMA user_version = 4")
-    if version < 5:
-        # Plan/Build mode + model override + thinking params (A2 feature).
-        _add_column(conn, "attempts", "mode", "TEXT NOT NULL DEFAULT 'build'")
-        _add_column(conn, "attempts", "model_override", "TEXT")
-        _add_column(conn, "attempts", "thinking", "TEXT NOT NULL DEFAULT 'auto'")
-        conn.execute("PRAGMA user_version = 5")
+    _run_schema_migrations(conn, version)
 
     # Attempts table — tracks each AgentLoop execution (借鉴 vibe_trading)
     conn.execute("""
@@ -253,134 +229,162 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # log to update messages + message_parts; the EventBus reads from
     # here to replay events for SSE reconnect.
     #
-    # Schema (opencode-aligned):
-    #   id           — stable per-event UUID
-    #   aggregate_id — session_id (the aggregate root)
-    #   seq          — per-aggregate monotonic integer (UNIQUE)
-    #   type         — event type string (dot-namespaced: "text.started")
-    #   data_json    — event payload as JSON (preserves opencode shape)
-    #   time_created — wall-clock timestamp (server time.time())
+    # Schema (opencode-aligned, canonical in core/storage/event_schema.py):
+    #   id               — stable per-event UUID
+    #   aggregate_id     — session_id (the aggregate root)
+    #   seq              — per-aggregate monotonic integer (UNIQUE)
+    #   type             — event type string (dot-namespaced: "text.started")
+    #   data_json        — event payload as JSON (preserves opencode shape)
+    #   time_created     — wall-clock timestamp (server time.time())
+    #   parent_event_id  — P0-1: trace tree (nullable)
+    #   branch_id        — P0-1: fork branch (default 'main')
     #
     # The (aggregate_id, seq) UNIQUE INDEX ensures events are append-only
     # and provides efficient replay (WHERE aggregate_id = ? ORDER BY seq).
     # The (type, time_created) index supports time-range queries by event
     # type (e.g. "all tool_result events in the last hour").
-    #
-    # Phase 3 B1: this table is created empty and unused. Service code
-    # still writes directly to messages + message_parts. Phase 3 B2 will
-    # add EventBusV2 dual-write; B3 will switch the read path to read
-    # from the projector (which materializes from event_log).
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS event_log (
-            id TEXT PRIMARY KEY,
-            aggregate_id TEXT NOT NULL,
-            seq INTEGER NOT NULL,
-            type TEXT NOT NULL,
-            data_json TEXT NOT NULL,
-            time_created REAL NOT NULL,
-            FOREIGN KEY (aggregate_id) REFERENCES sessions(id) ON DELETE CASCADE,
-            UNIQUE (aggregate_id, seq)
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_event_log_aggregate_seq "
-        "ON event_log(aggregate_id, seq)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_event_log_type_time "
-        "ON event_log(type, time_created)"
-    )
+    from ...core.storage.event_schema import ensure_event_log_schema
+
+    ensure_event_log_schema(conn)
 
     # FTS5 virtual table (graceful fallback if FTS5 not compiled in).
-    # Use trigram tokenizer for substring matching across Chinese/English boundaries
-    # (unicode61 default doesn't split Latin/Chinese tokens).
-    #
-    # Auto-heal: if messages_fts already exists with the wrong tokenizer
-    # (e.g. unicode61 from an older schema version), drop it and recreate
-    # with trigram so search behaves consistently. Otherwise SQLite happily
-    # skips the CREATE VIRTUAL TABLE IF NOT EXISTS and the wrong tokenizer
-    # sticks forever.
-    needs_fts_rebuild = False
+    _ensure_fts_table(conn)
+
+
+def _run_schema_migrations(
+    conn: sqlite3.Connection, version: int
+) -> None:
+    """Run one-time versioned schema migrations (idempotent via PRAGMA)."""
+    if version < 2:
+        # Backfill text-part ids while parts_json still exists
+        _migrate_text_part_ids(conn)
+        conn.execute("DELETE FROM messages WHERE role = 'tool'")
+        if _has_column(conn, "messages", "tool_call_id"):
+            _drop_column(conn, "messages", "tool_call_id")
+        if _has_column(conn, "messages", "parts_json"):
+            _drop_column(conn, "messages", "parts_json")
+        conn.execute("PRAGMA user_version = 2")
+    if version < 3:
+        # One-time compaction-type backfill (full-table LIKE scan)
+        _migrate_message_types(conn)
+        conn.execute("PRAGMA user_version = 3")
+    if version < 4:
+        # Chat persona column (Composer agent selector). Nullable so old
+        # rows start as the default chat persona.
+        _add_column(conn, "attempts", "persona", "TEXT")
+        conn.execute("PRAGMA user_version = 4")
+    if version < 5:
+        # Plan/Build mode + model override + thinking params (A2 feature).
+        _add_column(conn, "attempts", "mode", "TEXT NOT NULL DEFAULT 'build'")
+        _add_column(conn, "attempts", "model_override", "TEXT")
+        _add_column(conn, "attempts", "thinking", "TEXT NOT NULL DEFAULT 'auto'")
+        conn.execute("PRAGMA user_version = 5")
+    if version < 6:
+        # P0-1 A4: event_log UNIQUE upgraded to (aggregate_id, branch_id,
+        # seq) so multiple fork branches can share the same seq space.
+        # Fresh DBs already have the new constraint via the canonical DDL;
+        # pre-A4 tables are rebuilt in place (idempotent: skips itself when
+        # the new UNIQUE is already present). parent_event_id and
+        # branch_id columns are backfilled inside ensure_event_log_schema,
+        # which runs unconditionally in _ensure_schema above.
+        from ...core.storage.event_schema import migrate_event_log_unique
+        migrate_event_log_unique(conn)
+        conn.execute("PRAGMA user_version = 6")
+
+
+def _ensure_fts_table(conn: sqlite3.Connection) -> None:
+    """Create/repair the messages_fts full-text search table + triggers.
+
+    Uses trigram tokenizer for substring matching across Chinese/English
+    boundaries. Auto-heals a wrong-tokenizer FTS table. Gracefully
+    disables search if FTS5 is unavailable.
+    """
     try:
-        existing_fts = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'"
-        ).fetchone()
-        if existing_fts and existing_fts[0]:
-            sql_text = existing_fts[0].lower()
-            if "tokenize='trigram'" not in sql_text and 'tokenize="trigram"' not in sql_text:
-                needs_fts_rebuild = True
-                logger.warning(
-                    "messages_fts exists with wrong tokenizer; "
-                    "auto-rebuilding with trigram tokenizer..."
-                )
-
-        if needs_fts_rebuild:
-            # Drop the triggers first so we can rebuild cleanly
-            for trig in ("messages_ai", "messages_ad", "messages_au"):
-                try:
-                    conn.execute(f"DROP TRIGGER IF EXISTS {trig}")
-                except sqlite3.OperationalError as exc:
-                    logger.warning("drop trigger %s: %s", trig, exc)
-            try:
-                conn.execute("DROP TABLE IF EXISTS messages_fts")
-            except sqlite3.OperationalError as exc:
-                logger.error(
-                    "drop messages_fts failed (%s); skipping FTS rebuild", exc
-                )
-                needs_fts_rebuild = False
-
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                content,
-                role,
-                content='messages',
-                content_rowid='rowid',
-                tokenize='trigram'
-            )
-        """)
-        # Triggers to keep FTS in sync with messages
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                INSERT INTO messages_fts(rowid, content, role)
-                VALUES (new.rowid, new.content, new.role);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content, role)
-                VALUES ('delete', old.rowid, old.content, old.role);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content, role)
-                VALUES ('delete', old.rowid, old.content, old.role);
-                INSERT INTO messages_fts(rowid, content, role)
-                VALUES (new.rowid, new.content, new.role);
-            END
-        """)
-
-        # If we rebuilt the FTS table, repopulate it from messages
-        if needs_fts_rebuild:
-            try:
-                conn.execute(
-                    "INSERT INTO messages_fts(rowid, content, role) "
-                    "SELECT rowid, content, role FROM messages"
-                )
-                logger.info(
-                    "messages_fts rebuilt with trigram tokenizer; "
-                    "backfilled from messages table"
-                )
-            except sqlite3.OperationalError as exc:
-                logger.error("FTS backfill failed (continuing): %s", exc)
+        _ensure_fts_table_impl(conn)
     except sqlite3.OperationalError as exc:
         logger.warning("FTS5 unavailable, search endpoint will be disabled: %s", exc)
 
 
+def _ensure_fts_table_impl(conn: sqlite3.Connection) -> None:
+    """Create/repair the FTS table assuming FTS5 is available."""
+    needs_fts_rebuild = False
+    existing_fts = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+    ).fetchone()
+    if existing_fts and existing_fts[0]:
+        sql_text = existing_fts[0].lower()
+        if "tokenize='trigram'" not in sql_text and 'tokenize="trigram"' not in sql_text:
+            needs_fts_rebuild = True
+            logger.warning(
+                "messages_fts exists with wrong tokenizer; "
+                "auto-rebuilding with trigram tokenizer..."
+            )
+
+    if needs_fts_rebuild:
+        # Drop the triggers first so we can rebuild cleanly
+        for trig in ("messages_ai", "messages_ad", "messages_au"):
+            try:
+                conn.execute(f"DROP TRIGGER IF EXISTS {trig}")
+            except sqlite3.OperationalError as exc:
+                logger.warning("drop trigger %s: %s", trig, exc)
+        try:
+            conn.execute("DROP TABLE IF EXISTS messages_fts")
+        except sqlite3.OperationalError as exc:
+            logger.error(
+                "drop messages_fts failed (%s); skipping FTS rebuild", exc
+            )
+            needs_fts_rebuild = False
+
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            content,
+            role,
+            content='messages',
+            content_rowid='rowid',
+            tokenize='trigram'
+        )
+    """)
+    # Triggers to keep FTS in sync with messages
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO messages_fts(rowid, content, role)
+            VALUES (new.rowid, new.content, new.role);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, role)
+            VALUES ('delete', old.rowid, old.content, old.role);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, role)
+            VALUES ('delete', old.rowid, old.content, old.role);
+            INSERT INTO messages_fts(rowid, content, role)
+            VALUES (new.rowid, new.content, new.role);
+        END
+    """)
+
+    # If we rebuilt the FTS table, repopulate it from messages
+    if needs_fts_rebuild:
+        try:
+            conn.execute(
+                "INSERT INTO messages_fts(rowid, content, role) "
+                "SELECT rowid, content, role FROM messages"
+            )
+            logger.info(
+                "messages_fts rebuilt with trigram tokenizer; "
+                "backfilled from messages table"
+            )
+        except sqlite3.OperationalError as exc:
+            logger.error("FTS backfill failed (continuing): %s", exc)
+
+
 def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) -> None:
     """Add a column if it doesn't exist (SQLite has no IF NOT EXISTS for columns)."""
+    _validate_identifier(table, "table")
+    _validate_identifier(column, "column")
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {spec}")
     except sqlite3.OperationalError:
@@ -390,8 +394,17 @@ def _add_column(conn: sqlite3.Connection, table: str, column: str, spec: str) ->
 
 def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     """True if the given table has the given column."""
+    _validate_identifier(table, "table")
+    _validate_identifier(column, "column")
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(r[1] == column for r in rows)
+
+
+def _validate_identifier(name: str, kind: str) -> None:
+    """SEC-2: validate table/column names to prevent SQL injection."""
+    import re as _re
+    if not _re.match(r"^[a-zA-Z0-9_]+$", name):
+        raise ValueError(f"Invalid {kind} name: {name!r} (only alphanumeric + underscore allowed)")
 
 
 def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
@@ -407,6 +420,8 @@ def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
 
     This is heavy but correct on any SQLite version.
     """
+    _validate_identifier(table, "table")
+    _validate_identifier(column, "column")
     if not _has_column(conn, table, column):
         return  # already dropped
 
@@ -927,18 +942,26 @@ async def delete_session(session_id: str, request: Request):
     conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
-    _invalidate_projection(session_id)
+    _invalidate_projection(session_id, request)
     return {"status": "ok", "deleted_id": session_id}
 
 
-def _invalidate_projection(session_id: str) -> None:
+def _invalidate_projection(session_id: str, request: Request | None = None) -> None:
     """Drop the projector's in-memory state for a deleted session.
 
-    The projector cache lives on the EventBusV2 held by the process-wide
-    SessionService (owned by routers/chat.py). Lazy import avoids a
-    web_session → chat module cycle.
+    The projector cache lives on the EventStore held by the process-wide
+    SessionService. Prefers the DI container (attached by ``create_app``);
+    falls back to the process-wide service cache for tests/scripts.
     """
     try:
+        if request is not None:
+            container = getattr(request.app.state, "_container", None)
+            if container is not None:
+                bus = container.session_service.event_bus
+                invalidate = getattr(bus, "invalidate", None)
+                if callable(invalidate):
+                    invalidate(session_id)
+                return
         from .chat import _session_service_cache
         for service in _session_service_cache.values():
             bus = getattr(service, "event_bus", None)
@@ -971,39 +994,6 @@ def delete_messages(session_id: str, message_ids: list[str]) -> None:
     except Exception as exc:
         logger.error("delete_messages failed for session %s: %s", session_id, exc)
 
-
-def update_message_content(
-    message_id: str,
-    content: str,
-    parts: Optional[list[dict[str, Any]]] = None,
-) -> None:
-    """Update a message's content (and optional parts).
-
-    DELETE-CANDIDATE v0.6: FIXME broken; no callers; parts_json dropped by v2.
-    FIXME(broken): no callers exist, and the ``parts is not None``
-    branch writes to ``parts_json`` — a column dropped by the
-    version-2 migration — so it would silently fail (caught + logged)
-    and leave ``content`` un-updated too. Do not wire anything to this
-    function until it is rewritten against the current
-    messages/message_parts schema (or event-sourced projection).
-    """
-    """Update a message's content and optionally its parts."""
-    try:
-        conn = _get_db()
-        parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
-        if parts is not None:
-            conn.execute(
-                "UPDATE messages SET content = ?, parts_json = ? WHERE id = ?",
-                (content, parts_json, message_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE messages SET content = ? WHERE id = ?",
-                (content, message_id),
-            )
-        conn.commit()
-    except Exception as exc:
-        logger.error("update_message_content failed for message %s: %s", message_id, exc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

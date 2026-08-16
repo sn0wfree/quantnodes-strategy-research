@@ -34,21 +34,18 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 import pytest
 
-from strategy_research.core.goal.expression_evaluator import (
-    ExpressionEvaluator,
-    evaluate_condition,
-)
 from strategy_research.core.goal.event_bus import (
     CollectingObserver,
     MetricsObserver,
     WorkflowEventBus,
+)
+from strategy_research.core.goal.expression_evaluator import (
+    evaluate_condition,
 )
 from strategy_research.core.goal.workflow import (
     GoalAgentConfig,
@@ -60,7 +57,6 @@ from strategy_research.core.goal.workflow import (
 from strategy_research.core.goal.workflow_hook import GoalWorkflowHook
 from strategy_research.core.swarm.runtime import AgentResult, SwarmPreset, SwarmRuntime
 from strategy_research.core.workflow.types import AgentStatus, SwarmHook
-
 
 # ── SwarmPreset unification (P3.3) ───────────────────────────
 
@@ -231,7 +227,7 @@ class TestSwarmRuntimeHooks:
             dag={"a": []},
         )
         # No agents → hook should still get layer events
-        result = runtime.execute(preset, Path("/tmp"), "task", hooks=[hook])
+        runtime.execute(preset, Path('/tmp'), 'task', hooks=[hook])
         # No agents registered, so no agent_complete
         hook.on_layer_start.assert_called_once()
         hook.on_layer_complete.assert_called_once()
@@ -248,7 +244,7 @@ class TestSwarmRuntimeHooks:
             agents=[],
             dag={"a": [], "b": ["a"]},
         )
-        result = runtime.execute(preset, Path("/tmp"), "task", hooks=[hook])
+        runtime.execute(preset, Path('/tmp'), 'task', hooks=[hook])
         # Only first layer should have executed
         assert hook.on_layer_start.call_count == 1
 
@@ -426,7 +422,9 @@ class TestProgressTracking:
 
     def test_progress_total_layers_uses_topological(self):
         from strategy_research.core.goal.workflow import (
-            GoalAgentConfig, GoalWorkflowConfig, GoalWorkflowGoalConfig,
+            GoalAgentConfig,
+            GoalWorkflowConfig,
+            GoalWorkflowGoalConfig,
         )
         config = GoalWorkflowConfig(
             name="wf",
@@ -460,9 +458,10 @@ class TestResumeAndContinue:
         excludes the pre-completed ones).
         """
         from strategy_research.core.goal.workflow import (
-            GoalAgentConfig, GoalWorkflowConfig, GoalWorkflowGoalConfig,
+            GoalAgentConfig,
+            GoalWorkflowConfig,
+            GoalWorkflowGoalConfig,
         )
-        from strategy_research.core.swarm.runtime import SwarmRuntime
         from strategy_research.core.workflow.controller import WorkflowController
 
         executed: list[str] = []
@@ -517,7 +516,6 @@ class TestResumeAndContinue:
     def test_resume_loads_layer_results_and_skips_completed_layer(
         self, tmp_path, monkeypatch
     ):
-        import asyncio
         from strategy_research.core.goal.store import GoalStore
 
         runner, executed = self._setup_resume(tmp_path, monkeypatch)
@@ -551,7 +549,9 @@ class TestResumeAndContinue:
     def test_resume_raises_when_no_checkpoint(self, tmp_path, monkeypatch):
         """Calling resume_and_continue without a checkpoint must raise."""
         from strategy_research.core.goal.workflow import (
-            GoalAgentConfig, GoalWorkflowConfig, GoalWorkflowGoalConfig,
+            GoalAgentConfig,
+            GoalWorkflowConfig,
+            GoalWorkflowGoalConfig,
         )
         monkeypatch.setenv("STRATEGY_RESEARCH_CHECKPOINT_BASE_DIR", str(tmp_path))
 
@@ -565,7 +565,6 @@ class TestResumeAndContinue:
         runner = GoalWorkflowRunner(config=config, session_id="s_nope")
         runner._goal_id = "g_nope"
 
-        import asyncio
         with pytest.raises(FileNotFoundError):
             asyncio.run(runner.resume_and_continue())
 
@@ -579,7 +578,9 @@ class TestSwarmRuntimePreCompleted:
 
     def test_pre_completed_skips_agents_and_starts_from_start_layer(self):
         from strategy_research.core.swarm.runtime import (
-            AgentResult, SwarmPreset, SwarmRuntime,
+            AgentResult,
+            SwarmPreset,
+            SwarmRuntime,
         )
         from strategy_research.core.workflow.types import AgentCall
 
@@ -623,7 +624,9 @@ class TestSwarmRuntimePreCompleted:
     def test_pre_completed_partial_layer_skips_only_completed(self):
         """Within the current layer, only pre-completed agents are skipped."""
         from strategy_research.core.swarm.runtime import (
-            AgentResult, SwarmPreset, SwarmRuntime,
+            AgentResult,
+            SwarmPreset,
+            SwarmRuntime,
         )
         from strategy_research.core.workflow.types import AgentCall
 

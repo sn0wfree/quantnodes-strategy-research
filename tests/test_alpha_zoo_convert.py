@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from strategy_research.core.alpha_zoo_convert import (
     analyze_compute_function,
     convert_py_to_yaml,

@@ -1,7 +1,6 @@
 """Tests for core/utils/backtest_utils.py — 6 工具函数 (换手/调仓日/权重/NAV)."""
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -14,7 +13,6 @@ from strategy_research.core.utils.backtest_utils import (
     generate_rebalance_dates,
     normalize_weights,
 )
-
 
 # ============================================================
 # 1. calculate_turnover

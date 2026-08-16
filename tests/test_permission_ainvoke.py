@@ -10,19 +10,17 @@ Exercises ``BaseTool.ainvoke`` against the permission ruleset:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
-from strategy_research.core.agent.tools import BaseTool, ToolContext, ToolError
+from strategy_research.core.agent.tools import BaseTool
 from strategy_research.core.permission import (
     PermissionAction,
-    PermissionEvaluator,
     PermissionGateway,
     PermissionResponse,
 )
-
 
 # ── Test double ───────────────────────────────────────────────────
 

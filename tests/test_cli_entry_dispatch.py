@@ -25,15 +25,12 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 import strategy_research.cli.__main__ as entry
 from strategy_research.cli.__main__ import (
     _is_interactive_invocation,
     _wants_legacy_repl,
     main,
 )
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 

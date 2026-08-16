@@ -16,8 +16,6 @@ from typing import Any, Optional
 
 from textual.widgets import Static
 
-from strategy_research.cli.tui.theme import brand_tokens
-
 
 def _progress_bar(used: int, total: int, width: int = 10) -> str:
     """Render a progress bar like [====-------]."""

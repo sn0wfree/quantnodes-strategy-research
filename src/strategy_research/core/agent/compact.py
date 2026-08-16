@@ -18,11 +18,12 @@ Phase A simplification (chore):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,32 @@ _compaction_metrics: dict[str, int] = {
     "l4_aborts": 0,              # L4 safety aborts (would produce empty context)
     "filter_calls": 0,           # Total _convert_messages_to_history calls
 }
+
+
+# ── Per-session compaction lock ──────────────────────────────────────
+# Prevents concurrent compaction (auto from agent loop + manual /compact)
+# on the same session.  Both paths must acquire this lock before calling
+# compact_messages().  The lock is per-session (different sessions can
+# compact concurrently).
+class _CompactLockMap:
+    """Per-session asyncio.Lock for compaction serialization."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._meta_lock = asyncio.Lock()
+
+    async def get(self, session_id: str) -> asyncio.Lock:
+        async with self._meta_lock:
+            if session_id not in self._locks:
+                self._locks[session_id] = asyncio.Lock()
+            return self._locks[session_id]
+
+    async def clear(self, session_id: str) -> None:
+        async with self._meta_lock:
+            self._locks.pop(session_id, None)
+
+
+_compact_locks = _CompactLockMap()
 
 
 def get_compaction_metrics() -> dict[str, int]:
@@ -122,6 +149,11 @@ _LEGACY_L1_TOOL_LIMITS_DOC: dict[str, int] = {
     "list_files": 1000,
     "_default": 2000,
 }
+
+
+# Legacy callback signature kept for API compatibility (see
+# ``test_compact_full_pipeline.py::test_on_compaction_callback_accepted``).
+CompactionCallback = Callable[[str, Any], None]
 
 
 @dataclass(frozen=True)
@@ -251,51 +283,60 @@ def _serialize_message(msg: dict[str, Any], tool_max_chars: int = TOOL_OUTPUT_MA
         return f"[System update]: {content}"
 
     if role == "assistant":
-        parts: list[str] = []
-
-        # Extract person thinking blocks as reasoning content
-        if content:
-            think_matches = _THINK_RE.findall(content)
-            if think_matches:
-                reasoning_text = "\n".join(m.strip() for m in think_matches if m.strip())
-                if reasoning_text:
-                    parts.append(f"[Assistant reasoning]: {reasoning_text}")
-            # Remove think blocks from main content
-            clean_content = _THINK_RE.sub("", content).strip()
-            if clean_content:
-                parts.append(f"[Assistant]: {clean_content}")
-
-        # Tool calls
-        for tc in msg.get("tool_calls") or []:
-            if isinstance(tc, dict):
-                fn = tc.get("function", {})
-                args_str = fn.get("arguments", "")
-                if isinstance(args_str, str) and len(args_str) > 100:
-                    args_str = args_str[:100] + "..."
-                elif not isinstance(args_str, str):
-                    args_str = str(args_str)[:100]
-                parts.append(f"[Assistant tool call]: {fn.get('name', '?')}({args_str})")
-        return "\n".join(parts)
+        return _serialize_assistant(msg, content)
 
     if role == "tool":
-        truncated = content[:tool_max_chars] + "\n[truncated]" if len(content) > tool_max_chars else content
-        # Detect error status
-        is_error = False
-        if truncated.startswith("{") and '"status"' in truncated[:100]:
-            try:
-                import json
-                parsed = json.loads(truncated[:tool_max_chars])
-                if isinstance(parsed, dict) and parsed.get("status") == "error":
-                    is_error = True
-                    error_msg = parsed.get("message") or parsed.get("error") or str(parsed)
-                    truncated = error_msg
-            except Exception:
-                pass
-        if is_error:
-            return f"[Tool error]: {truncated}"
-        return f"[Tool result]: {truncated}"
+        return _serialize_tool_result(content, tool_max_chars)
 
     return ""
+
+
+def _serialize_assistant(msg: dict[str, Any], content: str) -> str:
+    """Serialize an assistant message (reasoning + text + tool calls)."""
+    parts: list[str] = []
+
+    # Extract person thinking blocks as reasoning content
+    if content:
+        think_matches = _THINK_RE.findall(content)
+        if think_matches:
+            reasoning_text = "\n".join(m.strip() for m in think_matches if m.strip())
+            if reasoning_text:
+                parts.append(f"[Assistant reasoning]: {reasoning_text}")
+        # Remove think blocks from main content
+        clean_content = _THINK_RE.sub("", content).strip()
+        if clean_content:
+            parts.append(f"[Assistant]: {clean_content}")
+
+    # Tool calls
+    for tc in msg.get("tool_calls") or []:
+        if isinstance(tc, dict):
+            fn = tc.get("function", {})
+            args_str = fn.get("arguments", "")
+            if isinstance(args_str, str) and len(args_str) > 100:
+                args_str = args_str[:100] + "..."
+            elif not isinstance(args_str, str):
+                args_str = str(args_str)[:100]
+            parts.append(f"[Assistant tool call]: {fn.get('name', '?')}({args_str})")
+    return "\n".join(parts)
+
+
+def _serialize_tool_result(content: str, tool_max_chars: int) -> str:
+    """Serialize a tool message, detecting error status."""
+    truncated = content[:tool_max_chars] + "\n[truncated]" if len(content) > tool_max_chars else content
+    is_error = False
+    if truncated.startswith("{") and '"status"' in truncated[:100]:
+        try:
+            import json
+            parsed = json.loads(truncated[:tool_max_chars])
+            if isinstance(parsed, dict) and parsed.get("status") == "error":
+                is_error = True
+                error_msg = parsed.get("message") or parsed.get("error") or str(parsed)
+                truncated = error_msg
+        except Exception:
+            pass
+    if is_error:
+        return f"[Tool error]: {truncated}"
+    return f"[Tool result]: {truncated}"
 
 
 # ── L1: Smart Microcompact (DEPRECATED, removed in Phase A) ───────
@@ -420,58 +461,12 @@ def _select_by_token_budget(
     turn_tokens = [_estimate_tokens(t) for t in turns]
 
     if config.quality_decay:
-        # Quality-decay mode: score turns, prefer higher-scored
-        total_turns = len(turns)
-        turn_scores = [_score_turn(turn, total_turns - 1 - i, total_turns)
-                       for i, turn in enumerate(turns)]
-
-        # Walk backwards: accumulate turns until budget is full
-        # Among turns that fit, sort by score (higher = keep)
-        recent_turn_indices: list[int] = []
-        remaining_budget = budget
-
-        # Greedy: walk backwards, collect turns that fit
-        candidates: list[tuple[int, float]] = []  # (index, score)
-        for i in range(len(turns) - 1, -1, -1):
-            if turn_tokens[i] <= remaining_budget:
-                candidates.append((i, turn_scores[i]))
-                remaining_budget -= turn_tokens[i]
-
-        # Sort candidates by score descending (prefer high-quality turns)
-        candidates.sort(key=lambda x: x[1], reverse=True)
-
-        # Greedily fill budget with highest-scored turns
-        recent_turn_indices = []
-        remaining_budget = budget
-        for idx, score in candidates:
-            if turn_tokens[idx] <= remaining_budget:
-                recent_turn_indices.append(idx)
-                remaining_budget -= turn_tokens[idx]
-
-        # Sort by position for correct message ordering
-        recent_turn_indices.sort()
+        recent_turn_indices = _select_quality_decay_turns(turns, turn_tokens, budget)
     else:
-        # Standard mode: walk backwards turn-by-turn
-        recent_turn_indices = []
-        remaining_budget = budget
-        for i in range(len(turns) - 1, -1, -1):
-            if turn_tokens[i] <= remaining_budget:
-                recent_turn_indices.append(i)
-                remaining_budget -= turn_tokens[i]
-            else:
-                break
-        recent_turn_indices.sort()
+        recent_turn_indices = _select_backward_turns(turn_tokens, budget)
 
     # Ensure at least tail_turns full turns in recent
-    if len(recent_turn_indices) < config.tail_turns:
-        needed = config.tail_turns - len(recent_turn_indices)
-        for i in range(len(turns) - 1, -1, -1):
-            if i not in recent_turn_indices:
-                recent_turn_indices.append(i)
-                needed -= 1
-                if needed == 0:
-                    break
-        recent_turn_indices.sort()
+    recent_turn_indices = _ensure_tail_turns(recent_turn_indices, len(turns), config.tail_turns)
 
     # Convert turn indices to message indices
     recent_msg_indices: set[int] = set()
@@ -486,6 +481,65 @@ def _select_by_token_budget(
     recent = non_system[recent_start:]
 
     return head, recent
+
+
+def _select_backward_turns(turn_tokens: list[int], budget: int) -> list[int]:
+    """Standard mode: keep turns from the end backwards until budget is full."""
+    indices: list[int] = []
+    remaining = budget
+    for i in range(len(turn_tokens) - 1, -1, -1):
+        if turn_tokens[i] <= remaining:
+            indices.append(i)
+            remaining -= turn_tokens[i]
+        else:
+            break
+    indices.sort()
+    return indices
+
+
+def _select_quality_decay_turns(
+    turns: list[Any], turn_tokens: list[int], budget: int
+) -> list[int]:
+    """Quality-decay mode: prefer higher-scored turns within the budget."""
+    total_turns = len(turns)
+    turn_scores = [_score_turn(turn, total_turns - 1 - i, total_turns)
+                   for i, turn in enumerate(turns)]
+
+    candidates: list[tuple[int, float]] = []
+    remaining_budget = budget
+    for i in range(total_turns - 1, -1, -1):
+        if turn_tokens[i] <= remaining_budget:
+            candidates.append((i, turn_scores[i]))
+            remaining_budget -= turn_tokens[i]
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+
+    indices: list[int] = []
+    remaining_budget = budget
+    for idx, score in candidates:
+        if turn_tokens[idx] <= remaining_budget:
+            indices.append(idx)
+            remaining_budget -= turn_tokens[idx]
+
+    indices.sort()
+    return indices
+
+
+def _ensure_tail_turns(
+    indices: list[int], turn_count: int, tail_turns: int
+) -> list[int]:
+    """Guarantee at least ``tail_turns`` full turns are kept in recent."""
+    if len(indices) >= tail_turns:
+        return indices
+    needed = tail_turns - len(indices)
+    for i in range(turn_count - 1, -1, -1):
+        if i not in indices:
+            indices.append(i)
+            needed -= 1
+            if needed == 0:
+                break
+    indices.sort()
+    return indices
 
 
 def _build_summary_prompt(

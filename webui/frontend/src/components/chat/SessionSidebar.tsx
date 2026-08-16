@@ -63,7 +63,7 @@ export function SessionSidebar() {
     let list = sessions
     if (filter === 'starred') list = list.filter((s) => s.starred && !s.archived)
     else if (filter === 'archived') list = list.filter((s) => s.archived)
-    else list = list.filter((s) => !s.archived && !isTestSession(s.title))
+    else list = list.filter((s) => !s.archived && !isTestSession(s.title) && !s.id.startsWith('dag:'))
 
     if (search.trim()) {
       const q = search.toLowerCase()

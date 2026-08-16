@@ -6,8 +6,8 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.engine.signals import (
-    SignalEngine,
     ConstantWeightEngine,
+    SignalEngine,
 )
 
 

@@ -8,7 +8,6 @@ import pytest
 
 from strategy_research.core.engine.optimizers import optimize_weights
 
-
 # ============================================================
 # fixtures
 # ============================================================
@@ -41,7 +40,7 @@ class TestEqualVolatility:
         result = optimize_weights(ret_df, pos_df, ret_df.index, method="equal_volatility")
         w = result.iloc[0]
         # B has highest vol in random data → should get lowest weight
-        vols = ret_df.std()
+        ret_df.std()
         # Inverse vol ordering should match weight ordering
         assert w["A"] > 0
 

@@ -12,6 +12,7 @@ Borrowed from vibe_trading ``src/session/service.py``. Adapted to:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -36,6 +37,255 @@ MAX_HISTORY_CHARS = 12000
 # Hard limit for queued messages per session. Exceeding returns 429 to caller.
 _QUEUE_LIMIT = 10
 
+# C1: wallclock timeout for a single attempt. A running AgentLoop that
+# exceeds this duration is killed (CancelledError → mark_failed). This
+# prevents a single hung tool call / LLM stream from permanently
+# blocking the session's queue. Set to 0 to disable.
+_CHAT_ATTEMPT_TIMEOUT = int(os.environ.get("SR_CHAT_ATTEMPT_TIMEOUT", "600"))
+
+
+def _build_attempt_metrics(usage_state: dict[str, int], loop_result: Any) -> dict:
+    """Build the attempt metrics payload from usage counters and loop result."""
+    metrics = {
+        "input_tokens": usage_state["input"],
+        "output_tokens": usage_state["output"],
+        "total_tokens": usage_state["input"] + usage_state["output"],
+    }
+    if loop_result.metrics.get("claim_validation"):
+        metrics["claim_validation"] = loop_result.metrics["claim_validation"]
+    return metrics
+
+
+def _emit_goal_event(
+    event_bus: Any, session_id: str, data: dict[str, Any], cfg: Optional[LLMConfig]
+) -> None:
+    """Detect goal tool results and emit the full-snapshot goal event.
+
+    When create_goal / add_evidence / complete_goal tools execute, emit ONE
+    full-snapshot ``goal_updated`` SSE event (built by
+    core/goal/events.build_goal_updated_payload). The event drives the
+    frontend panel AND is persisted by the projector as a
+    message_type='goal' message that enters the LLM context (see
+    docs/goal-events-panel-link.md).
+    """
+    import json as _json
+
+    tool_name = data.get("name", "")
+    change_type_map = {
+        "create_goal": "create",
+        "add_evidence": "evidence",
+        "complete_goal": "complete",
+    }
+    change_type = change_type_map.get(tool_name)
+    if change_type is None:
+        return
+
+    result_raw = data.get("result", "")
+    try:
+        result = _json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+    except (_json.JSONDecodeError, TypeError, ValueError):
+        return
+
+    if not isinstance(result, dict) or result.get("status") != "ok":
+        return
+
+    from ...core.goal import GoalStore
+    from ...core.goal.events import build_goal_updated_payload
+
+    truncate = 100
+    if cfg is not None and cfg.compact_config is not None:
+        truncate = cfg.compact_config.goal_evidence_truncate_chars
+
+    payload = None
+    try:
+        with GoalStore() as store:
+            payload = build_goal_updated_payload(
+                session_id,
+                store,
+                change_type,
+                truncate_chars=truncate,
+                evidence_text=result.get("text") if change_type == "evidence" else None,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("goal event build failed", exc_info=True)
+
+    if payload is not None:
+        event_bus.emit(session_id, "goal_updated", payload)
+
+
+class _LoopEventForwarder:
+    """AgentLoop on_event adapter for the B4 event-sourced path.
+
+    Two jobs per event:
+    1. Accumulate the part protocol (text/tool/thinking) into
+       ``accumulated_parts`` for the assistant message body.
+    2. Forward the event onto EventBusV2 (event_log + SSE); tool/usage
+       data ride along in ``event.data`` so the projector can merge them
+       into the message parts.
+
+    Also accumulates llm_usage tokens into attempt-local metrics so the
+    frontend can show context usage progress.
+    """
+
+    def __init__(
+        self,
+        service: "SessionService",
+        *,
+        attempt: Attempt,
+        accumulated_parts: list[dict[str, Any]],
+        event_bus: Any,
+        cfg: Optional[LLMConfig],
+    ) -> None:
+        self.service = service
+        self.attempt = attempt
+        self.accumulated_parts = accumulated_parts
+        self.event_bus = event_bus
+        self.cfg = cfg
+        self._usage_lock = threading.Lock()
+        self._usage_state: dict[str, int] = {"input": 0, "output": 0, "context_used": 0}
+
+    @property
+    def usage_state(self) -> dict[str, int]:
+        return self._usage_state
+
+    def __call__(self, event_type: str, data: dict[str, Any]) -> None:
+        # Offload large fields (system_prompt, tools_schema, llm response
+        # content) to sidecar blobs so the event_log stays lean; the small
+        # metadata + sidecar refs go into event_log. This lets a later
+        # projection reconstruct the full envelope from the event log
+        # alone (DSH request/response-envelope pattern).
+        if isinstance(data, dict):
+            if event_type == "llm_request":
+                data = self._offload_large_fields(data)
+            elif event_type == "llm_response":
+                data = self._offload_large_fields(data, fields=("content",))
+
+        # Accumulate parts for persistence
+        _accumulate_part(self.accumulated_parts, event_type, data)
+
+        # B4: tool result persistence is handled by EventBusV2 →
+        # projector.flush(). The tool_result event lands in event_log,
+        # the projector merges it into the assistant message's tool_call
+        # part, and flush writes the updated message to messages table.
+        # No direct DB write needed here.
+
+        # Track token usage so the frontend can show a context usage bar.
+        # llm_usage is emitted by AgentLoop after each LLM call (see
+        # core/agent/loop.py).
+        if event_type == "llm_usage" and isinstance(data, dict):
+            with self._usage_lock:
+                # OpenAI-compatible providers use input_tokens /
+                # output_tokens; some send prompt_tokens /
+                # completion_tokens. Accept both.
+                inc_in = int(data.get("input_tokens") or data.get("prompt_tokens") or 0)
+                inc_out = int(data.get("output_tokens") or data.get("completion_tokens") or 0)
+                self._usage_state["input"] += inc_in
+                self._usage_state["output"] += inc_out
+                # context_used = the size of the prompt actually sent to the
+                # model on the most recent LLM call. Overwrite (not
+                # accumulate) — a fresh call re-sends the whole context.
+                prompt_used = int(data.get("prompt_tokens") or data.get("input_tokens") or 0)
+                if prompt_used > 0:
+                    self._usage_state["context_used"] = prompt_used
+            total = self._usage_state["input"] + self._usage_state["output"]
+            # Emit a session_total_tokens event so the frontend has an
+            # authoritative figure (not the per-call delta).
+            self.event_bus.emit(
+                self.attempt.session_id,
+                "session_total_tokens",
+                {
+                    "input_tokens": self._usage_state["input"],
+                    "output_tokens": self._usage_state["output"],
+                    "total_tokens": total,
+                    "context_used": self._usage_state["context_used"],
+                    "message_id": self.attempt.message_id,
+                    "attempt_id": self.attempt.attempt_id,
+                },
+            )
+
+        # Add attempt/message context
+        data = dict(data)
+        data.setdefault("attempt_id", self.attempt.attempt_id)
+        data.setdefault("message_id", self.attempt.message_id)
+
+        # Detect goal tool results → emit goal SSE events for frontend
+        if event_type == "tool_result":
+            _emit_goal_event(self.event_bus, self.attempt.session_id, data, self.cfg)
+
+        self.event_bus.emit(self.attempt.session_id, event_type, data)
+
+    def _offload_large_fields(
+        self, data: dict[str, Any], fields: tuple[str, ...] = ("system_prompt", "tools_schema"),
+    ) -> dict[str, Any]:
+        """Offload large llm fields to sidecar blobs.
+
+        Returns a copy of ``data`` with any of ``fields`` that exceed the
+        inline threshold replaced by ``{field}_path`` / ``{field}_preview`` /
+        ``{field}_size`` references. The blob dir is derived from the event
+        DB path so the projection can resolve refs without a separate trace
+        file.
+        """
+        import hashlib as _hashlib
+
+        out = dict(data)
+        threshold = int(os.environ.get("SR_LLM_REQUEST_OFFLOAD_THRESHOLD", "4096"))
+
+        # Locate the sidecar dir next to the event DB: <dir>/trace-blobs/.
+        blob_root = None
+        try:
+            db_path = getattr(self.event_bus, "_db_path", None)
+            if db_path is not None:
+                blob_root = Path(db_path).parent / "trace-blobs"
+        except Exception:
+            blob_root = None
+
+        for field in fields:
+            value = out.get(field)
+            if not isinstance(value, str) or len(value) <= threshold:
+                continue
+            if blob_root is None:
+                # No blob root → keep inline (better full data than loss).
+                continue
+            blob_root.mkdir(parents=True, exist_ok=True)
+            digest = _hashlib.sha256(
+                f"{self.attempt.session_id}\0{field}\0{value}".encode("utf-8")
+            ).hexdigest()
+            path = blob_root / f"{digest[:24]}.txt"
+            try:
+                path.write_text(value, encoding="utf-8")
+            except OSError:
+                continue
+            out[field + "_path"] = f"trace-blobs/{path.name}"
+            out[field + "_preview"] = value[:512]
+            out[field + "_size"] = len(value)
+            out.pop(field, None)
+            # P0-1 C3: track this offload in blob_refs so the TTL-based
+            # cleanup has a single source of truth. Done outside the
+            # file write above so a write failure doesn't leave a
+            # dangling ref_count=1.
+            try:
+                from ...core.storage.blob_schema import (
+                    ensure_blob_refs_schema,
+                    record_blob_offload,
+                )
+                blob_conn = getattr(
+                    self.event_bus, "_backend", None
+                )
+                if blob_conn is not None and hasattr(
+                    blob_conn, "_ensure_conn"
+                ):
+                    conn_refs = blob_conn._ensure_conn()  # type: ignore[attr-defined]
+                    ensure_blob_refs_schema(conn_refs)
+                    record_blob_offload(conn_refs, out[field + "_path"])
+                    conn_refs.commit()
+            except Exception:
+                logger.debug(
+                    "blob_refs record failed for %s; cleanup will not "
+                    "track this offload until the next one",
+                    out[field + "_path"],
+                )
+        return out
+
 
 def _bootstrap_workspace(workspace: Path) -> None:
     """Ensure workspace has the required directory structure.
@@ -55,6 +305,64 @@ def _bootstrap_workspace(workspace: Path) -> None:
             init_db(workspace)
         except Exception as exc:
             logger.warning("Failed to init DuckDB: %s", exc)
+
+
+# Read-only tools allowed in plan mode (agent may observe but not modify).
+_PLAN_READONLY_TOOLS = frozenset({
+    "read_file", "list_files", "search_code", "search_file",
+    "get_file_info", "web_search", "web_fetch", "read_url",
+    "read_document", "think", "tool_help",
+    "list_goals", "get_goal_status",
+    "list_history", "git_diff", "factor_analysis",
+    "pattern_recognition", "list_skills", "load_skill",
+    "factor_cross_sectional_analysis", "factor_quintile_returns",
+    "factor_ic_decay", "factor_turnover",
+    "strategy_compare", "drawdown_analysis", "benchmark_comparison",
+})
+
+
+def _plan_mode_allowed_tools(mode: str) -> Optional[list[str]]:
+    """Restrict to read-only tools in plan mode; otherwise no restriction."""
+    if mode == "plan":
+        return list(_PLAN_READONLY_TOOLS)
+    return None
+
+
+def _thinking_instructions(thinking: str) -> str:
+    """Build system-prompt instructions for the thinking mode.
+
+    "auto" = no injection, let the provider decide.
+    """
+    if thinking == "off":
+        return (
+            "\n\nIMPORTANT: Do NOT use thinking/reasoning blocks. "
+            "Respond directly with your analysis."
+        )
+    if thinking == "on":
+        return (
+            "\n\nIMPORTANT: Use extended thinking for complex analysis. "
+            "Show your reasoning process in <think> blocks."
+        )
+    return ""
+
+
+def _resolve_loop_prompt(system_prompt: Optional[str], persona: Optional[str]):
+    """Resolve the final system prompt and loop role.
+
+    Unknown persona → fall back to the caller-provided prompt (empty string
+    is treated as "no override").
+    """
+    final_prompt = system_prompt
+    loop_role = "chat"
+    if system_prompt is None and persona:
+        from strategy_research.core.agent.prompt_builder import PromptBuilderFactory
+
+        if persona in PromptBuilderFactory.list_roles():
+            persona_prompt = PromptBuilderFactory.get(persona).build_system_prompt(persona, {})
+            if persona_prompt:
+                final_prompt = persona_prompt
+                loop_role = persona
+    return final_prompt, loop_role
 
 
 class SessionService:
@@ -78,13 +386,19 @@ class SessionService:
         self._processing_sessions: set[str] = set()
         self._paused_sessions: dict[str, asyncio.Event] = {}
         self._queue_consumers: dict[str, "asyncio.Task"] = {}
+        # PERF-1: event-driven attempt completion (replaces 250ms polling)
+        self._attempt_events: dict[str, asyncio.Event] = {}
+        self._attempt_results: dict[str, dict[str, str]] = {}
 
     # ── Session lifecycle ──────────────────────────────────────────────
 
-    def create_session(self, session_id: str, title: str = "") -> dict[str, Any]:
+    def create_session(
+        self, session_id: str, title: str = "", user_id: str = "anonymous"
+    ) -> dict[str, Any]:
         """Create a new session row if it doesn't exist.
 
-        Returns the session metadata dict.
+        ``user_id`` records the owning user (default "anonymous" keeps
+        TUI/CLI callers working). Returns the session metadata dict.
         """
         import time
 
@@ -100,7 +414,7 @@ class SessionService:
                     "INSERT INTO sessions (id, user_id, title, created_at, updated_at, "
                     "starred, tags_json, message_count, archived) "
                     "VALUES (?, ?, ?, ?, ?, 0, '[]', 0, 0)",
-                    (session_id, "anonymous", title or "新会话", now, now),
+                    (session_id, user_id, title or "新会话", now, now),
                 )
                 conn.commit()
 
@@ -304,7 +618,19 @@ class SessionService:
 
         Used when the caller knows the session but not the attempt id
         (e.g. the frontend's Cancel button). Returns True if cancelled.
+
+        Also cancels the in-flight attempt task directly to prevent orphan
+        tasks when the consumer is cancelled while an attempt is running.
         """
+        # First, cancel the in-flight attempt task (if any) to prevent orphans
+        for aid, task in list(self._active_loops.items()):
+            # Find the attempt task belonging to this session
+            # (check via store lookup since _active_loops keys by attempt_id)
+            attempt = self.store.get_attempt(session_id, aid)
+            if attempt is not None and not task.done():
+                task.cancel()
+                break
+
         consumer = self._queue_consumers.get(session_id)
         if consumer is None:
             return False
@@ -331,6 +657,23 @@ class SessionService:
         §11 — the mutex between chat and study is cooperative.
         """
         return session_id in self._processing_sessions
+
+    def get_available_actions(self, session_id: str) -> list[dict[str, str]]:
+        """Actions the current session state permits (C3: drives the UI).
+
+        Returns a list of ``{name, label, destructive}`` dicts.
+        """
+        actions: list[dict[str, str]] = []
+        if session_id in self._processing_sessions:
+            # Running attempt: can cancel
+            actions.append({"name": "cancel", "label": "取消", "destructive": "false"})
+        if session_id in self._paused_sessions:
+            # Paused: can resume
+            actions.append({"name": "resume", "label": "恢复", "destructive": "false"})
+        if session_id not in self._processing_sessions and session_id not in self._paused_sessions:
+            # Idle: can send
+            actions.append({"name": "send", "label": "发送", "destructive": "false"})
+        return actions
 
     def mark_session_processing(
         self, session_id: str, *, processing: bool
@@ -363,35 +706,45 @@ class SessionService:
           dropped once drained (``_process_session_queue``), so stale
           pending rows from before a restart are skipped too.
 
+        C1: also returns the 5 most recent FAILED attempts (with error)
+        so the frontend can display failure reasons.
+
         Returns one dict per live attempt:
-        ``{"attempt_id", "message_id", "status", "prompt", "created_at"}``
-        with status normalized to ``running`` / ``queued`` for the
-        frontend.
+        ``{"attempt_id", "message_id", "status", "prompt", "created_at",
+          "error"}``
+        with status normalized to ``running`` / ``queued`` / ``failed``.
         """
         attempts = self.store.list_attempts_by_status(
             session_id,
-            [AttemptStatus.PENDING.value, AttemptStatus.RUNNING.value],
+            [AttemptStatus.PENDING.value, AttemptStatus.RUNNING.value,
+             AttemptStatus.FAILED.value],
         )
         queue_alive = session_id in self._session_queues
         out: list[dict[str, str]] = []
+        failed_count = 0
         for attempt in attempts:
             if attempt.status == AttemptStatus.RUNNING:
                 if attempt.attempt_id not in self._active_loops:
                     continue
                 status = "running"
+            elif attempt.status == AttemptStatus.FAILED:
+                # C1: include up to 5 recent failures with error info
+                failed_count += 1
+                if failed_count > 5:
+                    continue
+                status = "failed"
             else:
                 if not queue_alive:
                     continue
                 status = "queued"
-            out.append(
-                {
-                    "attempt_id": attempt.attempt_id,
-                    "message_id": attempt.message_id or "",
-                    "status": status,
-                    "prompt": attempt.prompt or "",
-                    "created_at": attempt.created_at or "",
-                }
-            )
+            out.append({
+                "attempt_id": attempt.attempt_id or "",
+                "message_id": attempt.message_id or "",
+                "status": status,
+                "prompt": attempt.prompt[:200] if attempt.prompt else "",
+                "created_at": attempt.created_at,
+                "error": attempt.error or "",
+            })
         return out
 
     async def wait_for_attempt(
@@ -402,27 +755,29 @@ class SessionService:
     ) -> Optional[dict[str, str]]:
         """Wait for a background attempt to finish; return its outcome.
 
-        Polls the attempts table (the source of truth for status).
-        Used by the synchronous /api/chat/send path, which must block
-        until the per-session FIFO consumer has run the attempt.
+        Uses asyncio.Event (PERF-1) for zero-latency wakeup on
+        completion instead of polling. The event is set by
+        ``_signal_attempt_done`` when the attempt reaches a terminal state.
 
         Returns ``{"status", "summary", "error"}`` on completion, or
         None when the timeout elapses while the attempt is still
         pending/running (e.g. a long queue ahead of it).
         """
-        terminal = ("completed", "failed", "cancelled")
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            attempt = self.store.get_attempt(session_id, attempt_id)
-            if attempt is not None and attempt.status in terminal:
-                return {
-                    "status": attempt.status,
-                    "summary": attempt.summary or "",
-                    "error": attempt.error or "",
-                }
-            if asyncio.get_event_loop().time() > deadline:
-                return None
-            await asyncio.sleep(0.25)
+        # Fast path: already completed
+        result = self._attempt_results.get(attempt_id)
+        if result is not None:
+            return result
+
+        # Create event for this attempt
+        event = asyncio.Event()
+        self._attempt_events[attempt_id] = event
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._attempt_events.pop(attempt_id, None)
+        return self._attempt_results.pop(attempt_id, None)
 
     async def _process_session_queue(self, session_id: str) -> None:
         """Consumer coroutine for a session's message queue.
@@ -527,7 +882,15 @@ class SessionService:
         mode: str = "build",
         thinking: str = "auto",
     ) -> None:
-        """Execute an Attempt: load history → run AgentLoop → persist result."""
+        """Execute an Attempt: load history -> run AgentLoop -> persist result.
+
+        Runs in its own asyncio task (``asyncio.create_task``), so the
+        trace context set here is task-scoped and auto-discarded on
+        completion -- no manual reset needed.
+        """
+        from ...core.observability.trace import _session_id, _trace_id
+        _trace_id.set(attempt.attempt_id or uuid.uuid4().hex[:12])
+        _session_id.set(session_id)
         logger.info("[EXEC] start attempt=%s session=%s", attempt.attempt_id, session_id)
         attempt.mark_running()
 
@@ -575,19 +938,73 @@ class SessionService:
 
             # 2. Run AgentLoop with history context
             logger.info("[EXEC] running agent_loop model=%s max_iter=%d", model, max_iterations)
-            result_dict = await self._run_with_agent(
-                attempt=attempt,
-                history=history,
-                model=model,
-                max_iterations=max_iterations,
-                system_prompt=system_prompt,
-                allow_shell_tools=allow_shell_tools,
-                persona=getattr(attempt, "persona", None),
-                mode=mode,
-                thinking=thinking,
-                cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
-                accumulated_parts=accumulated_parts,
-            )
+            # C1: wallclock timeout — a hung AgentLoop (stuck tool/LLM
+            # stream) must not block the session queue forever.
+            if _CHAT_ATTEMPT_TIMEOUT > 0:
+                try:
+                    result_dict = await asyncio.wait_for(
+                        self._run_with_agent(
+                            attempt=attempt,
+                            history=history,
+                            model=model,
+                            max_iterations=max_iterations,
+                            system_prompt=system_prompt,
+                            allow_shell_tools=allow_shell_tools,
+                            persona=getattr(attempt, "persona", None),
+                            mode=mode,
+                            thinking=thinking,
+                            cfg=cfg,
+                            accumulated_parts=accumulated_parts,
+                        ),
+                        timeout=_CHAT_ATTEMPT_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[EXEC] attempt %s timed out after %ds",
+                        attempt.attempt_id, _CHAT_ATTEMPT_TIMEOUT,
+                    )
+                    attempt.mark_failed(
+                        error=f"attempt timed out after {_CHAT_ATTEMPT_TIMEOUT}s"
+                    )
+                    self.store.update_attempt(attempt)
+                    self.event_bus.emit(
+                        session_id, "attempt.failed",
+                        {"attempt_id": attempt.attempt_id, "status": "error",
+                         "error": attempt.error},
+                    )
+                    self.event_bus.emit(
+                        session_id, "agent_done",
+                        {"message_id": attempt.message_id, "status": "error"},
+                    )
+                    # C1.3: hanging events for observability
+                    try:
+                        from ...core.study.hanging_events import record_event
+                        record_event(
+                            "chat_attempt_stall",
+                            session_id=session_id,
+                            detail=f"attempt={attempt.attempt_id} timeout={_CHAT_ATTEMPT_TIMEOUT}s",
+                        )
+                    except Exception:  # noqa: BLE001 — best-effort
+                        pass
+                    self._signal_attempt_done(attempt.attempt_id, {
+                        "status": "error", "summary": "",
+                        "error": f"attempt timed out after {_CHAT_ATTEMPT_TIMEOUT}s",
+                    })
+                    return
+            else:
+                result_dict = await self._run_with_agent(
+                    attempt=attempt,
+                    history=history,
+                    model=model,
+                    max_iterations=max_iterations,
+                    system_prompt=system_prompt,
+                    allow_shell_tools=allow_shell_tools,
+                    persona=getattr(attempt, "persona", None),
+                    mode=mode,
+                    thinking=thinking,
+                    cfg=cfg,  # Pass cfg from _run_attempt to avoid NameError
+                    accumulated_parts=accumulated_parts,
+                )
             logger.info("[EXEC] agent_result status=%s content_len=%d",
                        result_dict.get("status"), len(result_dict.get("content", "")))
 
@@ -610,7 +1027,6 @@ class SessionService:
             attempt.metrics = result_dict.get("metrics")
             attempt.message_id = result_dict.get("message_id") or attempt.message_id
             self.store.update_attempt(attempt)
-
             # Persist message with the Attempt's message_id
             # (this is the SAME id SSE events carry, so they can find it).
             assistant_content = answer or "".join(
@@ -670,6 +1086,7 @@ class SessionService:
                     "error": attempt.error,
                     "run_dir": attempt.run_dir,
                     "message_id": attempt.message_id,
+                    "asked_user": bool(result_dict.get("asked_user")),
                 },
             )
 
@@ -677,8 +1094,18 @@ class SessionService:
             self.event_bus.emit(
                 session_id,
                 "agent_done",
-                {"message_id": attempt.message_id, "status": attempt.status.value},
+                {
+                    "message_id": attempt.message_id,
+                    "status": attempt.status.value,
+                    "asked_user": bool(result_dict.get("asked_user")),
+                },
             )
+            # PERF-1: signal event-driven wait_for_attempt
+            self._signal_attempt_done(attempt.attempt_id, {
+                "status": attempt.status.value,
+                "summary": attempt.summary or "",
+                "error": attempt.error or "",
+            })
         except asyncio.CancelledError:
             attempt.mark_failed(error="cancelled")
             self.store.update_attempt(attempt)
@@ -692,6 +1119,9 @@ class SessionService:
                 "agent_done",
                 {"message_id": attempt.message_id, "status": "cancelled"},
             )
+            self._signal_attempt_done(attempt.attempt_id, {
+                "status": "cancelled", "summary": "", "error": "cancelled",
+            })
             raise
         except Exception as exc:
             logger.exception("AgentLoop failed for attempt %s", attempt.attempt_id)
@@ -707,6 +1137,16 @@ class SessionService:
                 "agent_done",
                 {"message_id": attempt.message_id, "status": "error", "error": str(exc)},
             )
+            self._signal_attempt_done(attempt.attempt_id, {
+                "status": "error", "summary": "", "error": str(exc),
+            })
+
+    def _signal_attempt_done(self, attempt_id: str, result: dict[str, str]) -> None:
+        """PERF-1: signal an event-driven wait_for_attempt that the attempt is done."""
+        self._attempt_results[attempt_id] = result
+        event = self._attempt_events.get(attempt_id)
+        if event is not None:
+            event.set()
 
     async def _run_with_agent(
         self,
@@ -747,165 +1187,16 @@ class SessionService:
         if cfg and model:
             cfg.model = model
 
-        # Build AgentLoop (Phase 6: factory unifies the 3 chat-mode call sites).
-        # Caller-provided system_prompt wins (passed via system_prompt_override);
-        # otherwise factory renders chat.md with the real workspace path (P3).
-        workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
-
-        # Bootstrap workspace if incomplete
-        _bootstrap_workspace(workspace_path)
-
-        # Event callback: forward AgentLoop events → EventBus.
-        # Each event carries message_id so SSE clients can correlate.
-        # Also accumulates llm_usage tokens into attempt-local metrics so
-        # the frontend can show context usage progress.
-        usage_lock = threading.Lock()
-        usage_state: dict[str, int] = {"input": 0, "output": 0, "context_used": 0}
-
-        def _maybe_emit_goal_event(
-            event_bus: Any, session_id: str, data: dict[str, Any]
-        ) -> None:
-            """Detect goal tool results and emit the full-snapshot goal event.
-
-            When create_goal / add_evidence / complete_goal tools execute,
-            emit ONE full-snapshot ``goal_updated`` SSE event (built by
-            core/goal/events.build_goal_updated_payload). The event
-            drives the frontend panel AND is persisted by the projector
-            as a message_type='goal' message that enters the LLM context
-            (see docs/goal-events-panel-link.md).
-            """
-            import json as _json
-
-            tool_name = data.get("name", "")
-            change_type_map = {
-                "create_goal": "create",
-                "add_evidence": "evidence",
-                "complete_goal": "complete",
-            }
-            change_type = change_type_map.get(tool_name)
-            if change_type is None:
-                return
-
-            result_raw = data.get("result", "")
-            try:
-                result = (
-                    _json.loads(result_raw)
-                    if isinstance(result_raw, str)
-                    else result_raw
-                )
-            except (_json.JSONDecodeError, TypeError, ValueError):
-                return
-
-            if not isinstance(result, dict) or result.get("status") != "ok":
-                return
-
-            from ...core.goal import GoalStore
-            from ...core.goal.events import build_goal_updated_payload
-
-            truncate = 100
-            if cfg is not None and cfg.compact_config is not None:
-                truncate = cfg.compact_config.goal_evidence_truncate_chars
-
-            payload = None
-            try:
-                with GoalStore() as store:
-                    payload = build_goal_updated_payload(
-                        session_id,
-                        store,
-                        change_type,
-                        truncate_chars=truncate,
-                        evidence_text=result.get("text") if change_type == "evidence" else None,
-                    )
-            except Exception:  # noqa: BLE001
-                logger.warning("goal event build failed", exc_info=True)
-
-            if payload is not None:
-                event_bus.emit(session_id, "goal_updated", payload)
-
-        def event_callback(event_type: str, data: dict[str, Any]) -> None:
-            """AgentLoop on_event adapter for the B4 event-sourced path.
-
-            Two jobs per event:
-            1. Accumulate the part protocol (text/tool/thinking) into
-               ``accumulated_parts`` for the assistant message body.
-            2. Forward the event onto EventBusV2 (event_log + SSE);
-               tool/usage data ride along in ``event.data`` so the
-               projector can merge them into the message parts.
-
-            Mirrors the legacy ``chat.py::_run_agent_loop_background``
-            on_event closure; keep both in sync until that path is
-            removed (see the TODO there).
-            """
-            # Accumulate parts for persistence
-            _accumulate_part(accumulated_parts, event_type, data)
-
-            # B4: tool result persistence is handled by EventBusV2 →
-            # projector.flush(). The tool_result event lands in event_log,
-            # the projector merges it into the assistant message's tool_call
-            # part, and flush writes the updated message to messages table.
-            # No direct DB write needed here.
-
-            # Track token usage so the frontend can show a context
-            # usage bar. llm_usage is emitted by AgentLoop after each
-            # LLM call (see core/agent/loop.py).
-            if event_type == "llm_usage" and isinstance(data, dict):
-                with usage_lock:
-                    # OpenAI-compatible providers use input_tokens /
-                    # output_tokens; some send prompt_tokens /
-                    # completion_tokens. Accept both.
-                    inc_in = int(
-                        data.get("input_tokens")
-                        or data.get("prompt_tokens")
-                        or 0
-                    )
-                    inc_out = int(
-                        data.get("output_tokens")
-                        or data.get("completion_tokens")
-                        or 0
-                    )
-                    usage_state["input"] += inc_in
-                    usage_state["output"] += inc_out
-                    # context_used = the size of the prompt actually sent
-                    # to the model on the most recent LLM call. This is the
-                    # current context-window occupancy (bounded; drops after
-                    # compaction), unlike total_tokens which is cumulative
-                    # spend. Overwrite (not accumulate) — a fresh call
-                    # re-sends the whole context.
-                    prompt_used = int(
-                        data.get("prompt_tokens")
-                        or data.get("input_tokens")
-                        or 0
-                    )
-                    if prompt_used > 0:
-                        usage_state["context_used"] = prompt_used
-                total = usage_state["input"] + usage_state["output"]
-                # Emit a session_total_tokens event so the frontend
-                # has an authoritative figure (not the per-call delta).
-                self.event_bus.emit(
-                    attempt.session_id,
-                    "session_total_tokens",
-                    {
-                        "input_tokens": usage_state["input"],
-                        "output_tokens": usage_state["output"],
-                        "total_tokens": total,
-                        "context_used": usage_state["context_used"],
-                        "message_id": attempt.message_id,
-                        "attempt_id": attempt.attempt_id,
-                    },
-                )
-
-            # Add attempt/message context
-            data = dict(data)
-            data.setdefault("attempt_id", attempt.attempt_id)
-            data.setdefault("message_id", attempt.message_id)
-
-            # Detect goal tool results → emit goal SSE events for frontend
-            if event_type == "tool_result":
-                _maybe_emit_goal_event(
-                    self.event_bus, attempt.session_id, data
-                )
-
-            self.event_bus.emit(attempt.session_id, event_type, data)
+        # Event callback: forward AgentLoop events → EventBus. Each event
+        # carries message_id so SSE clients can correlate; llm_usage tokens
+        # accumulate into attempt-local metrics (see _LoopEventForwarder).
+        forwarder = _LoopEventForwarder(
+            self,
+            attempt=attempt,
+            accumulated_parts=accumulated_parts,
+            event_bus=self.event_bus,
+            cfg=cfg,
+        )
 
         # Build AgentLoop (Phase 6: via shared factory)
         workspace_path = Path(os.environ.get("SR_WORKSPACE_PATH", str(Path.cwd())))
@@ -914,53 +1205,14 @@ class SessionService:
         _bootstrap_workspace(workspace_path)
 
         # ── Plan mode: restrict to read-only tools ────────────────────
-        _PLAN_READONLY_TOOLS = {
-            "read_file", "list_files", "search_code", "search_file",
-            "get_file_info", "web_search", "web_fetch", "read_url",
-            "read_document", "think", "tool_help",
-            "list_goals", "get_goal_status",
-            "list_history", "git_diff", "factor_analysis",
-            "pattern_recognition", "list_skills", "load_skill",
-            "factor_cross_sectional_analysis", "factor_quintile_returns",
-            "factor_ic_decay", "factor_turnover",
-            "strategy_compare", "drawdown_analysis", "benchmark_comparison",
-        }
-        allowed_tools: list[str] | None = None
-        if mode == "plan":
-            allowed_tools = list(_PLAN_READONLY_TOOLS)
+        allowed_tools = _plan_mode_allowed_tools(mode)
 
         # ── Thinking parameter injection ──────────────────────────────
-        # Inject thinking instructions into system prompt based on mode
-        thinking_instructions = ""
-        if thinking == "off":
-            thinking_instructions = (
-                "\n\nIMPORTANT: Do NOT use thinking/reasoning blocks. "
-                "Respond directly with your analysis."
-            )
-        elif thinking == "on":
-            thinking_instructions = (
-                "\n\nIMPORTANT: Use extended thinking for complex analysis. "
-                "Show your reasoning process in <think> blocks."
-            )
-        # "auto" = no injection, let provider decide
+        thinking_instructions = _thinking_instructions(thinking)
 
         # Persona override: when a valid persona is requested, render its
         # system prompt and use it in place of the default chat prompt.
-        # Unknown persona → fall back to the caller-provided/default chat
-        # prompt (empty string is treated as "no override").
-        final_prompt = system_prompt
-        loop_role = "chat"
-        if system_prompt is None and persona:
-            from strategy_research.core.agent.prompt_builder import (
-                PromptBuilderFactory,
-            )
-            if persona in PromptBuilderFactory.list_roles():
-                persona_prompt = PromptBuilderFactory.get(persona).build_system_prompt(
-                    persona, {}
-                )
-                if persona_prompt:
-                    final_prompt = persona_prompt
-                    loop_role = persona
+        final_prompt, loop_role = _resolve_loop_prompt(system_prompt, persona)
 
         # Append thinking instructions to system prompt
         if thinking_instructions and final_prompt is not None:
@@ -971,7 +1223,7 @@ class SessionService:
             session_id=attempt.session_id,
             role=loop_role,
             workspace=workspace_path,  # P3: real workspace path for {workspace}
-            on_event=event_callback,
+            on_event=forwarder,
             event_bus=self.event_bus,
             max_iterations=max_iterations,
             system_prompt_override=final_prompt,  # caller-provided wins
@@ -981,20 +1233,15 @@ class SessionService:
         )
 
         # Run synchronously inside the asyncio loop (AgentLoop.arun is async).
+        # DAG-orchestrator continuation guard: when the LLM ends a turn with
+        # a question instead of driving the DAG loop (AgentLoop breaks on any
+        # turn without tool calls), inject a "keep going" turn and rerun —
+        # bounded by SR_ORCHESTRATOR_MAX_CONTINUES (default 10) so a
+        # pathological loop always terminates normally.
         try:
-            loop_result = await agent.arun(attempt.prompt, history=history)
-        except Exception as exc:
-            logger.exception("AgentLoop.arun failed")
+            loop_result, asked_user, retries = await self._run_with_guard(agent, attempt, history)
+        except RuntimeError as exc:
             return {"status": "failed", "reason": str(exc), "content": ""}
-
-        logger.debug(
-            "[DIAG] AgentLoop result: answer=%.200r finished_reason=%s error=%s iterations=%d tool_calls=%d",
-            loop_result.answer[:200] if loop_result.answer else "",
-            loop_result.finished_reason,
-            loop_result.error,
-            loop_result.iterations,
-            loop_result.tool_calls_made,
-        )
 
         return {
             "status": "success" if loop_result.answer else "empty",
@@ -1003,18 +1250,69 @@ class SessionService:
             "iterations": loop_result.iterations,
             "tool_calls_made": loop_result.tool_calls_made,
             "finished_reason": loop_result.finished_reason,
+            "asked_user": asked_user,
+            "continuations": retries,
             "error": loop_result.error,
-            "metrics": {
-                "input_tokens": usage_state["input"],
-                "output_tokens": usage_state["output"],
-                "total_tokens": usage_state["input"] + usage_state["output"],
-                **(
-                    {"claim_validation": loop_result.metrics.get("claim_validation")}
-                    if loop_result.metrics.get("claim_validation")
-                    else {}
-                ),
-            },
+            "metrics": _build_attempt_metrics(forwarder.usage_state, loop_result),
         }
+
+    async def _run_with_guard(self, agent: Any, attempt: Attempt, history: list[dict[str, Any]]):
+        """Run ``agent.arun`` with the DAG-orchestrator continuation guard.
+
+        When the LLM ends a turn with a question instead of driving the DAG
+        loop (AgentLoop breaks on any turn without tool calls), inject a
+        "keep going" turn and rerun — bounded by
+        ``SR_ORCHESTRATOR_MAX_CONTINUES`` (default 10) so a pathological loop
+        always terminates normally.
+
+        Returns ``(loop_result, asked_user, retries)`` on success; raises
+        ``RuntimeError`` on AgentLoop failure (caller converts to a failed
+        result dict).
+        """
+        from strategy_research.core.workflow.orchestrate_guard import (
+            continue_instruction,
+            looks_like_question,
+            max_continues,
+        )
+
+        is_dag_session = attempt.session_id.startswith("dag:")
+        retries = 0
+        guard_cap = max_continues() if is_dag_session else 0
+        while True:
+            try:
+                loop_result = await agent.arun(attempt.prompt, history=history)
+            except Exception as exc:
+                logger.exception("AgentLoop.arun failed")
+                raise RuntimeError(str(exc)) from exc
+
+            final_answer = loop_result.answer or ""
+            asked_user = (
+                is_dag_session
+                and loop_result.tool_calls_made == 0
+                and looks_like_question(final_answer)
+            )
+            if not asked_user or retries >= guard_cap:
+                logger.debug(
+                    "[DIAG] AgentLoop result: answer=%.200r finished_reason=%s error=%s iterations=%d tool_calls=%d",
+                    loop_result.answer[:200] if loop_result.answer else "",
+                    loop_result.finished_reason,
+                    loop_result.error,
+                    loop_result.iterations,
+                    loop_result.tool_calls_made,
+                )
+                return loop_result, asked_user, retries
+            logger.info(
+                "[DAG-GUARD] orchestrator answered with a question (retry %d/%d), continuing",
+                retries + 1,
+                guard_cap,
+            )
+            # Feed the LLM its own answer plus the continuation instruction
+            # as history so the next attempt sees the full conversation.
+            history = list(history) + [
+                {"role": "assistant", "content": final_answer},
+                {"role": "user", "content": continue_instruction()},
+            ]
+            retries += 1
 
     async def _run_test_script(
         self,
@@ -1198,92 +1496,112 @@ class SessionService:
 
         Writes compressed results back to the database.
         Returns dict with keys: layers, before_tokens, after_tokens, summary.
+
+        Acquires per-session compact lock to prevent concurrent compaction
+        (auto from agent loop + manual /compact) on the same session.
         """
         from ..routers.chat import _build_llm_config
+        from ...core.agent.compact import _compact_locks
 
-        messages = self.store.get_messages(session_id, limit=10000)
-        # keep_all_compactions from the caller-supplied CompactConfig
-        keep_all = bool(
-            config
-            and config.keep_all_compactions_in_history
-        )
-        history = self._convert_messages_to_history(
-            messages, keep_all_compactions=keep_all
-        )
+        async with await _compact_locks.get(session_id):
+            messages = self.store.get_messages(session_id, limit=10000)
+            # keep_all_compactions from the caller-supplied CompactConfig
+            keep_all = bool(
+                config
+                and config.keep_all_compactions_in_history
+            )
+            history = self._convert_messages_to_history(
+                messages, keep_all_compactions=keep_all
+            )
 
-        if not history:
-            return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
+            if not history:
+                return {"layers": [], "before_tokens": 0, "after_tokens": 0, "summary": ""}
 
-        cfg = _build_llm_config()
-        llm_client = None
-        model_context_tokens = None
-        if cfg:
-            model_context_tokens = cfg.model_context_tokens
-            try:
-                from strategy_research.core.llm import OpenAICompatClient
-                llm_client = OpenAICompatClient(cfg)
-            except Exception:
-                pass
+            cfg = _build_llm_config()
+            llm_client = None
+            model_context_tokens = None
+            if cfg:
+                model_context_tokens = cfg.model_context_tokens
+                try:
+                    from strategy_research.core.llm import OpenAICompatClient
+                    llm_client = OpenAICompatClient(cfg)
+                except Exception:
+                    pass
 
-        compressed, layers, _l4_summary, _l4_recent = compact_messages(
-            history,
-            config=config,
-            threshold_tokens=0,  # force all layers for manual /compact
-            model_context_tokens=model_context_tokens,
-            llm_client=llm_client,
-        )
+            compressed, layers, _l4_summary, _l4_recent = compact_messages(
+                history,
+                config=config,
+                threshold_tokens=0,  # force all layers for manual /compact
+                model_context_tokens=model_context_tokens,
+                llm_client=llm_client,
+            )
 
-        before_tokens = sum(len(m.get("content", "")) for m in history)
-        after_tokens = sum(len(m.get("content", "")) for m in compressed)
+            before_tokens = sum(len(m.get("content", "")) for m in history)
+            after_tokens = sum(len(m.get("content", "")) for m in compressed)
 
-        # Build summary: prefer LLM-generated [context summary], fallback to extraction
-        summary = self._extract_summary(compressed)
-        if not summary and layers:
-            summary = self._build_fallback_summary(compressed, history)
+            # Build summary: prefer LLM-generated [context summary], fallback to extraction
+            summary = self._extract_summary(compressed)
+            if not summary and layers:
+                summary = self._build_fallback_summary(compressed, history)
 
-        # Persist compressed history via event-sourcing (B4/B5)
-        # Emit compact.ended event with the compressed message set.
-        # The projector keeps ALL original messages (chat record) and
-        # adds a compaction marker carrying compacted_until_seq.
-        # EventBusV2.flush_to_messages=True ensures messages table is updated.
-        if layers:
-            try:
-                # opencode-aligned: emit compact.ended with the
-                # compressed set. The projector KEEPS all original
-                # messages in the projection (chat record preserved)
-                # and records compacted_until_seq on the marker so the
-                # LLM context builder can hide the covered messages.
-                # The boundary is computed from the compressed recent
-                # messages' seqs (attached during history conversion).
-                compacted_until_seq = None
-                recent_seqs = [
-                    m.get("seq") for m in (compressed or [])
-                    if m.get("role") != "system" and isinstance(m.get("seq"), int)
-                ]
-                if recent_seqs:
-                    compacted_until_seq = min(recent_seqs) - 1
-                self.event_bus.emit(
-                    session_id,
-                    "compact.ended",
-                    {
-                        "summary": summary or f"Compressed {before_tokens} → {after_tokens} tokens",
-                        "before_tokens": before_tokens,
-                        "after_tokens": after_tokens,
-                        "layers": layers,
-                        "messages": compressed,
-                        "compacted_until_seq": compacted_until_seq,
-                    },
-                )
-            except Exception:
-                logger.exception("failed to emit compact event")
+            # Persist compressed history via event-sourcing (B4/B5)
+            # Emit compact.ended event with the compressed message set.
+            # The projector keeps ALL original messages (chat record) and
+            # adds a compaction marker carrying compacted_until_seq.
+            # EventBusV2.flush_to_messages=True ensures messages table is updated.
+            if layers:
+                try:
+                    # C4.2: emit compact.count with message counts for observability
+                    msg_count_before = len(messages)
+                    msg_count_after = len(compressed) if compressed else msg_count_before
+                    self.event_bus.emit(
+                        session_id,
+                        "compact.count",
+                        {
+                            "messages_before": msg_count_before,
+                            "messages_after": msg_count_after,
+                            "tokens_before": before_tokens,
+                            "tokens_after": after_tokens,
+                            "layers": layers,
+                        },
+                    )
 
-        return {
-            "layers": layers,
-            "before_tokens": before_tokens,
-            "after_tokens": after_tokens,
-            "summary": summary,
-            "compressed": compressed,
-        }
+                    # opencode-aligned: emit compact.ended with the
+                    # compressed set. The projector KEEPS all original
+                    # messages in the projection (chat record preserved)
+                    # and records compacted_until_seq on the marker so the
+                    # LLM context builder can hide the covered messages.
+                    # The boundary is computed from the compressed recent
+                    # messages' seqs (attached during history conversion).
+                    compacted_until_seq = None
+                    recent_seqs = [
+                        m.get("seq") for m in (compressed or [])
+                        if m.get("role") != "system" and isinstance(m.get("seq"), int)
+                    ]
+                    if recent_seqs:
+                        compacted_until_seq = min(recent_seqs) - 1
+                    self.event_bus.emit(
+                        session_id,
+                        "compact.ended",
+                        {
+                            "summary": summary or f"Compressed {before_tokens} → {after_tokens} tokens",
+                            "before_tokens": before_tokens,
+                            "after_tokens": after_tokens,
+                            "layers": layers,
+                            "messages": compressed,
+                            "compacted_until_seq": compacted_until_seq,
+                        },
+                    )
+                except Exception:
+                    logger.exception("failed to emit compact event")
+
+            return {
+                "layers": layers,
+                "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "summary": summary,
+                "compressed": compressed,
+            }
 
     # ── History conversion ────────────────────────────────────────────
 
@@ -1327,289 +1645,385 @@ class SessionService:
                 See docs/compaction-history-filter.md.
         """
         from strategy_research.core.agent.compact import _compaction_metrics
-        from strategy_research.core.agent.compaction_message import CompactionMessage
 
         logger.debug("[HIST] converting %d messages", len(messages))
         _compaction_metrics["filter_calls"] += 1
 
-        # ── First pass: locate all compaction indices ──
-        compaction_indices: list[int] = []
-        for i, msg in enumerate(messages[:-1]):
-            mt = msg.message_type if hasattr(msg, "message_type") else "assistant"
-            if mt == "compaction":
-                compaction_indices.append(i)
-
-        # ── Decide which compactions to keep in LLM context ──
-        keep_compaction_indices: set[int]
-        if keep_all_compactions or not compaction_indices:
-            keep_compaction_indices = set(compaction_indices)
-        else:
-            # opencode-aligned: keep only the most recent compaction
-            keep_compaction_indices = {compaction_indices[-1]}
-            hidden = len(compaction_indices) - 1
-            _compaction_metrics["total_hidden"] += hidden
-            _compaction_metrics["total_kept"] += 1
-            if hidden > 0:
-                logger.debug(
-                    "[HIST] hiding %d older compactions, keeping 1 most recent",
-                    hidden,
-                )
-
-        # ── opencode-aligned: hide messages covered by compaction ──
-        # Each compaction marker records compacted_until_seq (the seq of
-        # the last message it covered). Everything with seq <= that was
-        # replaced by the summary: it stays in the DB (chat record) but
-        # must NOT enter the LLM context. The most recent compaction's
-        # boundary subsumes all older ones (summaries are cumulative).
-        hidden_until_seq: int = -1
-        for i in keep_compaction_indices:
-            msg = messages[i]
-            meta = getattr(msg, "metadata", None) or {}
-            boundary = meta.get("compacted_until_seq")
-            if isinstance(boundary, int) and boundary > hidden_until_seq:
-                hidden_until_seq = boundary
-        if hidden_until_seq >= 0:
-            hidden_msgs = sum(
-                1 for m in messages
-                if getattr(m, "seq", 0) <= hidden_until_seq
-                and getattr(m, "message_type", "") != "compaction"
-            )
-            _compaction_metrics["total_hidden"] += hidden_msgs
-            logger.debug(
-                "[HIST] hiding %d messages covered by compaction "
-                "(seq <= %d), kept in DB for chat record",
-                hidden_msgs, hidden_until_seq,
-            )
-
-        # ── Pre-build indexes for assistant-tool reordering ──
-        # tool_to_assistant_idx: tool_call_id -> assistant message index
-        # tc_to_tool_idx: tool_call_id -> tool message index
-        # These let us enforce the OpenAI protocol invariant:
-        #   assistant(tool_calls) MUST be followed by its tool result(s)
-        # opencode's to-llm-message.ts:assistant() guarantees this by
-        # physical structure (tool is a part of the assistant message).
-        # We achieve the same effect by reordering at conversion time.
-        tool_to_assistant_idx: dict[str, int] = {}
-        tc_to_tool_idx: dict[str, int] = {}
-        for i, msg in enumerate(messages[:-1]):
-            role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
-            if role == "assistant":
-                parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
-                for p in parts:
-                    if isinstance(p, dict) and p.get("type") == "tool_call":
-                        tc_id = p.get("id") or p.get("call_id")
-                        if tc_id:
-                            tool_to_assistant_idx.setdefault(tc_id, i)
-            elif role == "tool":
-                tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
-                if tc_id and tc_id not in tc_to_tool_idx:
-                    tc_to_tool_idx[tc_id] = i  # take first
+        # ── First pass: compaction + tool index bookkeeping ──
+        compaction_indices = _find_compaction_indices(messages)
+        keep_compaction_indices = _decide_kept_compactions(
+            compaction_indices, keep_all_compactions
+        )
+        hidden_until_seq = _hidden_until_seq(messages, keep_compaction_indices)
+        tool_to_assistant_idx, tc_to_tool_idx = _build_tool_indexes(messages)
 
         # ── Second pass: convert with filter + reorder ──
         # Each item: (entry_dict, group_id)
         # group_id is non-None for assistant+tools that must stay together
         # (preserved by trim).
         history_with_groups: list[tuple[dict[str, Any], int | None]] = []
-        compaction_count = 0
         emitted_assistant_idxs: set[int] = set()
         emitted_tool_msg_idxs: set[int] = set()
 
+        ctx = _HistoryConvertContext(
+            messages=messages,
+            hidden_until_seq=hidden_until_seq,
+            keep_compaction_indices=keep_compaction_indices,
+            tool_to_assistant_idx=tool_to_assistant_idx,
+            tc_to_tool_idx=tc_to_tool_idx,
+        )
+
         for i, msg in enumerate(messages[:-1]):
-            role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
-            content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-            parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
-            message_type = msg.message_type if hasattr(msg, "message_type") else "assistant"
-
-            # opencode-aligned: skip messages covered by compaction.
-            # They stay in the DB (chat record) but are replaced by the
-            # summary in LLM context. Compaction markers themselves are
-            # handled by the branch below (not hidden here).
-            if (
-                hidden_until_seq >= 0
-                and message_type != "compaction"
-                and getattr(msg, "seq", 0) <= hidden_until_seq
-            ):
-                continue
-
-            # Handle compaction messages: filter then convert
-            if message_type == "compaction":
-                if i not in keep_compaction_indices:
-                    continue  # skip older compactions
-                compaction_count += 1
-                logger.debug("[HIST] keeping compaction msg id=%s content_len=%d",
-                           msg.message_id, len(content))
-                comp = CompactionMessage(
-                    id=msg.message_id,
-                    session_id=msg.session_id,
-                    summary=content,
-                    recent="",
-                    reason="auto",
-                )
-                history_with_groups.append((comp.to_llm_message(), None))
-                continue
-
-            # Goal messages: role=system state snapshot that the agent
-            # MUST see (it tracks goal evolution — docs/goal-events-
-            # panel-link.md). Kept verbatim as a system message with a
-            # self-explaining [目标状态] prefix; never folded into the
-            # user/assistant conversation. Messages covered by
-            # compaction (seq <= boundary) are dropped by the filter
-            # above, so old goal snapshots leave the context naturally.
-            if message_type == "goal":
-                history_with_groups.append(
-                    ({"role": "system", "content": content or ""}, None)
-                )
-                continue
-
-            if role == "tool":
-                # Tool messages are emitted as part of their assistant.
-                # Three cases:
-                # 1. Already emitted alongside its assistant → skip
-                # 2. Assistant comes later in the list → defer (we'll pair it then)
-                # 3. Assistant not in this history slice (orphan) → drop with log
-                if i in emitted_tool_msg_idxs:
-                    continue
-                tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
-                if not tc_id:
-                    continue
-                assistant_idx = tool_to_assistant_idx.get(tc_id)
-                if assistant_idx is None or assistant_idx in emitted_assistant_idxs:
-                    # Orphan or already-paired-but-skipped → drop
-                    if assistant_idx is None:
-                        logger.debug(
-                            "[HIST] orphan tool dropped: tc_id=%s msg_id=%s",
-                            tc_id, msg.message_id,
-                        )
-                    continue
-                # Defer: assistant is later, will be paired then
-                continue
-
-            if role not in ("user", "assistant"):
-                continue
-
-            entry: dict[str, Any] = {"role": role, "content": content or ""}
-            # Attach the DB seq so downstream compaction can compute
-            # the exact boundary (compacted_until_seq).
-            msg_seq = getattr(msg, "seq", None)
-            if isinstance(msg_seq, int):
-                entry["seq"] = msg_seq
-            group_id: int | None = None
-
-            if role == "assistant" and parts:
-                tool_calls = []
-                for p in parts:
-                    if not isinstance(p, dict) or p.get("type") != "tool_call":
-                        continue
-                    tc_id = p.get("id") or p.get("call_id")
-                    if not tc_id:
-                        continue
-                    args_str = p.get("arguments") or "{}"
-                    if not isinstance(args_str, str):
-                        args_str = json.dumps(args_str, ensure_ascii=False)
-                    tool_calls.append({
-                        "id": tc_id,
-                        "type": "function",
-                        "function": {
-                            "name": p.get("name", ""),
-                            "arguments": args_str,
-                        },
-                    })
-                if tool_calls:
-                    entry["tool_calls"] = tool_calls
-                    group_id = i  # this assistant + its tools share group_id
-
-            if not content and not entry.get("tool_calls"):
-                continue
-
-            history_with_groups.append((entry, group_id))
-            emitted_assistant_idxs.add(i)
-
-            # Immediately follow with tool results for each tool_call.
-            # Two sources (in priority order):
-            #   1. Separate role="tool" messages (if they exist in DB)
-            #   2. Embedded result in assistant's _parts (projector pattern)
-            if role == "assistant" and entry.get("tool_calls"):
-                seen_tc_ids: set[str] = set()
-                for tc in entry["tool_calls"]:
-                    tc_id = tc["id"]
-                    if tc_id in seen_tc_ids:
-                        continue
-                    seen_tc_ids.add(tc_id)
-
-                    tool_content = ""
-                    source_found = False
-
-                    # Source 1: try separate tool message (legacy/compat)
-                    tool_msg_idx = tc_to_tool_idx.get(tc_id)
-                    if tool_msg_idx is not None and tool_msg_idx not in emitted_tool_msg_idxs:
-                        tool_msg = messages[tool_msg_idx]
-                        tool_content = (
-                            tool_msg.content if hasattr(tool_msg, "content")
-                            else tool_msg.get("content", "")
-                        )
-                        emitted_tool_msg_idxs.add(tool_msg_idx)
-                        source_found = True
-
-                    # Source 2: extract from assistant's _parts (projector pattern)
-                    if not source_found:
-                        for p in parts:
-                            if not isinstance(p, dict) or p.get("type") != "tool_call":
-                                continue
-                            p_id = p.get("id") or p.get("call_id")
-                            if p_id == tc_id:
-                                tool_content = p.get("result", "")
-                                if not tool_content and p.get("status") == "error":
-                                    error_msg = p.get("error", "tool execution failed")
-                                    tool_content = json.dumps(
-                                        {"status": "error", "error": error_msg},
-                                        ensure_ascii=False,
-                                    )
-                                break
-
-                    tool_entry = {
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": tool_content or "",
-                    }
-                    history_with_groups.append((tool_entry, group_id))
+            entries = _convert_one_history_message(
+                i, msg, ctx, emitted_assistant_idxs, emitted_tool_msg_idxs
+            )
+            if entries:
+                history_with_groups.extend(entries)
 
         # ── Trim by character budget from newest → oldest, preserving
         #    assistant-tool group integrity. ──
-        # Group consecutive entries that share the same group_id;
-        # each group is either kept whole or dropped whole. Within
-        # a group, the order is preserved (assistant before its tools).
-        grouped: list[list[tuple[dict[str, Any], int | None]]] = []
-        current_group: list[tuple[dict[str, Any], int | None]] = []
-        current_group_id: int | None = -1  # sentinel: no group yet
-        for entry, gid in history_with_groups:
-            if gid == current_group_id and gid is not None:
-                current_group.append((entry, gid))
-            else:
-                if current_group:
-                    grouped.append(current_group)
-                current_group = [(entry, gid)]
-                current_group_id = gid
-        if current_group:
-            grouped.append(current_group)
+        return _trim_history_groups(history_with_groups)
 
-        total_chars = 0
-        kept_groups: list[list[dict[str, Any]]] = []  # outer: groups in arrival order
-        for group in reversed(grouped):
-            group_chars = 0
-            for e, _ in group:
-                group_chars += len(e.get("content", ""))
-                for tc in e.get("tool_calls") or []:
-                    group_chars += len(tc.get("function", {}).get("arguments", ""))
-            if total_chars + group_chars > MAX_HISTORY_CHARS:
-                # Drop this whole group; older groups are even larger
-                # relative to budget and also dropped
-                continue
-            kept_groups.append([e for e, _ in group])
-            total_chars += group_chars
-        # Reverse the outer group order (oldest group first), but keep
-        # each group's internal order (assistant before tools).
-        kept_groups.reverse()
-        return [e for group in kept_groups for e in group]
+
+@dataclasses.dataclass
+class _HistoryConvertContext:
+    """Shared state for the history conversion second pass."""
+    messages: list
+    hidden_until_seq: int
+    keep_compaction_indices: set[int]
+    tool_to_assistant_idx: dict[str, int]
+    tc_to_tool_idx: dict[str, int]
+
+
+def _find_compaction_indices(messages: list) -> list[int]:
+    """Locate all compaction message indices (excluding the current turn)."""
+    indices: list[int] = []
+    for i, msg in enumerate(messages[:-1]):
+        mt = msg.message_type if hasattr(msg, "message_type") else "assistant"
+        if mt == "compaction":
+            indices.append(i)
+    return indices
+
+
+def _decide_kept_compactions(
+    compaction_indices: list[int], keep_all_compactions: bool
+) -> set[int]:
+    """Decide which compactions to keep in LLM context."""
+    from strategy_research.core.agent.compact import _compaction_metrics
+
+    if keep_all_compactions or not compaction_indices:
+        return set(compaction_indices)
+    # opencode-aligned: keep only the most recent compaction
+    kept = {compaction_indices[-1]}
+    hidden = len(compaction_indices) - 1
+    _compaction_metrics["total_hidden"] += hidden
+    _compaction_metrics["total_kept"] += 1
+    if hidden > 0:
+        logger.debug(
+            "[HIST] hiding %d older compactions, keeping 1 most recent",
+            hidden,
+        )
+    return kept
+
+
+def _hidden_until_seq(messages: list, keep_compaction_indices: set[int]) -> int:
+    """Compute the seq boundary hidden by the kept compaction markers.
+
+    Everything with seq <= the boundary was replaced by the summary:
+    it stays in the DB (chat record) but must NOT enter the LLM context.
+    """
+    from strategy_research.core.agent.compact import _compaction_metrics
+
+    hidden_until_seq: int = -1
+    for i in keep_compaction_indices:
+        msg = messages[i]
+        meta = getattr(msg, "metadata", None) or {}
+        boundary = meta.get("compacted_until_seq")
+        if isinstance(boundary, int) and boundary > hidden_until_seq:
+            hidden_until_seq = boundary
+    if hidden_until_seq >= 0:
+        hidden_msgs = sum(
+            1 for m in messages
+            if getattr(m, "seq", 0) <= hidden_until_seq
+            and getattr(m, "message_type", "") != "compaction"
+        )
+        _compaction_metrics["total_hidden"] += hidden_msgs
+        logger.debug(
+            "[HIST] hiding %d messages covered by compaction "
+            "(seq <= %d), kept in DB for chat record",
+            hidden_msgs, hidden_until_seq,
+        )
+    return hidden_until_seq
+
+
+def _build_tool_indexes(
+    messages: list,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Build assistant/tool lookup indexes for OpenAI protocol reordering.
+
+    ``tool_to_assistant_idx``: tool_call_id -> assistant message index.
+    ``tc_to_tool_idx``: tool_call_id -> tool message index.
+    """
+    tool_to_assistant_idx: dict[str, int] = {}
+    tc_to_tool_idx: dict[str, int] = {}
+    for i, msg in enumerate(messages[:-1]):
+        role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
+        if role == "assistant":
+            parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
+            for p in parts:
+                if isinstance(p, dict) and p.get("type") == "tool_call":
+                    tc_id = p.get("id") or p.get("call_id")
+                    if tc_id:
+                        tool_to_assistant_idx.setdefault(tc_id, i)
+        elif role == "tool":
+            tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
+            if tc_id and tc_id not in tc_to_tool_idx:
+                tc_to_tool_idx[tc_id] = i  # take first
+    return tool_to_assistant_idx, tc_to_tool_idx
+
+
+def _defer_or_drop_tool_message(
+    i: int,
+    msg,
+    ctx: _HistoryConvertContext,
+    emitted_tool_msg_idxs: set[int],
+    emitted_assistant_idxs: set[int],
+) -> list:
+    """Handle a role="tool" message: skip, defer, or drop as orphan.
+
+    Tool messages are emitted as part of their assistant:
+    1. Already emitted alongside its assistant → skip
+    2. Assistant comes later in the list → defer (paired then)
+    3. Assistant not in this history slice (orphan) → drop with log
+    """
+    if i in emitted_tool_msg_idxs:
+        return []
+    tc_id = msg.tool_call_id if hasattr(msg, "tool_call_id") else None
+    if not tc_id:
+        return []
+    assistant_idx = ctx.tool_to_assistant_idx.get(tc_id)
+    if assistant_idx is None or assistant_idx in emitted_assistant_idxs:
+        if assistant_idx is None:
+            logger.debug(
+                "[HIST] orphan tool dropped: tc_id=%s msg_id=%s",
+                tc_id, msg.message_id,
+            )
+        return []
+    return []  # Defer: assistant is later, will be paired then
+
+
+def _convert_one_history_message(
+    i: int,
+    msg,
+    ctx: _HistoryConvertContext,
+    emitted_assistant_idxs: set[int],
+    emitted_tool_msg_idxs: set[int],
+) -> list[tuple[dict[str, Any], int | None]]:
+    """Convert a single message into history entries (possibly empty).
+
+    ``emitted_assistant_idxs`` / ``emitted_tool_msg_idxs`` are mutated
+    to track which messages were already emitted.
+    """
+    from strategy_research.core.agent.compaction_message import CompactionMessage
+
+    role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
+    content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+    parts = msg.metadata.get("_parts", []) if hasattr(msg, "metadata") else []
+    message_type = msg.message_type if hasattr(msg, "message_type") else "assistant"
+
+    # Skip messages covered by compaction (kept in DB, replaced by summary).
+    if (
+        ctx.hidden_until_seq >= 0
+        and message_type != "compaction"
+        and getattr(msg, "seq", 0) <= ctx.hidden_until_seq
+    ):
+        return []
+
+    # Compaction messages: filter then convert
+    if message_type == "compaction":
+        if i not in ctx.keep_compaction_indices:
+            return []
+        logger.debug(
+            "[HIST] keeping compaction msg id=%s content_len=%d",
+            msg.message_id, len(content),
+        )
+        comp = CompactionMessage(
+            id=msg.message_id,
+            session_id=msg.session_id,
+            summary=content,
+            recent="",
+            reason="auto",
+        )
+        return [(comp.to_llm_message(), None)]
+
+    # Goal messages: role=system state snapshot the agent MUST see.
+    if message_type == "goal":
+        return [({"role": "system", "content": content or ""}, None)]
+
+    if role == "tool":
+        return _defer_or_drop_tool_message(
+            i, msg, ctx, emitted_tool_msg_idxs, emitted_assistant_idxs
+        )
+
+    if role not in ("user", "assistant"):
+        return []
+
+    entry: dict[str, Any] = {"role": role, "content": content or ""}
+    msg_seq = getattr(msg, "seq", None)
+    if isinstance(msg_seq, int):
+        entry["seq"] = msg_seq
+    group_id: int | None = None
+
+    if role == "assistant" and parts:
+        tool_calls = _extract_tool_calls(parts)
+        if tool_calls:
+            entry["tool_calls"] = tool_calls
+            group_id = i  # this assistant + its tools share group_id
+
+    if not content and not entry.get("tool_calls"):
+        return []
+
+    emitted_assistant_idxs.add(i)
+    entries: list[tuple[dict[str, Any], int | None]] = [(entry, group_id)]
+
+    # Immediately follow with tool results for each tool_call.
+    if role == "assistant" and entry.get("tool_calls"):
+        _append_tool_results(
+            entry["tool_calls"],
+            parts,
+            ctx.messages,
+            ctx.tc_to_tool_idx,
+            emitted_tool_msg_idxs,
+            entries,
+            group_id,
+        )
+    return entries
+
+
+def _extract_tool_calls(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract OpenAI-format tool_calls from an assistant message's parts."""
+    tool_calls = []
+    for p in parts:
+        if not isinstance(p, dict) or p.get("type") != "tool_call":
+            continue
+        tc_id = p.get("id") or p.get("call_id")
+        if not tc_id:
+            continue
+        args_str = p.get("arguments") or "{}"
+        if not isinstance(args_str, str):
+            args_str = json.dumps(args_str, ensure_ascii=False)
+        tool_calls.append({
+            "id": tc_id,
+            "type": "function",
+            "function": {
+                "name": p.get("name", ""),
+                "arguments": args_str,
+            },
+        })
+    return tool_calls
+
+
+def _append_tool_results(
+    tool_calls: list[dict[str, Any]],
+    parts: list[dict[str, Any]],
+    messages: list,
+    tc_to_tool_idx: dict[str, int],
+    emitted_tool_msg_idxs: set[int],
+    history_with_groups: list[tuple[dict[str, Any], int | None]],
+    group_id: int | None,
+) -> None:
+    """Append tool result entries right after their assistant message.
+
+    Two sources (in priority order):
+      1. Separate role="tool" messages (if they exist in DB)
+      2. Embedded result in assistant's _parts (projector pattern)
+    """
+    seen_tc_ids: set[str] = set()
+    for tc in tool_calls:
+        tc_id = tc["id"]
+        if tc_id in seen_tc_ids:
+            continue
+        seen_tc_ids.add(tc_id)
+
+        tool_content = ""
+        source_found = False
+
+        # Source 1: separate tool message (legacy/compat)
+        tool_msg_idx = tc_to_tool_idx.get(tc_id)
+        if tool_msg_idx is not None and tool_msg_idx not in emitted_tool_msg_idxs:
+            tool_msg = messages[tool_msg_idx]
+            tool_content = (
+                tool_msg.content if hasattr(tool_msg, "content")
+                else tool_msg.get("content", "")
+            )
+            emitted_tool_msg_idxs.add(tool_msg_idx)
+            source_found = True
+
+        # Source 2: extract from assistant's _parts (projector pattern)
+        if not source_found:
+            for p in parts:
+                if not isinstance(p, dict) or p.get("type") != "tool_call":
+                    continue
+                p_id = p.get("id") or p.get("call_id")
+                if p_id == tc_id:
+                    tool_content = p.get("result", "")
+                    if not tool_content and p.get("status") == "error":
+                        error_msg = p.get("error", "tool execution failed")
+                        tool_content = json.dumps(
+                            {"status": "error", "error": error_msg},
+                            ensure_ascii=False,
+                        )
+                    break
+
+        history_with_groups.append((
+            {
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": tool_content or "",
+            },
+            group_id,
+        ))
+
+
+def _trim_history_groups(
+    history_with_groups: list[tuple[dict[str, Any], int | None]],
+) -> list[dict[str, Any]]:
+    """Trim history by character budget, keeping assistant-tool groups intact.
+
+    Group consecutive entries sharing a group_id; each group is kept
+    whole or dropped whole. Within a group the order is preserved.
+    Returns the final OpenAI-format history list.
+    """
+    grouped: list[list[tuple[dict[str, Any], int | None]]] = []
+    current_group: list[tuple[dict[str, Any], int | None]] = []
+    current_group_id: int | None = -1  # sentinel: no group yet
+    for entry, gid in history_with_groups:
+        if gid == current_group_id and gid is not None:
+            current_group.append((entry, gid))
+        else:
+            if current_group:
+                grouped.append(current_group)
+            current_group = [(entry, gid)]
+            current_group_id = gid
+    if current_group:
+        grouped.append(current_group)
+
+    total_chars = 0
+    kept_groups: list[list[dict[str, Any]]] = []  # groups in arrival order
+    for group in reversed(grouped):
+        group_chars = 0
+        for e, _ in group:
+            group_chars += len(e.get("content", ""))
+            for tc in e.get("tool_calls") or []:
+                group_chars += len(tc.get("function", {}).get("arguments", ""))
+        if total_chars + group_chars > MAX_HISTORY_CHARS:
+            # Drop this whole group; older groups are even larger
+            continue
+        kept_groups.append([e for e, _ in group])
+        total_chars += group_chars
+    # Reverse the outer group order (oldest first), keep each group's order.
+    kept_groups.reverse()
+    return [e for group in kept_groups for e in group]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -1633,71 +2047,106 @@ def _accumulate_part(
     error and the chunk is dropped.
     """
     if event_type == "text.started":
-        text_id = data.get("text_id")
-        if not text_id:
-            logger.warning("text.started without text_id")
-            return
-        # Idempotent: SSE replay / duplicate emission. If a text part
-        # with this id already exists, treat as a no-op.
-        for p in reversed(parts):
-            if p.get("type") == "text" and p.get("id") == text_id:
-                return
-        parts.append({"type": "text", "id": text_id, "text": ""})
+        _accumulate_text_started(parts, data)
     elif event_type == "text_delta":
-        text_id = data.get("text_id")
-        text = data.get("text", "")
-        if not text_id:
-            logger.warning("text_delta without text_id, dropping chunk")
-            return
-        for p in reversed(parts):
-            if p.get("type") == "text" and p.get("id") == text_id:
-                p["text"] += text
-                break
-        else:
-            # Orphan: text.started hasn't arrived yet (replay / late join).
-            logger.warning("text_delta with orphan text_id=%s, pushing new", text_id)
-            parts.append({"type": "text", "id": text_id, "text": text})
+        _accumulate_text_delta(parts, data)
     elif event_type == "text.ended":
-        text_id = data.get("text_id")
-        final_text = data.get("text", "")
-        if not text_id:
-            logger.warning("text.ended without text_id")
-            return
-        for p in reversed(parts):
-            if p.get("type") == "text" and p.get("id") == text_id:
-                p["text"] = final_text
-                break
+        _accumulate_text_ended(parts, data)
     elif event_type == "tool_call":
-        raw_args = data.get("arguments")
-        args_str = (
-            raw_args
-            if isinstance(raw_args, str)
-            else json.dumps(raw_args, ensure_ascii=False) if raw_args is not None else None
-        )
-        parts.append(
-            {
-                "type": "tool_call",
-                "id": data.get("id") or data.get("call_id"),
-                "name": data.get("name") or data.get("tool"),
-                "arguments": args_str,
-            }
-        )
+        parts.append(_build_tool_call_part(data))
     elif event_type == "tool_result":
-        tool_call_id = data.get("id") or data.get("call_id")
-        for p in reversed(parts):
-            if p.get("type") == "tool_call" and p.get("id") == tool_call_id:
-                p["result"] = data.get("result") or data.get("preview")
-                p["status"] = data.get("status", "done")
-                break
+        _accumulate_tool_result(parts, data)
     elif event_type == "thinking_delta":
-        delta = data.get("delta", "")
-        if parts and parts[-1].get("type") == "thinking":
-            parts[-1]["text"] += delta
-        else:
-            parts.append({"type": "thinking", "text": delta})
+        _accumulate_thinking_delta(parts, data)
     elif event_type == "thinking_done":
         if parts and parts[-1].get("type") == "thinking":
             parts[-1]["status"] = "done"
+
+
+def _accumulate_text_started(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Push a new text part (idempotent by text_id)."""
+    text_id = data.get("text_id")
+    if not text_id:
+        logger.warning("text.started without text_id")
+        return
+    for p in reversed(parts):
+        if p.get("type") == "text" and p.get("id") == text_id:
+            return
+    parts.append({"type": "text", "id": text_id, "text": ""})
+
+
+def _accumulate_text_delta(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Append delta text to the matching text part (or create orphan)."""
+    text_id = data.get("text_id")
+    text = data.get("text", "")
+    if not text_id:
+        logger.warning("text_delta without text_id, dropping chunk")
+        return
+    for p in reversed(parts):
+        if p.get("type") == "text" and p.get("id") == text_id:
+            p["text"] += text
+            break
+    else:
+        logger.warning("text_delta with orphan text_id=%s, pushing new", text_id)
+        parts.append({"type": "text", "id": text_id, "text": text})
+
+
+def _accumulate_text_ended(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Override the matching text part with the final text."""
+    text_id = data.get("text_id")
+    final_text = data.get("text", "")
+    if not text_id:
+        logger.warning("text.ended without text_id")
+        return
+    for p in reversed(parts):
+        if p.get("type") == "text" and p.get("id") == text_id:
+            p["text"] = final_text
+            break
+
+
+def _build_tool_call_part(data: dict[str, Any]) -> dict[str, Any]:
+    """Build a tool_call part from an SSE event payload."""
+    raw_args = data.get("arguments")
+    args_str = (
+        raw_args
+        if isinstance(raw_args, str)
+        else json.dumps(raw_args, ensure_ascii=False) if raw_args is not None else None
+    )
+    return {
+        "type": "tool_call",
+        "id": data.get("id") or data.get("call_id"),
+        "name": data.get("name") or data.get("tool"),
+        "arguments": args_str,
+    }
+
+
+def _accumulate_tool_result(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Attach a tool result to the matching tool_call part."""
+    tool_call_id = data.get("id") or data.get("call_id")
+    for p in reversed(parts):
+        if p.get("type") == "tool_call" and p.get("id") == tool_call_id:
+            p["result"] = data.get("result") or data.get("preview")
+            p["status"] = data.get("status", "done")
+            break
+
+
+def _accumulate_thinking_delta(
+    parts: list[dict[str, Any]], data: dict[str, Any]
+) -> None:
+    """Append a thinking delta to the last thinking part (or create one)."""
+    delta = data.get("delta", "")
+    if parts and parts[-1].get("type") == "thinking":
+        parts[-1]["text"] += delta
+    else:
+        parts.append({"type": "thinking", "text": delta})
 
 
 def _utc_now_iso() -> str:

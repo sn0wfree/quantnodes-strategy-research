@@ -18,7 +18,6 @@ from typing import Iterator
 import pytest
 import requests
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = REPO_ROOT / "webui" / "static"
 
@@ -55,18 +54,36 @@ def _wait_for_http(url: str, timeout: float = 30.0, interval: float = 0.1) -> No
 
 @pytest.fixture(scope="session")
 def built_frontend() -> Path:
-    """确保 webui/static/ 存在 (前端构建产物)。"""
-    if not STATIC_DIR.exists():
-        # Auto-build if missing — saves a manual step in CI.
-        print(f"\n[conftest] Building frontend → {STATIC_DIR}...")
+    """确保 webui/static/ 存在且含 E2E hooks (前端构建产物)。
+
+    The E2E build must be produced with VITE_E2E=1 so main.tsx exposes
+    ``window.__sessionStore`` etc. (gated by ``import.meta.env.VITE_E2E``).
+    If the existing static dir lacks the hooks, rebuild with the flag.
+    """
+    def _has_e2e_hooks() -> bool:
+        if not STATIC_DIR.exists():
+            return False
+        assets = STATIC_DIR / "assets"
+        if not assets.is_dir():
+            return False
+        for js in assets.glob("*.js"):
+            if b"__sessionStore" in js.read_bytes():
+                return True
+        return False
+
+    if not _has_e2e_hooks():
+        # Auto-build if missing or stale — saves a manual step in CI.
+        print(f"\n[conftest] Building frontend (VITE_E2E=1) → {STATIC_DIR}...")
         subprocess.run(
             ["npm", "run", "build"],
             cwd=str(REPO_ROOT / "webui" / "frontend"),
             check=True,
             capture_output=True,
+            env={**os.environ, "VITE_E2E": "1"},
         )
     assert STATIC_DIR.exists(), f"Frontend build missing: {STATIC_DIR}"
     assert (STATIC_DIR / "index.html").exists(), f"index.html missing in {STATIC_DIR}"
+    assert _has_e2e_hooks(), "Frontend build lacks E2E hooks (VITE_E2E=1)"
     return STATIC_DIR
 
 
@@ -93,6 +110,9 @@ def backend_server(built_frontend: Path) -> Iterator[dict]:
         "CORS_ORIGINS": "*",
         "PYTHONUNBUFFERED": "1",
         "SR_WORKSPACE_PATH": str(ws),
+        # E2E exercises the register → login → chat flow; registration is
+        # disabled by default in production (auth.py opt-in switch).
+        "SR_ALLOW_REGISTRATION": "1",
     })
 
     # Use the package's CLI entry point so we hit the same code path users would.

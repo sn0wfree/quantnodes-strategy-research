@@ -21,9 +21,8 @@ import time
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from starlette.responses import JSONResponse
 
-from strategy_research.api.auth_tokens import _b64_decode, _b64_encode, _load_secret
+from strategy_research.api.auth_tokens import _b64_encode, _load_secret
 from strategy_research.api.middleware import AuthMiddleware
 
 
@@ -340,3 +339,69 @@ class TestMiddlewareInternals:
     def test_verify_malformed_token(self):
         mw = AuthMiddleware.__new__(AuthMiddleware)
         assert mw._verify_token("!!!not-base64!!!") is None
+
+
+# ────────────────────────── Disabled-account gate ──────────────────────────
+
+
+class TestDisabledAccount:
+    """A token for a disabled account must be rejected with 403 at the
+    middleware layer (immediate logout), while an unknown user id is
+    allowed through to let downstream handle auth."""
+
+    def test_disabled_user_rejected_403(self, app, client, monkeypatch, tmp_path):
+        from strategy_research.api import user_db as user_db_mod
+        from strategy_research.api.middleware import AuthMiddleware
+
+        user_db = user_db_mod.UserDB(tmp_path / "users.db")
+        user = user_db.create_user("offline", "Offline", "hash")
+        user_db.update_user(user["id"], is_active=0)
+
+        monkeypatch.setattr(user_db_mod, "get_user_db", lambda *a, **k: user_db)
+        mw = AuthMiddleware.__new__(AuthMiddleware)
+        assert mw._is_active(user["id"]) is False
+
+        # Full request path → 403.
+        headers = {"Authorization": f"Bearer {make_token(user['id'])}"}
+        res = client.get("/api/protected", headers=headers)
+        assert res.status_code == 403
+        assert res.json()["detail"] == "Account is disabled"
+
+    def test_active_user_allowed(self, app, client, monkeypatch, tmp_path):
+        import sqlite3
+
+        from strategy_research.api import user_db as user_db_mod
+
+        user_db = user_db_mod.UserDB(tmp_path / "users.db")
+        user = user_db.create_user("online", "Online", "hash")
+        monkeypatch.setattr(user_db_mod, "get_user_db", lambda *a, **k: user_db)
+
+        headers = {"Authorization": f"Bearer {make_token(user['id'])}"}
+        res = client.get("/api/protected", headers=headers)
+        assert res.status_code == 200
+        assert res.json()["user_id"] == user["id"]
+
+    def test_unknown_user_id_allowed_through(self, client, monkeypatch, tmp_path):
+        """Unknown user ids pass the middleware (is_active returns True) so
+        the downstream endpoint can 401/404 them."""
+        from strategy_research.api import user_db as user_db_mod
+
+        user_db = user_db_mod.UserDB(tmp_path / "users.db")
+        monkeypatch.setattr(user_db_mod, "get_user_db", lambda *a, **k: user_db)
+
+        headers = {"Authorization": f"Bearer {make_token('no-such-user')}"}
+        res = client.get("/api/protected", headers=headers)
+        assert res.status_code == 200  # middleware passes; endpoint has no auth dep
+
+    def test_is_active_swallows_db_errors(self, tmp_path, monkeypatch):
+        """If the DB lookup raises, _is_active should not crash the request."""
+        from strategy_research.api import user_db as user_db_mod
+        from strategy_research.api.middleware import AuthMiddleware
+
+        class BrokenDB:
+            def get_user_by_id(self, uid):
+                raise RuntimeError("db down")
+
+        monkeypatch.setattr(user_db_mod, "get_user_db", lambda *a, **k: BrokenDB())
+        mw = AuthMiddleware.__new__(AuthMiddleware)
+        assert mw._is_active("anything") is True

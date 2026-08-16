@@ -9,10 +9,7 @@ Reference: docs/text-part-routing.md
 """
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.api.session.service import _accumulate_part
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _accumulate_part: text.started / text_delta / text.ended lifecycle
@@ -135,7 +132,7 @@ def test_tool_call_and_tool_result_routing_unchanged():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_chat_py_on_event_text_protocol(monkeypatch):
+def test_chat_py_on_event_text_protocol(monkeypatch):  # noqa: C901
     """Verify the chat.py on_event callback applies the same text routing.
 
     Tests the inline logic in _run_agent_loop_background's on_event without
@@ -144,7 +141,7 @@ def test_chat_py_on_event_text_protocol(monkeypatch):
     """
     accumulated_parts: list[dict] = []
 
-    def on_event(event_type: str, data: dict) -> None:
+    def on_event(event_type: str, data: dict) -> None:  # noqa: C901
         # Mirror the chat.py logic (from _run_agent_loop_background)
         if event_type == "text.started":
             text_id = data.get("text_id")

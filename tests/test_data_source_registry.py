@@ -172,7 +172,7 @@ class TestGetLoaderOrFallback:
                 return False
 
         fake_cls = _FakeButDown
-        tushare_cls = registry.LOADER_REGISTRY.get("tushare")
+        registry.LOADER_REGISTRY.get('tushare')
 
         # Patch LOADER_REGISTRY to register fake_down + tushare
         new_registry = dict(registry.LOADER_REGISTRY)

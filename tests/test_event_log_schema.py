@@ -222,6 +222,10 @@ class TestEventLogIntegrationWithEnsureSchema(unittest.TestCase):
         )
         self.tmp.close()
         self.db_path = self.tmp.name
+        # Preserve the prior value so tearDown can restore it — leaking
+        # SR_WORKSPACE_PATH into later tests redirects the whole suite's
+        # session DB to this temp dir (shared-lock failures downstream).
+        self._orig_workspace_env = os.environ.get("SR_WORKSPACE_PATH")
         os.environ["SR_WORKSPACE_PATH"] = str(Path(self.db_path).parent)
         # Patch the path lookup
         import strategy_research.api.routers.web_session as ws
@@ -232,8 +236,14 @@ class TestEventLogIntegrationWithEnsureSchema(unittest.TestCase):
         importlib.reload(ws)
 
     def tearDown(self) -> None:
+        import os
+
         import strategy_research.api.routers.web_session as ws
         ws._get_db_path = self._orig_get_db_path
+        if self._orig_workspace_env is None:
+            os.environ.pop("SR_WORKSPACE_PATH", None)
+        else:
+            os.environ["SR_WORKSPACE_PATH"] = self._orig_workspace_env
         Path(self.db_path).unlink(missing_ok=True)
 
     def test_ensure_schema_creates_event_log(self) -> None:

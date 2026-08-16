@@ -9,8 +9,6 @@ from __future__ import annotations
 from typing import Any
 from unittest import mock
 
-import pytest
-
 from strategy_research.core.agent.loop import AgentLoop
 
 
@@ -62,7 +60,7 @@ class TestIterLifecycle:
         resp.tool_calls = []
         loop.client = mock.MagicMock()
         loop.client.chat = mock.MagicMock(return_value=resp)
-        result = loop.run("hello")
+        loop.run('hello')
 
         events = loop._on_event.events
         iter_starts = [d for et, d in events if et == "iter_start"]
@@ -302,7 +300,7 @@ class TestErrorEvent:
 
         from strategy_research.core.llm.errors import LLMRateLimitError
 
-        resp = mock.MagicMock()
+        mock.MagicMock()
         loop._stream_mode = False
         loop._get_goal_snapshot = lambda: None  # noqa: E731
         loop.client = mock.MagicMock()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,7 +17,6 @@ from strategy_research.core.agent.compact import (
     _split_into_turns,
     compact_messages,
 )
-
 
 # ── CompactConfig defaults ────────────────────────────────────────
 
@@ -106,132 +104,10 @@ class TestEstimateTokens:
 # See docs/compaction-phase-a-simplification.md for details.
 
 
-@pytest.mark.skip(reason="L1 _smart_microcompact removed in Phase A")
-class TestSmartMicrocompact:
-    def test_no_truncation_needed(self):
-        msgs = [{"role": "tool", "content": "short output"}]
-        cfg = CompactConfig(microcompact_tool_result_chars=2000)
-        result, count = _smart_microcompact(msgs, cfg)
-        assert count == 0
-        assert result[0]["content"] == "short output"
-
-    def test_truncation_applied(self):
-        long_content = "x" * 3000
-        msgs = [{"role": "tool", "content": long_content, "tool_call_id": "c1"}]
-        cfg = CompactConfig(microcompact_tool_result_chars=2000)
-        result, count = _smart_microcompact(msgs, cfg)
-        assert count == 1
-        assert len(result[0]["content"]) < 3000
-        assert "truncated" in result[0]["content"]
-
-    def test_head_tail_truncation(self):
-        content = "A" * 1000 + "MIDDLE" + "Z" * 1000
-        msgs = [{"role": "tool", "content": content, "tool_call_id": "c1"}]
-        cfg = CompactConfig(microcompact_tool_result_chars=200)
-        result, count = _smart_microcompact(msgs, cfg)
-        assert count == 1
-        truncated = result[0]["content"]
-        # Head 60% + tail 40% of 200 = 120 head + 80 tail
-        assert truncated.startswith("A" * 120)
-        assert truncated.endswith("Z" * 80)
-
-    def test_skip_error_messages(self):
-        error_content = "Error: something went wrong"
-        msgs = [{"role": "tool", "content": error_content}]
-        cfg = CompactConfig(microcompact_tool_result_chars=10)
-        result, count = _smart_microcompact(msgs, cfg)
-        assert count == 0
-
-    def test_skip_recent_tool_outputs(self):
-        msgs = [
-            {"role": "tool", "content": "x" * 3000, "tool_call_id": "c1"},
-            {"role": "tool", "content": "y" * 3000, "tool_call_id": "c2"},
-            {"role": "tool", "content": "z" * 3000, "tool_call_id": "c3"},
-            {"role": "tool", "content": "w" * 3000, "tool_call_id": "c4"},
-        ]
-        cfg = CompactConfig(microcompact_tool_result_chars=2000, collapse_keep_recent=2)
-        result, count = _smart_microcompact(msgs, cfg)
-        # Last 2 should be protected
-        assert count == 2
-
-    def test_per_tool_limit(self):
-        content = "x" * 3500
-        # Set up messages so tool name can be found
-        msgs = [
-            {"role": "assistant", "content": "", "tool_calls": [
-                {"id": "c1", "function": {"name": "read_file", "arguments": "{}"}}
-            ]},
-            {"role": "tool", "content": content, "tool_call_id": "c1"},
-        ]
-        cfg = CompactConfig(
-            microcompact_tool_result_chars=2000,
-            tool_truncate_chars={"read_file": 4000},
-        )
-        result, count = _smart_microcompact(msgs, cfg)
-        assert count == 0  # 3500 < 4000 limit for read_file
 
 
-# ── Tool name resolution (DEPRECATED, removed in Phase A) ──────────
 
 
-@pytest.mark.skip(reason="L1 _get_tool_name removed in Phase A")
-class TestGetToolName:
-    def test_find_tool_name(self):
-        msgs = [
-            {"role": "assistant", "content": "", "tool_calls": [
-                {"id": "c1", "function": {"name": "read_file", "arguments": "{}"}}
-            ]},
-            {"role": "tool", "content": "output", "tool_call_id": "c1"},
-        ]
-        assert _get_tool_name(msgs, 1) == "read_file"
-
-    def test_find_tool_name_nested_function(self):
-        msgs = [
-            {"role": "assistant", "content": "", "tool_calls": [
-                {"id": "c1", "function": {"name": "test", "arguments": "{}"}}
-            ]},
-            {"role": "tool", "content": "output", "tool_call_id": "c1"},
-        ]
-        assert _get_tool_name(msgs, 1) == "test"
-
-    def test_default_tool_name(self):
-        msgs = [{"role": "tool", "content": "output", "tool_call_id": "unknown"}]
-        assert _get_tool_name(msgs, 0) == "_default"
-
-
-# ── L3: Hard Truncate (DEPRECATED, removed in Phase A) ───────────
-# These tests are skipped because L3 (_hard_truncate) was removed in
-# commit A3. The L4-only flow doesn't drop oldest messages; L4 summary
-# replaces the old content instead.
-
-
-@pytest.mark.skip(reason="L3 _hard_truncate removed in Phase A")
-class TestHardTruncate:
-    def test_keeps_system_and_recent(self):
-        msgs = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "u1"},
-            {"role": "assistant", "content": "a1"},
-            {"role": "user", "content": "u2"},
-            {"role": "assistant", "content": "a2"},
-        ]
-        result = _hard_truncate(msgs, keep_recent=2)
-        assert len(result) == 3  # system + 2 recent
-        assert result[0]["content"] == "sys"
-        assert result[-1]["content"] == "a2"
-
-    def test_no_system(self):
-        msgs = [
-            {"role": "user", "content": "u1"},
-            {"role": "assistant", "content": "a1"},
-            {"role": "user", "content": "u2"},
-        ]
-        result = _hard_truncate(msgs, keep_recent=1)
-        assert len(result) == 1
-        assert result[0]["content"] == "u2"
-
-
-# ── Fix Tool Pairs ───────────────────────────────────────────────
 
 
 class TestFixToolPairs:
@@ -376,7 +252,6 @@ class TestSerializeMessage:
         assert result == "[System update]: you are helpful"
 
     def test_tool_error_detected(self):
-        import json
         error_content = json.dumps({"status": "error", "message": "file not found"})
         msg = {"role": "tool", "content": error_content, "tool_call_id": "c1"}
         result = _serialize_message(msg)

@@ -13,7 +13,6 @@ from strategy_research.core.goal.policy import (
     reject_live_execution_objective,
 )
 
-
 # ─── normalize_required_text ─────────────────────────────────────────────
 
 

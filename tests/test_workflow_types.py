@@ -1,4 +1,5 @@
 import pytest
+
 from strategy_research.core.workflow.types import (
     AgentCall,
     AgentStatus,

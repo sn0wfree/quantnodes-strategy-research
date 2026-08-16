@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from strategy_research.core.engine.artifacts import (
-    write_equity_curve,
-    write_trades_csv,
-    write_ohlcv_snapshots,
-    write_metrics_json,
     write_all_artifacts,
+    write_equity_curve,
+    write_metrics_json,
+    write_ohlcv_snapshots,
+    write_trades_csv,
 )
 from strategy_research.core.utils.backtest_models import (
     EquitySnapshot,
-    Position,
     TradeRecord,
 )
 

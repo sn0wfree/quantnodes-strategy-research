@@ -1,39 +1,40 @@
-"""Tests for the study executor: metric-target satisfaction + budget +
-pause/cancel + shutdown reasons.
+"""Tests for the study runner (AutoresearchRunner): metric-target
+satisfaction + budget + pause/cancel + shutdown reasons.
 
-Drives ``AutoresearchExecutor`` with ``run_research_round`` patched to
-return a controlled fake result (no autoresearch run). Cover:
-  - shutdown: TARGETS_MET (immediate on first round)
+Drives ``AutoresearchRunner`` with ``_run_one_round`` patched to return
+a controlled fake result (no autoresearch run). Cover:
+  - shutdown: TARGETS_MET (immediate on first round, e2_passed)
   - shutdown: MAX_ROUNDS
   - shutdown: BUDGET_LIMITED (turn budget)
   - shutdown: CANCELLED (control token)
   - shutdown: PAUSED → RESUME continuation
   - goal ledger reaches COMPLETE with evidence on every criterion
   - events emitted via the EventEmitter
+  - directive injection between rounds
+  - pure helpers (meets_metric_targets / _format_directives)
+
+The post-completion monitor phase is covered by
+``test_study_monitor.py`` (v2 semantics: in-sequence monitor phase
+instead of the retired background-task loop).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch
 
 import pytest
 
-from strategy_research.core.autoresearch import run_research_round
 from strategy_research.core.goal import GoalStore
 from strategy_research.core.goal.context import default_goal_criteria
-from strategy_research.core.study.executor import (
-    AutoresearchExecutor,
+from strategy_research.core.study.runner import (
+    AutoresearchRunner,
     ControlToken,
     ShutdownReason,
     meets_metric_targets,
 )
 from strategy_research.core.study.models import StudyStatus
 from strategy_research.core.study.store import StudyStore
-
 
 # ── fixtures ────────────────────────────────────────────────────────
 
@@ -67,13 +68,15 @@ class CollectingEmitter:
 
 
 def _make_round_result(metrics: dict, *, round: int = 1, run: str = "run_0001",
-                       verdict: str = "keep", stagnation: bool = False) -> dict:
+                       verdict: str = "keep", stagnation: bool = False,
+                       e2_passed: bool = False) -> dict:
     return {
         "round": round,
         "run_name": run,
         "run_dir": Path("/tmp/fake"),
         "metrics": metrics,
         "verdict": verdict,
+        "e2_passed": e2_passed,
         "decision": {"stagnation_triggered": stagnation,
                      "reason": "stale" if stagnation else "",
                      "to_dict": lambda: {"stagnation_triggered": stagnation}},
@@ -99,7 +102,7 @@ def _setup_with_goal(store: StudyStore, goal_store: GoalStore, **overrides):
         criteria=default_goal_criteria(),
     )
     kw = dict(
-        session_id="sess-st",
+        owner_session_id="sess-st",
         goal_id=goal.goal_id,
         objective="研究动量",
         workspace_path="/tmp/ws",
@@ -115,22 +118,37 @@ def _setup_with_goal(store: StudyStore, goal_store: GoalStore, **overrides):
     return goal, study
 
 
-def _round_lambda(metrics, verdict="keep", stagnation=False):
-    """Build a 3-or-4-arg compatible fake round function.
+def _round_lambda(metrics, verdict="keep", stagnation=False, e2_passed=False):
+    """Build a runner-compatible fake round function.
 
-    Accepts the old ``(self, r, prev)`` signature as well as the new
-    ``(self, r, prev, directives_text)`` one.
+    Runner signature: ``_run_one_round(round_num, previous_summary,
+    directive_text)``.
     """
     def _fake(self, r, prev, directives_text=None):
         return _make_round_result(metrics, round=r, verdict=verdict,
-                                 stagnation=stagnation)
+                                  stagnation=stagnation, e2_passed=e2_passed)
     return _fake
+
+
+def _patch_round(monkeypatch, fn, *, cooldown=0.0):
+    monkeypatch.setattr(
+        "strategy_research.core.study.runner.AutoresearchRunner."
+        "_run_one_round", fn,
+    )
+    monkeypatch.setattr(
+        "strategy_research.core.study.runner.AutoresearchRunner."
+        "_round_cooldown", lambda self: cooldown,
+    )
+    monkeypatch.setattr(
+        "strategy_research.core.study.runner.AutoresearchRunner."
+        "_maybe_load_previous_summary", lambda self, study: None,
+    )
 
 
 # ── shutdown: TARGETS_MET ───────────────────────────────────────────
 
 
-class TestExecutorShutdown:
+class TestRunnerShutdown:
     def test_targets_met_completes_goal_and_study(
         self, store, goal_store, monkeypatch
     ):
@@ -142,19 +160,12 @@ class TestExecutorShutdown:
             calls["n"] += 1
             return _make_round_result(
                 {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
+                e2_passed=True,
             )
 
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", fake_round,
-        )
-        # Also stub _round_cooldown so the loop doesn't wait.
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
+        _patch_round(monkeypatch, fake_round)
         emitter = CollectingEmitter()
-        ex = AutoresearchExecutor(
+        ex = AutoresearchRunner(
             study, store, goal_store=goal_store, emitter=emitter,
         )
         reason = asyncio.run(ex.run())
@@ -183,19 +194,14 @@ class TestExecutorShutdown:
             metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
         )
         # Metrics far below target, so loop only stops on max_rounds.
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round",
+        _patch_round(
+            monkeypatch,
             _round_lambda(
                 {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
                 verdict="discard",
             ),
         )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
+        ex = AutoresearchRunner(study, store, goal_store=goal_store)
         reason = asyncio.run(ex.run())
         assert reason == ShutdownReason.MAX_ROUNDS
         got = store.get_study(study.study_id)
@@ -208,16 +214,11 @@ class TestExecutorShutdown:
             budget_turn=9,  # exactly 1 round = 9 agents
             metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
         )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round",
+        _patch_round(
+            monkeypatch,
             _round_lambda({"calmar": 0.1}),
         )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
+        ex = AutoresearchRunner(study, store, goal_store=goal_store)
         reason = asyncio.run(ex.run())
         assert reason == ShutdownReason.BUDGET
         got = store.get_study(study.study_id)
@@ -237,15 +238,8 @@ class TestExecutorShutdown:
                 control.cancelled = True
             return _make_round_result({"calmar": 0.1}, round=r)
 
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", _round,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        ex = AutoresearchExecutor(
+        _patch_round(monkeypatch, _round)
+        ex = AutoresearchRunner(
             study, store, goal_store=goal_store, control=control,
         )
         reason = asyncio.run(ex.run())
@@ -279,20 +273,13 @@ class TestExecutorShutdown:
             paused_flag["seen"] = True
             control.paused = False
 
+        _patch_round(monkeypatch, _round)
         monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", _round,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
+            "strategy_research.core.study.runner.AutoresearchRunner."
             "_wait_until_resumed", _wait,
         )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
         emitter = CollectingEmitter()
-        ex = AutoresearchExecutor(
+        ex = AutoresearchRunner(
             study, store, goal_store=goal_store, control=control,
             emitter=emitter,
         )
@@ -306,7 +293,7 @@ class TestExecutorShutdown:
         assert "study_resumed" in ev_names
 
 
-class TestExecutorHelpers:
+class TestRunnerHelpers:
     def test_meets_metric_targets(self):
         assert meets_metric_targets(
             {"calmar": 0.6}, [{"name": "calmar", "op": ">=", "value": 0.5}],
@@ -333,18 +320,14 @@ class TestExecutorHelpers:
         # is COMPLETE with audit row.
         goal, study = _setup_with_goal(store, goal_store,
             metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}])
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round",
+        _patch_round(
+            monkeypatch,
             lambda self, r, prev, directives_text=None: _make_round_result(
                 {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
+                e2_passed=True,
             ),
         )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
+        ex = AutoresearchRunner(study, store, goal_store=goal_store)
         reason = asyncio.run(ex.run())
         assert reason == ShutdownReason.TARGETS_MET
         # Every required criterion must have evidence now.
@@ -361,11 +344,10 @@ class TestExecutorHelpers:
 
 class TestDirectiveInjection:
     def test_pending_directive_passed_to_round(self, store, monkeypatch):
-        # Use a study without metric targets so the executor doesn't bail
+        # Use a study without metric targets so the runner doesn't bail
         # out after one round — it should run round 1, then round 2, etc.
-        from strategy_research.core.study import StudyStatus
         study = store.create_study(
-            session_id="sess-st",
+            owner_session_id="sess-st",
             goal_id=None,
             objective="研究动量",
             workspace_path="/tmp/ws",
@@ -382,21 +364,8 @@ class TestDirectiveInjection:
                 {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2}, round=r,
             )
 
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", _round,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        # Round 1: no directive yet
-        # Round 2: directive added between rounds → consumed in round 2
-        # We simulate this by re-enqueuing after executor has read pending.
-        ex = AutoresearchExecutor(study, store, emitter=__import__(
-            "strategy_research.core.study.executor",
-            fromlist=["NullEmitter"],
-        ).NullEmitter())
+        _patch_round(monkeypatch, _round)
+        ex = AutoresearchRunner(study, store)
 
         # Pre-add directive → round 1 will see it
         store.add_directive(study.study_id, "改用动量因子", issued_by="chat:test")
@@ -412,12 +381,13 @@ class TestDirectiveInjection:
 
     def test_format_directives(self):
         from dataclasses import dataclass
-        from strategy_research.core.study.executor import AutoresearchExecutor
+
+        from strategy_research.core.study.runner import AutoresearchRunner
         @dataclass
         class D:
             content: str
             created_at: str = "2026-08-04T10:00:00+00:00"
-        out = AutoresearchExecutor._format_directives(
+        out = AutoresearchRunner._format_directives(
             [D("focus on volatility"), D("use small caps")]
         )
         assert "<user-directives>" in out
@@ -427,157 +397,11 @@ class TestDirectiveInjection:
 
     def test_empty_directives_list_format(self):
         """Empty input still wraps in user-directives block (no items)."""
-        from strategy_research.core.study.executor import AutoresearchExecutor
-        out = AutoresearchExecutor._format_directives([])
+        from strategy_research.core.study.runner import AutoresearchRunner
+        out = AutoresearchRunner._format_directives([])
         assert out.startswith("<user-directives>")
         assert "no directives" not in out  # still a valid block
-        # The executors guard (`if pending_directives` before calling
+        # The runner guards (`if pending_directives` before calling
         # _format_directives) is what actually keeps an empty list out
         # of the round's prompt — covered by the integration test
         # (test_pending_directive_passed_to_round).
-
-
-# ── Phase 3: monitoring loop ──────────────────────────────────────────
-
-
-class TestMonitoringLoop:
-    def test_complete_then_monitor_transitions_status(
-        self, store, goal_store, monkeypatch
-    ):
-        """A study with monitor_interval should launch monitor background task."""
-        control = ControlToken()
-        def _round(self, r, prev, directives_text=None):
-            return _make_round_result(
-                {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
-            )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", _round,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        checks = {"n": 0}
-        def _monitor_check(self):
-            checks["n"] += 1
-            from datetime import datetime, timezone
-            # After first check, request cancel so the loop exits cleanly.
-            control.cancelled = True
-            return {
-                "metrics": {"calmar": 0.6, "sharpe": 0.4, "max_dd": -0.1},
-                "verdict": "monitor",
-                "meets_targets": True,
-                "reason": "",
-                "now_iso": datetime.now(timezone.utc).isoformat(),
-            }
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_monitor_check", _monitor_check,
-        )
-        async def _fast_sleep(self, interval):
-            # skip the wait entirely
-            return None
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_monitor_sleep", _fast_sleep,
-        )
-
-        goal, study = _setup_with_goal(store, goal_store,
-            monitor_interval_seconds=60,
-        )
-        ex = AutoresearchExecutor(study, store, goal_store=goal_store,
-                                  control=control)
-
-        async def _run_and_wait():
-            reason = await ex.run()
-            assert reason == ShutdownReason.MONITORING
-            # Wait for the background monitor task to complete
-            if ex._monitor_task is not None:
-                await ex._monitor_task
-
-        asyncio.run(_run_and_wait())
-        assert checks["n"] >= 1
-        got = store.get_study(study.study_id)
-        # No drift detected → status remains MONITORING when cancelled.
-        assert got.execution_status in (
-            StudyStatus.MONITORING, StudyStatus.CANCELLED,
-        )
-
-    def test_drift_triggers_needs_refresh(
-        self, store, goal_store, monkeypatch
-    ):
-        """Monitor finds a regression → NEEDS_REFRESH."""
-        def _round(self, r, prev, directives_text=None):
-            return _make_round_result(
-                {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
-            )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", _round,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-        async def _fast_sleep(self, interval):
-            return None
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_monitor_sleep", _fast_sleep,
-        )
-
-        # Drift on first check — metrics too low to meet targets.
-        def _monitor_check(self):
-            from datetime import datetime, timezone
-            return {
-                "metrics": {"calmar": 0.1, "sharpe": 0.0, "max_dd": -0.2},
-                "verdict": "monitor",
-                "meets_targets": False,
-                "reason": "calmar below threshold",
-                "now_iso": datetime.now(timezone.utc).isoformat(),
-            }
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_monitor_check", _monitor_check,
-        )
-
-        goal, study = _setup_with_goal(store, goal_store,
-            monitor_interval_seconds=60,
-        )
-        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
-
-        async def _run_and_wait():
-            reason = await ex.run()
-            assert reason == ShutdownReason.MONITORING
-            # Wait for the background monitor task to complete
-            if ex._monitor_task is not None:
-                await ex._monitor_task
-
-        asyncio.run(_run_and_wait())
-        got = store.get_study(study.study_id)
-        assert got.execution_status == StudyStatus.NEEDS_REFRESH
-        assert got.monitor_drift_count == 1
-
-    def test_no_monitor_when_interval_none(
-        self, store, goal_store, monkeypatch
-    ):
-        """No monitor_interval → study stays COMPLETE."""
-        def _round(self, r, prev, directives_text=None):
-            return _make_round_result(
-                {"calmar": 0.62, "sharpe": 0.41, "max_dd": -0.1},
-            )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_run_one_round", _round,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.study.executor.AutoresearchExecutor."
-            "_round_cooldown", lambda self: 0.0,
-        )
-
-        goal, study = _setup_with_goal(store, goal_store)  # no monitor_interval
-        ex = AutoresearchExecutor(study, store, goal_store=goal_store)
-        asyncio.run(ex.run())
-        got = store.get_study(study.study_id)
-        assert got.execution_status == StudyStatus.COMPLETE

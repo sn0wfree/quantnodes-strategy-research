@@ -1,9 +1,10 @@
 """Tests for auth router and SSE event buffer."""
 
-import pytest
 import sqlite3
 import time
 import uuid
+
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -108,7 +109,6 @@ class TestSSEBuffer:
             assert len(buf._buffer) == 5
 
     def test_async_notification(self):
-        import asyncio
         from strategy_research.api.sse_buffer import SSEEventBuffer
         buf = SSEEventBuffer()
 
@@ -275,7 +275,8 @@ class TestMessages:
 
     def test_persist_message_via_helper(self, client):
         from strategy_research.api.routers.web_session import (
-            persist_message, _get_db,
+            _get_db,
+            persist_message,
         )
         sid = self._create_session(client)
         msg_id = persist_message(
@@ -304,10 +305,7 @@ class TestMessages:
             {"type": "text", "text": "Hello"},
             {"type": "tool_call", "id": "t1", "name": "fetch", "arguments": "{}"},
         ]
-        msg_id = persist_message(
-            session_id=sid, role="assistant",
-            content="Hello", parts=parts,
-        )
+        persist_message(session_id=sid, role='assistant', content='Hello', parts=parts)
         res = client.get(f"/api/chat/session/{sid}/messages")
         msgs = res.json()["messages"]
         assert len(msgs) == 1
@@ -353,7 +351,8 @@ class TestMessages:
 class TestAutoTitle:
     def test_auto_title_from_first_message(self, client):
         from strategy_research.api.routers.web_session import (
-            persist_message, auto_title_session, _get_db,
+            _get_db,
+            auto_title_session,
         )
         res = client.post("/api/chat/session", json={"title": "新会话"})
         sid = res.json()["id"]
@@ -367,7 +366,7 @@ class TestAutoTitle:
 
     def test_auto_title_skips_non_default(self, client):
         from strategy_research.api.routers.web_session import (
-            auto_title_session, _get_db,
+            auto_title_session,
         )
         res = client.post("/api/chat/session", json={"title": "Custom"})
         sid = res.json()["id"]

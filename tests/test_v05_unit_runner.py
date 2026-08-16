@@ -15,13 +15,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from strategy_research.core.goal.dag_renderer import render_dag, NodeStatus
+from strategy_research.core.goal.dag_renderer import NodeStatus, render_dag
 from strategy_research.core.goal.workflow import (
     GoalWorkflowRunner,
-    GoalWorkflowConfig,
-    GoalWorkflowGoalConfig,
-    GoalAgentConfig,
-    CompletionConfig,
 )
 from strategy_research.core.goal.workflow_config import load_goal_workflow
 

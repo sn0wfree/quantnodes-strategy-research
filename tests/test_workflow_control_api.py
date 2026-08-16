@@ -16,6 +16,7 @@ import pytest
 
 def _build_asgi_app():
     from fastapi import FastAPI
+
     from strategy_research.api.middleware import AuthMiddleware
     from strategy_research.api.routers import workflow
 

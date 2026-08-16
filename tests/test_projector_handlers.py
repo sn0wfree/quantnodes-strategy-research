@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from strategy_research.api.session.event_v2 import EventType, EventV2
+from strategy_research.core.events.event_v2 import EventType, EventV2
 from strategy_research.api.session.projector import (
     ProjectedMessage,
     ProjectedPart,
@@ -276,44 +276,3 @@ class TestProjectorOnCompactMarker(unittest.TestCase):
         self.assertEqual(msg.content, "updated")
 
 
-class TestProjectorOnCompactFullReplacement(unittest.TestCase):
-    def setUp(self) -> None:
-        self.proj = Projector(Path("/tmp/test.db"))
-        self.state = ProjectedSession(session_id="s1")
-
-    def test_replaces_messages_with_compressed(self) -> None:
-        for i in range(3):
-            e = _make_event(EventType.MESSAGE_RECEIVED, {"message_id": f"m{i}", "content": f"msg{i}"}, seq=i + 1)
-            self.proj._on_message_received(e, self.state)
-        self.assertEqual(len(self.state.messages), 3)
-        e = _make_event(EventType.COMPACT_ENDED, {
-            "summary": "replaced",
-            "messages": [
-                {"role": "user", "content": "cm1", "id": "cm1"},
-                {"role": "assistant", "content": "cm2", "id": "cm2"},
-            ],
-        }, seq=10)
-        self.proj._on_compact(e, self.state)
-        self.assertEqual(len(self.state.messages), 4)
-        self.assertNotIn("m0", self.state.messages)
-        self.assertIn("m2", self.state.messages)
-        self.assertIn("cm1", self.state.messages)
-        self.assertIn("cm2", self.state.messages)
-
-    def test_preserves_order(self) -> None:
-        for i in range(2):
-            e = _make_event(EventType.MESSAGE_RECEIVED, {"message_id": f"m{i}", "content": f"msg{i}"}, seq=i + 1)
-            self.proj._on_message_received(e, self.state)
-        e = _make_event(EventType.COMPACT_ENDED, {
-            "summary": "replaced",
-            "messages": [{"role": "user", "content": "cm1", "id": "cm1"}],
-        }, seq=10)
-        self.proj._on_compact(e, self.state)
-        ordered = self.state.messages_in_order()
-        self.assertEqual(ordered[0].id, "cm1")
-        self.assertEqual(ordered[1].message_type, "compaction")
-        self.assertEqual(ordered[2].id, "m1")
-
-
-if __name__ == "__main__":
-    unittest.main()

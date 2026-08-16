@@ -17,9 +17,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
-import re
 import warnings
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -27,7 +25,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from strategy_research.core.agent.compact import CompactConfig
-
 
 # ════════════════════════════════════════════════════════════════════
 # Fix 1: _amaybe_compact no longer uses nested asyncio.run + to_thread
@@ -72,9 +69,12 @@ class TestAmaybeCompactStructural:
         from strategy_research.core.agent.loop import AgentLoop
         src = _strip_docstring(inspect.getsource(AgentLoop._amaybe_compact))
         assert "await asyncio.to_thread(" in src
-        assert "compact_messages," in src
-        # Passes the sync client directly (no adapter wrapping)
-        assert "llm_client=self.client" in src
+        # The offloaded unit is the shared sync core (run_compact injected)
+        assert "_maybe_compact_impl" in src
+        # The engine invocation passes the sync client directly (no adapter)
+        impl_src = _strip_docstring(inspect.getsource(AgentLoop._run_compact_messages))
+        assert "compact_messages(" in impl_src
+        assert "llm_client=self.client" in impl_src
 
 
 class TestAmaybeCompactRuntime:

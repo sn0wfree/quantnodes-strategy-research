@@ -11,7 +11,6 @@ to avoid needing LLM config.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -162,7 +161,7 @@ class TestB2ServiceWiring(unittest.TestCase):
 
     def test_event_log_grows_with_service_operations(self) -> None:
         """Each service operation that emits events grows event_log."""
-        initial = self.v2_bus.count(self.session_id)
+        self.v2_bus.count(self.session_id)
 
         # Create another session
         sid2 = str(uuid.uuid4())

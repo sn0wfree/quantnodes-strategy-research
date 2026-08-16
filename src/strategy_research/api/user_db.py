@@ -9,7 +9,6 @@ Usage:
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 import threading
 import time
@@ -44,9 +43,21 @@ class UserDB:
                 username TEXT UNIQUE NOT NULL,
                 display_name TEXT,
                 password_hash TEXT NOT NULL,
-                created_at REAL NOT NULL
+                created_at REAL NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                is_active INTEGER NOT NULL DEFAULT 1
             )
         """)
+        # Migration: add role / is_active to pre-existing users tables.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        if "role" not in cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
+            )
+        if "is_active" not in cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+            )
         conn.commit()
 
     def close(self) -> None:
@@ -63,6 +74,8 @@ class UserDB:
         password_hash: str,
         user_id: Optional[str] = None,
         created_at: Optional[float] = None,
+        role: str = "user",
+        is_active: int = 1,
     ) -> dict:
         """Create a new user. Returns the user dict."""
         uid = user_id or str(uuid.uuid4())
@@ -70,9 +83,10 @@ class UserDB:
         conn = self._get_conn()
         with self._lock:
             conn.execute(
-                "INSERT INTO users (id, username, display_name, password_hash, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (uid, username, display_name, password_hash, ts),
+                "INSERT INTO users "
+                "(id, username, display_name, password_hash, created_at, role, is_active) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (uid, username, display_name, password_hash, ts, role, is_active),
             )
             conn.commit()
         return {
@@ -81,6 +95,8 @@ class UserDB:
             "display_name": display_name,
             "password_hash": password_hash,
             "created_at": ts,
+            "role": role,
+            "is_active": is_active,
         }
 
     def update_password(self, user_id: str, new_password_hash: str) -> bool:
@@ -93,6 +109,58 @@ class UserDB:
             )
             conn.commit()
         return cur.rowcount > 0
+
+    def update_user(
+        self,
+        user_id: str,
+        *,
+        role: Optional[str] = None,
+        display_name: Optional[str] = None,
+        is_active: Optional[int] = None,
+    ) -> Optional[dict]:
+        """Partially update a user's role / display_name / is_active.
+
+        Returns the updated user dict, or None if the user does not exist.
+        """
+        sets: list[str] = []
+        params: list = []
+        if role is not None:
+            sets.append("role = ?")
+            params.append(role)
+        if display_name is not None:
+            sets.append("display_name = ?")
+            params.append(display_name)
+        if is_active is not None:
+            sets.append("is_active = ?")
+            params.append(is_active)
+        if not sets:
+            return self.get_user_by_id(user_id)
+        params.append(user_id)
+        conn = self._get_conn()
+        with self._lock:
+            cur = conn.execute(
+                f"UPDATE users SET {', '.join(sets)} WHERE id = ?", params
+            )
+            conn.commit()
+        if cur.rowcount == 0:
+            return None
+        return self.get_user_by_id(user_id)
+
+    def list_users(
+        self, *, limit: int = 100, offset: int = 0
+    ) -> list[dict]:
+        """List users ordered by created_at, with pagination."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM users ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_users(self) -> int:
+        """Total number of user rows."""
+        conn = self._get_conn()
+        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
     def get_user_by_username(self, username: str) -> Optional[dict]:
         """Look up a user by username, or None."""
@@ -140,18 +208,24 @@ def get_user_db(workspace_path: Optional[Path] = None) -> UserDB:
 
 
 def hash_password(password: str) -> str:
-    """SHA-256 password hash (placeholder — upgrade to bcrypt later)."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """SEC-1: PBKDF2-HMAC-SHA256 password hash (260k iterations + salt)."""
+    import hashlib as _hl
+    import os as _os
+    salt = _os.urandom(16)
+    dk = _hl.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
+    return f"pbkdf2:260000:{salt.hex()}:{dk.hex()}"
 
 
 def seed_admin_if_empty(db: UserDB) -> None:
     """Insert admin/admin if the users table is empty.
 
     This runs on every startup. It's idempotent — only inserts if count == 0.
+    The seeded admin account is a superuser (role='admin').
     """
     if db.user_count() == 0:
         db.create_user(
             username="admin",
             display_name="Admin",
             password_hash=hash_password("admin"),
+            role="admin",
         )

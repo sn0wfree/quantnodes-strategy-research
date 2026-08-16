@@ -11,7 +11,6 @@ whose fixture predates the attempts table and is a pre-existing failure).
 """
 import asyncio
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -75,7 +74,10 @@ def _setup_full_db(db_path: Path) -> None:
             completed_at TEXT,
             error TEXT,
             message_id TEXT,
-            persona TEXT
+            persona TEXT,
+            mode TEXT NOT NULL DEFAULT 'build',
+            model_override TEXT,
+            thinking TEXT NOT NULL DEFAULT 'auto'
         );
         """
     )

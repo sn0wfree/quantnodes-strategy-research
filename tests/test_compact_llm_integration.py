@@ -1,14 +1,11 @@
 """Tests for _llm_summarize_v2 and L4 LLM integration path."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from strategy_research.core.agent.compact import (
     CompactConfig,
     _llm_summarize_v2,
-    compact_messages,
 )
 
 

@@ -19,7 +19,6 @@ from strategy_research.cli.tui.app import ResearchApp
 from strategy_research.cli.tui.keybindings import TUI_BINDINGS
 from strategy_research.cli.tui.messages import (
     SynthesizeInput,
-    WriteTranscript,
 )
 from strategy_research.cli.tui.theme import (
     _strip_rich_modifier,
@@ -27,11 +26,7 @@ from strategy_research.cli.tui.theme import (
     brand_tokens,
 )
 from strategy_research.cli.tui.widgets import (
-    ActivityRail,
-    Banner,
-    ChatInput,
     CommandSidebar,
-    HintFooter,
     ModeBar,
     TranscriptView,
 )
@@ -173,7 +168,3 @@ def test_active_primary_is_clean_hex():
 
 
 # Cheap non-asyncio test: brand primary must not be the literal Rich bold prefix.
-def test_active_primary_is_clean_hex():
-    p = active_primary()
-    assert not p.lower().startswith("bold ")
-    assert p.startswith("#")

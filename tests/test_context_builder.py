@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.context import (
-    CHARS_PER_TOKEN,
     ContextBuilder,
     estimate_tokens,
 )
 from strategy_research.core.agent.tools import ToolRegistry
 from strategy_research.core.llm import LLMConfig
 from strategy_research.core.memory.persistent import PersistentMemory
-
 
 # ── Token estimation ─────────────────────────────────────────────────
 
@@ -158,7 +155,7 @@ class TestInitialMessages:
 
     def test_no_recall_when_no_match(self, setup):
         builder, _, _ = setup
-        msgs = builder.build_initial_messages("completely unrelated task xyz123")
+        builder.build_initial_messages('completely unrelated task xyz123')
         # May or may not recall anything depending on token overlap
         # The test just ensures no crash
 

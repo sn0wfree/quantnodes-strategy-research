@@ -13,7 +13,6 @@ from textual.widgets import Log
 from strategy_research.cli.components.tool_event import (
     beautify_tool_name,
     render_tool_event,
-    summarize_args,
 )
 from strategy_research.cli.tui.messages import WriteRail
 

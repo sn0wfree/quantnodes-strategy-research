@@ -11,6 +11,7 @@ The messages + message_parts tables become materialized views (cached
 projection), and event_log is the source of truth."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import sqlite3
@@ -19,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from .event_v2 import EventType, EventV2, is_known_event_type
+from ...core.events.event_v2 import EventType, EventV2, is_known_event_type
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,36 @@ class ProjectedSession:
             self.messages.values(),
             key=lambda m: (m.seq, m.created_at),
         )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """P0-1 B2 — serialize to a JSON-safe dict for snapshot persistence.
+
+        Field shape mirrors the dataclass exactly so ``from_dict`` is a
+        straight ``ProjectedMessage(**m)`` reconstruction per message.
+        """
+        return {
+            "session_id": self.session_id,
+            "last_seq": self.last_seq,
+            "messages": {
+                mid: dataclasses.asdict(m)
+                for mid, m in self.messages.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ProjectedSession":
+        """Reconstruct a ProjectedSession from ``to_dict``'s output.
+
+        ``ProjectedMessage.parts`` may be either a dict (legacy) or a
+        list (current dataclass); both are accepted so older snapshots
+        keep loading.
+        """
+        state = cls(session_id=d["session_id"], last_seq=d.get("last_seq", 0))
+        state.messages = {
+            mid: ProjectedMessage(**m)
+            for mid, m in d.get("messages", {}).items()
+        }
+        return state
 
     def to_message_rows(self) -> List[Dict[str, Any]]:
         """Serialize to the shape of messages table rows.
@@ -281,6 +312,69 @@ class Projector:
         # See docs/projector-incremental.md.
         self._cache: Dict[str, ProjectedSession] = {}
 
+    # ── Snapshot support (P0-1 B2) ─────────────────────────────────
+
+    _SNAPSHOT_SCHEMA_DDL = (
+        "CREATE TABLE IF NOT EXISTS snapshots ("
+        "session_id TEXT PRIMARY KEY, "
+        "seq INTEGER NOT NULL, "
+        "snapshot_json TEXT NOT NULL, "
+        "created_at REAL NOT NULL)"
+    )
+    _SNAPSHOT_INDEX_DDL = (
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_session_seq "
+        "ON snapshots(session_id, seq)"
+    )
+
+    def _ensure_snapshots_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute(self._SNAPSHOT_SCHEMA_DDL)
+        conn.execute(self._SNAPSHOT_INDEX_DDL)
+
+    def _save_snapshot(
+        self,
+        conn: sqlite3.Connection,
+        state: ProjectedSession,
+    ) -> None:
+        """Persist ``state`` to ``snapshots`` (UPSERT, single-row).
+
+        Called from ``flush()`` inside the existing transaction so the
+        snapshot is consistent with the messages + message_parts it
+        accompanies.
+        """
+        self._ensure_snapshots_table(conn)
+        conn.execute(
+            "INSERT INTO snapshots (session_id, seq, snapshot_json, created_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "seq = excluded.seq, snapshot_json = excluded.snapshot_json, "
+            "created_at = excluded.created_at "
+            "WHERE excluded.seq > snapshots.seq",
+            (
+                state.session_id,
+                state.last_seq,
+                json.dumps(state.to_dict(), ensure_ascii=False),
+                sqlite3.time.time(),
+            ),
+        )
+
+    def _load_snapshot(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        after_seq: int,
+    ) -> Optional[ProjectedSession]:
+        """Return the most recent snapshot whose seq ≥ ``after_seq``."""
+        self._ensure_snapshots_table(conn)
+        row = conn.execute(
+            "SELECT snapshot_json, seq FROM snapshots "
+            "WHERE session_id = ? AND seq >= ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (session_id, after_seq),
+        ).fetchone()
+        if row is None:
+            return None
+        return ProjectedSession.from_dict(json.loads(row[0]))
+
     # ── Incremental projection (see docs/projector-incremental.md) ─
 
     def project_incremental(
@@ -415,12 +509,30 @@ class Projector:
 
         Returns a fresh ProjectedSession each call. Multiple calls
         with the same args produce identical state (pure function).
+
+        P0-1 B2: when a snapshot with ``seq >= after_seq`` exists, the
+        snapshot seeds the state and only events after the snapshot's
+        seq are replayed. Falls back to a full replay when no snapshot
+        is available — same behaviour as before B2.
         """
-        state = ProjectedSession(session_id=session_id)
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            snap = self._load_snapshot(conn, session_id, after_seq)
+        finally:
+            conn.close()
+        if snap is not None:
+            state = snap
+            after_seq = snap.last_seq
+        else:
+            state = ProjectedSession(session_id=session_id)
         events = self.load_events(session_id, after_seq=after_seq)
         for event in events:
             self._apply(event, state)
-        state.last_seq = max((e.seq for e in events), default=0)
+        state.last_seq = max(
+            (e.seq for e in events),
+            default=after_seq,
+        )
         return state
 
     def apply(self, event: EventV2, state: ProjectedSession) -> None:
@@ -439,6 +551,8 @@ class Projector:
         self,
         state: ProjectedSession,
         touched: Optional[Set[str]] = None,
+        *,
+        snapshot_interval: int = 200,
     ) -> None:
         """Atomically UPSERT the projected state to messages + message_parts.
 
@@ -565,6 +679,18 @@ class Projector:
                     )
                     for row in self._part_rows(msg):
                         self._insert_part(conn, row)
+
+            # P0-1 B2: snapshot persistence. Inside the same transaction
+            # so the snapshot is consistent with the messages +
+            # message_parts rows that were just UPSERTed. Triggered
+            # every ``snapshot_interval`` events so cold-start cost
+            # stays bounded (200 events = ~1s typical work avoided).
+            if (
+                snapshot_interval > 0
+                and state.last_seq > 0
+                and state.last_seq % snapshot_interval == 0
+            ):
+                self._save_snapshot(conn, state)
 
             conn.execute("COMMIT")
         except Exception:

@@ -361,7 +361,7 @@ class TestRunBacktestIntegration:
         data_map = {code: self._make_data(code)}
         dates = data_map[code].index
         signal_map = {code: pd.Series(-1.0, index=dates)}
-        metrics = eng.run_backtest(data_map, signal_map, [code])
+        eng.run_backtest(data_map, signal_map, [code])
         # No trades because short is blocked
         assert len(eng.trades) == 0
 

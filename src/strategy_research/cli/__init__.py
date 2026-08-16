@@ -10,7 +10,6 @@ all registered commands, then dispatches via ``registry.dispatch``.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -20,7 +19,6 @@ import yaml
 from .commands import core_commands  # noqa: F401  (registration side effect)
 from .commands import llm as _llm_cmd  # noqa: F401  (registration side effect)
 from .commands.autoresearch import _spawn_agent as _spawn_agent
-from .commands.registry import dispatch as _dispatch
 from .commands.registry import wire_commands as _wire
 from .commands.server import (
     cmd_api_serve,
@@ -523,16 +521,6 @@ def cmd_import(args: argparse.Namespace) -> int:
         print(f"❌ 不是有效的工作区: {path}")
         return 1
 
-    from strategy_research.core.data_import import (
-        generate_sample_data,
-        import_akshare,
-        import_csv_ohlcv,
-        import_fred,
-        import_from_source,
-        import_ifind,
-        import_parquet_ohlcv,
-        import_tushare,
-    )
     from strategy_research.core.db import init_db
 
     # 确保 DuckDB 初始化
@@ -543,9 +531,6 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     # 本地文件源
     if source == "sample":
-        # generate_sample_data still returns close-only panel; full OHLCV
-        # path is TBD (see TODO(toolsets)).  Tell user to use the API
-        # sources (tushare/akshare/...) or the online fetch in run_backtest.
         print(
             "❌ 'sample' source temporarily unavailable: generate_sample_data "
             "returns close-only data. Use tushare/akshare source or run "
@@ -553,93 +538,12 @@ def cmd_import(args: argparse.Namespace) -> int:
         )
         return 1
 
-    elif source == "csv":
-        if not args.file:
-            print("❌ 请指定 --file 参数")
-            return 1
-        try:
-            success = import_csv_ohlcv(
-                path, strategy_name, args.file,
-                date_column=args.date_column,
-                asset_column=args.asset_column,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            print(f"❌ CSV 导入失败: {e}")
-            return 1
-
-    elif source == "parquet":
-        if not args.file:
-            print("❌ 请指定 --file 参数")
-            return 1
-        try:
-            success = import_parquet_ohlcv(
-                path, strategy_name, args.file,
-                date_column=args.date_column,
-                asset_column=args.asset_column,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            print(f"❌ Parquet 导入失败: {e}")
-            return 1
-
-    # API 数据源
-    elif source == "tushare":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数 (如: 000001.SZ,600519.SH)")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_tushare(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
-    elif source == "ifind":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_ifind(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
+    if source in ("csv", "parquet"):
+        success = _import_local_file(source, args, path, strategy_name)
+    elif source in ("tushare", "ifind", "akshare", "auto"):
+        success = _import_api_source(source, args, path, strategy_name)
     elif source == "fred":
-        if not args.codes:
-            # 默认导入核心系列
-            from strategy_research.core.data_source.fred_loader import CORE_SERIES
-            codes = CORE_SERIES
-            print(f"📡 导入 FRED 核心系列 ({len(codes)} 个)...")
-        else:
-            codes = [c.strip() for c in args.codes.split(",")]
-        success = import_fred(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
-    elif source == "akshare":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_akshare(
-            path, strategy_name, codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
-    elif source == "auto":
-        if not args.codes:
-            print("❌ 请指定 --codes 参数")
-            return 1
-        codes = [c.strip() for c in args.codes.split(",")]
-        success = import_from_source(
-            path, strategy_name, "auto", codes,
-            args.start_date, args.end_date,
-            incremental=args.incremental,
-        )
-
+        success = _import_fred(args, path, strategy_name)
     else:
         print(f"❌ 未知数据源: {source}")
         print("   支持: csv, parquet, sample, tushare, ifind, fred, akshare, auto")
@@ -659,12 +563,77 @@ def cmd_import(args: argparse.Namespace) -> int:
         return 1
 
 
+def _import_local_file(source: str, args, path: Path, strategy_name: str) -> bool:
+    """Import from a local csv/parquet file."""
+    if not args.file:
+        print("❌ 请指定 --file 参数")
+        return False
+    try:
+        if source == "csv":
+            from strategy_research.core.data_import import import_csv_ohlcv
+            return import_csv_ohlcv(
+                path, strategy_name, args.file,
+                date_column=args.date_column,
+                asset_column=args.asset_column,
+            )
+        from strategy_research.core.data_import import import_parquet_ohlcv
+        return import_parquet_ohlcv(
+            path, strategy_name, args.file,
+            date_column=args.date_column,
+            asset_column=args.asset_column,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ 数据导入失败: {e}")
+        return False
+
+
+def _import_api_source(source: str, args, path: Path, strategy_name: str) -> bool:
+    """Import from a codes-based API source (tushare/ifind/akshare/auto)."""
+    if not args.codes:
+        print("❌ 请指定 --codes 参数 (如: 000001.SZ,600519.SH)")
+        return False
+    codes = [c.strip() for c in args.codes.split(",")]
+    from strategy_research.core.data_import import (
+        import_akshare,
+        import_from_source,
+        import_ifind,
+        import_tushare,
+    )
+    importer = {
+        "tushare": import_tushare,
+        "ifind": import_ifind,
+        "akshare": import_akshare,
+        "auto": import_from_source,
+    }[source]
+    if source == "auto":
+        return importer(path, strategy_name, "auto", codes,
+                        args.start_date, args.end_date, incremental=args.incremental)
+    return importer(path, strategy_name, codes,
+                    args.start_date, args.end_date, incremental=args.incremental)
+
+
+def _import_fred(args, path: Path, strategy_name: str) -> bool:
+    """Import FRED series (core series when --codes is omitted)."""
+    if not args.codes:
+        from strategy_research.core.data_source.fred_loader import CORE_SERIES
+        codes = CORE_SERIES
+        print(f"📡 导入 FRED 核心系列 ({len(codes)} 个)...")
+    else:
+        codes = [c.strip() for c in args.codes.split(",")]
+    from strategy_research.core.data_import import import_fred
+    return import_fred(
+        path, strategy_name, codes,
+        args.start_date, args.end_date,
+        incremental=args.incremental,
+    )
+
+
 
 # Main CLI
 # ============================================================
 
-def main() -> int:
-    """CLI entry point."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the top-level CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="quantnodes-research",
         description="通用策略自动研究框架",
@@ -781,6 +750,11 @@ def main() -> int:
 
     # session
     session_parser = subparsers.add_parser("session", help="会话管理")
+    hangs_parser = subparsers.add_parser("hangs", help="卡死防护事件报告")
+    hangs_parser.add_argument("--hours", type=float, default=24,
+                              help="回看窗口（小时），默认 24")
+    hangs_parser.add_argument("--limit", "-l", type=int, default=50,
+                              help="最近事件条数上限，默认 50")
     session_subparsers = session_parser.add_subparsers(dest="session_command", help="会话命令")
 
     # session stats
@@ -929,6 +903,21 @@ def main() -> int:
     # registered via cli.commands.core_commands on import.
     _wire(subparsers)
 
+    return parser, {
+        "session": session_parser,
+        "skills": skills_parser,
+        "swarm": swarm_parser,
+        "mcp": mcp_parser,
+        "api": api_parser,
+        "webui": webui_parser,
+        "compact": compact_parser,
+    }
+
+
+def main() -> int:
+    """CLI entry point."""
+    parser, subparsers = _build_parser()
+
     # ── Parse + handle global flags ─────────────────
     args = parser.parse_args()
 
@@ -944,147 +933,244 @@ def main() -> int:
     if getattr(args, "handler", None) is not None:
         return args.handler(args)
 
-    if args.command == "session":
-        if args.session_command == "stats":
-            return cmd_session_stats(args)
-        elif args.session_command == "list":
-            return cmd_session_list(args)
-        elif args.session_command == "show":
-            return cmd_session_show(args)
-        elif args.session_command == "search":
-            return cmd_session_search(args)
-        elif args.session_command == "delete":
-            return cmd_session_delete(args)
-        else:
-            session_parser.print_help()
-            return 0
-    elif args.command == "skills":
-        if args.skills_command == "list":
-            return cmd_skills_list(args)
-        elif args.skills_command == "show":
-            return cmd_skills_show(args)
-        elif args.skills_command == "search":
-            return cmd_skills_search(args)
-        else:
-            skills_parser.print_help()
-            return 0
-    elif args.command == "swarm":
-        if args.swarm_command == "list":
-            return cmd_swarm_list(args)
-        elif args.swarm_command == "inspect":
-            return cmd_swarm_inspect(args)
-        elif args.swarm_command == "run":
-            return cmd_swarm_run(args)
-        elif args.swarm_command == "cancel":
-            return cmd_swarm_cancel(args)
-        else:
-            swarm_parser.print_help()
-            return 0
-    elif args.command == "mcp":
-        if args.mcp_command == "serve":
-            return cmd_mcp_serve(args)
-        elif args.mcp_command == "list-tools":
-            return cmd_mcp_list_tools(args)
-        else:
-            mcp_parser.print_help()
-            return 0
-    elif args.command == "export":
-        return cmd_export(args)
-    elif args.command == "schedule":
-        from strategy_research.core.scheduled_research.cli import (
-            cmd_schedule_cancel,
-            cmd_schedule_create,
-            cmd_schedule_delete,
-            cmd_schedule_list,
-            cmd_schedule_run,
-            cmd_schedule_show,
-            cmd_schedule_start,
-        )
-        if args.schedule_command == "create":
-            return cmd_schedule_create(args)
-        elif args.schedule_command == "list":
-            return cmd_schedule_list(args)
-        elif args.schedule_command == "show":
-            return cmd_schedule_show(args)
-        elif args.schedule_command == "cancel":
-            return cmd_schedule_cancel(args)
-        elif args.schedule_command == "delete":
-            return cmd_schedule_delete(args)
-        elif args.schedule_command == "run":
-            return cmd_schedule_run(args)
-        elif args.schedule_command == "start":
-            return cmd_schedule_start(args)
-        else:
-            return 0
-    elif args.command == "goal":
-        from strategy_research.core.goal.cli import (
-            cmd_goal_audit,
-            cmd_goal_cancel,
-            cmd_goal_complete,
-            cmd_goal_evidence,
-            cmd_goal_list,
-            cmd_goal_start,
-            cmd_goal_status,
-        )
-        return {
-            "start": cmd_goal_start,
-            "status": cmd_goal_status,
-            "evidence": cmd_goal_evidence,
-            "audit": cmd_goal_audit,
-            "complete": cmd_goal_complete,
-            "list": cmd_goal_list,
-            "cancel": cmd_goal_cancel,
-        }.get(args.goal_command, lambda a: 1)(args)
-    elif args.command == "hypothesis":
-        from strategy_research.core.hypothesis.cli import (
-            cmd_hypothesis_create,
-            cmd_hypothesis_link,
-            cmd_hypothesis_list,
-            cmd_hypothesis_search,
-            cmd_hypothesis_show,
-            cmd_hypothesis_update,
-        )
-        return {
-            "create": cmd_hypothesis_create,
-            "list": cmd_hypothesis_list,
-            "show": cmd_hypothesis_show,
-            "update": cmd_hypothesis_update,
-            "search": cmd_hypothesis_search,
-            "link": cmd_hypothesis_link,
-        }.get(args.hypothesis_command, lambda a: 1)(args)
-    elif args.command == "validate-run":
-        from strategy_research.core.validation.cli import cmd_validate_run
-        return cmd_validate_run(args)
-    elif args.command == "engine":
-        from strategy_research.core.engine.cli import dispatch_engine
-        return dispatch_engine(args)
-    elif args.command == "accept":
-        from strategy_research.core.strategy_acceptance.cli import cmd_accept
-        return cmd_accept(args)
-    elif args.command == "api":
-        if args.api_command == "serve":
-            return cmd_api_serve(args)
-        else:
-            api_parser.print_help()
-            return 0
-    elif args.command == "webui":
-        if args.webui_command == "serve":
-            return cmd_webui_serve(args)
-        else:
-            webui_parser.print_help()
-            return 0
-    elif args.command == "compact":
-        if getattr(args, "compact_command", None) == "show":
-            return cmd_compact_show(args)
-        else:
-            compact_parser.print_help()
-            return 0
-    elif args.command == "serve":
-        # Top-level alias — same as `webui serve`
+    dispatcher = {
+        "session": _dispatch_session,
+        "hangs": _dispatch_hangs,
+        "skills": _dispatch_skills,
+        "swarm": _dispatch_swarm,
+        "mcp": _dispatch_mcp,
+        "export": _dispatch_export,
+        "schedule": _dispatch_schedule,
+        "goal": _dispatch_goal,
+        "hypothesis": _dispatch_hypothesis,
+        "validate-run": _dispatch_validate_run,
+        "engine": _dispatch_engine,
+        "accept": _dispatch_accept,
+        "api": _dispatch_api,
+        "webui": _dispatch_webui,
+        "compact": _dispatch_compact,
+        "serve": _dispatch_serve,
+    }
+    handler_fn = dispatcher.get(args.command)
+    if handler_fn is not None:
+        return handler_fn(args, subparsers)
+
+    parser.print_help()
+    return 0
+
+
+# ── Legacy subcommand dispatch helpers ─────────────────────
+
+def _dispatch_session(args, parsers) -> int:
+    """Dispatch the session subcommand."""
+    if args.session_command == "stats":
+        return cmd_session_stats(args)
+    elif args.session_command == "list":
+        return cmd_session_list(args)
+    elif args.session_command == "show":
+        return cmd_session_show(args)
+    elif args.session_command == "search":
+        return cmd_session_search(args)
+    elif args.session_command == "delete":
+        return cmd_session_delete(args)
+    else:
+        parsers["session"].print_help()
+        return 0
+
+
+def _dispatch_hangs(args, parsers) -> int:
+    """Dispatch the hangs report subcommand."""
+    from strategy_research.core.study.hanging_events import HangingEventsStore
+
+    with HangingEventsStore() as store:
+        rep = store.report(hours=args.hours, limit=args.limit)
+
+    print(f"=== 卡死防护事件报告 (最近 {args.hours:.0f}h, 共 {rep['total_events']} 条) ===")
+    print("-- 按事件类型 --")
+    for t, n in sorted(rep["by_type"].items(), key=lambda kv: -kv[1]):
+        print(f"  {t:24s} {n}")
+    print("-- 按 study --")
+    if not rep["by_study"]:
+        print("  (无)")
+    for row in rep["by_study"]:
+        print(f"  {row['study_id']:36s} {row['count']}")
+    print("-- 最近事件 --")
+    if not rep["recent"]:
+        print("  (无)")
+    for ev in rep["recent"]:
+        print(f"  {ev['created_at_iso'][:19]}  {ev['event_type']:24s} "
+              f"study={ev['study_id'] or '-':.12s}")
+    return 0
+
+
+def _dispatch_skills(args, parsers) -> int:
+    """Dispatch the skills subcommand."""
+    if args.skills_command == "list":
+        return cmd_skills_list(args)
+    elif args.skills_command == "show":
+        return cmd_skills_show(args)
+    elif args.skills_command == "search":
+        return cmd_skills_search(args)
+    else:
+        parsers["skills"].print_help()
+        return 0
+
+
+def _dispatch_swarm(args, parsers) -> int:
+    """Dispatch the swarm subcommand."""
+    if args.swarm_command == "list":
+        return cmd_swarm_list(args)
+    elif args.swarm_command == "inspect":
+        return cmd_swarm_inspect(args)
+    elif args.swarm_command == "run":
+        return cmd_swarm_run(args)
+    elif args.swarm_command == "cancel":
+        return cmd_swarm_cancel(args)
+    else:
+        parsers["swarm"].print_help()
+        return 0
+
+
+def _dispatch_mcp(args, parsers) -> int:
+    """Dispatch the mcp subcommand."""
+    if args.mcp_command == "serve":
+        return cmd_mcp_serve(args)
+    elif args.mcp_command == "list-tools":
+        return cmd_mcp_list_tools(args)
+    else:
+        parsers["mcp"].print_help()
+        return 0
+
+
+def _dispatch_export(args, parsers) -> int:
+    """Dispatch the export subcommand."""
+    from .commands.export import cmd_export
+
+    return cmd_export(args)
+
+
+def _dispatch_schedule(args, parsers) -> int:
+    """Dispatch the schedule subcommand."""
+    from strategy_research.core.scheduled_research.cli import (
+        cmd_schedule_cancel,
+        cmd_schedule_create,
+        cmd_schedule_delete,
+        cmd_schedule_list,
+        cmd_schedule_run,
+        cmd_schedule_show,
+        cmd_schedule_start,
+    )
+    if args.schedule_command == "create":
+        return cmd_schedule_create(args)
+    elif args.schedule_command == "list":
+        return cmd_schedule_list(args)
+    elif args.schedule_command == "show":
+        return cmd_schedule_show(args)
+    elif args.schedule_command == "cancel":
+        return cmd_schedule_cancel(args)
+    elif args.schedule_command == "delete":
+        return cmd_schedule_delete(args)
+    elif args.schedule_command == "run":
+        return cmd_schedule_run(args)
+    elif args.schedule_command == "start":
+        return cmd_schedule_start(args)
+    else:
+        return 0
+
+
+def _dispatch_goal(args, parsers) -> int:
+    """Dispatch the goal subcommand."""
+    from strategy_research.core.goal.cli import (
+        cmd_goal_audit,
+        cmd_goal_cancel,
+        cmd_goal_complete,
+        cmd_goal_evidence,
+        cmd_goal_list,
+        cmd_goal_start,
+        cmd_goal_status,
+    )
+    return {
+        "start": cmd_goal_start,
+        "status": cmd_goal_status,
+        "evidence": cmd_goal_evidence,
+        "audit": cmd_goal_audit,
+        "complete": cmd_goal_complete,
+        "list": cmd_goal_list,
+        "cancel": cmd_goal_cancel,
+    }.get(args.goal_command, lambda a: 1)(args)
+
+
+def _dispatch_hypothesis(args, parsers) -> int:
+    """Dispatch the hypothesis subcommand."""
+    from strategy_research.core.hypothesis.cli import (
+        cmd_hypothesis_create,
+        cmd_hypothesis_link,
+        cmd_hypothesis_list,
+        cmd_hypothesis_search,
+        cmd_hypothesis_show,
+        cmd_hypothesis_update,
+    )
+    return {
+        "create": cmd_hypothesis_create,
+        "list": cmd_hypothesis_list,
+        "show": cmd_hypothesis_show,
+        "update": cmd_hypothesis_update,
+        "search": cmd_hypothesis_search,
+        "link": cmd_hypothesis_link,
+    }.get(args.hypothesis_command, lambda a: 1)(args)
+
+
+def _dispatch_validate_run(args, parsers) -> int:
+    """Dispatch the validate-run subcommand."""
+    from strategy_research.core.validation.cli import cmd_validate_run
+    return cmd_validate_run(args)
+
+
+def _dispatch_engine(args, parsers) -> int:
+    """Dispatch the engine subcommand."""
+    from strategy_research.core.engine.cli import dispatch_engine
+    return dispatch_engine(args)
+
+
+def _dispatch_accept(args, parsers) -> int:
+    """Dispatch the accept subcommand."""
+    from strategy_research.core.strategy_acceptance.cli import cmd_accept
+    return cmd_accept(args)
+
+
+def _dispatch_api(args, parsers) -> int:
+    """Dispatch the api subcommand."""
+    if args.api_command == "serve":
+        return cmd_api_serve(args)
+    else:
+        parsers["api"].print_help()
+        return 0
+
+
+def _dispatch_webui(args, parsers) -> int:
+    """Dispatch the webui subcommand."""
+    if args.webui_command == "serve":
         return cmd_webui_serve(args)
     else:
-        parser.print_help()
+        parsers["webui"].print_help()
         return 0
+
+
+def _dispatch_compact(args, parsers) -> int:
+    """Dispatch the compact subcommand."""
+    if getattr(args, "compact_command", None) == "show":
+        from .commands.compact_show import cmd_compact_show
+
+        return cmd_compact_show(args)
+    else:
+        parsers["compact"].print_help()
+        return 0
+
+
+def _dispatch_serve(args, parsers) -> int:
+    """Dispatch the serve subcommand."""
+    # Top-level alias — same as `webui serve`
+    return cmd_webui_serve(args)
 
 
 if __name__ == "__main__":

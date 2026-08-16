@@ -1,12 +1,9 @@
 """Tests for goal/store.py — journal CRUD + novelty/regression gates."""
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from strategy_research.core.goal.store import GoalStore
-from strategy_research.core.goal.models import GoalStatus
 
 
 @pytest.fixture(autouse=True)

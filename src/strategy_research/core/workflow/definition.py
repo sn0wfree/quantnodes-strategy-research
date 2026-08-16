@@ -212,6 +212,34 @@ class WorkflowDefinition:
         if not self.nodes:
             errors.append("nodes must not be empty")
 
+        seen_ids = self._validate_nodes(errors)
+
+        for stype in SINGLETON_TYPES:
+            count = sum(1 for n in self.nodes if n.type == stype)
+            if count > 1:
+                errors.append(f"type '{stype}' may appear at most once (found {count})")
+
+        node_ids = set(seen_ids)
+        self._validate_edges(errors, node_ids)
+
+        # Cycle detection via topological sort
+        try:
+            self.topological_layers()
+        except WorkflowDefinitionError as exc:
+            errors.append(str(exc))
+
+        # Orphan nodes (no edges at all) — allowed only if the graph is a
+        # single node; otherwise require connectivity for segment purposes.
+        if len(self.nodes) > 1:
+            self._validate_orphans(errors)
+
+        # Value-domain checks
+        self._validate_params(errors)
+
+        return errors
+
+    def _validate_nodes(self, errors: list[str]) -> dict[str, str]:
+        """Validate node ids/types/config; returns id→type map."""
         seen_ids: dict[str, str] = {}
         for node in self.nodes:
             if not node.id or not ID_RE.match(node.id):
@@ -227,13 +255,10 @@ class WorkflowDefinition:
             for key in REQUIRED_CONFIG.get(node.type, ()):
                 if not node.config.get(key):
                     errors.append(f"node '{node.id}': missing required config '{key}'")
+        return seen_ids
 
-        for stype in SINGLETON_TYPES:
-            count = sum(1 for n in self.nodes if n.type == stype)
-            if count > 1:
-                errors.append(f"type '{stype}' may appear at most once (found {count})")
-
-        node_ids = set(seen_ids)
+    def _validate_edges(self, errors: list[str], node_ids: set[str]) -> None:
+        """Validate edge endpoints and self-loops."""
         for edge in self.edges:
             if edge.source not in node_ids:
                 errors.append(f"edge source '{edge.source}' not found")
@@ -242,32 +267,24 @@ class WorkflowDefinition:
             if edge.source == edge.target:
                 errors.append(f"self-loop on '{edge.source}'")
 
-        # Cycle detection via topological sort
-        try:
-            self.topological_layers()
-        except WorkflowDefinitionError as exc:
-            errors.append(str(exc))
+    def _validate_orphans(self, errors: list[str]) -> None:
+        """Flag nodes with no incident edges (require connectivity)."""
+        connected = set()
+        for edge in self.edges:
+            connected.add(edge.source)
+            connected.add(edge.target)
+        for node in self.nodes:
+            if node.id not in connected:
+                errors.append(f"node '{node.id}' is orphaned (no edges)")
 
-        # Orphan nodes (no edges at all) — allowed only if the graph is a
-        # single node; otherwise require connectivity for segment purposes.
-        if len(self.nodes) > 1:
-            connected = set()
-            for edge in self.edges:
-                connected.add(edge.source)
-                connected.add(edge.target)
-            for node in self.nodes:
-                if node.id not in connected:
-                    errors.append(f"node '{node.id}' is orphaned (no edges)")
-
-        # Value-domain checks
+    def _validate_params(self, errors: list[str]) -> None:
+        """Validate params value domains (max_steps / temperature)."""
         max_steps = self.params.get("planner", {}).get("max_steps", 6)
         if not isinstance(max_steps, int) or not (3 <= max_steps <= 8):
             errors.append(f"params.planner.max_steps must be int in [3, 8], got {max_steps!r}")
         temp = self.params.get("llm", {}).get("temperature")
         if temp is not None and not (0 <= float(temp) <= 2):
             errors.append(f"params.llm.temperature must be in [0, 2], got {temp!r}")
-
-        return errors
 
     # ── Topology ──────────────────────────────────────────────
 
@@ -320,7 +337,6 @@ class WorkflowDefinition:
         # Map each bucket to the approval that gates it: the approval
         # whose position in the topological order immediately precedes
         # the bucket.  Reconstructed via the original order.
-        approvals = {i: nid for i, nid in enumerate(ordered) if nid in approval_ids}
         approval_positions = [i for i, nid in enumerate(ordered) if nid in approval_ids]
 
         cursor = 0

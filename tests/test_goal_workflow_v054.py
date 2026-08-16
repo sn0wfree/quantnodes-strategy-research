@@ -18,10 +18,9 @@ from pathlib import Path
 import pytest
 
 from strategy_research.core.goal.workflow_config import (
-    load_goal_workflow,
     list_goal_workflows,
+    load_goal_workflow,
 )
-
 
 # ─── Preset names ──────────────────────────────────────────────────────
 

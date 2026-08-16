@@ -11,7 +11,6 @@ import pytest
 from strategy_research.core.validation.trade_input import TradeInput
 from strategy_research.core.validation.utils import _json_safe, _sharpe
 
-
 # ─── TradeInput ──────────────────────────────────────────────────────────
 
 

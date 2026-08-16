@@ -10,20 +10,14 @@ from providers when the LLM is called with an empty/invalid context.
 
 from __future__ import annotations
 
-import logging
 import os
-from typing import Any
 from unittest.mock import MagicMock
-
-import pytest
 
 from strategy_research.core.agent.compact import (
     CompactConfig,
-    _KEEP_ALL_COMPACTIONS_OVERRIDE,
     _llm_summarize_v2,
     compact_messages,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -149,6 +143,7 @@ class TestEnvVarKillSwitch:
         try:
             # Re-import to re-evaluate
             import importlib
+
             from strategy_research.core.agent import compact
             importlib.reload(compact)
             assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is False
@@ -161,6 +156,7 @@ class TestEnvVarKillSwitch:
         os.environ["SR_KEEP_ALL_COMPACTIONS"] = "1"
         try:
             import importlib
+
             from strategy_research.core.agent import compact
             importlib.reload(compact)
             assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is True
@@ -173,6 +169,7 @@ class TestEnvVarKillSwitch:
             os.environ["SR_KEEP_ALL_COMPACTIONS"] = val
             try:
                 import importlib
+
                 from strategy_research.core.agent import compact
                 importlib.reload(compact)
                 assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is True, f"Failed for {val}"
@@ -185,6 +182,7 @@ class TestEnvVarKillSwitch:
             os.environ["SR_KEEP_ALL_COMPACTIONS"] = val
             try:
                 import importlib
+
                 from strategy_research.core.agent import compact
                 importlib.reload(compact)
                 assert compact._KEEP_ALL_COMPACTIONS_OVERRIDE is False, f"Failed for {val!r}"

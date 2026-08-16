@@ -7,12 +7,12 @@ import pytest
 
 from strategy_research.core.engine.crypto import CryptoEngine
 from strategy_research.core.engine.forex import ForexEngine
+from strategy_research.core.engine.global_equity import GlobalEquityEngine
 from strategy_research.core.engine.global_futures import (
+    _GLOBAL_FUTURES_MULTIPLIERS,
     GlobalFuturesEngine,
     _get_global_product_code,
-    _GLOBAL_FUTURES_MULTIPLIERS,
 )
-from strategy_research.core.engine.global_equity import GlobalEquityEngine
 from strategy_research.core.engine.india_equity import IndiaEquityEngine
 
 

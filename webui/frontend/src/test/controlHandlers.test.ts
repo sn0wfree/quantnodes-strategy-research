@@ -32,6 +32,7 @@ function ctx(overrides: Partial<SSEContext> = {}): SSEContext {
     setStreamingText: store.setStreamingText,
     appendStreamingText: store.appendStreamingText,
     setActiveAttempt: store.setActiveAttempt,
+    setAskedUser: store.setAskedUser,
     setQueuePaused: () => {},
     setQueueLength: () => {},
     setTokensUsed: store.setTokensUsed,
@@ -165,6 +166,18 @@ describe('agentDone', () => {
 
   it('does not throw when there are no messages', () => {
     expect(() => agentDone({}, ctx())).not.toThrow()
+  })
+
+  it('flags the session when the attempt ended with a question', () => {
+    const setAskedUser = vi.fn()
+    agentDone({ asked_user: true }, ctx({ setAskedUser }))
+    expect(setAskedUser).toHaveBeenCalledWith('sess-1', true)
+  })
+
+  it('clears the flag when the attempt ended normally', () => {
+    const setAskedUser = vi.fn()
+    agentDone({ asked_user: false }, ctx({ setAskedUser }))
+    expect(setAskedUser).toHaveBeenCalledWith('sess-1', false)
   })
 })
 

@@ -4,8 +4,9 @@ See docs/claim-validation-badge-design.md §7.2.
 """
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import AgentLoop

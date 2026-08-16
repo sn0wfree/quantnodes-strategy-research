@@ -33,7 +33,6 @@ from strategy_research.core.factor_validate import (
     score_stability,
     score_turnover,
     validate_factor,
-    validate_factors_batch,
 )
 
 warnings.filterwarnings("ignore")
@@ -362,7 +361,7 @@ def test_compute_6d_scores_full(factor_series, returns_series):
     scores = compute_6d_scores(factor_series, factor_series, returns_series, ic_mean=ic["ic_mean"])
     assert isinstance(scores, dict)
     # 应有 6 个维度
-    expected = {"stability", "diversification", "turnover", "monotonicity", "coverage", "rank_ic"}
+    {'stability', 'diversification', 'turnover', 'monotonicity', 'coverage', 'rank_ic'}
     assert set(scores.keys()) >= {k for k in scores.keys()}
 
 

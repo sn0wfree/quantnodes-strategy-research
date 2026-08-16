@@ -63,6 +63,8 @@ class GoalRecord:
     progress_percent: float = 0.0
     parent_goal_id: str | None = None
     workflow_id: str | None = None
+    # Isolation D1: owning user (backfilled from session on migration).
+    user_id: str | None = None
 
 
 @dataclass(frozen=True)

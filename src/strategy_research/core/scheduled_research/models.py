@@ -39,6 +39,8 @@ class ScheduledResearchJob:
     status: JobStatus = JobStatus.PENDING
     config: dict = field(default_factory=dict)
     max_rounds: int = 1
+    target: str = "study"  # 'study' (default) | 'autoresearch' (legacy subprocess)
+    owner_session_id: str | None = None  # API 创建者 chat 会话（IDOR）
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -62,6 +64,8 @@ class ScheduledResearchJob:
             "status": self.status.value,
             "config": self.config,
             "max_rounds": self.max_rounds,
+            "target": self.target,
+            "owner_session_id": self.owner_session_id,
         }
 
     @classmethod
@@ -81,7 +85,31 @@ class ScheduledResearchJob:
             status=JobStatus(data.get("status", "pending")),
             config=data.get("config", {}),
             max_rounds=data.get("max_rounds", 1),
+            target=data.get("target", "study"),
+            owner_session_id=data.get("owner_session_id"),
         )
+
+    def study_params(self) -> dict:
+        """config → study 创建参数字典（dispatch 桥透传用）。
+
+        Keys mirror ``StudyStartRequest`` (minus identity/workspace/objective
+        which come from the job's own fields).
+        """
+        return {
+            "metric_targets": self.config.get("metric_targets"),
+            "budget_token": self.config.get("budget_token"),
+            "budget_turn": self.config.get("budget_turn"),
+            "budget_time_seconds": self.config.get("budget_time_seconds"),
+            "guidance_md": self.config.get("guidance_md"),
+            "monitor_interval_seconds": self.config.get("monitor_interval_seconds"),
+            "cooldown_base": self.config.get("cooldown_base", 30.0),
+            "cooldown_jitter": self.config.get("cooldown_jitter", 10.0),
+            "min_cooldown": self.config.get("min_cooldown", 1.0),
+            "max_rounds": self.config.get("max_rounds", self.max_rounds),
+            "behavior": self.config.get("behavior"),
+            "keep_recent": self.config.get("keep_recent", 10),
+            "lazy_detection_interval": self.config.get("lazy_detection_interval", 10),
+        }
 
     def is_due(self, now: float | None = None) -> bool:
         """Check if job is due to run."""

@@ -152,8 +152,15 @@ class BaseEngine(ABC, MarketMixin):
         close_df: pd.DataFrame,
         target_pos: pd.DataFrame,
         codes: List[str],
+        *,
+        progress_every: Optional[int] = None,
     ) -> None:
         """核心执行循环：逐 bar 处理 hooks → rebalance → equity snapshot。"""
+        total = max(1, len(dates))
+        # keep ≤100 progress lines per backtest regardless of bar count
+        every = progress_every if progress_every is not None else 0
+        if every == 0:
+            every = max(1, total // 100)
         for i, ts in enumerate(dates):
             self._bar_idx = i
 
@@ -171,6 +178,8 @@ class BaseEngine(ABC, MarketMixin):
                     self._rebalance(c, target_w, df, ts, equity)
                 except Exception as exc:
                     logger.warning("Rebalance failed for %s at %s: %s", c, ts, exc)
+            if progress_every is not None and i % every == 0:
+                print(f"[backtest] bar {i + 1}/{total}", flush=True)
 
             # c. equity snapshot
             snap_equity = self._calc_equity(close_df, ts)
@@ -353,6 +362,7 @@ class BaseEngine(ABC, MarketMixin):
         bars_per_year: int = 252,
         bench_ret: Optional[pd.Series] = None,
         optimizer: Optional[Callable] = None,
+        progress_every: Optional[int] = None,
     ) -> Dict[str, Any]:
         """运行完整回测。
 
@@ -363,11 +373,19 @@ class BaseEngine(ABC, MarketMixin):
             bars_per_year: 年化 bar 数
             bench_ret: 基准日收益率 (optional)
             optimizer: 权重优化器 (optional)
+            progress_every: 进度行频率 — 每 N bar 向 stdout 打一行
+                ``[backtest] bar i/total``（含 align/metrics 阶段标记）。
+                None = 零输出（默认，CLI/工具链行为不变）。
+                后台化场景（run.log 捕获 stdout）用它驱动日志停滞判定。
 
         Returns:
             metrics dict (17 keys)
         """
         from ..utils.backtest_metrics import calc_metrics
+
+        def _progress(msg: str) -> None:
+            if progress_every is not None:
+                print(msg, flush=True)
 
         # 1. reset state
         self.capital = self.initial_capital
@@ -381,9 +399,15 @@ class BaseEngine(ABC, MarketMixin):
             data_map, signal_map, codes, optimizer
         )
         valid_codes = [c for c in codes if c in target_pos.columns]
+        _progress(
+            f"[backtest] align done: {len(dates)} bars, {len(valid_codes)} codes"
+        )
 
         # 3. execute bars
-        self._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
+        self._execute_bars(
+            dates, data_map, close_df, target_pos, valid_codes,
+            progress_every=progress_every,
+        )
 
         # 4. build equity series
         equity_series = pd.Series(
@@ -395,6 +419,7 @@ class BaseEngine(ABC, MarketMixin):
         m = calc_metrics(
             equity_series, self.trades, self.initial_capital, bars_per_year, bench_ret
         )
+        _progress("[backtest] metrics done")
         return m
 
 

@@ -7,6 +7,13 @@ live trading or order execution (see policy.py).
 
 from __future__ import annotations
 
+from .completion_strategy import (
+    AutoCompleteStrategy,
+    CompletionStrategy,
+    CompletionStrategyFactory,
+    LiteCompleteStrategy,
+    ManualCompleteStrategy,
+)
 from .context import (
     CONTINUABLE_GOAL_STATUSES,
     OPEN_CRITERION_STATUSES,
@@ -17,6 +24,13 @@ from .context import (
     get_current_goal_context,
     goal_needs_continuation,
     goal_progress_tuple,
+)
+from .event_bus import (
+    CollectingObserver,
+    GoalPanelObserver,
+    LoggerObserver,
+    WorkflowEventBus,
+    WorkflowEventObserver,
 )
 from .models import (
     AuditRow,
@@ -32,30 +46,16 @@ from .models import (
 )
 from .policy import normalize_required_text, reject_live_execution_objective
 from .store import GoalStore
+from .validator_registry import (
+    ValidatorRegistry,
+    register_default_validators,
+)
 from .workflow import (
     GoalWorkflowConfig,
     GoalWorkflowRunner,
     GoalWorkflowState,
 )
-from .workflow_config import load_goal_workflow, list_goal_workflows
-from .completion_strategy import (
-    AutoCompleteStrategy,
-    CompletionStrategy,
-    CompletionStrategyFactory,
-    LiteCompleteStrategy,
-    ManualCompleteStrategy,
-)
-from .validator_registry import (
-    ValidatorRegistry,
-    register_default_validators,
-)
-from .event_bus import (
-    CollectingObserver,
-    GoalPanelObserver,
-    LoggerObserver,
-    WorkflowEventBus,
-    WorkflowEventObserver,
-)
+from .workflow_config import list_goal_workflows, load_goal_workflow
 
 __all__ = [
     "AuditRow",

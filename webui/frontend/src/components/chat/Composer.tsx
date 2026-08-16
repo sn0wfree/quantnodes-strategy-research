@@ -13,7 +13,18 @@ import { ComposerToolbar } from './ComposerToolbar'
 import { ComposerStatusBar } from './ComposerStatusBar'
 import { SlashCommandMenu } from './SlashCommandMenu'
 
-export function Composer() {
+export interface ComposerProps {
+  /** Transform the user-typed text before it is sent to the server.
+   *  Used by the orchestrator panel to append a ```json snapshot of
+   *  the current canvas DAG to every user message. */
+  composeMessage?: (raw: string) => string
+  /** Disable attachments / slash commands — orchestrator mode doesn't
+   *  use them. Image attachments, slash-command menu and drag-drop
+   *  upload are hidden. */
+  readOnly?: 'image'
+}
+
+export function Composer({ composeMessage, readOnly }: ComposerProps = {}) {
   const [text, setText] = useState('')
   const [images, setImages] = useState<string[]>([])
   const [sending, setSending] = useState(false)
@@ -85,7 +96,7 @@ export function Composer() {
     if (!text.trim() && images.length === 0) return
     if (!currentSessionId) return
 
-    const content = text.trim()
+    const content = (composeMessage ?? ((s) => s))(text.trim())
     const messageImages = [...images]
     const persona = currentSessionId ? getSessionPersona(currentSessionId) : undefined
     setText('')
@@ -208,6 +219,7 @@ export function Composer() {
   // Track typing to open/close the slash command menu
   const handleChange = (v: string) => {
     setText(v)
+    if (readOnly) return
     const ta = textareaRef.current
     if (ta) {
       const caret = ta.selectionStart ?? v.length
@@ -314,13 +326,15 @@ export function Composer() {
   return (
     <div className="border-t border-slate-800 bg-slate-900/80 p-4">
       {/* Hidden file input reused for image attachments */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleFileChange}
-        className="hidden"
-      />
+      {!readOnly && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+      )}
       {/* Image previews */}
       {images.length > 0 && (
         <div className="mb-2 flex gap-2">
@@ -340,7 +354,7 @@ export function Composer() {
 
       {/* Slash command menu (anchored above the toolbar row) */}
       <div className="relative">
-        {slashQuery !== null && (
+        {!readOnly && slashQuery !== null && (
           <SlashCommandMenu query={slashQuery} onSelect={selectSlashCommand} />
         )}
       </div>
@@ -358,7 +372,7 @@ export function Composer() {
           value={text}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
+          onPaste={readOnly ? undefined : handlePaste}
           placeholder={
             isStreaming
               ? '正在生成中... (Enter 停止)'
@@ -371,14 +385,16 @@ export function Composer() {
           className="flex-1 resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none disabled:opacity-50"
         />
         <div className="flex items-center gap-1">
-          <button
-            onClick={handleFileSelect}
-            disabled={isStreaming}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200 transition-colors disabled:opacity-30"
-            title="上传图片"
-          >
-            <ImageIcon className="h-4 w-4" />
-          </button>
+          {!readOnly && (
+            <button
+              onClick={handleFileSelect}
+              disabled={isStreaming}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200 transition-colors disabled:opacity-30"
+              title="上传图片"
+            >
+              <ImageIcon className="h-4 w-4" />
+            </button>
+          )}
           {isStreaming ? (
             <button
               onClick={handleCancel}

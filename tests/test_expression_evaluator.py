@@ -10,9 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.goal.expression_evaluator import (
     ExpressionEvaluator,
-    evaluate_condition,
-    _resolve_path,
     _parse_literal,
+    _resolve_path,
+    evaluate_condition,
 )
 
 

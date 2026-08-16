@@ -16,6 +16,7 @@ import pytest
 
 def _build_asgi_app():
     from fastapi import FastAPI
+
     from strategy_research.api.middleware import AuthMiddleware
     from strategy_research.api.routers import chat, study
     from strategy_research.api.routers.web_session import router as session_router
@@ -101,12 +102,11 @@ async def test_start_rejects_missing_workspace(_app_env):
 @pytest.mark.asyncio
 async def test_start_auto_creates_strategy(_app_env):
     """When strategy dir doesn't exist, it should be auto-created.
-    
+
     Note: We can't fully test the start endpoint because it triggers the
     scheduler in the background. Instead, test the auto-creation logic directly.
     """
-    from pathlib import Path
-    from strategy_research.api.routers.study import _create_minimal_strategy
+    from strategy_research.core.study.bootstrap import _create_minimal_strategy
 
     strat_dir = _app_env / "strategies" / "auto_created_strat"
     assert not strat_dir.exists()
@@ -183,6 +183,36 @@ async def test_status_unknown_session_returns_404(_app_env):
 
 
 @pytest.mark.asyncio
+async def test_summary_other_users_study_denied(_app_env, tmp_path, monkeypatch):
+    """SDOR: study-id-derived endpoints enforce owner-session matching.
+    A different user cannot read another user's study summary (403)."""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        study = store.create_study(
+            owner_session_id="sess-1",  # owned by 'tester'
+            goal_id=None,
+            objective="tester's study",
+            workspace_path=str(_app_env),
+            strategy_name="demo_strategy",
+            executor_type="autoresearch",
+            max_rounds=5,
+        )
+        study_id = study.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer("bob"),  # different user
+    ) as client:
+        r = await client.get(f"/api/study/{study_id}/summary")
+        assert r.status_code == 403  # isolated: bob does not own this study
+
+
+@pytest.mark.asyncio
 async def test_status_other_users_session_returns_403(_app_env, tmp_path, monkeypatch):
     """A2: caller cannot read another user's session."""
     app = _build_asgi_app()
@@ -217,7 +247,7 @@ async def test_summary_returns_strategy_and_round_fields(_app_env, tmp_path, mon
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         study = store.create_study(
-            session_id="sess-1",
+            owner_session_id="sess-1",
             goal_id=None,
             objective="test objective",
             workspace_path=str(_app_env),
@@ -260,7 +290,7 @@ def _seed_study(_app_env, tmp_path, monkeypatch, *, objective="test objective",
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         study = store.create_study(
-            session_id="sess-1",
+            owner_session_id="sess-1",
             goal_id=goal_id,
             objective=objective,
             workspace_path=str(_app_env),
@@ -422,12 +452,12 @@ async def test_list_filter_by_session_id(_app_env, tmp_path, monkeypatch):
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s_a = store.create_study(
-            session_id="sess-A", goal_id=None, objective="A obj",
+            owner_session_id="sess-A", goal_id=None, objective="A obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
         store.create_study(
-            session_id="sess-B", goal_id=None, objective="B obj",
+            owner_session_id="sess-B", goal_id=None, objective="B obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -442,7 +472,8 @@ async def test_list_filter_by_session_id(_app_env, tmp_path, monkeypatch):
         data = r.json()
         assert len(data["studies"]) == 1
         assert data["studies"][0]["study_id"] == study_a_id
-        assert data["studies"][0]["session_id"] == "sess-A"
+        # v2 single identity: session_id == study_id
+        assert data["studies"][0]["session_id"] == study_a_id
 
 
 @pytest.mark.asyncio
@@ -455,12 +486,12 @@ async def test_list_filter_by_status_returns_matching_only(
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s_queued = store.create_study(
-            session_id="sess-1", goal_id=None, objective="queued obj",
+            owner_session_id="sess-1", goal_id=None, objective="queued obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
         s_running = store.create_study(
-            session_id="sess-1", goal_id=None, objective="running obj",
+            owner_session_id="sess-1", goal_id=None, objective="running obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -492,14 +523,14 @@ async def test_list_filter_by_status_returns_matching_only(
 
 @pytest.mark.asyncio
 async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
-    """list?limit=N 应最多返回 N 条 study。"""
+    """list?limit=N 应最多返回 N 条 study（且限定当前用户的 sessions）。"""
     from strategy_research.core.study import StudyStore
 
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         for i in range(5):
             store.create_study(
-                session_id=f"sess-{i}", goal_id=None,
+                owner_session_id=f"sess-{i}", goal_id=None,
                 objective=f"obj {i}",
                 workspace_path=str(_app_env), strategy_name="demo",
                 executor_type="autoresearch", max_rounds=3,
@@ -507,6 +538,36 @@ async def test_list_limit_caps_results(_app_env, tmp_path, monkeypatch):
 
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    # Seed the 5 owner sessions as owned by 'tester' (the caller) so the
+    # IDOR-scoped list returns them.
+    import sqlite3
+    sessions_db = tmp_path / "sessions.db"
+    conn = sqlite3.connect(str(sessions_db))
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          title TEXT,
+          created_at TEXT,
+          updated_at TEXT,
+          starred INTEGER NOT NULL DEFAULT 0,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          message_count INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    now = "2026-08-01T10:00:00"
+    for i in range(5):
+        conn.execute(
+            "INSERT OR REPLACE INTO sessions (id, user_id, title, created_at, updated_at) "
+            "VALUES (?, 'tester', 't', ?, ?)",
+            (f"sess-{i}", now, now),
+        )
+    conn.commit()
+    conn.close()
 
     async with _api_client() as client:
         r = await client.get("/api/study/list?limit=2")
@@ -613,12 +674,12 @@ async def test_status_returns_no_study_when_session_has_none(_app_env, monkeypat
 @pytest.mark.asyncio
 async def test_status_returns_active_study_for_session(_app_env, tmp_path, monkeypatch):
     """GET /status?session_id= 应返回该 session 的 active study。"""
-    from strategy_research.core.study import StudyStore, StudyStatus
+    from strategy_research.core.study import StudyStatus, StudyStore
 
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=None, objective="找 alpha",
+            owner_session_id="sess-1", goal_id=None, objective="找 alpha",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=5,
         )
@@ -648,7 +709,7 @@ async def test_status_returns_study_by_id(_app_env, tmp_path, monkeypatch):
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-other", goal_id=None, objective="其他 session",
+            owner_session_id="sess-other", goal_id=None, objective="其他 session",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -687,12 +748,11 @@ async def test_status_includes_goal_snapshot_when_goal_linked(_app_env, tmp_path
         goal_id = goal.goal_id
 
     with StudyStore(db_path=db_path) as store:
-        s = store.create_study(
-            session_id="sess-1", goal_id=goal_id, objective="with goal",
+        store.create_study(
+            owner_session_id="sess-1", goal_id=goal_id, objective="with goal",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
-        study_id = s.study_id
 
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
@@ -720,7 +780,7 @@ async def test_resume_interrupted_study_calls_resume_interrupted(
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=None, objective="interrupted obj",
+            owner_session_id="sess-1", goal_id=None, objective="interrupted obj",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -754,7 +814,7 @@ async def test_resume_interrupted_failure_returns_400(_app_env, tmp_path, monkey
     db_path = tmp_path / "goals.db"
     with StudyStore(db_path=db_path) as store:
         s = store.create_study(
-            session_id="sess-1", goal_id=None, objective="interrupted",
+            owner_session_id="sess-1", goal_id=None, objective="interrupted",
             workspace_path=str(_app_env), strategy_name="demo",
             executor_type="autoresearch", max_rounds=3,
         )
@@ -802,7 +862,8 @@ async def test_start_rejects_strategy_name_with_path_traversal(_app_env, monkeyp
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(_app_env / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(_app_env / "hyp.json"))
 
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
+
     from strategy_research.api.routers import study as study_router
 
     sched = MagicMock()
@@ -827,7 +888,8 @@ async def test_start_rejects_strategy_name_with_path_traversal(_app_env, monkeyp
 @pytest.mark.asyncio
 async def test_start_accepts_plain_strategy_name(_app_env, monkeypatch):
     """A1: 合法的 strategy_name 仍然通过。"""
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
+
     from strategy_research.api.routers import study as study_router
 
     sched = MagicMock()
@@ -845,3 +907,112 @@ async def test_start_accepts_plain_strategy_name(_app_env, monkeypatch):
     async with _api_client() as client:
         r = await client.post("/api/study/start", json=body)
         assert r.status_code == 200
+
+
+# ── v2 guidance endpoint (§13.4) ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_guidance_endpoint_task_file(_app_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+    study_id = _seed_study(_app_env, tmp_path, monkeypatch)
+    gdir = _app_env / "study" / study_id
+    gdir.mkdir(parents=True)
+    (gdir / "guidance.md").write_text(
+        "---\n"
+        "gates:\n"
+        "  - {id: risk-max-dd, metric: max_dd, op: '>=', value: -0.15}\n"
+        "---\n"
+        "# 研究指引\n\n禁止 MaxDD 低于 -0.15\n",
+        encoding="utf-8",
+    )
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/{study_id}/guidance")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["task_scope"] is True
+        assert data["gates"][0]["id"] == "risk-max-dd"
+        assert data["gates"][0]["value"] == -0.15
+        assert "禁止 MaxDD" in data["body"]
+        assert "禁止 MaxDD" in data["text"]
+
+
+@pytest.mark.asyncio
+async def test_guidance_endpoint_global_fallback_and_404(_app_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+    study_id = _seed_study(_app_env, tmp_path, monkeypatch)
+
+    # no guidance anywhere → 404
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/{study_id}/guidance")
+        assert r.status_code == 404
+
+    # global template only → 200 with task_scope=False
+    gdir = _app_env / "study"
+    gdir.mkdir(parents=True)
+    (gdir / "guidance.md").write_text("global template body\n", encoding="utf-8")
+    async with _api_client() as client:
+        r = await client.get(f"/api/study/{study_id}/guidance")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["task_scope"] is False
+        assert "global template body" in data["body"]
+
+
+@pytest.mark.asyncio
+async def test_summary_includes_monitor_state(_app_env, tmp_path, monkeypatch):
+    """B4: summary 应返回 monitor_state（drift_count/last_check_at/interval）。"""
+    from strategy_research.core.study import StudyStore
+
+    db_path = tmp_path / "goals.db"
+    with StudyStore(db_path=db_path) as store:
+        study = store.create_study(
+            owner_session_id="sess-1",
+            goal_id=None,
+            objective="monitor me",
+            workspace_path=str(_app_env),
+            strategy_name="demo_strategy",
+            executor_type="autoresearch",
+            monitor_interval_seconds=60,
+        )
+        store.update_monitor_check(study.study_id, last_check_at="2026-08-01T12:00:00", drift=True)
+        store.update_monitor_check(study.study_id, last_check_at="2026-08-01T13:00:00", drift=False)
+        study_id = study.study_id
+
+    monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
+
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.get(f"/api/study/{study_id}/summary")
+        assert r.status_code == 200
+        ms = r.json()["monitor_state"]
+        assert ms is not None
+        assert ms["drift_count"] == 1  # drift=True 一次
+        assert ms["interval_seconds"] == 60
+        assert ms["last_check_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_workflow_executor_type(_app_env):
+    """E3: /study/start 只接受 autoresearch；workflow 引导到专用端点。"""
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        body = {
+            "session_id": "sess-1", "objective": "x",
+            "workspace_path": str(_app_env), "strategy_name": "demo_strategy",
+            "executor_type": "workflow",
+        }
+        r = await client.post("/api/study/start", json=body)
+        assert r.status_code == 400
+        assert "workflow" in r.json()["detail"]

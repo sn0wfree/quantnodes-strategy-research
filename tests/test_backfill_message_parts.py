@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pytest
 
-SRC_PATH = Path(__file__).resolve().parents[1] / "src"
+ROOT_PATH = Path(__file__).resolve().parents[1]
+SRC_PATH = ROOT_PATH / "src"
 sys.path.insert(0, str(SRC_PATH))
+sys.path.insert(0, str(ROOT_PATH))
 
 
 @pytest.fixture
@@ -163,6 +165,7 @@ class TestBackfillMessageParts:
         _create_session(db_path, "sess-1")
         # Insert with parts_json=null (need to re-add the column)
         import uuid
+
         import strategy_research.api.routers.web_session as ws
         mid = str(uuid.uuid4())
         with ws._get_db() as conn:

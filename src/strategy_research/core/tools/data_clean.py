@@ -18,9 +18,9 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, List
+from typing import List, Optional
+
 import pandas as pd
-import numpy as np
 
 # 预设模式定义
 PRESETS = {

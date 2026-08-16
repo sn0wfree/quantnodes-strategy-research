@@ -14,13 +14,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from strategy_research.core.agent.compact import (
     CompactConfig,
     _estimate_tokens,
     _fix_tool_pairs,
-    _llm_summarize_v2,
     _resolve_threshold_tokens,
     _select_by_token_budget,
     _serialize_message,
@@ -29,7 +26,6 @@ from strategy_research.core.agent.compact import (
     get_compaction_metrics,
     reset_compaction_metrics,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -795,9 +791,7 @@ class TestQualityDecay:
     def test_score_turn_tool_result_boost(self):
         """Turn with tool result gets moderate content weight."""
         from strategy_research.core.agent.compact import _score_turn
-        turn_with_tool = [
-            {"role": "assistant", "content": "result data"},
-        ]
+        [{'role': 'assistant', 'content': 'result data'}]
         turn_without = [
             {"role": "assistant", "content": "just text"},
         ]

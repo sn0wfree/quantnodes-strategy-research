@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from strategy_research.core.engine.china_a import ChinaAEngine
+from strategy_research.core.engine.china_futures import ChinaFuturesEngine
 from strategy_research.core.engine.composite import CompositeEngine
 from strategy_research.core.engine.crypto import CryptoEngine
 from strategy_research.core.engine.forex import ForexEngine
 from strategy_research.core.engine.global_equity import GlobalEquityEngine
 from strategy_research.core.engine.india_equity import IndiaEquityEngine
-from strategy_research.core.engine.china_futures import ChinaFuturesEngine
-from strategy_research.core.engine.global_futures import GlobalFuturesEngine
 from strategy_research.core.engine.signals import ConstantWeightEngine
-
 
 # ============================================================
 # helpers

@@ -13,7 +13,6 @@ from strategy_research.core.utils.market_detection import (
     detect_submarket,
 )
 
-
 # ============================================================
 # detect_market
 # ============================================================

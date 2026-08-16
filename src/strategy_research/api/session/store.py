@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -65,60 +64,6 @@ class SessionStore:
     # DELETE-CANDIDATE v0.6: 0 production callers; keep list_attempts_by_status.
     # synchronously. Remove when the transition window (docs/
     # compaction-summary-fix.md B4) closes.
-
-    def append_message(
-        self,
-        message: Message,
-        *,
-        message_id: Optional[str] = None,
-        parts: Optional[list[dict[str, Any]]] = None,
-        created_at: Optional[float] = None,
-        message_type: Optional[str] = None,
-        seq: Optional[int] = None,
-    ) -> str:
-        """Append a message to the session.
-
-        Args:
-            message: Message to persist.
-            message_id: Optional explicit ID (used by SSE event correlation
-                for assistant messages). If None, a UUID is generated.
-            parts: Optional structured parts (text/thinking/tool_call/etc.).
-            created_at: Optional timestamp (epoch seconds). If None, uses
-                time.time().
-            message_type: One of 'user' | 'assistant' | 'tool' | 'compaction'.
-                If None, uses message.role (user/assistant/tool).
-            seq: Per-session monotonic sequence number (Level 1, opencode-aligned).
-                If None, the column default (0) is used. Callers SHOULD pass
-                an explicit seq from SeqGenerator for new messages.
-
-        Returns:
-            The message_id used.
-        """
-        # 默认使用 message.role，而不是固定 assistant
-        if message_type is None:
-            message_type = message.role
-
-        logger.debug("[STORE] append_message session=%s role=%s type=%s content_len=%d seq=%s",
-                    message.session_id, message.role, message_type, len(message.content), seq)
-
-        # Lazy import to avoid circular dependency
-        from ..routers.web_session import persist_message
-
-        msg_id = message_id or str(uuid.uuid4())
-        persist_message(
-            session_id=message.session_id,
-            role=message.role,
-            content=message.content,
-            parts=parts or message.metadata.get("parts"),
-            metadata=message.metadata,
-            message_id=msg_id,
-            created_at=created_at,
-            tool_call_id=message.tool_call_id,
-            message_type=message_type,
-            seq=seq,
-        )
-        logger.debug("[STORE] persisted id=%s", msg_id)
-        return msg_id
 
     def get_messages(
         self,
@@ -237,14 +182,6 @@ class SessionStore:
             return self._get_messages_from_db(session_id, limit)
 
     # DELETE-CANDIDATE v0.6: 0 production callers.
-    def get_session_metadata(self, session_id: str) -> Optional[dict[str, Any]]:
-        """Return session metadata (title, message_count, starred, tags)."""
-        from ..routers.web_session import get_session
-
-        return get_session(session_id=session_id)
-
-    # ── Attempt CRUD ───────────────────────────────────────────────────
-
     def create_attempt(self, attempt: Attempt) -> Attempt:
         """Persist a new Attempt in pending status."""
         created_at = attempt.created_at or _utc_now_iso()
@@ -332,16 +269,6 @@ class SessionStore:
             return _row_to_attempt(row)
 
     # DELETE-CANDIDATE v0.6: 0 production callers; use list_attempts_by_status.
-    def list_attempts(self, session_id: str, limit: int = 50) -> list[Attempt]:
-        """List Attempts for a session, newest first."""
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM attempts WHERE session_id = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
-            return [_row_to_attempt(r) for r in rows]
-
     def list_attempts_by_status(
         self,
         session_id: str,

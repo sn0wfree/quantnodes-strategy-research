@@ -6,11 +6,11 @@ import pandas as pd
 import pytest
 
 from strategy_research.core.engine.market_hooks import (
-    calc_crypto_funding_fee,
-    check_crypto_liquidation,
+    _TIER_TABLE,
     FUNDING_HOURS,
     _maintenance_rate,
-    _TIER_TABLE,
+    calc_crypto_funding_fee,
+    check_crypto_liquidation,
 )
 from strategy_research.core.utils.backtest_models import Position
 

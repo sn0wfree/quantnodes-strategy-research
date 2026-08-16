@@ -40,7 +40,7 @@ import warnings
 from pathlib import Path
 from typing import List, Optional
 
-from .event_v2 import EventV2, is_known_event_type
+from ...core.events.event_v2 import EventV2, is_known_event_type
 from .events import EventBus, SSEEvent
 
 logger = logging.getLogger(__name__)

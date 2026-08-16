@@ -8,22 +8,24 @@ Schema:
   hypothesis_relations  — graph edges (parent, related, contradicts)
   hypothesis_goals      — M:N relationship to research goals
 
-Migration: On first startup, existing JSON files are migrated to SQLite.
-The original JSON file is renamed with .bak suffix after migration.
+Migration (v2 design §14.2): the legacy JSON file is intentionally NOT
+imported; it is left in place but never read.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
-import uuid
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ..storage.sqlite import (
+    connect,
+    resolve_db_path,
+    write_transaction,
+)
 from .registry import (
     VALID_TRANSITIONS,
     Hypothesis,
@@ -36,26 +38,27 @@ from .registry import (
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_DB_PATH = Path.home() / ".quantnodes-research" / "hypotheses.db"
 _ENV_PATH = "QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH"
 
 
-def _json_fallback_path(db_path: Path | None = None) -> Path:
-    """Return the path to the legacy JSON file for migration.
-
-    Looks at the same directory as the SQLite DB by default, so tests can
-    use tmp_path directories without polluting ~/.quantnodes-research/.
-    """
-    env_db = os.environ.get(_ENV_PATH, "").strip()
-    if env_db:
-        return Path(env_db).expanduser().parent / "hypotheses.json"
-    if db_path is not None:
-        return db_path.parent / "hypotheses.json"
-    return Path.home() / ".quantnodes-research" / "hypotheses.json"
+def _apply_scalar_fields(hyp: Any, fields: dict) -> None:
+    """Set stripped scalar fields that are not None (by attribute name)."""
+    for attr, value in fields.items():
+        if value is not None:
+            setattr(hyp, attr, value.strip())
 
 
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+def _apply_status(hyp: Any, status: str) -> None:
+    """Validate and apply a status change on a hypothesis."""
+    new_status = _validate_status(status)
+    if new_status != hyp.status:
+        allowed = VALID_TRANSITIONS.get(hyp.status, set())
+        if new_status not in allowed:
+            raise ValueError(
+                f"invalid hypothesis transition: {hyp.status} -> {new_status}. "
+                f"Allowed: {sorted(allowed) or '(terminal)'}"
+            )
+    hyp.status = new_status
 
 
 def default_db_path() -> Path:
@@ -65,11 +68,7 @@ def default_db_path() -> Path:
         1. QUANTNODES_RESEARCH_HYPOTHESES_DB_PATH env var
         2. ~/.quantnodes-research/hypotheses.db (default)
     """
-    import os
-    raw_path = os.environ.get(_ENV_PATH, "").strip()
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return _DEFAULT_DB_PATH
+    return resolve_db_path("hypotheses.db", _ENV_PATH)
 
 
 class HypothesisStore:
@@ -88,15 +87,8 @@ class HypothesisStore:
         self.db_path = db_path or default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(
-            str(self.db_path),
-            check_same_thread=False,
-        )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn = connect(self.db_path)
         self._init_db()
-        self._migrate_from_json()
 
     # ── Schema & migration ─────────────────────────────────────
 
@@ -148,45 +140,6 @@ class HypothesisStore:
             )
             self._conn.commit()
 
-    def _migrate_from_json(self) -> None:
-        """One-time migration from JSON file to SQLite.
-
-        If a hypotheses.json exists and the SQLite DB is empty, import all
-        records and rename the JSON file with .bak suffix.
-        """
-        json_path = _json_fallback_path(self.db_path)
-        if not json_path.exists():
-            return
-        # Check if DB already has data
-        with self._lock:
-            row = self._conn.execute("SELECT COUNT(*) AS n FROM hypotheses").fetchone()
-            if row["n"] > 0:
-                return
-            try:
-                raw = json.loads(json_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.warning("JSON migration skipped: %s", exc)
-                return
-            if not isinstance(raw, list):
-                return
-            for item in raw:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    hyp = Hypothesis.from_dict(item)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("Skipping malformed hypothesis: %s", exc)
-                    continue
-                self._insert_raw(hyp)
-            try:
-                json_path.rename(json_path.with_suffix(".json.bak"))
-                logger.info(
-                    "Migrated %d hypotheses from JSON to SQLite; JSON archived.",
-                    len(raw),
-                )
-            except OSError as exc:
-                logger.warning("Could not rename JSON file: %s", exc)
-
     def _insert_raw(self, hyp: Hypothesis) -> None:
         """Insert a hypothesis without validation. Used by migration."""
         with self._lock:
@@ -221,17 +174,6 @@ class HypothesisStore:
             self._conn.commit()
 
     # ── Write transactions ─────────────────────────────────────
-
-    @contextmanager
-    def _write_transaction(self):
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield
-        except Exception:
-            self._conn.rollback()
-            raise
-        else:
-            self._conn.commit()
 
     def _row_to_hyp(self, row: sqlite3.Row) -> Hypothesis:
         return Hypothesis(
@@ -335,7 +277,7 @@ class HypothesisStore:
                 created_at=now,
                 updated_at=now,
             )
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp)
         return hyp
 
@@ -369,30 +311,19 @@ class HypothesisStore:
                 return None
             hyp = self._row_to_hyp(row)
 
-            if title is not None:
-                hyp.title = title.strip()
-            if thesis is not None:
-                hyp.thesis = thesis.strip()
+            _apply_scalar_fields(hyp, {
+                "title": title,
+                "thesis": thesis,
+                "universe": universe,
+                "signal_definition": signal_definition,
+                "invalidation_notes": invalidation_notes,
+            })
             if status is not None:
-                new_status = _validate_status(status)
-                if new_status != hyp.status:
-                    allowed = VALID_TRANSITIONS.get(hyp.status, set())
-                    if new_status not in allowed:
-                        raise ValueError(
-                            f"invalid transition: {hyp.status} -> {new_status}. "
-                            f"Allowed: {sorted(allowed) or '(terminal)'}"
-                        )
-                hyp.status = new_status
-            if universe is not None:
-                hyp.universe = universe.strip()
-            if signal_definition is not None:
-                hyp.signal_definition = signal_definition.strip()
+                _apply_status(hyp, status)
             if data_sources is not None:
                 hyp.data_sources = _coerce_str_list(data_sources)
             if skills is not None:
                 hyp.skills = _coerce_str_list(skills)
-            if invalidation_notes is not None:
-                hyp.invalidation_notes = invalidation_notes.strip()
             if parent_hypothesis_id is not None:
                 hyp.parent_hypothesis_id = parent_hypothesis_id or None
             if related_ids is not None:
@@ -403,7 +334,7 @@ class HypothesisStore:
                 hyp.goal_id = goal_id or None
             hyp.updated_at = _utc_now()
 
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp)
         return hyp
 
@@ -430,7 +361,7 @@ class HypothesisStore:
             "linked_at": _utc_now(),
         })
         hyp.updated_at = _utc_now()
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._insert_raw(hyp)
         return hyp
 
@@ -521,12 +452,12 @@ class HypothesisStore:
         if related_id not in hyp_a.related_ids:
             hyp_a.related_ids.append(related_id)
             hyp_a.updated_at = _utc_now()
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp_a)
         if hyp_id not in hyp_b.related_ids:
             hyp_b.related_ids.append(hyp_id)
             hyp_b.updated_at = _utc_now()
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp_b)
         return hyp_a
 
@@ -538,12 +469,12 @@ class HypothesisStore:
             return None
         hyp_a.related_ids = [x for x in hyp_a.related_ids if x != related_id]
         hyp_a.updated_at = _utc_now()
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._insert_raw(hyp_a)
         if hyp_b is not None:
             hyp_b.related_ids = [x for x in hyp_b.related_ids if x != hyp_id]
             hyp_b.updated_at = _utc_now()
-            with self._write_transaction():
+            with write_transaction(self._conn):
                 self._insert_raw(hyp_b)
         return hyp_a
 
@@ -560,7 +491,7 @@ class HypothesisStore:
             else f"Contradicts {other_id}: {notes}"
         ).strip()
         hyp_a.updated_at = _utc_now()
-        with self._write_transaction():
+        with write_transaction(self._conn):
             self._insert_raw(hyp_a)
         return hyp_a
 

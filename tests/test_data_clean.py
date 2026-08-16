@@ -2,7 +2,8 @@
 
 import pandas as pd
 import pytest
-from strategy_research.core.tools.data_clean import clean_data, PRESETS, CleaningReport
+
+from strategy_research.core.tools.data_clean import PRESETS, CleaningReport, clean_data
 
 
 @pytest.fixture

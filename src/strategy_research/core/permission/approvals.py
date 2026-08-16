@@ -22,9 +22,9 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
-from .evaluator import PermissionEvaluator, PermissionDeniedError
+from .evaluator import PermissionEvaluator
 from .rules_io import DEFAULT_RULES_PATH, save_rule
 from .schema import (
     PermissionAction,

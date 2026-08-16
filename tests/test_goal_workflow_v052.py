@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,7 +27,6 @@ from strategy_research.cli.tui.workers.workflow_worker import (
     WorkflowWorker,
     WorkflowWorkerState,
 )
-
 
 # ─── Fixtures ──────────────────────────────────────────────────────────
 
@@ -201,7 +199,7 @@ class TestResearchAppStartWorkflow:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             assert app._workflow_worker is None
             runner = MagicMock()
             runner.event_bus = MagicMock()
@@ -214,7 +212,7 @@ class TestResearchAppStartWorkflow:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             runner = MagicMock()
             runner.event_bus = MagicMock()
             runner.event_bus.subscribe = MagicMock()
@@ -227,7 +225,7 @@ class TestResearchAppStartWorkflow:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             runner1 = MagicMock()
             runner1.event_bus = MagicMock()
             runner1.event_bus.subscribe = MagicMock()
@@ -253,7 +251,7 @@ class TestCtrlGPausesWorkflow:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             runner = MagicMock()
             runner.event_bus = MagicMock()
             runner.event_bus.subscribe = MagicMock()
@@ -269,7 +267,7 @@ class TestCtrlGPausesWorkflow:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             assert app._workflow_worker is None
             # Ctrl+G should not crash
             app.action_toggle_goal_continuation()
@@ -285,7 +283,7 @@ class TestGoalPanelReceivesEvents:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             panel = app.query_one("#goal-panel")
             panel.update_goal(
                 objective="test", status="active", progress=0.0,
@@ -297,7 +295,7 @@ class TestGoalPanelReceivesEvents:
         from strategy_research.cli.tui.app import ResearchApp
 
         app = ResearchApp(skip_resume=True)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             panel = app.query_one("#goal-panel")
             panel.update_goal(
                 objective="test", status="active", progress=50.0,

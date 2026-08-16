@@ -19,8 +19,8 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import HealthCheck, example, given, settings, strategies as st
-from hypothesis.extra.pandas import columns, data_frames, range_indexes
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 
 from strategy_research.core.compute_factor import OPERATORS
 
@@ -113,7 +113,13 @@ def test_cs_univariate_shape_invariant(op_name, df):
     # 注意: compute_factor.OPERATORS 中的 rank/zscore/scale 接受 Series
     # ALPHA_ZOO_OPS 中的对应函数接受 DataFrame
     from strategy_research.core.alpha_zoo_ops import (
-        rank as rank_df, zscore as zscore_df, scale as scale_df,
+        rank as rank_df,
+    )
+    from strategy_research.core.alpha_zoo_ops import (
+        scale as scale_df,
+    )
+    from strategy_research.core.alpha_zoo_ops import (
+        zscore as zscore_df,
     )
     fns = {"rank": rank_df, "zscore": zscore_df, "scale": scale_df}
     fn = fns[op_name]

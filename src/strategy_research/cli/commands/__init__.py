@@ -23,14 +23,22 @@ from strategy_research.cli.commands.slash_goal import (
     cmd_cancel,
     cmd_complete,
     cmd_evidence,
-    cmd_help as goal_help,
     cmd_start,
     cmd_status,
 )
+from strategy_research.cli.commands.slash_goal import (
+    cmd_help as goal_help,
+)
 from strategy_research.cli.commands.slash_memory import (
     cmd_forget,
+)
+from strategy_research.cli.commands.slash_memory import (
     cmd_list as memory_cmd_list,
+)
+from strategy_research.cli.commands.slash_memory import (
     cmd_search as memory_cmd_search,
+)
+from strategy_research.cli.commands.slash_memory import (
     cmd_show as memory_cmd_show,
 )
 from strategy_research.cli.commands.slash_router import (

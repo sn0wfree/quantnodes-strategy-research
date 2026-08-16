@@ -9,10 +9,8 @@ import pytest
 from strategy_research.core.goal import (
     AuditRow,
     EvidenceInput,
-    GoalRecord,
     GoalStatus,
     GoalStore,
-    RiskTier,
 )
 
 

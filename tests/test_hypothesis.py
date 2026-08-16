@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -21,7 +20,6 @@ from strategy_research.core.hypothesis import (
     HypothesisAutoCreator,
     HypothesisRegistry,
 )
-
 
 # ─── Fixtures ────────────────────────────────────────────────────────────
 
@@ -234,7 +232,7 @@ class TestRegistrySearch:
         assert results[0].title == "Momentum AAPL"
 
     def test_status_filter(self, registry: HypothesisRegistry):
-        h1 = registry.create(title="a", thesis="x", status="exploring")
+        registry.create(title="a", thesis="x", status="exploring")
         h2 = registry.create(title="b", thesis="y", status="testing")
         results = registry.search(status="testing")
         assert len(results) == 1
@@ -261,8 +259,8 @@ class TestRegistrySearch:
         assert len(registry.search(limit=999)) == 5  # capped by available
 
     def test_search_ordered_by_score_then_recency(self, registry: HypothesisRegistry):
-        h1 = registry.create(title="a", thesis="x")
-        h2 = registry.create(title="b", thesis="y")
+        registry.create(title="a", thesis="x")
+        registry.create(title="b", thesis="y")
         # Both have same score (0 query tokens → score 1 for all); tie-break on updated_at desc
         results = registry.search()
         assert len(results) == 2
@@ -273,22 +271,14 @@ class TestRegistrySearch:
 
 class TestRegistryAtomicity:
     def test_missing_file_returns_empty(self, tmp_path):
-        reg = HypothesisRegistry(path=tmp_path / "missing.json")
+        reg = HypothesisRegistry(path=tmp_path / "missing.db")
         assert reg.list() == []
 
-    def test_malformed_json_raises(self, tmp_path):
-        path = tmp_path / "bad.json"
-        path.write_text("{not json", encoding="utf-8")
+    def test_db_created_on_write(self, tmp_path):
+        path = tmp_path / "created.db"
         reg = HypothesisRegistry(path=path)
-        with pytest.raises(ValueError, match="invalid hypotheses storage"):
-            reg.list()
-
-    def test_non_list_root_raises(self, tmp_path):
-        path = tmp_path / "dict_root.json"
-        path.write_text(json.dumps({"wrong": "shape"}), encoding="utf-8")
-        reg = HypothesisRegistry(path=path)
-        with pytest.raises(ValueError, match="must contain a JSON list"):
-            reg.list()
+        reg.create(title="t", thesis="y")
+        assert path.exists()
 
     def test_atomic_write_no_leftover_tmp(self, registry: HypothesisRegistry, sample_kwargs):
         """After save, no .tmp file should remain."""
@@ -298,8 +288,8 @@ class TestRegistryAtomicity:
         assert not tmp.exists()
 
     def test_dir_created_on_init(self, tmp_path):
-        nested = tmp_path / "a" / "b" / "c" / "h.json"
-        reg = HypothesisRegistry(path=nested)
+        nested = tmp_path / "a" / "b" / "c" / "h.db"
+        HypothesisRegistry(path=nested)
         # Just init should not create file, but parent dirs should exist
         assert nested.parent.exists()
 

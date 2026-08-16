@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ────────────────────────── _first_existing_dotenv_path ──────────────────────────
 
 
@@ -12,7 +11,6 @@ class TestFirstExistingDotenv:
     def test_returns_none_when_no_files(self, tmp_path, monkeypatch):
         """三个候选都不存在 → None。"""
         from strategy_research.cli import _auto_onboard
-        from strategy_research.cli.onboard import _QUANTNODES_DOTENV_PATH
 
         fake_q = tmp_path / "q.env"
         fake_p = tmp_path / "p.env"

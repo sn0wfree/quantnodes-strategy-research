@@ -11,9 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.strategy_acceptance.llm_eval import (
     LLMEvaluator,
-    LLMEvaluatorError,
-    evaluate_or_skip,
     _fail_verdict,
+    evaluate_or_skip,
 )
 
 

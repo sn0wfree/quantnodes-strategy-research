@@ -1,5 +1,12 @@
 """EventV2 — typed event envelope for the event_log table (Level 3, B1 commit 2).
 
+P0-1 A2 (2026-08-15): moved from ``strategy_research.api.session.event_v2``
+to ``strategy_research.core.events.event_v2`` so ``core/agent/event_store``
+can depend on it without inverting the core/api layering. The public surface
+(EventV2, EventType, is_known_event_type) is unchanged; only the import
+path differs. No shim is kept — update ``from .event_v2 import ...`` →
+``from ...core.events.event_v2 import ...``.
+
 This module defines the data shape that EventBusV2 publishes and the
 projector consumes. It is intentionally thin: just a dataclass, an
 event-type registry, and JSON serialization helpers. No I/O.
@@ -96,9 +103,26 @@ class EventType:
     ITER_START = "iter_start"
     ITER_END = "iter_end"
 
+    # AgentLoop lifecycle (Trajectory View). Routed into event_log so the
+    # timeline has the full loop vocabulary, not just LLM requests.
+    LOOP_START = "loop_start"
+    LOOP_END = "loop_end"
+    LOOP_FINAL = "loop_final"
+    COMPRESSION = "compression"
+    TOOL_ERROR = "tool_error"
+
     # LLM usage
     LLM_USAGE = "llm_usage"
     SESSION_TOTAL_TOKENS = "session_total_tokens"
+
+    # LLM request envelope (DSH request-envelope pattern): recorded once
+    # per LLM call. Large fields (system_prompt, tools_schema) are
+    # offloaded to sidecar blobs; event_log stores metadata + refs.
+    LLM_REQUEST = "llm_request"
+
+    # LLM response envelope (Trajectory View): finish reason, tool-call
+    # count, and a short content preview.
+    LLM_RESPONSE = "llm_response"
 
     # Compaction
     COMPACT = "compact"
@@ -127,6 +151,34 @@ class EventType:
     # message_type='goal' — see projector._on_goal_updated)
     GOAL_UPDATED = "goal_updated"
 
+    # Study lifecycle (v2 design §16 — 5 groups)
+    STUDY_QUEUED = "study_queued"
+    STUDY_STARTED = "study_started"
+    STUDY_PAUSED = "study_paused"
+    STUDY_RESUMED = "study_resumed"
+    STUDY_CANCELLED = "study_cancelled"
+    STUDY_EARLY_STOPPED = "study_early_stopped"
+    STUDY_COMPLETED = "study_completed"
+    STUDY_FAILED = "study_failed"
+    STUDY_EXECUTOR_STOPPED = "study_executor_stopped"
+    STUDY_INTERRUPTED = "study_interrupted"
+    STUDY_ROUND = "study_round"
+    STUDY_ROUND_REJECTED = "study_round_rejected"
+    STUDY_PHASE = "study_phase"
+    STUDY_REVIEW = "study_review"
+    STUDY_TODOS_UPDATED = "study_todos_updated"
+    STUDY_EVIDENCE = "study_evidence"
+    STUDY_PROGRESS = "study_progress"
+    STUDY_BUDGET_LIMITED = "study_budget_limited"
+    STUDY_MONITORING_STARTED = "study_monitoring_started"
+    STUDY_MONITOR_CHECK = "study_monitor_check"
+    STUDY_MONITOR_CHECK_FAILED = "study_monitor_check_failed"
+    STUDY_DRIFT_DETECTED = "study_drift_detected"
+    STUDY_KNOWLEDGE_CHECK = "study_knowledge_check"
+    STUDY_KNOWLEDGE_UPDATE = "study_knowledge_update"
+    STUDY_KNOWLEDGE_COMPACTED = "study_knowledge_compacted"
+    STUDY_DIRECTIVES_CONSUMED = "study_directives_consumed"
+
 
 # Set of all known event types (for validation)
 _ALL_EVENT_TYPES: Set[str] = set()
@@ -145,6 +197,19 @@ def is_known_event_type(event_type: str) -> bool:
     return event_type in _ALL_EVENT_TYPES
 
 
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    """Tolerant key lookup for event_log rows.
+
+    sqlite3.Row supports bracket access but not ``.keys()``; plain dicts
+    support both. Forward-compat for rows that lack the P0-1 A3 columns
+    falls back to ``default`` so pre-A3 events keep reconstructing cleanly.
+    """
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 # ── Event envelope ───────────────────────────────────────────────────
 
 @dataclass
@@ -159,6 +224,14 @@ class EventV2:
             (aggregate_id, seq) in the event_log table.
         type: Event type string (e.g. "text.started"). See EventType.
         data: Freeform event payload (any JSON-serializable dict).
+        parent_event_id: P0-1 A3 — parent event ID for trace-tree
+            relationships (iter_start → tool_call → tool_result,
+            subagent_started → parent agent event). ``None`` for root
+            events. Persisted as a nullable column.
+        branch_id: P0-1 A3 — fork branch identifier. ``"main"`` for the
+            default branch; populated by EventStore.fork() in a later
+            phase. Schema enforces ``NOT NULL DEFAULT 'main'`` so this
+            default mirrors the DDL.
         time_created: Wall-clock timestamp (server time.time()).
     """
 
@@ -167,6 +240,8 @@ class EventV2:
     seq: int
     type: str
     data: Dict[str, Any]
+    parent_event_id: Optional[str] = None
+    branch_id: str = "main"
     time_created: float = field(default_factory=time.time)
 
     @classmethod
@@ -176,6 +251,9 @@ class EventV2:
         seq: int,
         type: str,
         data: Optional[Dict[str, Any]] = None,
+        *,
+        parent_event_id: Optional[str] = None,
+        branch_id: str = "main",
     ) -> "EventV2":
         """Factory method that assigns id and timestamp.
 
@@ -184,6 +262,8 @@ class EventV2:
             seq: Per-aggregate sequence number (caller-managed).
             type: Event type (should be a constant from EventType).
             data: Optional event payload.
+            parent_event_id: Optional parent event ID for trace trees.
+            branch_id: Fork branch identifier (``"main"`` by default).
 
         Returns:
             A new EventV2 instance.
@@ -194,12 +274,16 @@ class EventV2:
             raise ValueError(f"seq must be positive, got {seq}")
         if not type:
             raise ValueError("type must be non-empty")
+        if not branch_id:
+            raise ValueError("branch_id must be non-empty")
         return cls(
             id=str(uuid.uuid4()),
             aggregate_id=aggregate_id,
             seq=seq,
             type=type,
             data=data or {},
+            parent_event_id=parent_event_id,
+            branch_id=branch_id,
             time_created=time.time(),
         )
 
@@ -211,6 +295,8 @@ class EventV2:
             "seq": self.seq,
             "type": self.type,
             "data": self.data,
+            "parent_event_id": self.parent_event_id,
+            "branch_id": self.branch_id,
             "time_created": self.time_created,
         }
 
@@ -224,6 +310,9 @@ class EventV2:
 
         Defensive: missing fields raise ValueError (no silent defaults
         for required fields). Extra fields are ignored (forward-compat).
+        The P0-1 A3 fields ``parent_event_id`` and ``branch_id`` are
+        optional for backward compatibility with pre-A3 dicts — missing
+        values use the same defaults as the dataclass / schema.
         """
         required = ("id", "aggregate_id", "seq", "type", "time_created")
         missing = [f for f in required if f not in d]
@@ -235,6 +324,8 @@ class EventV2:
             seq=int(d["seq"]),
             type=d["type"],
             data=d.get("data") or {},
+            parent_event_id=d.get("parent_event_id"),
+            branch_id=d.get("branch_id") or "main",
             time_created=float(d["time_created"]),
         )
 
@@ -257,6 +348,8 @@ class EventV2:
             "seq": self.seq,
             "type": self.type,
             "data_json": json.dumps(self.data, ensure_ascii=False),
+            "parent_event_id": self.parent_event_id,
+            "branch_id": self.branch_id,
             "time_created": self.time_created,
         }
 
@@ -266,6 +359,9 @@ class EventV2:
 
         Accepts sqlite3.Row, dict, or any object that supports
         bracket access. data_json is parsed and merged into data.
+        P0-1 A3 fields use ``.get`` semantics to stay tolerant of
+        pre-A3 rows that lack the columns (the schema-level DEFAULT
+        ``'main'`` would have applied at INSERT time anyway).
         """
         return cls(
             id=row["id"],
@@ -273,6 +369,8 @@ class EventV2:
             seq=row["seq"],
             type=row["type"],
             data=json.loads(row["data_json"]) if isinstance(row["data_json"], str) else row["data_json"],
+            parent_event_id=_row_get(row, "parent_event_id"),
+            branch_id=_row_get(row, "branch_id") or "main",
             time_created=row["time_created"],
         )
 

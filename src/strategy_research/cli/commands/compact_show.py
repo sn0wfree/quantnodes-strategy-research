@@ -9,8 +9,7 @@ Usage:
 """
 from __future__ import annotations
 
-import dataclasses
-from typing import Any, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -92,7 +91,7 @@ def _print_config(console: Console, cfg: CompactConfig) -> int:
         table.add_row(
             "  → derived_threshold",
             f"{threshold:,}",
-            f"opencode: context - max(output, buffer)",
+            "opencode: context - max(output, buffer)",
         )
     table.add_row(
         "compaction_buffer_tokens",

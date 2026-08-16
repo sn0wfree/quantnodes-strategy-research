@@ -15,6 +15,459 @@ import yaml
 # Python AST 分析
 # ============================================================
 
+_BIN_OP_MAP = {
+    ast.Add: "add",
+    ast.Sub: "sub",
+    ast.Mult: "mul",
+    ast.Div: "div",
+    ast.Pow: "pow",
+}
+
+_CMP_OP_MAP = {
+    ast.Lt: "lt",
+    ast.LtE: "lte",
+    ast.Gt: "gt",
+    ast.GtE: "gte",
+    ast.Eq: "eq",
+    ast.NotEq: "neq",
+}
+
+# Helpers → operator-name mapping used by python_ast_to_yaml_ast.
+_HELPER_OP_MAP = {
+    "_rolling_sum": "ts_sum",
+    "_rolling_mean": "ts_mean",
+    "_rolling_std": "ts_std",
+    "_rolling_var": "ts_var",
+    "_rolling_min": "ts_min",
+    "_rolling_max": "ts_max",
+    "_rolling_rank": "ts_rank",
+    "_rolling_corr": "ts_corr",
+    "_rolling_cov": "ts_cov",
+    "_rolling_prod": "ts_prod",
+    "_where_ternary": "where",
+    "_sma": "ts_mean",
+    "_make_one": "fill_null",
+}
+
+_NO_EARLY_RETURN = object()
+
+
+def _apply_call_rename(func: str) -> str | None:
+    """Map a Python func name to its YAML operator name, or None if unchanged."""
+    return {
+        "_cross_sectional_zscore": "zscore",
+        "_delay": "delay",
+        "_rolling_sum": "ts_sum",
+        "_rolling_mean": "ts_mean",
+        "_rolling_std": "ts_std",
+        "_rolling_var": "ts_var",
+        "_rolling_min": "ts_min",
+        "_rolling_max": "ts_max",
+        "_rolling_rank": "ts_rank",
+        "_rolling_corr": "ts_corr",
+        "_rolling_cov": "ts_cov",
+        "_rolling_prod": "ts_prod",
+        "_where_ternary": "where",
+        "sum": "ts_sum",
+        "mean": "ts_mean",
+        "std": "ts_std",
+        "var": "ts_var",
+        "min": "ts_min",
+        "max": "ts_max",
+        "median": "ts_median",
+        "skew": "ts_skew",
+        "kurt": "ts_kurt",
+        "quantile": "ts_rank",
+        "cumsum": "expanding_sum",
+        "log1p": "log",
+        "pow": "signed_power",
+        "power": "signed_power",
+        "minimum": "ts_min",
+        "maximum": "ts_max",
+        "shift": "delay",
+        "diff": "delta",
+        "pct_change": "ts_return",
+        "fillna": "fill_null",
+    }.get(func)
+
+
+def _apply_call_special(func: str, yaml_args: list) -> tuple[str, object]:
+    """May return ``(func, CONVERTED)`` for early-return special cases.
+
+    Default returns ``(func, _NO_EARLY_RETURN)`` so the caller builds the
+    ``{"op": func, "args": yaml_args}`` node.
+    """
+    if func == "_sma":
+        # _sma(x, n, m) -> ts_mean(x, n) - drop the m parameter
+        if len(yaml_args) > 2:
+            yaml_args = yaml_args[:2]
+        return "ts_mean", _NO_EARLY_RETURN
+    if func in ("_ind_neutralize", "cumprod", "replace", "to_numpy"):
+        # Return the first argument unchanged.
+        return func, yaml_args[0] if yaml_args else None
+    if func == "_bench_close":
+        return func, {"column": "close"}
+    if func == "vwap":
+        return func, {"op": "safe_div", "args": [{"column": "amount"}, {"column": "volume"}]}
+    if func == "ones_like":
+        return func, {"value": 1.0}
+    if func == "full_like":
+        if yaml_args:
+            return func, yaml_args[0] if len(yaml_args) > 1 else {"value": 1.0}
+        return func, {"value": 1.0}
+    return func, _NO_EARLY_RETURN
+
+
+def _extract_span(args: list) -> dict:
+    """Extract the span/alpha kwarg for an ``ewm`` method call."""
+    span = {"value": 20}
+    for kw in args:
+        if isinstance(kw, dict) and kw.get("_type") == "kwarg":
+            kw_name = kw.get("name")
+            if kw_name == "span":
+                span = kw.get("value")
+            elif kw_name == "alpha":
+                span = _span_from_alpha(kw.get("value", {}))
+        elif isinstance(kw, dict) and kw.get("_type") == "value":
+            span = kw
+    return span
+
+
+def _extract_window(args: list) -> dict:
+    """Extract the window kwarg for a ``rolling`` method call."""
+    window = {"value": 20}
+    for kw in args:
+        if isinstance(kw, dict) and kw.get("_type") == "kwarg":
+            if kw.get("name") == "window":
+                window = kw.get("value")
+        elif isinstance(kw, dict) and kw.get("_type") == "value":
+            window = kw
+    return window
+
+
+def _span_from_alpha(alpha_val: dict) -> dict:
+    """Convert an ewm alpha value to a span dict (span = 2/alpha - 1)."""
+    span = {"value": 20}
+    if not isinstance(alpha_val, dict):
+        return span
+    if alpha_val.get("_type") == "value":
+        alpha = alpha_val.get("value", 0.1)
+        if isinstance(alpha, (int, float)) and alpha > 0:
+            span = {"value": round(2.0 / alpha - 1.0)}
+    elif alpha_val.get("_type") == "call" and alpha_val.get("func") == "div":
+        div_args = alpha_val.get("args", [])
+        if len(div_args) == 2:
+            a = div_args[0].get("value") if div_args[0].get("_type") == "value" else None
+            b = div_args[1].get("value") if div_args[1].get("_type") == "value" else None
+            if a is not None and b is not None and b != 0:
+                alpha = a / b
+                if alpha > 0:
+                    span = {"value": round(2.0 / alpha - 1.0)}
+    return span
+
+
+_ROLLING_METHOD_MAP = {
+    "mean": "ts_mean",
+    "std": "ts_std",
+    "sum": "ts_sum",
+    "min": "ts_min",
+    "max": "ts_max",
+    "rank": "ts_rank",
+    "corr": "ts_corr",
+    "cov": "ts_cov",
+    "skew": "ts_skew",
+    "kurt": "ts_kurt",
+    "var": "ts_var",
+    "median": "ts_median",
+}
+
+_EWM_METHOD_MAP = {
+    "mean": "ewm_mean",
+    "std": "ewm_std",
+    "corr": "ewm_corr",
+}
+
+
+def _handle_rolling_chain(
+    converted_obj: dict,
+    method: str,
+    args: list,
+    convert,
+) -> object:
+    """Merge a rolling/ewm chain like ``close.rolling(20).mean()``."""
+    rolling_type = None
+    inner_obj = None
+    rolling_span_or_window = None
+    if converted_obj.get("_type") == "rolling":
+        rolling_type = "rolling"
+        inner_obj = converted_obj.get("obj")
+        rolling_span_or_window = converted_obj.get("window")
+    elif converted_obj.get("op") == "ewm_mean" and converted_obj.get("args"):
+        rolling_type = "ewm"
+        inner_obj = converted_obj["args"][0] if len(converted_obj["args"]) > 0 else None
+        rolling_span_or_window = converted_obj["args"][1] if len(converted_obj["args"]) > 1 else {"value": 20}
+
+    method_map = _ROLLING_METHOD_MAP if rolling_type == "rolling" else _EWM_METHOD_MAP
+    op_name = method_map.get(method) if rolling_type else None
+    if op_name:
+        if inner_obj is None:
+            return None
+        yaml_args = [inner_obj]
+        if method in ("corr", "cov"):
+            if args:
+                arg_yaml = convert(args[0])
+                if arg_yaml is None:
+                    return None
+                yaml_args.append(arg_yaml)
+        yaml_args.append(rolling_span_or_window)
+        return {"op": op_name, "args": yaml_args}
+
+    if method == "quantile":
+        return {"op": "ts_rank", "args": [inner_obj, rolling_span_or_window]}
+    if method == "apply":
+        return None
+    return _NO_EARLY_RETURN
+
+
+def _handle_where_method(
+    converted_obj: dict,
+    args: list,
+    convert,
+) -> object:
+    """Translate ``.where(lambda..., val)`` into a YAML ``where`` node."""
+    if not args:
+        return _NO_EARLY_RETURN
+    arg = args[0]
+    if not (isinstance(arg, dict) and arg.get("_type") == "complex"):
+        return _NO_EARLY_RETURN
+    source = arg.get("source", "")
+    import re
+    op_map = {"Gt": "gt", "Lt": "lt", "GtE": "gte", "LtE": "lte", "Eq": "eq", "NotEq": "neq"}
+    not_op_map = {"Gt": "lte", "Lt": "gte", "GtE": "lt", "LtE": "gt", "Eq": "neq", "NotEq": "eq"}
+
+    m = re.search(r"ops=\[(Gt|Lt|GtE|LtE|Eq|NotEq)\(\)\].*?comparators=\[Constant\(value=(\d+\.?\d*)\)\]", source)
+    if m:
+        cmp_op = op_map.get(m.group(1), "gt")
+        return {"op": "where", "args": [
+            converted_obj,
+            {"op": cmp_op, "args": [converted_obj, {"value": float(m.group(2))}]}
+        ]}
+    m2 = re.search(r"Not\(Compare\(left=Name\(id='(\w+)'\).*?ops=\[(Gt|Lt|GtE|LtE|Eq|NotEq)\(\)\].*?comparators=\[Constant\(value=(\d+\.?\d*)\)\]\)", source)
+    if m2:
+        cmp_op = not_op_map.get(m2.group(2), "lte")
+        inner_ref = {"ref": m2.group(1)}
+        return {"op": "where", "args": [
+            converted_obj,
+            {"op": cmp_op, "args": [inner_ref, {"value": float(m2.group(3))}]},
+            args[1] if len(args) > 1 else converted_obj
+        ]}
+    m3 = re.search(r"BinOp\(left=Name\(id='(\w+)'.*?op=BitOr\(\).*?right=Name\(id='(\w+)'", source)
+    if m3:
+        a_ref = {"ref": m3.group(1)}
+        b_ref = {"ref": m3.group(2)}
+        fill_val = convert(args[1]) if len(args) > 1 else converted_obj
+        return {"op": "where", "args": [
+            converted_obj,
+            {"op": "or_", "args": [a_ref, b_ref]},
+            fill_val
+        ]}
+    return _NO_EARLY_RETURN
+
+
+def _convert_method_call(expr: dict, panel_keys: set[str], func_refs: dict, convert) -> dict | None:
+    """Convert a ``method_call`` AST node to a YAML node."""
+    obj = expr["obj"]
+    method = expr["method"]
+    args = expr["args"]
+
+    # 特殊处理 np.xxx() / pd.DataFrame() 前置前缀调用
+    prefix_result = _convert_prefixed_call(obj, method, args, convert)
+    if prefix_result is not _NO_EARLY_RETURN:
+        return prefix_result
+
+    # 特殊处理 rolling 方法
+    if method == "rolling":
+        return {"_type": "rolling", "obj": obj, "window": _extract_window(args)}
+
+    if method == "ewm":
+        span = _extract_span(args)
+        obj_yaml = convert(obj)
+        if obj_yaml is None:
+            return None
+        return {"op": "ewm_mean", "args": [obj_yaml, span]}
+
+    # 链式调用合并: 先转换 obj，再检查是否为 rolling/ewm
+    converted_obj = convert(obj)
+    if isinstance(converted_obj, dict):
+        result = _handle_rolling_chain(converted_obj, method, args, convert)
+        if result is not _NO_EARLY_RETURN:
+            return result
+
+    # 特殊处理 .where(lambda/complex, val) -> where(obj, condition, val)
+    if method == "where":
+        result = _handle_where_method(converted_obj, args, convert)
+        if result is not _NO_EARLY_RETURN:
+            return result
+
+    # 其他方法调用
+    if converted_obj is None:
+        return None
+    yaml_args = [converted_obj]
+    for arg in args:
+        if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+            continue
+        arg_yaml = convert(arg)
+        if arg_yaml is None:
+            return None
+        yaml_args.append(arg_yaml)
+    return {"op": method, "args": yaml_args}
+
+
+def _convert_prefixed_call(obj: dict, method: str, args: list, convert) -> object:
+    """Handle np.xxx() and pd.DataFrame() prefix method calls."""
+    if not (isinstance(obj, dict) and obj.get("_type") == "ref"):
+        return _NO_EARLY_RETURN
+
+    if obj.get("name") == "np":
+        yaml_args = []
+        for arg in args:
+            if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+                continue  # 跳过关键字参数
+            arg_yaml = convert(arg)
+            if arg_yaml is None:
+                if method in ("ones_like", "full_like"):
+                    continue
+                return None
+            yaml_args.append(arg_yaml)
+        return {"op": method, "args": yaml_args}
+
+    if obj.get("name") == "pd" and method == "DataFrame":
+        yaml_args = []
+        for arg in args:
+            if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+                continue
+            arg_yaml = convert(arg)
+            if arg_yaml is None:
+                return None
+            yaml_args.append(arg_yaml)
+        return {"op": "to_df", "args": yaml_args}
+
+    return _NO_EARLY_RETURN
+
+
+_REF_HELPER_MAP = {
+    "_delay": {"op": "delay"},
+    "_make_one": {"op": "fill_null"},
+    "_rolling_sum": {"op": "ts_sum"},
+    "_rolling_mean": {"op": "ts_mean"},
+    "_rolling_std": {"op": "ts_std"},
+    "_rolling_var": {"op": "ts_var"},
+    "_rolling_min": {"op": "ts_min"},
+    "_rolling_max": {"op": "ts_max"},
+    "_rolling_rank": {"op": "ts_rank"},
+    "_rolling_corr": {"op": "ts_corr"},
+    "_rolling_cov": {"op": "ts_cov"},
+    "_rolling_prod": {"op": "ts_prod"},
+    "_where_ternary": {"op": "where"},
+    "_sma": {"op": "ts_mean"},
+    "_ind_neutralize": None,
+    "_bench_close": None,
+    "panel": None,
+    "vwap": {"op": "safe_div", "args": [{"column": "amount"}, {"column": "volume"}]},
+}
+
+
+def _convert_ref(name: str, panel_keys: set[str], func_refs: dict) -> dict | None:
+    """Convert a ``ref`` AST node to a YAML node."""
+    if name == "np":
+        return None
+    builtin_types = {"float", "int", "bool", "str", "complex", "list", "dict", "set", "tuple"}
+    if name in builtin_types:
+        return {"value": name}
+    if name in func_refs:
+        helper_name = func_refs[name]
+        return {"op": _HELPER_OP_MAP.get(helper_name, helper_name)}
+    if name in _REF_HELPER_MAP:
+        return _REF_HELPER_MAP[name]
+    return {"ref": name}
+
+
+def _convert_rolling(expr: dict, convert) -> dict | None:
+    """Convert a ``rolling`` node; returns a placeholder merged later."""
+    obj = expr.get("obj")
+    window = expr.get("window", {"value": 20})
+    if obj:
+        obj_yaml = convert(obj)
+        if obj_yaml is not None:
+            return {"_type": "rolling", "obj": obj_yaml, "window": window}
+    return None
+
+
+def _convert_ewm(expr: dict, convert) -> dict | None:
+    """Convert an ``ewm`` node to an ``ewm_mean`` op."""
+    obj = expr.get("obj")
+    span = expr.get("span", {"value": 20})
+    if obj:
+        obj_yaml = convert(obj)
+        if obj_yaml is not None:
+            return {"op": "ewm_mean", "args": [obj_yaml, span]}
+    return None
+
+
+def _convert_call(expr: dict, panel_keys: set[str], func_refs: dict, convert) -> dict | None:
+    """Convert a ``call`` AST node to a YAML node."""
+    func = expr["func"]
+    args = expr["args"]
+
+    # 检查是否是函数引用
+    if func in func_refs:
+        helper_name = func_refs[func]
+        op_map = dict(_HELPER_OP_MAP)
+        op_map.update({"_ind_neutralize": "__SKIP__", "_bench_close": "__SKIP__"})
+        mapped = op_map.get(helper_name)
+        if mapped == "__SKIP__":
+            yaml_args_temp = []
+            for arg in args:
+                if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+                    continue
+                arg_yaml = convert(arg)
+                if arg_yaml is not None:
+                    yaml_args_temp.append(arg_yaml)
+            return yaml_args_temp[0] if yaml_args_temp else None
+        elif mapped is not None:
+            func = mapped
+
+    yaml_args = _convert_call_args(func, args, convert)
+    if yaml_args is None:
+        return None
+
+    func, early = _apply_call_special(func, yaml_args)
+    if early is not _NO_EARLY_RETURN:
+        return early
+    func = _apply_call_rename(func) or func
+    return {"op": func, "args": yaml_args}
+
+
+_ALLOW_NONE_FUNCS = ("vwap", "ones_like", "full_like", "_bench_close", "_ind_neutralize")
+
+
+def _convert_call_args(func: str, args: list, convert) -> list | None:
+    """Convert non-kwarg, non-panel args for a call node; None if any is un-convertible."""
+    yaml_args = []
+    for arg in args:
+        if isinstance(arg, dict) and arg.get("_type") == "kwarg":
+            continue
+        if isinstance(arg, dict) and arg.get("_type") == "ref" and arg.get("name") == "panel":
+            continue
+        yaml_arg = convert(arg)
+        if yaml_arg is None:
+            if func in _ALLOW_NONE_FUNCS:
+                continue
+            return None
+        yaml_args.append(yaml_arg)
+    return yaml_args
+
+
 class ComputeFunctionAnalyzer(ast.NodeVisitor):
     """分析 compute() 函数的 AST，提取操作序列。"""
 
@@ -95,51 +548,15 @@ class ComputeFunctionAnalyzer(ast.NodeVisitor):
         """分析表达式，返回简化表示。"""
         # panel 引用: panel["close"]
         if isinstance(node, ast.Subscript):
-            if isinstance(node.value, ast.Name) and node.value.id == "panel":
-                if isinstance(node.slice, ast.Constant):
-                    key = node.slice.value
-                    return {"_type": "panel_ref", "key": key}
-                elif isinstance(node.slice, ast.Index) and isinstance(node.slice.value, ast.Constant):
-                    key = node.slice.value.value
-                    return {"_type": "panel_ref", "key": key}
+            result = self._analyze_subscript(node)
+            if result is not None:
+                return result
 
-        # 方法调用: close.pct_change(fill_method=None)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            obj = self._analyze_expr(node.func.value)
-            method = node.func.attr
-            args = [self._analyze_expr(arg) for arg in node.args]
-            # 忽略 fill_method 关键字参数
-            for kw in node.keywords:
-                if kw.arg != "fill_method":
-                    args.append({"_type": "kwarg", "name": kw.arg, "value": self._analyze_expr(kw.value)})
-            return {"_type": "method_call", "obj": obj, "method": method, "args": args}
-
-        # float() / int() 类型转换
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("float", "int"):
-            if len(node.args) == 1:
-                arg = self._analyze_expr(node.args[0])
-                # 如果参数是常量，直接返回转换后的值
-                if isinstance(arg, dict) and arg.get("_type") == "value":
-                    if node.func.id == "float":
-                        return {"_type": "value", "value": float(arg["value"])}
-                    else:
-                        return {"_type": "value", "value": int(arg["value"])}
-                # 否则返回参数本身（类型转换在 YAML 中不需要）
-                return arg
-
-        # 函数调用: ts_mean(close, 20)
+        # 各类 ast.Call 形式 (方法调用 / 类型转换 / 函数调用)
         if isinstance(node, ast.Call):
-            func_name = self._get_func_name(node)
-            if func_name:
-                # 处理关键字参数
-                args = [self._analyze_expr(arg) for arg in node.args]
-                for kw in node.keywords:
-                    if kw.arg == "fill_method":
-                        # 忽略 fill_method 参数
-                        continue
-                    # 其他关键字参数作为命名参数
-                    args.append({"_type": "kwarg", "name": kw.arg, "value": self._analyze_expr(kw.value)})
-                return {"_type": "call", "func": func_name, "args": args}
+            result = self._analyze_call(node)
+            if result is not None:
+                return result
 
         # 变量引用: x
         if isinstance(node, ast.Name):
@@ -161,40 +578,76 @@ class ComputeFunctionAnalyzer(ast.NodeVisitor):
 
         # 二元运算: a + b, a * b
         if isinstance(node, ast.BinOp):
-            left = self._analyze_expr(node.left)
-            right = self._analyze_expr(node.right)
-            op_map = {
-                ast.Add: "add",
-                ast.Sub: "sub",
-                ast.Mult: "mul",
-                ast.Div: "div",
-                ast.Pow: "pow",
-            }
-            op_name = op_map.get(type(node.op))
+            op_name = _BIN_OP_MAP.get(type(node.op))
             if op_name:
-                return {"_type": "call", "func": op_name, "args": [left, right]}
+                return {"_type": "call", "func": op_name, "args": [
+                    self._analyze_expr(node.left),
+                    self._analyze_expr(node.right),
+                ]}
 
         # 比较运算: a < b, a > b
         if isinstance(node, ast.Compare):
             if len(node.ops) == 1 and len(node.comparators) == 1:
-                op = node.ops[0]
-                left = self._analyze_expr(node.left)
-                right = self._analyze_expr(node.comparators[0])
-                op_map = {
-                    ast.Lt: "lt",
-                    ast.LtE: "lte",
-                    ast.Gt: "gt",
-                    ast.GtE: "gte",
-                    ast.Eq: "eq",
-                    ast.NotEq: "neq",
-                }
-                op_name = op_map.get(type(op))
+                op_name = _CMP_OP_MAP.get(type(node.ops[0]))
                 if op_name:
-                    return {"_type": "call", "func": op_name, "args": [left, right]}
+                    return {"_type": "call", "func": op_name, "args": [
+                        self._analyze_expr(node.left),
+                        self._analyze_expr(node.comparators[0]),
+                    ]}
 
         # 复杂表达式
         self.complexity = max(self.complexity, 2)
         return {"_type": "complex", "source": ast.dump(node)}
+
+    def _analyze_subscript(self, node) -> Any | None:
+        """Analyze a ``panel["close"]`` subscript node, or None if not a panel ref."""
+        if not (isinstance(node.value, ast.Name) and node.value.id == "panel"):
+            return None
+        if isinstance(node.slice, ast.Constant):
+            return {"_type": "panel_ref", "key": node.slice.value}
+        if isinstance(node.slice, ast.Index) and isinstance(node.slice.value, ast.Constant):
+            return {"_type": "panel_ref", "key": node.slice.value.value}
+        return None
+
+    def _analyze_call(self, node) -> Any | None:
+        """分析 ast.Call 节点，返回简化表示或 None（非可识别调用）。"""
+        # 方法调用: close.pct_change(fill_method=None)
+        if isinstance(node.func, ast.Attribute):
+            obj = self._analyze_expr(node.func.value)
+            method = node.func.attr
+            args = [self._analyze_expr(arg) for arg in node.args]
+            # 忽略 fill_method 关键字参数
+            for kw in node.keywords:
+                if kw.arg != "fill_method":
+                    args.append({"_type": "kwarg", "name": kw.arg, "value": self._analyze_expr(kw.value)})
+            return {"_type": "method_call", "obj": obj, "method": method, "args": args}
+
+        # float() / int() 类型转换
+        if isinstance(node.func, ast.Name) and node.func.id in ("float", "int"):
+            if len(node.args) == 1:
+                arg = self._analyze_expr(node.args[0])
+                # 如果参数是常量，直接返回转换后的值
+                if isinstance(arg, dict) and arg.get("_type") == "value":
+                    if node.func.id == "float":
+                        return {"_type": "value", "value": float(arg["value"])}
+                    else:
+                        return {"_type": "value", "value": int(arg["value"])}
+                # 否则返回参数本身（类型转换在 YAML 中不需要）
+                return arg
+            return None
+
+        # 函数调用: ts_mean(close, 20)
+        func_name = self._get_func_name(node)
+        if func_name:
+            # 处理关键字参数
+            args = [self._analyze_expr(arg) for arg in node.args]
+            for kw in node.keywords:
+                if kw.arg == "fill_method":
+                    continue
+                args.append({"_type": "kwarg", "name": kw.arg, "value": self._analyze_expr(kw.value)})
+            return {"_type": "call", "func": func_name, "args": args}
+
+        return None
 
     def _get_func_name(self, node) -> str | None:
         """获取函数调用的名称。"""
@@ -282,480 +735,20 @@ def python_ast_to_yaml_ast(expr: dict, panel_keys: set[str], func_refs: dict = N
         return {"value": expr["value"]}
 
     if expr["_type"] == "ref":
-        name = expr["name"]
-        # 忽略 numpy 前缀
-        if name == "np":
-            return None
-        # 处理 Python 内置类型引用 (float, int, bool 等) -> value
-        builtin_types = {"float", "int", "bool", "str", "complex", "list", "dict", "set", "tuple"}
-        if name in builtin_types:
-            return {"value": name}
-        # 检查是否是函数引用
-        if name in func_refs:
-            helper_name = func_refs[name]
-            # 映射到正确的算子名
-            op_map = {
-                "_rolling_sum": "ts_sum",
-                "_rolling_mean": "ts_mean",
-                "_rolling_std": "ts_std",
-                "_rolling_var": "ts_var",
-                "_rolling_min": "ts_min",
-                "_rolling_max": "ts_max",
-                "_rolling_rank": "ts_rank",
-                "_rolling_corr": "ts_corr",
-                "_rolling_cov": "ts_cov",
-                "_where_ternary": "where",
-                "_sma": "ts_mean",
-                "_make_one": "fill_null",
-            }
-            return {"op": op_map.get(helper_name, helper_name)}
-        # 处理辅助函数引用
-        helper_map = {
-            "_delay": {"op": "delay"},
-            "_make_one": {"op": "fill_null"},
-            "_rolling_sum": {"op": "ts_sum"},
-            "_rolling_mean": {"op": "ts_mean"},
-            "_rolling_std": {"op": "ts_std"},
-            "_rolling_var": {"op": "ts_var"},
-            "_rolling_min": {"op": "ts_min"},
-            "_rolling_max": {"op": "ts_max"},
-            "_rolling_rank": {"op": "ts_rank"},
-            "_rolling_corr": {"op": "ts_corr"},
-            "_rolling_cov": {"op": "ts_cov"},
-            "_rolling_prod": {"op": "ts_prod"},
-            "_where_ternary": {"op": "where"},
-            "_sma": {"op": "ts_mean"},
-            "_ind_neutralize": None,
-            "_bench_close": None,
-            "panel": None,
-            "vwap": {"op": "safe_div", "args": [{"column": "amount"}, {"column": "volume"}]},
-        }
-        if name in helper_map:
-            return helper_map[name]
-        return {"ref": name}
+        return _convert_ref(expr["name"], panel_keys, func_refs)
 
     # 处理 rolling/ewm 节点
     if expr["_type"] == "rolling":
-        # rolling 节点作为参数时，尝试转换为对应的算子
-        obj = expr.get("obj")
-        window = expr.get("window", {"value": 20})
-        if obj:
-            obj_yaml = _convert(obj)
-            if obj_yaml is not None:
-                # 返回一个占位符，实际的合并会在 method_call 中处理
-                return {"_type": "rolling", "obj": obj_yaml, "window": window}
-        return None
+        return _convert_rolling(expr, _convert)
 
     if expr["_type"] == "ewm":
-        # ewm 节点作为参数时，转换为 ewm_mean
-        obj = expr.get("obj")
-        span = expr.get("span", {"value": 20})
-        if obj:
-            obj_yaml = _convert(obj)
-            if obj_yaml is not None:
-                return {"op": "ewm_mean", "args": [obj_yaml, span]}
-        return None
+        return _convert_ewm(expr, _convert)
 
     if expr["_type"] == "method_call":
-        obj = expr["obj"]
-        method = expr["method"]
-        args = expr["args"]
-
-        # 特殊处理 np.xxx() 调用 (numpy 前缀)
-        if isinstance(obj, dict) and obj.get("_type") == "ref" and obj.get("name") == "np":
-            # np.log(volume) -> log(volume)
-            yaml_args = []
-            for arg in args:
-                if isinstance(arg, dict) and arg.get("_type") == "kwarg":
-                    continue  # 跳过关键字参数
-                arg_yaml = _convert(arg)
-                if arg_yaml is None:
-                    # 对于 ones_like 等已知函数，允许 arg 为 None
-                    if method in ("ones_like", "full_like"):
-                        continue
-                    return None
-                yaml_args.append(arg_yaml)
-            return {"op": method, "args": yaml_args}
-
-        # 特殊处理 pd.DataFrame() 调用 -> to_df()
-        if isinstance(obj, dict) and obj.get("_type") == "ref" and obj.get("name") == "pd" and method == "DataFrame":
-            yaml_args = []
-            for arg in args:
-                if isinstance(arg, dict) and arg.get("_type") == "kwarg":
-                    continue
-                arg_yaml = _convert(arg)
-                if arg_yaml is None:
-                    return None
-                yaml_args.append(arg_yaml)
-            return {"op": "to_df", "args": yaml_args}
-
-        # 特殊处理 rolling 方法
-        if method == "rolling":
-            window = {"value": 20}
-            for kw in args:
-                if isinstance(kw, dict) and kw.get("_type") == "kwarg":
-                    if kw.get("name") == "window":
-                        window = kw.get("value")
-                elif isinstance(kw, dict) and kw.get("_type") == "value":
-                    window = kw
-            return {"_type": "rolling", "obj": obj, "window": window}
-
-        if method == "ewm":
-            span = {"value": 20}
-            for kw in args:
-                if isinstance(kw, dict) and kw.get("_type") == "kwarg":
-                    kw_name = kw.get("name")
-                    if kw_name == "span":
-                        span = kw.get("value")
-                    elif kw_name == "alpha":
-                        # alpha -> span: span = 2/alpha - 1
-                        alpha_val = kw.get("value", {})
-                        if isinstance(alpha_val, dict):
-                            if alpha_val.get("_type") == "value":
-                                alpha = alpha_val.get("value", 0.1)
-                                if isinstance(alpha, (int, float)) and alpha > 0:
-                                    span = {"value": round(2.0 / alpha - 1.0)}
-                            elif alpha_val.get("_type") == "call" and alpha_val.get("func") == "div":
-                                # alpha = 1.0/3.0 -> eval directly
-                                div_args = alpha_val.get("args", [])
-                                if len(div_args) == 2:
-                                    a = div_args[0].get("value") if div_args[0].get("_type") == "value" else None
-                                    b = div_args[1].get("value") if div_args[1].get("_type") == "value" else None
-                                    if a is not None and b is not None and b != 0:
-                                        alpha = a / b
-                                        if alpha > 0:
-                                            span = {"value": round(2.0 / alpha - 1.0)}
-                elif isinstance(kw, dict) and kw.get("_type") == "value":
-                    span = kw
-            obj_yaml = _convert(obj)
-            if obj_yaml is None:
-                return None
-            return {"op": "ewm_mean", "args": [obj_yaml, span]}
-
-        # 链式调用合并: 先转换 obj，再检查是否为 rolling/ewm
-        converted_obj = _convert(obj)
-        # 链式调用合并: 检查是否为 rolling/ewm 节点
-        if isinstance(converted_obj, dict):
-            # rolling 节点: {_type: rolling, obj: ..., window: ...}
-            # ewm 节点 (已转换): {op: ewm_mean, args: [obj, span]}
-            rolling_type = None
-            inner_obj = None
-            rolling_span_or_window = None
-            if converted_obj.get("_type") == "rolling":
-                rolling_type = "rolling"
-                inner_obj = converted_obj.get("obj")
-                rolling_span_or_window = converted_obj.get("window")
-            elif converted_obj.get("op") == "ewm_mean" and converted_obj.get("args"):
-                rolling_type = "ewm"
-                inner_obj = converted_obj["args"][0] if len(converted_obj["args"]) > 0 else None
-                rolling_span_or_window = converted_obj["args"][1] if len(converted_obj["args"]) > 1 else {"value": 20}
-
-            rolling_method_map = {
-                "mean": "ts_mean" if rolling_type == "rolling" else "ewm_mean",
-                "std": "ts_std" if rolling_type == "rolling" else "ewm_std",
-                "sum": "ts_sum" if rolling_type == "rolling" else None,
-                "min": "ts_min" if rolling_type == "rolling" else None,
-                "max": "ts_max" if rolling_type == "rolling" else None,
-                "rank": "ts_rank" if rolling_type == "rolling" else None,
-                "corr": "ts_corr" if rolling_type == "rolling" else "ewm_corr",
-                "cov": "ts_cov" if rolling_type == "rolling" else None,
-                "skew": "ts_skew" if rolling_type == "rolling" else None,
-                "kurt": "ts_kurt" if rolling_type == "rolling" else None,
-                "var": "ts_var" if rolling_type == "rolling" else None,
-                "median": "ts_median" if rolling_type == "rolling" else None,
-                "quantile": None,
-                "apply": None,
-            }
-
-            if method in rolling_method_map and rolling_method_map[method]:
-                op_name = rolling_method_map[method]
-                yaml_args = []
-                if inner_obj is None:
-                    return None
-                yaml_args.append(inner_obj)
-
-                if method == "corr":
-                    if args:
-                        arg_yaml = _convert(args[0])
-                        if arg_yaml is None:
-                            return None
-                        yaml_args.append(arg_yaml)
-                    yaml_args.append(rolling_span_or_window)
-                elif method == "cov":
-                    if args:
-                        arg_yaml = _convert(args[0])
-                        if arg_yaml is None:
-                            return None
-                        yaml_args.append(arg_yaml)
-                    yaml_args.append(rolling_span_or_window)
-                else:
-                    yaml_args.append(rolling_span_or_window)
-
-                return {"op": op_name, "args": yaml_args}
-
-            if method == "quantile":
-                _convert(args[0]) if args else {"value": 0.5}
-                return {"op": "ts_rank", "args": [inner_obj, rolling_span_or_window]}
-
-            if method == "apply":
-                return None
-
-        # 特殊处理 .where(lambda/complex, val) -> where(obj, condition, val)
-        if method == "where" and len(args) >= 1:
-            arg = args[0]
-            if isinstance(arg, dict) and arg.get("_type") == "complex":
-                source = arg.get("source", "")
-                # Parse lambda from AST source: Lambda(..., body=Compare(..., ops=[Gt()], comparators=[Constant(value=0)]))
-                import re
-                op_pattern = r"ops=\[(Gt|Lt|GtE|LtE|Eq|NotEq)\(\)\].*?comparators=\[Constant\(value=(\d+\.?\d*)\)\]"
-                m = re.search(op_pattern, source)
-                if m:
-                    op_map = {"Gt": "gt", "Lt": "lt", "GtE": "gte", "LtE": "lte", "Eq": "eq", "NotEq": "neq"}
-                    cmp_op = op_map.get(m.group(1), "gt")
-                    cmp_val = float(m.group(2))
-                    return {"op": "where", "args": [
-                        converted_obj,
-                        {"op": cmp_op, "args": [converted_obj, {"value": cmp_val}]}
-                    ]}
-                # Handle ~(ret < 0) -> Not(Compare(...)) pattern
-                not_pattern = r"Not\(Compare\(left=Name\(id='(\w+)'\).*?ops=\[(Gt|Lt|GtE|LtE|Eq|NotEq)\(\)\].*?comparators=\[Constant\(value=(\d+\.?\d*)\)\]\)"
-                m2 = re.search(not_pattern, source)
-                if m2:
-                    op_map = {"Gt": "lte", "Lt": "gte", "GtE": "lt", "LtE": "gt", "Eq": "neq", "NotEq": "eq"}
-                    cmp_op = op_map.get(m2.group(2), "lte")
-                    cmp_val = float(m2.group(3))
-                    inner_ref = {"ref": m2.group(1)}
-                    return {"op": "where", "args": [
-                        converted_obj,
-                        {"op": cmp_op, "args": [inner_ref, {"value": cmp_val}]},
-                        args[1] if len(args) > 1 else converted_obj
-                    ]}
-                # Handle (a | b) -> or_(a, b) pattern
-                or_pattern = r"BinOp\(left=Name\(id='(\w+)'.*?op=BitOr\(\).*?right=Name\(id='(\w+)'"
-                m3 = re.search(or_pattern, source)
-                if m3:
-                    a_ref = {"ref": m3.group(1)}
-                    b_ref = {"ref": m3.group(2)}
-                    # Get the second arg (value to fill)
-                    fill_val = _convert(args[1]) if len(args) > 1 else converted_obj
-                    return {"op": "where", "args": [
-                        converted_obj,
-                        {"op": "or_", "args": [a_ref, b_ref]},
-                        fill_val
-                    ]}
-
-        # 其他方法调用
-        yaml_args = []
-        if converted_obj is None:
-            return None
-        yaml_args.append(converted_obj)
-        for arg in args:
-            if isinstance(arg, dict) and arg.get("_type") == "kwarg":
-                continue
-            arg_yaml = _convert(arg)
-            if arg_yaml is None:
-                return None
-            yaml_args.append(arg_yaml)
-        return {"op": method, "args": yaml_args}
+        return _convert_method_call(expr, panel_keys, func_refs, _convert)
 
     if expr["_type"] == "call":
-        func = expr["func"]
-        args = expr["args"]
-
-        # 检查是否是函数引用
-        if func in func_refs:
-            helper_name = func_refs[func]
-            op_map = {
-                "_rolling_sum": "ts_sum",
-                "_rolling_mean": "ts_mean",
-                "_rolling_std": "ts_std",
-                "_rolling_var": "ts_var",
-                "_rolling_min": "ts_min",
-                "_rolling_max": "ts_max",
-                "_rolling_rank": "ts_rank",
-                "_rolling_corr": "ts_corr",
-                "_rolling_cov": "ts_cov",
-                "_rolling_prod": "ts_prod",
-                "_where_ternary": "where",
-                "_sma": "ts_mean",
-                "_make_one": "fill_null",
-                "_ind_neutralize": "__SKIP__",
-                "_bench_close": "__SKIP__",
-            }
-            mapped = op_map.get(helper_name)
-            if mapped == "__SKIP__":
-                # 忽略 _ind_neutralize/_bench_close，返回第一个参数
-                yaml_args_temp = []
-                for arg in args:
-                    if isinstance(arg, dict) and arg.get("_type") == "kwarg":
-                        continue
-                    arg_yaml = _convert(arg)
-                    if arg_yaml is not None:
-                        yaml_args_temp.append(arg_yaml)
-                return yaml_args_temp[0] if yaml_args_temp else None
-            elif mapped is not None:
-                func = mapped
-
-        # 处理参数 (过滤关键字参数和 panel 引用)
-        yaml_args = []
-        for arg in args:
-            if isinstance(arg, dict) and arg.get("_type") == "kwarg":
-                # 跳过关键字参数
-                continue
-            # 跳过 panel 引用 (vwap(panel, ...) 中的 panel 不需要传递)
-            if isinstance(arg, dict) and arg.get("_type") == "ref" and arg.get("name") == "panel":
-                continue
-            yaml_arg = _convert(arg)
-            if yaml_arg is None:
-                # 对于 vwap/ones_like 等已知函数，允许 arg 为 None
-                if func in ("vwap", "ones_like", "full_like", "_bench_close", "_ind_neutralize"):
-                    continue
-                return None
-            yaml_args.append(yaml_arg)
-
-        # 特殊处理 _cross_sectional_zscore -> zscore
-        if func == "_cross_sectional_zscore":
-            func = "zscore"
-        # 特殊处理 _delay -> delay
-        elif func == "_delay":
-            func = "delay"
-        # 特殊处理 _rolling_sum -> ts_sum
-        elif func == "_rolling_sum":
-            func = "ts_sum"
-        # 特殊处理 _rolling_mean -> ts_mean
-        elif func == "_rolling_mean":
-            func = "ts_mean"
-        # 特殊处理 _rolling_std -> ts_std
-        elif func == "_rolling_std":
-            func = "ts_std"
-        # 特殊处理 _rolling_var -> ts_var
-        elif func == "_rolling_var":
-            func = "ts_var"
-        # 特殊处理 _rolling_min -> ts_min
-        elif func == "_rolling_min":
-            func = "ts_min"
-        # 特殊处理 _rolling_max -> ts_max
-        elif func == "_rolling_max":
-            func = "ts_max"
-        # 特殊处理 _rolling_rank -> ts_rank
-        elif func == "_rolling_rank":
-            func = "ts_rank"
-        # 特殊处理 _rolling_corr -> ts_corr
-        elif func == "_rolling_corr":
-            func = "ts_corr"
-        # 特殊处理 _rolling_cov -> ts_cov
-        elif func == "_rolling_cov":
-            func = "ts_cov"
-        # 特殊处理 _rolling_prod -> ts_prod
-        elif func == "_rolling_prod":
-            func = "ts_prod"
-        # 特殊处理 _where_ternary -> where
-        elif func == "_where_ternary":
-            func = "where"
-        # 特殊处理 _sma -> ts_mean (drop min_periods parameter)
-        elif func == "_sma":
-            func = "ts_mean"
-            # _sma(x, n, m) -> ts_mean(x, n) - drop the m parameter
-            if len(yaml_args) > 2:
-                yaml_args = yaml_args[:2]
-        # 特殊处理 _ind_neutralize -> 忽略行业中心化
-        elif func == "_ind_neutralize":
-            # 返回第一个参数
-            if yaml_args:
-                return yaml_args[0]
-            return None
-        # 特殊处理 _bench_close -> 截面均值 (cross-sectional mean of close)
-        elif func == "_bench_close":
-            # _bench_close() -> {column: close} (fallback to close)
-            return {"column": "close"}
-        # 特殊处理 vwap -> amount / volume
-        elif func == "vwap":
-            return {"op": "safe_div", "args": [{"column": "amount"}, {"column": "volume"}]}
-        # 特殊处理 ones_like -> constant 1.0
-        elif func == "ones_like":
-            return {"value": 1.0}
-        # 特殊处理 full_like -> constant
-        elif func == "full_like":
-            if yaml_args:
-                return yaml_args[0] if len(yaml_args) > 1 else {"value": 1.0}
-            return {"value": 1.0}
-        # 特殊处理 sum -> ts_sum
-        elif func == "sum":
-            func = "ts_sum"
-        # 特殊处理 mean -> ts_mean
-        elif func == "mean":
-            func = "ts_mean"
-        # 特殊处理 std -> ts_std
-        elif func == "std":
-            func = "ts_std"
-        # 特殊处理 var -> ts_var
-        elif func == "var":
-            func = "ts_var"
-        # 特殊处理 min -> ts_min
-        elif func == "min":
-            func = "ts_min"
-        # 特殊处理 max -> ts_max
-        elif func == "max":
-            func = "ts_max"
-        # 特殊处理 median -> ts_median
-        elif func == "median":
-            func = "ts_median"
-        # 特殊处理 skew -> ts_skew
-        elif func == "skew":
-            func = "ts_skew"
-        # 特殊处理 kurt -> ts_kurt
-        elif func == "kurt":
-            func = "ts_kurt"
-        # 特殊处理 quantile -> ts_rank
-        elif func == "quantile":
-            func = "ts_rank"
-        # 特殊处理 cumsum -> expanding_sum
-        elif func == "cumsum":
-            func = "expanding_sum"
-        # 特殊处理 cumprod -> 忽略
-        elif func == "cumprod":
-            if yaml_args:
-                return yaml_args[0]
-            return None
-        # 特殊处理 log1p -> log
-        elif func == "log1p":
-            func = "log"
-        # 特殊处理 pow -> signed_power
-        elif func == "pow":
-            func = "signed_power"
-        # 特殊处理 power -> signed_power
-        elif func == "power":
-            func = "signed_power"
-        # 特殊处理 minimum -> ts_min
-        elif func == "minimum":
-            func = "ts_min"
-        # 特殊处理 maximum -> ts_max
-        elif func == "maximum":
-            func = "ts_max"
-        # 特殊处理 shift -> delay
-        elif func == "shift":
-            func = "delay"
-        # 特殊处理 diff -> delta
-        elif func == "diff":
-            func = "delta"
-        # 特殊处理 pct_change -> ts_return
-        elif func == "pct_change":
-            func = "ts_return"
-        # 特殊处理 fillna -> fill_null
-        elif func == "fillna":
-            func = "fill_null"
-        # 特殊处理 replace -> 忽略
-        elif func == "replace":
-            if yaml_args:
-                return yaml_args[0]
-            return None
-        # 特殊处理 to_numpy -> 忽略
-        elif func == "to_numpy":
-            if yaml_args:
-                return yaml_args[0]
-            return None
-
-        return {"op": func, "args": yaml_args}
+        return _convert_call(expr, panel_keys, func_refs, _convert)
 
     if expr["_type"] == "complex":
         return None
@@ -876,32 +869,7 @@ def _normalize_yaml(node):
     """递归规范化 YAML AST 节点，去除内部 _type 标记。"""
     if isinstance(node, dict):
         if "_type" in node:
-            t = node["_type"]
-            if t == "value":
-                return node.get("value", 0)
-            if t == "column":
-                return {"column": node.get("key", "")}
-            if t == "ref":
-                return {"ref": node.get("name", "")}
-            if t == "call":
-                func = node.get("func", "")
-                args = [_normalize_yaml(a) for a in node.get("args", [])]
-                return {"op": func, "args": args}
-            if t == "method_call":
-                method = node.get("method", "")
-                obj = _normalize_yaml(node.get("obj"))
-                args = [_normalize_yaml(a) for a in node.get("args", [])]
-                return {"op": method, "args": [obj] + args}
-            if t == "panel_ref":
-                return {"column": node.get("key", "")}
-            if t == "rolling":
-                return None
-            if t == "ewm":
-                return None
-            if t == "kwarg":
-                return _normalize_yaml(node.get("value"))
-            if t == "complex":
-                return None
+            return _normalize_typed(node)
         # 规范化 op/args 结构
         result = {}
         for k, v in node.items():
@@ -915,6 +883,31 @@ def _normalize_yaml(node):
     if isinstance(node, list):
         return [_normalize_yaml(item) for item in node]
     return node
+
+
+def _normalize_typed(node: dict):
+    """Normalize a node carrying an internal ``_type`` marker."""
+    t = node["_type"]
+    if t == "value":
+        return node.get("value", 0)
+    if t in ("column", "panel_ref"):
+        return {"column": node.get("key", "")}
+    if t == "ref":
+        return {"ref": node.get("name", "")}
+    if t == "call":
+        func = node.get("func", "")
+        args = [_normalize_yaml(a) for a in node.get("args", [])]
+        return {"op": func, "args": args}
+    if t == "method_call":
+        method = node.get("method", "")
+        obj = _normalize_yaml(node.get("obj"))
+        args = [_normalize_yaml(a) for a in node.get("args", [])]
+        return {"op": method, "args": [obj] + args}
+    if t == "kwarg":
+        return _normalize_yaml(node.get("value"))
+    if t in ("rolling", "ewm", "complex"):
+        return None
+    return _normalize_yaml({k: v for k, v in node.items() if k != "_type"})
 
 
 # ============================================================

@@ -15,9 +15,10 @@ from pathlib import Path
 def cmd_webui_serve(args) -> int:
     """启动 Web UI 服务器。"""
     import os
+
     import uvicorn
 
-    from strategy_research.api.app import create_app, configure_from_env
+    from strategy_research.api.app import configure_from_env, create_app
     from strategy_research.cli.llm_config_check import check_llm_config
 
     # Read env config (CORS_ORIGINS, JWT_SECRET, STATIC_DIR)
@@ -83,6 +84,7 @@ def cmd_webui_serve(args) -> int:
 def cmd_api_serve(args) -> int:
     """启动 HTTP API 服务器。"""
     import os
+
     import uvicorn
 
     from strategy_research.api.app import create_app

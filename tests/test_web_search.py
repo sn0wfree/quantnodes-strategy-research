@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -11,8 +10,9 @@ import pytest
 def _network_available() -> bool:
     """Check if network is available for live tests."""
     try:
-        from duckduckgo_search import DDGS
         import warnings
+
+        from duckduckgo_search import DDGS
         warnings.filterwarnings("ignore")
         with DDGS() as ddgs:
             results = list(ddgs.text("test", max_results=1))

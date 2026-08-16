@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from strategy_research.core.engine.base import BaseEngine
 from strategy_research.core.engine.signals import ConstantWeightEngine
-
 
 # ============================================================
 # Test Engine — 最简单的具体子类
@@ -236,7 +234,7 @@ class TestBaseEngineTPlusOne:
         sig_eng = ConstantWeightEngine({"A": 1.0})
         signal_map = sig_eng.generate(data)
         # Force close on same day should be blocked
-        m = engine.run_backtest(data, signal_map, ["A"])
+        engine.run_backtest(data, signal_map, ['A'])
         # Should still have trades (buy + end_of_backtest)
         assert len(engine.trades) >= 1
 

@@ -12,14 +12,12 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from strategy_research.core.alpha_zoo import compute_alpha, list_alphas
-from strategy_research.core.factor_validate import compute_ic
 
 warnings.filterwarnings("ignore")
 
@@ -191,7 +189,7 @@ def _try_compute_py_fallback(alpha_id, panel):
     m = re.match(r"^([a-z]+)(?:(\d+)_)?([a-z0-9_]+)$", alpha_id)
     if not m:
         return None
-    zoo_num, short = (m.group(1) + (m.group(2) or "")), m.group(3)
+    (m.group(1) + (m.group(2) or "")), m.group(3)
     # Try multiple module-path conventions
     candidates = []
     for zid in ["alpha101", "gtja191", "qlib158", "academic", "fundamental"]:
@@ -305,7 +303,7 @@ def test_alpha_zoo_summary(panel, alpha_registry):
     n_total = len(alpha_registry)
     pct = successes / n_total * 100
 
-    print(f"\n\n=== Alpha Zoo Unit Test Summary ===")
+    print("\n\n=== Alpha Zoo Unit Test Summary ===")
     print(f"Total alphas: {n_total}")
     print(f"Passed: {successes}/{n_total} ({pct:.1f}%)")
     print(f"Failed: {len(failures)}")
@@ -313,7 +311,7 @@ def test_alpha_zoo_summary(panel, alpha_registry):
     if failures:
         from collections import Counter
         err_types = Counter(err.split(":")[0][:50] for _, err in failures)
-        print(f"Failure types:")
+        print("Failure types:")
         for et, cnt in err_types.most_common():
             print(f"  [{cnt:3d}] {et}")
 

@@ -4,22 +4,18 @@ Uses behavior stubs to drive the runner without LLM calls.
 """
 import asyncio
 import os
-from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
+from strategy_research.core.goal.store import GoalStore
 from strategy_research.core.study.runner import (
     AutoresearchRunner,
     ControlToken,
-    NullEmitter,
     ShutdownReason,
-    meets_metric_targets,
     _metric_pass_set,
+    meets_metric_targets,
 )
 from strategy_research.core.study.store import StudyStore
-from strategy_research.core.study.models import StudyStatus
-from strategy_research.core.goal.store import GoalStore
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +42,7 @@ def study(stores):
         criteria=["calmar >= 0.5"],
     )
     return study_store.create_study(
-        session_id="test-sess",
+        owner_session_id="test-sess",
         goal_id=goal.goal_id,
         objective="test",
         workspace_path="/tmp/ws",
@@ -95,6 +91,7 @@ class TestRunnerAEGIS:
                 "round": round_num, "run_name": f"run_{round_num:04d}",
                 "metrics": {"calmar": 0.6, "sharpe": 0.4},
                 "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False},
                 "agent_outputs": {},
                 "summary": {"round": round_num, "metrics": {"calmar": 0.6}},
@@ -115,7 +112,7 @@ class TestRunnerAEGIS:
         # Create study with max_rounds=2
         with StudyStore() as s:
             study2 = s.create_study(
-                session_id="test-sess2", goal_id="goal2",
+                owner_session_id="test-sess2", goal_id="goal2",
                 objective="test", workspace_path="/tmp/ws",
                 strategy_name="demo",
                 metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
@@ -144,7 +141,7 @@ class TestRunnerAEGIS:
         study_store, goal_store = stores
         with StudyStore() as s:
             study2 = s.create_study(
-                session_id="test-sess3", goal_id="goal3",
+                owner_session_id="test-sess3", goal_id="goal3",
                 objective="test", workspace_path="/tmp/ws",
                 strategy_name="demo",
                 metric_targets=[{"name": "calmar", "op": ">=", "value": 99.0}],
@@ -213,6 +210,7 @@ class TestRunnerAEGIS:
             return {
                 "round": round_num, "run_name": f"run_{round_num:04d}",
                 "metrics": {"calmar": 0.6, "sharpe": 0.4}, "verdict": "keep",
+                "e2_passed": True,
                 "decision": {"stagnation_triggered": False},
                 "agent_outputs": {}, "summary": {"round": round_num},
                 "backtest_error": None, "passed_now": {"calmar", "sharpe"},

@@ -15,7 +15,6 @@ See ``docs/study-longhorizon-plan.md``.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -137,10 +136,7 @@ class TestRunResearchRound:
             )
             goal_id = goal.goal_id
 
-        r = run_research_round(
-            workspace, "demo", round_num=1,
-            session_id=session_id, behavior="improving",
-        )
+        run_research_round(workspace, 'demo', round_num=1, session_id=session_id, behavior='improving')
         # Evidence should have been appended for criterion[0]
         with GoalStore() as gs:
             ev = gs.list_evidence(goal_id)

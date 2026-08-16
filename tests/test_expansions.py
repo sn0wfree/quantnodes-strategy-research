@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from strategy_research.core.swarm.preset_loader import load_preset, list_presets
-from strategy_research.core.export.exporter import export_strategy, _parse_strategy
-
+from strategy_research.core.export.exporter import _parse_strategy, export_strategy
+from strategy_research.core.swarm.preset_loader import list_presets, load_preset
 
 # ── New Swarm Presets Tests ─────────────────────────────────
 

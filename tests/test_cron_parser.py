@@ -5,15 +5,14 @@ from __future__ import annotations
 import sys
 import time
 import unittest
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.scheduled_research.cron_parser import (
-    CronFields,
-    parse_cron,
     next_cron_trigger,
+    parse_cron,
     validate_cron,
 )
 

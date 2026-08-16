@@ -24,9 +24,8 @@ from .models import (
     StudyStatus,
     default_metric_targets,
 )
-from .store import StudyStore
-from .executor import (
-    AutoresearchExecutor,
+from .runner import (
+    AutoresearchRunner,
     ControlToken,
     EventEmitter,
     NullEmitter,
@@ -34,10 +33,10 @@ from .executor import (
     acceptance_config_from_targets,
     meets_metric_targets,
 )
-from .runner import AutoresearchRunner
 from .scheduler import StudyScheduler, make_event_bus_emitter
+from .store import StudyStore
 
-# Backward-compat: AutoresearchExecutor points to the new runner
+# Backward-compat: AutoresearchExecutor points to the runner
 AutoresearchExecutor = AutoresearchRunner
 
 __all__ = [

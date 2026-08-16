@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from strategy_research.core.agent.compact import (
     CompactConfig,
     _resolve_threshold_tokens,
@@ -23,7 +21,6 @@ from strategy_research.core.agent.loop import (
     compaction_persister_registered,
 )
 from strategy_research.core.llm.config import LLMConfig
-
 
 # ── _resolve_threshold_tokens (opencode formula) ────────────
 
@@ -197,9 +194,12 @@ class TestCompactMessages4Tuple:
 
     def test_summary_max_tokens_uses_opencode_formula(self):
         """max_tokens = min(model_max_output, summary_output_tokens)."""
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ] * 3
+        # Alternating user/assistant turns, large enough that head
+        # selection is non-empty and L4 fires.
+        msgs = []
+        for i in range(15):
+            msgs.append({"role": "user", "content": f"msg {i} " * 1000})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 1000})
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock(content="summary")
         cfg = CompactConfig(tail_turns=1)
@@ -215,9 +215,12 @@ class TestCompactMessages4Tuple:
 
     def test_summary_max_tokens_caps_at_4096(self):
         """When model output > 4096, max_tokens = 4096."""
-        msgs = [
-            {"role": "user", "content": f"msg {i} " * 30} for i in range(5)
-        ] * 3
+        # Alternating user/assistant turns, large enough that head
+        # selection is non-empty and L4 fires.
+        msgs = []
+        for i in range(15):
+            msgs.append({"role": "user", "content": f"msg {i} " * 1000})
+            msgs.append({"role": "assistant", "content": f"reply {i} " * 1000})
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock(content="summary")
         cfg = CompactConfig(tail_turns=1)

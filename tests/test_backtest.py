@@ -5,10 +5,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-from pathlib import Path
-
-import pytest
 
 from strategy_research.core.backtest import (
     create_run_dir,
@@ -19,7 +15,6 @@ from strategy_research.core.backtest import (
     parse_run_log,
     update_results_tsv,
 )
-
 
 # ============================================================
 # 1. parse_run_log — 8 个 metric patterns + 缺失文件
@@ -330,35 +325,56 @@ def test_run_strategy_successful_execution(tmp_path):
 
 
 def test_run_strategy_timeout(monkeypatch, tmp_path):
-    """mock subprocess.TimeoutExpired → 优雅返回."""
+    """日志停滞（进程存活但无输出）→ kill + 优雅返回（停滞语义）."""
     strategy_dir = tmp_path / "strategy"
     strategy_dir.mkdir()
-    (strategy_dir / "strategy.py").write_text("import time; time.sleep(99)", encoding="utf-8")
-
-    def fake_run(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd="python", timeout=1)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    (strategy_dir / "strategy.py").write_text(
+        "print('start', flush=True); import time; time.sleep(600)",
+        encoding="utf-8",
+    )
     from strategy_research.core.backtest import run_strategy
-    success, output = run_strategy(strategy_dir, timeout=1)
+    log_path = tmp_path / "run.log"
+    success, output = run_strategy(strategy_dir, timeout=1, log_path=log_path)
     assert success is False
-    assert "超时" in output or "Timeout" in output
+    assert "停滞" in output or "stalled" in output
+    assert "start" in output  # 卡死前已产出的日志保留
+
+
+def test_run_strategy_log_progress_runs_long(monkeypatch, tmp_path):
+    """持续写日志的长策略（超过停滞窗口）→ 正常跑完，不被误杀."""
+    strategy_dir = tmp_path / "strategy"
+    strategy_dir.mkdir()
+    (strategy_dir / "strategy.py").write_text(
+        "import time\n"
+        "for i in range(6):\n"
+        "    print(f'step {i}', flush=True)\n"
+        "    time.sleep(0.3)\n"
+        "print('done', flush=True)\n",
+        encoding="utf-8",
+    )
+    from strategy_research.core.backtest import run_strategy
+    log_path = tmp_path / "run.log"
+    # 总时长 1.8s > 停滞窗口 0.5s，但日志持续推进 → 完成
+    success, output = run_strategy(strategy_dir, timeout=0.5, log_path=log_path)
+    assert success is True
+    assert "done" in output
 
 
 def test_run_strategy_general_exception(monkeypatch, tmp_path):
-    """mock subprocess 抛通用异常 → 优雅返回."""
+    """后台启动抛通用异常 → 优雅返回."""
     strategy_dir = tmp_path / "strategy"
     strategy_dir.mkdir()
     (strategy_dir / "strategy.py").write_text("print(1)", encoding="utf-8")
 
-    def fake_run(*args, **kwargs):
+    def fake_run_bg(*args, **kwargs):
         raise OSError("simulated I/O error")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    from strategy_research.core.utils import bg_proc
+    monkeypatch.setattr(bg_proc, "run_bg", fake_run_bg)
     from strategy_research.core.backtest import run_strategy
     success, output = run_strategy(strategy_dir)
     assert success is False
-    assert "失败" in output or "失败" in output or "OSError" in output
+    assert "失败" in output or "OSError" in output
 
 
 # ============================================================
@@ -630,7 +646,6 @@ def test_get_best_experiment_handles_invalid_metric_value(tmp_path):
 
 def test_save_run_metrics_cleans_nan_to_null(tmp_path):
     """NaN/Inf 必须序列化为合法 JSON (null)，而不是 NaN 字面量。"""
-    import math
 
     from strategy_research.core.backtest import save_run_metrics
 

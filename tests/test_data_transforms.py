@@ -22,7 +22,6 @@ from strategy_research.core.tools.data_transforms import (
     wide_to_long_ohlcv,
 )
 
-
 # ============================================================
 # Fixtures
 # ============================================================

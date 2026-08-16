@@ -7,14 +7,12 @@ invalid input.
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.tools import ToolContext
-
 
 # ── Fixtures ────────────────────────────────────────────────────
 
@@ -122,7 +120,10 @@ class TestToolErrorStructure:
         assert "get_market_data" in result.get("fix", "")
         # commit_market_data retired after get_market_data(persist=True) merge
         assert "commit_market_data" not in result.get("fix", "")
-        assert result.get("workflow") == ["get_market_data", "run_backtest"]
+        # v2 structured error envelope: tool + step are present (the legacy
+        # `workflow` suggestion key was retired; fix carries the guidance).
+        assert result.get("tool") == "run_backtest"
+        assert result.get("step")
 
     def test_compute_factor_empty_ohlcv_hint(self, registry, workspace):
         """compute_factor on empty workspace → workflow hint."""

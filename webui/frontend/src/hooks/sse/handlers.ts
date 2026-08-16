@@ -14,6 +14,7 @@ import {
   sessionTotalTokens,
   llmUsage,
   compact,
+  compactCount,
   agentDone,
   errorEvent,
 } from './controlHandlers'
@@ -85,6 +86,7 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   session_total_tokens: sessionTotalTokens,
   llm_usage: llmUsage,
   compact,
+  compact_count: compactCount,
   agent_done: agentDone,
   error: errorEvent,
   agent_status: agentStatus,

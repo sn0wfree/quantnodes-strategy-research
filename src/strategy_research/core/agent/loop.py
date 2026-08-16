@@ -28,16 +28,18 @@ Exception handling policy:
 from __future__ import annotations
 
 import asyncio
+import os
 import hashlib
 import json
 import logging
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..git import git_commit
 from ..hooks.composite import CompositeHook
@@ -49,10 +51,34 @@ from .circuit_breaker import RetryPolicy, ToolLoopCircuitBreaker
 from .compact import CompactConfig, compact_messages
 from .context import ContextBuilder, estimate_tokens
 from .progress import HeartbeatTimer
-from .tools import ToolContext, ToolRegistry, TRANSIENT_TOOL_ERRORS
+from .tools import TRANSIENT_TOOL_ERRORS, ToolContext, ToolRegistry
 from .trace import TraceWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _run_coro_in_sync(coro: Any) -> Any:
+    """Run a coroutine to completion from synchronous code.
+
+    Works both outside AND inside a running event loop (``AgentLoop.run``
+    is invoked from async contexts by ``role_factory``): when a loop is
+    already running, the coroutine executes on a background thread with
+    its own loop and the caller blocks until it finishes.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: dict[str, Any] = {}
+
+    def _runner() -> None:
+        result["value"] = asyncio.run(coro)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    return result["value"]
 
 
 # ── Tool-level auto-retry (transient errors only) ───────────────────
@@ -66,6 +92,11 @@ _TOOL_RETRY_DELAY = 2.0
 # （run_backtest metrics → 右侧面板）；超大输出（如 read_file 大文件）截断
 # 防撑爆 SSE/DB。preview 字段始终为 200 字符截断（兼容旧消费方）。
 _TOOL_RESULT_MAX = 50_000
+
+# Tool result 入 LLM history 前的统一截断上限（字符）。
+# 超长输出在中间截断，保留头尾并标记 [truncated]。
+# 环境变量 SR_TOOL_RESULT_MAX_CHARS 可覆盖（0 = 不截断）。
+_TOOL_RESULT_HISTORY_MAX = int(os.environ.get("SR_TOOL_RESULT_MAX_CHARS", "30000"))
 
 
 # ── Cached GoalStore (goal-snapshot injection) ─────────────────────
@@ -192,6 +223,12 @@ class AgentLoop:
         readonly: bool = False,
         session_id: str | None = None,
         strategy_name: str | None = None,
+        # ── v2 path parameterization (study scenario) ────────────────
+        strategy_dir: Path | None = None,
+        runs_dir: Path | None = None,
+        results_tsv: Path | None = None,
+        write_roots: tuple[str, ...] | None = None,
+        read_roots: tuple[str, ...] | None = None,
         enable_goal_injection: bool = True,
         enable_hypothesis_auto_create: bool = True,
         hooks: CompositeHook | None = None,
@@ -215,6 +252,11 @@ class AgentLoop:
         self.auto_git_commit = auto_git_commit
         self.session_id = session_id
         self.strategy_name = strategy_name
+        self.strategy_dir = strategy_dir
+        self.runs_dir = runs_dir
+        self.results_tsv = results_tsv
+        self.write_roots = write_roots
+        self.read_roots = read_roots
         self.enable_goal_injection = enable_goal_injection
         self.enable_hypothesis_auto_create = enable_hypothesis_auto_create
         self._hooks = hooks
@@ -288,6 +330,16 @@ class AgentLoop:
                 self._on_event(event_type, data or {})
             except Exception:  # noqa: BLE001
                 logger.warning("on_event callback failed for %s", event_type, exc_info=True)
+
+    def _trace_and_emit(self, event_type: str, data: dict | None = None) -> None:
+        """Write a trace entry AND emit it onto the event bus.
+
+        Keeps ``trace.jsonl`` (backward-compat) and the event_log in sync
+        for the same logical event, so the Trajectory View can be derived
+        from the event_log alone (single source of truth).
+        """
+        self._trace({"type": event_type, **(data or {})})
+        self._emit(event_type, data or {})
 
     def emit_tool_progress(
         self,
@@ -371,23 +423,7 @@ class AgentLoop:
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
-                        idx = tc_delta.get("index", 0)
-                        while len(accumulated_tool_calls) <= idx:
-                            accumulated_tool_calls.append({
-                                "id": tc_delta.get("id", ""),
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            })
-                        tc = accumulated_tool_calls[idx]
-                        if tc_delta.get("id"):
-                            tc["id"] = tc_delta["id"]
-                        if tc_delta.get("type"):
-                            tc["type"] = tc_delta["type"]
-                        func_delta = tc_delta.get("function", {})
-                        if func_delta.get("name"):
-                            tc["function"]["name"] = func_delta["name"]
-                        if func_delta.get("arguments"):
-                            tc["function"]["arguments"] += func_delta["arguments"]
+                        self._accumulate_tool_call(accumulated_tool_calls, tc_delta)
 
                 if chunk.usage:
                     usage = chunk.usage
@@ -425,6 +461,29 @@ class AgentLoop:
             raw_response["usage"] = usage
 
         return self.client.parse_response(raw_response)
+
+    @staticmethod
+    def _accumulate_tool_call(
+        accumulated: list[dict[str, Any]], tc_delta: dict[str, Any]
+    ) -> None:
+        """Merge a streaming tool-call delta into the accumulated list."""
+        idx = tc_delta.get("index", 0)
+        while len(accumulated) <= idx:
+            accumulated.append({
+                "id": tc_delta.get("id", ""),
+                "type": "function",
+                "function": {"name": "", "arguments": ""},
+            })
+        tc = accumulated[idx]
+        if tc_delta.get("id"):
+            tc["id"] = tc_delta["id"]
+        if tc_delta.get("type"):
+            tc["type"] = tc_delta["type"]
+        func_delta = tc_delta.get("function", {})
+        if func_delta.get("name"):
+            tc["function"]["name"] = func_delta["name"]
+        if func_delta.get("arguments"):
+            tc["function"]["arguments"] += func_delta["arguments"]
 
     # ── Async helpers ─────────────────────────────
 
@@ -499,23 +558,7 @@ class AgentLoop:
 
                 if chunk.delta_tool_calls:
                     for tc_delta in chunk.delta_tool_calls:
-                        idx = tc_delta.get("index", 0)
-                        while len(accumulated_tool_calls) <= idx:
-                            accumulated_tool_calls.append({
-                                "id": tc_delta.get("id", ""),
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            })
-                        tc_entry = accumulated_tool_calls[idx]
-                        if tc_delta.get("id"):
-                            tc_entry["id"] = tc_delta["id"]
-                        if tc_delta.get("type"):
-                            tc_entry["type"] = tc_delta["type"]
-                        func_delta = tc_delta.get("function", {})
-                        if func_delta.get("name"):
-                            tc_entry["function"]["name"] = func_delta["name"]
-                        if func_delta.get("arguments"):
-                            tc_entry["function"]["arguments"] += func_delta["arguments"]
+                        self._accumulate_tool_call(accumulated_tool_calls, tc_delta)
 
                 if chunk.usage:
                     usage = chunk.usage
@@ -588,8 +631,7 @@ class AgentLoop:
         messages = self.context_builder.build_initial_messages(full_task, history=history)
         result.messages = list(messages)
         t0 = time.perf_counter()
-        self._trace({
-            "type": "loop_start",
+        self._trace_and_emit("loop_start", {
             "task": task,
             "max_iterations": self.max_iterations,
             "tokens": estimate_tokens(messages),
@@ -601,7 +643,7 @@ class AgentLoop:
     ) -> None:
         """Extend compression_applied, emit compression trace + compact events."""
         result.compression_applied.extend(applied)
-        self._trace({"type": "compression", "applied": applied, "iteration": iteration})
+        self._trace_and_emit("compression", {"applied": applied, "iteration": iteration})
         for layer in applied:
             self._emit("compact", {
                 "layer": layer,
@@ -611,8 +653,11 @@ class AgentLoop:
 
     def _emit_iter_start(self, iteration: int, messages: list[dict[str, Any]]) -> None:
         """Emit iter_start trace + event, set _current_iter."""
-        self._trace({"type": "iter_start", "iteration": iteration, "tokens": estimate_tokens(messages)})
-        self._emit("iter_start", {"iteration": iteration, "max_iterations": self.max_iterations})
+        self._trace_and_emit("iter_start", {
+            "iteration": iteration,
+            "tokens": estimate_tokens(messages),
+            "max_iterations": self.max_iterations,
+        })
         self._current_iter = iteration
 
     def _handle_llm_error(
@@ -648,12 +693,12 @@ class AgentLoop:
         assistant_msg = self._response_to_assistant_msg(response)
         messages.append(assistant_msg)
         result.messages.append(assistant_msg)
-        self._trace({
-            "type": "llm_response",
+        self._trace_and_emit("llm_response", {
             "iteration": iteration,
             "finish_reason": response.finish_reason,
             "has_tool_calls": response.has_tool_calls(),
             "tool_call_count": len(response.tool_calls),
+            "content": response.content or "",
             "content_preview": (response.content or "")[:200],
         })
 
@@ -738,6 +783,16 @@ class AgentLoop:
             self._recent_hashes = self._recent_hashes[-self.no_progress_window:]
         if not self._detect_no_progress():
             return False
+        from ..study.hanging_events import record_event
+        record_event(
+            "no_progress",
+            session_id=getattr(self, "session_id", None),
+            detail=(
+                f"iteration={iteration} "
+                f"window={self.no_progress_window} "
+                f"tool_calls={len(self._recent_hashes)}"
+            ),
+        )
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_no_progress()
         result.finished_reason = "no_progress"
@@ -745,7 +800,7 @@ class AgentLoop:
             response.content or
             f"No progress detected (last {self.no_progress_window} tool calls identical)"
         )
-        self._trace({"type": "loop_end", "reason": "no_progress", "iteration": iteration})
+        self._trace_and_emit("loop_end", {"reason": "no_progress", "iteration": iteration})
         self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
             "iteration": iteration,
@@ -761,7 +816,7 @@ class AgentLoop:
             result.answer = (
                 f"Reached max_iterations={self.max_iterations} without a final answer."
             )
-        self._trace({"type": "loop_end", "reason": "max_iter", "iteration": result.iterations})
+        self._trace_and_emit("loop_end", {"reason": "max_iter", "iteration": result.iterations})
         self._emit("assistant_message", {"content": result.answer})
         self._emit("iter_end", {
             "iteration": result.iterations,
@@ -775,7 +830,7 @@ class AgentLoop:
         """Populate stop result fields, emit trace + event."""
         result.answer = response.content
         result.finished_reason = "stop"
-        self._trace({"type": "loop_end", "reason": "stop", "iteration": iteration})
+        self._trace_and_emit("loop_end", {"reason": "stop", "iteration": iteration})
         self._emit("assistant_message", {"content": response.content or ""})
         self._emit("iter_end", {
             "iteration": iteration,
@@ -790,8 +845,7 @@ class AgentLoop:
         elapsed = time.perf_counter() - t0
         result.metrics["elapsed_s"] = round(elapsed, 2)
         result.metrics["tokens"] = estimate_tokens(messages)
-        self._trace({
-            "type": "loop_final",
+        self._trace_and_emit("loop_final", {
             "reason": result.finished_reason,
             "iterations": result.iterations,
             "tool_calls_made": result.tool_calls_made,
@@ -842,7 +896,7 @@ class AgentLoop:
         context: str | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> LoopResult:
-        """Run the loop until done.
+        """Run the loop until done (sync path).
 
         Args:
             task: User task description.
@@ -865,83 +919,9 @@ class AgentLoop:
                                   and "<conversation-checkpoint>" in h.get("content", ""))
             logger.info("[AGENT] compaction_in_history=%d", compaction_count)
 
-        full_task, result, messages, t0 = self._prepare_run(task, context, history)
-        self._subagent_count[0] = 0  # reset per-turn delegation counter
-        hook_ctx = self._build_hook_context(0, messages)
-        self._fire_hooks("before_run", hook_ctx)
-
-        for iteration in range(1, self.max_iterations + 1):
-            result.iterations = iteration
-            hook_ctx = self._build_hook_context(iteration, messages)
-            self._fire_hooks("before_iteration", hook_ctx)
-
-            messages, applied = self._maybe_compact(messages)
-            if applied:
-                self._emit_compaction(applied, iteration, result)
-            self._emit_iter_start(iteration, messages)
-            self._inject_todos_snapshot(messages)
-
-            try:
-                if self._stream_mode:
-                    response = self._stream_chat(messages, iteration)
-                else:
-                    tools = self.registry.get_definitions() or None
-                    response = self.client.chat(messages, tools=tools)
-            except LLMError as exc:
-                if self._stream_mode and not self._is_stream_required_error(exc):
-                    try:
-                        tools = self.registry.get_definitions() or None
-                        response = self.client.chat(messages, tools=tools)
-                    except LLMError as exc2:
-                        self._handle_llm_error(exc2, iteration, result)
-                        self._fire_hooks("on_error", hook_ctx, exc2)
-                        break
-                else:
-                    self._handle_llm_error(exc, iteration, result)
-                    self._fire_hooks("on_error", hook_ctx, exc)
-                    break
-
-            self._append_assistant_msg(response, messages, result, iteration)
-
-            if not response.has_tool_calls():
-                if self._check_goal_continuation(response, messages, result, iteration):
-                    continue
-                self._handle_stop(response, result, iteration)
-                self._fire_hooks("after_iteration", hook_ctx)
-                break
-
-            if self._circuit_breaker is not None and self._circuit_breaker.is_open():
-                tool_result_msgs = self._breaker_open_messages(response.tool_calls)
-                self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-                self._fire_hooks("after_iteration", hook_ctx)
-                continue
-
-            self._fire_hooks("before_execute_tools", hook_ctx)
-            tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
-            tool_hashes = self._collect_tool_hashes(response.tool_calls, tool_result_msgs)
-            for tc, tool_result_msg in zip(response.tool_calls, tool_result_msgs):
-                if tool_result_msg.get("content", "").startswith('{"status": "error"'):
-                    self._fire_hooks("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
-                else:
-                    self._fire_hooks("after_tool_executed", hook_ctx, tc, tool_result_msg)
-            self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-            self._fire_hooks("after_iteration", hook_ctx)
-
-            if self._check_no_progress(tool_hashes, response, result, iteration):
-                self._fire_hooks("after_run", hook_ctx, result)
-                return result
-        else:
-            self._handle_max_iter(result)
-
-        self._finalize_metrics(result, messages, t0)
-        self._run_claim_validation(result, messages)
-        self._fire_hooks("after_run", hook_ctx, result)
-        self._git_commit(full_task, result)
-
-        if self._trace_writer is not None:
-            result.trace_path = str(self._trace_writer.path)
-
-        return result
+        return _run_coro_in_sync(
+            self._run_loop_core(task, context, history, async_mode=False)
+        )
 
     # ── Async public API ──────────────────────────
 
@@ -969,44 +949,66 @@ class AgentLoop:
         Returns:
             LoopResult with answer, iterations, tool_calls_made, finished_reason.
         """
+        return await self._run_loop_core(task, context, history, async_mode=True)
+
+    async def _run_loop_core(  # noqa: C901
+        self,
+        task: str,
+        context: str | None,
+        history: list[dict[str, Any]] | None,
+        *,
+        async_mode: bool,
+    ) -> LoopResult:
+        """Shared run-loop core (single source for ``run``/``arun``).
+
+        ``async_mode`` selects the await-based I/O (achat/astream/ainvoke/
+        gather/afire_hooks) vs the synchronous equivalents (chat/stream/
+        invoke/ThreadPoolExecutor/fire_hooks). Both paths share the same
+        iteration/hook/compact/stop/no-progress semantics.
+        """
+        from ..observability.trace import _session_id, _trace_id
+
+        if not _trace_id.get():
+            _trace_id.set(uuid.uuid4().hex[:12])
+        if self.session_id and not _session_id.get():
+            _session_id.set(self.session_id)
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
         self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
-        await self._afire_hooks("before_run", hook_ctx)
+
+        async def _fire(name: str, ctx: Any, *args: Any) -> None:
+            # Both modes await hook coroutines on the current loop: the
+            # sync adapter (_fire_hooks) runs them on a throwaway loop,
+            # which raises in 3.10 when the coroutine was created inside
+            # a running loop (the sync `run` bridge thread).
+            await self._afire_hooks(name, ctx, *args)
+
+        await _fire("before_run", hook_ctx)
 
         for iteration in range(1, self.max_iterations + 1):
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
-            await self._afire_hooks("before_iteration", hook_ctx)
+            await _fire("before_iteration", hook_ctx)
 
-            messages, applied = await self._amaybe_compact(messages)
+            if async_mode:
+                messages, applied = await self._amaybe_compact(messages)
+            else:
+                messages, applied = self._maybe_compact(messages)
             if applied:
                 self._emit_compaction(applied, iteration, result)
             self._emit_iter_start(iteration, messages)
             self._inject_todos_snapshot(messages)
 
             try:
-                if self._stream_mode:
-                    response = await self._astream_chat(messages, iteration)
-                else:
-                    tools = self.registry.get_definitions() or None
-                    response = await self.client.achat(messages, tools=tools)
+                response = await self._get_response(
+                    messages, iteration, async_mode, hook_ctx, result
+                )
             except LLMError as exc:
-                if self._stream_mode and not self._is_stream_required_error(exc):
-                    # Streaming failed for non-streaming-required reasons
-                    # (e.g. provider doesn't support SSE, parsing error on
-                    # a partial chunk). Fall back to non-streaming achat().
-                    try:
-                        tools = self.registry.get_definitions() or None
-                        response = await self.client.achat(messages, tools=tools)
-                    except LLMError as exc2:
-                        self._handle_llm_error(exc2, iteration, result)
-                        await self._afire_hooks("on_error", hook_ctx, exc2)
-                        break
-                else:
-                    self._handle_llm_error(exc, iteration, result)
-                    await self._afire_hooks("on_error", hook_ctx, exc)
-                    break
+                self._handle_llm_error(exc, iteration, result)
+                await _fire("on_error", hook_ctx, exc)
+                break
+            if response is None:
+                break
 
             self._append_assistant_msg(response, messages, result, iteration)
 
@@ -1014,43 +1016,100 @@ class AgentLoop:
                 if self._check_goal_continuation(response, messages, result, iteration):
                     continue
                 self._handle_stop(response, result, iteration)
-                await self._afire_hooks("after_iteration", hook_ctx)
+                await _fire("after_iteration", hook_ctx)
                 break
 
             if self._circuit_breaker is not None and self._circuit_breaker.is_open():
                 tool_result_msgs = self._breaker_open_messages(response.tool_calls)
                 self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-                await self._afire_hooks("after_iteration", hook_ctx)
+                await _fire("after_iteration", hook_ctx)
                 continue
 
-            await self._afire_hooks("before_execute_tools", hook_ctx)
-            tool_result_msgs = await self._aexecute_tool_batch(response.tool_calls, result)
+            await _fire("before_execute_tools", hook_ctx)
+            if async_mode:
+                tool_result_msgs = await self._aexecute_tool_batch(response.tool_calls, result)
+            else:
+                tool_result_msgs = self._execute_tool_batch(response.tool_calls, result)
             tool_hashes = self._collect_tool_hashes(response.tool_calls, tool_result_msgs)
-            for tc, tool_result_msg in zip(response.tool_calls, tool_result_msgs):
-                if tool_result_msg.get("content", "").startswith('{"status": "error"'):
-                    await self._afire_hooks("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
-                else:
-                    await self._afire_hooks("after_tool_executed", hook_ctx, tc, tool_result_msg)
+            await self._fire_tool_result_hooks(
+                _fire, hook_ctx, response.tool_calls, tool_result_msgs
+            )
             self._append_tool_results(response.tool_calls, tool_result_msgs, messages, result)
-            await self._afire_hooks("after_iteration", hook_ctx)
+            await _fire("after_iteration", hook_ctx)
 
             if self._check_no_progress(tool_hashes, response, result, iteration):
-                await self._afire_hooks("after_run", hook_ctx, result)
+                await _fire("after_run", hook_ctx, result)
                 return result
         else:
             self._handle_max_iter(result)
 
         self._finalize_metrics(result, messages, t0)
         self._run_claim_validation(result, messages)
-        await self._afire_hooks("after_run", hook_ctx, result)
-        await asyncio.to_thread(self._git_commit, full_task, result)
+        await _fire("after_run", hook_ctx, result)
+        if async_mode:
+            await asyncio.to_thread(self._git_commit, full_task, result)
+        else:
+            self._git_commit(full_task, result)
 
         if self._trace_writer is not None:
             result.trace_path = str(self._trace_writer.path)
 
         return result
 
-    # ── Internal helpers ─────────────────────────
+    async def _get_response(
+        self,
+        messages: list[dict[str, Any]],
+        iteration: int,
+        async_mode: bool,
+        hook_ctx: Any,
+        result: LoopResult,
+    ) -> "LLMResponse | None":
+        """Chat/stream call with the non-streaming fallback.
+
+        Returns the response, or ``None`` when the stream-fallback error
+        path already fired ``on_error`` (caller breaks the loop).
+        Raises ``LLMError`` when the error was NOT stream-fallback-eligible
+        (caller handles + fires ``on_error``).
+        """
+        try:
+            if self._stream_mode:
+                # Trace LLM request envelope before streaming
+                self._trace_llm_request(messages, iteration, tools=None)
+                if async_mode:
+                    return await self._astream_chat(messages, iteration)
+                return self._stream_chat(messages, iteration)
+            tools = self.registry.get_definitions() or None
+            # Trace LLM request envelope before non-streaming call
+            self._trace_llm_request(messages, iteration, tools=tools)
+            if async_mode:
+                return await self.client.achat(messages, tools=tools)
+            return self.client.chat(messages, tools=tools)
+        except LLMError as exc:
+            if not (self._stream_mode and not self._is_stream_required_error(exc)):
+                raise
+            # Streaming failed for non-streaming-required reasons
+            # (e.g. provider doesn't support SSE, parsing error on a
+            # partial chunk). Fall back to non-streaming chat().
+            try:
+                tools = self.registry.get_definitions() or None
+                # Trace fallback LLM request
+                self._trace_llm_request(messages, iteration, tools=tools)
+                if async_mode:
+                    return await self.client.achat(messages, tools=tools)
+                return self.client.chat(messages, tools=tools)
+            except LLMError as exc2:
+                self._handle_llm_error(exc2, iteration, result)
+                await self._afire_hooks("on_error", hook_ctx, exc2)
+                return None
+
+    @staticmethod
+    async def _fire_tool_result_hooks(_fire, hook_ctx, tool_calls, tool_result_msgs) -> None:
+        """Fire per-tool-result hooks (on_tool_error / after_tool_executed)."""
+        for tc, tool_result_msg in zip(tool_calls, tool_result_msgs):
+            if tool_result_msg.get("content", "").startswith('{"status": "error"'):
+                await _fire("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
+            else:
+                await _fire("after_tool_executed", hook_ctx, tc, tool_result_msg)
 
     def _response_to_assistant_msg(self, response: LLMResponse) -> dict[str, Any]:
         """Convert LLMResponse to an assistant message dict."""
@@ -1072,23 +1131,32 @@ class AgentLoop:
             ]
         return msg
 
-    def _execute_tool_call(
-        self, tc: ToolCall, result: LoopResult
+    async def _execute_tool_call_core(
+        self, tc: ToolCall, result: LoopResult, *, async_mode: bool
     ) -> dict[str, Any]:
-        """Execute one tool_call via the registry; return tool-result message."""
+        """Shared tool-call core (single source for both modes).
+
+        ``async_mode`` selects ``tool.ainvoke`` (permission-gated, awaited
+        on the loop) vs ``tool.invoke`` (direct sync call) and
+        ``asyncio.sleep`` vs ``time.sleep`` for the transient-retry delay.
+        The sync entry runs this core via ``_run_coro_in_sync`` (from a
+        pool thread there is no running loop, so no nested thread).
+        """
         result.tool_calls_made += 1
         tool = self.registry.get(tc.name)
         if tool is None:
             logger.warning("tool '%s' not in registry", tc.name)
-            self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
+            self._trace_and_emit("tool_error", {"tool": tc.name, "error": "not in registry"})
             self._emit("tool_result", {
-            "tool": tc.name,
-            "call_id": tc.id,
-            "status": "error",
-            "ok": False,  # backward compat
-            "elapsed_ms": 0,
-            "preview": "tool not in registry",
-        })
+                "tool": tc.name,
+                "id": tc.id,
+                "call_id": tc.id,
+                "status": "error",
+                "ok": False,  # backward compat
+                "result": "tool not in registry",
+                "preview": "tool not in registry",
+                "elapsed_ms": 0,
+            })
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -1132,6 +1200,11 @@ class AgentLoop:
         kwargs["ctx"] = ToolContext(
             workspace=self.workspace,
             session_id=self.session_id,
+            strategy_dir=self.strategy_dir,
+            runs_dir=self.runs_dir,
+            results_tsv=self.results_tsv,
+            write_roots=self.write_roots,
+            read_roots=self.read_roots,
             emit_progress=_progress_callback,
             emit_event=self._emit,
             message_id=getattr(self, "_current_message_id", None),
@@ -1156,7 +1229,10 @@ class AgentLoop:
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
             try:
-                output = tool.invoke(kwargs)
+                if async_mode:
+                    output = await tool.ainvoke(kwargs, kwargs.get("ctx"))
+                else:
+                    output = tool.invoke(kwargs)
                 last_exc = None
                 break
             except TRANSIENT_TOOL_ERRORS as exc:
@@ -1165,7 +1241,10 @@ class AgentLoop:
                                tc.name, type(exc).__name__, _attempt + 1,
                                _TOOL_MAX_RETRIES, exc)
                 if _attempt < _TOOL_MAX_RETRIES - 1:
-                    time.sleep(_TOOL_RETRY_DELAY)
+                    if async_mode:
+                        await asyncio.sleep(_TOOL_RETRY_DELAY)
+                    else:
+                        time.sleep(_TOOL_RETRY_DELAY)
             except Exception as exc:                    # noqa: BLE001
                 logger.exception("tool %s raised", tc.name)
                 output = json.dumps(
@@ -1221,16 +1300,47 @@ class AgentLoop:
             "output_preview": output_preview,
         })
 
+        # Truncate tool output for LLM history (keep head + tail, mark middle)
+        history_output = output
+        if (
+            _TOOL_RESULT_HISTORY_MAX > 0
+            and isinstance(output, str)
+            and len(output) > _TOOL_RESULT_HISTORY_MAX
+        ):
+            half = _TOOL_RESULT_HISTORY_MAX // 2
+            history_output = (
+                output[:half]
+                + f"\n\n[truncated {len(output) - _TOOL_RESULT_HISTORY_MAX} chars]\n\n"
+                + output[-half:]
+            )
+
         return {
             "role": "tool",
             "tool_call_id": tc.id,
-            "content": output,
+            "content": history_output,
         }
 
-    def _execute_tool_with_heartbeat(
+    def _execute_tool_call(
         self, tc: ToolCall, result: LoopResult
     ) -> dict[str, Any]:
-        """Execute tool_call with HeartbeatTimer for long-running tools."""
+        """Execute one tool_call via the registry; return tool-result message.
+
+        Sync entry over the shared core (see ``_execute_tool_call_core``).
+        """
+        return _run_coro_in_sync(
+            self._execute_tool_call_core(tc, result, async_mode=False)
+        )
+
+    async def _aexecute_tool_call(
+        self, tc: ToolCall, result: LoopResult
+    ) -> dict[str, Any]:
+        """Async version of _execute_tool_call (permission-gated ainvoke)."""
+        return await self._execute_tool_call_core(tc, result, async_mode=True)
+
+    async def _execute_tool_with_heartbeat_core(
+        self, tc: ToolCall, result: LoopResult, *, async_mode: bool
+    ) -> dict[str, Any]:
+        """Shared heartbeat wrapper (single source for both modes)."""
         def _heartbeat_tick(payload: dict) -> None:
             self._trace({"type": "heartbeat", **payload})
             self._emit("tool_heartbeat", {
@@ -1244,7 +1354,25 @@ class AgentLoop:
             interval=self.heartbeat_interval,
             emit=_heartbeat_tick,
         ):
-            return self._execute_tool_call(tc, result)
+            return await self._execute_tool_call_core(tc, result, async_mode=async_mode)
+
+    def _execute_tool_with_heartbeat(
+        self, tc: ToolCall, result: LoopResult
+    ) -> dict[str, Any]:
+        """Execute tool_call with HeartbeatTimer for long-running tools.
+
+        Sync entry over the shared core (see
+        ``_execute_tool_with_heartbeat_core``).
+        """
+        return _run_coro_in_sync(
+            self._execute_tool_with_heartbeat_core(tc, result, async_mode=False)
+        )
+
+    async def _aexecute_tool_with_heartbeat(
+        self, tc: ToolCall, result: LoopResult
+    ) -> dict[str, Any]:
+        """Async version of _execute_tool_with_heartbeat."""
+        return await self._execute_tool_with_heartbeat_core(tc, result, async_mode=True)
 
     def _execute_tool_batch(
         self, tool_calls: list[ToolCall], result: LoopResult
@@ -1313,174 +1441,6 @@ class AgentLoop:
 
     # ── Async tool execution ─────────────────────
 
-    async def _aexecute_tool_call(
-        self, tc: ToolCall, result: LoopResult
-    ) -> dict[str, Any]:
-        """Async version of _execute_tool_call using asyncio.to_thread."""
-        result.tool_calls_made += 1
-        tool = self.registry.get(tc.name)
-        if tool is None:
-            logger.warning("tool '%s' not in registry", tc.name)
-            self._trace({"type": "tool_error", "tool": tc.name, "error": "not in registry"})
-            self._emit("tool_result", {
-                "tool": tc.name,
-                "id": tc.id,
-                "call_id": tc.id,
-                "status": "error",
-                "ok": False,
-                "result": "tool not in registry",
-                "preview": "tool not in registry",
-                "elapsed_ms": 0,
-            })
-            return {
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(
-                    {"status": "error", "error": f"tool '{tc.name}' not found"},
-                    ensure_ascii=False,
-                ),
-            }
-
-        self._emit("tool_call", {
-            "tool": tc.name,
-            "name": tc.name,
-            "id": tc.id,
-            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-            if not isinstance(tc.arguments, str)
-            else tc.arguments,
-            "call_id": tc.id,
-            "iter": getattr(self, "_current_iter", 0),
-        })
-
-        kwargs = dict(tc.arguments)
-        if "workspace" not in kwargs and self.workspace is not None:
-            kwargs["workspace"] = self.workspace
-        if "session_id" not in kwargs and self.session_id is not None:
-            kwargs["session_id"] = self.session_id
-
-        def _progress_callback(steps: list[str]) -> None:
-            self._emit("tool_progress", {
-                "id": tc.id,
-                "steps": steps,
-            })
-        kwargs["_progress_callback"] = _progress_callback
-
-        kwargs["ctx"] = ToolContext(
-            workspace=self.workspace,
-            session_id=self.session_id,
-            emit_progress=_progress_callback,
-            emit_event=self._emit,
-            message_id=getattr(self, "_current_message_id", None),
-            permission_evaluator=getattr(self, "_permission_evaluator", None),
-            permission_gateway=getattr(self, "_permission_gateway", None),
-            tool_call_id=tc.id,
-        )
-
-        # SubAgentTool injection: emit_event, message_id, count ref, parent registry
-        if tc.name == "delegate_to_agent":
-            kwargs["emit_event"] = self._emit
-            kwargs["message_id"] = getattr(self, "_current_message_id", None)
-            kwargs["_subagent_count_ref"] = self._subagent_count
-            kwargs["_parent_registry"] = self.registry
-
-        # TodoWriteTool injection: emit_event (session_id already injected)
-        if tc.name == "todo_write":
-            kwargs["emit_event"] = self._emit
-
-        t0 = time.perf_counter()
-        # ── Tool-level auto-retry for transient errors (sync parity) ─
-        # Tier 1 A1: the async path uses ``ainvoke`` so the permission
-        # gate (ASK -> SSE -> user reply) can run via the event loop
-        # without blocking the worker thread. Sync parity path below
-        # keeps ``invoke`` since async-in-thread would deadlock.
-        last_exc = None
-        for _attempt in range(_TOOL_MAX_RETRIES):
-            try:
-                output = await tool.ainvoke(kwargs, kwargs.get("ctx"))
-                last_exc = None
-                break
-            except TRANSIENT_TOOL_ERRORS as exc:
-                last_exc = exc
-                logger.warning("tool %s raised %s (attempt %d/%d): %s",
-                               tc.name, type(exc).__name__, _attempt + 1,
-                               _TOOL_MAX_RETRIES, exc)
-                if _attempt < _TOOL_MAX_RETRIES - 1:
-                    await asyncio.sleep(_TOOL_RETRY_DELAY)
-            except Exception as exc:                    # noqa: BLE001
-                logger.exception("tool %s raised", tc.name)
-                output = json.dumps(
-                    {"status": "error", "error": f"{type(exc).__name__}: {exc}"},
-                    ensure_ascii=False,
-                )
-                last_exc = None
-                break
-        else:
-            # All retries exhausted for transient errors
-            output = json.dumps(
-                {"status": "error", "error": f"{type(last_exc).__name__}: {last_exc}",
-                 "hint": "tool failed after retries; check input parameters or data quality"},
-                ensure_ascii=False,
-            )
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-
-        is_error = isinstance(output, str) and output.startswith('{"status": "error"')
-        status_str = "error" if is_error else "done"
-
-        # Update circuit breaker
-        if self._circuit_breaker is not None:
-            if is_error:
-                self._circuit_breaker.record_failure(tc.name)
-            else:
-                self._circuit_breaker.record_success(tc.name)
-
-        output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
-        output_full = (output if isinstance(output, str) else str(output))[:_TOOL_RESULT_MAX]
-        self._emit("tool_result", {
-            "tool": tc.name,
-            "id": tc.id,
-            "call_id": tc.id,
-            "status": status_str,
-            "ok": not is_error,
-            "result": output_full,
-            "preview": output_preview,
-            "elapsed_ms": elapsed_ms,
-        })
-
-        self._trace({
-            "type": "tool_result",
-            "tool": tc.name,
-            "call_id": tc.id,
-            "status": status_str,
-            "iteration": getattr(self, "_current_iter", 0),
-            "elapsed_ms": elapsed_ms,
-            "output_preview": output_preview,
-        })
-
-        return {
-            "role": "tool",
-            "tool_call_id": tc.id,
-            "content": output,
-        }
-
-    async def _aexecute_tool_with_heartbeat(
-        self, tc: ToolCall, result: LoopResult
-    ) -> dict[str, Any]:
-        """Async version of _execute_tool_with_heartbeat."""
-        def _heartbeat_tick(payload: dict) -> None:
-            self._trace({"type": "heartbeat", **payload})
-            self._emit("tool_heartbeat", {
-                "tool": tc.name,
-                "call_id": tc.id,
-                "elapsed_s": payload.get("elapsed_s", 0.0),
-            })
-
-        with HeartbeatTimer(
-            tool_name=tc.name,
-            interval=self.heartbeat_interval,
-            emit=_heartbeat_tick,
-        ):
-            return await self._aexecute_tool_call(tc, result)
-
     async def _aexecute_tool_batch(
         self, tool_calls: list[ToolCall], result: LoopResult
     ) -> list[dict[str, Any]]:
@@ -1530,15 +1490,11 @@ class AgentLoop:
     # ── Context compression ─────────────────────────
 
     def _maybe_compact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-        """Apply context compression if over threshold.
+        """Apply context compression if over threshold (sync path).
 
-        3-layer progressive compression (opencode-aligned):
-            L1 (microcompact_ratio=0.9): Smart microcompact
-            L4 (llm_summarize_ratio=0.95): LLM-driven summary
-            L3 (hard_truncate_ratio=0.99): Hard truncate (rare)
-
-        Also checks overflow (overflow_ratio=0.99) to force
-        compression when near context limit.
+        Single source: the shared sync core is ``_maybe_compact_impl``;
+        the async twin (``_amaybe_compact``) runs the same core in a
+        worker thread so the event loop is never blocked.
 
         opencode-aligned trigger formula:
             trigger = threshold_tokens (default derived from model
@@ -1547,6 +1503,36 @@ class AgentLoop:
         If L4 fails (e.g. DB error during persistence), the
         compaction is rolled back and the original messages are
         kept. The LLM doesn't lose context.
+        """
+        return self._maybe_compact_impl(
+            messages, run_compact=self._run_compact_messages
+        )
+
+    def _run_compact_messages(self, messages: list[dict[str, Any]]):
+        """Invoke the compact_messages engine with the loop's config."""
+        return compact_messages(
+            messages,
+            config=self.cc,
+            threshold_tokens=self.threshold_tokens,
+            model_context_tokens=self.config.model_context_tokens,
+            model_max_output_tokens=self.config.model_max_output_tokens,
+            llm_client=self.client,
+            previous_summary=self._previous_summary,
+            session_id=self.session_id,
+        )
+
+    def _maybe_compact_impl(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        run_compact: Callable[[list[dict[str, Any]]], tuple],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Shared sync compaction core (single source for both modes).
+
+        ``run_compact`` is the only divergent point: the sync path calls
+        it directly on the calling thread, the async path runs this whole
+        core in a worker thread (``asyncio.to_thread``) so the loop is
+        never blocked by the sync LLM summary call.
         """
         # Overflow detection: log only (no force compact in this path)
         if self.config.model_context_tokens:
@@ -1568,16 +1554,7 @@ class AgentLoop:
         # passed through to the persistence step. No more NoneType risk
         # in the loop (the recent_count // 100 bug is gone).
         try:
-            messages, applied, l4_summary_text, l4_recent_text = compact_messages(
-                messages,
-                config=self.cc,
-                threshold_tokens=self.threshold_tokens,
-                model_context_tokens=self.config.model_context_tokens,
-                model_max_output_tokens=self.config.model_max_output_tokens,
-                llm_client=self.client,
-                previous_summary=self._previous_summary,
-                session_id=self.session_id,
-            )
+            messages, applied, l4_summary_text, l4_recent_text = run_compact(messages)
         except Exception:
             # Critical: L4 failed. Roll back to keep full history.
             # The LLM is more useful with full history than with
@@ -1735,55 +1712,25 @@ class AgentLoop:
     async def _amaybe_compact(
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Async version of _maybe_compact — runs sync compact_messages
-        in a worker thread so the event loop is never blocked.
+        """Async version of _maybe_compact — runs the shared sync core
+        (``_maybe_compact_impl``) in a worker thread so the event loop is
+        never blocked.
 
-        Previously this used a nested ``_AchatAdapter`` that called
-        ``asyncio.run(asyncio.to_thread(...))`` from inside a running
-        loop, which raised ``RuntimeError`` and produced a
-        "coroutine 'to_thread' was never awaited" warning.  Running
-        the whole ``compact_messages`` call off-loop is simpler and
-        correct: the sync LLM client (``self.client.chat``) is invoked
-        directly from the worker thread, with no nested event loop.
+        Acquires per-session compact lock to prevent concurrent compaction
+        (auto from agent loop + manual /compact) on the same session.
+        The sync LLM client (``self.client.chat``) is invoked directly
+        from the worker thread, with no nested event loop.
         """
-        # Overflow detection
-        if self.config.model_context_tokens:
-            usable = self.config.model_context_tokens - 4096
-            tokens = estimate_tokens(messages)
-            if tokens >= usable * self.cc.overflow_ratio:
-                logger.debug("Overflow detected (async): %d tokens", tokens)
-
-        original_messages = list(messages)
-        try:
-            messages, applied, l4_summary_text, l4_recent_text = await asyncio.to_thread(
-                compact_messages,
-                messages,
-                config=self.cc,
-                threshold_tokens=self.threshold_tokens,
-                model_context_tokens=self.config.model_context_tokens,
-                model_max_output_tokens=self.config.model_max_output_tokens,
-                llm_client=self.client,
-                previous_summary=self._previous_summary,
-                session_id=self.session_id,
+        if not self.session_id:
+            return await asyncio.to_thread(
+                self._maybe_compact_impl, messages, run_compact=self._run_compact_messages
             )
-        except Exception:
-            logger.exception("L4 compaction failed (async); keeping full history")
-            return original_messages, []
-
-        if l4_summary_text and any(layer.startswith("llm_summarize") for layer in applied):
-            self._previous_summary = l4_summary_text
-            try:
-                self._persist_compaction_event(
-                    l4_summary_text, l4_recent_text or "",
-                    compressed_messages=messages,
-                )
-            except Exception:
-                logger.exception(
-                    "compaction persistence failed (async); rolling back",
-                )
-                return original_messages, []
-
-        return messages, applied
+        from .compact import _compact_locks
+        lock = await _compact_locks.get(self.session_id)
+        async with lock:
+            return await asyncio.to_thread(
+                self._maybe_compact_impl, messages, run_compact=self._run_compact_messages
+            )
 
     # ── Trace helpers ──────────────────────────────
 
@@ -1794,6 +1741,87 @@ class AgentLoop:
                 self._trace_writer.write(entry)
             except Exception:                       # noqa: BLE001
                 pass  # trace failures should never break the loop
+
+    def _trace_llm_request(
+        self,
+        messages: list[dict[str, Any]],
+        iteration: int,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Log full LLM request envelope (DSH request/header pattern).
+
+        Records system prompt, tools schema, and history metadata for each
+        LLM call.  Large fields (system prompt, tools JSON) are offloaded to
+        sidecar files when they exceed the threshold.
+
+        Two sinks:
+        1. ``llm_request`` on_event → the B4 forwarder (service.py) offloads
+           large fields and persists to event_log (single source of truth).
+        2. trace.jsonl (optional, backward-compat) if a trace_writer is set.
+
+        This provides the foundation for Trajectory View / Trace Viewer.
+        """
+        try:
+            import json as _json
+
+            # Extract system prompt from first message
+            system_prompt = ""
+            if messages and messages[0].get("role") == "system":
+                system_prompt = messages[0].get("content", "")
+
+            # Tools schema as JSON
+            tools_json = _json.dumps(tools, ensure_ascii=False) if tools else "[]"
+
+            # History metadata (don't log full content — too large)
+            history_meta = []
+            for m in messages[1:]:  # skip system prompt
+                history_meta.append({
+                    "role": m.get("role", "?"),
+                    "content_len": len(m.get("content", "")),
+                    "has_tool_calls": bool(m.get("tool_calls")),
+                })
+
+            entry: dict[str, Any] = {
+                "type": "llm_request",
+                "iteration": iteration,
+                "session_id": self.session_id or "",
+                "history_count": len(messages),
+                "history_meta": history_meta,
+                "tools_count": len(tools) if tools else 0,
+                "system_prompt_len": len(system_prompt),
+                "system_prompt": system_prompt,
+                "tools_schema": tools_json,
+            }
+
+            # Sink 1: event_log via the on_event forwarder (offloads large
+            # fields itself). Best-effort — never break the loop.
+            try:
+                self._emit("llm_request", dict(entry))
+            except Exception:  # noqa: BLE001
+                logger.debug("llm_request emit failed", exc_info=True)
+
+            # Sink 2: trace.jsonl (optional, backward-compat).
+            if self._trace_writer is not None:
+                try:
+                    # Use sidecar offload for large fields
+                    self._trace_writer.write_text_entry(
+                        dict(entry),
+                        field="system_prompt",
+                        value=system_prompt,
+                        offload_kind=f"llm-request-system-{iteration}",
+                    )
+                    # Tools schema goes inline (usually small) or offloaded
+                    self._trace_writer.write_text_entry(
+                        dict(entry),
+                        field="tools_schema",
+                        value=tools_json,
+                        offload_kind=f"llm-request-tools-{iteration}",
+                        threshold=10_000,  # tools schema usually fits inline
+                    )
+                except Exception:  # noqa: BLE001
+                    pass  # trace failures should never break the loop
+        except Exception:                       # noqa: BLE001
+            pass  # trace failures should never break the loop
 
     # ── P3-d: Goal + Hypothesis integration ────────
 

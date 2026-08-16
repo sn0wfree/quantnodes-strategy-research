@@ -10,15 +10,12 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from strategy_research.core.agent.compaction_message import (
-    CompactionMessage,
-    MESSAGE_TYPE_COMPACTION,
     MESSAGE_TYPE_ASSISTANT,
+    MESSAGE_TYPE_COMPACTION,
+    CompactionMessage,
     new_compaction_message,
 )
-
 
 # ── new_compaction_message factory ──────────────────────────
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -222,7 +221,6 @@ class TestMaybeAwait(unittest.TestCase):
         self.assertEqual(result, 42)
 
     async def test_awaitable_value(self) -> None:
-        import asyncio
         async def returns_10():
             return 10
         result = await maybe_await(returns_10())

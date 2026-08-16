@@ -59,7 +59,7 @@ export function StudyTab({ sessionId, workspacePath }: StudyTabProps) {
         <div className="flex flex-1 flex-col gap-3 min-h-0">
           <button
             onClick={() => setCreating(true)}
-            className="w-full flex-shrink-0 rounded border border-dashed border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200"
+            className="w-full flex-shrink-0 cursor-pointer rounded-lg border border-dashed border-slate-700 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:bg-slate-800/30 hover:text-slate-200"
           >
             + 启动新的 study
           </button>

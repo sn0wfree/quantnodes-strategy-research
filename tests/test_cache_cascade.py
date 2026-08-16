@@ -90,7 +90,7 @@ class TestCascadeEstimator:
             HardcodedLayer(),
         ]
         est = CascadeEstimator(layers=layers)
-        result = est.estimate([100, 200, 300])
+        est.estimate([100, 200, 300])
         # _build_layers creates fresh layers; with 3 samples p86 and mean both succeed
         # Use static_config directly instead
         layers2 = [

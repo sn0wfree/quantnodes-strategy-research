@@ -6,7 +6,7 @@ already-populated.
 """
 from __future__ import annotations
 
-from typing import Iterable, List
+from typing import Iterable
 from unittest import mock
 
 import pytest
@@ -19,6 +19,12 @@ from strategy_research.cli.llm_streaming import (
 from strategy_research.cli.tui.session import ChatSession
 from strategy_research.core.llm.errors import LLMError, LLMTimeoutError
 from strategy_research.core.llm.parser import StreamChunk
+
+
+@pytest.fixture(autouse=True)
+def _isolate_session_db(tmp_path, monkeypatch):
+    """Isolate the unified session DB (TUI flow persists to cwd by default)."""
+    monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
 
 
 def _chunk(content: str, *, finish: str | None = None) -> StreamChunk:
@@ -331,7 +337,8 @@ async def test_stream_chat_to_tui_renders_error_line_on_llm_failure():
 @pytest.mark.asyncio
 async def test_stream_chat_to_tui_appends_to_ctx_history():
     app = _FakeApp()
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _Ctx:
@@ -416,7 +423,8 @@ async def test_stream_chat_to_tui_long_text_shows_fold_indicator():
     # Tail visible
     assert "tail" in joined
     # ctx.history gets the FULL text (zero data loss)
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _Ctx:
@@ -446,7 +454,6 @@ async def test_stream_chat_to_tui_long_text_shows_summary():
 @pytest.mark.asyncio
 async def test_toggle_fold_cycles_through_multiple_folders():
     """Ctrl+E cycles: expand last -> fold + expand prev -> cycle."""
-    from strategy_research.cli.tui.widgets.streaming_text import StreamingText
 
     app = _FakeApp()
 
@@ -584,9 +591,8 @@ async def test_fake_app_write_transcript_helper():
 @pytest.mark.asyncio
 async def test_chat_session_dispatches_plain_text_to_llm():
     """When ``llm_client`` is bound, plain-text turns go through AgentLoop."""
-    from strategy_research.cli.interactive.main import InteractiveContext
-    from strategy_research.cli.tui.session import ChatSession
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _App:
@@ -643,13 +649,22 @@ async def test_chat_session_dispatches_plain_text_to_llm():
     fake_result.answer = "model reply here"
     fake_result.error = None
 
-    # Patch at the source module since session.py imports lazily
-    with mock.patch("strategy_research.core.agent.loop.AgentLoop") as MockLoop, \
-         mock.patch("strategy_research.core.agent.builtin_tools.build_default_registry", return_value=None):
-        instance = mock.MagicMock()
-        instance.arun = mock.AsyncMock(return_value=fake_result)
-        MockLoop.return_value = instance
-        rc = await s.dispatch("hi there")
+    # Patch the AgentLoop symbol bound in chat_loop (module-level
+    # ``from .loop import AgentLoop``) — patching loop.AgentLoop is a no-op
+    # once chat_loop has already been imported by earlier tests.
+    with mock.patch("strategy_research.core.agent.chat_loop.AgentLoop") as MockLoop, \
+         mock.patch("strategy_research.core.agent.builtin_tools.build_default_registry", return_value=None), \
+         mock.patch(
+             # Force the degraded in-memory path: with the shared session
+             # DB unavailable, the assistant reply lands in ctx.history
+             # (the legacy behavior this test pins).
+             "strategy_research.core.agent.memory_manager.get_default_memory_manager",
+             side_effect=RuntimeError("no mm in test"),
+         ):
+            instance = mock.MagicMock()
+            instance.arun = mock.AsyncMock(return_value=fake_result)
+            MockLoop.return_value = instance
+            rc = await s.dispatch("hi there")
 
     assert rc == 0
     # Assistant reply appended.
@@ -659,9 +674,8 @@ async def test_chat_session_dispatches_plain_text_to_llm():
 @pytest.mark.asyncio
 async def test_chat_session_skips_llm_for_slash_commands():
     """Slash commands go through _DISPATCH only, not the LLM bridge."""
-    from strategy_research.cli.interactive.main import InteractiveContext
-    from strategy_research.cli.tui.session import ChatSession
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _App:
@@ -702,9 +716,8 @@ async def test_chat_session_skips_llm_for_slash_commands():
 @pytest.mark.asyncio
 async def test_chat_session_no_client_no_llm_call():
     """When ``llm_client is None`` plain text still appends to history only."""
-    from strategy_research.cli.interactive.main import InteractiveContext
-    from strategy_research.cli.tui.session import ChatSession
-    from dataclasses import dataclass, field as dc_field
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
 
     @dataclass
     class _App:

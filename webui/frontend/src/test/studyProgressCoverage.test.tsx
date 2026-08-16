@@ -28,7 +28,8 @@ vi.mock('lucide-react', () => {
     Target: Stub, Layers: Stub, Eye: Stub, EyeOff: Stub, RefreshCw: Stub,
     ArrowRight: Stub, Search: Stub, MessageSquare: Stub, Settings: Stub,
     Workflow: Stub, Bot: Stub, ChevronRight: Stub, ChevronDown: Stub,
-    AlertTriangle: Stub, BarChart3: Stub,
+    AlertTriangle: Stub, BarChart3: Stub, CheckCircle2: Stub,
+    SlidersHorizontal: Stub, Circle: Stub,
   }
 })
 
@@ -141,6 +142,9 @@ describe('StudyProgress execution-status branches', () => {
     mockStudySuccess({ execution_status: 'error', last_error: 'phase timeout' })
     render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
     const err = await screen.findByText('phase timeout')
-    expect(err.className).toMatch(/rose/)
+    // Color lives on the wrapping banner div (text-rose-300); the text
+    // itself is an inner span.
+    const banner = err.closest('.border-rose-800')
+    expect(banner).toBeTruthy()
   })
 })

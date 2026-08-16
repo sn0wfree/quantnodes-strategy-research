@@ -10,6 +10,40 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+def _user_goal_ids(request: Request) -> set[str] | None:
+    """Goal ids the requesting user may access (session scoped).
+
+    Resolution chain: user -> owned sessions -> goal rows on those
+    sessions. Returns ``None`` when isolation is disabled (no filtering);
+    otherwise the caller's allowed goal-id set (possibly empty, meaning
+    the user owns no goals). Hypotheses without a goal_id are legacy
+    orphans and are treated as visible to everyone.
+    """
+    import os as _os
+
+    if _os.environ.get("SR_ENFORCE_STUDY_IDOR", "1") == "0":
+        return None
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    from ...core.goal import GoalStore
+    from .web_session import _get_db
+
+    with _get_db() as conn:
+        rows = conn.execute(
+            "SELECT id FROM sessions WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    session_ids = [r["id"] for r in rows]
+    if not session_ids:
+        return set()
+
+    db_path = getattr(request.app.state, "goal_db_path", None)
+    goal_ids: set[str] = set()
+    with GoalStore(db_path=db_path) as store:
+        for sid in session_ids:
+            for g in store.list_goals(session_id=sid, limit=100000):
+                goal_ids.add(g.goal_id)
+    return goal_ids
+
+
 class HypothesisCreateRequest(BaseModel):
     title: str
     thesis: str = ""
@@ -65,6 +99,9 @@ async def hypothesis_list(
         items = registry.list()
         if status:
             items = [h for h in items if h.status == status]
+        allowed = _user_goal_ids(request)
+        if allowed is not None:
+            items = [h for h in items if not h.goal_id or h.goal_id in allowed]
         return {
             "status": "ok",
             "hypotheses": [h.to_dict() for h in items[:limit]],
@@ -88,6 +125,9 @@ async def hypothesis_search(
         hyp_path = getattr(request.app.state, "hypotheses_path", None)
         registry = HypothesisRegistry(path=Path(hyp_path) if hyp_path else None)
         results = registry.search(query=q)
+        allowed = _user_goal_ids(request)
+        if allowed is not None:
+            results = [h for h in results if not h.goal_id or h.goal_id in allowed]
         return {
             "status": "ok",
             "results": [h.to_dict() for h in results[:limit]],

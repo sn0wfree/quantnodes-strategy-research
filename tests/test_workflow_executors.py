@@ -11,7 +11,6 @@ from strategy_research.core.workflow.executors import (
     StubExecutor,
 )
 
-
 # ============================================================
 # StubExecutor
 # ============================================================
@@ -164,7 +163,7 @@ class TestCLIExecutor:
         # which doesn't exist → FileNotFoundError
         dangerous = "echo; touch /tmp/sr_test_injection"
         ex = CLIExecutor("test", command=dangerous)
-        result = ex.run("prompt", {})
+        ex.run('prompt', {})
         # Should NOT create the file
         import os
         assert not os.path.exists("/tmp/sr_test_injection")

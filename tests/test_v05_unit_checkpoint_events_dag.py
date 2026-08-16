@@ -10,21 +10,19 @@ Covers:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from strategy_research.core.goal.checkpoint_store import CheckpointStore
 from strategy_research.core.goal.event_bus import (
-    WorkflowEventBus,
-    LoggerObserver,
     CollectingObserver,
     GoalPanelObserver,
+    LoggerObserver,
     MetricsObserver,
+    WorkflowEventBus,
 )
-from strategy_research.core.workflow.dag import validate_dag, topological_layers, find_downstream, find_upstream
-
+from strategy_research.core.workflow.dag import find_downstream, find_upstream, topological_layers, validate_dag
 
 # ═══════════════════════════════════════════════════════════════════════
 # CheckpointStore

@@ -41,13 +41,16 @@ Body content as Markdown (streaming v2):
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from rich.console import RenderableType
 from textual.widgets import RichLog
 
 from strategy_research.cli.tui.messages import WriteTranscript
 from strategy_research.cli.tui.widgets.streaming_text import StreamingText
+
+if TYPE_CHECKING:
+    from textual.geometry import Strip
 
 _ARGS_PREVIEW_MAX = 80
 
@@ -135,8 +138,9 @@ class TranscriptView(RichLog):
             self._plain_lines.append(content)
         else:
             try:
-                from rich.console import Console as RichConsole
                 import io
+
+                from rich.console import Console as RichConsole
                 buf = io.StringIO()
                 console = RichConsole(file=buf, force_terminal=False, width=200)
                 console.print(content, end="")
@@ -152,7 +156,6 @@ class TranscriptView(RichLog):
         map screen coordinates to content positions. Also applies
         selection highlighting when a drag-select is active.
         """
-        from textual.strip import Strip as _Strip
         scroll_x, scroll_y = self.scroll_offset
         strip = self._render_line(scroll_y + y, scroll_x, self.size.width)
 

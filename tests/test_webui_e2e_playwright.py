@@ -17,19 +17,26 @@
 # so they don't pollute the rest of the test suite.
 pytest_plugins = ["conftest_e2e"]
 
-import time
+import os
 import uuid
 from typing import Iterator
 
 import pytest
 import requests
+
+# Browser E2E is opt-in (run via e2e.yml / SR_RUN_BROWSER_TESTS=1): the
+# Playwright sync API keeps a running asyncio loop on the main thread for the
+# whole session, which breaks pytest-asyncio for every later test file.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("SR_RUN_BROWSER_TESTS", "0") != "1",
+    reason="Browser E2E; set SR_RUN_BROWSER_TESTS=1 (or run via e2e.yml)",
+)
 from playwright.sync_api import (
     Browser,
     BrowserContext,
     Page,
     expect,
 )
-
 
 # ────────────────────────── Helpers ──────────────────────────
 
@@ -248,8 +255,9 @@ class TestChatFlow:
             },
         )
 
-        # 重新加载 → AuthGuard 看到 token → AppShell 渲染
-        page.goto(f"{app_url}/")
+        # 重新加载 → AuthGuard 看到 token → AppShell 渲染。
+        # Chat 页路由是 /chat（/ 是 Dashboard）。
+        page.goto(f"{app_url}/chat")
         page.wait_for_selector("header", timeout=10_000)  # TopBar
 
         # 等待 window.__sessionStore 暴露 (main.tsx 异步 import)
@@ -291,8 +299,8 @@ class TestChatFlow:
         textarea.click()
         textarea.type("什么是 alpha 因子？")
 
-        # 点击发送按钮 (Composer 末尾的 primary 按钮)
-        send_btn = page.locator("button.bg-primary-600").last
+        # 点击发送按钮 (Composer 末尾的发送按钮，title="发送 (Enter)")
+        send_btn = page.locator('button[title="发送 (Enter)"]').last
         send_btn.click()
 
         # 1. 等待 user 消息立即出现 (乐观更新)
@@ -340,10 +348,10 @@ class TestChatFlow:
         topbar = page.locator("header").first
         expect(topbar).to_be_visible()
 
-    def test_message_input_disabled_without_session(
+    def test_message_input_available_with_auto_created_session(
         self, context: BrowserContext, app_url: str, api_client: requests.Session
     ):
-        """没有 currentSessionId 时，textarea 被禁用。"""
+        """无历史会话时 AppShell 自动创建新会话 → textarea 可用。"""
         username = _unique_username()
         r = api_client.post(
             f"{api_client.base_url}/api/auth/register",
@@ -358,10 +366,12 @@ class TestChatFlow:
             "(t) => localStorage.setItem('sr-auth', JSON.stringify({state:{token:t}}))",
             token,
         )
-        page.goto(f"{app_url}/")
+        # Chat 页路由是 /chat（/ 是 Dashboard）
+        page.goto(f"{app_url}/chat")
 
-        # 没有 session → textarea 应该是禁用且 placeholder 是 "选择或创建会话"
+        # AppShell 自动创建会话（无历史 session 时）→ textarea 可用
         page.wait_for_selector("textarea", timeout=5000)
         textarea = page.locator("textarea").first
-        expect(textarea).to_be_disabled()
-        expect(textarea).to_have_attribute("placeholder", "选择或创建会话")
+        expect(textarea).to_be_enabled()
+        # 自动创建的会话标题出现在会话列表
+        expect(page.locator("text=新会话").first).to_be_visible(timeout=5000)

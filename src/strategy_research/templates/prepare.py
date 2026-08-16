@@ -102,7 +102,7 @@ def compute_factors(prices: pd.DataFrame, factor_exprs: list[dict]) -> dict[str,
     # 导入因子计算模块
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-        from strategy_research.core.compute_factor import compute_factor, FactorComputeError
+        from strategy_research.core.compute_factor import FactorComputeError, compute_factor
     except ImportError:
         print("⚠️  无法导入 compute_factor，使用简单因子")
         return _compute_simple_factors(prices, factor_exprs)
@@ -240,29 +240,76 @@ def evaluate(params: dict, factor_exprs: list[dict],
         _persist_factor_failures(Path(__file__).parent, factor_failures)
 
     # 计算综合分数
-    scores = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
-    for name, factor_df in factors.items():
-        # 找到权重
-        weight = 1.0
-        for expr in factor_exprs:
-            if expr.get("factor_name") == name:
-                weight = expr.get("weight", 1.0)
-                break
-        # 对齐
-        aligned = factor_df.reindex(prices.index).reindex(columns=prices.columns)
-        scores = scores.add(aligned * weight, fill_value=0)
+    scores = _compute_factor_scores(prices, factors, factor_exprs)
 
     # 计算日收益
     returns = prices.pct_change(fill_method=None)
 
     # 模拟回测
+    nav, weight_changes = _simulate_backtest(
+        prices, returns, scores, top_n, max_weight, rebalance_freq, factor_weight_method
+    )
+
+    # 构造 NAV 序列
+    nav_series = pd.Series(nav, index=prices.index[rebalance_freq - 1:rebalance_freq - 1 + len(nav)])
+
+    # 计算指标
+    ann_return = _ann_return(nav_series)
+    max_dd = _max_drawdown(nav_series)
+    sharpe = _sharpe(nav_series)
+    ann_vol = _ann_vol(nav_series)
+    sortino = _sortino(nav_series)
+    turnover = np.mean(weight_changes) * 252 if weight_changes else 0.0
+
+    # Calmar
+    calmar = ann_return / abs(max_dd) if max_dd < 0 else 0.0
+
+    return {
+        GOAL_METRIC: calmar,
+        "calmar": calmar,
+        "sharpe": sharpe,
+        "max_dd": max_dd,
+        "ann_return": ann_return,
+        "ann_vol": ann_vol,
+        "sortino": sortino,
+        "turnover": turnover,
+        "trades": len(weight_changes),
+    }
+
+
+def _compute_factor_scores(
+    prices: pd.DataFrame,
+    factors: dict,
+    factor_exprs: list[dict],
+) -> pd.DataFrame:
+    """Blend per-factor values into a combined score DataFrame."""
+    scores = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+    for name, factor_df in factors.items():
+        weight = 1.0
+        for expr in factor_exprs:
+            if expr.get("factor_name") == name:
+                weight = expr.get("weight", 1.0)
+                break
+        aligned = factor_df.reindex(prices.index).reindex(columns=prices.columns)
+        scores = scores.add(aligned * weight, fill_value=0)
+    return scores
+
+
+def _simulate_backtest(
+    prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    scores: pd.DataFrame,
+    top_n: int,
+    max_weight: float,
+    rebalance_freq: int,
+    factor_weight_method: str,
+) -> tuple[list[float], list[float]]:
+    """Simulate periodic rebalancing; returns (nav, weight_changes)."""
     nav = [1.0]
     prev_weights = {}
     weight_changes = []
 
     for i in range(rebalance_freq, len(prices)):
-        prices.index[i]
-
         # 调仓日: 选股 + 计算权重
         if (i - rebalance_freq) % rebalance_freq == 0:
             day_scores = scores.iloc[i].dropna()
@@ -306,31 +353,7 @@ def evaluate(params: dict, factor_exprs: list[dict],
 
         nav.append(nav[-1] * (1 + daily_ret))
 
-    # 构造 NAV 序列
-    nav_series = pd.Series(nav, index=prices.index[rebalance_freq - 1:rebalance_freq - 1 + len(nav)])
-
-    # 计算指标
-    ann_return = _ann_return(nav_series)
-    max_dd = _max_drawdown(nav_series)
-    sharpe = _sharpe(nav_series)
-    ann_vol = _ann_vol(nav_series)
-    sortino = _sortino(nav_series)
-    turnover = np.mean(weight_changes) * 252 if weight_changes else 0.0
-
-    # Calmar
-    calmar = ann_return / abs(max_dd) if max_dd < 0 else 0.0
-
-    return {
-        GOAL_METRIC: calmar,
-        "calmar": calmar,
-        "sharpe": sharpe,
-        "max_dd": max_dd,
-        "ann_return": ann_return,
-        "ann_vol": ann_vol,
-        "sortino": sortino,
-        "turnover": turnover,
-        "trades": len(weight_changes),
-    }
+    return nav, weight_changes
 
 
 def _empty_metrics() -> dict:

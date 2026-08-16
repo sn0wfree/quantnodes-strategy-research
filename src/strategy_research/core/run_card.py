@@ -157,10 +157,25 @@ def write_run_card(
 
     # Markdown (人读)
     md_path = run_dir / "run_card.md"
+    md_lines = _render_markdown(run_card, strategy_hashes, config_summary, data_provenance, artifact_refs, warnings)
+    md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+
+    return run_card
+
+
+def _render_markdown(
+    run_card: dict[str, Any],
+    strategy_hashes: dict[str, str],
+    config_summary: dict[str, Any],
+    data_provenance: dict[str, Any],
+    artifact_refs: list[dict[str, Any]],
+    warnings: Optional[Sequence[str]],
+) -> list[str]:
+    """Render the human-readable run_card.md lines."""
     md_lines = [
-        f"# Run Card `{run_dir.name}`",
+        f"# Run Card `{run_card['run_dir']}`",
         "",
-        f"- Schema: `{SCHEMA_VERSION}`",
+        f"- Schema: `{run_card['schema_version']}`",
         f"- Generated: `{run_card['generated_at']}`",
         f"- Config hash: `{run_card['config_hash'][:16]}...`",
     ]
@@ -224,6 +239,4 @@ def write_run_card(
         for w in warnings:
             md_lines.append(f"- {w}")
 
-    md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
-
-    return run_card
+    return md_lines

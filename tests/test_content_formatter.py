@@ -133,9 +133,10 @@ class TestEndToEndWithRichMarkdown:
     def test_reformatted_content_renders_as_code_block(self):
         """The reformed content should produce a code block in Rich Markdown,
         not a paragraph of text."""
-        from rich.markdown import Markdown
-        from rich.console import Console
         import io
+
+        from rich.console import Console
+        from rich.markdown import Markdown
 
         body = '> Title\n{"action": "test", "reason": "because"}'
         reformatted = reformat_body_content(body)

@@ -5,21 +5,15 @@ async mock LLM clients (achat / astream).
 """
 from __future__ import annotations
 
-import asyncio
-import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
-from strategy_research.core.agent.loop import AgentLoop, LoopResult, _tool_call_hash
-from strategy_research.core.agent.tools import ToolRegistry
+from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
 from strategy_research.core.llm.errors import LLMError
 from strategy_research.core.llm.parser import StreamChunk
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

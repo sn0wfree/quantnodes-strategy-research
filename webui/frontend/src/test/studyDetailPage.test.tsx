@@ -15,6 +15,19 @@ vi.mock('../api/client', async () => {
         resume: vi.fn(),
         cancel: vi.fn(),
         directive: vi.fn(),
+        journal: vi.fn().mockResolvedValue({ status: 'ok', study_id: 'st-1', journal: '' }),
+        hangingEvents: vi.fn().mockResolvedValue({
+          status: 'ok', study_id: 'st-1', window_hours: 24, by_type: {}, recent: [],
+        }),
+        availableActions: vi.fn().mockResolvedValue({
+          status: 'ok', study_id: 'st-1', execution_status: 'running',
+          actions: [
+            { name: 'pause', label: '暂停', destructive: false },
+            { name: 'cancel', label: '取消', destructive: true },
+          ],
+        }),
+        dispatchAction: vi.fn().mockResolvedValue({ status: 'ok', study_id: 'st-1', action: 'ok' }),
+        redoRound: vi.fn(),
       },
     },
     ApiError: class extends Error {
@@ -38,6 +51,9 @@ vi.mock('lucide-react', () => {
     Activity: Stub, Layers: Stub, Eye: Stub, EyeOff: Stub, Plus: Stub,
     ArrowRight: Stub, Search: Stub, MessageSquare: Stub,
     Settings: Stub, Workflow: Stub, BookOpen: Stub,
+    Moon: Stub, Sun: Stub, Network: Stub, Sigma: Stub, Library: Stub, LogOut: Stub,
+    Circle: Stub, CheckCircle2: Stub, SlidersHorizontal: Stub, Info: Stub,
+    ShieldAlert: Stub,
   }
 })
 
@@ -126,7 +142,7 @@ describe('StudyDetailPage', () => {
     expect(await screen.findByText(/mom_20d/)).toBeInTheDocument()
     expect(screen.getAllByText('找到 alpha 因子').length).toBeGreaterThan(0)
     expect(screen.getByText('运行中')).toBeInTheDocument()
-    expect(screen.getByText(/Round 2\/5/)).toBeInTheDocument()
+    expect(screen.getByText(/2\/5/)).toBeInTheDocument()
     expect(screen.getByText('run_0002')).toBeInTheDocument()
     expect(screen.getByText('momentum')).toBeInTheDocument()
     expect(mockSummary).toHaveBeenCalledWith('st-1')
@@ -148,10 +164,9 @@ describe('StudyDetailPage', () => {
   })
 
   it('calls the pause API and surfaces errors', async () => {
-    vi.mocked(api.study.pause).mockResolvedValue({
-      status: 'ok', study_id: 'st-1', action: 'pause',
-    } as never)
-    vi.mocked(api.study.pause).mockRejectedValueOnce(new Error('pause failed') as never)
+    vi.mocked(api.study.dispatchAction).mockRejectedValueOnce(
+      new Error('pause failed') as never
+    )
     renderPage()
     await screen.findByText(/mom_20d/)
     fireEvent.click(screen.getByRole('button', { name: /暂停/ }))
@@ -162,6 +177,13 @@ describe('StudyDetailPage', () => {
     mockSummary.mockResolvedValue(
       summaryFixture({ execution_status: 'paused' }) as never
     )
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'paused',
+      actions: [
+        { name: 'resume', label: '恢复', destructive: false },
+        { name: 'cancel', label: '取消', destructive: true },
+      ],
+    } as never)
     renderPage()
     await screen.findByText(/mom_20d/)
     expect(screen.getByRole('button', { name: /恢复/ })).toBeInTheDocument()
@@ -194,12 +216,21 @@ describe('StudyDetailPage interactions', () => {
     mockSummary.mockResolvedValue(
       summaryFixture({ execution_status: 'paused' }) as never
     )
-    vi.mocked(api.study.resume).mockResolvedValue({
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'paused',
+      actions: [
+        { name: 'resume', label: '恢复', destructive: false },
+        { name: 'cancel', label: '取消', destructive: true },
+      ],
+    } as never)
+    vi.mocked(api.study.dispatchAction).mockResolvedValue({
       status: 'ok', study_id: 'st-1', action: 'resumed',
     } as never)
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /恢复/ }))
-    await waitFor(() => expect(api.study.resume).toHaveBeenCalledWith('st-1'))
+    await waitFor(() =>
+      expect(api.study.dispatchAction).toHaveBeenCalledWith('st-1', 'resume')
+    )
   })
 
   it('submits a directive and refreshes the list', async () => {
@@ -244,6 +275,13 @@ describe('StudyDetailPage interactions', () => {
     fireEvent.change(input, { target: { value: 'x' } })
     fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
     expect(await screen.findByText(/directive rejected/)).toBeInTheDocument()
+  })
+
+  it('renders the task-info card in the sidebar', async () => {
+    renderPage()
+    expect(await screen.findByText('任务信息')).toBeInTheDocument()
+    expect(screen.getByText('/tmp/ws')).toBeInTheDocument()
+    expect(screen.getByText('2026-08-01 10:00')).toBeInTheDocument()
   })
 
   it('does not submit an empty directive', async () => {

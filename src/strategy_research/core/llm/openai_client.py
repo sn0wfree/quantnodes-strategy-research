@@ -57,6 +57,13 @@ def _backoff_delay(attempt: int, base: float) -> float:
     return min(base * (2 ** attempt), 60.0)
 
 
+def _jitter_backoff(attempt: int, base: float) -> float:
+    """Exponential backoff with jitter, capped at 60s."""
+    delay = _backoff_delay(attempt, base)
+    jitter = random.uniform(0.7, 1.3)
+    return min(delay * jitter, 60.0)
+
+
 def _parse_retry_after(header_value: str) -> float | None:
     """Parse Retry-After header (seconds or HTTP-date). Returns seconds or None."""
     if not header_value:
@@ -333,7 +340,7 @@ class OpenAICompatClient:
             ) from exc
         return parse_chat_response(raw, adapter=adapter)
 
-    def stream(
+    def stream(  # noqa: C901
         self,
         messages: list[dict[str, Any]],
         *,
@@ -362,8 +369,14 @@ class OpenAICompatClient:
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
+        # Wall-clock ceiling for the whole request (retries included):
+        # guards against slow-trickle streams that never trigger the
+        # per-read timeout. deadline=None → disabled.
+        deadline = self._wallclock_deadline()
+
         last_response: httpx.Response | None = None
         for attempt in range(self.config.max_retries):
+            self._check_wallclock(deadline)
             started = False
             try:
                 with httpx.Client(**client_kwargs) as client:
@@ -390,6 +403,7 @@ class OpenAICompatClient:
                         # Stream content
                         try:
                             for line in response.iter_lines():
+                                self._check_wallclock(deadline)
                                 chunk = parse_stream_chunk(line, adapter=adapter)
                                 if chunk is not None:
                                     started = True
@@ -410,9 +424,7 @@ class OpenAICompatClient:
                         f"stream timed out after {self.config.timeout_s}s "
                         f"({self.config.max_retries} attempts)"
                     ) from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "stream timeout (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -421,9 +433,7 @@ class OpenAICompatClient:
             except httpx.TransportError as exc:
                 if started or attempt == self.config.max_retries - 1:
                     raise LLMError(f"stream transport error: {exc}") from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "stream transport error (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -435,7 +445,7 @@ class OpenAICompatClient:
             _raise_for_status(last_response, self.config.provider)
         raise LLMError("stream max retries exhausted")
 
-    async def astream(
+    async def astream(  # noqa: C901
         self,
         messages: list[dict[str, Any]],
         *,
@@ -459,8 +469,12 @@ class OpenAICompatClient:
         url = self._chat_url()
         client_kwargs = self._client_kwargs()
 
+        # Wall-clock ceiling (see sync stream).
+        deadline = self._wallclock_deadline()
+
         last_response: httpx.Response | None = None
         for attempt in range(self.config.max_retries):
+            self._check_wallclock(deadline)
             started = False
             try:
                 async with httpx.AsyncClient(**client_kwargs) as client:
@@ -487,6 +501,7 @@ class OpenAICompatClient:
                         # Stream content
                         try:
                             async for line in response.aiter_lines():
+                                self._check_wallclock(deadline)
                                 if not started and line.startswith("data: "):
                                     logger.debug("[DIAG] astream first raw line: %.200s", line)
                                 chunk = parse_stream_chunk(line, adapter=adapter)
@@ -520,9 +535,7 @@ class OpenAICompatClient:
                         f"stream timed out after {self.config.timeout_s}s "
                         f"({self.config.max_retries} attempts)"
                     ) from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "astream timeout (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -531,9 +544,7 @@ class OpenAICompatClient:
             except httpx.TransportError as exc:
                 if started or attempt == self.config.max_retries - 1:
                     raise LLMError(f"stream transport error: {exc}") from exc
-                delay = _backoff_delay(attempt, self.config.retry_backoff_s)
-                jitter = random.uniform(0.7, 1.3)
-                delay = min(delay * jitter, 60.0)
+                delay = _jitter_backoff(attempt, self.config.retry_backoff_s)
                 logger.warning(
                     "astream transport error (attempt %d/%d); sleeping %.1fs",
                     attempt + 1, self.config.max_retries, delay,
@@ -561,6 +572,33 @@ class OpenAICompatClient:
         if self._transport is not None:
             kwargs["transport"] = self._transport
         return kwargs
+
+    # ── wall-clock ceiling (slow-trickle guard) ────────────────────
+
+    def _wallclock_deadline(self) -> float | None:
+        """Deadline (monotonic) for the whole request, or None if disabled."""
+        wc = getattr(self.config, "wallclock_timeout_s", 0.0) or 0.0
+        if wc <= 0:
+            return None
+        return time.monotonic() + wc
+
+    def _check_wallclock(self, deadline: float | None) -> None:
+        """Raise LLMTimeoutError once the deadline passed (retries included)."""
+        if deadline is not None and time.monotonic() > deadline:
+            from ..observability.trace import _session_id
+            from ..study.hanging_events import record_event
+            record_event(
+                "wallclock_timeout",
+                session_id=_session_id.get(),
+                detail=(
+                    f"model={self.config.model} "
+                    f"wallclock={self.config.wallclock_timeout_s:.0f}s"
+                ),
+            )
+            raise LLMTimeoutError(
+                f"stream wall-clock timeout after "
+                f"{self.config.wallclock_timeout_s:.0f}s"
+            )
 
     def _request_with_retry(
         self, payload: dict[str, Any], *, stream: bool, adapter: Any = None,

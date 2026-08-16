@@ -739,81 +739,113 @@ def run_onboarding(
     llm_path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
     env_path = dotenv_path or _QUANTNODES_DOTENV_PATH
 
-    # ─── Test-mode branch ─────────────────────────────────────────────
     if inputs is not None:
-        # ── Step 0: config audit (auto-apply in test mode) ──────────────
-        from strategy_research.core.llm.config_audit import (
-            detect_issues,
-            fix_issues,
+        return _run_onboarding_test_mode(
+            inputs, llm_path, env_path, skip_tushare, llm_json_path, dotenv_path
         )
-        _issues = detect_issues(llm_json_path=llm_path, env_path=env_path)
-        if _issues:
-            fix_issues(_issues, llm_json_path=llm_path, env_path=env_path)
+    return _run_onboarding_tty(llm_path, env_path, skip_tushare, llm_json_path, dotenv_path)
 
-        llm: dict[str, object] = {}
-        collected: dict[str, object] = {}
 
-        def _next() -> str:
-            if not inputs:
-                raise RuntimeError("ran out of onboarding inputs")
-            return inputs.pop(0)
+def _run_onboarding_test_mode(
+    inputs: list[str],
+    llm_path: Path,
+    env_path: Path,
+    skip_tushare: bool,
+    llm_json_path: Path | None,
+    dotenv_path: Path | None,
+) -> Path | None:
+    """Test-mode onboarding: pops items from ``inputs``, no TTY interaction."""
+    # ── Step 0: config audit (auto-apply in test mode) ──────────────
+    from strategy_research.core.llm.config_audit import (
+        detect_issues,
+        fix_issues,
+    )
+    _issues = detect_issues(llm_json_path=llm_path, env_path=env_path)
+    if _issues:
+        fix_issues(_issues, llm_json_path=llm_path, env_path=env_path)
 
-        # Step 1: provider
-        chosen_label = _next().strip()
-        chosen = next((p for p in PROVIDERS if chosen_label == p.label), None)
-        if chosen is None:
-            raise ValueError(f"provider not selected: {chosen_label!r}")
-        llm["provider"] = chosen.key
-        if chosen.base_url:
-            llm["base_url"] = chosen.base_url
-        collected["provider"] = chosen
+    llm: dict[str, object] = {}
+    collected: dict[str, object] = {}
 
-        # Step 2: model
-        model = _next().strip() or chosen.default_model
-        llm["model"] = model
+    def _next() -> str:
+        if not inputs:
+            raise RuntimeError("ran out of onboarding inputs")
+        return inputs.pop(0)
 
-        # Step 3: API key (skip for providers with no key)
-        if chosen.key_required:
-            key = _next().strip()
-            if key:
-                llm["api_key"] = _LLM_API_KEY_REF
-                collected["api_key_value"] = key
+    # Step 1: provider
+    chosen_label = _next().strip()
+    chosen = next((p for p in PROVIDERS if chosen_label == p.label), None)
+    if chosen is None:
+        raise ValueError(f"provider not selected: {chosen_label!r}")
+    llm["provider"] = chosen.key
+    if chosen.base_url:
+        llm["base_url"] = chosen.base_url
+    collected["provider"] = chosen
 
-        # Step 4: timeout
-        timeout = _next().strip() or "300"
-        llm["timeout"] = int(timeout)
-        llm["max_retries"] = 2
+    # Step 2: model
+    model = _next().strip() or chosen.default_model
+    llm["model"] = model
 
-        # Optional Step 5: Tushare (China A-share)
-        if not skip_tushare:
-            tushare = _next().strip()
-            if tushare:
-                collected["tushare_token_value"] = tushare
+    # Step 3: API key (skip for providers with no key)
+    if chosen.key_required:
+        key = _next().strip()
+        if key:
+            llm["api_key"] = _LLM_API_KEY_REF
+            collected["api_key_value"] = key
 
-        # K3: plaintext-key migration (test mode: read next input)
-        existing_plain = _detect_plaintext_api_key(llm_path)
-        if existing_plain:
-            migrate = _prompt_migrate_plaintext(existing_plain, inputs=inputs)
-            if migrate and "api_key_value" in collected:
-                # user agreed → write env: form to llm.json (already set above)
-                pass
-            elif not migrate and "api_key_value" in collected:
-                # user declined → use plaintext form in llm.json
-                llm["api_key"] = collected["api_key_value"]
+    # Step 4: timeout
+    timeout = _next().strip() or "300"
+    llm["timeout"] = int(timeout)
+    llm["max_retries"] = 2
 
-        # Write tokens to .env (always)
-        tokens: dict[str, str] = {}
-        if "api_key_value" in collected:
-            tokens["LLM_API_KEY"] = collected["api_key_value"]
-        if "tushare_token_value" in collected:
-            tokens["TUSHARE_TOKEN"] = collected["tushare_token_value"]
-        if tokens:
-            _save_tokens_to_dotenv(tokens, dotenv_path=env_path)
+    # Optional Step 5: Tushare (China A-share)
+    if not skip_tushare:
+        tushare = _next().strip()
+        if tushare:
+            collected["tushare_token_value"] = tushare
 
-        _attach_profile(llm, chosen)
-        return _finalize_llm_json(llm, llm_json_path=llm_path)
+    # K3: plaintext-key migration (test mode: read next input)
+    existing_plain = _detect_plaintext_api_key(llm_path)
+    if existing_plain:
+        _apply_k3_migration(llm, collected, existing_plain, inputs=inputs)
 
-    # ─── TTY-mode branch (prompt_toolkit with BACK/CANCEL) ─────────────
+    # Write tokens to .env (always)
+    tokens: dict[str, str] = {}
+    if "api_key_value" in collected:
+        tokens["LLM_API_KEY"] = collected["api_key_value"]
+    if "tushare_token_value" in collected:
+        tokens["TUSHARE_TOKEN"] = collected["tushare_token_value"]
+    if tokens:
+        _save_tokens_to_dotenv(tokens, dotenv_path=env_path)
+
+    _attach_profile(llm, chosen)
+    return _finalize_llm_json(llm, llm_json_path=llm_path)
+
+
+def _apply_k3_migration(
+    llm: dict[str, object],
+    collected: dict[str, object],
+    existing_plain: str,
+    *,
+    inputs: list[str] | None = None,
+) -> None:
+    """Prompt whether to migrate a plaintext key; write env: or plaintext."""
+    migrate = _prompt_migrate_plaintext(existing_plain, inputs=inputs)
+    if migrate and "api_key_value" in collected:
+        return  # agreed → env:LLM_API_KEY form (already set)
+    if not migrate and "api_key_value" in collected:
+        # declined → use plaintext form in llm.json
+        llm["api_key"] = collected["api_key_value"]
+
+
+def _run_onboarding_tty(
+    llm_path: Path,
+    env_path: Path,
+    skip_tushare: bool,
+    llm_json_path: Path | None,
+    dotenv_path: Path | None,
+) -> Path | None:
+    """TTY-mode onboarding: prompt_toolkit selectors with BACK/CANCEL."""
     import sys
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):

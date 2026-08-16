@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -248,13 +247,13 @@ class TestRunBacktestE2E:
         code = "600000.SH"
         data_map = {code: self._make_ohlcv(code)}
         sig_file = tmp_path / "signal_engine.py"
-        sig_file.write_text(textwrap.dedent(f"""\
+        sig_file.write_text(textwrap.dedent("""\
             import pandas as pd
             from strategy_research.core.engine.signals import SignalEngine
 
             class SignalEngine(SignalEngine):
                 def generate(self, data_map):
-                    return {{code: pd.Series(1.0, index=df.index) for code, df in data_map.items()}}
+                    return {code: pd.Series(1.0, index=df.index) for code, df in data_map.items()}
         """))
 
         with patch("strategy_research.core.db.load_ohlcv_data", return_value=data_map):

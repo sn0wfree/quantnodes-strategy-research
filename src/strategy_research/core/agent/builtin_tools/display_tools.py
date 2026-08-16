@@ -20,26 +20,16 @@ html → _on_html) so reloads keep them in the chat record.
 from __future__ import annotations
 
 import csv
-import io
 import json
 import logging
-import math
-import os
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
 from ..tools import BaseTool, ToolContext, ToolError
-from .utils import err_actionable
+from .utils import err_actionable, tool_ok
 
 logger = logging.getLogger(__name__)
-
-
-def _ok(payload: dict[str, Any]) -> str:
-    """Standard success envelope (mirrors builtin_tools._ok)."""
-    import json as _json
-
-    return _json.dumps({"status": "ok", **payload}, ensure_ascii=False)
 
 # Downsample budget: enough for a smooth curve, small enough for SSE
 # + DB persistence.
@@ -245,7 +235,7 @@ class ShowChartTool(BaseTool):
                 "data": data,
             })
 
-        return _ok({
+        return tool_ok({
             "displayed": display_title,
             "chart_type": chart_type,
             "source_file": source_file,
@@ -321,7 +311,10 @@ class ShowReportTool(BaseTool):
                 tool="show_report",
             )
 
-        run_dir = (ctx.workspace / "runs" / strategy_name / run).resolve()
+        # v2: ctx.runs_dir overrides the legacy runs/<strategy> layout
+        runs_root = ctx.runs_dir if ctx.runs_dir is not None \
+            else ctx.workspace / "runs" / strategy_name
+        run_dir = (runs_root / run).resolve()
         workspace_root = Path(ctx.workspace).resolve()
         if not run_dir.is_relative_to(workspace_root):
             return err_actionable(
@@ -359,7 +352,7 @@ class ShowReportTool(BaseTool):
                 "content": content,
             })
 
-        return _ok({
+        return tool_ok({
             "displayed": f"{strategy_name}/{run}",
             "report": str(report_path),
             "bytes": len(content),

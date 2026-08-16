@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from strategy_research.core.swarm.preset_loader import load_preset, list_presets
+from strategy_research.core.swarm.preset_loader import list_presets, load_preset
 from strategy_research.core.swarm.runtime import (
     AgentResult,
     SwarmPreset,
@@ -16,7 +15,6 @@ from strategy_research.core.swarm.runtime import (
 )
 from strategy_research.core.workflow.dag import topological_layers
 from strategy_research.core.workflow.types import AgentCall, AgentStatus
-
 
 # ── Preset Loader Tests ────────────────────────────────────
 

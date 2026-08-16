@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-
 # ── thinking / reasoning tag stripping ──────────────────────────────
 
 # Closed-form tags emitted by various providers when surfacing their

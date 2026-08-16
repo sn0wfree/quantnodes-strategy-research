@@ -18,7 +18,6 @@ import json
 import sqlite3
 import tempfile
 import unittest
-import uuid
 from pathlib import Path
 
 from strategy_research.api.session.event_bus_v2 import EventBusV2

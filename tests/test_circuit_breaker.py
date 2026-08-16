@@ -3,15 +3,12 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from strategy_research.core.agent.circuit_breaker import (
     BreakerState,
     CircuitBreakerConfig,
     RetryPolicy,
     ToolLoopCircuitBreaker,
 )
-
 
 # ── ToolLoopCircuitBreaker ──────────────────────────────────────────
 

@@ -25,11 +25,8 @@ Coverage:
 """
 from __future__ import annotations
 
-import asyncio
-import json
 import tempfile
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 import pytest
@@ -41,10 +38,7 @@ from strategy_research.core.goal.workflow import (
     GoalWorkflowConfig,
     GoalWorkflowGoalConfig,
     GoalWorkflowRunner,
-    GoalWorkflowState,
 )
-from strategy_research.core.swarm.runtime import SwarmPreset
-
 
 # ── P3.9: GoalWorkflowRunner delegates to SwarmRuntime ────────
 

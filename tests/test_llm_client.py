@@ -426,7 +426,7 @@ class TestStreaming:
 
         # Patch stream to use mock
         def mock_stream(messages, **kwargs):
-            handler = stream_handler
+            stream_handler
             # Use httpx.MockTransport for stream method
             with httpx.Client(
                 transport=httpx.MockTransport(stream_handler),

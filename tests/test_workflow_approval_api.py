@@ -19,6 +19,7 @@ from strategy_research.core.workflow.builtin import user_dir
 
 def _build_asgi_app():
     from fastapi import FastAPI
+
     from strategy_research.api.middleware import AuthMiddleware
     from strategy_research.api.routers import workflow
 
@@ -237,7 +238,7 @@ class TestRunFlow:
 
     async def test_params_override(self, api_env):
         app, _ = api_env
-        fake = _patch_loop_factory(None)
+        _patch_loop_factory(None)
         async with _client(app) as client:
             resp = await client.post("/api/goal/workflow/start-definition", json={
                 "session_id": "s1", "definition_name": "plan_execute_auto",

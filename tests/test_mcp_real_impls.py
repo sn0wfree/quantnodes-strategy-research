@@ -12,9 +12,6 @@ Phase B 把以下 7 个 stub 工具接入真实现:
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
 
 import pytest

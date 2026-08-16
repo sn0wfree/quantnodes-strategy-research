@@ -1,5 +1,6 @@
 """E2E test: send multiple messages and verify none disappear."""
 import asyncio
+
 import pytest
 from playwright.async_api import async_playwright
 

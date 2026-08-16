@@ -23,7 +23,6 @@ Reference: docs/phase-4-plan.md §7.2.
 from __future__ import annotations
 
 import enum
-from typing import Any
 
 from ..workflow.dag import topological_layers, validate_dag
 

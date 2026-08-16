@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -14,15 +13,12 @@ from strategy_research.core.agent.builtin_tools import (
     GitDiffTool,
     ListFilesTool,
     ListHistoryTool,
-    ListSkillsTool,
-    LoadSkillTool,
     ReadFileTool,
     RunBacktestTool,
     WriteFileTool,
     build_default_registry,
 )
-from strategy_research.core.agent.tools import ToolContext, ToolRegistry
-
+from strategy_research.core.agent.tools import ToolContext
 
 # ── Shared fixture ───────────────────────────────────────────────────
 

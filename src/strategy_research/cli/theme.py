@@ -17,8 +17,8 @@ Environment variables honored:
 
 from __future__ import annotations
 
-import os
 import contextvars
+import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,7 +26,6 @@ from typing import Iterator, Optional
 
 from rich.console import Console
 from rich.theme import Theme as _RichThemeType
-
 
 # Brand palette — kept in sync with QuantNodes-Research frontend.
 _BRAND_HEX = "#d97706"

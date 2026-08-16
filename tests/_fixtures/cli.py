@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 
 def make_argv(*args: str) -> list[str]:
     """Build an argv list starting with the program name.

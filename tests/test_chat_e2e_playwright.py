@@ -19,6 +19,15 @@ import requests
 
 pytest_plugins = ["conftest_e2e"]
 
+# Real-browser + real-LLM E2E: opt-in only. Skipping also prevents the
+# Playwright sync API from leaving a running asyncio loop on the main
+# thread, which would break pytest-asyncio for every later test file
+# ("Runner.run() cannot be called from a running event loop").
+pytestmark = pytest.mark.skipif(
+    os.environ.get("SR_E2E_REAL_LLM", "0") != "1",
+    reason="Real-browser + real-LLM E2E; set SR_E2E_REAL_LLM=1 to run",
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -77,7 +86,7 @@ def real_llm_server() -> Iterator[dict]:
 @pytest.fixture
 def authenticated_page(real_llm_server, browser):
     """Login as admin and return a page ready for chat."""
-    from playwright.sync_api import BrowserContext, Page
+    from playwright.sync_api import BrowserContext
 
     base_url = real_llm_server["base_url"]
     ctx: BrowserContext = browser.new_context(
@@ -193,7 +202,7 @@ class TestRealBrowserChatFlow:
 
         # Check response mentions 42
         body = page.inner_text("body")
-        assert "42" in body, f"LLM didn't remember the number"
+        assert "42" in body, "LLM didn't remember the number"
 
     def test_error_display(self, authenticated_page):
         """Error toast shows when LLM fails."""

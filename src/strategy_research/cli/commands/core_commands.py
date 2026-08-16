@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 # Shared parent for LLM-flagged commands (run / evaluate / autoresearch).
 from strategy_research.cli.llm_config import _LLM_PARENT  # noqa: E402
 
-
 # ── init ────────────────────────────────────────────────────────────
 
 

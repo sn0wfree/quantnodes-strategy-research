@@ -17,7 +17,7 @@ import pytest
 
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import AgentLoop
-from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
+from strategy_research.core.llm import LLMConfig, LLMResponse
 from strategy_research.core.llm.errors import (
     LLMAuthError,
     LLMConfigError,
@@ -26,7 +26,6 @@ from strategy_research.core.llm.errors import (
     LLMServerError,
     LLMTimeoutError,
 )
-
 
 # ---------------------------------------------------------------- helpers
 
@@ -83,6 +82,7 @@ class TestChatPathStreaming:
         ``ChatSession._run_agent_loop`` routes through
         ``build_chat_agent_loop``, which forces ``stream_mode=True``."""
         import inspect
+
         from strategy_research.cli.tui.session import ChatSession
         from strategy_research.core.agent import chat_loop
 
@@ -105,7 +105,7 @@ class TestChatPathStreaming:
                 yield chunk
 
         loop.client.astream = fake_astream
-        result = asyncio.run(loop.arun("分析A股"))
+        asyncio.run(loop.arun('分析A股'))
 
         types = sink.types()
         # text_delta events must have fired

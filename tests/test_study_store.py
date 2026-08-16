@@ -6,7 +6,6 @@ guardrails, active-study lookup and startup recovery scanning.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ from strategy_research.core.study import (
     default_metric_targets,
 )
 from strategy_research.core.study.models import MetricTarget
-
 
 # ── fixtures ─────────────────────────────────────────────────────────
 
@@ -46,7 +44,7 @@ def make_study(store: StudyStore, session_id: str):
 
     def _make(**overrides):
         kw = dict(
-            session_id=session_id,
+            owner_session_id=session_id,
             goal_id="goal_demo",
             objective="研究动量因子",
             workspace_path="/tmp/ws",
@@ -121,7 +119,7 @@ class TestStudyStoreCRUD:
     def test_create_with_targets(self, store: StudyStore, session_id: str):
         targets = [{"name": "calmar", "op": ">=", "value": 0.7}]
         r = store.create_study(
-            session_id=session_id, goal_id="g1", objective="xxx",
+            owner_session_id=session_id, goal_id="g1", objective="xxx",
             workspace_path="/w", strategy_name="s",
             metric_targets=targets, max_rounds=5, budget_token=10000,
             behavior="improving",
@@ -140,21 +138,21 @@ class TestStudyStoreCRUD:
         assert store.get_active_study(session_id) is None
 
     def test_get_active_study_returns_newest(self, store: StudyStore, session_id: str):
-        a = store.create_study(session_id=session_id, goal_id="g",
+        a = store.create_study(owner_session_id=session_id, goal_id="g",
                                objective="a", workspace_path="/w", strategy_name="s")
-        b = store.create_study(session_id=session_id, goal_id="g",
+        b = store.create_study(owner_session_id=session_id, goal_id="g",
                                objective="b", workspace_path="/w", strategy_name="s")
-        # create_study supersedes old active studies for the same session
-        # so a is cancelled, b is the only active study
+        # v2: no same-session supersede — both stay active; the newest wins
+        # "active study" lookups.
         assert store.get_active_study(session_id).study_id == b.study_id
-        assert store.get_study(a.study_id).execution_status == StudyStatus.CANCELLED
+        assert store.get_study(a.study_id).execution_status == StudyStatus.QUEUED
         store.update_execution_status(b.study_id, StudyStatus.CANCELLED)
-        assert store.get_active_study(session_id) is None
+        assert store.get_active_study(session_id).study_id == a.study_id
 
     def test_list_filters_session(self, store: StudyStore):
-        store.create_study(session_id="se1", goal_id=None, objective="x",
+        store.create_study(owner_session_id="se1", goal_id=None, objective="x",
                            workspace_path="/w", strategy_name="s")
-        store.create_study(session_id="se2", goal_id=None, objective="y",
+        store.create_study(owner_session_id="se2", goal_id=None, objective="y",
                            workspace_path="/w", strategy_name="s")
         assert len(store.list_studies(session_id="se1")) == 1
         assert len(store.list_studies(session_id="se2")) == 1
@@ -162,11 +160,10 @@ class TestStudyStoreCRUD:
 
     def test_list_filters_status(self, store: StudyStore):
         # Create studies in different sessions (supersede only affects same session)
-        a = store.create_study(session_id="s1", goal_id=None, objective="a",
+        a = store.create_study(owner_session_id="s1", goal_id=None, objective="a",
                                workspace_path="/w", strategy_name="s")
         store.update_execution_status(a.study_id, StudyStatus.RUNNING)
-        b = store.create_study(session_id="s2", goal_id=None, objective="b",
-                               workspace_path="/w", strategy_name="s")
+        store.create_study(owner_session_id='s2', goal_id=None, objective='b', workspace_path='/w', strategy_name='s')
         # b is queued (default)
         assert len(store.list_studies(status=StudyStatus.RUNNING)) == 1
         assert len(store.list_studies(status=StudyStatus.QUEUED)) == 1
@@ -175,7 +172,7 @@ class TestStudyStoreCRUD:
     def test_list_newest_first(self, store: StudyStore, session_id: str):
         ids = []
         for i in range(3):
-            r = store.create_study(session_id=session_id, goal_id=None,
+            r = store.create_study(owner_session_id=session_id, goal_id=None,
                                    objective=f"obj-{i}", workspace_path="/w",
                                    strategy_name="s")
             ids.append(r.study_id)
@@ -232,15 +229,15 @@ class TestStudyStoreCRUD:
         assert got.last_verdict == "keep"
 
     def test_list_active_studies_recovery_scan(self, store: StudyStore):
-        r1 = store.create_study(session_id="se1", goal_id=None, objective="a",
+        r1 = store.create_study(owner_session_id="se1", goal_id=None, objective="a",
                                  workspace_path="/w", strategy_name="s")
-        r2 = store.create_study(session_id="se2", goal_id=None, objective="b",
+        r2 = store.create_study(owner_session_id="se2", goal_id=None, objective="b",
                                  workspace_path="/w", strategy_name="s")
         store.update_execution_status(r1.study_id, StudyStatus.RUNNING)
         store.update_execution_status(r2.study_id, StudyStatus.QUEUED)
         # complete one
         store.update_execution_status(
-            store.create_study(session_id="se3", goal_id=None, objective="c",
+            store.create_study(owner_session_id="se3", goal_id=None, objective="c",
                                workspace_path="/w", strategy_name="s").study_id,
             StudyStatus.COMPLETE,
         )
@@ -251,11 +248,11 @@ class TestStudyStoreCRUD:
         assert len(actives) == 2
 
     def test_delete_session_studies(self, store: StudyStore):
-        store.create_study(session_id="se1", goal_id=None, objective="a",
+        store.create_study(owner_session_id="se1", goal_id=None, objective="a",
                            workspace_path="/w", strategy_name="s")
-        store.create_study(session_id="se1", goal_id=None, objective="b",
+        store.create_study(owner_session_id="se1", goal_id=None, objective="b",
                            workspace_path="/w", strategy_name="s")
-        store.create_study(session_id="se2", goal_id=None, objective="c",
+        store.create_study(owner_session_id="se2", goal_id=None, objective="c",
                            workspace_path="/w", strategy_name="s")
         assert store.delete_session_studies("se1") == 2
         assert len(store.list_studies(session_id="se1")) == 0
@@ -267,14 +264,14 @@ class TestStudyStoreCRUD:
             store.delete_session_studies("")
 
     def test_goal_id_nullable(self, store: StudyStore, session_id: str):
-        r = store.create_study(session_id=session_id, goal_id=None,
+        r = store.create_study(owner_session_id=session_id, goal_id=None,
                                objective="x", workspace_path="/w", strategy_name="s")
         assert r.goal_id is None
         assert store.get_study(r.study_id).goal_id is None
 
     def test_persistence_across_connections(self, db_path: Path, session_id: str):
         with StudyStore(db_path=db_path) as s:
-            r = s.create_study(session_id=session_id, goal_id="g", objective="x",
+            r = s.create_study(owner_session_id=session_id, goal_id="g", objective="x",
                                workspace_path="/w", strategy_name="s")
         # Reopen: schema + data survive
         with StudyStore(db_path=db_path) as s2:
@@ -287,14 +284,14 @@ class TestStudyStoreCRUD:
 
 class TestStudyStoreValidation:
     @pytest.mark.parametrize("field,override", [
-        ("session_id", "  "),
+        ("owner_session_id", "  "),
         ("objective", "  "),
         ("workspace_path", "  "),
         ("strategy_name", "  "),
     ])
     def test_empty_required(self, store: StudyStore, field, override, session_id):
         base = dict(
-            session_id="s", goal_id=None, objective="x",
+            owner_session_id="s", goal_id=None, objective="x",
             workspace_path="/w", strategy_name="s",
         )
         base[field] = override
@@ -303,14 +300,14 @@ class TestStudyStoreValidation:
 
     def test_invalid_executor_type(self, store: StudyStore, session_id: str):
         with pytest.raises(ValueError):
-            store.create_study(session_id=session_id, goal_id=None, objective="x",
+            store.create_study(owner_session_id=session_id, goal_id=None, objective="x",
                                workspace_path="/w", strategy_name="s",
                                executor_type="bogus")
 
     @pytest.mark.parametrize("name", ["cooldown_base", "cooldown_jitter", "min_cooldown"])
     def test_nonpositive_cooldown(self, store: StudyStore, session_id, name):
         with pytest.raises(ValueError):
-            store.create_study(session_id=session_id, goal_id=None, objective="x",
+            store.create_study(owner_session_id=session_id, goal_id=None, objective="x",
                                workspace_path="/w", strategy_name="s",
                                **{name: 0})
 
@@ -318,7 +315,7 @@ class TestStudyStoreValidation:
                                        "budget_time_seconds", "max_rounds"])
     def test_nonpositive_optional_budget(self, store: StudyStore, session_id, name):
         with pytest.raises(ValueError):
-            store.create_study(session_id=session_id, goal_id=None, objective="x",
+            store.create_study(owner_session_id=session_id, goal_id=None, objective="x",
                                workspace_path="/w", strategy_name="s",
                                **{name: -1})
 
@@ -380,8 +377,7 @@ class TestStudyDirectives:
 
     def test_directive_cascade_on_study_delete(self, store, session_id):
         """Deleting a study removes its directives via FK CASCADE."""
-        from strategy_research.core.study import StudyStore, StudyDirective
-        s = store.create_study(session_id=session_id, goal_id=None,
+        s = store.create_study(owner_session_id=session_id, goal_id=None,
                                objective="x", workspace_path="/w",
                                strategy_name="strat")
         store.add_directive(s.study_id, "directive-1")
@@ -407,7 +403,7 @@ class TestStudyDirectives:
 class TestStudyMonitoring:
     def test_create_with_monitor_interval(self, store: StudyStore, session_id: str):
         s = store.create_study(
-            session_id=session_id, goal_id=None, objective="x",
+            owner_session_id=session_id, goal_id=None, objective="x",
             workspace_path="/w", strategy_name="s",
             monitor_interval_seconds=600,
         )
@@ -420,7 +416,7 @@ class TestStudyMonitoring:
     ):
         with pytest.raises(ValueError):
             store.create_study(
-                session_id=session_id, goal_id=None, objective="x",
+            owner_session_id=session_id, goal_id=None, objective="x",
                 workspace_path="/w", strategy_name="s",
                 monitor_interval_seconds=-1,
             )
@@ -460,17 +456,17 @@ class TestStudyMonitoring:
     ):
         # Two studies with monitor_interval; one COMPLETE, one MONITORING.
         a = store.create_study(
-            session_id=session_id, goal_id=None, objective="a",
+            owner_session_id=session_id, goal_id=None, objective="a",
             workspace_path="/w", strategy_name="s",
             monitor_interval_seconds=60,
         )
         b = store.create_study(
-            session_id=session_id, goal_id=None, objective="b",
+            owner_session_id=session_id, goal_id=None, objective="b",
             workspace_path="/w", strategy_name="s",
             monitor_interval_seconds=60,
         )
         c = store.create_study(
-            session_id=session_id, goal_id=None, objective="c",
+            owner_session_id=session_id, goal_id=None, objective="c",
             workspace_path="/w", strategy_name="s",
             # no monitor interval — should be excluded
         )
@@ -486,7 +482,8 @@ class TestStudyMonitoring:
 
     def test_monitoring_status_in_active_set(self):
         from strategy_research.core.study.models import (
-            ACTIVE_EXECUTION_STATUSES, StudyStatus,
+            ACTIVE_EXECUTION_STATUSES,
+            StudyStatus,
         )
         # MONITORING is intentionally excluded — it's a passive background check
         assert StudyStatus.MONITORING not in ACTIVE_EXECUTION_STATUSES

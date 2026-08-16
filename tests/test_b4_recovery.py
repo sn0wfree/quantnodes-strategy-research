@@ -10,14 +10,13 @@ Verifies that the event-sourced system gracefully handles:
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from strategy_research.api.session.event_v2 import EventV2
 from strategy_research.api.session.event_bus_v2 import EventBusV2
+from strategy_research.core.events.event_v2 import EventV2
 from strategy_research.api.session.events import EventBus
 from strategy_research.api.session.projector import Projector
 

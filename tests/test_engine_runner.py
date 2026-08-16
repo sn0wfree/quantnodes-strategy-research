@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from strategy_research.core.engine.config import BacktestConfigSchema
 from strategy_research.core.engine.runner import (
     _create_market_engine,
-    _validate_signal_engine_source,
     _validate_signal_engine_class,
+    _validate_signal_engine_source,
 )
 from strategy_research.core.engine.signals import SignalEngine
-
 
 # ============================================================
 # Config validation

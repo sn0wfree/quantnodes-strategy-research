@@ -228,3 +228,59 @@ class TestShouldFlushBoundary:
             "thinking_start",
         ):
             assert not es._should_flush(event_type), event_type
+
+
+# ── P0-1 A3 — parent_event_id / branch_id round-trip ─────────────────
+
+
+class TestParentAndBranchRoundTrip:
+    """P0-1 A3: EventStore persists and replays the new trace-tree
+    columns, and falls back to defaults for pre-A3 rows.
+    """
+
+    async def test_emit_default_branch_main(self, es: EventStore) -> None:
+        e = es.emit("s1", "text.started", {})
+        assert e.branch_id == "main"
+        assert e.parent_event_id is None
+
+    async def test_emit_explicit_branch_and_parent(self, es: EventStore) -> None:
+        e1 = es.emit("s1", "text.started", {})
+        e2 = es.emit(
+            "s2", "tool_call", {"name": "x"},
+            parent_event_id=e1.id, branch_id="exp1",
+        )
+        assert e2.parent_event_id == e1.id
+        assert e2.branch_id == "exp1"
+        # Round-trip through replay (SQLite path uses _row_to_dict).
+        replayed = es.replay("s2")
+        assert len(replayed) == 1
+        assert replayed[0].parent_event_id == e1.id
+        assert replayed[0].branch_id == "exp1"
+
+    async def test_replay_legacy_row_uses_defaults(
+        self, es: EventStore, tmp_path: Path,
+    ) -> None:
+        """Simulate a pre-A3 row by INSERTing directly without the new
+        columns — replay() must still work and use default values.
+        """
+        from strategy_research.core.agent.memory_manager import resolve_db_path
+        import sqlite3
+        # `es` fixture may have its own DB; reach the EventStore's path
+        # by going through the backend connection.
+        conn = es._backend._ensure_conn()  # type: ignore[attr-defined]
+        # Create a parent-less pre-A3 row directly via raw SQL using only
+        # the original 6 columns.
+        from strategy_research.core.events.event_v2 import EventV2
+        ev = EventV2.create("legacy", 1, "text.started", {"legacy": True})
+        row = ev.to_row()
+        conn.execute(
+            "INSERT INTO event_log (id, aggregate_id, seq, type, data_json, "
+            "time_created) VALUES (?, ?, ?, ?, ?, ?)",
+            (row["id"], row["aggregate_id"], row["seq"], row["type"],
+             row["data_json"], row["time_created"]),
+        )
+        conn.commit()
+        replayed = es.replay("legacy")
+        assert len(replayed) == 1
+        assert replayed[0].parent_event_id is None
+        assert replayed[0].branch_id == "main"

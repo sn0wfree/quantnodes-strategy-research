@@ -298,3 +298,74 @@ class TestChatLoopWorkspaceRendering:
             registry=custom_registry,
         )
         assert loop.registry is custom_registry
+
+
+# ── Shell tool gating (real registry) ─────────────────────────────────
+
+
+class TestChatLoopShellGating:
+    """``allow_shell_tools`` controls whether ``run_command`` is offered.
+
+    Uses the real ``build_default_registry()`` (no fake_registry fixture) so
+    the gating logic in ``build_chat_agent_loop`` is exercised end-to-end,
+    including the ``{tool_list}`` rendering the LLM actually sees.
+    """
+
+    def _loop(self, allow_shell_tools: bool, fake_config):
+        from strategy_research.core.agent.chat_loop import build_chat_agent_loop
+
+        return build_chat_agent_loop(
+            config=fake_config,
+            session_id="shell-gating",
+            allow_shell_tools=allow_shell_tools,
+        )
+
+    def _system_prompt(self, loop) -> str:
+        return loop.context_builder.build_system_prompt()
+
+    def test_disabled_removes_run_command_from_registry(self, fake_config):
+        loop = self._loop(False, fake_config)
+        assert "run_command" not in loop.registry._tools
+
+    def test_enabled_keeps_run_command_in_registry(self, fake_config):
+        loop = self._loop(True, fake_config)
+        assert "run_command" in loop.registry._tools
+
+    def test_disabled_hides_run_command_from_tool_list(self, fake_config):
+        """The LLM's system prompt must not advertise run_command when off.
+
+        Asserts on the ``- run_command`` tool-list bullet: chat.md mentions
+        the tool name in prose (constraints section), so a bare substring
+        check would be a false positive.
+        """
+        loop = self._loop(False, fake_config)
+        sp = self._system_prompt(loop)
+        assert "- run_command" not in sp
+
+    def test_enabled_shows_run_command_in_tool_list(self, fake_config):
+        """The LLM's system prompt must list run_command when on."""
+        loop = self._loop(True, fake_config)
+        sp = self._system_prompt(loop)
+        assert "- run_command" in sp
+
+    def test_explicit_registry_is_gated_too(self, fake_config):
+        """allow_shell_tools=False pops run_command from caller-provided
+        registries as well — no path leaks the shell tool when disabled."""
+        from strategy_research.core.agent.chat_loop import build_chat_agent_loop
+
+        custom_registry = _FakeRegistry(["run_command", "read_file"])
+        loop = build_chat_agent_loop(
+            config=fake_config, session_id="s1",
+            registry=custom_registry, allow_shell_tools=False,
+        )
+        assert "run_command" not in loop.registry._tools
+
+    def test_explicit_registry_keeps_tool_when_enabled(self, fake_config):
+        from strategy_research.core.agent.chat_loop import build_chat_agent_loop
+
+        custom_registry = _FakeRegistry(["run_command", "read_file"])
+        loop = build_chat_agent_loop(
+            config=fake_config, session_id="s1",
+            registry=custom_registry, allow_shell_tools=True,
+        )
+        assert "run_command" in loop.registry._tools

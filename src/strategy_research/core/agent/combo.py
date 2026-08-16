@@ -135,11 +135,11 @@ class CompositeTool(BaseTool):
             "",
             "# ── 工具说明书 (组合工具) ────────────────",
             "# 版本: 1.0.0",
-            f"# 变更: 由组合配置生成 (workspace tools/combo/)",
+            "# 变更: 由组合配置生成 (workspace tools/combo/)",
             "",
             "## 用途",
             f"# {self.description}",
-            f"# 组合步骤: " + " → ".join(s.get("tool", "?") for s in self._steps),
+            "# 组合步骤: " + " → ".join(s.get("tool", "?") for s in self._steps),
             "",
             "## 参数",
         ]

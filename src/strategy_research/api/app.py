@@ -38,6 +38,7 @@ def create_app(
     # 配置应用日志级别 - 确保 info 级别日志可见。
     # SR_LOG_LEVEL=DEBUG 可开启 [DIAG] 诊断日志（流式 chunk、cfg、agent
     # result 等），用于排查 SSE/LLM 链路问题；默认 INFO 不显。
+    # v2 §14.2: hypotheses 默认走 SQLite（旧 JSON 不迁移、不读取）。
     log_level_name = os.environ.get("SR_LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
     logging.basicConfig(
@@ -47,6 +48,11 @@ def create_app(
     )
     # 设置 strategy_research 命名空间日志级别
     logging.getLogger("strategy_research").setLevel(log_level)
+    # Trace context (ContextVar) + optional JSON formatter.
+    # SR_LOG_JSON=1 enables single-line JSON logs with trace_id /
+    # session_id / study_id / round_num for structured log pipelines.
+    from ..core.observability import setup_trace_logging
+    setup_trace_logging(log_level=log_level)
     logger.info("[STARTUP] create_app called")
 
     # Register the core loop's compaction persister (legacy fallback
@@ -54,19 +60,12 @@ def create_app(
     from ..core.agent.loop import register_compaction_persister
     from .routers.web_session import persist_message
     register_compaction_persister(persist_message)
-    # Resolve from environment if not explicitly provided (supports uvicorn --reload factory mode)
-    if workspace_path is None:
-        env = os.environ.get("SR_WORKSPACE_PATH")
-        workspace_path = Path(env) if env else None
-    if goal_db_path is None:
-        goal_db_path = os.environ.get("SR_GOAL_DB_PATH")
-    if hypotheses_path is None:
-        hypotheses_path = os.environ.get("SR_HYPOTHESES_PATH")
-    if static_dir is None:
-        static_dir = os.environ.get("STATIC_DIR")
-    if cors_origins is None:
-        cors_str = os.environ.get("CORS_ORIGINS")
-        cors_origins = cors_str.split(",") if cors_str else None
+
+    workspace_path, goal_db_path, hypotheses_path, static_dir, cors_origins = (
+        _resolve_app_env(
+            workspace_path, goal_db_path, hypotheses_path, static_dir, cors_origins
+        )
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -75,20 +74,48 @@ def create_app(
         - Schedule model catalog refresh 5s after startup so the user
           sees fresh metadata without blocking first response.
 
-        The SessionService + EventStore are created lazily on first
-        request via ``routers.chat._get_session_service`` (singleton
-        keyed by DB path), so there is no startup-time EventStore to
-        initialize here. The previous ``from .routers.chat import
-        _event_store`` referenced a dead module-level instance that
-        has been removed; the real EventStore is created per-DB inside
-        ``_get_session_service``.
+        The SessionService + EventStore are created eagerly by the DI
+        container (``build_container``) at app creation; routers resolve
+        them via ``api.dependencies`` (container-backed).
         """
-        logger.info("[STARTUP] SessionService ready (lazy init on first request)")
+        logger.info("[STARTUP] SessionService ready (DI container)")
 
         task = asyncio.create_task(_refresh_model_catalog_async())
+
+        # Scheduled research daemon: migrate legacy JSON jobs once, then
+        # tick on the main loop dispatching due jobs to the study system.
+        from ..core.scheduled_research.executor import ScheduledResearchExecutor
+        from ..core.scheduled_research.store import ScheduledResearchStore
+
+        schedule_store = ScheduledResearchStore()
+        migrated = schedule_store.migrate_from_json()
+        if migrated:
+            logger.info("[STARTUP] migrated %d legacy scheduled jobs → SQLite", migrated)
+        from .routers.study import _get_study_scheduler
+
+        scheduler = _get_study_scheduler()
+        # Recover studies left RUNNING/QUEUED from a prior process:
+        # RUNNING → INTERRUPTED (manual resume), QUEUED → re-queue, MONITORING
+        # → rebuild monitor task. Without this, uvicorn reload or crash leaves
+        # ghost studies that no consumer will ever pick up.
+        recovered = await scheduler.recover_on_startup()
+        if recovered:
+            logger.info(
+                "[STARTUP] study scheduler recovered %d studies from prior process",
+                len(recovered),
+            )
+
+        schedule_executor = ScheduledResearchExecutor(
+            schedule_store,
+            scheduler=scheduler,
+        )
+        schedule_executor.start(loop=asyncio.get_running_loop())
+        logger.info("[STARTUP] scheduled research daemon started")
+
         try:
             yield
         finally:
+            schedule_executor.stop()
             task.cancel()
             try:
                 await task
@@ -106,6 +133,22 @@ def create_app(
     app.state.workspace_path = workspace_path
     app.state.goal_db_path = goal_db_path
     app.state.hypotheses_path = hypotheses_path
+
+    # ── DI container: single construction point for API services ─────
+    # Wire the container eagerly so all routers share one SessionService
+    # / SessionStore / EventStore (queue/cancel state, SSE bridges).
+    # The legacy routers/chat.py singleton cache is pre-seeded with the
+    # container's services so both access paths stay identical.
+    from .container import attach_container, build_container, services_from_container
+    from .routers.chat import _session_service_cache
+    from .routers.web_session import _get_db_path
+
+    container = build_container(workspace_path=workspace_path, db_path=Path(_get_db_path()))
+    attach_container(app, container)
+    for key, svc in services_from_container(container).items():
+        setattr(app.state, key, svc)
+    _session_service_cache[str(container.db_path)] = container.session_service
+    logger.info("[STARTUP] DI container attached (db=%s)", container.db_path)
 
     # Initialize DuckDB on startup
     if workspace_path:
@@ -140,19 +183,35 @@ def create_app(
     app.add_middleware(AuthMiddleware)
 
     # Register routers
-    from .routers import admin, auth, chat, goal, hypothesis, memory, permission, run, session, study, validation, web_session, workflow
+    from .routers import (
+        admin,
+        auth,
+        chat,
+        goal,
+        hypothesis,
+        memory,
+        permission,
+        run,
+        study,
+        validation,
+        web_session,
+        workflow,
+    )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(web_session.router, prefix="/api/chat/session", tags=["chat-session"])
     app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+    from .routers import admin_users
+    app.include_router(admin_users.router, prefix="/api/admin", tags=["admin-users"])
 
     app.include_router(goal.router, prefix="/api/goal", tags=["goal"])
     app.include_router(workflow.router, prefix="/api/goal/workflow", tags=["workflow"])
     app.include_router(study.router, prefix="/api/study", tags=["study"])
+    from .routers import schedule
+    app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
     app.include_router(hypothesis.router, prefix="/api/hypothesis", tags=["hypothesis"])
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
-    app.include_router(session.router, prefix="/api/session", tags=["session"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
 
@@ -180,38 +239,7 @@ def create_app(
     # Serve static files if available
     static_path = Path(static_dir) if static_dir else Path(__file__).parent.parent.parent.parent / "webui" / "static"
     if static_path.exists():
-        # Mount assets directory
-        assets_path = static_path / "assets"
-        if assets_path.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
-
-        # Serve index.html for all non-API routes (SPA fallback)
-        @app.get("/", include_in_schema=False)
-        async def serve_index():
-            return FileResponse(static_path / "index.html")
-
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_spa(full_path: str):
-            # Don't intercept API routes
-            if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not found")
-
-            # Resolve + contain the path inside the static dir (blocks
-            # path traversal via ".." / encoded segments).
-            try:
-                resolved = (static_path / full_path).resolve()
-                resolved.relative_to(static_path.resolve())
-            except (ValueError, OSError):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not found")
-
-            if resolved.is_file():
-                return FileResponse(resolved)
-            # Fallback to index.html (SPA routing)
-            return FileResponse(static_path / "index.html")
-
-        logger.info("Serving static files from %s", static_path)
+        _mount_static_files(app, static_path)
     else:
         @app.get("/")
         async def root():
@@ -222,6 +250,64 @@ def create_app(
             }
 
     return app
+
+
+def _resolve_app_env(
+    workspace_path: Optional[Path],
+    goal_db_path: Optional[str],
+    hypotheses_path: Optional[str],
+    static_dir: Optional[str],
+    cors_origins: Optional[list],
+) -> tuple:
+    """Resolve config values from environment when not explicitly provided."""
+    if workspace_path is None:
+        env = os.environ.get("SR_WORKSPACE_PATH")
+        workspace_path = Path(env) if env else None
+    if goal_db_path is None:
+        goal_db_path = os.environ.get("SR_GOAL_DB_PATH")
+    if hypotheses_path is None:
+        hypotheses_path = os.environ.get("SR_HYPOTHESES_PATH")
+    if static_dir is None:
+        static_dir = os.environ.get("STATIC_DIR")
+    if cors_origins is None:
+        cors_str = os.environ.get("CORS_ORIGINS")
+        cors_origins = cors_str.split(",") if cors_str else None
+    return workspace_path, goal_db_path, hypotheses_path, static_dir, cors_origins
+
+
+def _mount_static_files(app: FastAPI, static_path: Path) -> None:
+    """Mount static assets + SPA fallback routes."""
+    assets_path = static_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+    # Serve index.html for all non-API routes (SPA fallback)
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse(static_path / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # Don't intercept API routes
+        if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Resolve + contain the path inside the static dir (blocks
+        # path traversal via ".." / encoded segments).
+        try:
+            resolved = (static_path / full_path).resolve()
+            resolved.relative_to(static_path.resolve())
+        except (ValueError, OSError):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
+
+        if resolved.is_file():
+            return FileResponse(resolved)
+        # Fallback to index.html (SPA routing)
+        return FileResponse(static_path / "index.html")
+
+    logger.info("Serving static files from %s", static_path)
 
 
 def configure_from_env():

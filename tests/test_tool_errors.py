@@ -113,7 +113,6 @@ def test_init_subclass_auto_wraps_child_and_grandchild():
 
 def test_not_double_wrapped():
     """execute 被包装后再次继承（不重声明）不再包一层。"""
-    from strategy_research.core.agent.tools import tool_errors
 
     raw = _ChildTool.__dict__["execute"]
     assert not getattr(raw, "_tool_errors_wrapped", False) or raw.__wrapped__ is not None

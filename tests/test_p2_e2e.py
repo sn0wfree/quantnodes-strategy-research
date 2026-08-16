@@ -9,21 +9,16 @@ Tests for:
 from __future__ import annotations
 
 import argparse
-import json
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from strategy_research.core.agent.loop import AgentLoop, LoopResult
 from strategy_research.core.agent.context import ContextBuilder
+from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.agent.tools import ToolRegistry
-from strategy_research.core.hooks.composite import CompositeHook, AgentHook
+from strategy_research.core.hooks.composite import AgentHook, CompositeHook
 from strategy_research.core.hooks.context import AgentHookContext
 from strategy_research.core.llm.config import LLMConfig
-from strategy_research.core.memory.persistent import PersistentMemory
-
 
 # ── Test Hooks ─────────────────────────────────────────────
 
@@ -93,7 +88,7 @@ class TestAgentLoopHookIntegration:
         )
         loop.client = mock_client
 
-        result = loop.run("test task")
+        loop.run('test task')
 
         call_names = [c[0] for c in hook.calls]
         assert "before_run" in call_names
@@ -127,7 +122,7 @@ class TestAgentLoopHookIntegration:
         )
         loop.client = mock_client
 
-        result = loop.run("test task")
+        loop.run('test task')
 
         iter_calls = [c for c in hook.calls if c[0] == "before_iteration"]
         assert len(iter_calls) == 1  # only 1 iteration before stop

@@ -13,15 +13,8 @@ from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import (
     AgentLoop,
     LoopResult,
-    _tool_call_hash,
-)
-from strategy_research.core.agent.compact import (
-    CompactConfig,
-    compact_messages,
-    _estimate_tokens,
 )
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -128,7 +121,7 @@ class TestLLMSummarize:
 
     def test_incremental_summary(self):
         """L4 should support incremental summary updates."""
-        from strategy_research.core.agent.compact import _build_summary_prompt, DEFAULT_SUMMARY_TEMPLATE
+        from strategy_research.core.agent.compact import DEFAULT_SUMMARY_TEMPLATE, _build_summary_prompt
         prompt = _build_summary_prompt("new conversation", "old summary text", DEFAULT_SUMMARY_TEMPLATE)
         assert "Update the anchored summary" in prompt
         assert "<previous-summary>" in prompt
@@ -332,7 +325,7 @@ class TestGitCommit:
             )
             loop.client.chat = mock.chat
             with patch("strategy_research.core.agent.loop.git_commit", return_value=True) as mock_commit:
-                r = loop.run("task")
+                loop.run("task")
                 mock_commit.assert_called_once()
                 args = mock_commit.call_args
                 assert str(ws) in str(args[0][0])
@@ -354,7 +347,7 @@ class TestGitCommit:
             )
             loop.client.chat = mock.chat
             with patch("strategy_research.core.agent.loop.git_commit") as mock_commit:
-                r = loop.run("task")
+                loop.run("task")
                 mock_commit.assert_not_called()
 
 

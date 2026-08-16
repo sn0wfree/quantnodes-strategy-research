@@ -115,12 +115,7 @@ def evaluate_node(
     if isinstance(node, (int, float)):
         return node
     if isinstance(node, str):
-        # 可能是列名
-        if node in data:
-            return data[node]
-        if node in env:
-            return env[node]
-        raise ValueError(f"未知标识符: {node}")
+        return _resolve_identifier(node, env, data)
 
     if not isinstance(node, dict):
         raise ValueError(f"无效的 AST 节点: {node}")
@@ -162,57 +157,73 @@ def evaluate_node(
 
     # 算子调用: {op: ts_mean, args: [...]}
     if "op" in node:
-        op_name = node["op"]
-        args_nodes = node.get("args", [])
-
-        op_func = _get_operator(op_name)
-        if op_func is None:
-            raise ValueError(f"未知算子: {op_name}")
-
-        # 递归求值参数
-        args = []
-        for arg_node in args_nodes:
-            arg_val = evaluate_node(arg_node, env, data)
-            # 常量参数转换为标量
-            if isinstance(arg_val, pd.DataFrame):
-                # 检查是否是常量 DataFrame
-                if len(arg_val.columns) == 1 and len(arg_val.iloc[:, 0].unique()) == 1:
-                    val = arg_val.iloc[0, 0]
-                    if isinstance(val, (int, float)) and val == int(val):
-                        args.append(int(val))
-                    else:
-                        args.append(val)
-                else:
-                    args.append(arg_val)
-            elif isinstance(arg_val, pd.Series):
-                # 检查是否是常量 Series
-                if len(arg_val.unique()) == 1:
-                    val = arg_val.iloc[0]
-                    if isinstance(val, (int, float)) and val == int(val):
-                        args.append(int(val))
-                    else:
-                        args.append(val)
-                else:
-                    args.append(arg_val)
-            else:
-                args.append(arg_val)
-
-        # 调用算子
-        try:
-            # 特殊处理 where 算子 (使用 DataFrame 版本)
-            if op_name == "where":
-                # 2-arg where: pandas .where(cond) -> where(cond, value, NaN)
-                if len(args) == 2:
-                    cond, val = args
-                    return _where_df(cond, val, np.nan)
-                result = _where_df(*args)
-            else:
-                result = op_func(*args)
-            return result
-        except Exception as e:
-            raise ValueError(f"算子 {op_name} 执行失败: {e}")
+        return _call_operator(node, env, data)
 
     raise ValueError(f"无效的 AST 节点: {node}")
+
+
+def _call_operator(
+    node: dict,
+    env: dict[str, pd.DataFrame],
+    data: dict[str, pd.DataFrame],
+) -> Any:
+    """Dispatch an ``{op: ..., args: [...]}`` node."""
+    op_name = node["op"]
+    args_nodes = node.get("args", [])
+
+    op_func = _get_operator(op_name)
+    if op_func is None:
+        raise ValueError(f"未知算子: {op_name}")
+
+    # 递归求值参数
+    args = [_coerce_arg(evaluate_node(arg, env, data)) for arg in args_nodes]
+
+    # 调用算子
+    try:
+        # 特殊处理 where 算子 (使用 DataFrame 版本)
+        if op_name == "where":
+            # 2-arg where: pandas .where(cond) -> where(cond, value, NaN)
+            if len(args) == 2:
+                cond, val = args
+                return _where_df(cond, val, np.nan)
+            return _where_df(*args)
+        return op_func(*args)
+    except Exception as e:
+        raise ValueError(f"算子 {op_name} 执行失败: {e}")
+
+
+def _resolve_identifier(
+    name: str,
+    env: dict[str, pd.DataFrame],
+    data: dict[str, pd.DataFrame],
+) -> Any:
+    """Resolve a bare-string identifier to a column/environment value."""
+    if name in data:
+        return data[name]
+    if name in env:
+        return env[name]
+    raise ValueError(f"未知标识符: {name}")
+
+
+def _coerce_arg(arg_val: Any) -> Any:
+    """Coerce a DataFrame/Series argument to a scalar when it's constant."""
+    if isinstance(arg_val, pd.DataFrame):
+        # 检查是否是常量 DataFrame
+        if len(arg_val.columns) == 1 and len(arg_val.iloc[:, 0].unique()) == 1:
+            val = arg_val.iloc[0, 0]
+            if isinstance(val, (int, float)) and val == int(val):
+                return int(val)
+            return val
+        return arg_val
+    if isinstance(arg_val, pd.Series):
+        # 检查是否是常量 Series
+        if len(arg_val.unique()) == 1:
+            val = arg_val.iloc[0]
+            if isinstance(val, (int, float)) and val == int(val):
+                return int(val)
+            return val
+        return arg_val
+    return arg_val
 
 
 # ============================================================

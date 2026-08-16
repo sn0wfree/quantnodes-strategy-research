@@ -18,15 +18,12 @@ Reference: docs/phase-4-plan.md §7.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from strategy_research.core.goal.dag_renderer import (
-    render_dag,
     NodeStatus,
+    render_dag,
 )
-
 
 # ─── Fixtures ──────────────────────────────────────────────────────────
 
@@ -261,12 +258,12 @@ class TestSaveGoalWorkflow:
         assert not bak.exists()
 
     def test_save_validates_dag(self, tmp_path):
-        from strategy_research.core.goal.workflow_config import save_goal_workflow
         from strategy_research.core.goal.workflow import (
+            CompletionConfig,
             GoalWorkflowConfig,
             GoalWorkflowGoalConfig,
-            CompletionConfig,
         )
+        from strategy_research.core.goal.workflow_config import save_goal_workflow
         # Create config with cyclic DAG
         config = GoalWorkflowConfig(
             name="cyclic_test",

@@ -1,14 +1,18 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
-  ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen, User,
+  ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
+  Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
+  ShieldAlert,
 } from 'lucide-react'
-import { api, type StudySummaryResponse, type StudyDirectivesResponse } from '../../api/client'
+import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { RoundHistory } from './RoundHistory'
 import { ScoreboardMini } from './ScoreboardMini'
+import { MetricsCompare } from './MetricsCompare'
 import { EmptyState } from '../common/EmptyState'
+import { PageShell } from '../layout/PageShell'
 
 function formatDateTime(iso?: string): string {
   if (!iso) return '—'
@@ -21,11 +25,40 @@ function formatDateTime(iso?: string): string {
   }
 }
 
+function KpiCard({
+  icon,
+  iconCls,
+  value,
+  label,
+  valueCls = 'text-slate-100',
+}: {
+  icon: React.ReactNode
+  iconCls: string
+  value: string
+  label: string
+  valueCls?: string
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3.5 shadow-soft transition-colors hover:border-slate-700">
+      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${iconCls}`}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className={`font-mono text-xl font-bold tabular-nums ${valueCls}`}>{value}</div>
+        <div className="text-[10px] text-slate-500">{label}</div>
+      </div>
+    </div>
+  )
+}
+
 export function StudyDetailPage() {
   const { studyId = '' } = useParams<{ studyId: string }>()
   const navigate = useNavigate()
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [directives, setDirectives] = useState<StudyDirectivesResponse | null>(null)
+  const [journal, setJournal] = useState<StudyJournalResponse | null>(null)
+  const [hanging, setHanging] = useState<StudyHangingEventsResponse | null>(null)
+  const [actions, setActions] = useState<StudyAvailableActionsResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -39,6 +72,33 @@ export function StudyDetailPage() {
       setDirectives(r)
     } catch {
       // Non-critical — audit trail can be absent
+    }
+  }, [studyId])
+
+  const loadJournal = useCallback(async () => {
+    try {
+      const r = await api.study.journal(studyId)
+      setJournal(r)
+    } catch {
+      // Non-critical — journal may not exist yet
+    }
+  }, [studyId])
+
+  const loadHanging = useCallback(async () => {
+    try {
+      const r = await api.study.hangingEvents(studyId)
+      setHanging(r)
+    } catch {
+      // Non-critical — observability panel can be absent
+    }
+  }, [studyId])
+
+  const loadActions = useCallback(async () => {
+    try {
+      const r = await api.study.availableActions(studyId)
+      setActions(r)
+    } catch {
+      setActions(null)
     }
   }, [studyId])
 
@@ -71,16 +131,20 @@ export function StudyDetailPage() {
 
     void poll()
     void loadDirectives()
+    void loadJournal()
+    void loadHanging()
+    void loadActions()
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, loadDirectives])
+  }, [studyId, loadDirectives, loadJournal, loadHanging, loadActions])
 
-  const onAction = async (action: 'pause' | 'resume' | 'cancel') => {
+  const onAction = async (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel') => {
     setBusy(true)
     try {
-      await api.study[action](studyId)
+      await api.study.dispatchAction(studyId, action)
+      await loadActions()
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -105,9 +169,9 @@ export function StudyDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
+      <div className="flex min-h-screen items-center justify-center bg-app text-slate-400">
         <div className="flex items-center gap-2">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-500" />
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-primary-500" />
           加载中...
         </div>
       </div>
@@ -116,13 +180,13 @@ export function StudyDetailPage() {
 
   if (notFound || !summary) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-950">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-app">
         <EmptyState
           icon={<FolderOpen className="h-10 w-10" />}
           title="研究任务不存在"
           description="该 study 可能已被删除，或链接不正确。"
         />
-        <Link to="/" className="text-sm text-sky-400 hover:text-sky-300 hover:underline">
+        <Link to="/" className="text-sm text-primary-400 hover:text-primary-300 hover:underline">
           返回聊天
         </Link>
       </div>
@@ -132,6 +196,17 @@ export function StudyDetailPage() {
   const status = summary.execution_status ?? 'unknown'
   const strategyName = summary.strategy_name ?? ''
   const workspacePath = summary.workspace_path ?? ''
+  const progressPercent = summary.goal_snapshot?.progress_percent ?? 0
+  const evidenceCount = summary.goal_snapshot?.evidence_count ?? 0
+  const lastVerdict = summary.last_verdict ?? '—'
+  const metricTargets = summary.metric_targets ?? []
+
+  const bestCalmar = (summary.recent_rounds ?? [])
+    .map((r) => r.metrics?.calmar)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    .reduce((a, b) => Math.max(a, b), 0)
+  const driftCount = summary.monitor_state?.drift_count ?? 0
+  const isDrifting = status === 'needs_refresh' || driftCount > 0
 
   const openRun = (runName: string) => {
     if (!strategyName) return
@@ -140,107 +215,204 @@ export function StudyDetailPage() {
     )
   }
 
-  const canPause = status === 'running' || status === 'monitoring'
-  const canResume = status === 'paused' || status === 'interrupted'
-  const canCancel =
-    status !== 'complete' && status !== 'cancelled' &&
-    status !== 'error' && status !== 'needs_refresh' &&
-    status !== 'interrupted'
+  const canPause = (actions?.actions ?? []).some((a) => a.name === 'pause')
+  const canResume = (actions?.actions ?? []).some(
+    (a) => a.name === 'resume' || a.name === 'resume_interrupted'
+  )
+  const canCancel = (actions?.actions ?? []).some((a) => a.name === 'cancel')
+  const canDirective = canPause || canResume
+
+  const controlActions = (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={() => navigate(-1)}
+        className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/50 px-2 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200 active:scale-95"
+        title="返回"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" /> 返回
+      </button>
+      {canPause && (
+        <button
+          onClick={() => onAction('pause')}
+          disabled={busy}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-amber-500 active:scale-95 disabled:opacity-50"
+        >
+          <Pause className="h-3.5 w-3.5" /> 暂停
+        </button>
+      )}
+      {canResume && (
+        <button
+          onClick={() =>
+            onAction(
+              (actions?.actions ?? []).some((a) => a.name === 'resume_interrupted')
+                ? 'resume_interrupted'
+                : 'resume'
+            )
+          }
+          disabled={busy}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-emerald-500 active:scale-95 disabled:opacity-50"
+        >
+          <Play className="h-3.5 w-3.5" /> 恢复
+        </button>
+      )}
+      {canCancel && (
+        <button
+          onClick={() => onAction('cancel')}
+          disabled={busy}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-rose-700 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-rose-600 active:scale-95 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" /> 取消
+        </button>
+      )}
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      {/* Top bar */}
-      <header className="flex items-center gap-3 border-b border-slate-800 bg-slate-900/80 px-4 py-2.5">
-        <button
-          onClick={() => navigate(-1)}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-sm text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" /> 返回
-        </button>
-        <h1 className="flex-1 truncate text-sm font-medium text-slate-200">
-          {summary.objective || '研究详情'}
-        </h1>
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${STUDY_STATUS_COLORS[status] ?? 'bg-slate-700 text-slate-100'}`}>
-          {STUDY_STATUS_LABELS[status] ?? status}
-        </span>
-        <span className="text-xs text-slate-400">
-          Round {summary.current_round ?? 0}/{summary.max_rounds ?? 5}
-        </span>
-        <div className="flex items-center gap-1.5">
-          {canPause && (
-            <button
-              onClick={() => onAction('pause')}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded bg-amber-600 px-2 py-1 text-xs hover:bg-amber-500 disabled:opacity-50"
-            >
-              <Pause className="h-3 w-3" /> 暂停
-            </button>
-          )}
-          {canResume && (
-            <button
-              onClick={() => onAction('resume')}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-xs hover:bg-emerald-500 disabled:opacity-50"
-            >
-              <Play className="h-3 w-3" /> 恢复
-            </button>
-          )}
-          {canCancel && (
-            <button
-              onClick={() => onAction('cancel')}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded bg-rose-700 px-2 py-1 text-xs hover:bg-rose-600 disabled:opacity-50"
-            >
-              <X className="h-3 w-3" /> 取消
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* Meta strip */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800/60 bg-slate-950 px-4 py-1.5 text-[10px] text-slate-500">
-        <span className="inline-flex items-center gap-1">
-          <FolderOpen className="h-3 w-3" /> 策略: {strategyName || '—'}
-        </span>
-        <span className="inline-flex items-center gap-1 truncate" title={workspacePath}>
-          <User className="h-3 w-3" /> {workspacePath || '—'}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <Clock className="h-3 w-3" /> 创建: {formatDateTime(summary.created_at)}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <Clock className="h-3 w-3" /> 更新: {formatDateTime(summary.updated_at)}
-        </span>
-      </div>
-
+    <PageShell
+      title={summary.objective || '研究详情'}
+      subtitle={`策略 ${strategyName || '—'} · 创建于 ${formatDateTime(summary.created_at)}`}
+      icon={<BookOpen className="h-4 w-4" />}
+      actions={controlActions}
+    >
+      {/* Error banner */}
       {error && (
-        <div className="mx-4 mt-2 rounded border border-rose-800 bg-rose-950/50 px-3 py-1.5 text-xs text-rose-300">
+        <div className="mb-4 rounded-xl border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">
           {error}
         </div>
       )}
 
+      {/* KPI band */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+        <KpiCard
+          icon={<RotateCcw className="h-4 w-4" />}
+          iconCls="border border-sky-500/30 bg-sky-500/10 text-sky-400"
+          value={`${summary.current_round ?? 0}/${summary.max_rounds ?? 5}`}
+          label="当前轮次 / 最大轮数"
+          valueCls="text-sky-400"
+        />
+        <KpiCard
+          icon={<Activity className="h-4 w-4" />}
+          iconCls="border border-amber-500/30 bg-amber-500/10 text-amber-400"
+          value={STUDY_STATUS_LABELS[status] ?? status}
+          label={isDrifting ? `漂移 ×${driftCount}（需检查）` : '执行状态'}
+          valueCls={STUDY_STATUS_COLORS[status]?.split(' ')[0] ? 'text-slate-100' : 'text-slate-100'}
+        />
+        <KpiCard
+          icon={<BarChart3 className="h-4 w-4" />}
+          iconCls="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          value={lastVerdict}
+          label="最近 round 结论"
+          valueCls="text-emerald-400"
+        />
+        <KpiCard
+          icon={<Target className="h-4 w-4" />}
+          iconCls="border border-primary-500/30 bg-primary-500/10 text-primary-400"
+          value={`${progressPercent}%`}
+          label={`目标进度 · ${evidenceCount} 证据`}
+          valueCls="text-primary-400"
+        />
+        <KpiCard
+          icon={<BarChart3 className="h-4 w-4" />}
+          iconCls="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          value={bestCalmar.toFixed(2)}
+          label="最佳 Calmar（历史轮次）"
+          valueCls="text-emerald-400"
+        />
+      </div>
+
+      {/* Metric targets */}
+      {metricTargets.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            验收线:
+          </span>
+          {metricTargets.map((t, i) => (
+            <span
+              key={i}
+              className="rounded-full border border-primary-500/30 bg-primary-500/10 px-2 py-0.5 font-mono text-[10px] text-primary-400"
+            >
+              {t.name} {t.op} {t.value}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Body */}
-      <main className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-3">
-        <div className="space-y-3 xl:col-span-2">
+      <main className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="min-w-0 space-y-4 xl:col-span-2">
           <ObjectiveProgress
             objective={summary.objective}
-            progressPercent={summary.goal_snapshot?.progress_percent ?? 0}
-            evidenceCount={summary.goal_snapshot?.evidence_count ?? 0}
+            progressPercent={progressPercent}
+            evidenceCount={evidenceCount}
             criteria={summary.goal_snapshot?.criteria ?? []}
           />
           <RoundHistory
             rounds={summary.recent_rounds ?? []}
             currentRound={summary.current_round ?? 1}
             onOpenRun={openRun}
+            studyId={studyId}
+          />
+          <MetricsCompare
+            rounds={summary.recent_rounds ?? []}
+            onOpenRun={openRun}
           />
           <ScoreboardMini scoreboard={summary.scoreboard ?? []} />
+
+          {/* Journal */}
+          {journal?.journal && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                <FileText className="h-3 w-3" /> 研究日志 journal.md
+              </div>
+              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-400">
+                {journal.journal}
+              </pre>
+            </div>
+          )}
         </div>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
+          {/* Task info */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              <Info className="h-3 w-3" /> 任务信息
+            </div>
+            <div className="space-y-1.5 text-[10px]">
+              <div className="flex items-center gap-2">
+                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                  <FolderOpen className="h-3 w-3" /> 工作区
+                </span>
+                <span className="min-w-0 truncate font-mono text-slate-300" title={workspacePath}>
+                  {workspacePath || '—'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                  <Clock className="h-3 w-3" /> 创建
+                </span>
+                <span className="font-mono text-slate-300">{formatDateTime(summary.created_at)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                  <Clock className="h-3 w-3" /> 更新
+                </span>
+                <span className="font-mono text-slate-300">{formatDateTime(summary.updated_at)}</span>
+              </div>
+              {summary.completed_at && (
+                <div className="flex items-center gap-2">
+                  <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
+                    <Clock className="h-3 w-3" /> 完成
+                  </span>
+                  <span className="font-mono text-slate-300">{formatDateTime(summary.completed_at)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Directive input */}
-          {(canPause || canResume) && (
-            <div className="rounded border border-slate-700 bg-slate-900 p-2 space-y-1">
-              <label className="block text-[10px] text-slate-400">
+          {(canDirective) && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft space-y-2">
+              <label className="block text-[10px] font-medium uppercase tracking-wider text-slate-500">
                 注入研究方向（下一轮 researcher 看到）
               </label>
               <textarea
@@ -248,22 +420,62 @@ export function StudyDetailPage() {
                 value={directiveText}
                 onChange={(e) => setDirectiveText(e.target.value)}
                 placeholder="例：改成动量因子 + 减小 top_n"
-                className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-primary-500"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none transition-shadow focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
               />
               <button
                 type="button"
                 onClick={onDirective}
                 disabled={submittingDirective || !directiveText.trim()}
-                className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-1 text-xs hover:bg-indigo-500 disabled:opacity-50"
+                className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-indigo-500 active:scale-95 disabled:opacity-50"
               >
-                <Send className="h-3 w-3" /> 提交指令
+                <Send className="h-3.5 w-3.5" /> 提交指令
               </button>
             </div>
           )}
 
+          {/* Hanging events (observability) */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                <ShieldAlert className="h-3 w-3" /> 卡死防护事件
+              </div>
+              {hanging && hanging.recent.length > 0 && (
+                <span className="rounded-full border border-rose-700/50 bg-rose-950/40 px-1.5 py-0.5 text-[9px] font-medium text-rose-400">
+                  {hanging.recent.length} 个事件
+                </span>
+              )}
+            </div>
+            {!hanging || hanging.recent.length === 0 ? (
+              <p className="text-xs text-slate-500">近 24h 无异常事件</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {hanging.recent.map((e, i) => (
+                  <li
+                    key={i}
+                    className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-rose-400">
+                        {HANGING_EVENT_LABELS[e.event_type] ?? e.event_type}
+                      </span>
+                      <span className="font-mono text-[9px] text-slate-600">
+                        {new Date(e.created_at_iso).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    {e.detail && (
+                      <p className="mt-0.5 truncate text-[10px] text-slate-500" title={e.detail}>
+                        {e.detail}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           {/* Directives audit trail */}
-          <div className="rounded border border-slate-700 bg-slate-900 p-2">
-            <div className="mb-2 flex items-center gap-1 text-[10px] uppercase text-slate-500">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
               <Clock className="h-3 w-3" /> 指令记录
             </div>
             {(directives?.directives?.length ?? 0) === 0 ? (
@@ -271,12 +483,18 @@ export function StudyDetailPage() {
             ) : (
               <ul className="space-y-1.5">
                 {directives!.directives.map((d) => (
-                  <li key={d.directive_id} className="rounded bg-slate-950/60 p-1.5 text-[11px]">
+                  <li key={d.directive_id} className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]">
                     <p className="text-slate-300">{d.content}</p>
-                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-500">
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
                       <span>{formatDateTime(d.created_at)}</span>
                       {d.issued_by && <span>· {d.issued_by}</span>}
-                      <span className={d.consumed_at ? 'text-emerald-500' : 'text-amber-500'}>
+                      <span
+                        className={
+                          d.consumed_at
+                            ? 'rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-emerald-400'
+                            : 'rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-amber-400'
+                        }
+                      >
                         {d.consumed_at ? '已消费' : '待消费'}
                       </span>
                     </div>
@@ -287,6 +505,6 @@ export function StudyDetailPage() {
           </div>
         </div>
       </main>
-    </div>
+    </PageShell>
   )
 }

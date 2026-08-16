@@ -10,8 +10,6 @@ Pause/resume is exercised via the /chat/cancel + /chat/queue/resume
 HTTP endpoints (see test_session_queue_http.py for end-to-end).
 """
 import asyncio
-import os
-from pathlib import Path
 
 import pytest
 
@@ -39,11 +37,11 @@ def event_bus():
 
 @pytest.fixture
 def session_service(temp_db, event_bus):
+    import sqlite3
+
     from strategy_research.api.routers.web_session import _ensure_schema
     from strategy_research.api.session.service import SessionService
     from strategy_research.api.session.store import SessionStore
-
-    import sqlite3
     conn = sqlite3.connect(str(temp_db))
     try:
         _ensure_schema(conn)

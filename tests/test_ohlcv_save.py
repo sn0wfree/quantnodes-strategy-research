@@ -9,8 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-import pytest
-
 
 # ============================================================
 # 1. generate_sample_ohlcv_data 结构
@@ -103,8 +101,8 @@ class TestSaveOHLCVData:
 
     def test_preserves_open_high_low(self, tmp_path: Path):
         """保存后 open/high/low 应保留。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         ohlcv = generate_sample_ohlcv_data(n_assets=2, n_days=50)
@@ -127,8 +125,8 @@ class TestSaveOHLCVData:
 
     def test_preserves_volume(self, tmp_path: Path):
         """保存后 volume 应保留非 0 值。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         ohlcv = generate_sample_ohlcv_data(n_assets=2, n_days=30)
@@ -150,8 +148,8 @@ class TestSaveOHLCVData:
 
     def test_ohlc_not_degenerate_to_close_only(self, tmp_path: Path):
         """保存后 OHLC 应有真实变化（非 OHL=close 全等）。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         ohlcv = generate_sample_ohlcv_data(n_assets=3, n_days=50)
@@ -171,8 +169,8 @@ class TestSaveOHLCVData:
 
     def test_assigns_correct_asset_code(self, tmp_path: Path):
         """保存的 asset_code 应正确。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         ohlcv = generate_sample_ohlcv_data(n_assets=2, n_days=10)
@@ -189,8 +187,8 @@ class TestSaveOHLCVData:
 
     def test_replaces_existing_data(self, tmp_path: Path):
         """重复保存应替换不追加。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         ohlcv = generate_sample_ohlcv_data(n_assets=1, n_days=10)
@@ -208,8 +206,8 @@ class TestSaveOHLCVData:
 
     def test_returns_true_on_success(self, tmp_path: Path):
         """保存成功应返回 True。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         ohlcv = generate_sample_ohlcv_data(n_assets=1, n_days=5)
@@ -229,8 +227,8 @@ class TestSaveOHLCVData:
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
 
-        from strategy_research.core.db import save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import save_ohlcv_data
 
         ohlcv = generate_sample_ohlcv_data(n_assets=1, n_days=5)
         ok = save_ohlcv_data(tmp_path, "test_strat", "asset_000", ohlcv["asset_000"])
@@ -247,8 +245,8 @@ class TestImportWithLoaderUsesOHLCV:
 
     def test_loaders_return_ohlcv_data_preserved(self, tmp_path: Path):
         """loader 返回 OHLCV → save_ohlcv_data → DB 保留 OHLCV。"""
-        from strategy_research.core.db import init_db, save_ohlcv_data
         from strategy_research.core.data_import import generate_sample_ohlcv_data
+        from strategy_research.core.db import init_db, save_ohlcv_data
 
         init_db(tmp_path)
         # 模拟 loader 返回 dict[code → OHLCV DataFrame]

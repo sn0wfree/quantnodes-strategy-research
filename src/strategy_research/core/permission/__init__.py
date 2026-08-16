@@ -18,6 +18,9 @@ Persistence: user-curated rules live at
 new rule; reject-always appends a deny rule.
 """
 
+from .approvals import PermissionGateway
+from .evaluator import PermissionDeniedError, PermissionEvaluator
+from .rules_io import DEFAULT_RULES_PATH, load_rules, save_rule
 from .schema import (
     Permission,
     PermissionAction,
@@ -25,9 +28,6 @@ from .schema import (
     PermissionResponse,
     PermissionRule,
 )
-from .evaluator import PermissionEvaluator, PermissionDeniedError
-from .rules_io import DEFAULT_RULES_PATH, load_rules, save_rule
-from .approvals import PermissionGateway
 
 __all__ = [
     "Permission",

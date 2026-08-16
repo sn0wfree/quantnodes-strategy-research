@@ -1,13 +1,10 @@
-import pytest
-import time
-from pathlib import Path
 from strategy_research.core.memory.fts5 import MemoryFTS5
 
 
 class TestMemoryFTS5Init:
     def test_init_creates_db(self, tmp_path):
         db_path = tmp_path / "test.db"
-        fts5 = MemoryFTS5(db_path)
+        MemoryFTS5(db_path)
         assert db_path.exists()
 
     def test_init_default_path(self):

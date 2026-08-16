@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import re
 
-import pandas as pd
-
 from .futures_base import FuturesBaseEngine
 
 # 全球期货乘数表 (部分)

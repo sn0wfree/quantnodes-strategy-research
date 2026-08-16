@@ -6,7 +6,14 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NewType, Optional
+
+# ── Typed IDs ────────────────────────────────────────────────────────
+# NewType creates distinct types at compile time with zero runtime cost.
+# Prevents accidentally passing an attempt_id where session_id is expected.
+SessionId = NewType("SessionId", str)
+MessageId = NewType("MessageId", str)
+AttemptId = NewType("AttemptId", str)
 
 
 def _utc_now_iso() -> str:
@@ -46,12 +53,12 @@ class Session:
         config: Session-level configuration such as model overrides or strategy parameters.
     """
 
-    session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    session_id: SessionId = field(default_factory=lambda: SessionId(uuid.uuid4().hex[:12]))
     title: str = ""
     status: SessionStatus = SessionStatus.ACTIVE
     created_at: str = field(default_factory=_utc_now_iso)
     updated_at: str = field(default_factory=_utc_now_iso)
-    last_attempt_id: Optional[str] = None
+    last_attempt_id: Optional[AttemptId] = None
     config: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -98,13 +105,13 @@ class Message:
             ordering key for LLM history projection.
     """
 
-    message_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    session_id: str = ""
+    message_id: MessageId = field(default_factory=lambda: MessageId(uuid.uuid4().hex[:12]))
+    session_id: SessionId = field(default_factory=lambda: SessionId(""))
     role: str = "user"
     content: str = ""
     tool_call_id: Optional[str] = None
     created_at: str = field(default_factory=_utc_now_iso)
-    linked_attempt_id: Optional[str] = None
+    linked_attempt_id: Optional[AttemptId] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     message_type: str = "user"  # user / assistant / tool / compaction / error
     seq: int = 0  # 0 means unassigned (legacy); see SeqGenerator
@@ -149,9 +156,9 @@ class Attempt:
         metrics: Snapshot of backtest metrics.
     """
 
-    attempt_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    session_id: str = ""
-    parent_attempt_id: Optional[str] = None
+    attempt_id: AttemptId = field(default_factory=lambda: AttemptId(uuid.uuid4().hex[:12]))
+    session_id: SessionId = field(default_factory=lambda: SessionId(""))
+    parent_attempt_id: Optional[AttemptId] = None
     status: AttemptStatus = AttemptStatus.PENDING
     prompt: str = ""
     run_dir: Optional[str] = None
@@ -159,7 +166,7 @@ class Attempt:
     react_trace: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=_utc_now_iso)
     completed_at: Optional[str] = None
-    message_id: Optional[str] = None  # assistant message ID for SSE event correlation
+    message_id: Optional[MessageId] = None  # assistant message ID for SSE event correlation
     error: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
     persona: Optional[str] = None  # optional role/persona (researcher/strategist/...)

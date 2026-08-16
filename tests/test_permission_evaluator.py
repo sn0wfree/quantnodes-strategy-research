@@ -21,14 +21,11 @@ from strategy_research.core.permission import (
     Permission,
     PermissionAction,
     PermissionEvaluator,
-    PermissionGateway,
     PermissionRule,
-    DEFAULT_RULES_PATH,
     load_rules,
     save_rule,
 )
 from strategy_research.core.permission.evaluator import PermissionDeniedError
-
 
 # ── Evaluator basics ──────────────────────────────────────────────
 
@@ -276,6 +273,7 @@ def test_default_rules_path_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyP
         str(tmp_path / "perm.yaml"),
     )
     import importlib
+
     import strategy_research.core.permission.rules_io as ri
     importlib.reload(ri)
     assert str(ri.DEFAULT_RULES_PATH).endswith("perm.yaml")

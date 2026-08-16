@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
-from typing import Any
 
 from ..tools import BaseTool, ToolContext, ToolRegistry
-from .utils import err_actionable, safe_get_param
+from .utils import err_actionable
 
 logger = logging.getLogger(__name__)
-
-
-def _ok(payload: dict[str, Any]) -> str:
-    return json.dumps({"status": "ok", **payload}, ensure_ascii=False)
 
 
 # ── 1. WebSearchTool ─────────────────────────────────────────────

@@ -12,10 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ────────────────────────── cmd_webui_serve ──────────────────────────
 

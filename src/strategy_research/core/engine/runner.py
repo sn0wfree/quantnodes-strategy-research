@@ -281,6 +281,7 @@ def run_engine_backtest(
     signal_engine_cls: Optional[Type[SignalEngine]] = None,
     bars_per_year: int = 252,
     optimizer: Optional[str] = None,
+    progress_every: Optional[int] = None,
 ) -> Dict[str, Any]:
     """运行完整回测 pipeline。
 
@@ -292,6 +293,8 @@ def run_engine_backtest(
         signal_engine_cls: SignalEngine 类 (二选一)
         bars_per_year: 年化 bar 数
         optimizer: 优化器名称 (equal_volatility/risk_parity/mean_variance/max_diversification/turnover_aware)
+        progress_every: 进度行频率（透传 engine.run_backtest；None=零输出，
+            0=自动频率）。后台化场景（CLI 子进程 + run.log）用它驱动停滞判定。
 
     Returns:
         metrics dict
@@ -339,7 +342,10 @@ def run_engine_backtest(
         opt_func = _opt_func
 
     # 6. Run
-    metrics = engine.run_backtest(data_map, signal_map, valid_codes, bars_per_year, optimizer=opt_func)
+    metrics = engine.run_backtest(
+        data_map, signal_map, valid_codes, bars_per_year,
+        optimizer=opt_func, progress_every=progress_every,
+    )
 
     return metrics
 

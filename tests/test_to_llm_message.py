@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from strategy_research.core.agent.compaction_message import MESSAGE_TYPE_COMPACTION
 from strategy_research.core.agent.to_llm_message import (
     filter_out_compactions,
@@ -26,7 +24,6 @@ from strategy_research.core.agent.to_llm_message import (
     project_messages_to_llm,
     project_to_llm_message,
 )
-
 
 # ── infer_message_type (backward compat) ─────────────────────
 

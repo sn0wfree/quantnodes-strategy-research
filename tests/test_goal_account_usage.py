@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_research.core.goal import GoalStore, GoalStatus
+from strategy_research.core.goal import GoalStatus, GoalStore
 
 
 @pytest.fixture
@@ -199,16 +199,17 @@ class TestStaleGoal:
                 token_delta=10,
             )
 
-    def test_wrong_session_id_raises(self, store, goal_with_budgets):
-        from strategy_research.core.goal.models import StaleGoalError
-
-        with pytest.raises(StaleGoalError):
-            store.account_usage(
-                session_id="wrong_session",
-                goal_id=goal_with_budgets.goal_id,
-                expected_goal_id=goal_with_budgets.goal_id,
-                token_delta=10,
-            )
+    def test_wrong_session_id_allowed(self, store, goal_with_budgets):
+        """v2 decision D: session is no longer part of the write guard —
+        any executor identity (e.g. a study micro session) may write when
+        goal_id + expected_goal_id match."""
+        updated = store.account_usage(
+            session_id="wrong_session",
+            goal_id=goal_with_budgets.goal_id,
+            expected_goal_id=goal_with_budgets.goal_id,
+            token_delta=10,
+        )
+        assert updated.tokens_used == 10
 
 
 # ─── persistence ──────────────────────────────────────────────────────

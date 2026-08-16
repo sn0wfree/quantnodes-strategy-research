@@ -15,12 +15,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import AgentLoop
 from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
-
 
 # ---------------------------------------------------------------- helpers
 
@@ -159,6 +156,7 @@ class TestNoRedundantDone:
     def test_session_run_agent_loop_does_not_call_append_done(self):
         """Verify the source: _run_agent_loop no longer contains append_done."""
         import inspect
+
         from strategy_research.cli.tui.session import ChatSession
 
         src = inspect.getsource(ChatSession._run_agent_loop)
@@ -171,6 +169,7 @@ class TestNoRedundantDone:
     def test_route_agent_event_iter_end_calls_append_done(self):
         """Verify the canonical Done. marker source: route_agent_event iter_end."""
         import inspect
+
         from strategy_research.cli.tui.app import ResearchApp
 
         src = inspect.getsource(ResearchApp.route_agent_event)

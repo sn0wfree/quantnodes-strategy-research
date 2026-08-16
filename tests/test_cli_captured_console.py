@@ -8,7 +8,6 @@ of the ``with`` block.
 from __future__ import annotations
 
 from rich.console import Console
-from rich.text import Text
 
 from strategy_research.cli.theme import captured_console, get_console
 

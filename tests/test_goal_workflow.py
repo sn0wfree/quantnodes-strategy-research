@@ -49,7 +49,6 @@ Refactor coverage (Phase 2 R1-R12):
 """
 from __future__ import annotations
 
-import asyncio
 from unittest import mock
 
 import pytest

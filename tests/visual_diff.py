@@ -82,8 +82,8 @@ def compare_images(
 
     # 像素级 diff
     diff_img = ImageChops.difference(base_img, actual_img)
-    base_pixels = base_img.load()
-    actual_pixels = actual_img.load()
+    base_img.load()
+    actual_img.load()
     diff_pixels = diff_img.load()
 
     diff_count = 0
@@ -100,7 +100,6 @@ def compare_images(
     # 保存 diff 可视化（红色叠加）
     diff_path: Path | None = None
     if diff_output and not match:
-        from PIL import ImageEnhance, ImageOps
         # Highlight diff pixels in red
         overlay = Image.new("RGB", base_img.size, (255, 0, 0))
         mask = Image.new("L", base_img.size, 0)

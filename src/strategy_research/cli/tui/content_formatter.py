@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import re
 
-
 # Heuristic: does the substring after the first ``{`` look like JSON?
 # We look for at least one ``": `` pattern (key-value separator) which
 # is overwhelmingly common in JSON and extremely rare in natural text.

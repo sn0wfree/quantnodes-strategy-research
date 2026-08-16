@@ -8,7 +8,6 @@ import pytest
 
 from strategy_research.cli.tui.text_filters import strip_thinking_tags
 
-
 # ── closed tags ──────────────────────────────────────────────────────
 
 

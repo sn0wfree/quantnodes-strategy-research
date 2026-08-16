@@ -15,7 +15,6 @@ from strategy_research.core.utils.backtest_models import (
     TradeRecord,
 )
 
-
 # ============================================================
 # Position
 # ============================================================

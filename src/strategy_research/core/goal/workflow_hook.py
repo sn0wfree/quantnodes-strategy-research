@@ -16,8 +16,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..workflow.types import SwarmHook
-
 logger = logging.getLogger(__name__)
 
 

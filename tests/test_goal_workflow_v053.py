@@ -19,9 +19,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from strategy_research.core.goal.workflow import GoalWorkflowRunner, GoalWorkflowConfig
+from strategy_research.core.goal.workflow import GoalWorkflowRunner
 from strategy_research.core.goal.workflow_config import load_goal_workflow
-
 
 # ─── Fixtures ──────────────────────────────────────────────────────────
 
@@ -157,7 +156,7 @@ class TestP1Checkpoint:
         runner._state.evidence_count = 1
 
         # Save
-        cp_dir = runner.checkpoint()
+        runner.checkpoint()
 
         # Restore
         restored = GoalWorkflowRunner.resume_from_checkpoint(
@@ -228,6 +227,7 @@ class TestP1PromptBuilder:
     def test_prompt_builder_used(self):
         """Verify that the module can be imported and the fix is in place."""
         import inspect
+
         from strategy_research.core.swarm.runtime import SwarmRuntime
         source = inspect.getsource(SwarmRuntime._execute_agent)
         # After P1.5 fix, should reference PromptBuilder
@@ -241,7 +241,7 @@ class TestP1DeadParams:
     """Dead params should emit DeprecationWarning in v0.5.3."""
 
     def test_agent_runner_deprecated(self, workflow_config, fresh_db):
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             runner = GoalWorkflowRunner(
                 config=workflow_config,
@@ -253,7 +253,7 @@ class TestP1DeadParams:
             assert runner is not None
 
     def test_runner_kwargs_deprecated(self, workflow_config, fresh_db):
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             runner = GoalWorkflowRunner(
                 config=workflow_config,
@@ -265,7 +265,7 @@ class TestP1DeadParams:
     def test_no_warning_with_clean_params(self, workflow_config, fresh_db):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            runner = GoalWorkflowRunner(
+            GoalWorkflowRunner(
                 config=workflow_config,
                 session_id="test",
             )

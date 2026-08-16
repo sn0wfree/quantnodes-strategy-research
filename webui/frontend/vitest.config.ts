@@ -8,6 +8,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // forks pool: the threads pool keeps a jsdom worker alive after the
+    // suite finishes (open-handle teardown hang), so `npm test` never exits.
+    pool: 'forks',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-import pytest
-
 from strategy_research.core.validation.monte_carlo import monte_carlo_test
 from strategy_research.core.validation.trade_input import TradeInput
 

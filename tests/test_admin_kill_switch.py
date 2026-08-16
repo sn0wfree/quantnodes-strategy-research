@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import os
-from unittest.mock import patch
-
 import pytest
 from fastapi.testclient import TestClient
 
 from strategy_research.api.app import create_app
 from strategy_research.core.agent.compact import (
-    _compaction_metrics,
-    get_compaction_metrics,
     reset_compaction_metrics,
-    set_keep_all_override,
 )
 
 
@@ -261,8 +255,8 @@ class TestModuleFunctions:
 class TestMetricsIntegration:
     def test_filter_increments_metrics(self):
         """_convert_messages_to_history should increment filter_calls."""
-        from strategy_research.api.session.service import SessionService
         from strategy_research.api.session.models import Message
+        from strategy_research.api.session.service import SessionService
         from strategy_research.core.agent import compact as compact_mod
 
         compact_mod.reset_compaction_metrics()

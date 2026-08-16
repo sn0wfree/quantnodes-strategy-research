@@ -254,6 +254,80 @@ def _atomic_write_env(path: Path, lines: dict[str, str]) -> None:
     atomic_write_env(path, lines)
 
 
+def _fix_c1(issue, llm, env, state):
+    """C1: plaintext key → env:LLM_API_KEY."""
+    plaintext = llm.get("api_key", "")
+    if plaintext and not plaintext.startswith("env:"):
+        env[ENV_LLM_API_KEY] = plaintext
+        state["env_changed"] = True
+        llm["api_key"] = "env:LLM_API_KEY"
+        state["llm_changed"] = True
+        return dataclasses.replace(issue, fix_summary="Migrated plaintext key to env:LLM_API_KEY in .env")
+    return dataclasses.replace(issue, fix_summary="(skipped: already env:VAR or empty)")
+
+
+def _fix_c2(issue, llm, env, state):
+    """C2: placeholder OPENAI_API_KEY → delete."""
+    if ENV_API_KEY in env:
+        del env[ENV_API_KEY]
+        state["env_changed"] = True
+        return dataclasses.replace(issue, fix_summary="Deleted OPENAI_API_KEY from .env")
+    return issue
+
+
+def _fix_c4(issue, llm, env, state):
+    """C4: missing required fields → fill defaults."""
+    for field, default_val in _REQUIRED_LLM_FIELDS.items():
+        if field not in llm or llm[field] is None:
+            if field == "base_url" and llm.get("provider"):
+                defaults = PROVIDER_DEFAULTS.get(llm["provider"], {})
+                fallback = defaults.get("base_url", default_val)
+            else:
+                fallback = default_val
+            if fallback is not None:
+                llm[field] = fallback
+                state["llm_changed"] = True
+    return dataclasses.replace(issue, fix_summary="Filled missing fields with defaults")
+
+
+def _fix_c5(issue, llm, env, state):
+    """C5: dead legacy keys → delete."""
+    dead = [k for k in _DEAD_ENV_KEYS if k in env]
+    provider = llm.get("provider", "")
+    if provider and provider != "openai" and ENV_BASE_URL in env:
+        dead.append(ENV_BASE_URL)
+    removed = []
+    for k in dead:
+        if k in env:
+            del env[k]
+            removed.append(k)
+            state["env_changed"] = True
+    return dataclasses.replace(issue, fix_summary=f"Deleted: {', '.join(removed)}")
+
+
+def _fix_c6(issue, llm, env, state):
+    """C6: max_tokens below provider recommendation → bump up."""
+    provider = llm.get("provider", "")
+    recommended = PROVIDER_DEFAULTS.get(provider, {}).get("max_tokens")
+    if recommended:
+        llm["max_tokens"] = recommended
+        state["llm_changed"] = True
+        return dataclasses.replace(
+            issue,
+            fix_summary=f"Set max_tokens to {recommended} (provider recommendation)",
+        )
+    return issue
+
+
+_FIX_HANDLERS = {
+    "C1": _fix_c1,
+    "C2": _fix_c2,
+    "C4": _fix_c4,
+    "C5": _fix_c5,
+    "C6": _fix_c6,
+}
+
+
 def fix_issues(
     issues: Sequence[AuditIssue],
     llm_json_path: Path | None = None,
@@ -275,82 +349,20 @@ def fix_issues(
     llm_data = _read_llm_json(llm_path)
     llm = llm_data.get("llm", {})
     env = _read_env(env_p)
-    llm_changed = False
-    env_changed = False
+    state = {"llm_changed": False, "env_changed": False}
     updated: list[AuditIssue] = []
 
     for issue in issues:
         if not issue.fixable:
             updated.append(issue)
             continue
-
-        # ── C1: plaintext key → env:LLM_API_KEY ──
-        if issue.code == "C1":
-            plaintext = llm.get("api_key", "")
-            if plaintext and not plaintext.startswith("env:"):
-                env[ENV_LLM_API_KEY] = plaintext
-                env_changed = True
-                llm["api_key"] = "env:LLM_API_KEY"
-                llm_changed = True
-                issue = dataclasses.replace(issue, fix_summary="Migrated plaintext key to env:LLM_API_KEY in .env")
-            else:
-                issue = dataclasses.replace(issue, fix_summary="(skipped: already env:VAR or empty)")
-
-        # ── C2: placeholder OPENAI_API_KEY → delete ──
-        elif issue.code == "C2":
-            if ENV_API_KEY in env:
-                del env[ENV_API_KEY]
-                env_changed = True
-                issue = dataclasses.replace(issue, fix_summary="Deleted OPENAI_API_KEY from .env")
-
-        # ── C4: missing required fields → fill defaults ──
-        elif issue.code == "C4":
-            for field, default_val in _REQUIRED_LLM_FIELDS.items():
-                if field not in llm or llm[field] is None:
-                    if field == "base_url" and llm.get("provider"):
-                        provider = llm["provider"]
-                        defaults = PROVIDER_DEFAULTS.get(provider, {})
-                        fallback = defaults.get("base_url", default_val)
-                    else:
-                        fallback = default_val
-                    if fallback is not None:
-                        llm[field] = fallback
-                        llm_changed = True
-            issue = dataclasses.replace(issue, fix_summary="Filled missing fields with defaults")
-
-        # ── C5: dead legacy keys → delete ──
-        elif issue.code == "C5":
-            dead = [k for k in _DEAD_ENV_KEYS if k in env]
-            provider = llm.get("provider", "")
-            if provider and provider != "openai" and ENV_BASE_URL in env:
-                dead.append(ENV_BASE_URL)
-            removed = []
-            for k in dead:
-                if k in env:
-                    del env[k]
-                    removed.append(k)
-                    env_changed = True
-            issue = dataclasses.replace(issue, fix_summary=f"Deleted: {', '.join(removed)}")
-
-        # ── C6: max_tokens below provider recommendation → bump up ──
-        elif issue.code == "C6":
-            provider = llm.get("provider", "")
-            recommended = PROVIDER_DEFAULTS.get(provider, {}).get("max_tokens")
-            if recommended:
-                llm["max_tokens"] = recommended
-                llm_changed = True
-                issue = dataclasses.replace(
-                    issue,
-                    fix_summary=f"Set max_tokens to {recommended} (provider recommendation)",
-                )
-
-        updated.append(issue)
+        updated.append(_FIX_HANDLERS[issue.code](issue, llm, env, state))
 
     # Write changes
-    if llm_changed:
+    if state["llm_changed"]:
         _atomic_write_json(llm_path, llm_data)
         logger.info("config_audit: updated %s", llm_path)
-    if env_changed:
+    if state["env_changed"]:
         _atomic_write_env(env_p, env)
         logger.info("config_audit: updated %s", env_p)
 

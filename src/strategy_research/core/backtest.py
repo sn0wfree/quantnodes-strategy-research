@@ -5,10 +5,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -20,8 +20,11 @@ from .db import (
     save_nav_history,
     save_weight_history,
 )
-from .git import git_commit as git_commit, git_commit_rich, git_get_hash
+from .git import git_commit as git_commit
+from .git import git_commit_rich, git_get_hash
 from .run_card import write_run_card
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # 子进程环境变量白名单
@@ -134,15 +137,17 @@ def create_run_dir(strategy_dir: Path, run_name: str) -> Path:
 
 def save_run_snapshot(strategy_dir: Path, run_dir: Path) -> None:
     """保存策略快照。"""
+    # Study 场景 strategy_dir == run_dir（v2 每轮独立目录）：跳过自复制
+    same_dir = run_dir.resolve() == strategy_dir.resolve()
     src = strategy_dir / "strategy.py"
     dst = run_dir / "strategy.py"
-    if src.exists():
+    if src.exists() and not same_dir:
         shutil.copy2(src, dst)
 
     # 也保存 config.yaml
     config_src = strategy_dir / "config.yaml"
     config_dst = run_dir / "config.yaml"
-    if config_src.exists():
+    if config_src.exists() and not same_dir:
         shutil.copy2(config_src, config_dst)
 
 
@@ -169,9 +174,22 @@ def save_run_metrics(run_dir: Path, metrics: dict) -> None:
         json.dump(_clean_nan(metrics), f, indent=2, ensure_ascii=False)
 
 
-def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None:
-    """更新 results.tsv。"""
-    results_path = strategy_dir / "runs" / "results.tsv"
+def update_results_tsv(
+    strategy_dir: Path,
+    run_name: str,
+    metrics: dict,
+    *,
+    round_num: int | None = None,
+    results_tsv: Path | None = None,
+) -> None:
+    """Update results.tsv.
+
+    v2: ``round`` column appended LAST (index 13) so existing column
+    indices (calmar=3, status=11) stay stable; CLI rows leave it empty.
+    ``results_tsv`` overrides the default location (``strategy_dir/runs/
+    results.tsv``) for study scenarios.
+    """
+    results_path = results_tsv or (strategy_dir / "runs" / "results.tsv")
 
     if results_path.exists():
         with open(results_path, "r", encoding="utf-8") as f:
@@ -181,7 +199,7 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
         lines = [
             "run\tcommit\taction\tcalmar\tsharpe\tmax_dd\t"
             "ann_return\tturnover\tfactors_added\tfactors_removed\t"
-            "params_changed\tstatus\tdescription\n"
+            "params_changed\tstatus\tdescription\tround\n"
         ]
 
     row = "\t".join([
@@ -199,6 +217,7 @@ def update_results_tsv(strategy_dir: Path, run_name: str, metrics: dict) -> None
         str(metrics.get("params_changed", 0)),
         metrics.get("status", "pending"),
         metrics.get("description", ""),
+        str(round_num) if round_num is not None else "",
     ]) + "\n"
 
     lines.append(row)
@@ -226,30 +245,40 @@ def _extract_warnings(metrics: dict, output: str) -> list[str]:
 def run_strategy(
     strategy_dir: Path,
     timeout: int = 300,
+    log_path: Path | None = None,
 ) -> tuple[bool, str]:
-    """运行策略脚本。"""
+    """运行策略脚本（后台化：日志停滞判定，无墙钟超时）。
+
+    ``timeout`` 语义为**日志停滞窗口**（默认 300s）：只要策略脚本持续向
+    ``log_path`` 输出（run.log 流式追加），就跑多久都行；进程存活但日志
+    停滞超过 timeout → 判定卡死 → 整组 kill。``log_path`` 缺省时落到
+    ``strategy_dir/run.log``。
+    """
     strategy_file = strategy_dir / "strategy.py"
     if not strategy_file.exists():
         return False, f"策略文件不存在: {strategy_file}"
 
+    if log_path is None:
+        log_path = strategy_dir / "run.log"
+
+    from .utils.bg_proc import log_tail, run_bg, wait_bg
+
     try:
         import sys
-        result = subprocess.run(
+        proc = run_bg(
             [sys.executable, str(strategy_file)],
+            log_path,
             cwd=str(strategy_dir),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
             env=_build_restricted_env(),
         )
+        success, output = wait_bg(proc, log_path, stall_timeout=float(timeout))
+        if not success:
+            # stalled → killed; surface the log tail so the caller sees
+            # how far the strategy got before it went silent
+            tail = log_tail(log_path, n=10)
+            return False, f"策略执行停滞 ({timeout}秒无日志输出): {tail}"
+        return proc.returncode == 0, output
 
-        output = result.stdout + "\n" + result.stderr
-        success = result.returncode == 0
-
-        return success, output
-
-    except subprocess.TimeoutExpired:
-        return False, f"策略执行超时 ({timeout}秒)"
     except Exception as e:
         return False, f"策略执行失败: {e}"
 
@@ -261,6 +290,9 @@ def run_backtest_script(
     description: str = "",
     timeout: int = 300,
     run_dir: Path | None = None,
+    strategy_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    round_num: int | None = None,
 ) -> dict:
     """运行策略脚本回测并保存结果。
 
@@ -271,8 +303,15 @@ def run_backtest_script(
         description: 描述
         timeout: 超时时间 (秒)
         run_dir: 可选的 run 目录路径。如果提供,则使用此目录而不是创建新目录。
+        strategy_dir: 策略/执行目录（strategy.py/config.yaml 源）。默认
+            ``workspace/strategies/<name>``；study 场景传 run 目录。
+        results_tsv: results.tsv 落点。默认 ``strategy_dir/runs/results.tsv``。
+        round_num: study 轮号（写入 results.tsv 的 round 列）。
     """
-    strategy_dir = workspace_path / "strategies" / strategy_name
+    if strategy_dir is None:
+        strategy_dir = workspace_path / "strategies" / strategy_name
+    else:
+        strategy_dir = Path(strategy_dir)
     if not strategy_dir.exists():
         return {"success": False, "run": "", "metrics": {}, "error": f"策略目录不存在: {strategy_dir}"}
 
@@ -281,10 +320,15 @@ def run_backtest_script(
         run_dir = create_run_dir(strategy_dir, run_name)
     else:
         run_name = run_dir.name
+        # v2: caller-provided run dirs (study layout) may not exist yet
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
 
     save_run_snapshot(strategy_dir, run_dir)
 
-    success, output = run_strategy(strategy_dir, timeout)
+    # Backgrounded: strategy stdout/stderr streams straight into
+    # run.log (log-progress liveness, no wall-clock ceiling).
+    success, output = run_strategy(strategy_dir, timeout, log_path=run_dir / "run.log")
 
     # 读取因子失败信息
     factor_failures = []
@@ -305,9 +349,6 @@ def run_backtest_script(
         except Exception:
             pass
 
-    with open(run_dir / "run.log", "w", encoding="utf-8") as f:
-        f.write(output)
-
     metrics = parse_run_log(run_dir / "run.log")
 
     commit_hash = git_get_hash(workspace_path)
@@ -322,7 +363,10 @@ def run_backtest_script(
     })
 
     save_run_metrics(run_dir, metrics)
-    update_results_tsv(strategy_dir, run_name, metrics)
+    update_results_tsv(
+        strategy_dir, run_name, metrics,
+        round_num=round_num, results_tsv=results_tsv,
+    )
 
     save_backtest_result(
         workspace_path=workspace_path,
@@ -382,10 +426,22 @@ def run_backtest_from_yaml(
     yaml_path: str | None = None,
     action: str = "manual",
     description: str = "",
+    strategy_dir: Path | None = None,
+    results_tsv: Path | None = None,
+    runs_dir: Path | None = None,
+    round_num: int | None = None,
 ) -> dict:
-    """从 YAML 配置运行回测。"""
+    """从 YAML 配置运行回测。
+
+    v2: ``strategy_dir`` / ``results_tsv`` / ``runs_dir`` override the
+    default ``workspace/strategies/<name>`` layout for study scenarios.
+    """
+    if strategy_dir is None:
+        strategy_dir = workspace_path / "strategies" / strategy_name
+    else:
+        strategy_dir = Path(strategy_dir)
     if yaml_path is None:
-        yaml_path = workspace_path / "strategies" / strategy_name / "config.yaml"
+        yaml_path = strategy_dir / "config.yaml"
     else:
         yaml_path = Path(yaml_path)
 
@@ -397,9 +453,13 @@ def run_backtest_from_yaml(
         result = run_from_yaml(str(yaml_path), workspace_path)
 
         # 保存结果
-        strategy_dir = workspace_path / "strategies" / strategy_name
-        run_name = get_next_run_name(strategy_dir)
-        run_dir = create_run_dir(strategy_dir, run_name)
+        if runs_dir is None:
+            runs_dir = strategy_dir / "runs"
+        else:
+            runs_dir = Path(runs_dir)
+        run_name = get_next_run_name(runs_dir)
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         save_run_snapshot(strategy_dir, run_dir)
 
@@ -430,7 +490,10 @@ def run_backtest_from_yaml(
         metrics["warnings"] = list(getattr(result, "warnings", None) or [])
 
         save_run_metrics(run_dir, metrics)
-        update_results_tsv(strategy_dir, run_name, metrics)
+        update_results_tsv(
+            strategy_dir, run_name, metrics,
+            round_num=round_num, results_tsv=results_tsv,
+        )
 
         # 保存到 DuckDB
         save_backtest_result(

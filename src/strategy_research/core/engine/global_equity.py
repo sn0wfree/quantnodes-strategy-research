@@ -6,8 +6,6 @@ HK: T+0, 印花税+征费, 100股整手
 
 from __future__ import annotations
 
-import pandas as pd
-
 from .base import BaseEngine
 
 

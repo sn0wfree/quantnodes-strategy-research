@@ -355,53 +355,7 @@ class ResearchApp(App):
             # Transition marker: thinking → text. Streaming already started.
             pass
         elif event_type == "assistant_message":
-            # Final assistant content (one-shot fallback). Used by:
-            #   (a) old backend that doesn't emit the 3-step protocol
-            #   (b) /goal /compact command handlers that wrap text in
-            #       3-step while still emitting assistant_message for
-            #       backwards compatibility
-            #
-            # Dedup: if the 3-step path already finalized a segment for
-            # this turn, the streaming preview is on-screen and we
-            # should NOT overwrite it with the formatted Markdown. This
-            # is the common case for /goal /compact.
-            #
-            # Otherwise, finalize any active streamer and render the
-            # formatted Markdown.
-            #
-            # Body content often contains inline JSON which Rich
-            # Markdown renders as garbled paragraph text.  We detect and
-            # reformat it into a fenced ```json``` block before passing
-            # to write_markdown.
-            from strategy_research.cli.tui.content_formatter import reformat_body_content
-            from strategy_research.cli.tui.text_filters import extract_thinking_tags
-            raw_content = data.get("content", "") or ""
-            think_content, body_content = extract_thinking_tags(raw_content)
-            try:
-                tv = self.query_one(TranscriptView)
-                # Dedup: if we've already finalized a segment for this
-                # turn, the assistant_message is a duplicate from a
-                # non-streaming fallback path. Skip the write.
-                if self._finalized_text_ids and not tv._streamer:
-                    # Recent finalized segment exists, no active
-                    # streamer — this is the duplicate we want to skip.
-                    return
-                # Step 1: render think content as a foldable section
-                # (collapsed by default; Ctrl+E to expand).
-                if think_content:
-                    tv.append_thinking(think_content)
-                # Step 2: end any active streamer (so its preview is
-                # cleared) and render the formatted Markdown.
-                if tv._streamer is not None:
-                    tv._truncate_to(tv._stream_baseline)
-                    tv._streamer = None
-                    tv._stream_baseline = None
-                tv.write_assistant_message(reformat_body_content(body_content))
-                # Clear finalized set — this new write supersedes.
-                self._finalized_text_ids.clear()
-                self._active_text_id = None
-            except Exception:
-                pass
+            self._route_assistant_message(data)
         elif event_type in ("tool_call", "tool_result", "tool_progress", "tool_heartbeat"):
             # Stage C: tool calls are rendered inline in the transcript,
             # not the side rail. See TranscriptView.append_tool_call /
@@ -412,16 +366,7 @@ class ResearchApp(App):
         elif event_type == "llm_usage":
             self.update_header(token_used=data.get("output_tokens", 0))
         elif event_type == "iter_start":
-            self.start_thinking()
-            self.update_header(
-                iter_count=data.get("iteration", 0),
-                iter_max=data.get("max_iterations", 0),
-            )
-            try:
-                rail = self.query_one(ToolsRail)
-                rail.set_iter(data.get("iteration", 0), data.get("max_iterations", 0))
-            except Exception:
-                pass
+            self._route_iter_start(data)
         elif event_type == "iter_end":
             self.stop_thinking()
             try:
@@ -434,17 +379,60 @@ class ResearchApp(App):
         elif event_type == "thinking_end":
             self.stop_thinking()
         elif event_type == "error":
-            try:
-                tv = self.query_one(TranscriptView)
-                from strategy_research.cli.tui.messages import WriteTranscript
-                message = data.get("message", "unknown")
-                if "quota" in message.lower():
-                    friendly = "[yellow]\u26a0 MiniMax \u914d\u989d\u5df2\u7528\u5b8c\uff085\u5c0f\u65f6\u9650\u989d\uff09\u3002\u8bf7\u7a0d\u540e\u91cd\u8bd5\u6216\u5207\u6362 provider\u3002[/yellow]"
-                else:
-                    friendly = f"[red]Agent error:[/red] {message}"
-                tv.post_message(WriteTranscript(content=friendly))
-            except Exception:
-                pass
+            self._route_error_event(data)
+
+    def _route_assistant_message(self, data: dict) -> None:
+        """Render a final assistant message (one-shot fallback path)."""
+        from strategy_research.cli.tui.content_formatter import reformat_body_content
+        from strategy_research.cli.tui.text_filters import extract_thinking_tags
+
+        raw_content = data.get("content", "") or ""
+        think_content, body_content = extract_thinking_tags(raw_content)
+        try:
+            tv = self.query_one(TranscriptView)
+            # Dedup: if we've already finalized a segment for this
+            # turn, the assistant_message is a duplicate from a
+            # non-streaming fallback path. Skip the write.
+            if self._finalized_text_ids and not tv._streamer:
+                return
+            if think_content:
+                tv.append_thinking(think_content)
+            if tv._streamer is not None:
+                tv._truncate_to(tv._stream_baseline)
+                tv._streamer = None
+                tv._stream_baseline = None
+            tv.write_assistant_message(reformat_body_content(body_content))
+            self._finalized_text_ids.clear()
+            self._active_text_id = None
+        except Exception:
+            pass
+
+    def _route_iter_start(self, data: dict) -> None:
+        """Handle the iter_start event (thinking + header + rail)."""
+        self.start_thinking()
+        self.update_header(
+            iter_count=data.get("iteration", 0),
+            iter_max=data.get("max_iterations", 0),
+        )
+        try:
+            rail = self.query_one(ToolsRail)
+            rail.set_iter(data.get("iteration", 0), data.get("max_iterations", 0))
+        except Exception:
+            pass
+
+    def _route_error_event(self, data: dict) -> None:
+        """Render an error event into the transcript."""
+        try:
+            tv = self.query_one(TranscriptView)
+            from strategy_research.cli.tui.messages import WriteTranscript
+            message = data.get("message", "unknown")
+            if "quota" in message.lower():
+                friendly = "[yellow]\u26a0 MiniMax \u914d\u989d\u5df2\u7528\u5b8c\uff085\u5c0f\u65f6\u9650\u989d\uff09\u3002\u8bf7\u7a0d\u540e\u91cd\u8bd5\u6216\u5207\u6362 provider\u3002[/yellow]"
+            else:
+                friendly = f"[red]Agent error:[/red] {message}"
+            tv.post_message(WriteTranscript(content=friendly))
+        except Exception:
+            pass
 
     def _route_tool_event(self, event_type: str, data: dict) -> None:
         """Inline tool events into TranscriptView (stage C)."""

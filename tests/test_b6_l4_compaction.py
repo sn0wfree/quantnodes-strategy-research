@@ -8,7 +8,6 @@ Verifies that AgentLoop._persist_compaction_event:
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -17,6 +16,7 @@ from pathlib import Path
 from strategy_research.api.session.event_bus_v2 import EventBusV2
 from strategy_research.api.session.events import EventBus
 from strategy_research.api.session.projector import Projector
+from strategy_research.core.agent.loop import AgentLoop
 
 
 def _setup_db(db_path: Path) -> None:
@@ -137,8 +137,8 @@ class TestPersistCompactionEvent(unittest.TestCase):
         """Create AgentLoop with event_bus wired in (webui path)."""
         # Build a minimal LLMConfig to satisfy AgentLoop.__init__
         from strategy_research.core.agent.compact import CompactConfig
-        from strategy_research.core.llm import LLMConfig
         from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.llm import LLMConfig
 
         cfg = LLMConfig(model="test-model", base_url="http://localhost", api_key="test")
         loop = AgentLoop(
@@ -196,8 +196,8 @@ class TestPersistCompactionEvent(unittest.TestCase):
     def test_persist_skips_when_no_session_id(self) -> None:
         """No session_id → skip (no event emitted)."""
         from strategy_research.core.agent.compact import CompactConfig
-        from strategy_research.core.llm import LLMConfig
         from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.llm import LLMConfig
 
         cfg = LLMConfig(model="m", base_url="http://localhost", api_key="k")
         loop = AgentLoop(
@@ -223,9 +223,10 @@ class TestPersistCompactionEvent(unittest.TestCase):
     def test_persist_legacy_fallback_without_event_bus(self) -> None:
         """When event_bus is None, falls back to direct persist_message."""
         from unittest.mock import patch
+
         from strategy_research.core.agent.compact import CompactConfig
-        from strategy_research.core.llm import LLMConfig
         from strategy_research.core.agent.loop import AgentLoop, compaction_persister_registered
+        from strategy_research.core.llm import LLMConfig
 
         cfg = LLMConfig(model="m", base_url="http://localhost", api_key="k")
         loop = AgentLoop(
@@ -259,6 +260,7 @@ class TestPersistCompactionEvent(unittest.TestCase):
 
         # Patch CompactionMessage to include metadata
         from unittest.mock import patch
+
         from strategy_research.core.agent import compaction_message as cm_module
 
         original_new = cm_module.new_compaction_message
@@ -308,8 +310,8 @@ class TestL4CompactionIntegration(unittest.TestCase):
         So we pre-populate via events, not direct INSERT.
         """
         from strategy_research.core.agent.compact import CompactConfig
-        from strategy_research.core.llm import LLMConfig
         from strategy_research.core.agent.loop import AgentLoop
+        from strategy_research.core.llm import LLMConfig
 
         # Pre-populate event_log via events (mimics prior conversation)
         self.v2.emit("s1", "message_received", {

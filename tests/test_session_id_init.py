@@ -30,7 +30,6 @@ from strategy_research.cli.interactive.main import InteractiveContext
 from strategy_research.cli.tui.app import ResearchApp
 from strategy_research.cli.tui.widgets import StatusHeader
 
-
 # Pattern for generated session ids: "cli-" + 1..8 hex chars.
 _SESSION_ID_RE = re.compile(r"^cli-[a-f0-9]{1,8}$")
 

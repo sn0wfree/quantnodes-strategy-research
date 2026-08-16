@@ -8,8 +8,6 @@ Verifies:
 """
 from __future__ import annotations
 
-import pytest
-
 from strategy_research.api.session.models import Message
 from strategy_research.api.session.service import SessionService
 

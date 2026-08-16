@@ -12,25 +12,22 @@ Fills coverage gaps for:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from strategy_research.core.goal.workflow_config import (
-    load_goal_workflow,
-    list_goal_workflows,
-    save_goal_workflow,
-    _resolve_yaml_path,
-    _validate_config,
-)
 from strategy_research.core.goal.workflow import (
+    BranchConfig,
+    GoalAgentConfig,
     GoalWorkflowConfig,
     GoalWorkflowGoalConfig,
-    GoalAgentConfig,
-    CompletionConfig,
-    BranchConfig,
 )
-
+from strategy_research.core.goal.workflow_config import (
+    _resolve_yaml_path,
+    _validate_config,
+    list_goal_workflows,
+    load_goal_workflow,
+    save_goal_workflow,
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 # load_goal_workflow with explicit path

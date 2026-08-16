@@ -43,7 +43,6 @@ from strategy_research.cli.tui.keybindings import TUI_BINDINGS
 from strategy_research.cli.tui.session import ChatSession
 from strategy_research.cli.tui.widgets.mode_bar import ModeBar
 
-
 # ================================================================
 # ModeBar widget
 # ================================================================

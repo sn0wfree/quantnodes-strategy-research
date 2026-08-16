@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from rich.console import Console, Group
 
 from strategy_research.cli.ui.rail import RailRunDashboard, RailStep
