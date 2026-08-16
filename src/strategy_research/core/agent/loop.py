@@ -303,6 +303,8 @@ class AgentLoop:
         # ``_run_loop_core`` to drive the strategy lands in L7.
         # Accepts: ``LoopStrategy`` / str / dict / None.
         strategy: Any | None = None,
+        # ── DSH-inspired: pluggable context injectors ──────────
+        injectors: list[Any] | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -347,6 +349,12 @@ class AgentLoop:
         self._strict_claim_validation = strict_claim_validation
         self.cc = compact_config or config.compact_config or CompactConfig()
         self._previous_summary: str | None = None
+        # DSH-inspired: pluggable context injectors (sorted by order).
+        if injectors is not None:
+            self._injectors = sorted(injectors, key=lambda i: getattr(i, "order", 0))
+        else:
+            from .context_injector import build_default_injectors
+            self._injectors = build_default_injectors()
 
         # Tool filtering: allowed_tools > readonly > all
         if allowed_tools is not None:
@@ -765,12 +773,16 @@ class AgentLoop:
     ) -> tuple[str, LoopResult, list[dict[str, Any]], float]:
         """Assemble full_task, init result/messages, emit loop_start trace."""
         self._maybe_auto_create_hypothesis(task)
-        goal_context = self._get_goal_context()
         full_task = task
         if context:
             full_task = context + "\n\n" + task
-        if goal_context:
-            full_task = goal_context + "\n\n" + full_task
+        # DSH-inspired: run pre-run injectors (order=-100, e.g. GoalContextInjector)
+        for injector in self._injectors:
+            if getattr(injector, "order", 0) < 0:
+                try:
+                    full_task = injector.inject_pre_run(self, full_task, [])
+                except Exception:  # noqa: BLE001
+                    pass  # injectors must not break the loop
         result = LoopResult()
         messages = self.context_builder.build_initial_messages(full_task, history=history)
         result.messages = list(messages)
@@ -1153,9 +1165,7 @@ class AgentLoop:
 
             # L7 v0.5: compaction + per-iteration observability delegated
             # to the strategy's CompactionStep. The step runs the
-            # compaction engine, emits _emit_compaction, _emit_iter_start,
-            # and _inject_todos_snapshot — so the skeleton no longer
-            # hard-codes these per-iteration side-effects.
+            # compaction engine, emits _emit_compaction, _emit_iter_start.
             comp_ctx = _make_strategy_ctx(
                 self, messages, None, result, iteration, hook_ctx,
             )
@@ -1163,6 +1173,14 @@ class AgentLoop:
                 self._strategy.compaction, comp_ctx, async_mode=async_mode,
             )
             messages = comp_ctx.messages
+
+            # DSH-inspired: run per-iteration injectors (order=0, e.g. TodosInjector)
+            for injector in self._injectors:
+                if getattr(injector, "order", 0) == 0:
+                    try:
+                        injector.inject_per_iteration(self, messages)
+                    except Exception:  # noqa: BLE001
+                        pass  # injectors must not break the loop
 
             # L7 v0.4: LLM call + before_iteration + on_error delegated
             # to the strategy's LLMCallStep. The step fires
@@ -1183,14 +1201,24 @@ class AgentLoop:
 
             if not response.has_tool_calls():
                 # L7: consult the strategy's ContinuationStep before
-                # the hard-coded goal check. DefaultContinuationStep is
-                # a no-op (returns False); the legacy path still runs.
+                # the goal check. DefaultContinuationStep is a no-op
+                # (returns False); the legacy path still runs.
                 should_continue, _ = self._strategy.continuation.evaluate(
                     _make_strategy_ctx(self, messages, response, result, iteration, hook_ctx)
                 )
                 if should_continue:
                     continue
-                if self._check_goal_continuation(response, messages, result, iteration):
+                # DSH-inspired: run post-response injectors (order>=100, e.g. GoalContinuationInjector)
+                injector_continued = False
+                for injector in self._injectors:
+                    if getattr(injector, "order", 0) >= 100:
+                        try:
+                            if injector.inject_post_response(self, response, messages, result, iteration):
+                                injector_continued = True
+                                break
+                        except Exception:  # noqa: BLE001
+                            pass  # injectors must not break the loop
+                if injector_continued:
                     continue
                 # L7: consult the strategy's StopStep before the legacy
                 # _handle_stop. DefaultStopStep is a no-op; the legacy

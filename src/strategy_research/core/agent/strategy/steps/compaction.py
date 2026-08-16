@@ -4,9 +4,9 @@ Drives context compression at the start of each iteration. Wraps the
 existing ``_maybe_compact`` / ``_amaybe_compact`` methods (which
 themselves delegate to the compaction engine in ``compact.py``).
 
-After compaction, also emits ``_emit_compaction`` / ``_emit_iter_start``
-/ ``_inject_todos_snapshot`` — these are the remaining per-iteration
-observability calls that were previously hard-coded in the skeleton.
+After compaction, emits ``_emit_compaction`` / ``_emit_iter_start``.
+Per-iteration context injection (todos, goal continuation, etc.) is
+handled by the ``ContextInjector`` chain in ``AgentLoop._injectors``.
 """
 
 from __future__ import annotations
@@ -46,7 +46,6 @@ class DefaultCompactionStep:
         if applied:
             loop._emit_compaction(applied, ctx.iteration, ctx.result)
         loop._emit_iter_start(ctx.iteration, messages)
-        loop._inject_todos_snapshot(messages)
 
         ctx.messages = messages
         ctx.metadata["compaction_applied"] = applied

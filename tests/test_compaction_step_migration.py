@@ -5,9 +5,10 @@ Covers:
 1. DefaultCompactionStep runs _maybe_compact / _amaybe_compact based
    on async_mode.
 2. It fires _emit_compaction when compaction is applied.
-3. It fires _emit_iter_start and _inject_todos_snapshot always.
+3. It fires _emit_iter_start always.
 4. Step error isolation still works.
 5. should_run returns True (compaction threshold checked internally).
+6. _inject_todos_snapshot is NOT called (handled by ContextInjector chain).
 """
 
 from __future__ import annotations
@@ -95,7 +96,8 @@ class TestCompactionStep:
         assert len(loop.emit_iter_start_calls) == 1
         assert loop.emit_iter_start_calls[0][0] == 5
 
-    def test_inject_todos_snapshot_always_fires(self):
+    def test_inject_todos_snapshot_not_called(self):
+        """_inject_todos_snapshot is handled by ContextInjector, not CompactionStep."""
         loop = _FakeLoop()
         step = DefaultCompactionStep()
         step.bind_agent_loop(loop)
@@ -103,7 +105,7 @@ class TestCompactionStep:
         import asyncio
 
         asyncio.run(step.execute(ctx, async_mode=False))
-        assert len(loop.inject_todos_calls) == 1
+        assert len(loop.inject_todos_calls) == 0
 
     def test_should_run_returns_true(self):
         assert DefaultCompactionStep().should_run(LoopContext(task="t")) is True
