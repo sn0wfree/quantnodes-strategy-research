@@ -1424,6 +1424,30 @@ class AgentLoop:
                 ),
             }
 
+        # DSH-inspired: check monotonic deny guards before execution
+        guard_reason = self.registry.check_guards(tc.name, tc.arguments)
+        if guard_reason:
+            logger.info("tool '%s' denied by guard: %s", tc.name, guard_reason)
+            self._trace_and_emit("tool_error", {"tool": tc.name, "error": f"guard: {guard_reason}"})
+            self._emit("tool_result", {
+                "tool": tc.name,
+                "id": tc.id,
+                "call_id": tc.id,
+                "status": "denied",
+                "ok": False,
+                "result": guard_reason,
+                "preview": guard_reason[:100],
+                "elapsed_ms": 0,
+            })
+            return {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps(
+                    {"status": "denied", "error": guard_reason},
+                    ensure_ascii=False,
+                ),
+            }
+
         # Emit tool_call event
         self._emit("tool_call", {
             "tool": tc.name,

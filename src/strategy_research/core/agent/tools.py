@@ -16,7 +16,7 @@ import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Dict, List, Optional, Protocol, Union, get_args, get_origin, get_type_hints, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 EFFECT_DB = "db"
 EFFECT_FS = "fs"
 EFFECT_NET = "net"
+
+
+# ── ToolGuard (DSH-inspired monotonic deny guard) ─────────────────
+
+
+@runtime_checkable
+class ToolGuard(Protocol):
+    """Monotonic deny guard — can only reject, never force-allow.
+
+    Guards are evaluated in registration order.  The first denial wins
+    and no subsequent guard can override it.  This guarantees that
+    security is monotonic — adding a guard can only restrict, never
+    expand, the allowed tool set.
+    """
+
+    def check(self, name: str, params: Dict[str, Any]) -> Optional[str]:
+        """Return a denial reason, or None to allow the tool call."""
+        ...
 
 _EFFECT_LABELS = {
     EFFECT_DB: "写DB",
@@ -745,10 +763,12 @@ class BaseTool(ABC):
 
 
 class ToolRegistry:
-    """Tool registry."""
+    """Tool registry with DSH-inspired scoped tools and guard pipeline."""
 
     def __init__(self) -> None:
         self._tools: Dict[str, BaseTool] = {}
+        self._guards: List[ToolGuard] = []
+        self._denied: set = set()
 
     def register(self, tool: BaseTool) -> None:
         """Register a tool (collects its brief at registration time)."""
@@ -784,6 +804,73 @@ class ToolRegistry:
                 "status": "error", "tool": name,
                 "error": str(exc),
             }, ensure_ascii=False)
+
+    # ── DSH-inspired: scoped tools + guard pipeline ──────────────
+
+    def restrict(
+        self,
+        *,
+        deny: Optional[List[str]] = None,
+        allow: Optional[List[str]] = None,
+    ) -> None:
+        """Scope tools: deny removes tools, allow keeps only those listed.
+
+        ``deny`` is cumulative — calling restrict multiple times adds to
+        the denied set.  ``allow`` replaces the allowed set (last call wins).
+
+        Typical use: child agent inherits parent's tools but restricts
+        to a safe subset::
+
+            child_registry = parent_registry.restricted(
+                deny=["delegate_to_agent", "run_command"],
+            )
+        """
+        if deny:
+            self._denied.update(deny)
+            for name in deny:
+                self._tools.pop(name, None)
+        if allow:
+            allowed_set = set(allow)
+            self._tools = {k: v for k, v in self._tools.items() if k in allowed_set}
+
+    def restricted(
+        self,
+        *,
+        deny: Optional[List[str]] = None,
+        allow: Optional[List[str]] = None,
+    ) -> "ToolRegistry":
+        """Return a new registry with restrictions applied (immutable variant)."""
+        import copy
+        new = copy.copy(self)
+        new._tools = dict(self._tools)
+        new._guards = list(self._guards)
+        new._denied = set(self._denied)
+        new.restrict(deny=deny, allow=allow)
+        return new
+
+    def guard(self, guard: ToolGuard) -> None:
+        """Register a monotonic deny guard.
+
+        Guards are evaluated in registration order before tool execution.
+        The first denial wins — no subsequent guard can override it.
+        """
+        self._guards.append(guard)
+
+    def check_guards(self, name: str, params: Dict[str, Any]) -> Optional[str]:
+        """Run all guards; return denial reason or None to allow.
+
+        Denied tools are also checked against the denied set.
+        """
+        if name in self._denied:
+            return f"Tool '{name}' is denied by restriction"
+        for g in self._guards:
+            try:
+                reason = g.check(name, params)
+                if reason:
+                    return reason
+            except Exception:  # noqa: BLE001
+                logger.debug("Guard %s raised, skipping", type(g).__name__)
+        return None
 
     @property
     def tool_names(self) -> List[str]:
