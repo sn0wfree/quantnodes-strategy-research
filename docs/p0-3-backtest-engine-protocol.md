@@ -1,8 +1,23 @@
 # P0-3 BacktestEngine Protocol
 
-> **Status:** Draft (branch `p0-3-backtest-engine-protocol`)
+> **Status:** Completed (branch `p0-3-backtest-engine-protocol`, merged to `main` as `7921bb8`)
 > **承接:** P0-2 统一了 `BacktestResult` dataclass（`core/backtest_models.py`）。
 > 本步把 `BacktestEngine` + `Strategy` 收敛成 Protocol，让 YAML / Callback 路径走同一接口。
+
+## 完成状态
+
+| 步骤 | 标题 | 状态 | 提交 |
+|------|------|------|------|
+| 母文档 | 设计 | ✅ | `cc9b540` |
+| E1 | Protocol (Strategy + BacktestEngine) | ✅ | `d2e3bd5` |
+| E2 | StrategyEngineAdapter | ✅ | `d2e3bd5` |
+| E3 | CallbackEngineAdapter | ✅ | `d2e3bd5` |
+| E4 | Factory + Registry | ✅ | `d2e3bd5` |
+| E5 | 测试 (11 个) | ✅ | `d2e3bd5` |
+| 合并 | merge commit | ✅ | `7921bb8` |
+
+**测试**：11 个 P0-3 新增 + 315 个回归（合计 326）全绿。
+**ruff**：P0-3 新增文件 0 错误。
 
 ## 目标
 

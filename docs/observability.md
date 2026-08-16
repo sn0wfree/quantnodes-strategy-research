@@ -335,3 +335,24 @@ branch_id, seq)` 保证分支内单调。
 
 详情见 `docs/p0-2-capability-seams.md`（母文档）与各 phase
 子文档（A/B/C/D）。
+
+---
+
+## 附录：BacktestEngine Protocol（P0-3）
+
+P0-2.B 统一了 `BacktestResult` dataclass，P0-3 把两条回测入口折叠成单一
+Protocol：
+
+- **`Strategy`** (`core/backtest_engine/protocol.py`) — 单方法 `compute_weights(date, price_panel, nav_history) -> dict[str, float]`。YAML / Factor 路径已实现此签名；Callback 路径通过 adapter 把五步法流水线折成同一个调用。
+- **`BacktestEngine`** — `run(strategy, price_panel, *, config=None) -> BacktestResult`，可选 `config` 参数携带引擎特有的 kwargs（rebal_freq / min_history / cost / BacktestConfig）。
+- **`StrategyEngineAdapter`** — 包装 `utils.strategy_engine.StrategyEngine`，YAML 路径 1:1。
+- **`CallbackEngineAdapter`** — 包装 `utils.backtest_engine.run_backtest`，五步法（compute_signals / select_assets / compute_weights / apply_risk / post_weights）在内部由一个 `_CallbackStrategyAdapter` 驱动。
+- **Registry** (`core/backtest_engine/factory.py`) — `get_engine("strategy" | "callback")`；默认是 `strategy`。
+
+迁移路径：
+
+- 现有调用方继续使用 `utils.strategy_engine.StrategyEngine.run` / `utils.backtest_engine.run_backtest` — 不强制迁移
+- 新代码统一通过 `core.backtest_engine` import
+- 后续 P0-3+ 可加入 `BaseEngineAdapter` 把 `engine/runner.py` 的 bar-by-bar 路径也接进来
+
+详情见 `docs/p0-3-backtest-engine-protocol.md`。
