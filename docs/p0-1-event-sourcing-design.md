@@ -1,8 +1,41 @@
 # P0-1 Append-only 事件源架构升级设计（2026-08-15）
 
-> **Status:** Draft (branch `p0-1-event-sourcing`)
+> **Status:** Completed (branch `p0-1-event-sourcing`, 2026-08-16)
 > **Scope:** 将 `event_log` 升级为 "模型可见即可重建" 的完整事件源架构，fork/resume/replay 全免费
 > **用户决策:** ① P0-1 优先于 P0-2 执行 ② Blob TTL 默认 1 年 ③ git first doc first
+
+## 完成状态
+
+| 阶段 | 标题 | 状态 | 提交 |
+|------|------|------|------|
+| 母文档 | 设计（本文档） | ✅ | `ef5a215` |
+| **Phase A** | Schema + EventV2 合并 | ✅ | - |
+| A1 | Schema 统一 + 列回填 | ✅ | `d5e4380` |
+| A2 | EventV2 下沉 core/events | ✅ | `60bba1b` |
+| A3 | parent_event_id + branch_id 字段 | ✅ | `da09867` |
+| A4 | 版本化 UNIQUE 迁移到 fork-aware | ✅ | `746a4db` |
+| **Phase B** | 重放优化 + Snapshot | ✅ | - |
+| B1 | Replay SQL 过滤下推 | ✅ | `a00f9d7` |
+| B2 | Projector Snapshot | ✅ | `a6293e1` |
+| B3 | InMemoryStore replay parity | ✅ | `c7868cd` |
+| B4 | Cache 命中率暴露 | ✅ | `c7868cd` |
+| **Phase C** | Fork/Resume + Blob 清理 | ✅/⏭ | - |
+| C1 | `EventStore.fork()` | ✅ | `06d8d3e` |
+| C2 | Resume 路由 | ⏭ Projector 已具备，service 路由后续 | - |
+| C3 | Blob 引用计数 + TTL 清理 | ✅ | `e0a6763` |
+| C4 | API 端点 | ⏭ | - |
+| **Phase D** | 收尾 | ✅ | `8543d5b` |
+
+**测试结果**：565+ 相关测试全绿；`TraceProjection.project()` 在 5000 事件 SQLite session 上 < 2ms（远低于 100ms 目标）。
+**ruff**：3 存量错误（C901 + 2×I001），无新增。
+
+## 后续（P0-2 候选）
+
+- SSE 双路径统一（EventStore-backed，删除 SSEEventBuffer 独立 ring buffer）
+- `branch_id != "main"` 多分支 fork
+- Resume API 端点 + service 层集成
+- `blob_refs` decrement 路径（事件真正删除时）
+- 前端 BranchTree + "Fork from here" 按钮
 
 ---
 

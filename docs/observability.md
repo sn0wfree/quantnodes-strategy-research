@@ -263,3 +263,40 @@ A1 之前旧会话的后向兼容回退。
 | 轮次详情端点 | `api/routers/study.py`（artifacts/manifest/diff/adopt/redo/hanging_events/actions） |
 | 状态机矩阵 | `core/study/models.py::ACTION_MATRIX` + `allowed_actions()` |
 | 测试 | `tests/test_study_dump.py`、`tests/test_admin_metrics.py`、`tests/test_hanging_events.py`、`tests/test_trace_context.py`、`tests/test_study_round_detail.py`、`tests/test_study_actions.py` |
+
+---
+
+## 附录：事件源架构（P0-1）
+
+`event_log` 表是事件源（event-sourced audit log）：每一行 append-only，
+schema 固定（`core/storage/event_schema.py::EVENT_LOG_DDL`），含主键
+`id`、聚合根 `aggregate_id`、单调 `seq`、事件 `type`、`data_json`、
+`time_created`、`parent_event_id`、`branch_id`。`UNIQUE (aggregate_id,
+branch_id, seq)` 保证分支内单调。
+
+读路径：
+
+- `GET /session/{id}/trace` → `TraceProjection.project()` → `EventStore.replay(types=…, branch_id=…, limit=…)`。
+  SQL 层 WHERE `type IN (...)` 过滤，~95% 反序列化被跳过。
+- `Projector.project()` 优先从 `snapshots` 表加载最近
+  `ProjectedSession`（flush 每 200 事件写一次），然后 replay delta；
+  5000 事件 session 冷启 O(N) → O(delta)。
+
+写路径：
+
+- `EventStore.emit()` 持久化 + cache + SSE push + Projector flush。
+  `flush()` 在同事务内 UPSERT `messages` / `message_parts` + 写 snapshot。
+- 大字段（`system_prompt` / `tools_schema` / `content`）offload 到
+  `<event-db>/trace-blobs/`，引用记入 `blob_refs(blob_path, ref_count,
+  first_seen, last_access)`。`scripts/cleanup_blobs.py` 按 TTL=365 天
+  (`SR_BLOB_TTL_DAYS`) 删除非活跃 blob，写 `blob-cleanup-audit.log`。
+
+运维：
+
+- `scripts/migrate_event_log_p0_1_a4.py [--dry-run]` — 旧 UNIQUE
+  `(aggregate_id, seq)` → `(aggregate_id, branch_id, seq)` 重建迁移。
+- `scripts/cleanup_blobs.py [--apply] [--ttl-days N]` — blob 清理。
+- `EventStore.health_report()` 暴露 `cache_hit_rate` 供 LRU 容量调优。
+
+详情见 `docs/p0-1-event-sourcing-design.md`（母文档）与各 phase
+子文档（A1-A4, B1-B4, C1/C3, D）。
