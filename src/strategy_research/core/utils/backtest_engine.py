@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 import numpy as np
 import pandas as pd
 
@@ -82,13 +80,12 @@ class BacktestCallbacks:
 # ============================================================
 # 2. 结果容器
 # ============================================================
-@dataclass
-class BacktestResult:
-    """回测结果."""
-    nav_daily: pd.Series
-    weights_history: list[tuple[pd.Timestamp, dict[str, float]]] = field(default_factory=list)
-    rebalance_dates: list[pd.Timestamp] = field(default_factory=list)
-    metrics: dict = field(default_factory=dict)
+# P0-2 Phase F: legacy BacktestResult is a type alias of the canonical
+# dataclass. Keep the symbol so existing imports (``from
+# .backtest_engine import BacktestResult``) continue to work; both
+# fields are now uniformly available, including ``factor_failures``
+# (default empty list when the callback-based engine doesn't populate it).
+from ..backtest_models import BacktestResult
 
 
 # ============================================================

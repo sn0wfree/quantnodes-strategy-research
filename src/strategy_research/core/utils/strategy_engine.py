@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 import numpy as np
 import pandas as pd
 
@@ -52,17 +50,11 @@ class BaseStrategy:
 # ============================================================
 # 2. 结果
 # ============================================================
-@dataclass
-class BacktestResult:
-    nav_daily: pd.Series
-    weights_history: list[tuple[pd.Timestamp, dict[str, float]]] = field(default_factory=list)
-    rebalance_dates: list[pd.Timestamp] = field(default_factory=list)
-    metrics: dict = field(default_factory=dict)
-    # 运行期因子失败收集（{factor, asset, error, occurrences}）。
-    # run_from_yaml 结束时从 strategy.factor_failures 附加；
-    # run_backtest_from_yaml 写 factor_failures.json + 聚合摘要
-    # （docs/run-backtest-data-gate.md）。
-    factor_failures: list[dict] = field(default_factory=list)
+# P0-2 Phase F: BacktestResult is now defined canonically in
+# core/backtest_models.py. Re-export here so legacy imports keep
+# working. The unified dataclass includes ``factor_failures`` (default
+# empty list).
+from ..backtest_models import BacktestResult
 
 
 # ============================================================
