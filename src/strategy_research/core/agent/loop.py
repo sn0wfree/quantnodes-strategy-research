@@ -1127,6 +1127,7 @@ class AgentLoop:
         if self.session_id and not _session_id.get():
             _session_id.set(self.session_id)
         full_task, result, messages, t0 = self._prepare_run(task, context, history)
+        response = None  # L7 v0.4: set by LLMCallStep each iteration
         self._subagent_count[0] = 0  # reset per-turn delegation counter
         hook_ctx = self._build_hook_context(0, messages)
 
@@ -1149,7 +1150,6 @@ class AgentLoop:
         for iteration in range(1, max_iter + 1):
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
-            await _fire("before_iteration", hook_ctx)
 
             if async_mode:
                 messages, applied = await self._amaybe_compact(messages)
@@ -1160,18 +1160,22 @@ class AgentLoop:
             self._emit_iter_start(iteration, messages)
             self._inject_todos_snapshot(messages)
 
-            try:
-                response = await self._get_response(
-                    messages, iteration, async_mode, hook_ctx, result
-                )
-            except LLMError as exc:
-                self._handle_llm_error(exc, iteration, result)
-                await _fire("on_error", hook_ctx, exc)
+            # L7 v0.4: LLM call + before_iteration + on_error delegated
+            # to the strategy's LLMCallStep. The step fires
+            # before_iteration before _get_response and on_error after
+            # _handle_llm_error.
+            llm_ctx = _make_strategy_ctx(
+                self, messages, None, result, iteration, hook_ctx,
+            )
+            llm_ctx = await self._call_step(
+                self._strategy.llm_call, llm_ctx, async_mode=async_mode,
+            )
+            if llm_ctx.should_stop:
                 break
+            response = llm_ctx.response
             if response is None:
                 break
-
-            self._append_assistant_msg(response, messages, result, iteration)
+            messages = llm_ctx.messages
 
             if not response.has_tool_calls():
                 # L7: consult the strategy's ContinuationStep before
@@ -1255,9 +1259,18 @@ class AgentLoop:
         else:
             self._handle_max_iter(result)
 
-        self._finalize_metrics(result, messages, t0)
-        self._run_claim_validation(result, messages)
-        await _fire("after_run", hook_ctx, result)
+        # L7 v0.4: finalization (metrics + claim validation) + the
+        # normal-end ``after_run`` hook delegated to the strategy's
+        # FinalizationStep. The no-progress early-return path fires
+        # after_run in the skeleton above (it returns before reaching
+        # this Step) — that call is intentionally kept.
+        fin_ctx = _make_strategy_ctx(
+            self, messages, response, result, result.iterations, hook_ctx,
+        )
+        fin_ctx.t0 = t0
+        fin_ctx = await self._call_step(
+            self._strategy.finalization, fin_ctx, async_mode=async_mode,
+        )
         if async_mode:
             await asyncio.to_thread(self._git_commit, full_task, result)
         else:
