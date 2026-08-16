@@ -4,15 +4,15 @@ P1-1 introduces a composable ``LoopStrategy`` whose ``Step``
 implementations exchange state through this context. Defaults are
 chosen so v0.1 callers can build a fresh context in one line.
 
-Why a dedicated dataclass instead of reusing ``messages`` + ``result``
-directly: LoopStrategy may add per-step fields (recent_hashes,
-previous_summary, …) without touching the legacy ``AgentLoop`` state.
+L7 adds ``result`` and ``hook_ctx`` fields so steps can read the
+in-flight AgentLoop result / hook context without a separate
+``metadata`` lookup.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -25,8 +25,8 @@ class LoopContext:
     """
 
     task: str
-    context: str | None = None
-    history: list[dict[str, Any]] | None = None
+    context: Optional[str] = None
+    history: Optional[list[dict[str, Any]]] = None
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     iteration: int = 0
@@ -43,13 +43,20 @@ class LoopContext:
     tool_calls_made: int = 0
 
     # Compaction state (CompactionStep writes; later steps read).
-    previous_summary: str | None = None
+    previous_summary: Optional[str] = None
     last_seq: int = 0
 
     # Stop signals — a step may set should_stop + stop_reason to break
     # the loop early. ``should_continue`` reads these to decide.
     should_stop: bool = False
-    stop_reason: str | None = None
+    stop_reason: Optional[str] = None
+
+    # L7: carry the in-flight AgentLoop result so steps can mutate
+    # it without round-tripping through metadata. Optional so v0.1
+    # callers that only build a transient LoopContext (e.g.
+    # ``_make_strategy_ctx`` for stop/continuation reads) keep working.
+    result: Any | None = None
+    hook_ctx: Any | None = None
 
     # Free-form bag for step-specific payloads (no per-step field
     # explosion; v0.1 keeps it minimal).

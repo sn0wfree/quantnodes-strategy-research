@@ -1,10 +1,8 @@
-"""Default PreRunStep — placeholder (v0.1).
+"""Default PreRunStep (L7).
 
-v0.1 keeps PreRunStep as a no-op stub. The full hypothesis / goal /
-context-injection logic stays inside AgentLoop._prepare_run for now;
-the migration to a Step happens in L7 once AgentLoop._run_loop_core
-is rewritten to drive the strategy. See ``loop_strategy.py`` for
-composition.
+Bound to an AgentLoop via ``bind_agent_loop`` — ``execute`` delegates to
+``agent_loop._prepare_run`` so the strategy step has the same effect
+as the legacy hard-coded pre-run block in ``_run_loop_core``.
 """
 
 from __future__ import annotations
@@ -13,7 +11,14 @@ from ..loop_context import LoopContext
 
 
 class DefaultPreRunStep:
-    """No-op PreRunStep; the real pre-run still lives in AgentLoop."""
+    """PreRunStep that delegates to ``agent_loop._prepare_run``."""
+
+    def __init__(self) -> None:
+        self._loop: object | None = None
+
+    def bind_agent_loop(self, agent_loop: object) -> None:
+        """L7 wiring — AgentLoop injects itself after strategy creation."""
+        self._loop = agent_loop
 
     @property
     def name(self) -> str:
@@ -23,10 +28,16 @@ class DefaultPreRunStep:
         return True
 
     def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
-        # v0.1: AgentLoop builds the initial messages + result via
-        # ``_prepare_run`` and stores them in ``ctx.messages`` before
-        # the loop starts. The Step itself is a hook for future
-        # strategy variants that want custom pre-run injection.
+        if self._loop is None:
+            return ctx
+        full_task, result, messages, t0 = self._loop._prepare_run(
+            ctx.task, ctx.context, ctx.history,
+        )
+        ctx.messages = list(messages)
+        ctx.result = result
+        ctx.iteration = 0
+        ctx.t0 = t0
+        ctx.metadata["full_task"] = full_task
         return ctx
 
 

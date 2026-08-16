@@ -396,3 +396,26 @@ tools / bus 测试全绿，证明引入的抽象层未破坏现有行为。
 注册表：`StrategyFactory.available()` 现在返回 `["react", "explorer", "validator", "minimal"]`，`create_strategy(name=None)` 默认 `react`。注册发生在 `__init__.py`（而非 `factory.py`）以避开循环导入。
 
 详情见 `docs/p1-2-3-4-strategies.md`。
+
+---
+
+## 附录：Profile / LoopStrategy 接入（P1-5）
+
+`Profile`（YAML / dict）通过 `loop_strategy` 字段指向 LoopStrategy：
+
+- **`resolve_loop_strategy()`** (`core/agent/strategy/profile_resolver.py`) — 纯函数，4 种 spec：
+  - `None` → 默认 `"react"`
+  - `str` (`"explorer"`) → `create_strategy(name)`
+  - `dict` (`{"name": "validator", "config": {...}}`) → name + LoopConfig
+  - `LoopStrategy` 实例 → 直接透传
+  - 非法类型 → `ValueError`；未知 name → `KeyError`
+
+- **AgentLoop 接入** (`core/agent/loop.py`) — 新增 `strategy=` 构造参数：
+  - 解析后存到 `self._strategy`
+  - `AgentLoop.get_strategy()` 暴露（供 L7 实际驱动）
+  - `_run_loop_core` v0.1 暂不读取（行为等价默认 ReAct）
+
+P1-6（`_run_loop_core` 实际驱动 strategy）延期到 L7：
+ 涉及 60+ 行 for 循环的拆解，独立 PR 更安全。
+
+详情见 `docs/p1-5-6-profile-and-migration.md`。

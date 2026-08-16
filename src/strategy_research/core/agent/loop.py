@@ -162,6 +162,55 @@ def compaction_persister_registered(fn: Any):
         _compaction_persister = previous
 
 
+# ── L7: LoopStrategy context helper ────────────────────────────────────
+
+
+def _make_strategy_ctx(
+    loop: Any,
+    messages: list[dict[str, Any]],
+    response: Any,
+    result: Any,
+    iteration: int,
+) -> Any:
+    """Build a transient ``LoopContext`` for consulting Stop /
+    Continuation steps without disturbing the legacy hard-coded
+    control flow. v0.1 keeps the strategy steps read-only — the
+    legacy path still drives everything; a custom step can only flip
+    ``ctx.should_stop`` (the loop body honours it).
+    """
+    from .strategy.loop_context import LoopContext
+
+    return LoopContext(
+        task="",
+        messages=list(messages),
+        iteration=iteration,
+        response=response,
+        response_was_tool_call=bool(getattr(response, "tool_calls", None)),
+        response_content=getattr(response, "content", "") or "",
+        result=result,
+    )
+
+
+def _inject_agent_loop(strategy: Any, agent_loop: Any) -> None:
+    """L7 — bind ``agent_loop`` to every step on ``strategy`` that opts in.
+
+    Steps that need the loop (e.g. DefaultPreRunStep, DefaultLLMCallStep)
+    define a ``bind_agent_loop`` method; custom or no-op steps simply
+    ignore the call. Walks the 9 known step slots.
+    """
+    slots = (
+        "pre_run", "llm_call", "compaction", "stop", "continuation",
+        "progress", "resilience", "tool_execution", "finalization",
+    )
+    for slot in slots:
+        step = getattr(strategy, slot, None)
+        if step is None:
+            continue
+        bind = getattr(step, "bind_agent_loop", None)
+        if callable(bind):
+            bind(agent_loop)
+
+
 # ── Result dataclass ────────────────────────────────────────────────
 
 
@@ -241,6 +290,12 @@ class AgentLoop:
         retry_policy: RetryPolicy | None = None,
         enable_claim_validation: bool = False,
         strict_claim_validation: bool = False,
+        # ── P1-5: LoopStrategy integration ──────────────────────
+        # v0.1: accept the strategy spec; build / resolve into a
+        # ``LoopStrategy`` and store on self. The actual rewrite of
+        # ``_run_loop_core`` to drive the strategy lands in L7.
+        # Accepts: ``LoopStrategy`` / str / dict / None.
+        strategy: Any | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -266,6 +321,15 @@ class AgentLoop:
         self._event_bus = event_bus
         self._circuit_breaker = circuit_breaker
         self._retry_policy = retry_policy or RetryPolicy()
+        # P1-5: build / resolve the LoopStrategy from the spec.
+        # v0.1 stores it on self; ``_run_loop_core`` does not yet
+        # consult it (that's L7's job).
+        from .strategy.profile_resolver import resolve_loop_strategy
+        self._strategy = resolve_loop_strategy(strategy)
+        # L7: inject self into every Default*Step so steps that opt
+        # in (currently DefaultPreRunStep + DefaultLLMCallStep) can
+        # call AgentLoop methods. Custom steps ignore the binding.
+        _inject_agent_loop(self._strategy, self)
         self._enable_claim_validation = enable_claim_validation
         self._strict_claim_validation = strict_claim_validation
         self.cc = compact_config or config.compact_config or CompactConfig()
@@ -648,6 +712,15 @@ class AgentLoop:
             from pathlib import Path
             workspace = Path.cwd()
         return StaticSandbox(workspace)
+
+    # ── P1-5: LoopStrategy accessor ──────────────────────────────
+
+    def get_strategy(self):
+        """Return the ``LoopStrategy`` resolved from the ``strategy=``
+        constructor arg (or the default ReAct strategy when none was
+        supplied). v0.1 stores the strategy on ``self._strategy`` but
+        ``_run_loop_core`` does not yet consult it (L7 work)."""
+        return self._strategy
 
     # ── Shared logic (sync-safe: pure logic + trace + emit, no I/O) ──
 
@@ -1049,8 +1122,25 @@ class AgentLoop:
             self._append_assistant_msg(response, messages, result, iteration)
 
             if not response.has_tool_calls():
+                # L7: consult the strategy's ContinuationStep before
+                # the hard-coded goal check. DefaultContinuationStep is
+                # a no-op (returns False); the legacy path still runs.
+                should_continue, _ = self._strategy.continuation.evaluate(
+                    _make_strategy_ctx(self, messages, response, result, iteration)
+                )
+                if should_continue:
+                    continue
                 if self._check_goal_continuation(response, messages, result, iteration):
                     continue
+                # L7: consult the strategy's StopStep before the legacy
+                # _handle_stop. DefaultStopStep is a no-op; the legacy
+                # path still runs.
+                should_stop, _stop_reason = self._strategy.stop.evaluate(
+                    _make_strategy_ctx(self, messages, response, result, iteration)
+                )
+                if should_stop:
+                    await _fire("after_iteration", hook_ctx)
+                    break
                 self._handle_stop(response, result, iteration)
                 await _fire("after_iteration", hook_ctx)
                 break
