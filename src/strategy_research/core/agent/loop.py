@@ -1151,14 +1151,18 @@ class AgentLoop:
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
 
-            if async_mode:
-                messages, applied = await self._amaybe_compact(messages)
-            else:
-                messages, applied = self._maybe_compact(messages)
-            if applied:
-                self._emit_compaction(applied, iteration, result)
-            self._emit_iter_start(iteration, messages)
-            self._inject_todos_snapshot(messages)
+            # L7 v0.5: compaction + per-iteration observability delegated
+            # to the strategy's CompactionStep. The step runs the
+            # compaction engine, emits _emit_compaction, _emit_iter_start,
+            # and _inject_todos_snapshot — so the skeleton no longer
+            # hard-codes these per-iteration side-effects.
+            comp_ctx = _make_strategy_ctx(
+                self, messages, None, result, iteration, hook_ctx,
+            )
+            comp_ctx = await self._call_step(
+                self._strategy.compaction, comp_ctx, async_mode=async_mode,
+            )
+            messages = comp_ctx.messages
 
             # L7 v0.4: LLM call + before_iteration + on_error delegated
             # to the strategy's LLMCallStep. The step fires
