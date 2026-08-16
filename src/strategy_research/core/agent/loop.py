@@ -356,6 +356,8 @@ class AgentLoop:
         else:
             from .context_injector import build_default_injectors
             self._injectors = build_default_injectors()
+        # DSH-inspired: steering inbox for mid-loop message injection.
+        self._inbox: asyncio.Queue = asyncio.Queue()
 
         # Tool filtering: allowed_tools > readonly > all
         if allowed_tools is not None:
@@ -1118,6 +1120,33 @@ class AgentLoop:
         """
         return await self._run_loop_core(task, context, history, async_mode=True)
 
+    # ── DSH-inspired: steering inbox ──────────────────────────────
+
+    def inject(self, message: dict[str, Any]) -> None:
+        """Queue a message for injection at the next pre-step boundary.
+
+        The message is drained at the start of each iteration (after
+        compaction, before LLM call).  This enables mid-loop steering
+        — e.g. injecting user corrections or external context while the
+        agent is still running.
+
+        Non-blocking: always succeeds.  Messages are FIFO.
+        """
+        self._inbox.put_nowait(message)
+
+    async def ainject(self, message: dict[str, Any]) -> None:
+        """Async variant of inject()."""
+        await self._inbox.put(message)
+
+    def _drain_inbox(self, messages: list[dict[str, Any]]) -> None:
+        """Drain all queued inbox messages into the conversation."""
+        while not self._inbox.empty():
+            try:
+                msg = self._inbox.get_nowait()
+                messages.append(msg)
+            except asyncio.QueueEmpty:
+                break
+
     async def _run_loop_core(  # noqa: C901
         self,
         task: str,
@@ -1174,6 +1203,9 @@ class AgentLoop:
                 self._strategy.compaction, comp_ctx, async_mode=async_mode,
             )
             messages = comp_ctx.messages
+
+            # DSH-inspired: drain steering inbox (mid-loop message injection)
+            self._drain_inbox(messages)
 
             # DSH-inspired: run per-iteration injectors (order=0, e.g. TodosInjector)
             for injector in self._injectors:
