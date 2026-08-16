@@ -1,6 +1,6 @@
 # P1-2/3/4 — 三个一策略实现
 
-> **Status:** Draft (branch `p1-2-3-4-strategies`)
+> **Status:** Completed (branch `p1-2-3-4-strategies`, merged to `main` as `a9a3c1c`)
 > **承接:** P1-1 LoopStrategy 基础设施。每个策略是一个 `LoopStrategy`
 > 子类 + 重写对应 Step + 在 factory 注册。
 
@@ -68,12 +68,16 @@ class MinimalStrategy(CustomStrategy):
 
 ## 实施步骤
 
-| 步骤 | 内容 | 验证 |
-|------|------|------|
-| 2A | `core/agent/strategy/explorer.py` + factory 注册 `"explorer"` | 5 个测试 |
-| 2B | `core/agent/strategy/validator.py` + factory 注册 `"validator"` | 5 个测试 |
-| 2C | `core/agent/strategy/minimal.py` + factory 注册 `"minimal"` | 5 个测试 |
-| 2D | `__init__.py` re-export + 集成测试 | 现有 20+ 测试 + 15 个新增 |
+| 步骤 | 内容 | 验证 | 提交 |
+|------|------|------|------|
+| 2A | `core/agent/strategy/explorer.py` + factory 注册 `"explorer"` | 5 个测试 | `77e3ab4` |
+| 2B | `core/agent/strategy/validator.py` + factory 注册 `"validator"` | 5 个测试 | `77e3ab4` |
+| 2C | `core/agent/strategy/minimal.py` + factory 注册 `"minimal"` | 5 个测试 | `77e3ab4` |
+| 2D | `__init__.py` re-export + 集成测试 | 现有 21 个测试 + 23 个新增 | `77e3ab4` |
+| 合并 | merge commit | ✅ | `a9a3c1c` |
+
+**测试**：23 个 P1-2/3/4 新增 + 21 个 P1-1 回归 = 44 个策略相关测试全绿；总回归 270+ 测试通过。
+**ruff**：P1-2/3/4 新增文件 0 错误。
 
 ## 风险
 

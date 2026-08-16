@@ -375,3 +375,24 @@ AgentLoop 实际迁移留作后续迭代。现有 260 个 AgentLoop / EventStore
 tools / bus 测试全绿，证明引入的抽象层未破坏现有行为。
 
 详情见 `docs/p1-1-loop-strategy-abstraction.md`。
+
+---
+
+## 附录：三策略实现（P1-2/3/4）
+
+在 P1-1 `LoopStrategy` 基础设施之上新增三个一策略子类（每个一策略 = 一个 `LoopStrategy` 子类 + 必要时重写 Step）：
+
+| 策略 | 工厂 | 设计重点 | 关键参数 |
+|------|------|----------|----------|
+| **`ExplorerStrategy`** | `ExplorerStrategyFactory.create()` | 高迭代、宽松进展 | `max_iterations=50, no_progress_window=5` |
+| **`ValidatorStrategy`** | `ValidatorStrategyFactory.create()` | 低迭代、严格进展、最终化校验 | `max_iterations=5, no_progress_window=2`, `finalization=ClaimValidationFinalizationStep` |
+| **`MinimalStrategy`** | `MinimalStrategyFactory.create()` | 单次 LLM、不调用工具 | `max_iterations=1`, `tool_execution=NoOpToolExecutionStep` |
+
+自定义 Step helper（`core/agent/strategy/custom_steps.py`）：
+
+- **`ClaimValidationFinalizationStep`** — 设置 `ctx.metadata["claim_validation_ran"] = True`，让下游消费者知道策略触发了 claim 校验（真实 call 留给 L7 AgentLoop 迁移时接入）。
+- **`NoOpToolExecutionStep`** — context 透传；若 assistant 请求了 tool calls，记录 `ctx.metadata["tool_execution_skipped"] = True`。
+
+注册表：`StrategyFactory.available()` 现在返回 `["react", "explorer", "validator", "minimal"]`，`create_strategy(name=None)` 默认 `react`。注册发生在 `__init__.py`（而非 `factory.py`）以避开循环导入。
+
+详情见 `docs/p1-2-3-4-strategies.md`。
