@@ -300,3 +300,38 @@ branch_id, seq)` 保证分支内单调。
 
 详情见 `docs/p0-1-event-sourcing-design.md`（母文档）与各 phase
 子文档（A1-A4, B1-B4, C1/C3, D）。
+
+---
+
+## 附录：Capability Seam（P0-2）
+
+数据源 / 回测 / 沙箱三层从"硬编码实现"转为 Protocol + Provider：
+
+- **`DataStore`** (`core/storage/data_store.py`) — 鸭子类型 facade，
+  覆盖 load_ohlcv_data / 因子注册表 / 回测结果 / 权重 NAV 历史 / 校验
+  缓存 / 导入元数据 / 数据指纹。`DuckDBDataStore` 是默认实现
+  （薄包装 `core/db.py` 函数），registry 在 `data_store_registry.py`。
+  工具 / 服务通过 `ToolContext.data_store` 注入，或调用
+  `from strategy_research.core.storage import get_store`。
+- **`BacktestResult`** (`core/backtest_models.py`) — 5 字段权威定义
+  （含 `factor_failures`）。`utils/backtest_engine` 与
+  `utils/strategy_engine` re-export，import 路径不变。
+- **`ExecutionSandbox`** (`core/agent/sandbox/protocol.py`) —
+  `validate_source` + `resolve_write` + `resolve_read` 是当前能力；
+  `execute_strategy` / `allow_network` / `get_resource_usage` 是未来
+  runtime hooks（v0.1 raise `NotImplementedError`）。`StaticSandbox`
+  是默认实现（包装 `validate_python_source` + `PathWhitelist`）。
+- **`ToolContext` DI** (`core/agent/tools_capability.py`) —
+  `AgentLoop._build_data_store` / `_build_sandbox` 自动注入默认值；
+  工具通过 `get_data_store(ctx)` / `get_sandbox(ctx)` helper 消费，
+  seam 缺失时抛 `ToolCapabilityError`。
+
+新增/迁移调用方：
+
+- `DuckDBDataStore` 包装所有 `core.db` 函数 — v0.1 不强制迁移调用方
+- `BacktestResult` 双类型 alias — 现有代码零改动
+- `ExecutionSandbox` legacy `sandbox.py` 移到 `sandbox/legacy.py` —
+  `__init__.py` re-export 公开名字保持兼容
+
+详情见 `docs/p0-2-capability-seams.md`（母文档）与各 phase
+子文档（A/B/C/D）。
