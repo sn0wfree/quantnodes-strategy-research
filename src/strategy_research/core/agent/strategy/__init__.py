@@ -37,6 +37,7 @@ from .factory import (
 from .loop_context import LoopContext
 from .loop_strategy import LoopConfig, LoopStrategy
 from .minimal import MinimalStrategy, MinimalStrategyFactory
+from .profile_resolver import resolve_loop_strategy
 from .protocol import (
     CompactionStep,
     ContinuationStep,
@@ -66,6 +67,7 @@ __all__ = [
     "MinimalStrategy",
     "MinimalStrategyFactory",
     "NoOpToolExecutionStep",
+    "resolve_loop_strategy",
     "PreRunStep",
     "ProgressStep",
     "ReActStrategyFactory",

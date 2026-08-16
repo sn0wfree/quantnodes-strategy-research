@@ -241,6 +241,12 @@ class AgentLoop:
         retry_policy: RetryPolicy | None = None,
         enable_claim_validation: bool = False,
         strict_claim_validation: bool = False,
+        # ── P1-5: LoopStrategy integration ──────────────────────
+        # v0.1: accept the strategy spec; build / resolve into a
+        # ``LoopStrategy`` and store on self. The actual rewrite of
+        # ``_run_loop_core`` to drive the strategy lands in L7.
+        # Accepts: ``LoopStrategy`` / str / dict / None.
+        strategy: Any | None = None,
     ):
         self.config = config
         self.memory = memory
@@ -266,6 +272,11 @@ class AgentLoop:
         self._event_bus = event_bus
         self._circuit_breaker = circuit_breaker
         self._retry_policy = retry_policy or RetryPolicy()
+        # P1-5: build / resolve the LoopStrategy from the spec.
+        # v0.1 stores it on self; ``_run_loop_core`` does not yet
+        # consult it (that's L7's job).
+        from .strategy.profile_resolver import resolve_loop_strategy
+        self._strategy = resolve_loop_strategy(strategy)
         self._enable_claim_validation = enable_claim_validation
         self._strict_claim_validation = strict_claim_validation
         self.cc = compact_config or config.compact_config or CompactConfig()
@@ -648,6 +659,15 @@ class AgentLoop:
             from pathlib import Path
             workspace = Path.cwd()
         return StaticSandbox(workspace)
+
+    # ── P1-5: LoopStrategy accessor ──────────────────────────────
+
+    def get_strategy(self):
+        """Return the ``LoopStrategy`` resolved from the ``strategy=``
+        constructor arg (or the default ReAct strategy when none was
+        supplied). v0.1 stores the strategy on ``self._strategy`` but
+        ``_run_loop_core`` does not yet consult it (L7 work)."""
+        return self._strategy
 
     # ── Shared logic (sync-safe: pure logic + trace + emit, no I/O) ──
 
