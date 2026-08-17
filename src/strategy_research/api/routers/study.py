@@ -29,6 +29,7 @@ from ..schemas.study import (
     StudyGuidanceResponse,
     StudyHangingEventsResponse,
     StudyJournalResponse,
+    StudyKnowledgeResponse,
     StudyListResponse,
     StudyRoundArtifactsResponse,
     StudyRoundDiffResponse,
@@ -38,6 +39,7 @@ from ..schemas.study import (
     StudyStartResponse,
     StudyStatusResponse,
     StudySummaryResponse,
+    StudyTodosResponse,
 )
 from ._task_utils import log_task_exception
 
@@ -834,6 +836,24 @@ async def study_journal(request: Request, study_id: str):
     p = journal_path(Path(study.workspace_path), study_id)
     content = p.read_text(encoding="utf-8") if p.exists() else ""
     return {"status": "ok", "study_id": study_id, "journal": content}
+
+
+@router.get("/{study_id}/todos", response_model=StudyTodosResponse)
+async def study_todos(request: Request, study_id: str):
+    """v2: todos.md content (task tracking for the study)."""
+    study = _owned_study(request, study_id)
+    p = Path(study.workspace_path) / "study" / study_id / "todos.md"
+    content = p.read_text(encoding="utf-8") if p.exists() else ""
+    return {"status": "ok", "study_id": study_id, "todos": content}
+
+
+@router.get("/{study_id}/knowledge", response_model=StudyKnowledgeResponse)
+async def study_knowledge(request: Request, study_id: str):
+    """v2: knowledge.md content (accumulated research knowledge)."""
+    study = _owned_study(request, study_id)
+    p = Path(study.workspace_path) / "study" / study_id / "knowledge.md"
+    content = p.read_text(encoding="utf-8") if p.exists() else ""
+    return {"status": "ok", "study_id": study_id, "knowledge": content}
 
 
 @router.get("/{study_id}/guidance", response_model=StudyGuidanceResponse)

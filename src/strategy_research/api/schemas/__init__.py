@@ -29,6 +29,7 @@ from .study import (
     StudyGuidanceResponse,
     StudyHangingEventsResponse,
     StudyJournalResponse,
+    StudyKnowledgeResponse,
     StudyListItem,
     StudyListResponse,
     StudyRedoRequest,
@@ -41,6 +42,7 @@ from .study import (
     StudyStartResponse,
     StudyStatusResponse,
     StudySummaryResponse,
+    StudyTodosResponse,
 )
 
 __all__ = [
@@ -70,6 +72,7 @@ __all__ = [
     "StudyGuidanceResponse",
     "StudyHangingEventsResponse",
     "StudyJournalResponse",
+    "StudyKnowledgeResponse",
     "StudyListItem",
     "StudyListResponse",
     "StudyRedoRequest",
@@ -82,4 +85,5 @@ __all__ = [
     "StudyStartResponse",
     "StudyStatusResponse",
     "StudySummaryResponse",
+    "StudyTodosResponse",
 ]

@@ -224,6 +224,12 @@ class APIClient {
     journal: (studyId: string) =>
       this.get<StudyJournalResponse>(`/study/${studyId}/journal`),
 
+    todos: (studyId: string) =>
+      this.get<StudyTodosResponse>(`/study/${studyId}/todos`),
+
+    knowledge: (studyId: string) =>
+      this.get<StudyKnowledgeResponse>(`/study/${studyId}/knowledge`),
+
     roundArtifacts: (studyId: string, roundNum: number) =>
       this.get<StudyRoundArtifactsResponse>(`/study/${studyId}/rounds/${roundNum}/artifacts`),
 
@@ -743,6 +749,18 @@ export interface StudyJournalResponse {
   status: string
   study_id: string
   journal: string
+}
+
+export interface StudyTodosResponse {
+  status: string
+  study_id: string
+  todos: string
+}
+
+export interface StudyKnowledgeResponse {
+  status: string
+  study_id: string
+  knowledge: string
 }
 
 export interface ArtifactItem {

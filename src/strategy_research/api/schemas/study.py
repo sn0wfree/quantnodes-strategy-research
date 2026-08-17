@@ -185,6 +185,18 @@ class StudyJournalResponse(BaseModel):
     journal: str
 
 
+class StudyTodosResponse(BaseModel):
+    status: str
+    study_id: str
+    todos: str
+
+
+class StudyKnowledgeResponse(BaseModel):
+    status: str
+    study_id: str
+    knowledge: str
+
+
 class StudyGuidanceResponse(BaseModel):
     status: str
     study_id: str
