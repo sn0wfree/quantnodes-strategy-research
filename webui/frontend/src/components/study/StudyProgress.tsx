@@ -70,28 +70,42 @@ export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
       if (r.status === 'ok') {
         setSummary(r)
 
-        // Build flow nodes from summary
+        // Build flow nodes from real round data
         const nodes: FlowNodeData[] = WORKFLOW_NODES.map((n) => ({
           id: n.id,
           label: n.label,
           status: 'pending' as const,
         }))
 
-          // Mark nodes based on current round and execution status
-        if (current?.execution_status === 'running') {
-          // Mark first few nodes as done based on round progress
-          const round = current.current_round ?? 1
-          const doneCount = Math.min(round * 2, WORKFLOW_NODES.length - 1)
+        // Determine phase status from rounds
+        const rounds = r.recent_rounds ?? []
+        const round = current?.current_round ?? 0
 
-          nodes.forEach((n, i) => {
-            if (i < doneCount) {
-              n.status = 'done'
-            } else if (i === doneCount) {
-              n.status = 'running'
-            }
-          })
-        } else if (current?.execution_status === 'complete') {
+        if (current?.execution_status === 'complete') {
+          // All done
           nodes.forEach((n) => { n.status = 'done' })
+        } else if (rounds.length > 0 && round > 0) {
+          // Last round's verdict tells us the outcome
+          const lastRound = rounds[rounds.length - 1]
+          const verdict = lastRound?.verdict
+
+          if (verdict === 'keep' || verdict === 'discard') {
+            // Round completed - all phases done for this round
+            nodes.forEach((n) => { n.status = 'done' })
+          } else if (current?.execution_status === 'running') {
+            // Round in progress - show partial progress based on round count
+            // Each round completes all 9 phases, so completed rounds = all done
+            // Current round = show some phases as running
+            const completedRounds = Math.max(0, round - 1)
+            if (completedRounds > 0) {
+              nodes.forEach((n) => { n.status = 'done' })
+            }
+            // Mark first phase as running for current round
+            nodes[0].status = 'running'
+          }
+        } else if (current?.execution_status === 'running' && round === 1) {
+          // First round, no data yet
+          nodes[0].status = 'running'
         }
 
         setFlowNodes(nodes)

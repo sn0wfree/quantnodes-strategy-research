@@ -1113,6 +1113,14 @@ async def study_dispatch_action(
         if not sched.cancel(study_id, reason=reason):
             raise HTTPException(status_code=409, detail="study not cancellable")
         return {"status": "ok", "study_id": study_id, "action": "cancelled"}
+    if act == StudyAction.REDO:
+        round_num = body.round_num if body and body.round_num else study.current_round
+        if study.execution_status == StudyStatus.RUNNING:
+            raise HTTPException(status_code=409, detail="study is running; pause or cancel first")
+        ok = await sched.redo(study_id, round_num, workspace_path=study.workspace_path)
+        if not ok:
+            raise HTTPException(status_code=409, detail="redo failed")
+        return {"status": "ok", "study_id": study_id, "action": f"redo_round_{round_num}"}
     raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
 
 

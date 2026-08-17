@@ -286,6 +286,7 @@ class StudyAvailableActionsResponse(BaseModel):
 
 class StudyActionRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=512)
+    round_num: Optional[int] = Field(None, ge=1)
 
 
 class StudyRedoRequest(BaseModel):

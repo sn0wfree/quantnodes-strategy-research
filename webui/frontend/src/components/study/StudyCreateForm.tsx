@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { useStudyStore } from '../../stores/study'
 import { useAuthStore } from '../../stores/auth'
 import { api, type MetricTarget } from '../../api/client'
-import { Plus, X, Target, SlidersHorizontal } from 'lucide-react'
+import { Plus, X, Target, SlidersHorizontal, ChevronDown, ChevronRight } from 'lucide-react'
 import { StrategyNameInput } from './StrategyNameInput'
 
 interface Props {
-  sessionId: string
+  sessionId: string | null | undefined
   workspacePath: string
-  onCreated?: () => void
+  onCreated?: (studyId: string) => void
+  /** Compact variant for inline use (smaller text, collapsible advanced params) */
+  compact?: boolean
 }
 
 const DEFAULT_METRICS: MetricTarget[] = [
@@ -17,21 +19,25 @@ const DEFAULT_METRICS: MetricTarget[] = [
   { name: 'max_dd', op: '>=', value: -0.15 },
 ]
 
-const INPUT_CLS =
-  'w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-sm text-slate-200 outline-none transition-shadow focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40'
+const INPUT_CLS = (compact?: boolean) =>
+  `w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 ${
+    compact ? 'text-xs' : 'text-sm'
+  } text-slate-200 outline-none transition-shadow focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40`
 
 function Section({
   icon,
   title,
   children,
+  compact,
 }: {
   icon: React.ReactNode
   title: string
   children: React.ReactNode
+  compact?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
-      <div className="mb-2.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+    <div className={`rounded-xl border border-slate-800 bg-slate-900/60 ${compact ? 'p-2.5' : 'p-3.5'} shadow-soft`}>
+      <div className={`mb-2.5 flex items-center gap-1.5 ${compact ? 'text-[9px]' : 'text-[10px]'} font-medium uppercase tracking-wider text-slate-500`}>
         {icon}
         {title}
       </div>
@@ -40,7 +46,7 @@ function Section({
   )
 }
 
-export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) {
+export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }: Props) {
   const [objective, setObjective] = useState('')
   const [strategyName, setStrategyName] = useState('')
   const [metrics, setMetrics] = useState<MetricTarget[]>(DEFAULT_METRICS)
@@ -50,6 +56,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
   const [behavior, setBehavior] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const busy = useStudyStore((s) => s.busy)
   const setBusy = useStudyStore((s) => s.setBusy)
@@ -67,6 +74,10 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    if (!sessionId) {
+      setError('Session ID is required.')
+      return
+    }
     if (!objective.trim()) {
       setError('Objective is required.')
       return
@@ -79,7 +90,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
     setBusy(true)
     setErrorGlobal('')
     try {
-      await api.study.start({
+      const r = await api.study.start({
         session_id: sessionId,
         objective: objective.trim(),
         workspace_path: workspacePath,
@@ -92,7 +103,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
       })
       setObjective('')
       setStrategyName('')
-      onCreated?.()
+      onCreated?.(r.study_id)
     } catch (err) {
       setError((err as Error).message || 'Study start failed')
     } finally {
@@ -102,20 +113,20 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3 text-slate-100">
-      <Section icon={<Target className="h-3 w-3 text-primary-400" />} title="研究目标">
+    <form onSubmit={onSubmit} className={`space-y-3 text-slate-100 ${compact ? 'text-xs' : ''}`}>
+      <Section icon={<Target className="h-3 w-3 text-primary-400" />} title="研究目标" compact={compact}>
         <textarea
-          rows={3}
+          rows={compact ? 2 : 3}
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
           placeholder="例：研究 A 股动量因子，目标 Calmar ≥ 0.5"
-          className={INPUT_CLS}
+          className={INPUT_CLS(compact)}
         />
         <div className="mt-2.5">
           <StrategyNameInput
             objective={objective}
             userId={userId}
-            sessionId={sessionId}
+            sessionId={sessionId ?? ''}
             value={strategyName}
             onChange={setStrategyName}
           />
@@ -125,12 +136,13 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
       <Section
         icon={<Target className="h-3 w-3 text-primary-400" />}
         title="验收指标（默认对齐 AcceptanceConfig：calmar/sharpe/max_dd）"
+        compact={compact}
       >
         <div className="space-y-1.5">
           {metrics.map((m, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm">
+            <div key={i} className={`flex items-center gap-2 ${compact ? 'text-xs' : 'text-sm'}`}>
               <input
-                className="w-28 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                className={`w-28 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40 ${compact ? 'text-xs' : ''}`}
                 value={m.name}
                 onChange={(e) => updateMetric(i, { name: e.target.value })}
                 placeholder="metric"
@@ -151,7 +163,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
               <input
                 type="number"
                 step="0.01"
-                className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                className={`w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40 ${compact ? 'text-xs' : ''}`}
                 value={m.value}
                 onChange={(e) => updateMetric(i, { value: Number(e.target.value) })}
               />
@@ -181,62 +193,52 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
         </button>
       </Section>
 
-      <Section icon={<SlidersHorizontal className="h-3 w-3 text-primary-400" />} title="高级参数">
-        <div className="grid grid-cols-2 gap-2.5">
-          <div>
-            <label className="mb-1 block text-[10px] text-slate-500">轮数预算 (turns)</label>
-            <input
-              type="number"
-              min={1}
-              className={INPUT_CLS}
-              value={budgetTurn}
-              onChange={(e) =>
-                setBudgetTurn(e.target.value === '' ? '' : Number(e.target.value))
-              }
-              placeholder="不限"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[10px] text-slate-500">最大轮数</label>
-            <input
-              type="number"
-              min={1}
-              className={INPUT_CLS}
-              value={maxRounds}
-              onChange={(e) =>
-                setMaxRounds(e.target.value === '' ? '' : Number(e.target.value))
-              }
-              placeholder="不限"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[10px] text-slate-500">监控间隔（秒，0=不监控）</label>
-            <input
-              type="number"
-              min={0}
-              className={INPUT_CLS}
-              value={monitorSec}
-              onChange={(e) =>
-                setMonitorSec(e.target.value === '' ? '' : Number(e.target.value))
-              }
-              placeholder="例 3600"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[10px] text-slate-500">Behavior (CI)</label>
-            <select
-              className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-primary-500"
-              value={behavior}
-              onChange={(e) => setBehavior(e.target.value)}
-            >
-              <option value="">real LLM</option>
-              <option value="static">static</option>
-              <option value="varying">varying</option>
-              <option value="improving">improving</option>
-            </select>
-          </div>
+      {/* Advanced params - collapsible in compact mode, always shown otherwise */}
+      {compact ? (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 shadow-soft">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex w-full items-center gap-2 p-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-slate-500 transition-colors hover:text-slate-400"
+          >
+            <SlidersHorizontal className="h-3 w-3 text-primary-400" />
+            高级参数
+            {showAdvanced ? (
+              <ChevronDown className="ml-auto h-3 w-3" />
+            ) : (
+              <ChevronRight className="ml-auto h-3 w-3" />
+            )}
+          </button>
+          {showAdvanced && (
+            <div className="border-t border-slate-800 px-2.5 pb-2.5 pt-2">
+              <AdvancedParams
+                budgetTurn={budgetTurn}
+                setBudgetTurn={setBudgetTurn}
+                maxRounds={maxRounds}
+                setMaxRounds={setMaxRounds}
+                monitorSec={monitorSec}
+                setMonitorSec={setMonitorSec}
+                behavior={behavior}
+                setBehavior={setBehavior}
+                compact
+              />
+            </div>
+          )}
         </div>
-      </Section>
+      ) : (
+        <Section icon={<SlidersHorizontal className="h-3 w-3 text-primary-400" />} title="高级参数">
+          <AdvancedParams
+            budgetTurn={budgetTurn}
+            setBudgetTurn={setBudgetTurn}
+            maxRounds={maxRounds}
+            setMaxRounds={setMaxRounds}
+            monitorSec={monitorSec}
+            setMonitorSec={setMonitorSec}
+            behavior={behavior}
+            setBehavior={setBehavior}
+          />
+        </Section>
+      )}
 
       {error && (
         <p className="rounded-lg border border-rose-800 bg-rose-950/50 px-2.5 py-1.5 text-xs text-rose-300">
@@ -252,5 +254,82 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated }: Props) 
         {submitting ? '启动中…' : '启动 study'}
       </button>
     </form>
+  )
+}
+
+// Extracted advanced params to avoid duplication
+function AdvancedParams({
+  budgetTurn, setBudgetTurn,
+  maxRounds, setMaxRounds,
+  monitorSec, setMonitorSec,
+  behavior, setBehavior,
+  compact,
+}: {
+  budgetTurn: number | ''
+  setBudgetTurn: (v: number | '') => void
+  maxRounds: number | '' | ''
+  setMaxRounds: (v: number | '' | '') => void
+  monitorSec: number | ''
+  setMonitorSec: (v: number | '') => void
+  behavior: string
+  setBehavior: (v: string) => void
+  compact?: boolean
+}) {
+  const inputCls = INPUT_CLS(compact)
+  return (
+    <div className={`grid ${compact ? 'grid-cols-1 gap-2' : 'grid-cols-2 gap-2.5'}`}>
+      <div>
+        <label className={`mb-1 block ${compact ? 'text-[9px]' : 'text-[10px]'} text-slate-500`}>轮数预算 (turns)</label>
+        <input
+          type="number"
+          min={1}
+          className={inputCls}
+          value={budgetTurn}
+          onChange={(e) =>
+            setBudgetTurn(e.target.value === '' ? '' : Number(e.target.value))
+          }
+          placeholder="不限"
+        />
+      </div>
+      <div>
+        <label className={`mb-1 block ${compact ? 'text-[9px]' : 'text-[10px]'} text-slate-500`}>最大轮数</label>
+        <input
+          type="number"
+          min={1}
+          className={inputCls}
+          value={maxRounds}
+          onChange={(e) =>
+            setMaxRounds(e.target.value === '' ? '' : Number(e.target.value))
+          }
+          placeholder="不限"
+        />
+      </div>
+      <div>
+        <label className={`mb-1 block ${compact ? 'text-[9px]' : 'text-[10px]'} text-slate-500`}>监控间隔（秒，0=不监控）</label>
+        <input
+          type="number"
+          min={0}
+          className={inputCls}
+          value={monitorSec}
+          onChange={(e) =>
+            setMonitorSec(e.target.value === '' ? '' : Number(e.target.value))
+          }
+          placeholder="例 3600"
+        />
+      </div>
+      <div>
+        <label className={`mb-1 block ${compact ? 'text-[9px]' : 'text-[10px]'} text-slate-500`}>Behavior (CI)</label>
+        <select
+          className={`w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 ${compact ? 'text-xs' : 'text-sm'} text-slate-200 outline-none focus:border-primary-500`}
+          value={behavior}
+          onChange={(e) => setBehavior(e.target.value)}
+        >
+          <option value="">real LLM</option>
+          <option value="static">static</option>
+          <option value="varying">varying</option>
+          <option value="improving">improving</option>
+        </select>
+      </div>
+    </div>
   )
 }
