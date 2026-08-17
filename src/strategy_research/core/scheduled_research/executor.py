@@ -25,6 +25,7 @@ import logging
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from .cron_parser import next_cron_trigger
@@ -167,6 +168,16 @@ class ScheduledResearchExecutor:
 
     async def _dispatch_async(self, job: ScheduledResearchJob) -> None:
         """Dispatch a single job (awaits async dispatch_fn)."""
+        # Pre-check: skip jobs with non-existent workspace (test cleanup, stale jobs)
+        if job.workspace and not Path(job.workspace).exists():
+            logger.warning(
+                "Job %s skipped: workspace not found (%s)",
+                job.id, job.workspace,
+            )
+            self._schedule_next(job)
+            self._store.update(job)
+            return
+
         self._mark_running(job)
         try:
             result = self._dispatch_fn(job)
@@ -187,6 +198,16 @@ class ScheduledResearchExecutor:
 
     def _dispatch(self, job: ScheduledResearchJob) -> Optional[Awaitable[Optional[str]]]:
         """Sync variant of ``_dispatch_async`` — may return an awaitable."""
+        # Pre-check: skip jobs with non-existent workspace
+        if job.workspace and not Path(job.workspace).exists():
+            logger.warning(
+                "Job %s skipped: workspace not found (%s)",
+                job.id, job.workspace,
+            )
+            self._schedule_next(job)
+            self._store.update(job)
+            return None
+
         self._mark_running(job)
         try:
             result = self._dispatch_fn(job)
