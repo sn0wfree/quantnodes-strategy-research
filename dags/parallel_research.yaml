@@ -1,0 +1,127 @@
+# Parallel Research Pipeline DAG Configuration
+# Optimized version with parallel agent execution where possible.
+#
+# Stages:
+#   1. researcher (serial)
+#   2. data_quality + factor_analyst (parallel)
+#   3. strategist (serial)
+#   4. portfolio_construction + risk_controller (parallel)
+#   5. attribution_analyst + anti_overfit_analyst (parallel)
+#   6. backtest (serial)
+#   7. evaluation (serial)
+
+dag_id: parallel_research
+name: Parallel Research Pipeline
+description: |
+  Optimized research pipeline with parallel agent execution.
+  Independent agents run concurrently to reduce total execution time.
+
+version: "1.0"
+
+tasks:
+  # Stage 1: Research (must run first)
+  - task_id: agent_researcher
+    task_type: agent
+    name: researcher
+    config:
+      agent_name: researcher
+    dependencies: []
+    priority: 10
+
+  # Stage 2: Parallel - Data Quality and Factor Analysis
+  - task_id: agent_data_quality
+    task_type: agent
+    name: data_quality
+    config:
+      agent_name: data_quality
+    dependencies:
+      - agent_researcher
+    priority: 9
+
+  - task_id: agent_factor_analyst
+    task_type: agent
+    name: factor_analyst
+    config:
+      agent_name: factor_analyst
+    dependencies:
+      - agent_researcher
+    priority: 9
+
+  # Stage 3: Strategy (depends on both parallel tasks)
+  - task_id: agent_strategist
+    task_type: agent
+    name: strategist
+    config:
+      agent_name: strategist
+    dependencies:
+      - agent_data_quality
+      - agent_factor_analyst
+    priority: 8
+
+  # Stage 4: Parallel - Portfolio and Risk
+  - task_id: agent_portfolio_construction
+    task_type: agent
+    name: portfolio_construction
+    config:
+      agent_name: portfolio_construction
+    dependencies:
+      - agent_strategist
+    priority: 7
+
+  - task_id: agent_risk_controller
+    task_type: agent
+    name: risk_controller
+    config:
+      agent_name: risk_controller
+    dependencies:
+      - agent_strategist
+    priority: 7
+
+  # Stage 5: Parallel - Attribution and Anti-Overfit
+  - task_id: agent_attribution_analyst
+    task_type: agent
+    name: attribution_analyst
+    config:
+      agent_name: attribution_analyst
+    dependencies:
+      - agent_portfolio_construction
+      - agent_risk_controller
+    priority: 6
+
+  - task_id: agent_anti_overfit_analyst
+    task_type: agent
+    name: anti_overfit_analyst
+    config:
+      agent_name: anti_overfit_analyst
+    dependencies:
+      - agent_portfolio_construction
+      - agent_risk_controller
+    priority: 6
+
+  # Stage 6: Backtest
+  - task_id: backtest
+    task_type: backtest
+    name: backtest
+    config: {}
+    dependencies:
+      - agent_attribution_analyst
+      - agent_anti_overfit_analyst
+    priority: 5
+
+  # Stage 7: Evaluation
+  - task_id: evaluation
+    task_type: evaluation
+    name: evaluation
+    config: {}
+    dependencies:
+      - backtest
+    priority: 4
+
+metadata:
+  author: strategy-research
+  created_at: "2026-08-17"
+  tags:
+    - research
+    - parallel
+    - optimized
+  max_parallel: 4

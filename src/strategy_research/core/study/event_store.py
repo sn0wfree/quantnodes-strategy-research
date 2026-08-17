@@ -157,6 +157,7 @@ class EventStore:
 
         if db_path:
             self._init_db()
+            self._load_events_from_db()
 
     def _init_db(self) -> None:
         """Initialize SQLite database for persistent event storage."""
@@ -191,6 +192,39 @@ class EventStore:
         """)
         conn.commit()
         conn.close()
+
+    def _load_events_from_db(self) -> None:
+        """Load events from SQLite database on initialization."""
+        if not self._db_path:
+            return
+
+        import sqlite3
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            rows = conn.execute(
+                """SELECT event_id, event_type, study_id, timestamp, data, metadata, version
+                   FROM events ORDER BY seq ASC"""
+            ).fetchall()
+
+            for row in rows:
+                event = Event(
+                    event_id=row[0],
+                    event_type=EventType(row[1]),
+                    study_id=row[2],
+                    timestamp=row[3],
+                    data=json.loads(row[4]),
+                    metadata=json.loads(row[5]),
+                    version=row[6],
+                )
+                self._events.append(event)
+
+                # Update sequence counter
+                if event.study_id not in self._sequences:
+                    self._sequences[event.study_id] = 0
+                self._sequences[event.study_id] += 1
+
+        finally:
+            conn.close()
 
     def append(
         self,

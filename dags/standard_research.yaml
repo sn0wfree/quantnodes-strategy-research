@@ -1,0 +1,126 @@
+# Standard Research Pipeline DAG Configuration
+# This is the default 8-agent serial pipeline that replaces the hardcoded version.
+#
+# Usage:
+#   from strategy_research.core.study.integration import run_study_with_dag
+#   run_study_with_dag(study, store, "dags/standard_research.yaml")
+#
+# Or load directly:
+#   from strategy_research.core.study.integration import load_dag_from_yaml
+#   dag = load_dag_from_yaml("dags/standard_research.yaml")
+
+dag_id: standard_research
+name: Standard Research Pipeline
+description: |
+  The default 8-agent research pipeline for quantitative strategy research.
+  Agents execute in sequence: researcher → data_quality → factor_analyst →
+  strategist → portfolio_construction → risk_controller → attribution_analyst →
+  anti_overfit_analyst.
+
+version: "1.0"
+
+tasks:
+  # Stage 1: Research
+  - task_id: agent_researcher
+    task_type: agent
+    name: researcher
+    config:
+      agent_name: researcher
+    dependencies: []
+    priority: 10
+
+  # Stage 2: Data Quality
+  - task_id: agent_data_quality
+    task_type: agent
+    name: data_quality
+    config:
+      agent_name: data_quality
+    dependencies:
+      - agent_researcher
+    priority: 9
+
+  # Stage 3: Factor Analysis
+  - task_id: agent_factor_analyst
+    task_type: agent
+    name: factor_analyst
+    config:
+      agent_name: factor_analyst
+    dependencies:
+      - agent_data_quality
+    priority: 8
+
+  # Stage 4: Strategy Development
+  - task_id: agent_strategist
+    task_type: agent
+    name: strategist
+    config:
+      agent_name: strategist
+    dependencies:
+      - agent_factor_analyst
+    priority: 7
+
+  # Stage 5: Portfolio Construction
+  - task_id: agent_portfolio_construction
+    task_type: agent
+    name: portfolio_construction
+    config:
+      agent_name: portfolio_construction
+    dependencies:
+      - agent_strategist
+    priority: 6
+
+  # Stage 6: Risk Control
+  - task_id: agent_risk_controller
+    task_type: agent
+    name: risk_controller
+    config:
+      agent_name: risk_controller
+    dependencies:
+      - agent_portfolio_construction
+    priority: 5
+
+  # Stage 7: Attribution Analysis
+  - task_id: agent_attribution_analyst
+    task_type: agent
+    name: attribution_analyst
+    config:
+      agent_name: attribution_analyst
+    dependencies:
+      - agent_risk_controller
+    priority: 4
+
+  # Stage 8: Anti-Overfit Analysis
+  - task_id: agent_anti_overfit_analyst
+    task_type: agent
+    name: anti_overfit_analyst
+    config:
+      agent_name: anti_overfit_analyst
+    dependencies:
+      - agent_attribution_analyst
+    priority: 3
+
+  # Stage 9: Backtest Execution
+  - task_id: backtest
+    task_type: backtest
+    name: backtest
+    config: {}
+    dependencies:
+      - agent_anti_overfit_analyst
+    priority: 2
+
+  # Stage 10: Evaluation
+  - task_id: evaluation
+    task_type: evaluation
+    name: evaluation
+    config: {}
+    dependencies:
+      - backtest
+    priority: 1
+
+metadata:
+  author: strategy-research
+  created_at: "2026-08-17"
+  tags:
+    - research
+    - serial
+    - default
