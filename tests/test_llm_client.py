@@ -154,7 +154,7 @@ class TestToolCalls:
                         "content": None,
                         "tool_calls": [{
                             "id": "c1", "type": "function",
-                            "function": {"name": "read_file",
+                            "function": {"name": "read",
                                          "arguments": '{"path": "/foo"}'},
                         }],
                     },
@@ -164,12 +164,12 @@ class TestToolCalls:
         c = mock_client(h)
         r = c.chat(
             [{"role": "user", "content": "go"}],
-            tools=[{"type": "function", "function": {"name": "read_file"}}],
+            tools=[{"type": "function", "function": {"name": "read"}}],
         )
         assert r.has_tool_calls()
         assert len(r.tool_calls) == 1
         assert r.tool_calls[0].id == "c1"
-        assert r.tool_calls[0].name == "read_file"
+        assert r.tool_calls[0].name == "read"
         assert r.tool_calls[0].arguments == {"path": "/foo"}
         assert r.finish_reason == "tool_calls"
 

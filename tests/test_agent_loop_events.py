@@ -84,7 +84,7 @@ class TestToolEventPayload:
         # Pretend the LLM requested one tool call then stops
         tc = mock.MagicMock()
         tc.id = "call_abc"
-        tc.name = "read_file"
+        tc.name = "read"
         tc.arguments = {"path": "/x.py"}
         resp_tool = mock.MagicMock()
         resp_tool.content = ""
@@ -111,7 +111,7 @@ class TestToolEventPayload:
         tool_calls = [d for et, d in sink.events if et == "tool_call"]
         assert len(tool_calls) == 1
         tc_payload = tool_calls[0]
-        assert tc_payload["tool"] == "read_file"
+        assert tc_payload["tool"] == "read"
         # arguments is serialized to a JSON string (loop.py json.dumps it)
         assert tc_payload["arguments"] == '{"path": "/x.py"}'
         assert tc_payload["call_id"] == "call_abc"

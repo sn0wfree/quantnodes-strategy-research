@@ -260,7 +260,7 @@ class OpenAICompatClient:
         # Tool calls
         resp = client.chat(
             messages, tools=[{"type": "function",
-                              "function": {"name": "read_file", ...}}]
+                              "function": {"name": "read", ...}}]
         )
         for tc in resp.tool_calls:
             ...

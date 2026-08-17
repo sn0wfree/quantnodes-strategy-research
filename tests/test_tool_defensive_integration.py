@@ -42,15 +42,15 @@ class TestAllToolsStructuredErrors:
 
     @pytest.mark.parametrize("tool_name,kwargs", [
         # Workspace required
-        ("read_file", {"path": "x"}),
-        ("list_files", {}),
-        ("write_file", {"path": "x", "content": "y"}),
+        ("read", {"path": "x"}),
+        ("list", {}),
+        ("write", {"path": "x", "content": "y"}),
         ("run_backtest", {"strategy_name": "x"}),
         ("compute_factor", {"factor_code": "x"}),
         ("list_history", {}),
         ("factor_analysis", {"factor_code": "x"}),
         ("list_skills", {}),
-        ("load_skill", {"name": "x"}),
+        ("skill", {"name": "x"}),
         ("factor_cross_sectional_analysis", {"factor_code": "x"}),
         ("factor_quintile_returns", {"factor_code": "x"}),
         ("factor_ic_decay", {"factor_code": "x"}),

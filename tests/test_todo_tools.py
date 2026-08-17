@@ -28,7 +28,7 @@ from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
 
 
 def todo_resp(todos: list[dict], call_id: str = "todo-1") -> LLMResponse:
-    tc = ToolCall(id=call_id, name="todo_write", arguments={"todos": todos})
+    tc = ToolCall(id=call_id, name="todowrite", arguments={"todos": todos})
     return LLMResponse(content="", tool_calls=[tc], finish_reason="tool_calls")
 
 

@@ -285,9 +285,9 @@ class TestExecuteAgent:
 
         build_default_registry()
         ctrl = self._make_controller()
-        filtered = ctrl._build_tool_registry(["read_file"])
-        assert "read_file" in filtered
-        assert "write_file" not in filtered
+        filtered = ctrl._build_tool_registry(["read"])
+        assert "read" in filtered
+        assert "write" not in filtered
         assert len(filtered) == 1
         # Empty whitelist → empty registry (text-only mode)
         empty = ctrl._build_tool_registry([])

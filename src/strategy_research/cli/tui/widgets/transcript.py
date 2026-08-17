@@ -310,7 +310,7 @@ class TranscriptView(RichLog):
         Args:
             call_id: Unique tool-call identifier (used by ``update_tool_result``
                 to locate the line and replace it in-place).
-            tool: Tool name (e.g. ``"read_file"``).
+            tool: Tool name (e.g. ``"read"``).
             args: Tool arguments dict (JSON-serialised for display).
 
         Side effects:

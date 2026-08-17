@@ -1533,14 +1533,14 @@ class AgentLoop:
         )
 
         # SubAgentTool injection: emit_event, message_id, count ref, parent registry
-        if tc.name == "delegate_to_agent":
+        if tc.name == "task":
             kwargs["emit_event"] = self._emit
             kwargs["message_id"] = getattr(self, "_current_message_id", None)
             kwargs["_subagent_count_ref"] = self._subagent_count
             kwargs["_parent_registry"] = self.registry
 
         # TodoWriteTool injection: emit_event (session_id already injected)
-        if tc.name == "todo_write":
+        if tc.name == "todowrite":
             kwargs["emit_event"] = self._emit
 
         t0 = time.perf_counter()

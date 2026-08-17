@@ -287,7 +287,7 @@ class MCPServer:
             handler=list_skills,
         ))
         self.register(MCPTool(
-            name="load_skill",
+            name="skill",
             description="按名称加载技能内容",
             parameters={
                 "type": "object",

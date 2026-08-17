@@ -118,7 +118,7 @@ class TestAruncBasic:
     async def test_arun_multiple_tool_calls_one_response(self, workspace):
         mock = AsyncMockLLM([
             tool_resp([
-                ToolCall(id="c1", name="read_file", arguments={"path": "README.md"}),
+                ToolCall(id="c1", name="read", arguments={"path": "README.md"}),
                 ToolCall(id="c2", name="list_history", arguments={}),
             ]),
             text_resp("got both"),
@@ -185,7 +185,7 @@ class TestAruncMaxIterations:
     @pytest.mark.asyncio
     async def test_arun_max_iterations_reached(self, workspace):
         mock = AsyncMockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
+            tool_resp([ToolCall(id=f"c{i}", name="read",
                                 arguments={"path": f"file_{i}.txt"})])
             for i in range(5)
         ])

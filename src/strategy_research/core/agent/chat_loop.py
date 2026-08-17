@@ -89,7 +89,7 @@ def build_chat_agent_loop(
 
     # Gate shell tools: remove from registry when not allowed
     if registry is not None and not allow_shell_tools:
-        for shell_tool_name in ("run_command",):
+        for shell_tool_name in ("shell",):
             registry._tools.pop(shell_tool_name, None)
 
     # DAG-orchestrator sessions (session_id prefix "dag:"): the LLM gets

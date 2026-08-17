@@ -252,7 +252,7 @@ class TestBuildPayload(unittest.TestCase):
 
     def test_with_tools(self) -> None:
         cfg = LLMConfig(api_key="sk-test")
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        tools = [{"type": "function", "function": {"name": "read"}}]
         payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], tools, None, {}, _FAKE_ADAPTER)
         self.assertIn("tools", payload)
         self.assertEqual(payload["tool_choice"], "auto")
@@ -260,7 +260,7 @@ class TestBuildPayload(unittest.TestCase):
 
     def test_with_tool_choice(self) -> None:
         cfg = LLMConfig(api_key="sk-test")
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        tools = [{"type": "function", "function": {"name": "read"}}]
         payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], tools, "required", {}, _FAKE_ADAPTER)
         self.assertEqual(payload["tool_choice"], "required")
 

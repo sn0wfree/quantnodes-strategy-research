@@ -822,7 +822,7 @@ class ToolRegistry:
         to a safe subset::
 
             child_registry = parent_registry.restricted(
-                deny=["delegate_to_agent", "run_command"],
+                deny=["task", "shell"],
             )
         """
         if deny:

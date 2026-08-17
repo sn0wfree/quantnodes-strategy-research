@@ -196,6 +196,6 @@ class TestRealToolsStrictCompat:
         """Tools with optional params aren't strict (would force all to required)."""
         registry = build_default_registry()
         # read_file has optional limit/offset
-        tool = registry.get("read_file")
+        tool = registry.get("read")
         assert tool is not None
         assert tool.strict is False

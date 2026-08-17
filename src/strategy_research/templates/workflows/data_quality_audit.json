@@ -19,7 +19,7 @@
       "label": "生成诊断报告",
       "config": {
         "role": "data_quality",
-        "tools": ["read_file", "get_market_data"],
+        "tools": ["read", "get_market_data"],
         "prompt_text": "基于上游数据质量检查结果，输出诊断报告：问题清单、影响评估、修复建议。"
       }
     }

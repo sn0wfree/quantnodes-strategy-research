@@ -74,17 +74,17 @@ class TestFileTools:
     def test_read_file_exists(self):
         from strategy_research.core.agent.builtin_tools.file_tools import ReadFileTool
         tool = ReadFileTool()
-        assert tool.name == "read_file"
+        assert tool.name == "read"
 
     def test_list_files_exists(self):
         from strategy_research.core.agent.builtin_tools.file_tools import ListFilesTool
         tool = ListFilesTool()
-        assert tool.name == "list_files"
+        assert tool.name == "list"
 
     def test_write_file_exists(self):
         from strategy_research.core.agent.builtin_tools.file_tools import WriteFileTool
         tool = WriteFileTool()
-        assert tool.name == "write_file"
+        assert tool.name == "write"
 
     def test_read_file_schema(self):
         from strategy_research.core.agent.builtin_tools.file_tools import ReadFileTool
@@ -124,7 +124,7 @@ class TestWorkspaceTools:
     def test_load_skill_exists(self):
         from strategy_research.core.agent.builtin_tools.workspace_tools import LoadSkillTool
         tool = LoadSkillTool()
-        assert tool.name == "load_skill"
+        assert tool.name == "skill"
 
 
 # ── Todo Tools ────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ class TestTodoTools:
     def test_tool_exists(self):
         from strategy_research.core.agent.builtin_tools.todo_tools import TodoWriteTool
         tool = TodoWriteTool()
-        assert tool.name == "todo_write"
+        assert tool.name == "todowrite"
 
     def test_todo_store_set_and_get(self):
         from strategy_research.core.agent.builtin_tools.todo_tools import TodoStore
@@ -159,7 +159,7 @@ class TestSubAgentTool:
     def test_tool_exists(self):
         from strategy_research.core.agent.builtin_tools.subagent_tool import SubAgentTool
         tool = SubAgentTool()
-        assert tool.name == "delegate_to_agent"
+        assert tool.name == "task"
 
 
 # ── Build Default Registry ────────────────────────────────────────
@@ -172,12 +172,12 @@ class TestBuildDefaultRegistry:
 
     def test_contains_core_tools(self):
         r = build_default_registry()
-        assert r.get("read_file") is not None
-        assert r.get("list_files") is not None
-        assert r.get("write_file") is not None
+        assert r.get("read") is not None
+        assert r.get("list") is not None
+        assert r.get("write") is not None
         assert r.get("tool_help") is not None
-        assert r.get("delegate_to_agent") is not None
-        assert r.get("todo_write") is not None
+        assert r.get("task") is not None
+        assert r.get("todowrite") is not None
 
     def test_contains_analysis_tools(self):
         r = build_default_registry()

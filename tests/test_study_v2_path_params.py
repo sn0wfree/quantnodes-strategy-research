@@ -226,7 +226,7 @@ def test_runner_tsv_composite_match(tmp_path):
 
 def test_write_file_honors_custom_write_roots(tmp_path):
     reg = build_default_registry()
-    tool = reg.get("write_file")
+    tool = reg.get("write")
     study = tmp_path / "study"
     out = tool.invoke({
         "ctx": ToolContext(
@@ -248,7 +248,7 @@ def test_write_file_honors_custom_write_roots(tmp_path):
 
 def test_read_file_honors_custom_read_roots(tmp_path):
     reg = build_default_registry()
-    tool = reg.get("read_file")
+    tool = reg.get("read")
     target = tmp_path / "study" / "s6" / "manifest.json"
     target.parent.mkdir(parents=True)
     target.write_text("{}", encoding="utf-8")

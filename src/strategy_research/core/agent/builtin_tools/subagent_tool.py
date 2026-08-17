@@ -86,7 +86,7 @@ class SubAgentTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "delegate_to_agent"
+    name = "task"
     category = "agent"
     # Sub-agents may write files / run backtests → treated as a write tool
     # (serial execution; avoids count-ref races in parallel dispatch).
@@ -138,7 +138,7 @@ class SubAgentTool(BaseTool):
         filtered = TR()
         if parent_registry is not None:
             for t_name, t_obj in parent_registry._tools.items():
-                if t_name != "delegate_to_agent":
+                if t_name != "task":
                     filtered.register(t_obj)
         if tools_whitelist:
             wl_registry = TR()

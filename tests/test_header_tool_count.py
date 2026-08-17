@@ -45,7 +45,7 @@ class TestRouteToolEventIncrementsCounter:
     def test_tool_call_increments_total(self):
         app = self._app_with_mocked_widgets()
         app._route_tool_event("tool_call", {
-            "call_id": "c1", "tool": "read_file", "args": {"path": "x"},
+            "call_id": "c1", "tool": "read", "args": {"path": "x"},
         })
         assert app._tool_total == 1
         assert app._tool_ok == 0

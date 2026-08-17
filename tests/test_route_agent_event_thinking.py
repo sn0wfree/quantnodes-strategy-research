@@ -164,7 +164,7 @@ class TestThinkingSpentOnUnrelatedEvents:
         tv = _setup_tv_mock()
         app.query_one = mock.MagicMock(return_value=tv)
 
-        app.route_agent_event("tool_call", {"call_id": "x", "tool": "read_file", "args": {}})
+        app.route_agent_event("tool_call", {"call_id": "x", "tool": "read", "args": {}})
 
         tv.append_thinking.assert_not_called()
 

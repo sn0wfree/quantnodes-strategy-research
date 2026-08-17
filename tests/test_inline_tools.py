@@ -64,18 +64,18 @@ def tv() -> TranscriptView:
 
 class TestAppendToolCall:
     def test_writes_running_line(self, tv: TranscriptView):
-        tv.append_tool_call("c1", "read_file", {"path": "config.yaml"})
+        tv.append_tool_call("c1", "read", {"path": "config.yaml"})
         assert len(tv._captured) == 1
         line = tv._captured[0]
         assert "⏳" in line
-        assert "read_file" in line
+        assert "read" in line
         assert "config.yaml" in line
 
     def test_records_line_index_and_tool_name(self, tv: TranscriptView):
-        tv.append_tool_call("c1", "read_file", {"path": "x"})
+        tv.append_tool_call("c1", "read", {"path": "x"})
         assert "c1" in tv._tool_lines
         assert tv._tool_lines["c1"] == 0
-        assert tv._tool_names["c1"] == "read_file"
+        assert tv._tool_names["c1"] == "read"
 
     def test_long_args_are_truncated(self, tv: TranscriptView):
         big = {"x": "a" * 200}
@@ -90,8 +90,8 @@ class TestAppendToolCall:
         assert "A股动量" in tv._captured[0]
 
     def test_multiple_calls_record_distinct_indices(self, tv: TranscriptView):
-        tv.append_tool_call("c1", "read_file", {"path": "a"})
-        tv.append_tool_call("c2", "read_file", {"path": "b"})
+        tv.append_tool_call("c1", "read", {"path": "a"})
+        tv.append_tool_call("c2", "read", {"path": "b"})
         assert tv._tool_lines["c1"] == 0
         assert tv._tool_lines["c2"] == 1
 
@@ -101,13 +101,13 @@ class TestAppendToolCall:
 
 class TestUpdateToolResult:
     def test_ok_replaces_with_green_check(self, tv: TranscriptView):
-        tv.append_tool_call("c1", "read_file", {"path": "x"})
+        tv.append_tool_call("c1", "read", {"path": "x"})
         tv.update_tool_result("c1", ok=True, elapsed_ms=320)
         assert len(tv._captured) == 2
         result_line = tv._captured[1]
         assert "✔" in result_line
         assert "320ms" in result_line
-        assert "read_file" in result_line
+        assert "read" in result_line
 
     def test_error_replaces_with_red_cross(self, tv: TranscriptView):
         tv.append_tool_call("c1", "run_backtest", {"strategy": "mom"})

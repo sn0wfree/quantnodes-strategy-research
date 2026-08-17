@@ -333,13 +333,13 @@ def _fallback_plan(max_steps: int) -> list[dict[str, Any]]:
     """5-step standard pipeline fallback (hypothesis→data→backtest→validate→report)."""
     steps = [
         ("step_001", "提出研究假设", "基于目标提出可检验的研究假设，明确验证指标。预期产出：假设列表。",
-         ["read_file", "web_search", "factor_analysis"], []),
+         ["read", "websearch", "factor_analysis"], []),
         ("step_002", "准备数据", "检查并准备所需行情/因子数据，确认覆盖与质量。预期产出：数据就绪说明。",
          ["get_market_data", "check_data"], ["step_001"]),
         ("step_003", "回测验证", "对假设构建策略并运行回测，产出绩效指标。预期产出：回测结果与指标。",
          ["run_backtest"], ["step_002"]),
         ("step_004", "稳健性检查", "检查回测结果稳健性（回撤/换手/参数敏感性）。预期产出：稳健性结论。",
-         ["read_file", "drawdown_analysis"], ["step_003"]),
+         ["read", "drawdown_analysis"], ["step_003"]),
         ("step_005", "结论报告", "汇总发现，输出最终研究结论与建议。预期产出：完整研究报告。",
          ["show_chart", "show_report"], ["step_004"]),
     ]

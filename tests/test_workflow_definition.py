@@ -201,7 +201,7 @@ class TestSegmentCut:
 class TestToSwarmPreset:
     def test_llm_nodes_default_executor(self):
         d = make_def(
-            [llm("a", role="researcher", tools=["read_file"]), tool_node("t", "run_backtest")],
+            [llm("a", role="researcher", tools=["read"]), tool_node("t", "run_backtest")],
             [{"source": "a", "target": "t"}],
         )
         preset = d.to_swarm_preset(d.segment_cut()[0], "objective")

@@ -81,8 +81,8 @@ class TestPlanModeTools:
 
     def test_plan_readonly_tools_is_set(self):
         from strategy_research.api.session.service import _PLAN_READONLY_TOOLS
-        assert "read_file" in _PLAN_READONLY_TOOLS
-        assert "web_search" in _PLAN_READONLY_TOOLS
+        assert "read" in _PLAN_READONLY_TOOLS
+        assert "websearch" in _PLAN_READONLY_TOOLS
         assert "run_backtest" not in _PLAN_READONLY_TOOLS
 
     def test_plan_mode_sets_allowed_tools(self):

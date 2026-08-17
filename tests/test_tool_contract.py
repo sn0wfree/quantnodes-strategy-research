@@ -73,9 +73,9 @@ class TestRegistryContract:
 class TestEffectsContract:
 
     @pytest.mark.parametrize("write_tool", [
-        "write_file", "run_backtest", "get_market_data", "import_data",
+        "write", "run_backtest", "get_market_data", "import_data",
         "clean_data", "create_goal", "add_evidence", "complete_goal",
-        "run_command",
+        "shell",
     ])
     def test_write_tools_declare_effects(self, write_tool):
         tool = build_default_registry().get(write_tool)

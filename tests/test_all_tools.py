@@ -637,7 +637,7 @@ class TestWebTools:
             from strategy_research.core.agent.builtin_tools.web_tools import WebSearchTool
             tool = WebSearchTool()
             # Just verify it can be instantiated
-            assert tool.name == "web_search"
+            assert tool.name == "websearch"
         except ImportError:
             pytest.skip("web_search dependencies not installed")
 
@@ -688,7 +688,7 @@ class TestToolDescriptions:
         """Core tools should have input/output examples in description."""
         r = build_default_registry()
         examples_tools = [
-            "read_file", "write_file", "compute_factor", "factor_analysis",
+            "read", "write", "compute_factor", "factor_analysis",
             "run_backtest", "options_pricing", "get_market_data", "import_data",
         ]
         for name in examples_tools:

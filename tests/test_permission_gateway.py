@@ -30,10 +30,10 @@ def test_request_blocks_until_respond(fast_timeout_gateway: PermissionGateway):
         task = asyncio.create_task(
             fast_timeout_gateway.request(
                 tool_call_id="tc-1",
-                tool_name="write_file",
+                tool_name="write",
                 args={"path": "x.py", "__session_id__": "s1"},
                 decision=fast_timeout_gateway.evaluator.evaluate(
-                    "write_file", {"path": "x.py"},
+                    "write", {"path": "x.py"},
                 ),
             ),
         )
@@ -65,10 +65,10 @@ def test_request_timeout_returns_deny(fast_timeout_gateway: PermissionGateway):
     async def run():
         response = await fast_timeout_gateway.request(
             tool_call_id="tc-timeout",
-            tool_name="write_file",
+            tool_name="write",
             args={"path": "x.py"},
             decision=fast_timeout_gateway.evaluator.evaluate(
-                "write_file", {"path": "x.py"},
+                "write", {"path": "x.py"},
             ),
         )
         return response
@@ -83,10 +83,10 @@ def test_respond_twice_for_same_id_raises(fast_timeout_gateway: PermissionGatewa
         task = asyncio.create_task(
             fast_timeout_gateway.request(
                 tool_call_id="tc-dup",
-                tool_name="write_file",
+                tool_name="write",
                 args={"path": "x.py"},
                 decision=fast_timeout_gateway.evaluator.evaluate(
-                    "write_file", {"path": "x.py"},
+                    "write", {"path": "x.py"},
                 ),
             ),
         )
@@ -124,9 +124,9 @@ def test_request_emits_hook_callback():
         task = asyncio.create_task(
             gw.request(
                 tool_call_id="tc-hook",
-                tool_name="write_file",
+                tool_name="write",
                 args={"path": "x.py"},
-                decision=gw.evaluator.evaluate("write_file", {"path": "x.py"}),
+                decision=gw.evaluator.evaluate("write", {"path": "x.py"}),
             ),
         )
         await asyncio.sleep(0)
@@ -152,13 +152,13 @@ def test_request_persists_permanent_allow_rule(tmp_path: Path):
 
     async def run():
         # write_file defaults to ASK — confirm before the handshake.
-        decision = gw.evaluator.evaluate("write_file", {"path": "y.py"})
+        decision = gw.evaluator.evaluate("write", {"path": "y.py"})
         assert decision.action == PermissionAction.ASK
 
         task = asyncio.create_task(
             gw.request(
                 tool_call_id="tc-perm",
-                tool_name="write_file",
+                tool_name="write",
                 args={"path": "y.py"},
                 decision=decision,
             ),
@@ -180,7 +180,7 @@ def test_request_persists_permanent_allow_rule(tmp_path: Path):
     assert "action: allow" in text
 
     # And the evaluator should now allow the same pattern directly.
-    follow_up = gw.evaluator.evaluate("write_file", {"path": "y.py"})
+    follow_up = gw.evaluator.evaluate("write", {"path": "y.py"})
     assert follow_up.action == PermissionAction.ALLOW
 
 
@@ -189,11 +189,11 @@ def test_request_persists_permanent_deny_rule(tmp_path: Path):
     gw = PermissionGateway(rules_path=path, timeout_s=1.0)
 
     async def run():
-        decision = gw.evaluator.evaluate("write_file", {"path": "danger.py"})
+        decision = gw.evaluator.evaluate("write", {"path": "danger.py"})
         task = asyncio.create_task(
             gw.request(
                 tool_call_id="tc-deny",
-                tool_name="write_file",
+                tool_name="write",
                 args={"path": "danger.py"},
                 decision=decision,
             ),
@@ -211,7 +211,7 @@ def test_request_persists_permanent_deny_rule(tmp_path: Path):
 
     asyncio.run(run())
 
-    follow_up = gw.evaluator.evaluate("write_file", {"path": "danger.py"})
+    follow_up = gw.evaluator.evaluate("write", {"path": "danger.py"})
     assert follow_up.action == PermissionAction.DENY
 
 
@@ -223,10 +223,10 @@ def test_history_records_every_handshake(tmp_path: Path):
             task = asyncio.create_task(
                 gw.request(
                     tool_call_id=f"tc-{i}",
-                    tool_name="write_file",
+                    tool_name="write",
                     args={"path": f"f{i}.py"},
                     decision=gw.evaluator.evaluate(
-                        "write_file", {"path": f"f{i}.py"},
+                        "write", {"path": f"f{i}.py"},
                     ),
                 ),
             )

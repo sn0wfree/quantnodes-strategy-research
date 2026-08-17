@@ -168,8 +168,8 @@ class TestComboExecution:
         ))
         assert result["status"] == "ok"
         assert result["combo_summary"] == [
-            {"step": 1, "tool": "read_file"},
-            {"step": 2, "tool": "read_file"},
+            {"step": 1, "tool": "read"},
+            {"step": 2, "tool": "read"},
         ]
 
     def test_failure_passthrough_with_location(self, ctx_ws):
@@ -181,7 +181,7 @@ class TestComboExecution:
         assert result["status"] == "error"
         assert "not found" in result["error"]
         assert result["combo_step"] == 2
-        assert result["combo_tool"] == "read_file"
+        assert result["combo_tool"] == "read"
         assert result["combo"] == "read_two"
 
     def test_missing_input_reference(self, ctx_ws):

@@ -293,9 +293,9 @@ class TestRegistryIntegration:
         """Test that all expected tools are registered."""
         r = build_default_registry()
         expected_tools = [
-            "read_file", "write_file", "compute_factor", "factor_analysis",
+            "read", "write", "compute_factor", "factor_analysis",
             "run_backtest", "git_diff", "list_history", "pattern_recognition",
-            "list_skills", "load_skill", "options_pricing",
+            "list_skills", "skill", "options_pricing",
             "factor_cross_sectional_analysis", "factor_quintile_returns",
             "factor_ic_decay", "factor_turnover",
             "strategy_compare", "drawdown_analysis", "benchmark_comparison",

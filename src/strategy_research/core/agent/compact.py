@@ -142,11 +142,11 @@ Rules:
 # Kept only as documentation reference for the (now-unused) tool_truncate_chars
 # field default. Field default now uses an empty dict; L4 doesn't pre-truncate.
 _LEGACY_L1_TOOL_LIMITS_DOC: dict[str, int] = {
-    "read_file": 3000,
+    "read": 3000,
     "search_code": 2000,
-    "run_command": 2000,
+    "shell": 2000,
     "backtest_run": 4000,
-    "list_files": 1000,
+    "list": 1000,
     "_default": 2000,
 }
 

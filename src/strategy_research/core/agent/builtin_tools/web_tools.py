@@ -42,7 +42,7 @@ class WebSearchTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "web_search"
+    name = "websearch"
     description = "DuckDuckGo 网页搜索 (无需 API key); 返回标题/URL/摘要。"
     repeatable = True
     strict = True
@@ -69,7 +69,7 @@ class WebSearchTool(BaseTool):
                 "missing required parameter 'query'",
                 expected="non-empty search string, e.g. 'quantitative trading A-share momentum'",
                 fix="pass a non-empty query, e.g. query='Python pandas tutorial'",
-                tool="web_search",
+                tool="websearch",
             )
         return web_search(query=query, max_results=max_results)
 
@@ -106,7 +106,7 @@ class ReadUrlTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "read_url"
+    name = "webfetch"
     description = "抓取网页 URL 并返回 Markdown 内容。"
     repeatable = True
     strict = True
@@ -125,7 +125,7 @@ class ReadUrlTool(BaseTool):
                 "missing required parameter 'url'",
                 expected="non-empty URL string, e.g. 'https://docs.python.org/3/'",
                 fix="pass a valid http(s) URL, e.g. url='https://example.com/article'",
-                tool="read_url",
+                tool="webfetch",
             )
         return read_url(url=url, max_chars=max_chars)
 

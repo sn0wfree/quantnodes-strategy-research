@@ -367,7 +367,7 @@ class LoadSkillTool(BaseTool):
     # ─────────────────────────────────────────────────────────────
     """
 
-    name = "load_skill"
+    name = "skill"
     description = "按名称加载技能完整 markdown 文档 (含 API 契约/工作流/示例)。"
     repeatable = True
     category = "技能"
@@ -378,10 +378,10 @@ class LoadSkillTool(BaseTool):
         name: str,
     ) -> str:
         if ctx.workspace is None:
-            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="load_skill")
+            return err_actionable("missing workspace context", fix="AgentLoop 注入 workspace; 直接调用时传 ctx", tool="skill")
         workspace = ctx.workspace
         if not isinstance(name, str) or not name:
-            return err_actionable("missing or invalid 'name'", tool="load_skill")
+            return err_actionable("missing or invalid 'name'", tool="skill")
 
         try:
             from ...skills import SkillRegistry
@@ -412,4 +412,4 @@ class LoadSkillTool(BaseTool):
                 "content": skill.content,
             })
         except Exception as exc:  # noqa: BLE001
-            return err_actionable(f"load_skill failed: {exc}", tool="load_skill")
+            return err_actionable(f"load_skill failed: {exc}", tool="skill")

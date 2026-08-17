@@ -89,7 +89,7 @@ class TestBasicLoop:
     def test_multiple_tool_calls_in_one_response(self, workspace):
         mock = MockLLM([
             tool_resp([
-                ToolCall(id="c1", name="read_file", arguments={"path": "README.md"}),
+                ToolCall(id="c1", name="read", arguments={"path": "README.md"}),
                 ToolCall(id="c2", name="list_history", arguments={}),
             ]),
             text_resp("got both"),
@@ -113,7 +113,7 @@ class TestMaxIterations:
     def test_max_iterations_reached(self, workspace):
         # Different tool calls each iter to avoid no_progress trigger
         mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
+            tool_resp([ToolCall(id=f"c{i}", name="read",
                                 arguments={"path": f"file_{i}.txt"})])
             for i in range(5)
         ])
@@ -159,7 +159,7 @@ class TestNoProgress:
     def test_different_tool_calls_continue(self, workspace):
         # Each call has different arguments → no_progress NOT triggered
         mock = MockLLM([
-            tool_resp([ToolCall(id="c1", name="read_file",
+            tool_resp([ToolCall(id="c1", name="read",
                                 arguments={"path": f"file_{i}.py"})])
             for i in range(5)
         ] + [text_resp("done")])
@@ -201,7 +201,7 @@ class TestNoProgress:
 class TestErrorHandling:
     def test_llm_error_mid_loop(self, workspace):
         mock = MockLLM([
-            tool_resp([ToolCall(id="c1", name="read_file",
+            tool_resp([ToolCall(id="c1", name="read",
                                 arguments={"path": "file.txt"})]),
             # Second call raises
         ])
@@ -227,7 +227,7 @@ class TestErrorHandling:
 
     def test_tool_execution_error_does_not_crash(self, workspace):
         mock = MockLLM([
-            tool_resp([ToolCall(id="c1", name="read_file",
+            tool_resp([ToolCall(id="c1", name="read",
                                 arguments={"path": "nonexistent.txt"})]),
             text_resp("ok"),
         ])
@@ -400,9 +400,9 @@ class TestIntegration:
     def test_full_run_with_tool_calls_and_final_answer(self, workspace):
         # Realistic flow: LLM reads history, modifies strategy, runs backtest, gives summary
         mock = MockLLM([
-            tool_resp([ToolCall(id="c1", name="read_file",
+            tool_resp([ToolCall(id="c1", name="read",
                                 arguments={"path": "strategies/foo/strategy.py"})]),
-            tool_resp([ToolCall(id="c2", name="write_file",
+            tool_resp([ToolCall(id="c2", name="write",
                                 arguments={"path": "strategies/foo/strategy.py",
                                            "content": "# updated\nx = 1\n"})]),
             text_resp("Strategy updated with momentum_20_60 factor."),
@@ -453,11 +453,11 @@ class TestAllowedTools:
             config=LLMConfig(api_key="sk-test"),
             registry=build_default_registry(),
             workspace=workspace,
-            allowed_tools=["read_file", "list_history"],
+            allowed_tools=["read", "list_history"],
         )
-        assert loop.registry.get("read_file") is not None
+        assert loop.registry.get("read") is not None
         assert loop.registry.get("list_history") is not None
-        assert loop.registry.get("write_file") is None
+        assert loop.registry.get("write") is None
         assert loop.registry.get("run_backtest") is None
 
     def test_allowed_tools_none_means_all(self, workspace):
@@ -469,8 +469,8 @@ class TestAllowedTools:
             workspace=workspace,
             allowed_tools=None,
         )
-        assert loop.registry.get("read_file") is not None
-        assert loop.registry.get("write_file") is not None
+        assert loop.registry.get("read") is not None
+        assert loop.registry.get("write") is not None
         assert loop.registry.get("run_backtest") is not None
 
 
@@ -487,7 +487,7 @@ class TestReadonly:
             workspace=workspace,
             readonly=True,
         )
-        assert loop.registry.get("write_file") is None
+        assert loop.registry.get("write") is None
 
     def test_readonly_filters_run_backtest(self, workspace):
         """readonly=True 时 run_backtest 被过滤（写工具，产 runs/）"""
@@ -509,7 +509,7 @@ class TestReadonly:
             workspace=workspace,
             readonly=True,
         )
-        assert loop.registry.get("read_file") is not None
+        assert loop.registry.get("read") is not None
         assert loop.registry.get("list_history") is not None
         assert loop.registry.get("git_diff") is not None
         assert loop.registry.get("compute_factor") is not None
@@ -523,10 +523,10 @@ class TestReadonly:
             workspace=workspace,
             readonly=False,
         )
-        assert loop.registry.get("write_file") is not None
+        assert loop.registry.get("write") is not None
 
     @pytest.mark.parametrize("write_tool", [
-        "write_file",
+        "write",
         "run_backtest",
         "get_market_data",
         "import_data",
@@ -534,7 +534,7 @@ class TestReadonly:
         "create_goal",
         "add_evidence",
         "complete_goal",
-        "run_command",
+        "shell",
     ])
     def test_readonly_filters_every_write_tool(self, workspace, write_tool):
         """readonly=True 过滤全部 is_readonly=False 工具。"""
@@ -619,4 +619,4 @@ class TestCustomSystemPrompt:
         # system message 应该包含自定义 prompt
         sys_msg = r.messages[0]["content"]
         assert "风险控制员" in sys_msg
-        assert "read_file" in sys_msg  # {tool_list} 被替换
+        assert "read" in sys_msg  # {tool_list} 被替换

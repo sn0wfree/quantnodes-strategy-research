@@ -254,7 +254,7 @@ def test_normal_session_registry_untouched(monkeypatch):
     )
     tools = list(captured["registry"]._tools.keys())
     assert "submit_dag_step" not in tools
-    assert "read_file" in tools
+    assert "read" in tools
 
 
 # ── drafts endpoints ─────────────────────────────────────────────────

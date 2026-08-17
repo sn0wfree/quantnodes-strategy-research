@@ -96,7 +96,7 @@ class TestGoalWorkflowConfig:
         agent = GoalAgentConfig(
             id="researcher",
             prompt_file=".prompts/researcher.md",
-            tools=["read_file"],
+            tools=["read"],
             input_from=[],
             evidence_criterion=0,
         )
@@ -192,14 +192,14 @@ class TestGoalWorkflowRunner:
                 GoalAgentConfig(
                     id="agent_a",
                     prompt_file=".prompts/test.md",
-                    tools=["read_file"],
+                    tools=["read"],
                     input_from=[],
                     evidence_criterion=0,
                 ),
                 GoalAgentConfig(
                     id="agent_b",
                     prompt_file=".prompts/test.md",
-                    tools=["read_file"],
+                    tools=["read"],
                     input_from=["agent_a"],
                     evidence_criterion=1,
                 ),

@@ -309,12 +309,12 @@ def _bootstrap_workspace(workspace: Path) -> None:
 
 # Read-only tools allowed in plan mode (agent may observe but not modify).
 _PLAN_READONLY_TOOLS = frozenset({
-    "read_file", "list_files", "search_code", "search_file",
-    "get_file_info", "web_search", "web_fetch", "read_url",
+    "read", "list", "search_code", "search_file",
+    "get_file_info", "websearch", "web_fetch", "webfetch",
     "read_document", "think", "tool_help",
     "list_goals", "get_goal_status",
     "list_history", "git_diff", "factor_analysis",
-    "pattern_recognition", "list_skills", "load_skill",
+    "pattern_recognition", "list_skills", "skill",
     "factor_cross_sectional_analysis", "factor_quintile_returns",
     "factor_ic_decay", "factor_turnover",
     "strategy_compare", "drawdown_analysis", "benchmark_comparison",

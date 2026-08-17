@@ -47,13 +47,13 @@ class TestRouteAgentEvent:
         with mock.patch.object(app, "query_one", return_value=mock_tv):
             app.route_agent_event(
                 "tool_call",
-                {"tool": "read_file", "args": {"path": "/x"}, "call_id": "c1"},
+                {"tool": "read", "args": {"path": "/x"}, "call_id": "c1"},
             )
         # TranscriptView.append_tool_call called
         mock_tv.append_tool_call.assert_called_once()
         call_id, tool, args = mock_tv.append_tool_call.call_args.args
         assert call_id == "c1"
-        assert tool == "read_file"
+        assert tool == "read"
         assert args == {"path": "/x"}
 
     def test_tool_result_dispatches_to_transcript(self):
@@ -63,7 +63,7 @@ class TestRouteAgentEvent:
             app.route_agent_event(
                 "tool_result",
                 {
-                    "tool": "read_file",
+                    "tool": "read",
                     "call_id": "c1",
                     "status": "ok",
                     "ok": True,

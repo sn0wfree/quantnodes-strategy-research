@@ -58,7 +58,7 @@ class ReadFileTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "read_file"
+    name = "read"
     description = (
         "读取工作区内文件内容 (行数限制可选); 路径相对 workspace, "
         "限允许根目录 (strategies/templates/memory/logs/data/docs/.)。"
@@ -77,7 +77,7 @@ class ReadFileTool(BaseTool):
             return err_actionable(
                 "missing workspace context",
                 fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
-                tool="read_file",
+                tool="read",
             )
         workspace = ctx.workspace
 
@@ -87,7 +87,7 @@ class ReadFileTool(BaseTool):
                 received=path,
                 expected="non-empty string path relative to workspace, e.g. 'strategies/momentum_20d/strategy.py'",
                 fix="pass path='strategies/<name>/strategy.py' or 'templates/strategy.py'",
-                tool="read_file",
+                tool="read",
             )
 
         # v2: ctx roots override the default white-list roots
@@ -105,7 +105,7 @@ class ReadFileTool(BaseTool):
                 received=path,
                 expected="path under an allowed read root (strategies/templates/memory/logs/data/docs/)",
                 fix="use a path under strategies/, templates/, memory/, logs/, data/, or docs/",
-                tool="read_file",
+                tool="read",
             )
 
         if not resolved.exists():
@@ -113,7 +113,7 @@ class ReadFileTool(BaseTool):
                 f"file not found: {path}",
                 received=path,
                 fix="verify the path exists with list_files(workspace=..., path='<dir>')",
-                tool="read_file",
+                tool="read",
                 extra={"resolved_path": str(resolved)},
             )
         if not resolved.is_file():
@@ -121,7 +121,7 @@ class ReadFileTool(BaseTool):
                 f"not a regular file: {path}",
                 received=path,
                 fix="use list_files to list a directory, read_file on a file",
-                tool="read_file",
+                tool="read",
                 extra={"resolved_path": str(resolved)},
             )
 
@@ -131,13 +131,13 @@ class ReadFileTool(BaseTool):
             return err_actionable(
                 f"file is not valid UTF-8: {path}",
                 fix="file may be binary; use read_document for PDF, or skip this file",
-                tool="read_file",
+                tool="read",
             )
         except OSError as exc:
             return err_actionable(
                 f"read failed: {exc}",
                 fix="check file permissions",
-                tool="read_file",
+                tool="read",
             )
 
         all_lines = content.splitlines()
@@ -188,7 +188,7 @@ class ListFilesTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "list_files"
+    name = "list"
     description = (
         "列出工作区目录内容 (文件/子目录, 含大小); path 相对 workspace, "
         "可用 glob pattern 过滤。"
@@ -206,7 +206,7 @@ class ListFilesTool(BaseTool):
             return err_actionable(
                 "missing workspace context",
                 fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
-                tool="list_files",
+                tool="list",
             )
         workspace = ctx.workspace
 
@@ -219,14 +219,14 @@ class ListFilesTool(BaseTool):
                 received=rel_path,
                 expected="directory path relative to workspace, e.g. 'strategies' or '.' for root",
                 fix="verify the path exists; use list_files(path='.') to see top-level dirs",
-                tool="list_files",
+                tool="list",
             )
         if not target.is_dir():
             return err_actionable(
                 f"not a directory: {rel_path}",
                 received=rel_path,
                 fix="use read_file for files, list_files for directories",
-                tool="list_files",
+                tool="list",
             )
 
         entries = []
@@ -288,7 +288,7 @@ class WriteFileTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "write_file"
+    name = "write"
     description = (
         "写入文件到工作区 (限 strategies/templates/memory/logs 写白名单); "
         ".py 做 AST 安全检查, 危险代码被拒。"
@@ -303,7 +303,7 @@ class WriteFileTool(BaseTool):
             return err_actionable(
                 "missing workspace context",
                 fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
-                tool="write_file",
+                tool="write",
             )
         workspace = ctx.workspace
 
@@ -313,7 +313,7 @@ class WriteFileTool(BaseTool):
                 received=path,
                 expected="non-empty string path, e.g. 'strategies/momentum_20d/strategy.py'",
                 fix="pass a non-empty path",
-                tool="write_file",
+                tool="write",
             )
         if not isinstance(content, str):
             return err_actionable(
@@ -321,7 +321,7 @@ class WriteFileTool(BaseTool):
                 received=type(content).__name__,
                 expected="string content for the file",
                 fix="pass content as a string, e.g. content='# strategy parameters\\nPARAMS = {...}'",
-                tool="write_file",
+                tool="write",
             )
 
         # AST guard for .py files
@@ -332,7 +332,7 @@ class WriteFileTool(BaseTool):
                     f"AST validation failed: {msg}",
                     received=content[:200],
                     fix="remove dangerous code (exec/eval, blocked imports, dunder access); see sandbox rules",
-                    tool="write_file",
+                    tool="write",
                 )
 
         # v2: ctx roots override the default white-list roots
@@ -350,7 +350,7 @@ class WriteFileTool(BaseTool):
                 received=path,
                 expected="path under an allowed write root (strategies/templates/memory/logs)",
                 fix="use a path under strategies/, templates/, memory/, or logs/",
-                tool="write_file",
+                tool="write",
             )
 
         try:
@@ -360,7 +360,7 @@ class WriteFileTool(BaseTool):
             return err_actionable(
                 f"write failed: {exc}",
                 fix="check filesystem permissions and disk space",
-                tool="write_file",
+                tool="write",
             )
 
         return tool_ok({

@@ -83,9 +83,9 @@ class TestLLMAgent:
     def test_tools_override_passed(self, tmp_path: Path):
         fake = FakeLoop({})
         node = WorkflowNode(id="n1", type="llm_agent",
-                            config={"role": "researcher", "tools": ["read_file", "web_search"]})
+                            config={"role": "researcher", "tools": ["read", "websearch"]})
         dispatch_node(node, make_ctx(tmp_path, loop_factory=fake))
-        assert fake.calls[0].get("tools_override") == ["read_file", "web_search"]
+        assert fake.calls[0].get("tools_override") == ["read", "websearch"]
 
     def test_upstream_context_injected(self, tmp_path: Path):
         from strategy_research.core.swarm.runtime import AgentResult
@@ -118,7 +118,7 @@ class TestLLMAgent:
 class TestPlanner:
     PLAN = json.dumps({"plan": [
         {"id": "step_001", "title": "假设", "description": "提出假设并验证", "type": "llm_agent",
-         "tools": ["read_file"], "depends_on": []},
+         "tools": ["read"], "depends_on": []},
         {"id": "step_002", "title": "回测", "description": "运行回测验证假设", "type": "llm_agent",
          "tools": ["run_backtest"], "depends_on": ["step_001"]},
     ]})

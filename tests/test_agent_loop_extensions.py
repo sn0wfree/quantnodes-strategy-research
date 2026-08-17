@@ -42,7 +42,7 @@ def tool_resp(tool_calls: list[ToolCall]) -> LLMResponse:
 def long_tool_result(content: str) -> LLMResponse:
     return LLMResponse(
         content=None,
-        tool_calls=[ToolCall(id="c1", name="read_file", arguments={"path": "x"})],
+        tool_calls=[ToolCall(id="c1", name="read", arguments={"path": "x"})],
         finish_reason="tool_calls",
     )
 
@@ -60,7 +60,7 @@ class TestMicrocompact:
         """Tool results > microcompact_tool_result_limit chars should be trimmed."""
         mock = MockLLM([
             # Iteration 1: LLM decides to use tool
-            tool_resp([ToolCall(id="c1", name="read_file", arguments={"path": "x"})]),
+            tool_resp([ToolCall(id="c1", name="read", arguments={"path": "x"})]),
             # After tool result, LLM summarization may consume a response
             text_resp("Summary of read_file"),
             # Final response
@@ -138,7 +138,7 @@ class TestHardTruncate:
     def test_truncate_triggered_at_high_threshold(self):
         """With very low threshold, truncate should trigger."""
         mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
+            tool_resp([ToolCall(id=f"c{i}", name="read",
                                 arguments={"path": f"file_{i}.py"})])
             for i in range(15)
         ] + [text_resp("Summary"), text_resp("done")])
@@ -245,7 +245,7 @@ class TestTrace:
     def test_trace_records_tool_calls(self, tmp_path):
         """Trace should record tool_call events."""
         mock = MockLLM([
-            tool_resp([ToolCall(id="c1", name="read_file",
+            tool_resp([ToolCall(id="c1", name="read",
                                 arguments={"path": "README.md"})]),
             text_resp("done"),
         ])
@@ -280,7 +280,7 @@ class TestTrace:
     def test_trace_records_compression(self, tmp_path):
         """Trace should record compression events."""
         mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
+            tool_resp([ToolCall(id=f"c{i}", name="read",
                                 arguments={"path": f"file_{i}.py"})])
             for i in range(10)
         ] + [text_resp("Summary"), text_resp("done")])
@@ -405,7 +405,7 @@ class TestIntegration:
     def test_full_run_with_all_features(self, tmp_path):
         """Full run: tool calls → compression → trace → git commit."""
         mock = MockLLM([
-            tool_resp([ToolCall(id="c1", name="read_file",
+            tool_resp([ToolCall(id="c1", name="read",
                                 arguments={"path": "README.md"})]),
             text_resp("Strategy updated."),
         ])
@@ -459,7 +459,7 @@ class TestIntegration:
         ).PersistentMemory(memory_dir=tmp_path / "memory")
 
         mock = MockLLM([
-            tool_resp([ToolCall(id=f"c{i}", name="read_file",
+            tool_resp([ToolCall(id=f"c{i}", name="read",
                                 arguments={"path": f"file_{i}.py"})])
             for i in range(8)
         ] + [text_resp("Summary"), text_resp("done")])

@@ -85,7 +85,7 @@ class TestMCPServerDefaultTools:
         server.register_default_tools()
         tool_names = {t["name"] for t in server.list_tools()}
         assert "list_skills" in tool_names
-        assert "load_skill" in tool_names
+        assert "skill" in tool_names
         assert "run_backtest" in tool_names
         assert "search_memory" in tool_names
         assert "list_sessions" in tool_names

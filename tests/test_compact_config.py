@@ -69,9 +69,9 @@ class TestCompactConfig:
 
     def test_tool_truncate_chars_custom(self):
         """DEPRECATED field: still loadable for backward compat, ignored at runtime."""
-        limits = {"read_file": 5000, "custom_tool": 1000}
+        limits = {"read": 5000, "custom_tool": 1000}
         cfg = CompactConfig(tool_truncate_chars=limits)
-        assert cfg.tool_truncate_chars["read_file"] == 5000
+        assert cfg.tool_truncate_chars["read"] == 5000
         assert cfg.tool_truncate_chars["custom_tool"] == 1000
 
 

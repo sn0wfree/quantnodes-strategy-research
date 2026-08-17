@@ -135,7 +135,7 @@ class TodoWriteTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "todo_write"
+    name = "todowrite"
     category = "agent"
     # Mutates shared todo state → serial execution (avoids race with
     # parallel readonly tools racing on the snapshot).

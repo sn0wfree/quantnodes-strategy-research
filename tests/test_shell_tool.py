@@ -103,7 +103,7 @@ class TestShellExecTimeout:
         ))
         assert result["status"] == "error"
         assert "timed out" in result["error"].lower()
-        assert result.get("tool") == "run_command"
+        assert result.get("tool") == "shell"
 
     def test_custom_timeout_respected(self, tool, tmp_workspace):
         result = json.loads(tool.execute(
@@ -175,26 +175,26 @@ class TestShellToolRegistration:
         from strategy_research.core.agent.tools import ToolRegistry
         r = ToolRegistry()
         register_shell_tools(r)
-        assert "run_command" in r
-        assert r.get("run_command").name == "run_command"
+        assert "shell" in r
+        assert r.get("shell").name == "shell"
 
     def test_default_registry_includes_shell_tool(self):
         from strategy_research.core.agent.builtin_tools import build_default_registry
         r = build_default_registry()
-        assert "run_command" in r
+        assert "shell" in r
 
     def test_chat_loop_removes_shell_tool_when_disabled(self):
         from strategy_research.core.agent.builtin_tools import build_default_registry
 
         # Simulate the gating logic from build_chat_agent_loop
         r = build_default_registry()
-        assert "run_command" in r  # before gating
+        assert "shell" in r  # before gating
 
         # When allow_shell_tools=False, remove it
         allow_shell_tools = False
         if not allow_shell_tools:
-            r._tools.pop("run_command", None)
-        assert "run_command" not in r
+            r._tools.pop("shell", None)
+        assert "shell" not in r
 
     def test_chat_loop_keeps_shell_tool_when_enabled(self):
         from strategy_research.core.agent.builtin_tools import build_default_registry
@@ -202,8 +202,8 @@ class TestShellToolRegistration:
         r = build_default_registry()
         allow_shell_tools = True
         if not allow_shell_tools:
-            r._tools.pop("run_command", None)
-        assert "run_command" in r
+            r._tools.pop("shell", None)
+        assert "shell" in r
 
 
 # ── Tool schema ────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ class TestShellToolSchema:
         from strategy_research.core.agent.builtin_tools.shell_tools import ShellExecTool
         schema = ShellExecTool().to_openai_schema()
         assert schema["type"] == "function"
-        assert schema["function"]["name"] == "run_command"
+        assert schema["function"]["name"] == "shell"
         params = schema["function"]["parameters"]
         # v2: workspace 由 ToolContext 注入, 不在 schema 中
         assert "workspace" not in params["properties"]

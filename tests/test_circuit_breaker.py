@@ -23,16 +23,16 @@ class TestCircuitBreakerState:
 
     def test_record_success_keeps_closed(self):
         cb = ToolLoopCircuitBreaker()
-        cb.record_success("read_file")
+        cb.record_success("read")
         assert cb.state is BreakerState.CLOSED
 
     def test_failure_threshold_opens(self):
         cb = ToolLoopCircuitBreaker(
             config=CircuitBreakerConfig(failure_threshold=2, cooldown_seconds=999)
         )
-        cb.record_failure("read_file")
+        cb.record_failure("read")
         assert cb.state is BreakerState.CLOSED
-        cb.record_failure("read_file")
+        cb.record_failure("read")
         assert cb.state is BreakerState.OPEN
         assert cb.is_open()
 

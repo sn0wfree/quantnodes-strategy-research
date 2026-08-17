@@ -65,7 +65,7 @@ def text_resp(content: str) -> LLMResponse:
 
 
 def delegate_resp(task: str, call_id: str) -> LLMResponse:
-    tc = ToolCall(id=call_id, name="delegate_to_agent", arguments={"task": task})
+    tc = ToolCall(id=call_id, name="task", arguments={"task": task})
     return LLMResponse(content="", tool_calls=[tc], finish_reason="tool_calls")
 
 
@@ -164,7 +164,7 @@ class TestChatGeneratesSubagents:
 
         # Each tool result contains the subagent's answer
         tool_results = [
-            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "delegate_to_agent"
+            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "task"
         ]
         assert len(tool_results) == 2
         for tr in tool_results:
@@ -259,18 +259,18 @@ class TestNoNestedDelegation:
         parent_registry = build_default_registry()
         child_registry = tool._build_child_registry(parent_registry, None)
         assert isinstance(child_registry, ToolRegistry)
-        assert child_registry.get("delegate_to_agent") is None
+        assert child_registry.get("task") is None
         # Sanity: other tools still present
-        assert child_registry.get("read_file") is not None
+        assert child_registry.get("read") is not None
 
     def test_child_registry_applies_whitelist(self):
         tool = SubAgentTool()
         parent_registry = build_default_registry()
-        child = tool._build_child_registry(parent_registry, ["read_file", "write_file"])
-        assert child.get("read_file") is not None
-        assert child.get("write_file") is not None
+        child = tool._build_child_registry(parent_registry, ["read", "write"])
+        assert child.get("read") is not None
+        assert child.get("write") is not None
         assert child.get("run_backtest") is None
-        assert child.get("delegate_to_agent") is None
+        assert child.get("task") is None
 
 
 # ── Child subagent behavior ──────────────────────────────────────────
@@ -407,7 +407,7 @@ class TestChildToolCallsForwarded:
         assert "child boom" in failed[0][1]["error"]
         # Parent sees an error tool_result for the delegation
         tool_results = [
-            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "delegate_to_agent"
+            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "task"
         ]
         assert tool_results and tool_results[0]["status"] == "error"
 
@@ -442,7 +442,7 @@ class TestCountLimitIntegration:
         assert len(started) == 5  # only 5 spawned
         # The 6th delegation's tool result is an error with the hint
         tool_results = [
-            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "delegate_to_agent"
+            e[1] for e in events if e[0] == "tool_result" and e[1].get("tool") == "task"
         ]
         assert len(tool_results) == 6
         refused = [tr for tr in tool_results if tr["status"] == "error"]
@@ -589,7 +589,7 @@ class TestWhitelistAtExecute:
         tool = SubAgentTool()
         parent = build_default_registry()
         out = tool.execute(
-            task="x", tools=["read_file"], _parent_registry=parent,
+            task="x", tools=["read"], _parent_registry=parent,
             _subagent_count_ref=[0], emit_event=None,
         )
         parsed = json.loads(out)
@@ -630,7 +630,7 @@ class TestDelegateIsWriteTool:
     def test_effects_declared_not_readonly(self):
         """delegate_to_agent declares EFFECT_FS and is not readonly, so the
         AgentLoop runs it serially (avoids count-ref races)."""
-        tool = build_default_registry().get("delegate_to_agent")
+        tool = build_default_registry().get("task")
         assert tool is not None
         assert tool.effects
         assert tool.is_readonly is False
@@ -642,8 +642,8 @@ class TestBatchOfDelegates:
         """Two delegate_to_agent calls in a single LLM response both run,
         spawning 2 subagents with distinct ids."""
         child_clients = patch_child_client([text_resp("child ok")])
-        tc1 = ToolCall(id="b1", name="delegate_to_agent", arguments={"task": "t1"})
-        tc2 = ToolCall(id="b2", name="delegate_to_agent", arguments={"task": "t2"})
+        tc1 = ToolCall(id="b1", name="task", arguments={"task": "t1"})
+        tc2 = ToolCall(id="b2", name="task", arguments={"task": "t2"})
         parent = AsyncMockLLM([
             LLMResponse(content="", tool_calls=[tc1, tc2], finish_reason="tool_calls"),
             text_resp("both done"),
@@ -685,7 +685,7 @@ class TestForwardEvent:
         from strategy_research.core.agent.builtin_tools.subagent_tool import _forward_event
 
         seen: list[tuple[str, dict]] = []
-        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "tool_call", {"name": "read_file"})
+        _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "tool_call", {"name": "read"})
         _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "tool_result", {"ok": True})
         _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "text_delta", {"delta": "x"})
         assert [e[0] for e in seen] == [
@@ -693,7 +693,7 @@ class TestForwardEvent:
         ]
         assert seen[0][1]["agent_id"] == "sub-1"
         assert seen[0][1]["message_id"] == "msg-1"
-        assert seen[0][1]["name"] == "read_file"
+        assert seen[0][1]["name"] == "read"
 
     def test_none_callback_is_noop(self):
         from strategy_research.core.agent.builtin_tools.subagent_tool import _forward_event

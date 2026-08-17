@@ -42,14 +42,14 @@ class TestRailIgnoresToolEvents:
     def test_tool_call_ignored(self):
         rail = self._rail()
         rail.handle_event("tool_call", {
-            "tool": "read_file", "args": {"path": "x"}, "call_id": "c1",
+            "tool": "read", "args": {"path": "x"}, "call_id": "c1",
         })
         assert rail._timeline == []
 
     def test_tool_result_ignored(self):
         rail = self._rail()
         rail.handle_event("tool_result", {
-            "tool": "read_file", "call_id": "c1",
+            "tool": "read", "call_id": "c1",
             "ok": True, "elapsed_ms": 320,
         })
         assert rail._timeline == []

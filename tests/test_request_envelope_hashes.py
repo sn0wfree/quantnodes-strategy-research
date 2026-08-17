@@ -36,7 +36,7 @@ class TestTraceLlmRequestHashes:
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Hello"},
         ]
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        tools = [{"type": "function", "function": {"name": "read"}}]
 
         loop._trace_llm_request(messages, iteration=1, tools=tools)
 
@@ -62,7 +62,7 @@ class TestTraceLlmRequestHashes:
     def test_tools_hash_correctness(self):
         loop = self._make_loop()
         messages = [{"role": "system", "content": ""}]
-        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        tools = [{"type": "function", "function": {"name": "read"}}]
 
         loop._trace_llm_request(messages, iteration=1, tools=tools)
 

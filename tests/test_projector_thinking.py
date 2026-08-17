@@ -204,7 +204,7 @@ class TestThinkingMixedWithOtherParts:
             _make_event(76, EventType.THINKING_START, mid),
             _make_event(77, EventType.THINKING_DELTA, mid, delta="think B"),
             _make_event(78, EventType.THINKING_END, mid),
-            _make_event(79, EventType.TOOL_CALL, mid, id="tc-1", name="list_files",
+            _make_event(79, EventType.TOOL_CALL, mid, id="tc-1", name="list",
                          arguments="{}"),
             _make_event(80, EventType.TOOL_RESULT, mid, id="tc-1",
                          result="[]", status="done"),
@@ -221,7 +221,7 @@ class TestThinkingMixedWithOtherParts:
         assert text[0]["text"] == "hello"
         # Tool call: 1
         tc = [d for t, d in parts.values() if t == "tool_call"]
-        assert tc[0]["name"] == "list_files"
+        assert tc[0]["name"] == "list"
         assert tc[0]["result"] == "[]"
         # seq order: thinking_70 < text_73 < thinking_76 < tool_79.
         # (We check that thinking/text/tool all coexist; the project()

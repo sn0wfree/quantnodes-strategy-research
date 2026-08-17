@@ -80,8 +80,8 @@ class TestContextBuilder:
     def test_system_prompt_contains_tools(self, registry, workspace):
         b = ContextBuilder(LLMConfig(), registry, workspace=workspace)
         sp = b.build_system_prompt()
-        assert "read_file" in sp
-        assert "write_file" in sp
+        assert "read" in sp
+        assert "write" in sp
         assert "run_backtest" in sp
         assert "compute_factor" in sp
         assert "git_diff" in sp
@@ -287,7 +287,7 @@ class TestIntegration:
         )
         sp = builder.build_system_prompt()
         # Check that all 6 tools' names appear with descriptions
-        for tool_name in ["read_file", "write_file", "run_backtest",
+        for tool_name in ["read", "write", "run_backtest",
                           "compute_factor", "git_diff", "list_history"]:
             assert tool_name in sp, f"tool {tool_name} missing from system prompt"
 
@@ -323,7 +323,7 @@ class TestCustomSystemPrompt:
                           system_prompt=custom)
         sp = b.build_system_prompt()
         assert "数据质量检查员" in sp
-        assert "read_file" in sp  # {tool_list} 被替换
+        assert "read" in sp  # {tool_list} 被替换
 
     def test_custom_prompt_with_workspace_placeholder(self, registry, workspace):
         """自定义 prompt 中的 {workspace} 被替换"""

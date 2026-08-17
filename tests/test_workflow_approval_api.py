@@ -40,7 +40,7 @@ def _client(app):
 
 PLAN_2 = json.dumps({"plan": [
     {"id": "plan_1", "title": "数据准备", "description": "检查数据质量并确认覆盖",
-     "type": "llm_agent", "tools": ["read_file"], "depends_on": []},
+     "type": "llm_agent", "tools": ["read"], "depends_on": []},
     {"id": "plan_2", "title": "回测", "description": "运行回测验证假设并记录指标",
      "type": "llm_agent", "tools": ["run_backtest"], "depends_on": ["plan_1"]},
 ]})

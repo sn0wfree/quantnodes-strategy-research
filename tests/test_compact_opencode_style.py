@@ -417,8 +417,8 @@ class TestBackwardCompatDeprecatedFields:
         assert cfg.tool_truncate_chars == {}
 
     def test_tool_truncate_chars_still_loadable(self):
-        cfg = CompactConfig(tool_truncate_chars={"read_file": 5000})
-        assert cfg.tool_truncate_chars["read_file"] == 5000
+        cfg = CompactConfig(tool_truncate_chars={"read": 5000})
+        assert cfg.tool_truncate_chars["read"] == 5000
 
 
 # ── 4-tuple return value ─────────────────────────────────────────

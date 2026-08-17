@@ -32,14 +32,14 @@ from strategy_research.core.permission.evaluator import PermissionDeniedError
 
 def test_r0_tools_auto_allow():
     ev = PermissionEvaluator()
-    decision = ev.evaluate("read_file", {"path": "/etc/passwd"})
+    decision = ev.evaluate("read", {"path": "/etc/passwd"})
     assert decision.action == PermissionAction.ALLOW
     assert decision.rule is None
 
 
 def test_default_action_is_ask_for_unknown_tool():
     ev = PermissionEvaluator()
-    decision = ev.evaluate("write_file", {"path": "/tmp/x"})
+    decision = ev.evaluate("write", {"path": "/tmp/x"})
     assert decision.action == PermissionAction.ASK
     assert decision.rule is not None
     assert decision.rule.action == PermissionAction.ASK
@@ -72,13 +72,13 @@ def test_last_match_wins():
         ),
     ])
     assert ev.evaluate(
-        "write_file", {"path": "strategies/foo.py"},
+        "write", {"path": "strategies/foo.py"},
     ).action == PermissionAction.ALLOW
     assert ev.evaluate(
-        "write_file", {"path": "README.md"},
+        "write", {"path": "README.md"},
     ).action == PermissionAction.ASK
     assert ev.evaluate(
-        "write_file", {"path": ".env"},
+        "write", {"path": ".env"},
     ).action == PermissionAction.DENY
 
 
@@ -89,8 +89,8 @@ def test_wildcard_permission_matches_any_tool():
             action=PermissionAction.ALLOW,
         ),
     ])
-    assert ev.evaluate("write_file", {"path": "x"}).action == PermissionAction.ALLOW
-    assert ev.evaluate("run_command", {"command": "ls"}).action == PermissionAction.ALLOW
+    assert ev.evaluate("write", {"path": "x"}).action == PermissionAction.ALLOW
+    assert ev.evaluate("shell", {"command": "ls"}).action == PermissionAction.ALLOW
     # R0 still auto-allow (fast path), but the wildcard rule also
     # matches — verdict is allow either way.
 
@@ -100,13 +100,13 @@ def test_wildcard_permission_matches_any_tool():
 
 def test_extract_target_write_file_uses_path():
     ev = PermissionEvaluator()
-    d = ev.evaluate("write_file", {"path": "strategies/x.py"})
+    d = ev.evaluate("write", {"path": "strategies/x.py"})
     assert d.target == "strategies/x.py"
 
 
 def test_extract_target_run_command_uses_first_token():
     ev = PermissionEvaluator()
-    d = ev.evaluate("run_command", {"command": "rm -rf /"})
+    d = ev.evaluate("shell", {"command": "rm -rf /"})
     assert d.target == "rm"
 
 
@@ -118,7 +118,7 @@ def test_extract_target_run_backtest_uses_strategy_name():
 
 def test_extract_target_read_file_falls_back_to_file_path():
     ev = PermissionEvaluator()
-    d = ev.evaluate("read_file", {"file_path": "docs/x.md"})
+    d = ev.evaluate("read", {"file_path": "docs/x.md"})
     assert d.target == "docs/x.md"
 
 
@@ -126,8 +126,8 @@ def test_extract_target_empty_args_returns_tool_name():
     """When the call args lack the expected field, fall back to the
     tool name so the rule still matches."""
     ev = PermissionEvaluator()
-    d = ev.evaluate("write_file", {})
-    assert d.target == "write_file"
+    d = ev.evaluate("write", {})
+    assert d.target == "write"
 
 
 # ── Glob patterns ──────────────────────────────────────────────────
@@ -142,10 +142,10 @@ def test_glob_simple_star():
         ),
     ])
     assert ev.evaluate(
-        "write_file", {"path": "strategies/momentum.py"},
+        "write", {"path": "strategies/momentum.py"},
     ).action == PermissionAction.ALLOW
     assert ev.evaluate(
-        "write_file", {"path": "scripts/build.py"},
+        "write", {"path": "scripts/build.py"},
     ).action == PermissionAction.ASK
 
 
@@ -159,7 +159,7 @@ def test_glob_double_star_treated_as_single():
         ),
     ])
     assert ev.evaluate(
-        "write_file", {"path": "strategies/x.py"},
+        "write", {"path": "strategies/x.py"},
     ).action == PermissionAction.ALLOW
 
 
@@ -173,10 +173,10 @@ def test_decision_pattern_property_for_display():
             action=PermissionAction.ASK,
         ),
     ])
-    d = ev.evaluate("write_file", {"path": "strategies/foo.py"})
+    d = ev.evaluate("write", {"path": "strategies/foo.py"})
     assert d.pattern == "strategies/*"
     # No rule matched -> falls back to target.
-    d2 = ev.evaluate("run_command", {"command": "ls"})
+    d2 = ev.evaluate("shell", {"command": "ls"})
     assert d2.pattern == "ls"
 
 

@@ -51,14 +51,14 @@ class TestRegistry:
         # 11 original tools + 3 web tools (web_search, read_url, read_document)
         expected_core = [
             "compute_factor", "factor_analysis", "git_diff", "list_history",
-            "list_skills", "load_skill", "options_pricing", "pattern_recognition",
-            "read_file", "run_backtest", "write_file",
+            "list_skills", "skill", "options_pricing", "pattern_recognition",
+            "read", "run_backtest", "write",
         ]
         # All core tools must be present
         for name in expected_core:
             assert name in names, f"missing core tool: {name}"
         # Web tools may be present if dependencies are installed
-        web_tools = ["web_search", "read_url", "read_document"]
+        web_tools = ["websearch", "webfetch", "read_document"]
         for name in web_tools:
             if name in names:
                 expected_core.append(name)
@@ -66,12 +66,12 @@ class TestRegistry:
 
     def test_registry_contains(self):
         r = build_default_registry()
-        assert "read_file" in r
+        assert "read" in r
         assert "missing_tool" not in r
 
     def test_registry_execute(self):
         r = build_default_registry()
-        out = r.execute("read_file", {"path": "README.md", "workspace": Path(".")})
+        out = r.execute("read", {"path": "README.md", "workspace": Path(".")})
         # Should be valid JSON
         d = json.loads(out)
         assert "status" in d
@@ -148,7 +148,7 @@ class TestListFilesTool:
 
     def test_registered_as_readonly(self):
         registry = build_default_registry()
-        tool = registry.get("list_files")
+        tool = registry.get("list")
         assert isinstance(tool, ListFilesTool)
         assert tool.is_readonly is True
 
@@ -756,7 +756,7 @@ class TestIntegration:
     def test_registry_execute_read_file(self, workspace: Path):
         (workspace / "memory" / "notes.md").write_text("integration test\n")
         r = build_default_registry()
-        result = json.loads(r.execute("read_file", {
+        result = json.loads(r.execute("read", {
             "ctx": ToolContext(workspace=workspace), "path": "memory/notes.md",
         }))
         assert result["status"] == "ok"
@@ -785,7 +785,7 @@ class TestIntegration:
         r = build_default_registry()
 
         # ReadFile
-        result = json.loads(r.execute("read_file", {
+        result = json.loads(r.execute("read", {
             "ctx": ToolContext(workspace=workspace), "path": "README.md",
         }))
         assert "ws-specific content" in result["content"]

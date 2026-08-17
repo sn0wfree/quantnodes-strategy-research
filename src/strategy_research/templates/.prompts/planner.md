@@ -19,7 +19,7 @@
       "title": "步骤标题",
       "description": "详细任务描述（给执行 agent 看）",
       "type": "llm_agent",
-      "tools": ["read_file", "get_market_data"],
+      "tools": ["read", "get_market_data"],
       "depends_on": ["step_000"]
     }
   ]

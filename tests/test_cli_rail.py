@@ -41,21 +41,21 @@ class TestRailStep:
 class TestToolLifecycle:
     def test_tool_call_pushes_step(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill", "args": {"name": "read_csv"}})
+        d.handle_event("tool_call", {"tool": "skill", "args": {"name": "read_csv"}})
         assert len(d._steps) == 1
-        assert d._steps[0].tool == "load_skill"
+        assert d._steps[0].tool == "skill"
         assert d._steps[0].title == "Skill"  # strip 'load_' + capitalize
 
     def test_active_step_singular(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("tool_call", {"tool": "get_financials"})
         # Latest call becomes active; previous is still in steps
         assert d._active_step.tool == "get_financials"
 
     def test_tool_result_clears_active(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("tool_result", {"ok": True, "elapsed_ms": 100})
         assert d._active_step is None
         assert d._steps[-1].status == "done"
@@ -63,7 +63,7 @@ class TestToolLifecycle:
 
     def test_tool_result_failure(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("tool_result", {"ok": False, "elapsed_ms": 50, "summary": "boom"})
         assert d._steps[-1].status == "error"
         assert d._steps[-1].result_summary == "boom"
@@ -81,7 +81,7 @@ class TestToolLifecycle:
 class TestOtherEvents:
     def test_text_delta_appends(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("text_delta", {"text": "loading…"})
         assert "loading…" in d._active_step.lines
 
@@ -124,21 +124,21 @@ class TestRender:
 
     def test_render_text_contains_step_title(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("tool_result", {"ok": True, "elapsed_ms": 200})
         out = _render_to_text(d)
         assert "Skill" in out
 
     def test_render_shows_active(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})  # active
+        d.handle_event("tool_call", {"tool": "skill"})  # active
         d.set_verb("Loading")
         out = _render_to_text(d)
         assert "Loading" in out
 
     def test_render_shows_done_when_finished(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("tool_result", {"ok": True})
         d.finish(result="Completed.", elapsed=1.5)
         out = _render_to_text(d)
@@ -146,7 +146,7 @@ class TestRender:
 
     def test_render_returns_group_with_steps(self):
         d = RailRunDashboard()
-        d.handle_event("tool_call", {"tool": "load_skill"})
+        d.handle_event("tool_call", {"tool": "skill"})
         d.handle_event("tool_call", {"tool": "run_backtest"})
         d.handle_event("tool_result", {"ok": True})
         result = d.render()

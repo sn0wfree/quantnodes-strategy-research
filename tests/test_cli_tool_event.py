@@ -31,7 +31,7 @@ class TestBeautifyToolName:
             ("get_financials", "Financials"),
             ("run_backtest", "Backtest"),
             ("fetch_data", "Data"),
-            ("load_skill", "Skill"),
+            ("skill", "Skill"),
             ("build_features", "Features"),
             ("compute_factor", "Factor"),
             ("plain", "Plain"),
@@ -141,7 +141,7 @@ class TestRenderToolEvent:
         assert "ms" in out
 
     def test_includes_result_summary(self):
-        text = render_tool_event("load_skill", status="ok", result_summary="loaded read_csv")
+        text = render_tool_event("skill", status="ok", result_summary="loaded read_csv")
         out = _render_plain(text)
         assert "loaded read_csv" in out
 
@@ -165,7 +165,7 @@ class TestRenderToolEvents:
     def test_batch_passes_kwargs(self):
         events = [
             {
-                "name": "load_skill",
+                "name": "skill",
                 "args": {"name": "read_csv"},
                 "status": "ok",
                 "duration_ms": 100,

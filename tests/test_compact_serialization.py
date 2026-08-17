@@ -97,7 +97,7 @@ class TestSerializeToolCalls:
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": '"/tmp/test.py"'}},
+                {"id": "c1", "type": "function", "function": {"name": "read", "arguments": '"/tmp/test.py"'}},
             ],
         }
         result = _serialize_message(msg)
@@ -109,7 +109,7 @@ class TestSerializeToolCalls:
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": '"/a.py"'}},
+                {"id": "c1", "type": "function", "function": {"name": "read", "arguments": '"/a.py"'}},
                 {"id": "c2", "type": "function", "function": {"name": "search_code", "arguments": '"query"'}},
             ],
         }
@@ -123,7 +123,7 @@ class TestSerializeToolCalls:
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": long_args}},
+                {"id": "c1", "type": "function", "function": {"name": "shell", "arguments": long_args}},
             ],
         }
         result = _serialize_message(msg)
@@ -134,7 +134,7 @@ class TestSerializeToolCalls:
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": 42}},
+                {"id": "c1", "type": "function", "function": {"name": "read", "arguments": 42}},
             ],
         }
         result = _serialize_message(msg)
@@ -146,7 +146,7 @@ class TestSerializeToolCalls:
             "role": "assistant",
             "content": "Let me read the file",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": '"/a.py"'}},
+                {"id": "c1", "type": "function", "function": {"name": "read", "arguments": '"/a.py"'}},
             ],
         }
         result = _serialize_message(msg)
@@ -164,7 +164,7 @@ class TestSerializeToolCalls:
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"type": "function", "function": {"name": "read_file", "arguments": '"/a.py"'}},
+                {"type": "function", "function": {"name": "read", "arguments": '"/a.py"'}},
             ],
         }
         result = _serialize_message(msg)

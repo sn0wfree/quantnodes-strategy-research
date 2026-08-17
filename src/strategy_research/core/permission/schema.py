@@ -30,20 +30,20 @@ class Permission(str, Enum):
     """
 
     # ── R0 read-only (auto-allowed) ────────────────────────────
-    READ_FILE = "read_file"
-    LIST_FILES = "list_files"
+    READ_FILE = "read"
+    LIST_FILES = "list"
     LIST_HISTORY = "list_history"
 
     # ── R1 network read (ask once default) ────────────────────
     WEB_FETCH = "web_fetch"
-    WEB_SEARCH = "web_search"
+    WEB_SEARCH = "websearch"
 
     # ── R2 workspace write (ask every call default) ───────────
-    WRITE_FILE = "write_file"
+    WRITE_FILE = "write"
     EDIT = "edit"
 
     # ── R3 execute side-effects (ask every call default) ──────
-    RUN_COMMAND = "run_command"
+    RUN_COMMAND = "shell"
     RUN_BACKTEST = "run_backtest"
     GET_MARKET_DATA = "get_market_data"
     IMPORT_DATA = "import_data"
@@ -53,7 +53,7 @@ class Permission(str, Enum):
     DELETE_FILE = "delete_file"
 
     # ── Agent delegation ───────────────────────────────────────
-    DELEGATE_TO_AGENT = "delegate_to_agent"
+    DELEGATE_TO_AGENT = "task"
 
     # Catch-all when a tool name does not map to a known category.
     UNKNOWN = "*"

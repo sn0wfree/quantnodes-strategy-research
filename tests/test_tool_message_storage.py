@@ -39,7 +39,7 @@ class TestConvertHistoryNewFormat:
         messages = [
             _make_msg("user", "read file", message_id="u1"),
             _make_msg("assistant", "", message_id="a1",
-                      metadata={"_parts": [{"type": "tool_call", "id": "call_1", "name": "read_file", "arguments": '{"path":"x"}'}]}),
+                      metadata={"_parts": [{"type": "tool_call", "id": "call_1", "name": "read", "arguments": '{"path":"x"}'}]}),
             _make_msg("tool", "file content", message_id="t1", tool_call_id="call_1"),
             _make_msg("user", "current", message_id="u2"),
         ]
@@ -49,15 +49,15 @@ class TestConvertHistoryNewFormat:
         assert history[1]["role"] == "assistant"
         assert len(history[1]["tool_calls"]) == 1
         assert history[1]["tool_calls"][0]["id"] == "call_1"
-        assert history[1]["tool_calls"][0]["function"]["name"] == "read_file"
+        assert history[1]["tool_calls"][0]["function"]["name"] == "read"
         assert history[2]["role"] == "tool"
         assert history[2]["tool_call_id"] == "call_1"
         assert history[2]["content"] == "file content"
 
     def test_multiple_tool_calls(self):
         parts = [
-            {"type": "tool_call", "id": "call_1", "name": "read_file", "arguments": '{"path":"a.py"}'},
-            {"type": "tool_call", "id": "call_2", "name": "list_files", "arguments": '{"path":"."}'},
+            {"type": "tool_call", "id": "call_1", "name": "read", "arguments": '{"path":"a.py"}'},
+            {"type": "tool_call", "id": "call_2", "name": "list", "arguments": '{"path":"."}'},
         ]
         messages = [
             _make_msg("user", "do stuff", message_id="u1"),
@@ -69,8 +69,8 @@ class TestConvertHistoryNewFormat:
         history = SessionService._convert_messages_to_history(messages)
         assert len(history) == 4
         assert len(history[1]["tool_calls"]) == 2
-        assert history[1]["tool_calls"][0]["function"]["name"] == "read_file"
-        assert history[1]["tool_calls"][1]["function"]["name"] == "list_files"
+        assert history[1]["tool_calls"][0]["function"]["name"] == "read"
+        assert history[1]["tool_calls"][1]["function"]["name"] == "list"
         assert history[2]["tool_call_id"] == "call_1"
         assert history[3]["tool_call_id"] == "call_2"
 
@@ -122,7 +122,7 @@ class TestConvertHistoryLegacyFormat:
         the embedded result becomes a role=tool message immediately
         after (opencode-aligned assistant-tool grouping)."""
         parts = [
-            {"type": "tool_call", "id": "call_1", "name": "read_file",
+            {"type": "tool_call", "id": "call_1", "name": "read",
              "arguments": '{"path":"test.py"}', "result": "file content", "status": "done"},
         ]
         messages = [
@@ -135,7 +135,7 @@ class TestConvertHistoryLegacyFormat:
         assert len(history) == 3
         assert history[1]["role"] == "assistant"
         assert len(history[1]["tool_calls"]) == 1
-        assert history[1]["tool_calls"][0]["function"]["name"] == "read_file"
+        assert history[1]["tool_calls"][0]["function"]["name"] == "read"
         assert history[2]["role"] == "tool"
         assert history[2]["tool_call_id"] == "call_1"
         assert history[2]["content"] == "file content"

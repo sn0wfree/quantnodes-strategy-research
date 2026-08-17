@@ -52,29 +52,29 @@ class TestToolWhitelist:
         """strategist 必须能 write_file + run_backtest."""
         from strategy_research.core.agent.role_factory import _get_tool_whitelist
         wl = _get_tool_whitelist("strategist")
-        assert "write_file" in wl
+        assert "write" in wl
         assert "run_backtest" in wl
-        assert "read_file" in wl
+        assert "read" in wl
 
     def test_data_quality_minimal(self):
         """data_quality 是只读 agent, 包含 read_file + web tools."""
         from strategy_research.core.agent.role_factory import _get_tool_whitelist
         wl = _get_tool_whitelist("data_quality")
-        assert "read_file" in wl
-        assert "web_search" in wl
-        assert "read_url" in wl
+        assert "read" in wl
+        assert "websearch" in wl
+        assert "webfetch" in wl
 
     def test_critic_is_readonly(self):
         """critic 不能 write_file."""
         from strategy_research.core.agent.role_factory import _get_tool_whitelist
         wl = _get_tool_whitelist("critic")
-        assert "write_file" not in wl
-        assert "read_file" in wl
+        assert "write" not in wl
+        assert "read" in wl
 
     def test_unknown_role_minimal_default(self):
         """未知 role 退到 read_file 默认最小集."""
         from strategy_research.core.agent.role_factory import _get_tool_whitelist
-        assert _get_tool_whitelist("foo_bar_baz") == ["read_file"]
+        assert _get_tool_whitelist("foo_bar_baz") == ["read"]
 
 
 class TestShouldUseRealLlm:
@@ -128,7 +128,7 @@ class TestBuildAgentLoop:
         assert "compute_factor" not in [t.name for t in loop.registry._tools.values()]
         # 但应保留 read_file
         tool_names = [t.name for t in loop.registry._tools.values()]
-        assert "read_file" in tool_names
+        assert "read" in tool_names
 
     def test_strategist_has_write_tools(self, tmp_path):
         from strategy_research.core.agent.role_factory import build_agent_loop
@@ -140,7 +140,7 @@ class TestBuildAgentLoop:
         )
         assert loop is not None
         tool_names = {t.name for t in loop.registry._tools.values()}
-        assert "write_file" in tool_names
+        assert "write" in tool_names
         assert "run_backtest" in tool_names
 
     def test_unknown_role_returns_none(self, tmp_path):

@@ -50,7 +50,7 @@ class _FakeToolDef:
 @pytest.fixture
 def fake_registry(monkeypatch):
     """Patch ``build_default_registry`` to return a deterministic registry."""
-    fake = _FakeRegistry(["read_file", "list_files", "run_backtest", "web_search"])
+    fake = _FakeRegistry(["read", "list", "run_backtest", "websearch"])
     monkeypatch.setattr(
         "strategy_research.core.agent.builtin_tools.build_default_registry",
         lambda: fake,
@@ -168,7 +168,7 @@ class TestChatLoopAllowedToolsUnlock:
         # (see loop.py:184: if allowed_tools is not None: filtered...)
         assert loop.registry is fake_registry
         assert sorted(loop.registry._tools.keys()) == [
-            "list_files", "read_file", "run_backtest", "web_search"
+            "list", "read", "run_backtest", "websearch"
         ]
 
     def test_explicit_empty_list_filters_to_empty(
@@ -189,11 +189,11 @@ class TestChatLoopAllowedToolsUnlock:
 
         loop = build_chat_agent_loop(
             config=fake_config, session_id="s1",
-            allowed_tools=["read_file", "list_files"],
+            allowed_tools=["read", "list"],
         )
         # Only the two allowed tools survive
         assert sorted(loop.registry._tools.keys()) == [
-            "list_files", "read_file"
+            "list", "read"
         ]
 
 
@@ -240,7 +240,7 @@ class TestChatLoopWorkspaceRendering:
         loop = build_chat_agent_loop(config=fake_config, session_id="s1")
         sp = self._system_prompt(loop)
         # All 4 fake tools must appear in the system prompt
-        for tool_name in ["read_file", "list_files", "run_backtest", "web_search"]:
+        for tool_name in ["read", "list", "run_backtest", "websearch"]:
             assert tool_name in sp
 
     def test_extra_context_overrides_defaults(
@@ -325,11 +325,11 @@ class TestChatLoopShellGating:
 
     def test_disabled_removes_run_command_from_registry(self, fake_config):
         loop = self._loop(False, fake_config)
-        assert "run_command" not in loop.registry._tools
+        assert "shell" not in loop.registry._tools
 
     def test_enabled_keeps_run_command_in_registry(self, fake_config):
         loop = self._loop(True, fake_config)
-        assert "run_command" in loop.registry._tools
+        assert "shell" in loop.registry._tools
 
     def test_disabled_hides_run_command_from_tool_list(self, fake_config):
         """The LLM's system prompt must not advertise run_command when off.
@@ -353,19 +353,19 @@ class TestChatLoopShellGating:
         registries as well — no path leaks the shell tool when disabled."""
         from strategy_research.core.agent.chat_loop import build_chat_agent_loop
 
-        custom_registry = _FakeRegistry(["run_command", "read_file"])
+        custom_registry = _FakeRegistry(["shell", "read"])
         loop = build_chat_agent_loop(
             config=fake_config, session_id="s1",
             registry=custom_registry, allow_shell_tools=False,
         )
-        assert "run_command" not in loop.registry._tools
+        assert "shell" not in loop.registry._tools
 
     def test_explicit_registry_keeps_tool_when_enabled(self, fake_config):
         from strategy_research.core.agent.chat_loop import build_chat_agent_loop
 
-        custom_registry = _FakeRegistry(["run_command", "read_file"])
+        custom_registry = _FakeRegistry(["shell", "read"])
         loop = build_chat_agent_loop(
             config=fake_config, session_id="s1",
             registry=custom_registry, allow_shell_tools=True,
         )
-        assert "run_command" in loop.registry._tools
+        assert "shell" in loop.registry._tools

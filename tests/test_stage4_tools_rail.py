@@ -21,7 +21,7 @@ from strategy_research.cli.tui.widgets.tools_rail import (
 
 class TestTimelineEntry:
     def test_default_fields(self):
-        e = TimelineEntry(kind="tool", label="read_file", status="running")
+        e = TimelineEntry(kind="tool", label="read", status="running")
         assert e.duration_ms is None
         assert e.detail == ""
         assert e.iter is None
@@ -35,13 +35,13 @@ class TestToolsRailHandleEvent:
 
     def test_tool_call_is_no_op(self):
         rail = self._rail()
-        rail.handle_event("tool_call", {"tool": "read_file", "iter": 1})
+        rail.handle_event("tool_call", {"tool": "read", "iter": 1})
         assert rail._timeline == []
 
     def test_tool_result_is_no_op(self):
         rail = self._rail()
         rail.handle_event("tool_result", {
-            "tool": "read_file", "status": "ok", "elapsed_ms": 500,
+            "tool": "read", "status": "ok", "elapsed_ms": 500,
         })
         assert rail._timeline == []
 

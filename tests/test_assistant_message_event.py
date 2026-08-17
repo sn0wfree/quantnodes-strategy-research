@@ -88,10 +88,10 @@ class TestAssistantMessageEmission:
         loop = _make_loop(sink, max_iterations=2)
         loop.client.chat = MockLLM([
             LLMResponse(content=None, tool_calls=[
-                ToolCall(id="c1", name="read_file", arguments={"path": "x"}),
+                ToolCall(id="c1", name="read", arguments={"path": "x"}),
             ], finish_reason="tool_calls"),
             LLMResponse(content=None, tool_calls=[
-                ToolCall(id="c2", name="read_file", arguments={"path": "y"}),
+                ToolCall(id="c2", name="read", arguments={"path": "y"}),
             ], finish_reason="tool_calls"),
         ]).chat
         result = loop.run("endless")

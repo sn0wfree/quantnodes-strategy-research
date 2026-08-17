@@ -75,7 +75,7 @@ class ShellExecTool(BaseTool):
     # ─────────────────────────────────────────────
     """
 
-    name = "run_command"
+    name = "shell"
     description = "在工作区目录执行 shell 命令 (opt-in); 返回 stdout/stderr/退出码。"
     repeatable = True
     category = "系统"
@@ -93,7 +93,7 @@ class ShellExecTool(BaseTool):
             return err_actionable(
                 "missing workspace context",
                 fix="AgentLoop 注入 workspace; 直接调用时传 ctx",
-                tool="run_command",
+                tool="shell",
             )
         workspace = Path(str(ctx.workspace)).resolve()
 
@@ -102,7 +102,7 @@ class ShellExecTool(BaseTool):
                 "missing or empty 'command' parameter",
                 expected="a valid shell command string, e.g. 'pip install pandas'",
                 fix="pass command='your shell command here'",
-                tool="run_command",
+                tool="shell",
             )
 
         # ── Parse timeout ────────────────────────────────────
@@ -116,7 +116,7 @@ class ShellExecTool(BaseTool):
                     f"command blocked for safety: contains '{blocked}'",
                     received=command,
                     fix="use a less destructive command",
-                    tool="run_command",
+                    tool="shell",
                 )
 
         # ── Execute ──────────────────────────────────────────
@@ -137,21 +137,21 @@ class ShellExecTool(BaseTool):
                 f"command timed out after {timeout}s",
                 received=command,
                 fix="increase timeout or use a shorter-running command",
-                tool="run_command",
+                tool="shell",
             )
         except FileNotFoundError:
             return err_actionable(
                 "shell not found (sh/bash not in PATH)",
                 received=command,
                 fix="check that /bin/sh or /bin/bash exists",
-                tool="run_command",
+                tool="shell",
             )
         except Exception as exc:
             return err_actionable(
                 f"command execution failed: {exc}",
                 received=command,
                 fix="verify the command syntax is correct",
-                tool="run_command",
+                tool="shell",
             )
 
         stdout = _truncate(result.stdout)

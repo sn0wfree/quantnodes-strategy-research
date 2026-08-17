@@ -140,7 +140,7 @@ class TestWriteAssistantMessage:
     def test_tool_lines_preserved(self, tv: TranscriptView):
         """Markdown rendering doesn't clobber in-flight tool call state."""
         tv._tool_lines["c1"] = 0
-        tv._tool_names["c1"] = "read_file"
+        tv._tool_names["c1"] = "read"
         tv.write_assistant_message("# Final answer")
         # Tool state intact (used by future update_tool_result)
         assert "c1" in tv._tool_lines

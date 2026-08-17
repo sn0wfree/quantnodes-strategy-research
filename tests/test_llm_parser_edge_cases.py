@@ -110,10 +110,10 @@ class TestToolCallDataClass(unittest.TestCase):
     """ToolCall dataclass to_dict."""
 
     def test_to_dict(self) -> None:
-        tc = ToolCall(id="c1", name="read_file", arguments={"path": "/foo"})
+        tc = ToolCall(id="c1", name="read", arguments={"path": "/foo"})
         d = tc.to_dict()
         self.assertEqual(d["id"], "c1")
-        self.assertEqual(d["name"], "read_file")
+        self.assertEqual(d["name"], "read")
         self.assertEqual(d["arguments"], {"path": "/foo"})
 
 

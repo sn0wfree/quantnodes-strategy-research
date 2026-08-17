@@ -14,7 +14,7 @@ Shapes observed in production (verified against the local SQLite
 * DSML bracket / pipe variants (emitted as *individual tokens* during
   streaming, so a single chunk is often just one of these):
   - ``<|DSML|tool_calls>``
-  - ``<|DSML|invoke name="list_files">``
+  - ``<|DSML|invoke name="list">``
   - ``<|DSML|parameter name="workspace" string="true">...<|DSML|parameter>``
   - ``<|DSML|tool_calls>...<``  (unclosed)
   - ``[DSML | tool_calls>...<]``

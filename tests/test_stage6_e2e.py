@@ -64,7 +64,7 @@ class TestE2EConversationFlow:
         with mock.patch.object(app, "query_one", return_value=mock_tv):
             # tool_call → TranscriptView.append_tool_call
             app.route_agent_event("tool_call", {
-                "tool": "read_file",
+                "tool": "read",
                 "args": {"path": "/x"},
                 "call_id": "c1",
                 "iter": 1,
@@ -73,14 +73,14 @@ class TestE2EConversationFlow:
 
             # tool_progress → no-op on TV (reserved for future inline use)
             app.route_agent_event("tool_progress", {
-                "tool": "read_file",
+                "tool": "read",
                 "call_id": "c1",
                 "message": "reading...",
             })
 
             # tool_result → TranscriptView.update_tool_result
             app.route_agent_event("tool_result", {
-                "tool": "read_file",
+                "tool": "read",
                 "call_id": "c1",
                 "status": "ok",
                 "ok": True,
