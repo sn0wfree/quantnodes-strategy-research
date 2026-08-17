@@ -290,7 +290,13 @@ def _check_factor_syntax(cfg: dict | None) -> list[ReadinessCheck]:
 
     bad: list[str] = []
     for f in factors:
-        code = f.get("code", "")
+        # Handle both dict and string factor formats
+        if isinstance(f, str):
+            code = f
+        elif isinstance(f, dict):
+            code = f.get("code", "")
+        else:
+            continue
         if not code:
             continue
         try:
