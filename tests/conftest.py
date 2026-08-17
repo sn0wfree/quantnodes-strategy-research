@@ -102,7 +102,7 @@ def _isolate_workspace_env():
         k: os.environ.get(k)
         for k in (
             "SR_WORKSPACE_PATH", "SR_SESSIONS_DB", "HYPOTHESIS_USE_SQLITE",
-            "STATIC_DIR",
+            "STATIC_DIR", "QUANTNODES_RESEARCH_GOAL_DB_PATH",
         )
     }
     yield

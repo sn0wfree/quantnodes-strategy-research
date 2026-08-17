@@ -288,12 +288,29 @@ class StudyScheduler:
           loops when uvicorn reload kills the study due to file changes)
         - PAUSED → stays PAUSED (user pause is respected)
         - QUEUED → stays QUEUED but is re-submitted to the scheduler
+        - workspace_path not exists → mark as ERROR (stale test data cleanup)
         """
+        from pathlib import Path
+
         # Memory guard: process-local state is empty at startup so there
         # is no false-positive "ghost" to filter (unlike chat attempts we
         # need no inter-process coordination).
         recoverable: list[StudyRecord] = []
         for s in self.store.list_active_studies():
+            # Defense: skip studies with non-existent workspace paths
+            # (e.g. pytest temp dirs that were cleaned up)
+            ws_path = Path(s.workspace_path)
+            if not ws_path.exists():
+                logger.warning(
+                    "study %s workspace not found: %s, marking as error",
+                    s.study_id, s.workspace_path,
+                )
+                self.store.update_execution_status(
+                    s.study_id, StudyStatus.ERROR,
+                    last_error=f"workspace not found: {s.workspace_path}",
+                )
+                continue
+
             if s.execution_status == StudyStatus.PAUSED:
                 continue  # respect user pause
             if s.execution_status == StudyStatus.RUNNING:
