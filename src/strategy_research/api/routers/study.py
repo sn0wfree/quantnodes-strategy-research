@@ -812,9 +812,9 @@ async def study_rounds_list(
 @router.get("/{study_id}/journal", response_model=StudyJournalResponse)
 async def study_journal(request: Request, study_id: str):
     """v2: journal.md content (append-only archive, single source)."""
-    from ...core.study import state_store as ss
+    from ...core.study.round_manifest import journal_path
     study = _owned_study(request, study_id)
-    p = ss.journal_path(Path(study.workspace_path), study_id)
+    p = journal_path(Path(study.workspace_path), study_id)
     content = p.read_text(encoding="utf-8") if p.exists() else ""
     return {"status": "ok", "study_id": study_id, "journal": content}
 

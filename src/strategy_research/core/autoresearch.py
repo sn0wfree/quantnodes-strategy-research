@@ -1996,7 +1996,7 @@ def run_execution_phase(
     path = Path(workspace_path).resolve()
     spawn = _make_spawn_fn(
         path, strategy_name, current_state, behavior, max_retries,
-        inter_agent_sleep, max_iterations=max_iterations,
+        max_iterations=max_iterations, inter_agent_sleep=inter_agent_sleep,
     )
 
     dq = spawn("data_quality", [researcher_output])
