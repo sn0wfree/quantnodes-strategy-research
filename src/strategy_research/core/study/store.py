@@ -166,6 +166,10 @@ class StudyStore:
                 self._conn.execute(
                     "ALTER TABLE studies ADD COLUMN last_traceback TEXT"
                 )
+            if "early_stop_patience" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE studies ADD COLUMN early_stop_patience INTEGER NOT NULL DEFAULT 3"
+                )
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS study_directives (
