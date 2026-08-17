@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { ArrowRight, Clock, FolderOpen, Target, User } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowRight, Clock, FolderOpen, Target, User, ExternalLink } from 'lucide-react'
 import { api, type StudySummaryResponse } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { MetricsCompare } from './MetricsCompare'
@@ -36,6 +36,7 @@ function MetaRow({ icon, label, value, title }: { icon: React.ReactNode; label: 
 }
 
 export function StudyTaskSummary({ studyId }: Props) {
+  const navigate = useNavigate()
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -80,10 +81,23 @@ export function StudyTaskSummary({ studyId }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2.5">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-        <Target className="h-3.5 w-3.5 text-primary-400" />
-        任务摘要
-      </h2>
+      {/* Header with fixed button - always visible */}
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <Target className="h-3.5 w-3.5 text-primary-400" />
+          任务摘要
+        </h2>
+        {summary && (
+          <Link
+            to={`/study/${summary.study_id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-[10px] font-medium text-primary-300 transition-colors hover:bg-primary-500/20 hover:text-primary-200"
+          >
+            <ExternalLink className="h-3 w-3" />
+            查看详情
+          </Link>
+        )}
+      </div>
 
       {loading && !summary ? (
         <div className="animate-pulse space-y-2">
@@ -100,11 +114,22 @@ export function StudyTaskSummary({ studyId }: Props) {
           加载中…
         </div>
       ) : (
-        <>
+        <div
+          className="flex flex-1 cursor-pointer flex-col gap-2.5 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft transition-all hover:border-primary-500/40 hover:bg-slate-900/80 hover:shadow-elevated"
+          onClick={() => summary && navigate(`/study/${summary.study_id}`)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              summary && navigate(`/study/${summary.study_id}`)
+            }
+          }}
+        >
           {/* Objective + badges */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+          <div>
             <p className="line-clamp-2 text-xs font-medium leading-relaxed text-slate-200">
-              {summary.objective || '未命名研究'}
+              {summary!.objective || '未命名研究'}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span
@@ -117,16 +142,16 @@ export function StudyTaskSummary({ studyId }: Props) {
                 )}
                 {STUDY_STATUS_LABELS[status] ?? status}
               </span>
-              {summary.last_verdict && (
+              {summary!.last_verdict && (
                 <span
                   className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${
-                    summary.last_verdict === 'keep'
+                    summary!.last_verdict === 'keep'
                       ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
                       : 'border-slate-700 bg-slate-800/70 text-slate-500'
                   }`}
                 >
-                  {summary.last_verdict}
-                  {summary.last_verdict === 'keep' && ' ✓'}
+                  {summary!.last_verdict}
+                  {summary!.last_verdict === 'keep' && ' ✓'}
                 </span>
               )}
             </div>
@@ -146,40 +171,37 @@ export function StudyTaskSummary({ studyId }: Props) {
                 />
               </div>
               <p className="mt-1.5 text-[10px] text-slate-500">
-                Round {summary.current_round ?? 0}/{summary.max_rounds ?? 5}
+                Round {summary!.current_round ?? 0}/{summary!.max_rounds ?? 5}
               </p>
             </div>
           </div>
 
           {/* Metrics compare */}
-          <MetricsCompare rounds={summary.recent_rounds ?? []} />
+          <MetricsCompare rounds={summary!.recent_rounds ?? []} />
 
           {/* Meta */}
-          <div className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+          <div className="space-y-1.5">
             <MetaRow
               icon={<User className="h-3 w-3" />}
               label="策略"
-              value={summary.strategy_name || '—'}
+              value={summary!.strategy_name || '—'}
             />
             <MetaRow
               icon={<FolderOpen className="h-3 w-3" />}
               label="工作区"
-              value={summary.workspace_path || '—'}
-              title={summary.workspace_path}
+              value={summary!.workspace_path || '—'}
+              title={summary!.workspace_path}
             />
-            <MetaRow icon={<Clock className="h-3 w-3" />} label="创建" value={formatDateTime(summary.created_at)} />
-            <MetaRow icon={<Clock className="h-3 w-3" />} label="更新" value={formatDateTime(summary.updated_at)} />
+            <MetaRow icon={<Clock className="h-3 w-3" />} label="创建" value={formatDateTime(summary!.created_at)} />
+            <MetaRow icon={<Clock className="h-3 w-3" />} label="更新" value={formatDateTime(summary!.updated_at)} />
           </div>
 
-          {/* Detail link */}
-          <Link
-            to={`/study/${summary.study_id}`}
-            className="mt-auto flex items-center justify-center gap-1.5 rounded-xl border border-primary-500/40 bg-primary-500/10 px-3 py-2 text-xs font-medium text-primary-300 transition-colors hover:bg-primary-500/20 hover:text-primary-200"
-          >
-            查看完整运行状况
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </>
+          {/* Click hint */}
+          <div className="mt-auto flex items-center justify-center gap-1 border-t border-slate-800/60 pt-2 text-[10px] text-slate-500">
+            <span>点击查看详情</span>
+            <ArrowRight className="h-3 w-3" />
+          </div>
+        </div>
       )}
     </div>
   )

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Clock, ArrowRight, RefreshCw, ListChecks } from 'lucide-react'
 import type { StudySummary } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
@@ -28,10 +29,12 @@ function HistoryCard({
   study,
   selected,
   onClick,
+  onDoubleClick,
 }: {
   study: StudySummary
   selected: boolean
   onClick: () => void
+  onDoubleClick?: () => void
 }) {
   const status = study.execution_status ?? 'unknown'
   const isActive = ACTIVE_STATUSES.includes(status)
@@ -47,6 +50,7 @@ function HistoryCard({
     <button
       type="button"
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       aria-pressed={selected}
       className={`w-full cursor-pointer rounded-xl border p-3 text-left shadow-soft transition-all duration-200 active:scale-[0.99] ${
         selected
@@ -116,6 +120,7 @@ interface Props {
 }
 
 export function StudyTaskList({ studies, selectedId, loading, onSelect, onRefresh }: Props) {
+  const navigate = useNavigate()
   const [filter, setFilter] = useState<FilterKey>('all')
 
   const sorted = useMemo(() => {
@@ -190,6 +195,7 @@ export function StudyTaskList({ studies, selectedId, loading, onSelect, onRefres
               study={s}
               selected={s.study_id === selectedId}
               onClick={() => onSelect(s)}
+              onDoubleClick={() => navigate(`/study/${s.study_id}`)}
             />
           ))}
         </div>
