@@ -128,6 +128,7 @@ class StudyRecord:
     cooldown_jitter: float = 10.0
     min_cooldown: float = 1.0
     max_rounds: int | None = None
+    early_stop_patience: int = 3  # consecutive idle rounds before early stop
     lazy_detection_interval: int = 10
     keep_recent: int = 10
     behavior: str | None = None  # None = real LLM; 'static'/'varying'/'improving' = stub

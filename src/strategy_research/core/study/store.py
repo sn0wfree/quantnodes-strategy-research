@@ -116,6 +116,7 @@ class StudyStore:
                     cooldown_jitter         REAL NOT NULL DEFAULT 10.0,
                     min_cooldown            REAL NOT NULL DEFAULT 1.0,
                     max_rounds              INTEGER,
+                    early_stop_patience     INTEGER NOT NULL DEFAULT 3,
                     lazy_detection_interval INTEGER NOT NULL DEFAULT 10,
                     keep_recent             INTEGER NOT NULL DEFAULT 10,
                     behavior                TEXT,
@@ -242,6 +243,7 @@ class StudyStore:
         cooldown_jitter: float = 10.0,
         min_cooldown: float = 1.0,
         max_rounds: int | None = None,
+        early_stop_patience: int = 3,
         lazy_detection_interval: int = 10,
         keep_recent: int = 10,
         behavior: str | None = None,
@@ -309,14 +311,14 @@ class StudyStore:
                     metric_targets,
                     budget_token, budget_turn, budget_time_seconds,
                     cooldown_base, cooldown_jitter, min_cooldown,
-                    max_rounds, lazy_detection_interval, keep_recent,
+                    max_rounds, early_stop_patience, lazy_detection_interval, keep_recent,
                     behavior,
                     execution_status, current_round,
                     heartbeat, created_at, updated_at,
                     monitor_interval_seconds, last_monitor_check_at,
                     monitor_drift_count
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
                 """,
                 (
                     study_id,
@@ -335,6 +337,7 @@ class StudyStore:
                     cooldown_jitter,
                     min_cooldown,
                     max_rounds,
+                    early_stop_patience,
                     lazy_detection_interval,
                     keep_recent,
                     behavior,

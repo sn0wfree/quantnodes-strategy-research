@@ -219,6 +219,7 @@ class StudyStartRequest(BaseModel):
     cooldown_jitter: float = 10.0
     min_cooldown: float = 1.0
     max_rounds: Optional[int] = None
+    early_stop_patience: int = 3
     behavior: Optional[str] = None
     lazy_detection_interval: int = 10
     keep_recent: int = 10
@@ -308,6 +309,7 @@ async def study_start(req: StudyStartRequest, request: Request):
             cooldown_jitter=req.cooldown_jitter,
             min_cooldown=req.min_cooldown,
             max_rounds=req.max_rounds,
+            early_stop_patience=req.early_stop_patience,
             behavior=req.behavior,
             monitor_interval_seconds=req.monitor_interval_seconds,
             guidance_md=req.guidance_md,
@@ -874,9 +876,8 @@ async def study_round_artifacts(request: Request, study_id: str, round_num: int)
     under the run_* directories (strategy.py, config.yaml, agents/*,
     backtest logs...).
     """
-    _owned_study(request, study_id)
-    from ...core.study import round_manifest as rm
     study = _owned_study(request, study_id)
+    from ...core.study import round_manifest as rm
     rd = rm.round_dir(Path(study.workspace_path), study_id, round_num)
     if not rd.exists():
         raise HTTPException(status_code=404, detail="round dir not found")
@@ -901,9 +902,8 @@ async def study_round_artifacts(request: Request, study_id: str, round_num: int)
 @router.get("/{study_id}/rounds/{round_num}/manifest", response_model=StudyRoundManifestResponse)
 async def study_round_manifest(request: Request, study_id: str, round_num: int):
     """Round manifest.json content (hypothesis / changes / metrics / next)."""
-    _owned_study(request, study_id)
-    from ...core.study import round_manifest as rm
     study = _owned_study(request, study_id)
+    from ...core.study import round_manifest as rm
     m = rm.load_manifest(Path(study.workspace_path), study_id, round_num)
     if m is None:
         raise HTTPException(status_code=404, detail="round manifest not found")
@@ -921,9 +921,8 @@ async def study_round_diff(
     <name>/baseline/strategy.py). Otherwise diffs round ``against``'s
     adopted run strategy vs round ``round_num``'s.
     """
-    _owned_study(request, study_id)
-    import difflib
     study = _owned_study(request, study_id)
+    import difflib
     ws = Path(study.workspace_path)
 
     def _strategy_of(rn: int) -> Path | None:
@@ -976,7 +975,6 @@ async def study_round_adopt(request: Request, study_id: str, round_num: int):
     (shared across studies) is left untouched. Safe to call while the
     study is paused/interrupted.
     """
-    _owned_study(request, study_id)
     study = _owned_study(request, study_id)
     ws = Path(study.workspace_path)
     runs = _round_run_dirs(ws, study_id, round_num)

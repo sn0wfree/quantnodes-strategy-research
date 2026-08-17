@@ -470,7 +470,7 @@ class AutoresearchRunner:
                     self._idle_rounds = 0
                 else:
                     self._idle_rounds += 1
-                if self._idle_rounds >= 3:
+                if self._idle_rounds >= self._get_study().early_stop_patience:
                     self._mark_terminal(StudyStatus.EARLY_STOPPED, last_metrics=metrics,
                                         last_error=f"idle={self._idle_rounds} rounds, best={self._best_score}",
                                         reason=ShutdownReason.EARLY_STOPPED)
