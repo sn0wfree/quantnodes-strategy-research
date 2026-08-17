@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Pause, Play, X, ArrowRightCircle, ExternalLink } from 'lucide-react'
 import { useStudyStore } from '../../stores/study'
 import { api, type StudySummaryResponse, type FlowNodeData } from '../../api/client'
@@ -9,8 +9,7 @@ import { RoundHistory } from './RoundHistory'
 import { ScoreboardMini } from './ScoreboardMini'
 
 interface Props {
-  sessionId: string
-  pollIntervalMs?: number
+  // sessionId is no longer needed - SSE handlers update the store directly
 }
 
 // 9-agent workflow nodes
@@ -26,49 +25,34 @@ const WORKFLOW_NODES = [
   { id: 'anti_overfit', label: 'AntiOverfit' },
 ]
 
-export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
+export function StudyProgress(_props: Props) {
+  // SSE-driven: current is updated by studyHandlers via useStudyStore
   const current = useStudyStore((s) => s.current)
-  const setCurrent = useStudyStore((s) => s.setCurrent)
   const setError = useStudyStore((s) => s.setError)
   const [directiveText, setDirectiveText] = useState('')
   const [submittingDirective, setSubmittingDirective] = useState(false)
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [flowNodes, setFlowNodes] = useState<FlowNodeData[]>([])
+  const lastSummaryStudyId = useRef<string>('')
+  const lastSummaryRound = useRef<number>(-1)
 
-  // Poll /study/status for basic state
-  useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-
-    const poll = async () => {
-      try {
-        const r = await api.study.status(sessionId)
-        if (!cancelled) setCurrent(r)
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message)
-      } finally {
-        if (!cancelled) {
-          timer = setTimeout(poll, pollIntervalMs)
-        }
-      }
-    }
-
-    poll()
-    return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [sessionId, setCurrent, setError, pollIntervalMs])
-
-  // Poll /study/{id}/summary for detailed data
-  const pollSummary = useCallback(async () => {
+  // Fetch summary when study changes or round advances
+  const fetchSummary = useCallback(async () => {
     const studyId = current?.study_id
     if (!studyId) return
+
+    // Only re-fetch if study changed or round advanced
+    const round = current?.current_round ?? 0
+    if (studyId === lastSummaryStudyId.current && round === lastSummaryRound.current) {
+      return
+    }
 
     try {
       const r = await api.study.summary(studyId)
       if (r.status === 'ok') {
         setSummary(r)
+        lastSummaryStudyId.current = studyId
+        lastSummaryRound.current = round
 
         // Build flow nodes from real round data
         const nodes: FlowNodeData[] = WORKFLOW_NODES.map((n) => ({
@@ -77,34 +61,24 @@ export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
           status: 'pending' as const,
         }))
 
-        // Determine phase status from rounds
         const rounds = r.recent_rounds ?? []
-        const round = current?.current_round ?? 0
 
         if (current?.execution_status === 'complete') {
-          // All done
           nodes.forEach((n) => { n.status = 'done' })
         } else if (rounds.length > 0 && round > 0) {
-          // Last round's verdict tells us the outcome
           const lastRound = rounds[rounds.length - 1]
           const verdict = lastRound?.verdict
 
           if (verdict === 'keep' || verdict === 'discard') {
-            // Round completed - all phases done for this round
             nodes.forEach((n) => { n.status = 'done' })
           } else if (current?.execution_status === 'running') {
-            // Round in progress - show partial progress based on round count
-            // Each round completes all 9 phases, so completed rounds = all done
-            // Current round = show some phases as running
             const completedRounds = Math.max(0, round - 1)
             if (completedRounds > 0) {
               nodes.forEach((n) => { n.status = 'done' })
             }
-            // Mark first phase as running for current round
             nodes[0].status = 'running'
           }
         } else if (current?.execution_status === 'running' && round === 1) {
-          // First round, no data yet
           nodes[0].status = 'running'
         }
 
@@ -115,23 +89,16 @@ export function StudyProgress({ sessionId, pollIntervalMs = 10000 }: Props) {
     }
   }, [current?.study_id, current?.execution_status, current?.current_round])
 
+  // React to SSE-driven store changes: fetch summary when current changes
   useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
+    fetchSummary()
+  }, [fetchSummary])
 
-    const pollLoop = async () => {
-      if (!cancelled) {
-        await pollSummary()
-        timer = setTimeout(pollLoop, pollIntervalMs)
-      }
-    }
-
-    pollLoop()
-    return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [pollSummary, pollIntervalMs])
+  // Fallback: minimal poll every 30s for robustness (in case SSE misses events)
+  useEffect(() => {
+    const timer = setInterval(fetchSummary, 30000)
+    return () => clearInterval(timer)
+  }, [fetchSummary])
 
   if (!current || current.status === 'no_study') {
     return (

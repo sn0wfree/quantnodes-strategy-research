@@ -82,7 +82,7 @@ describe('StudyProgress execution-status branches', () => {
   it('renders the "interrupted" status label and "继续运行" action', async () => {
     setupStudy({ execution_status: 'interrupted', current_round: 2 })
     mockStudySuccess({ execution_status: 'interrupted', current_round: 2 })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     expect(await screen.findByText('继续运行')).toBeInTheDocument()
     // Cancel should be hidden for interrupted (only paused/monitoring/running show it)
     expect(screen.queryByText('取消')).toBeNull()
@@ -91,7 +91,7 @@ describe('StudyProgress execution-status branches', () => {
   it('hides cancel for terminal "complete" status', async () => {
     setupStudy({ execution_status: 'complete' })
     mockStudySuccess({ execution_status: 'complete' })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     expect(await screen.findByText('已完成')).toBeInTheDocument()
     expect(screen.queryByText('取消')).toBeNull()
   })
@@ -99,7 +99,7 @@ describe('StudyProgress execution-status branches', () => {
   it('hides cancel for terminal "cancelled" status', async () => {
     setupStudy({ execution_status: 'cancelled' })
     mockStudySuccess({ execution_status: 'cancelled' })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     expect(await screen.findByText('已取消')).toBeInTheDocument()
     expect(screen.queryByText('取消')).toBeNull()
   })
@@ -107,7 +107,7 @@ describe('StudyProgress execution-status branches', () => {
   it('hides cancel for terminal "error" status', async () => {
     setupStudy({ execution_status: 'error', last_error: 'risk budget exceeded' })
     mockStudySuccess({ execution_status: 'error', last_error: 'risk budget exceeded' })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     expect(await screen.findByText('错误')).toBeInTheDocument()
     expect(screen.getByText('risk budget exceeded')).toBeInTheDocument()
     expect(screen.queryByText('取消')).toBeNull()
@@ -132,7 +132,7 @@ describe('StudyProgress execution-status branches', () => {
       scoreboard: [],
       goal_snapshot: null,
     } as never)
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     const link = await screen.findByText('查看详细')
     expect(link).toHaveAttribute('href', '/study/st-detail')
   })
@@ -140,7 +140,7 @@ describe('StudyProgress execution-status branches', () => {
   it('renders the last_error in rose color when present', async () => {
     setupStudy({ execution_status: 'error', last_error: 'phase timeout' })
     mockStudySuccess({ execution_status: 'error', last_error: 'phase timeout' })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     const err = await screen.findByText('phase timeout')
     // Color lives on the wrapping banner div (text-rose-300); the text
     // itself is an inner span.

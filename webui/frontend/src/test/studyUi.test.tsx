@@ -142,7 +142,7 @@ describe('StudyProgress', () => {
 
   it('shows no-study message when status is empty', async () => {
     vi.mocked(api.study.status).mockResolvedValue({ status: 'no_study' })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     expect(await screen.findByText(/暂无 study/)).toBeInTheDocument()
   })
 
@@ -167,7 +167,7 @@ describe('StudyProgress', () => {
       last_metrics: { calmar: 0.62 }, last_verdict: 'keep',
       recent_rounds: [], scoreboard: [], goal_snapshot: null,
     })
-    render(<StudyProgress sessionId="sess" pollIntervalMs={50} />)
+    render(<StudyProgress />)
     expect(await screen.findByText('运行中')).toBeInTheDocument()
     // Round display format is "Round X/Y"
     expect(screen.getAllByText(/Round 2/).length).toBeGreaterThan(0)

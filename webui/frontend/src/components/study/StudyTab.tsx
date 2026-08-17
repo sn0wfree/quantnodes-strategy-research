@@ -64,7 +64,7 @@ export function StudyTab({ sessionId, workspacePath }: StudyTabProps) {
             + 启动新的 study
           </button>
           <div className="flex-1 flex flex-col min-h-0">
-            <StudyProgress sessionId={sessionId} />
+            <StudyProgress />
           </div>
         </div>
       )}
