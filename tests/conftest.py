@@ -87,7 +87,7 @@ def _purge_hypothesis_sqlite_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_workspace_env():
+def _isolate_workspace_env(tmp_path):
     """Snapshot/restore workspace env vars around every test.
 
     Guards against tests that mutate ``SR_WORKSPACE_PATH`` /
@@ -95,6 +95,9 @@ def _isolate_workspace_env():
     a leaked value redirects every later test's session DB to one shared
     file, producing cascade ``database is locked`` failures (the suite is
     order-sensitive otherwise).
+    
+    Also sets ``QUANTNODES_RESEARCH_GOAL_DB_PATH`` to a temporary path
+    to prevent tests from writing to the production database.
     """
     import os
 
@@ -105,7 +108,13 @@ def _isolate_workspace_env():
             "STATIC_DIR", "QUANTNODES_RESEARCH_GOAL_DB_PATH",
         )
     }
+    
+    # Set goal DB to a temporary path to isolate tests from production
+    test_goal_db = tmp_path / "test_goals.db"
+    os.environ["QUANTNODES_RESEARCH_GOAL_DB_PATH"] = str(test_goal_db)
+    
     yield
+    
     for k, v in saved.items():
         if v is None:
             os.environ.pop(k, None)
