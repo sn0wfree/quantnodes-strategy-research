@@ -711,6 +711,12 @@ export interface StudySummaryResponse {
   completed_at?: string | null
   recent_rounds: StudyRoundSummary[]
   scoreboard: LeverScoreSummary[]
+  budget?: {
+    budget_used_turns?: number
+    budget_used_time_s?: number
+    budget_turn?: number | null
+    budget_time_seconds?: number | null
+  } | null
   goal_snapshot?: {
     goal_id?: string
     goal_status?: string

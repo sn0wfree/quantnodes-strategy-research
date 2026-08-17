@@ -519,6 +519,20 @@ async def study_summary(request: Request, study_id: str):
             journal_entries = []
             scoreboard = []
 
+    # Load budget data from state.json
+    budget_data = None
+    try:
+        from ...core.study.state_store import load as load_state
+        state = load_state(Path(study.workspace_path), study.study_id)
+        budget_data = {
+            "budget_used_turns": state.budget_used_turns,
+            "budget_used_time_s": state.budget_used_time_s,
+            "budget_turn": study.budget_turn,
+            "budget_time_seconds": study.budget_time_seconds,
+        }
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "study_id": study.study_id,
@@ -539,6 +553,7 @@ async def study_summary(request: Request, study_id: str):
         "recent_rounds": [_serialize_round(r) for r in recent_rounds],
         "scoreboard": scoreboard,
         "goal_snapshot": _snapshot(goal_snapshot),
+        "budget": budget_data,
         "monitor_state": (
             {
                 "drift_count": study.monitor_drift_count,

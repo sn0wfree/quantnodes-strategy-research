@@ -11,6 +11,8 @@ import { ObjectiveProgress } from './ObjectiveProgress'
 import { RoundHistory } from './RoundHistory'
 import { ScoreboardMini } from './ScoreboardMini'
 import { MetricsCompare } from './MetricsCompare'
+import { MetricsTrendChart } from './MetricsTrendChart'
+import { BudgetBar } from './BudgetBar'
 import { EmptyState } from '../common/EmptyState'
 import { PageShell } from '../layout/PageShell'
 
@@ -356,6 +358,18 @@ export function StudyDetailPage() {
             rounds={summary.recent_rounds ?? []}
             onOpenRun={openRun}
           />
+          <MetricsTrendChart
+            rounds={summary.recent_rounds ?? []}
+            metricTargets={summary.metric_targets ?? []}
+          />
+          {summary.budget && (
+            <BudgetBar
+              usedTurns={summary.budget.budget_used_turns}
+              totalTurns={summary.budget.budget_turn}
+              usedTimeS={summary.budget.budget_used_time_s}
+              totalTimes={summary.budget.budget_time_seconds}
+            />
+          )}
           <ScoreboardMini scoreboard={summary.scoreboard ?? []} />
 
           {/* Journal */}
