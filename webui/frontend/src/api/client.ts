@@ -705,6 +705,7 @@ export interface StudySummaryResponse {
   workspace_path?: string
   last_metrics?: Record<string, number> | null
   last_verdict?: string | null
+  metric_targets?: MetricTarget[]
   created_at?: string
   updated_at?: string
   completed_at?: string | null
@@ -829,6 +830,12 @@ export interface StudyAvailableActionsResponse {
   study_id: string
   execution_status: string
   actions: StudyActionItem[]
+}
+
+export interface StudyActionResponse {
+  status: string
+  study_id: string
+  action: string
 }
 
 // ── Flow types ─────────────────────────────────────────────────────

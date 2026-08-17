@@ -45,6 +45,7 @@ export type SSEEventType =
   | 'llm_usage'
   | 'session_total_tokens'
   | 'compact'
+  | 'compact_count'
   | 'study_queued'
   | 'study_started'
   | 'study_round'
@@ -85,6 +86,7 @@ export const EVENT_TYPES: SSEEventType[] = [
   'session_meta_updated',
   'goal_updated',
   'compact',
+  'compact_count',
   'llm_usage', 'session_total_tokens',
   'attempt.started', 'queue_paused', 'queue_state',
   // Study task system (StudyScheduler → EventStore → SSE)

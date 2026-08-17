@@ -77,12 +77,12 @@ interface SessionStateResponse {
     created_at: number
     updated_at: number
     finished_reason?: string
-    tool_calls_count: number
-    compaction_count: number
+    tool_calls_count?: number
+    compaction_count?: number
     last_compaction?: { layer: string; timestamp: number }
-    context_tokens: number
-    context_tokens_limit: number
-    iterations_detail: Array<{ iteration: number; prompt: string; response: string }>
+    context_tokens?: number
+    context_tokens_limit?: number
+    iterations_detail?: Array<{ iteration: number; prompt: string; response: string } | Record<string, unknown>>
     color?: string
   }> | null
   goal: {
@@ -114,20 +114,6 @@ interface SessionStateResponse {
     } | null
     agent_statuses?: Record<string, string>
   } | null
-  agents: Array<{
-    id: string
-    session_id: string
-    status: string
-    name: string
-    description?: string
-    created_at: number
-    updated_at: number
-    tool_calls_count?: number
-    compaction_count?: number
-    context_tokens?: number
-    context_tokens_limit?: number
-    iterations_detail?: Array<Record<string, unknown>>
-  }>
 }
 
 // Bump per runSearch call so stale search responses are dropped.
@@ -188,7 +174,7 @@ export const useSessionStore = create<SessionState>()(
           )
           // Agent store
           if (data.agents?.length) {
-            useAgentStore.getState().setAgents(data.agents)
+            useAgentStore.getState().setAgents(data.agents as any)
           } else {
             useAgentStore.getState().setAgents([])
           }
@@ -200,7 +186,7 @@ export const useSessionStore = create<SessionState>()(
                 id: n.id,
                 label: n.label ?? n.id,
                 type: n.type,
-                status: n.status,
+                status: n.status as any,
               })),
               (wf.edges || []).map((e) => ({
                 id: e.id,
@@ -247,10 +233,11 @@ export const useSessionStore = create<SessionState>()(
                 criterion_id: c.criterion_id,
                 text: c.text,
                 status: c.status,
+                required: true,
                 evidence_count: c.evidence_count ?? 0,
               })),
               evidence_count: data.goal.evidence_count ?? 0,
-              recap: data.goal.recap,
+              recap: data.goal.recap ?? undefined,
             })
           } else {
             useGoalStore.getState().clearGoal()

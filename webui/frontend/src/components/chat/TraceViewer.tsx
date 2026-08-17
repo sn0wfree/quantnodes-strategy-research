@@ -13,6 +13,13 @@ interface TraceEvent {
   time_created?: number;
   type: string;
   iteration?: number;
+  // LLM request envelope fields
+  system_prompt?: string;
+  system_prompt_len?: number;
+  tools_schema?: string;
+  tools_count?: number;
+  history_meta?: unknown[];
+  history_count?: number;
   [key: string]: unknown;
 }
 

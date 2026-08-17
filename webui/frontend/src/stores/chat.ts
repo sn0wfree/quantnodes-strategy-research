@@ -109,6 +109,7 @@ export interface Message {
     queue_status?: 'processing' | 'queued'
     status?: string
     details?: string
+    error?: string
     /** L2 claim validation result (truthfulness). Populated by the
      *  backend when claim validation is enabled; drives the
      *  🟢/🟡/🔴 verifiability badge in AssistantMessage. */

@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import {
+import type {
   StudyStartResponse,
   StudyStatusResponse,
   StudyListResponse,
@@ -21,8 +21,11 @@ import {
   StudyControlResponse,
   StudyDirectivesResponse,
   StudyRoundSummary,
+  MetricTarget,
+  StudySummary,
+  LeverScoreSummary,
+  StudyDirectiveItem,
 } from '../api/client'
-import type { MetricTarget, StudySummary, LeverScoreSummary, StudyDirectiveItem } from '../api/client'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const openapi = JSON.parse(
@@ -30,7 +33,7 @@ const openapi = JSON.parse(
 )
 
 function schemaRef(ref: string) {
-  const name = ref.split('/').pop()
+  const name = ref.split('/').pop() ?? ''
   return openapi.components?.schemas?.[name]
 }
 
@@ -103,7 +106,6 @@ describe('study API contract (openapi.json ↔ client.ts)', () => {
     // Compile-time checks: accessing a missing key errors (ts-expect-error
     // would fire if the key did not exist).
     const status = {} as StudyStatusResponse
-    // @ts-expect-error — deliberate access to verify the field exists
     status.study_id satisfies string | undefined
     status.execution_status satisfies string | undefined
     status.metric_targets satisfies MetricTarget[] | undefined
