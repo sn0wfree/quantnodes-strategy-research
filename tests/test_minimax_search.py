@@ -152,6 +152,53 @@ class TestMinimaxSearch:
         assert result["results"][0]["body"] == "organic desc"
 
 
+class TestMinimaxSearchEdgeCases:
+    """Additional edge cases for minimax_search()."""
+
+    def test_timeout_returns_error(self, monkeypatch):
+        monkeypatch.setenv("MINIMAX_CODE_PLAN_KEY", "test-key")
+        with patch("urllib.request.urlopen", side_effect=TimeoutError("slow")):
+            result = json.loads(minimax_search("test"))
+            assert result["status"] == "error"
+            assert "failed" in result["error"].lower()
+
+    def test_non_json_response_returns_error(self, monkeypatch):
+        monkeypatch.setenv("MINIMAX_CODE_PLAN_KEY", "test-key")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"<html>403 Forbidden</html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = json.loads(minimax_search("test"))
+            assert result["status"] == "error"
+            assert "non-JSON" in result["error"]
+
+    def test_empty_results_list(self, monkeypatch):
+        monkeypatch.setenv("MINIMAX_CODE_PLAN_KEY", "test-key")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"results": []}).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = json.loads(minimax_search("zzz non-existent"))
+            assert result["status"] == "ok"
+            assert result["n_results"] == 0
+
+    def test_non_dict_result_in_list_skipped(self, monkeypatch):
+        """Non-dict items in the results array are gracefully ignored."""
+        monkeypatch.setenv("MINIMAX_CODE_PLAN_KEY", "test-key")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "results": ["bad-string", 42, {"title": "good", "url": "https://ok.com", "snippet": "ok"}],
+        }).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = json.loads(minimax_search("test"))
+            assert result["n_results"] == 1
+            assert result["results"][0]["href"] == "https://ok.com"
+
+
 class TestWebSearchFallback:
     """web_search() auto-selects provider."""
 
@@ -166,3 +213,19 @@ class TestWebSearchFallback:
         result = json.loads(web_search("quantum computing"))
         # result is either "ok" (DDG works) or "error" (DDG not installed)
         assert result["status"] in ("ok", "error")
+
+    def test_minimax_preferred_when_key_set(self, monkeypatch):
+        """When MINIMAX_CODE_PLAN_KEY is set, web_search uses minimax_search."""
+        monkeypatch.setenv("MINIMAX_CODE_PLAN_KEY", "test-key")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "results": [{"title": "Momentum", "url": "https://example.com", "snippet": "A strategy"}],
+        }).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            from strategy_research.core.web.search import web_search
+            result = json.loads(web_search("momentum"))
+            assert result["status"] == "ok"
+            assert result["provider"] == "minimax"

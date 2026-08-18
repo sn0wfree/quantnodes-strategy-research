@@ -33,6 +33,7 @@ vi.mock('lucide-react', () => {
     FileCode: Stub, LineChart: Stub, TrendingUp: Stub, TrendingDown: Stub,
     ListChecks: Stub, Library: Stub, LogOut: Stub, Network: Stub, Sigma: Stub,
     SlidersHorizontal: Stub, FolderOpen: Stub, User: Stub,
+    Archive: Stub, ArchiveRestore: Stub, Info: Stub, MoreVertical: Stub,
   }
 })
 

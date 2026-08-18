@@ -8,7 +8,11 @@ import type { StudySummary } from '../api/client'
 
 vi.mock('lucide-react', () => {
   const Stub = () => null
-  return { Clock: Stub, ArrowRight: Stub, RefreshCw: Stub, ListChecks: Stub }
+  return {
+    Clock: Stub, ArrowRight: Stub, RefreshCw: Stub, ListChecks: Stub,
+    Archive: Stub, ArchiveRestore: Stub, Pause: Stub, Play: Stub,
+    RotateCcw: Stub, X: Stub, MoreVertical: Stub, Info: Stub,
+  }
 })
 
 function study(overrides: Partial<StudySummary> = {}): StudySummary {

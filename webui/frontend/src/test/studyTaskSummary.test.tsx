@@ -22,6 +22,8 @@ vi.mock('lucide-react', () => {
   return {
     Target: Stub, Clock: Stub, FolderOpen: Stub, User: Stub,
     ArrowRight: Stub, BarChart3: Stub, ExternalLink: Stub,
+    Archive: Stub, ArchiveRestore: Stub, Pause: Stub, Play: Stub,
+    RotateCcw: Stub, X: Stub, MoreVertical: Stub, Info: Stub,
   }
 })
 
