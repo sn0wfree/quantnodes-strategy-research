@@ -31,6 +31,7 @@ from ..schemas.study import (
     StudyJournalResponse,
     StudyKnowledgeResponse,
     StudyListResponse,
+    StudyObjectiveHistoryResponse,
     StudyRoundArtifactsResponse,
     StudyRoundDiffResponse,
     StudyRoundManifestResponse,
@@ -1176,7 +1177,62 @@ async def study_dispatch_action(
         if not ok:
             raise HTTPException(status_code=409, detail="redo failed")
         return {"status": "ok", "study_id": study_id, "action": f"redo_round_{round_num}"}
+    if act == StudyAction.REPLACE_OBJECTIVE:
+        new_obj = body.new_objective if body else None
+        expected_gid = body.expected_goal_id if body else None
+        if not new_obj or not expected_gid:
+            raise HTTPException(
+                status_code=400,
+                detail="replace_objective requires 'new_objective' and 'expected_goal_id'",
+            )
+        try:
+            res = sched.replace_objective(
+                study_id,
+                new_objective=new_obj,
+                expected_goal_id=expected_gid,
+                replaced_by=(body.archived_by if body else None) or "user",
+                reason=reason,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if res is None:
+            raise HTTPException(status_code=404, detail="study not found")
+        return {
+            "status": "ok",
+            "study_id": study_id,
+            "action": f"replaced_objective_history_{res['history_id']}",
+        }
     raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
+
+
+@router.get("/{study_id}/objective_history",
+            response_model=StudyObjectiveHistoryResponse)
+async def study_objective_history(request: Request, study_id: str):
+    """Audit trail of objective replacements (newest first)."""
+    from ...core.study import StudyStore
+    _owned_study(request, study_id)
+    with StudyStore() as store:
+        if store.get_study(study_id) is None:
+            raise HTTPException(status_code=404, detail="study not found")
+        entries = store.list_objective_history(study_id)
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "history": [
+            {
+                "id": e.id,
+                "study_id": e.study_id,
+                "session_id": e.session_id,
+                "objective": e.objective,
+                "replaced_by": e.replaced_by,
+                "expected_goal_id": e.expected_goal_id,
+                "reason": e.reason,
+                "applied_at": e.applied_at,
+                "applied_round": e.applied_round,
+            }
+            for e in entries
+        ],
+    }
 
 
 @router.post("/{study_id}/rounds/{round_num}/redo", response_model=StudyActionResponse)

@@ -229,6 +229,28 @@ class StudyDirective:
     consumed_at: str | None = None
 
 
+@dataclass(frozen=True)
+class ObjectiveHistoryEntry:
+    """Audit record for an objective replacement on a study.
+
+    Persisted in the ``objective_history`` table. ``applied_round`` is
+    NULL while the replacement is pending (next round hasn't started
+    yet) and is set to ``round_num`` by the runner when the new
+    objective first takes effect — exactly like
+    ``StudyDirective.consumed_at``.
+    """
+
+    id: int
+    study_id: str
+    session_id: str
+    objective: str
+    replaced_by: str | None
+    expected_goal_id: str
+    reason: str | None
+    applied_at: str
+    applied_round: int | None  # None=pending
+
+
 def default_metric_targets() -> list[dict]:
     """Return the default acceptance targets for a study.
 

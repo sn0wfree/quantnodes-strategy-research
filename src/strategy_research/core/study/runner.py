@@ -404,6 +404,24 @@ class AutoresearchRunner:
             round_num += 1
             self._round_start_clock = time.perf_counter()
 
+            # ── Flush pending objective replacements (Step B1) ───────
+            # The user may have replaced the objective between rounds;
+            # the store updated ``studies.objective`` already, but the
+            # audit row is still flagged ``applied_round=NULL``. Mark
+            # them applied here so the history UI can distinguish
+            # pending vs applied. Also force-reload the study cache so
+            # the freshly persisted objective is picked up.
+            applied_now = self.study_store.mark_pending_objectives_applied(
+                sid, round_num,
+            )
+            if applied_now:
+                self.invalidate_study_cache()
+                self._emit(session, "study_objective_applied", {
+                    "study_id": sid,
+                    "round": round_num,
+                    "count": applied_now,
+                })
+
             # Consume directives
             pending = self.study_store.list_pending_directives(sid)
             directive_text = self._format_directives(pending) if pending else None

@@ -223,6 +223,32 @@ class StudyStore:
                     self._conn.execute(
                         f"ALTER TABLE study_rounds ADD COLUMN {_col} TEXT"
                     )
+            # Objective-replacement audit trail (Step B1).
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS objective_history (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    study_id          TEXT NOT NULL,
+                    session_id        TEXT NOT NULL,
+                    objective         TEXT NOT NULL,
+                    replaced_by       TEXT,
+                    expected_goal_id  TEXT NOT NULL,
+                    reason            TEXT,
+                    applied_at        TEXT NOT NULL,
+                    applied_round     INTEGER,
+                    FOREIGN KEY (study_id) REFERENCES studies(study_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_objective_history_study "
+                "ON objective_history(study_id, applied_at DESC)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_objective_history_pending "
+                "ON objective_history(study_id) WHERE applied_round IS NULL"
+            )
             # Soft-delete (archive) metadata: retained on the row, only
             # the default list query filters it out.
             study_cols = [r[1] for r in self._conn.execute("PRAGMA table_info(studies)")]
@@ -526,6 +552,130 @@ class StudyStore:
             "SELECT * FROM studies WHERE study_id = ?", (study_id,)
         ).fetchone()
         return self._study_from_row(row) if row else None
+
+    @synchronized
+    def queue_objective_replace(
+        self,
+        study_id: str,
+        new_objective: str,
+        expected_goal_id: str,
+        *,
+        replaced_by: str | None = None,
+        reason: str | None = None,
+    ) -> "ObjectiveHistoryEntry":
+        """Record a pending objective replacement.
+
+        Side effects:
+          - INSERT a row in ``objective_history`` with
+            ``applied_round = NULL`` (pending marker).
+          - UPDATE ``studies.objective`` so the runner picks up the
+            new text on its next round (the runner also flushes
+            ``applied_round`` to mark the row as applied).
+          - Cache invalidation is the caller's responsibility
+            (runner calls ``invalidate_study_cache()`` before each
+            round so the next ``_get_study()`` re-reads from DB).
+
+        Returns the freshly inserted ``ObjectiveHistoryEntry``.
+        Raises ``ValueError`` when the study does not exist.
+        """
+        from .models import ObjectiveHistoryEntry as _OHE
+
+        new_objective = new_objective.strip()
+        if not new_objective:
+            raise ValueError("new_objective must not be empty")
+        # Cheap length guard (the API schema enforces 10..2000 too).
+        if len(new_objective) < 10:
+            raise ValueError("new_objective too short (<10 chars)")
+
+        now = now_iso()
+        with write_transaction(self._conn):
+            study_row = self._conn.execute(
+                "SELECT study_id, session_id FROM studies WHERE study_id = ?",
+                (study_id,),
+            ).fetchone()
+            if study_row is None:
+                raise ValueError("study not found")
+            session_id = study_row["session_id"]
+
+            cur = self._conn.execute(
+                """
+                INSERT INTO objective_history (
+                    study_id, session_id, objective, replaced_by,
+                    expected_goal_id, reason, applied_at, applied_round
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    study_id,
+                    session_id,
+                    new_objective,
+                    replaced_by,
+                    expected_goal_id,
+                    reason,
+                    now,
+                ),
+            )
+            history_id = cur.lastrowid
+            self._conn.execute(
+                "UPDATE studies SET objective = ?, updated_at = ?, heartbeat = ? "
+                "WHERE study_id = ?",
+                (new_objective, now, now, study_id),
+            )
+        return _OHE(
+            id=history_id,
+            study_id=study_id,
+            session_id=session_id,
+            objective=new_objective,
+            replaced_by=replaced_by,
+            expected_goal_id=expected_goal_id,
+            reason=reason,
+            applied_at=now,
+            applied_round=None,
+        )
+
+    @synchronized
+    def list_objective_history(
+        self, study_id: str,
+    ) -> list["ObjectiveHistoryEntry"]:
+        """Return the full audit trail (newest first)."""
+        from .models import ObjectiveHistoryEntry as _OHE
+
+        rows = self._conn.execute(
+            "SELECT * FROM objective_history WHERE study_id = ? "
+            "ORDER BY applied_at DESC, id DESC",
+            (study_id,),
+        ).fetchall()
+        return [
+            _OHE(
+                id=r["id"],
+                study_id=r["study_id"],
+                session_id=r["session_id"],
+                objective=r["objective"],
+                replaced_by=r["replaced_by"],
+                expected_goal_id=r["expected_goal_id"],
+                reason=r["reason"],
+                applied_at=r["applied_at"],
+                applied_round=r["applied_round"],
+            )
+            for r in rows
+        ]
+
+    @synchronized
+    def mark_pending_objectives_applied(
+        self, study_id: str, round_num: int,
+    ) -> int:
+        """Mark every still-pending replacement as applied at ``round_num``.
+
+        Called by the runner at the start of each round so the audit
+        trail can distinguish pending from applied entries. Returns the
+        number of rows updated.
+        """
+        with write_transaction(self._conn):
+            cur = self._conn.execute(
+                "UPDATE objective_history SET applied_round = ? "
+                "WHERE study_id = ? AND applied_round IS NULL",
+                (round_num, study_id),
+            )
+        return cur.rowcount
 
     @synchronized
     def delete_round(self, study_id: str, round_num: int) -> int:

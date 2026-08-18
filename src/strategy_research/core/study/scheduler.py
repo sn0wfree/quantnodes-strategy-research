@@ -273,6 +273,88 @@ class StudyScheduler:
         })
         return True
 
+    def replace_objective(
+        self,
+        study_id: str,
+        *,
+        new_objective: str,
+        expected_goal_id: str,
+        replaced_by: str | None = None,
+        reason: str | None = None,
+    ) -> dict | None:
+        """Queue a new objective; takes effect on the runner's next round.
+
+        Steps (all-or-nothing transaction):
+          1. ``StudyStore.queue_objective_replace`` — INSERT history row
+             (applied_round=NULL), UPDATE studies.objective.
+          2. If the study has a goal, sync ``goals.objective`` + the
+             active ``goal_claims.thesis`` so the ledger matches.
+          3. Emit ``study_objective_replaced`` for SSE listeners.
+
+        Returns ``{"history_id": int, "expected_goal_id": str}`` on
+        success; ``None`` when the study is missing.
+        """
+
+        study = self.store.get_study(study_id)
+        if study is None:
+            return None
+
+        new_objective = new_objective.strip()
+        if not new_objective:
+            return None
+
+        # Reject live-trading / execution wording (reuse goal policy).
+        try:
+            from ..goal.policy import reject_live_execution_objective
+            reject_live_execution_objective(new_objective)
+        except ValueError:
+            raise
+
+        # 1. study row + audit row
+        entry = self.store.queue_objective_replace(
+            study_id,
+            new_objective=new_objective,
+            expected_goal_id=expected_goal_id,
+            replaced_by=replaced_by,
+            reason=reason,
+        )
+
+        # 2. best-effort: sync goal ledger so they don't drift.
+        if study.goal_id:
+            try:
+                from ..goal import GoalStore, StaleGoalError
+                with GoalStore() as gs:
+                    try:
+                        gs.update_goal(
+                            session_id=study.session_id,
+                            goal_id=study.goal_id,
+                            expected_goal_id=expected_goal_id,
+                            objective=new_objective,
+                        )
+                    except StaleGoalError:
+                        # Goal was superseded meanwhile; not fatal — the
+                        # study row already carries the new objective.
+                        pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "replace_objective: goal sync skipped study=%s: %s",
+                    study_id, exc,
+                )
+
+        # 3. event
+        self._emit_event(study.session_id, "study_objective_replaced", {
+            "study_id": study_id,
+            "history_id": entry.id,
+            "new_objective": new_objective,
+            "replaced_by": replaced_by,
+            "reason": reason,
+            "applied_round": None,
+        })
+        return {
+            "history_id": entry.id,
+            "expected_goal_id": expected_goal_id,
+        }
+
     async def redo(
         self,
         study_id: str,

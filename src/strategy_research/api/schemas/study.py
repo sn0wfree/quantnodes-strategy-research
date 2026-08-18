@@ -304,6 +304,43 @@ class StudyActionRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=512)
     round_num: Optional[int] = Field(None, ge=1)
     archived_by: Optional[str] = Field(None, max_length=128)
+    # ── REPLACE_OBJECTIVE-only ────────────────────────────────────────
+    new_objective: Optional[str] = Field(
+        None, min_length=10, max_length=2000,
+    )
+    expected_goal_id: Optional[str] = Field(None, max_length=128)
+
+
+class StudyReplaceObjectiveRequest(BaseModel):
+    """Body for ``POST /api/study/{id}/actions/replace_objective``.
+
+    Validation mirrors ``GoalStore.update_goal``:
+      - ``new_objective`` 10..2000 chars
+      - ``expected_goal_id`` is the optimistic-concurrency token
+        (matches the goal's current ``goal_id``).
+    """
+
+    new_objective: str = Field(..., min_length=10, max_length=2000)
+    expected_goal_id: str = Field(..., min_length=1, max_length=128)
+    reason: Optional[str] = Field(None, max_length=512)
+
+
+class ObjectiveHistoryEntryModel(BaseModel):
+    id: int
+    study_id: str
+    session_id: str
+    objective: str
+    replaced_by: Optional[str] = None
+    expected_goal_id: str
+    reason: Optional[str] = None
+    applied_at: str
+    applied_round: Optional[int] = None  # None=pending
+
+
+class StudyObjectiveHistoryResponse(BaseModel):
+    status: str
+    study_id: str
+    history: list[ObjectiveHistoryEntryModel]
 
 
 class StudyRedoRequest(BaseModel):
