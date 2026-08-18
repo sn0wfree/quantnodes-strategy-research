@@ -20,27 +20,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..workflow.agents import AgentRegistry
-from ..workflow.controller import WorkflowController
 from ..workflow.dag import topological_layers
 from ..workflow.grounding import GroundingProvider
 from ..workflow.types import AgentCall, AgentStatus, SwarmHook
 
 logger = logging.getLogger(__name__)
-
-
-# ── Default controller factory ────────────────────────────────
-
-
-def _build_default_controller() -> WorkflowController | None:
-    """Build a default WorkflowController backed by SwarmWorker + LLM."""
-    try:
-        from ..workflow.controller import ControllerConfig
-        cfg = ControllerConfig(timeout_seconds=60.0)
-        return WorkflowController(registry=AgentRegistry(), adj={}, config=cfg)
-    except Exception as exc:                                    # noqa: BLE001
-        logger.debug("default controller init failed: %s", exc)
-        return None
 
 
 # ── Data classes ───────────────────────────────────────────────
@@ -122,7 +106,9 @@ class SwarmRuntime:
         grounding: GroundingProvider | None = None,
         max_workers: int = 4,
     ) -> None:
-        self._controller = controller
+        # `controller` kwarg retained for backward compatibility — the
+        # execution path uses AgentExecutor directly. See
+        # docs/unified-agent-engine-design.md (P4).
         # DELETE-CANDIDATE v0.6: GroundingProvider never read.
         # TODO(architecture): grounding is stored but never read —
         # future feature: ground agent outputs against a knowledge
@@ -131,7 +117,6 @@ class SwarmRuntime:
         self._grounding = grounding
         self._max_workers = max_workers
         self._active_runs: dict[str, bool] = {}
-        self._owns_default_controller = controller is None
 
     def execute(
         self,

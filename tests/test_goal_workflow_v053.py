@@ -224,6 +224,7 @@ class TestP1ExpressionDSL:
 class TestP1PromptBuilder:
     """SwarmRuntime._execute_agent should use PromptBuilder.build_prompt."""
 
+    @pytest.mark.skip(reason="PromptBuilder no longer used by _execute_agent (P4 unified)")
     def test_prompt_builder_used(self):
         """Verify that the module can be imported and the fix is in place."""
         import inspect

@@ -314,6 +314,7 @@ class TestExecuteAgent:
 
 
 class TestSwarmRuntimeDefaultController:
+    @pytest.mark.skip(reason="_owns_default_controller removed in P8 (P4 unified)")
     def test_owns_default_controller_flag(self):
         from strategy_research.core.swarm.runtime import SwarmRuntime
         r1 = SwarmRuntime()
