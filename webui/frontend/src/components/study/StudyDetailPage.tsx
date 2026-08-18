@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
   Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
-  ShieldAlert, Layers, MessageSquare, CheckSquare,
+  ShieldAlert, GitBranch, MessageSquare,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
@@ -15,17 +15,15 @@ import { MetricsTrendChart } from './MetricsTrendChart'
 import { BudgetBar } from './BudgetBar'
 import { EmptyState } from '../common/EmptyState'
 import { PageShell } from '../layout/PageShell'
-import { AgentActivityPanel } from './AgentActivityPanel'
-import { DAGVisualization } from './DAGVisualization'
+import { StudyFlowTab } from './StudyFlowTab'
 import { AgentChatLog } from './AgentChatLog'
 
-type TabKey = 'overview' | 'agents' | 'logs' | 'todos'
+type TabKey = 'overview' | 'flow' | 'logs'
 
 const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
   { key: 'overview', label: '概览', icon: <BarChart3 className="h-3 w-3" /> },
-  { key: 'agents', label: 'Agent 活动', icon: <Layers className="h-3 w-3" /> },
+  { key: 'flow', label: '研究流程', icon: <GitBranch className="h-3 w-3" /> },
   { key: 'logs', label: '日志', icon: <MessageSquare className="h-3 w-3" /> },
-  { key: 'todos', label: '任务', icon: <CheckSquare className="h-3 w-3" /> },
 ]
 
 function formatDateTime(iso?: string): string {
@@ -554,22 +552,19 @@ export function StudyDetailPage() {
       </main>
       )}
 
-      {/* Agents tab */}
-      {activeTab === 'agents' && (
-        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <div className="min-w-0 space-y-4 xl:col-span-2">
-            <AgentActivityPanel
-              studyId={studyId}
-              currentRound={summary.current_round ?? 1}
-            />
-          </div>
-          <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-            <DAGVisualization
-              currentRound={summary.current_round ?? 1}
-              totalRounds={summary.max_rounds}
-            />
-          </div>
-        </div>
+      {/* Flow tab - merged agents + todos */}
+      {activeTab === 'flow' && (
+        <StudyFlowTab
+          studyId={studyId}
+          summary={summary}
+          directives={directives}
+          journal={journal}
+          directiveText={directiveText}
+          submittingDirective={submittingDirective}
+          canDirective={canDirective}
+          onDirective={onDirective}
+          onDirectiveTextChange={setDirectiveText}
+        />
       )}
 
       {/* Logs tab */}
@@ -579,90 +574,6 @@ export function StudyDetailPage() {
             studyId={studyId}
             currentRound={summary.current_round ?? 1}
           />
-        </div>
-      )}
-
-      {/* Todos tab */}
-      {activeTab === 'todos' && (
-        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <div className="min-w-0 space-y-4 xl:col-span-2">
-            {/* ObjectiveProgress */}
-            <ObjectiveProgress
-              objective={summary.objective}
-              progressPercent={progressPercent}
-              evidenceCount={evidenceCount}
-              criteria={summary.goal_snapshot?.criteria ?? []}
-            />
-
-            {/* Journal */}
-            {journal?.journal && (
-              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
-                <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                  <FileText className="h-3 w-3" /> 研究日志 journal.md
-                </div>
-                <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-400">
-                  {journal.journal}
-                </pre>
-              </div>
-            )}
-          </div>
-
-          <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-            {/* Directive input */}
-            {(canDirective) && (
-              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft space-y-2">
-                <label className="block text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                  注入研究方向（下一轮 researcher 看到）
-                </label>
-                <textarea
-                  rows={2}
-                  value={directiveText}
-                  onChange={(e) => setDirectiveText(e.target.value)}
-                  placeholder="例：改成动量因子 + 减小 top_n"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none transition-shadow focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                />
-                <button
-                  type="button"
-                  onClick={onDirective}
-                  disabled={submittingDirective || !directiveText.trim()}
-                  className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-indigo-500 active:scale-95 disabled:opacity-50"
-                >
-                  <Send className="h-3.5 w-3.5" /> 提交指令
-                </button>
-              </div>
-            )}
-
-            {/* Directives audit trail */}
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
-              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                <Clock className="h-3 w-3" /> 指令记录
-              </div>
-              {(directives?.directives?.length ?? 0) === 0 ? (
-                <p className="text-xs text-slate-500">暂无指令</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {directives!.directives.map((d) => (
-                    <li key={d.directive_id} className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]">
-                      <p className="text-slate-300">{d.content}</p>
-                      <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
-                        <span>{formatDateTime(d.created_at)}</span>
-                        {d.issued_by && <span>· {d.issued_by}</span>}
-                        <span
-                          className={
-                            d.consumed_at
-                              ? 'rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-emerald-400'
-                              : 'rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-amber-400'
-                          }
-                        >
-                          {d.consumed_at ? '已消费' : '待消费'}
-                        </span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
         </div>
       )}
     </PageShell>
