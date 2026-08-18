@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import traceback
 from dataclasses import dataclass
@@ -854,6 +855,16 @@ class AutoresearchRunner:
         if previous_summary and previous_summary.get("factor_failures"):
             current_state["factor_failures"] = previous_summary["factor_failures"]
 
+        # ── DAG-driven execution (P5 unified engine) ───────────
+        # Feature flag: SR_STUDY_DAG_ENGINE=1 → drive execution via
+        # graph.json + AgentExecutor (replaces hardcoded Phase 1/2/3).
+        if os.environ.get("SR_STUDY_DAG_ENGINE") == "1":
+            return self._run_round_via_dag(
+                path, strategy, current_state, run_dir, graph,
+                session=session, sid=sid, round_num=round_num,
+                directive_text=directive_text,
+            )
+
         # Phase 1: researcher
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
@@ -1385,6 +1396,226 @@ class AutoresearchRunner:
             )
             graph = DEFAULT_STANDARD_GRAPH
         return graph
+
+    # ── DAG-driven round execution (P5 unified engine) ────────
+
+    def _run_round_via_dag(
+        self,
+        path: Path,
+        strategy: str,
+        current_state: dict,
+        run_dir: Path,
+        graph: "StudyGraph",
+        *,
+        session: str,
+        sid: str,
+        round_num: int,
+        directive_text: str | None,
+    ) -> dict:
+        """Execute one round by driving graph.json through AgentExecutor.
+
+        Serial execution (topological layer by layer, one agent at a
+        time). Replaces the hardcoded Phase 1/2/3 block in
+        ``_run_one_round_impl``. The returned dict matches the legacy
+        ``exec_result`` + ``eval_result`` schema so downstream code
+        (``generate_run_summary``, ``_update_results_tsv``, etc.) is
+        untouched.
+        """
+        from ..agent.dag_config import AgentDAGConfig
+        from ..agent.executor import AgentExecutor
+        from ..agent.registry import get_default_registry
+
+        dag_config = AgentDAGConfig.from_study_graph(
+            graph, name=f"study_{sid}_r{round_num}",
+            description=self._get_study().objective,
+        )
+        # Class-level hook for test injection; defaults to the global
+        # builtin registry.
+        registry = getattr(self, "_plugin_registry", None) or get_default_registry()
+        executor = AgentExecutor(registry)
+
+        # Build the shared task text injected into each agent's user
+        # message (mirrors the study context fields the legacy
+        # phase functions received via current_state).
+        task_text = self._build_round_task_text(
+            current_state, directive_text,
+        )
+
+        layers = self._layered_topological_layers(graph)
+        agent_outputs: dict[str, Any] = {}
+        node_map = dag_config.node_map()
+
+        for layer_idx, layer_ids in enumerate(layers):
+            self._emit(session, "study_phase", {
+                "study_id": sid, "round": round_num,
+                "phase": f"layer_{layer_idx}", "status": "started",
+            })
+            upstream: dict[str, str] = {}
+            for agent_id in layer_ids:
+                plugin = registry.get(agent_id)
+                if plugin is None:
+                    logger.warning(
+                        "study %s round %d: unknown plugin %r; skipping",
+                        sid, round_num, agent_id,
+                    )
+                    continue
+                node = node_map.get(agent_id)
+                # Build per-agent context (study-specific kwargs forwarded
+                # to AgentLoop).
+                agent_ctx = {
+                    "strategy_name": strategy,
+                    "strategy_dir": run_dir,
+                    "runs_dir": run_dir,
+                    "results_tsv": run_dir / "results.tsv",
+                    "session_id": session,
+                    "session_manager": self._session_manager,
+                }
+                result = executor.execute(
+                    plugin, task_text, path,
+                    context=agent_ctx,
+                    upstream_outputs=upstream,
+                    node=node,
+                )
+                if result.status == "success":
+                    agent_outputs[agent_id] = self._try_parse_json(result.output)
+                    upstream[agent_id] = result.output
+                    self._save_agent_output(run_dir, agent_id, result)
+                else:
+                    agent_outputs[agent_id] = {
+                        "error": result.error or "unknown error",
+                        "parse_failed": True,
+                    }
+                    upstream[agent_id] = result.output or "{}"
+                    self._save_agent_output(run_dir, agent_id, result)
+                self._emit(session, "study_agent_complete", {
+                    "study_id": sid, "round": round_num,
+                    "agent": agent_id,
+                    "status": result.status,
+                    "elapsed_s": result.elapsed_s,
+                })
+            self._emit(session, "study_phase", {
+                "study_id": sid, "round": round_num,
+                "phase": f"layer_{layer_idx}", "status": "done",
+            })
+
+        return self._rebuild_phase_outputs(agent_outputs, graph)
+
+    def _layered_topological_layers(self, graph) -> list[list[str]]:
+        """Fallback topological layer computation if AgentDAGConfig
+        doesn't expose one (kept for forward compat)."""
+        return graph.topological_layers()
+
+    @staticmethod
+    def _try_parse_json(text: str) -> Any:
+        """Parse agent output JSON; return the raw string on failure."""
+        if not isinstance(text, str):
+            return text
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return text
+
+    def _build_round_task_text(
+        self, current_state: dict, directive_text: str | None,
+    ) -> str:
+        """Compose the base task text for every agent in the round."""
+        from ..autoresearch import read_current_state
+        parts: list[str] = ["根据研究目标与历史结果完成当前轮次的工作。"]
+        if current_state:
+            parts.append("## 当前状态\n" + json.dumps(
+                current_state, ensure_ascii=False, default=str,
+            ))
+        if directive_text:
+            parts.append("## 用户指令\n" + directive_text)
+        return "\n\n".join(parts)
+
+    def _save_agent_output(
+        self, run_dir: Path, agent_id: str, result: Any,
+    ) -> None:
+        """Persist an agent's output to ``run_dir/<agent_id>.json``."""
+        from ..autoresearch import save_agent_record
+        try:
+            save_agent_record(
+                run_dir, agent_id, 3, {}, result.output,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("save_agent_record failed for %s", agent_id)
+
+    def _rebuild_phase_outputs(
+        self, agent_outputs: dict[str, Any], graph,
+    ) -> dict:
+        """Translate the DAG ``agent_outputs`` map back into the
+        legacy ``run_execution_phase`` / ``run_evaluation_phase``
+        result schema that downstream callers consume.
+        """
+        researcher_output = agent_outputs.get("researcher") or {}
+        backtest_raw = agent_outputs.get("backtest") or {}
+        if isinstance(backtest_raw, str):
+            try:
+                backtest_raw = json.loads(backtest_raw)
+            except (json.JSONDecodeError, TypeError):
+                backtest_raw = {}
+        metrics = (
+            backtest_raw.get("metrics", {}) if isinstance(backtest_raw, dict)
+            else {}
+        )
+        backtest_result = (
+            backtest_raw if isinstance(backtest_raw, dict) else {}
+        )
+        backtest_error = (
+            backtest_raw.get("error") if isinstance(backtest_raw, dict)
+            and not backtest_raw.get("success") else None
+        )
+
+        decision_raw = agent_outputs.get("decide") or {}
+        if isinstance(decision_raw, str):
+            try:
+                decision_raw = json.loads(decision_raw)
+            except (json.JSONDecodeError, TypeError):
+                decision_raw = {}
+        verdict = "discard"
+        if isinstance(decision_raw, dict):
+            verdict = decision_raw.get("verdict") or decision_raw.get(
+                "decision", "discard",
+            )
+
+        # Lightweight decision stub: downstream calls .to_dict().
+        from ..strategy_acceptance import (
+            AcceptanceDecision,
+            decide,
+        )
+        try:
+            decision_obj = decide(metrics=metrics, llm_verdict=None)
+        except Exception:  # noqa: BLE001
+            decision_obj = AcceptanceDecision(verdict=verdict, reason="")
+
+        return {
+            "researcher_output": researcher_output,
+            "data_quality_output": agent_outputs.get("data_quality") or {},
+            "factor_analyst_output": agent_outputs.get("factor_analyst") or {},
+            "strategist_output": agent_outputs.get("strategist") or {},
+            "portfolio_construction_output": (
+                agent_outputs.get("portfolio_construction") or {}
+            ),
+            "backtest_result": backtest_result,
+            "backtest_error": backtest_error,
+            "metrics": metrics,
+            "risk_controller_output": agent_outputs.get("risk_controller") or {},
+            "attribution_analyst_output": (
+                agent_outputs.get("attribution_analyst") or {}
+            ),
+            "anti_overfit_analyst_output": (
+                agent_outputs.get("anti_overfit_analyst") or {}
+            ),
+            "backtest_diagnostics_output": (
+                agent_outputs.get("backtest_diagnostics") or {}
+            ),
+            "decision": decision_obj,
+            "verdict": verdict,
+            "aoa_llm_verdict": (
+                agent_outputs.get("anti_overfit_analyst") or {}
+            ),
+        }
 
     def _emit_topology(
         self,
