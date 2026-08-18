@@ -557,8 +557,6 @@ export function StudyDetailPage() {
         <StudyFlowTab
           studyId={studyId}
           summary={summary}
-          directives={directives}
-          journal={journal}
           directiveText={directiveText}
           submittingDirective={submittingDirective}
           canDirective={canDirective}
@@ -567,13 +565,59 @@ export function StudyDetailPage() {
         />
       )}
 
-      {/* Logs tab */}
+      {/* Logs tab - chat + directives + journal */}
       {activeTab === 'logs' && (
-        <div className="mt-4">
-          <AgentChatLog
-            studyId={studyId}
-            currentRound={summary.current_round ?? 1}
-          />
+        <div className="mt-4 flex flex-col gap-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {/* Agent chat logs */}
+            <AgentChatLog
+              studyId={studyId}
+              currentRound={summary.current_round ?? 1}
+            />
+
+            {/* Directives audit trail */}
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
+              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                <Clock className="h-3 w-3" /> 指令记录
+              </div>
+              {(directives?.directives?.length ?? 0) === 0 ? (
+                <p className="text-xs text-slate-500">暂无指令</p>
+              ) : (
+                <ul className="space-y-1.5 max-h-96 overflow-y-auto">
+                  {directives!.directives.map((d) => (
+                    <li key={d.directive_id} className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]">
+                      <p className="text-slate-300">{d.content}</p>
+                      <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
+                        <span>{formatDateTime(d.created_at)}</span>
+                        {d.issued_by && <span>· {d.issued_by}</span>}
+                        <span
+                          className={
+                            d.consumed_at
+                              ? 'rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-emerald-400'
+                              : 'rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-amber-400'
+                          }
+                        >
+                          {d.consumed_at ? '已消费' : '待消费'}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Journal */}
+          {journal?.journal && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
+              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                <FileText className="h-3 w-3" /> 研究日志 journal.md
+              </div>
+              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-400">
+                {journal.journal}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </PageShell>

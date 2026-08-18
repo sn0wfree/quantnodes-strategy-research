@@ -15,7 +15,6 @@ import { GitBranch } from 'lucide-react'
 import { api } from '../../api/client'
 import { DAGNode, type DAGNodeData } from '../workflow/DAGNode'
 import { DAGEdge } from '../workflow/DAGEdge'
-import { layoutWithDagre } from '../workflow/layout'
 import { AgentNodeDetail } from './AgentNodeDetail'
 import { DAGProgressBar } from '../workflow/DAGProgressBar'
 
@@ -35,6 +34,44 @@ const AGENT_SEQUENCE = [
   { id: 'attribution_analyst', label: 'Attribution', type: 'evaluator', agentColor: '#34d399' },
   { id: 'anti_overfit_analyst', label: 'Anti-Overfit', type: 'evaluator', agentColor: '#34d399' },
 ]
+
+// Custom layout: arrange nodes in rows with wrapping
+function layoutWithWrapping(
+  rawNodes: Array<{ id: string; label: string; status: string; agentColor?: string; agentName?: string; type?: string }>,
+  rawEdges: Array<{ source: string; target: string }>,
+  maxPerRow: number = 4
+) {
+  const nodeWidth = 180
+  const nodeHeight = 80
+  const horizontalGap = 80
+  const verticalGap = 100
+
+  const nodes = rawNodes.map((n, i) => {
+    const row = Math.floor(i / maxPerRow)
+    const col = i % maxPerRow
+    // Alternate direction for snake-like pattern
+    const actualCol = row % 2 === 0 ? col : (maxPerRow - 1 - col)
+    const x = actualCol * (nodeWidth + horizontalGap)
+    const y = row * (nodeHeight + verticalGap)
+
+    return {
+      id: n.id,
+      position: { x, y },
+      data: n as unknown as Record<string, unknown>,
+      type: 'dagNode',
+    }
+  })
+
+  const edges = rawEdges.map((e, i) => ({
+    id: `e-${i}`,
+    source: e.source,
+    target: e.target,
+    type: 'dagEdge',
+    data: { animated: rawNodes.find((n) => n.id === e.target)?.status === 'running' },
+  }))
+
+  return { nodes, edges }
+}
 
 export function AgentFlowCanvas({ studyId, currentRound, totalRounds }: AgentFlowCanvasProps) {
   const [selectedNode, setSelectedNode] = useState<(DAGNodeData & { id: string }) | null>(null)
@@ -95,7 +132,7 @@ export function AgentFlowCanvas({ studyId, currentRound, totalRounds }: AgentFlo
   }, [])
 
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
-    () => layoutWithDagre(rawNodes, rawEdges),
+    () => layoutWithWrapping(rawNodes, rawEdges, 4),
     [rawNodes, rawEdges]
   )
 
@@ -103,7 +140,7 @@ export function AgentFlowCanvas({ studyId, currentRound, totalRounds }: AgentFlo
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges)
 
   useEffect(() => {
-    const { nodes: newNodes, edges: newEdges } = layoutWithDagre(rawNodes, rawEdges)
+    const { nodes: newNodes, edges: newEdges } = layoutWithWrapping(rawNodes, rawEdges, 4)
     setNodes(newNodes)
     setEdges(newEdges)
   }, [rawNodes, rawEdges, setNodes, setEdges])
@@ -142,7 +179,7 @@ export function AgentFlowCanvas({ studyId, currentRound, totalRounds }: AgentFlo
       </div>
 
       {/* ReactFlow Canvas */}
-      <div className="h-[300px]">
+      <div className="h-[320px]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -153,7 +190,7 @@ export function AgentFlowCanvas({ studyId, currentRound, totalRounds }: AgentFlo
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          fitViewOptions={{ padding: 0.15 }}
           proOptions={{ hideAttribution: true }}
           minZoom={0.3}
           maxZoom={2}
