@@ -214,6 +214,9 @@ def create_app(
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
+    # MiniMax / DuckDuckGo web search (front-end direct invocation)
+    from .routers import search as search_router
+    app.include_router(search_router.router, tags=["search"])
 
     # Permission gate (Tier 1 A1) — answers to permission_request SSE
     # events. Mounted under /api/chat so the frontend can use the

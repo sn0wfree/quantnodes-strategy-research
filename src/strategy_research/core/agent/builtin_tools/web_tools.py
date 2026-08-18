@@ -14,28 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 class WebSearchTool(BaseTool):
-    """DuckDuckGo 网页搜索（无需 API key）。
+    """网页搜索 — 优先 MiniMax, 回退 DuckDuckGo。
 
     # ── 工具说明书 ──────────────────────────────
-    # 版本: 1.1.0
-    # 变更: v1.1.0 迁移 v2 (显式签名)
+    # 版本: 1.2.0
+    # 变更: v1.2.0 切换 MiniMax 为优先 backend (DuckDuckGo 兜底)
     #
     # ## 用途
-    # DuckDuckGo 网页搜索, 返回标题/URL/摘要。无需 API key。
+    # 通用网页搜索, 返回标题/URL/摘要。
+    #
+    # ## Backend 优先级
+    # 1. **MiniMax Token Plan / Coding Plan** — 当以下任一环境变量
+    #    设置时使用: MINIMAX_CODE_PLAN_KEY / MINIMAX_CODING_API_KEY
+    #    / MINIMAX_OAUTH_TOKEN / MINIMAX_API_KEY.
+    #    Region 默认 CN (api.minimaxi.com/v1/coding_plan/search),
+    #    MINIMAX_API_HOST 可覆盖。
+    # 2. **DuckDuckGo** — 无 key 时的兜底。需 duckduckgo-search 包。
     #
     # ## 参数
     # - query: 搜索词 (必填)
-    # - max_results: 最大结果数 (默认 10)
+    # - max_results: 最大结果数 (默认 10, MiniMax 实际限制 1-10)
     #
     # ## 示例
     # {"query": "A-share momentum factor research"}
     #
     # ## 边界
-    # 只读工具 (effects: net); 依赖 duckduckgo_search 包。
+    # 只读工具 (effects: net)。
     #
     # ## 错误处理范式
     # - 缺 query → error + expected 示例
-    # - 网络失败 → error (transient, 可重试)
+    # - 网络失败 / key 无效 → error (transient, 可重试)
     #
     # ## 相关工具
     # read_url: 打开结果
@@ -43,7 +51,10 @@ class WebSearchTool(BaseTool):
     """
 
     name = "websearch"
-    description = "DuckDuckGo 网页搜索 (无需 API key); 返回标题/URL/摘要。"
+    description = (
+        "网页搜索 (优先 MiniMax Token Plan, 回退 DuckDuckGo); "
+        "返回标题/URL/摘要。"
+    )
     repeatable = True
     strict = True
     category = "Web"
@@ -51,6 +62,14 @@ class WebSearchTool(BaseTool):
 
     @classmethod
     def check_available(cls) -> bool:
+        # Always available — MiniMax (env-keyed) or DDG (pkg-keyed) handles
+        # the lookup; if neither is configured the dispatcher returns an
+        # explicit error JSON to the agent.
+        try:
+            from ...web import minimax_search  # noqa: F401
+            return True
+        except ImportError:
+            pass
         try:
             import duckduckgo_search  # noqa: F401
             return True

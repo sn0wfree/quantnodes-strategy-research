@@ -318,6 +318,18 @@ class APIClient {
       ),
   }
 
+  // ── Web search (MiniMax Token Plan / DuckDuckGo fallback) ──
+  search = {
+    minimax: (query: string, count: number = 5) =>
+      this.get<MiniMaxSearchResponse>(
+        `/api/search/minimax?q=${encodeURIComponent(query)}&count=${count}`,
+      ),
+    minimaxHealth: () =>
+      this.get<{ status: string; configured: boolean }>(
+        `/api/search/minimax/health`,
+      ),
+  }
+
   run = {
     status: (
       workspacePath: string,
@@ -857,6 +869,24 @@ export interface StudyRoundAgentOutputsResponse {
   }>
 }
 
+// ── MiniMax / web search ──────────────────────────────────────
+
+export interface MiniMaxSearchResult {
+  title: string
+  href: string
+  body: string
+}
+
+export interface MiniMaxSearchResponse {
+  status: string
+  provider?: string
+  query: string
+  count: number
+  n_results: number
+  results: MiniMaxSearchResult[]
+  related_queries?: string[]
+}
+
 // ── Step B: study execution graph (multi-entry / multi-exit) ───
 
 export interface StudyGraphNodeLike {
@@ -1225,6 +1255,25 @@ export interface AdminUsersListResponse {
   total: number
   limit: number
   offset: number
+}
+
+// ── MiniMax / DuckDuckGo web search (front-end direct invocation) ─
+
+export interface SearchHit {
+  title: string
+  href: string
+  body: string
+}
+
+export interface SearchResponse {
+  status: string
+  provider?: string | null
+  query: string
+  count: number
+  n_results: number
+  results: SearchHit[]
+  related_queries: string[]
+  error?: string | null
 }
 
 export const api = new APIClient()
