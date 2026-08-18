@@ -321,76 +321,78 @@ class SwarmRuntime:
     ) -> AgentResult:
         """Execute a single agent.
 
-        Supports three executor types:
-        - "llm" (default): calls LLM via WorkflowController
-        - "python_executor": calls a registered Python function
-        - "evaluator": calls the decide() function for keep/discard
+        Supports three executor types via the unified AgentExecutor:
+        - "llm" (default): AgentLoop with unified prompt path
+        - "python_executor": registered Python function
+        - "evaluator": decide() function for keep/discard
         """
+        from ..agent.executor import AgentExecutor
+        from ..agent.plugin import AgentPlugin
+        from ..agent.dag_config import AgentNodeConfig
+        from ..agent.registry import get_default_registry
+
         t0 = time.perf_counter()
         ctx = agent_call.context if hasattr(agent_call, "context") else {}
         executor_type = ctx.get("executor_type", "llm")
+        plugin_id = ctx.get("agent_name", agent_call.agent_name)
 
-        try:
-            # ── python_executor: run a registered Python function ──
-            if executor_type == "python_executor":
-                return self._execute_python_executor(
-                    agent_call, workspace, upstream, ctx, t0,
-                )
-
-            # ── evaluator: run decide() function ──
-            if executor_type == "evaluator":
-                return self._execute_evaluator(
-                    agent_call, workspace, upstream, ctx, t0,
-                )
-
-            # ── LLM agent (default) ──
-            # P1.5: Use PromptBuilder for structured prompt construction
-            from ..workflow.prompt import PromptBuilder
-            builder = PromptBuilder()
-            full_task = builder.build_prompt(
-                agent_name=agent_call.agent_name,
-                base_prompt=task,
-                context=ctx,
-                upstream_outputs=upstream if upstream else None,
+        # Build plugin from the global registry (or fall back to a
+        # minimal stub for unknown agent names).
+        reg = get_default_registry()
+        plugin = reg.get(plugin_id)
+        if plugin is None:
+            plugin = AgentPlugin(
+                id=plugin_id, name=plugin_id, category="execution",
+                description=plugin_id,
+                prompt_file=f".prompts/{plugin_id}.md",
+                tools=tuple(ctx.get("tools") or []),
+                executor_type=executor_type,
+                python_function=ctx.get("python_function"),
+                default_timeout=ctx.get("timeout", 180),
             )
 
-            if self._controller is None and self._owns_default_controller:
-                self._controller = _build_default_controller()
-
-            if self._controller is not None:
-                if self._owns_default_controller:
-                    try:
-                        output = self._controller.execute_agent(
-                            agent_call, full_task, workspace,
-                        )
-                    except Exception as exc:                    # noqa: BLE001
-                        logger.warning(
-                            "default controller.execute_agent "
-                            "failed for %s: %s",
-                            agent_call.agent_name, exc,
-                        )
-                        output = f"[error] {agent_call.agent_name}: {exc}"
-                else:
-                    output = self._controller.execute_agent(
-                        agent_call, full_task, workspace,
-                    )
-            else:
-                output = f"[stub] {agent_call.agent_name}: completed"
-
+        # Unknown agents without a valid prompt → stub result
+        # (preserves pre-unification SwarmRuntime behaviour for
+        # tests and ad-hoc agent names).
+        if not plugin.prompt_file or plugin_id not in reg:
             return AgentResult(
                 agent_id=agent_call.agent_name,
                 status=AgentStatus.SUCCESS,
-                output=output,
+                output=f"[stub] {agent_call.agent_name}: completed",
                 elapsed_s=round(time.perf_counter() - t0, 2),
             )
 
-        except Exception as exc:  # noqa: BLE001
-            return AgentResult(
-                agent_id=agent_call.agent_name,
-                status=AgentStatus.ERROR,
-                error=str(exc),
-                elapsed_s=round(time.perf_counter() - t0, 2),
-            )
+        node = AgentNodeConfig(
+            id=plugin_id,
+            timeout=ctx.get("timeout"),
+            max_iterations=ctx.get("max_iterations"),
+            tools_override=list(ctx["tools"]) if "tools" in ctx else None,
+        )
+
+        executor = AgentExecutor(reg)
+        result = executor.execute(
+            plugin, task, workspace,
+            context=ctx,
+            upstream_outputs=upstream if upstream else None,
+            node=node,
+        )
+
+        # Map unified status to SwarmRuntime's AgentStatus enum.
+        status_map = {
+            "success": AgentStatus.SUCCESS,
+            "error": AgentStatus.ERROR,
+            "skipped": AgentStatus.SKIPPED,
+        }
+        return AgentResult(
+            agent_id=agent_call.agent_name,
+            status=status_map.get(result.status, AgentStatus.ERROR),
+            output=result.output,
+            error=result.error,
+            elapsed_s=result.elapsed_s,
+            summary=result.summary,
+            metrics=result.metrics,
+            artifacts=result.artifacts,
+        )
 
     def _execute_python_executor(
         self,
