@@ -255,11 +255,41 @@ class APIClient {
     availableActions: (studyId: string) =>
       this.get<StudyAvailableActionsResponse>(`/study/${studyId}/available_actions`),
 
-    dispatchAction: (studyId: string, name: string, body?: { reason?: string; archived_by?: string }) =>
+    dispatchAction: (
+      studyId: string,
+      name: string,
+      body?: {
+        reason?: string
+        archived_by?: string
+        new_objective?: string
+        expected_goal_id?: string
+        round_num?: number
+      },
+    ) =>
       this.post<StudyActionResponse>(`/study/${studyId}/actions/${name}`, body ?? {}),
 
     redoRound: (studyId: string, roundNum: number) =>
       this.post<StudyActionResponse>(`/study/${studyId}/rounds/${roundNum}/redo`),
+
+    replaceObjective: (
+      studyId: string,
+      newObjective: string,
+      expectedGoalId: string,
+      reason?: string,
+    ) =>
+      this.post<StudyActionResponse>(
+        `/study/${studyId}/actions/replace_objective`,
+        {
+          new_objective: newObjective,
+          expected_goal_id: expectedGoalId,
+          reason,
+        }
+      ),
+
+    objectiveHistory: (studyId: string) =>
+      this.get<StudyObjectiveHistoryResponse>(
+        `/study/${studyId}/objective_history`
+      ),
   }
 
   run = {
@@ -856,6 +886,26 @@ export interface StudyAvailableActionsResponse {
   study_id: string
   execution_status: string
   actions: StudyActionItem[]
+}
+
+// ── Step B1: REPLACE_OBJECTIVE + objective_history ───────────────
+
+export interface StudyObjectiveHistoryEntry {
+  id: number
+  study_id: string
+  session_id: string
+  objective: string
+  replaced_by?: string | null
+  expected_goal_id: string
+  reason?: string | null
+  applied_at: string
+  applied_round?: number | null  // null = pending
+}
+
+export interface StudyObjectiveHistoryResponse {
+  status: string
+  study_id: string
+  history: StudyObjectiveHistoryEntry[]
 }
 
 export interface StudyActionResponse {

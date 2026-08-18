@@ -35,6 +35,7 @@ export function StudyFlowTab({
             progressPercent={progressPercent}
             evidenceCount={evidenceCount}
             criteria={summary.goal_snapshot?.criteria ?? []}
+            studyId={studyId}
           />
         </div>
         <div>

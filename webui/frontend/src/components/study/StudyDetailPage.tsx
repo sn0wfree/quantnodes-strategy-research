@@ -4,6 +4,7 @@ import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
   Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
   ShieldAlert, GitBranch, MessageSquare, Archive, ArchiveRestore,
+  Edit3,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
@@ -16,6 +17,7 @@ import { BudgetBar } from './BudgetBar'
 import { EmptyState } from '../common/EmptyState'
 import { PageShell } from '../layout/PageShell'
 import { StudyFlowTab } from './StudyFlowTab'
+import { EditObjectiveDialog } from './EditObjectiveDialog'
 import { AgentChatLog } from './AgentChatLog'
 
 type TabKey = 'overview' | 'flow' | 'logs'
@@ -78,6 +80,7 @@ export function StudyDetailPage() {
   const [directiveText, setDirectiveText] = useState('')
   const [submittingDirective, setSubmittingDirective] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  const [editObjectiveOpen, setEditObjectiveOpen] = useState(false)
 
   const loadDirectives = useCallback(async () => {
     try {
@@ -106,6 +109,22 @@ export function StudyDetailPage() {
     }
   }, [studyId])
 
+  const loadSummary = useCallback(async () => {
+    try {
+      const r = await api.study.summary(studyId)
+      setSummary(r)
+      setNotFound(false)
+      setError('')
+    } catch (err) {
+      const status = (err as { status?: number })?.status
+      if (status === 404) {
+        setNotFound(true)
+      } else {
+        setError((err as Error).message)
+      }
+    }
+  }, [studyId])
+
   const loadActions = useCallback(async () => {
     try {
       const r = await api.study.availableActions(studyId)
@@ -120,25 +139,10 @@ export function StudyDetailPage() {
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const poll = async () => {
-      try {
-        const r = await api.study.summary(studyId)
-        if (cancelled) return
-        setSummary(r)
-        setNotFound(false)
-        setError('')
-      } catch (err) {
-        if (cancelled) return
-        const status = (err as { status?: number })?.status
-        if (status === 404) {
-          setNotFound(true)
-        } else {
-          setError((err as Error).message)
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-          timer = setTimeout(poll, 5000)
-        }
+      await loadSummary()
+      if (!cancelled) {
+        setLoading(false)
+        timer = setTimeout(poll, 5000)
       }
     }
 
@@ -151,7 +155,14 @@ export function StudyDetailPage() {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, loadDirectives, loadJournal, loadHanging, loadActions])
+  }, [
+    studyId,
+    loadDirectives,
+    loadJournal,
+    loadHanging,
+    loadActions,
+    loadSummary,
+  ])
 
   const onAction = async (
     action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive',
@@ -238,6 +249,9 @@ export function StudyDetailPage() {
   const canCancel = (actions?.actions ?? []).some((a) => a.name === 'cancel')
   const canArchive = (actions?.actions ?? []).some((a) => a.name === 'archive')
   const canUnarchive = (actions?.actions ?? []).some((a) => a.name === 'unarchive')
+  const canReplaceObjective = (actions?.actions ?? []).some(
+    (a) => a.name === 'replace_objective',
+  )
   const canDirective = canPause || canResume
 
   const controlActions = (
@@ -306,6 +320,15 @@ export function StudyDetailPage() {
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-sky-600/40 bg-sky-700/20 px-2.5 py-1.5 text-xs text-sky-200 transition-all hover:bg-sky-700/40 hover:text-sky-50 active:scale-95 disabled:opacity-50"
         >
           <ArchiveRestore className="h-3.5 w-3.5" /> 取消归档
+        </button>
+      )}
+      {canReplaceObjective && (
+        <button
+          onClick={() => setEditObjectiveOpen(true)}
+          disabled={busy}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1.5 text-xs text-indigo-200 transition-all hover:bg-indigo-500/30 hover:text-indigo-50 active:scale-95 disabled:opacity-50"
+        >
+          <Edit3 className="h-3.5 w-3.5" /> 修改目标
         </button>
       )}
     </div>
@@ -651,6 +674,19 @@ export function StudyDetailPage() {
           )}
         </div>
       )}
+
+      <EditObjectiveDialog
+        studyId={studyId}
+        currentObjective={summary.objective}
+        goalId={summary.goal_snapshot?.goal_id ?? null}
+        open={editObjectiveOpen}
+        onClose={() => setEditObjectiveOpen(false)}
+        onSuccess={() => {
+          // Refresh summary so the new objective + history show immediately
+          void loadSummary()
+          void loadActions()
+        }}
+      />
     </PageShell>
   )
 }

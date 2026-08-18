@@ -1,4 +1,6 @@
-import { Target, CheckCircle2, Circle } from 'lucide-react'
+import { useState } from 'react'
+import { Target, CheckCircle2, Circle, History } from 'lucide-react'
+import { StudyObjectiveHistory } from './StudyObjectiveHistory'
 
 interface Criteria {
   criterion_id: string
@@ -12,6 +14,7 @@ interface Props {
   progressPercent?: number
   evidenceCount?: number
   criteria?: Criteria[]
+  studyId?: string  // when set, enables the history icon
 }
 
 export function ObjectiveProgress({
@@ -19,8 +22,10 @@ export function ObjectiveProgress({
   progressPercent = 0,
   evidenceCount = 0,
   criteria = [],
+  studyId,
 }: Props) {
   const coveredCount = criteria.filter((c) => c.status === 'covered').length
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft transition-colors hover:border-slate-700">
@@ -28,6 +33,17 @@ export function ObjectiveProgress({
         <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
           <Target className="h-3 w-3 text-primary-400" />
           目标 · 进度
+          {studyId && (
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              title="查看目标变更历史"
+              aria-label="查看目标变更历史"
+              className="ml-1 inline-flex cursor-pointer items-center justify-center rounded-full p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-primary-300"
+            >
+              <History className="h-3 w-3" />
+            </button>
+          )}
         </div>
         {criteria.length > 0 && (
           <span className="rounded-full border border-slate-700 bg-slate-800/60 px-1.5 py-0.5 font-mono text-[9px] text-slate-400">
@@ -79,6 +95,13 @@ export function ObjectiveProgress({
             )
           })}
         </div>
+      )}
+      {studyId && (
+        <StudyObjectiveHistory
+          studyId={studyId}
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+        />
       )}
     </div>
   )
