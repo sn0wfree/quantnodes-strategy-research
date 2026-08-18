@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ..workflow.types import AgentCall
+from .types import AgentCall
 from .runtime import SwarmPreset
 
 logger = logging.getLogger(__name__)

@@ -246,7 +246,7 @@ class TestSwarmRuntimeShouldStop:
 
 class TestSwarmRuntimeExecute:
     def test_execute_simple_dag(self, tmp_path):
-        rt = SwarmRuntime(controller=None)
+        rt = SwarmRuntime()
         preset = SwarmPreset(
             name="test",
             agents=[AgentCall(agent_name="a", prompt=".prompts/researcher.md")],
@@ -258,7 +258,7 @@ class TestSwarmRuntimeExecute:
         assert result.elapsed_s >= 0.0
 
     def test_execute_with_hooks(self, tmp_path):
-        rt = SwarmRuntime(controller=None)
+        rt = SwarmRuntime()
         hook = MagicMock()
         hook.should_stop.return_value = False
         preset = SwarmPreset(
@@ -272,7 +272,7 @@ class TestSwarmRuntimeExecute:
         hook.on_layer_complete.assert_called()
 
     def test_execute_hook_should_stop(self, tmp_path):
-        rt = SwarmRuntime(controller=None)
+        rt = SwarmRuntime()
         hook = MagicMock()
         hook.should_stop.return_value = True
         preset = SwarmPreset(
@@ -288,7 +288,7 @@ class TestSwarmRuntimeExecute:
         hook.on_layer_start.assert_called_once()
 
     def test_execute_two_layer_dag(self, tmp_path):
-        rt = SwarmRuntime(controller=None)
+        rt = SwarmRuntime()
         preset = SwarmPreset(
             name="test",
             agents=[
@@ -308,7 +308,7 @@ class TestSwarmRuntimeCancel:
         assert rt.cancel("nonexistent") is False
 
     def test_cancel_after_execute(self, tmp_path):
-        rt = SwarmRuntime(controller=None)
+        rt = SwarmRuntime()
         preset = SwarmPreset(name="t", dag={"a": []})
         result = rt.execute(preset, tmp_path, "task")
         # Run is already done, should be removed from active

@@ -22,7 +22,7 @@ from typing import Any
 
 from ..workflow.dag import topological_layers
 from ..workflow.grounding import GroundingProvider
-from ..workflow.types import AgentCall, AgentStatus, SwarmHook
+from .types import AgentCall, AgentStatus, SwarmHook
 
 logger = logging.getLogger(__name__)
 
@@ -95,20 +95,16 @@ class SwarmRuntime:
     """DAG-based multi-agent swarm runtime with hook support.
 
     Usage:
-        runtime = SwarmRuntime(controller=ctrl)
+        runtime = SwarmRuntime()
         preset = load_preset(preset_path)
         result = runtime.execute(preset, workspace, task, hooks=[my_hook])
     """
 
     def __init__(
         self,
-        controller: WorkflowController | None = None,
         grounding: GroundingProvider | None = None,
         max_workers: int = 4,
     ) -> None:
-        # `controller` kwarg retained for backward compatibility — the
-        # execution path uses AgentExecutor directly. See
-        # docs/unified-agent-engine-design.md (P4).
         # DELETE-CANDIDATE v0.6: GroundingProvider never read.
         # TODO(architecture): grounding is stored but never read —
         # future feature: ground agent outputs against a knowledge

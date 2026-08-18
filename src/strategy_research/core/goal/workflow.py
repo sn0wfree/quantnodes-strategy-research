@@ -530,7 +530,7 @@ class GoalWorkflowRunner:
 
         # 5. Build SwarmRuntime
         from ..swarm.runtime import SwarmRuntime
-        runtime = SwarmRuntime(controller=None)  # P8: controller ignored by AgentExecutor path
+        runtime = SwarmRuntime()  # P8: controller removed
 
         # 6. Execute via SwarmRuntime (in thread since it's sync)
         try:
@@ -663,7 +663,7 @@ class GoalWorkflowRunner:
 
         # Convert config → SwarmPreset (same as start)
         preset = self._config.to_swarm_preset()
-        runtime = SwarmRuntime(controller=None)  # P8: controller ignored by AgentExecutor path
+        runtime = SwarmRuntime()  # P8: controller removed
 
         try:
             # Need the original objective for prompts; reload from goal
@@ -773,7 +773,7 @@ class GoalWorkflowRunner:
 
         preset = self._config.to_swarm_preset()
         from ..swarm.runtime import SwarmRuntime
-        runtime = SwarmRuntime(controller=None)  # P8: controller ignored by AgentExecutor path
+        runtime = SwarmRuntime()  # P8: controller removed
 
         try:
             result = await asyncio.to_thread(

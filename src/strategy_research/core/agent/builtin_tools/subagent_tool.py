@@ -5,7 +5,7 @@ Constraints (enforced):
     2. Parent agent may spawn at most MAX_SUBAGENTS per turn.
        Excess calls return an actionable error.
 
-The sub-agent runs via SwarmWorker (lightweight ReAct loop) and returns
+The sub-agent runs via the unified AgentExecutor (AgentLoop) and returns
 the answer as a tool result to the parent agent.
 """
 
@@ -18,8 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ...llm.config import LLMConfig
-from ...llm.openai_client import OpenAICompatClient
-from ..tools import EFFECT_FS, BaseTool, ToolContext, ToolRegistry
+from ..tools import EFFECT_FS, BaseTool, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class SubAgentTool(BaseTool):
     #
     # ## 用途
     # 将独立子任务委派给子 agent。子 agent 运行一个轻量的 ReAct 循环
-    # (SwarmWorker)，拥有独立工具白名单（不含 delegate_to_agent），
+    # (AgentExecutor → AgentLoop), 拥有独立工具白名单（不含 delegate_to_agent），
     # 可读写文件、跑回测、调用因子分析等工具。结果作为工具返回值交回父 agent。
     #
     # ## 参数
