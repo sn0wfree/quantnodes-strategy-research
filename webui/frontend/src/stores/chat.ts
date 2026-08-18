@@ -207,6 +207,7 @@ interface ChatState {
   clearAllPartAccum: () => void
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
+  removeMessage: (id: string) => void
   updateMessage: (id: string, updater: (msg: Message) => void) => void
   setStreamingMessage: (id: string | null) => void
   setStreamingText: (text: string) => void
@@ -292,6 +293,10 @@ export const useChatStore = create<ChatState>()(
     addMessage: (message) =>
       set((state) => {
         state.messages.set(message.id, message)
+      }),
+    removeMessage: (id) =>
+      set((state) => {
+        state.messages.delete(id)
       }),
     updateMessage: (id, updater) =>
       set((state) => {

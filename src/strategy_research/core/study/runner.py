@@ -822,6 +822,9 @@ class AutoresearchRunner:
 
         results_tsv = root / "results.tsv"
 
+        # ── Load the execution graph (topology-aware scheduling) ────
+        graph = self._load_graph(path, sid)
+
         # read state (study layout: strategy in run dir, tsv at study root)
         current_state = read_current_state(
             path, strategy,
@@ -940,6 +943,10 @@ class AutoresearchRunner:
         summary = generate_run_summary(agent_outputs, metrics, verdict, round_num, previous_summary)
         summary["acceptance_decision"] = eval_result["decision"].to_dict()
         save_run_summary(run_dir, summary)
+
+        # Emit final graph topology so the frontend can paint per-node
+        # status (completed / error) for this round.
+        self._emit_topology(session, sid, round_num, graph, agent_outputs)
 
         # AEGIS: Attribution + Journal + Regression Gate
         passed_now = _metric_pass_set(metrics, metric_targets)
@@ -1352,6 +1359,71 @@ class AutoresearchRunner:
         )
         self._idle_rounds += 1
         return result
+
+    # ── Graph loading (topology-aware scheduling) ────────────────
+
+    def _load_graph(self, path: Path, sid: str) -> "StudyGraph":
+        """Load the study's persisted execution graph.
+
+        Falls back to ``DEFAULT_STANDARD_GRAPH`` when ``graph.json`` is
+        missing or malformed (legacy studies pre-migration). Validates
+        and logs warnings; never raises — a broken graph must not block
+        a running study.
+        """
+        from .graph import StudyGraph
+        from .graph_templates import DEFAULT_STANDARD_GRAPH
+
+        graph = StudyGraph.load(path, sid)
+        if graph is None:
+            graph = DEFAULT_STANDARD_GRAPH
+        errors = graph.validate()
+        if errors:
+            logger.warning(
+                "Study %s graph validation warnings: %s; "
+                "falling back to standard template",
+                sid, errors,
+            )
+            graph = DEFAULT_STANDARD_GRAPH
+        return graph
+
+    def _emit_topology(
+        self,
+        session: str,
+        sid: str,
+        round_num: int,
+        graph: "StudyGraph",
+        agent_outputs: dict,
+    ) -> None:
+        """Emit SSE events describing the current layer being processed.
+
+        The frontend uses these events to highlight which layer is
+        active and to flag nodes that errored (so they can show a red
+        border).
+        """
+        layers = graph.topological_layers()
+        completed_ids = {
+            nid for nid, out in agent_outputs.items()
+            if out and not (isinstance(out, dict) and out.get("error"))
+        }
+        for layer_idx, layer_ids in enumerate(layers):
+            for nid in layer_ids:
+                node = graph.node_map.get(nid)
+                if node is None:
+                    continue
+                status = (
+                    "completed" if nid in completed_ids
+                    else "pending"
+                )
+                self._emit(session, "study_graph_node", {
+                    "study_id": sid,
+                    "round": round_num,
+                    "layer": layer_idx,
+                    "node_id": nid,
+                    "node_type": node.type,
+                    "node_label": node.label or nid,
+                    "enabled": node.enabled,
+                    "status": status,
+                })
 
     def _collect_knowledge(self, topics: list[str]) -> int:
         """v2: run the collector agent and append to knowledge.md.

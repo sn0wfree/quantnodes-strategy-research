@@ -354,5 +354,37 @@ class StudyObjectiveHistoryResponse(BaseModel):
     history: list[ObjectiveHistoryEntryModel]
 
 
+# ── Step B: study execution graph (multi-entry / multi-exit) ───
+
+
+class StudyGraphNodeModel(BaseModel):
+    id: str
+    type: str
+    label: str = ""
+    config: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class StudyGraphEdgeModel(BaseModel):
+    source: str
+    target: str
+    condition: Optional[str] = None
+
+
+class StudyGraphBody(BaseModel):
+    nodes: list[StudyGraphNodeModel]
+    edges: list[StudyGraphEdgeModel]
+
+
+class StudyGraphResponse(BaseModel):
+    status: str
+    study_id: str
+    graph: StudyGraphBody
+    # Marks whether this graph came from the persisted graph.json or a
+    # fallback default template. Frontend can disable edit affordance
+    # when ``persisted=False`` if desired.
+    persisted: bool = True
+
+
 class StudyRedoRequest(BaseModel):
     round_num: int = Field(..., ge=1)

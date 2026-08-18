@@ -2,11 +2,11 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
-  Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
+  Target, Activity, RotateCcw, BarChart3, BookOpen, Info,
   ShieldAlert, GitBranch, MessageSquare, Archive, ArchiveRestore,
   Edit3,
 } from 'lucide-react'
-import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
+import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { RoundHistory } from './RoundHistory'
@@ -62,7 +62,6 @@ export function StudyDetailPage() {
   const navigate = useNavigate()
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [directives, setDirectives] = useState<StudyDirectivesResponse | null>(null)
-  const [journal, setJournal] = useState<StudyJournalResponse | null>(null)
   const [hanging, setHanging] = useState<StudyHangingEventsResponse | null>(null)
   const [actions, setActions] = useState<StudyAvailableActionsResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -74,6 +73,7 @@ export function StudyDetailPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const [editObjectiveOpen, setEditObjectiveOpen] = useState(false)
   const [retryMenuOpen, setRetryMenuOpen] = useState(false)
+  const [logsSelectedRound, setLogsSelectedRound] = useState<number>(1)
 
   const loadDirectives = useCallback(async () => {
     try {
@@ -81,15 +81,6 @@ export function StudyDetailPage() {
       setDirectives(r)
     } catch {
       // Non-critical — audit trail can be absent
-    }
-  }, [studyId])
-
-  const loadJournal = useCallback(async () => {
-    try {
-      const r = await api.study.journal(studyId)
-      setJournal(r)
-    } catch {
-      // Non-critical — journal may not exist yet
     }
   }, [studyId])
 
@@ -141,7 +132,6 @@ export function StudyDetailPage() {
 
     void poll()
     void loadDirectives()
-    void loadJournal()
     void loadHanging()
     void loadActions()
     return () => {
@@ -151,7 +141,6 @@ export function StudyDetailPage() {
   }, [
     studyId,
     loadDirectives,
-    loadJournal,
     loadHanging,
     loadActions,
     loadSummary,
@@ -501,18 +490,6 @@ export function StudyDetailPage() {
             />
           )}
           <ScoreboardMini scoreboard={summary.scoreboard ?? []} />
-
-          {/* Journal */}
-          {journal?.journal && (
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
-              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                <FileText className="h-3 w-3" /> 研究日志 journal.md
-              </div>
-              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-400">
-                {journal.journal}
-              </pre>
-            </div>
-          )}
         </div>
 
         <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
@@ -671,7 +648,9 @@ export function StudyDetailPage() {
             {/* Agent chat logs */}
             <AgentChatLog
               studyId={studyId}
-              currentRound={clampRound(summary.current_round)}
+              selectedRound={Math.max(1, logsSelectedRound || clampRound(summary.current_round))}
+              onSelectedRoundChange={setLogsSelectedRound}
+              totalRounds={summary.max_rounds}
             />
 
             {/* Directives audit trail */}
@@ -701,22 +680,10 @@ export function StudyDetailPage() {
                       </div>
                     </li>
                   ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* Journal */}
-          {journal?.journal && (
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 shadow-soft">
-              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                <FileText className="h-3 w-3" /> 研究日志 journal.md
-              </div>
-              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-400">
-                {journal.journal}
-              </pre>
-            </div>
-          )}
+</ul>
+               )}
+             </div>
+           </div>
         </div>
       )}
 

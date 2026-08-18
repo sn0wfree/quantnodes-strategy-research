@@ -26,6 +26,8 @@ from ..schemas.study import (
     StudyAvailableActionsResponse,
     StudyDirectiveCreatedResponse,
     StudyDirectivesResponse,
+    StudyGraphBody,
+    StudyGraphResponse,
     StudyGuidanceResponse,
     StudyHangingEventsResponse,
     StudyJournalResponse,
@@ -1296,6 +1298,83 @@ async def study_objective_history(request: Request, study_id: str):
             }
             for e in entries
         ],
+    }
+
+
+@router.get("/{study_id}/graph", response_model=StudyGraphResponse)
+async def study_graph(request: Request, study_id: str):
+    """Return the study's execution graph (nodes + edges).
+
+    Reads ``{ws}/study/{id}/graph.json``. Falls back to the standard
+    8-node template when missing (legacy studies; see migration
+    script) — the response sets ``persisted=False`` in that case.
+    """
+    from pathlib import Path as _Path
+    from ...core.study.graph import StudyGraph
+    from ...core.study.graph_templates import DEFAULT_STANDARD_GRAPH
+    study = _owned_study(request, study_id)
+    ws = _Path(study.workspace_path)
+    persisted = True
+    graph = StudyGraph.load(ws, study_id)
+    if graph is None:
+        graph = DEFAULT_STANDARD_GRAPH
+        persisted = False
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "graph": {
+            "nodes": [n.to_dict() for n in graph.nodes],
+            "edges": [e.to_dict() for e in graph.edges],
+        },
+        "persisted": persisted,
+    }
+
+
+@router.put("/{study_id}/graph", response_model=StudyGraphResponse)
+async def study_update_graph(
+    request: Request, study_id: str, body: StudyGraphBody,
+):
+    """Update the study's execution graph.
+
+    Only editable when the study is ``paused`` or ``interrupted`` —
+    mutating a running study would orphan its in-flight agent state.
+    """
+    from ...core.study.graph import StudyGraph
+    from ...core.study.models import StudyStatus
+    from ...core.study import StudyStore
+    study = _owned_study(request, study_id)
+    if study.execution_status not in (StudyStatus.PAUSED, StudyStatus.INTERRUPTED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"graph only editable in paused/interrupted state, "
+                f"current={study.execution_status.value}"
+            ),
+        )
+    from ...core.study.graph import GraphNode, GraphEdge
+    nodes = tuple(
+        GraphNode(id=n.id, type=n.type, label=n.label,
+                  config=dict(n.config), enabled=n.enabled)
+        for n in body.nodes
+    )
+    edges = tuple(
+        GraphEdge(source=e.source, target=e.target, condition=e.condition)
+        for e in body.edges
+    )
+    graph = StudyGraph(nodes=nodes, edges=edges)
+    errors = graph.validate()
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    from pathlib import Path as _Path
+    graph.save(_Path(study.workspace_path), study_id)
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "graph": {
+            "nodes": [n.to_dict() for n in graph.nodes],
+            "edges": [e.to_dict() for e in graph.edges],
+        },
+        "persisted": True,
     }
 
 

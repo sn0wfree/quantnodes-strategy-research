@@ -118,11 +118,15 @@ def init_study_dir(
     strategy_name: str,
     objective: str,
     guidance_md: str | None = None,
+    graph: "StudyGraph | None" = None,
 ) -> dict:
     """v2 bootstrap: autonomous study directory (design §6.2).
 
     Creates baseline/strategy.py, results.tsv header, guidance.md,
-    todos.md, knowledge.md and state.json.
+    todos.md, knowledge.md, state.json and graph.json.
+
+    ``graph`` (optional): custom execution graph (multi-entry/exit).
+    When None, ``DEFAULT_STANDARD_GRAPH`` is used.
     """
     root = ws / "study" / study_id
     (root / "baseline").mkdir(parents=True, exist_ok=True)
@@ -154,6 +158,20 @@ def init_study_dir(
     knowledge = root / "knowledge.md"
     if not knowledge.exists():
         knowledge.write_text(_KNOWLEDGE_TEMPLATE, encoding="utf-8")
+
+    # Execution graph (multi-entry/exit). Persisted so the runner can
+    # topologically schedule agents each round. Falls back to the
+    # standard 8-node template when no custom graph is supplied.
+    from .graph import StudyGraph
+    from .graph_templates import DEFAULT_STANDARD_GRAPH
+
+    graph_path = root / "graph.json"
+    if not graph_path.exists():
+        graph_to_write = graph if graph is not None else DEFAULT_STANDARD_GRAPH
+        graph_path.write_text(
+            graph_to_write.to_json(),
+            encoding="utf-8",
+        )
 
     init_state(ws, study_id)
 
@@ -239,7 +257,10 @@ def create_study_record(
                 issued_by="system",
             )
 
-    init_study_dir(ws, study.study_id, strategy_name, objective, guidance_md=guidance_md)
+    init_study_dir(
+        ws, study.study_id, strategy_name, objective,
+        guidance_md=guidance_md,
+    )
     return study
 
 

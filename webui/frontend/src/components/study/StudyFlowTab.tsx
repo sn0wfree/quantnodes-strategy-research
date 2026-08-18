@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Send } from 'lucide-react'
 import { type StudySummaryResponse } from '../../api/client'
 import { ObjectiveProgress } from './ObjectiveProgress'
@@ -25,6 +26,7 @@ export function StudyFlowTab({
 }: StudyFlowTabProps) {
   const progressPercent = summary.goal_snapshot?.progress_percent ?? 0
   const evidenceCount = summary.goal_snapshot?.evidence_count ?? 0
+  const [selectedRound, setSelectedRound] = useState<number>(clampRound(summary.current_round))
 
   return (
     <div className="mt-4 flex flex-col gap-4">
@@ -68,8 +70,9 @@ export function StudyFlowTab({
       {/* Middle: Agent flow canvas */}
       <AgentFlowCanvas
         studyId={studyId}
-currentRound={clampRound(summary.current_round)}
-            totalRounds={summary.max_rounds}
+        selectedRound={selectedRound}
+        onSelectedRoundChange={setSelectedRound}
+        totalRounds={summary.max_rounds}
       />
     </div>
   )

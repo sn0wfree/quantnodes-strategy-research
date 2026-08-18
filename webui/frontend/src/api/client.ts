@@ -305,6 +305,12 @@ class APIClient {
           : {},
       ),
 
+    graph: (studyId: string) =>
+      this.get<StudyGraphResponse>(`/study/${studyId}/graph`),
+
+    updateGraph: (studyId: string, body: StudyGraphBody) =>
+      this.put<StudyGraphResponse>(`/study/${studyId}/graph`, body),
+
     approveAgentLoop: (studyId: string, decision: 'approved' | 'reject') =>
       this.post<{ status: string; study_id: string; decision: string; forwarded: boolean }>(
         `/study/${studyId}/agents/approve`,
@@ -842,12 +848,48 @@ export interface StudyRoundAgentOutputsResponse {
   round: number
   agent_outputs: Record<string, {
     agent?: string
-    output?: string
     input?: string
+    output?: string
+    parts?: MessagePartLike[]
     duration_ms?: number
     timestamp?: string
     [key: string]: unknown
   }>
+}
+
+// ── Step B: study execution graph (multi-entry / multi-exit) ───
+
+export interface StudyGraphNodeLike {
+  id: string
+  type: string
+  label?: string
+  config?: Record<string, unknown>
+  enabled?: boolean
+}
+
+export interface StudyGraphEdgeLike {
+  source: string
+  target: string
+  condition?: string | null
+}
+
+export interface StudyGraphBody {
+  nodes: StudyGraphNodeLike[]
+  edges: StudyGraphEdgeLike[]
+}
+
+export interface StudyGraphResponse {
+  status: string
+  study_id: string
+  graph: StudyGraphBody
+  persisted?: boolean
+}
+
+// ── chat Message-shape alias used by AgentChatLog group-chat view ──
+
+export interface MessagePartLike {
+  type: string
+  [key: string]: unknown
 }
 
 export interface DiffLine {

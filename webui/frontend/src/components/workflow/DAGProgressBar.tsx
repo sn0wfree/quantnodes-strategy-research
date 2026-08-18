@@ -3,9 +3,16 @@ interface DAGProgressBarProps {
   completed: number
   total: number
   elapsed?: number
+  error?: number
 }
 
-export function DAGProgressBar({ progress, completed, total, elapsed }: DAGProgressBarProps) {
+export function DAGProgressBar({
+  progress,
+  completed,
+  total,
+  elapsed,
+  error,
+}: DAGProgressBarProps) {
   return (
     <div className="wf-panel flex items-center gap-3 border-t px-4 py-2">
       {/* Progress bar */}
@@ -22,6 +29,11 @@ export function DAGProgressBar({ progress, completed, total, elapsed }: DAGProgr
           {completed}/{total}
         </span>
         <span className="font-mono">{Math.round(progress)}%</span>
+        {error !== undefined && error > 0 && (
+          <span className="font-mono text-rose-400" title="失败的节点">
+            ⚠ {error}
+          </span>
+        )}
         {elapsed !== undefined && (
           <span className="font-mono">
             {elapsed < 60

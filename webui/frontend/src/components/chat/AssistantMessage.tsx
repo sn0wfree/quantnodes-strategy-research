@@ -39,6 +39,12 @@ interface AssistantMessageProps {
   streamingText?: string
   isQueued?: boolean
   layout: ChatLayout
+  /**
+   * When true, hide all interactive affordances (regenerate, edit,
+   * copy-as-source). Used by the study page's agent detail modal —
+   * the user can inspect but cannot rewrite a historical agent run.
+   */
+  readOnly?: boolean
 }
 
 
@@ -274,6 +280,7 @@ export function AssistantMessage({
   isStreaming,
   isQueued,
   layout,
+  readOnly,
 }: AssistantMessageProps) {
   const provider = useSystemStore((s) => s.llm.provider)
   const readPartText = useReadPartText()
@@ -371,7 +378,7 @@ export function AssistantMessage({
     </span>
   ) : null
 
-  const actions = (
+  const actions = readOnly ? null : (
     <MessageActions message={message} alwaysVisible={layout === 'flat'} />
   )
 
