@@ -3002,6 +3002,15 @@ export interface components {
             monitor_interval_seconds?: number | null;
             /** Guidance Md */
             guidance_md?: string | null;
+            /**
+             * Auto Compose Graph
+             * @default false
+             */
+            auto_compose_graph: boolean | null;
+            /** Selected Agents */
+            selected_agents?: string[] | null;
+            /** Graph Override */
+            graph_override?: Record<string, never> | null;
         };
         /** StudyStartResponse */
         StudyStartResponse: {

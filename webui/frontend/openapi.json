@@ -7047,6 +7047,43 @@
               }
             ],
             "title": "Guidance Md"
+          },
+          "auto_compose_graph": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Auto Compose Graph"
+          },
+          "selected_agents": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Agents"
+          },
+          "graph_override": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Override"
           }
         },
         "type": "object",

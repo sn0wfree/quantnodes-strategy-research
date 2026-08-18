@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useStudyStore } from '../../stores/study'
 import { useAuthStore } from '../../stores/auth'
 import { api, type MetricTarget } from '../../api/client'
-import { Plus, X, Target, SlidersHorizontal, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, X, Target, SlidersHorizontal, ChevronDown, ChevronRight, Sparkles } from 'lucide-react'
 import { StrategyNameInput } from './StrategyNameInput'
+import { StudyDAGComposer } from './StudyDAGComposer'
 
 interface Props {
   sessionId: string | null | undefined
@@ -57,6 +58,18 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAICompose, setShowAICompose] = useState(false)
+  const [composedAgents, setComposedAgents] = useState<string[]>([])
+  const [composedGraph, setComposedGraph] = useState<{
+    nodes: Array<{
+      id: string
+      type: string
+      label: string
+      config: Record<string, unknown>
+      enabled: boolean
+    }>
+    edges: Array<{ source: string; target: string }>
+  } | null>(null)
 
   const busy = useStudyStore((s) => s.busy)
   const setBusy = useStudyStore((s) => s.setBusy)
@@ -100,6 +113,9 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
         max_rounds: maxRounds === '' ? undefined : Number(maxRounds),
         monitor_interval_seconds: monitorSec === '' ? undefined : Number(monitorSec),
         behavior: behavior || undefined,
+        auto_compose_graph: composedAgents.length > 0 && !composedGraph,
+        selected_agents: composedAgents.length > 0 ? composedAgents : undefined,
+        graph_override: composedGraph || undefined,
       })
       setObjective('')
       setStrategyName('')
@@ -132,6 +148,32 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
           />
         </div>
       </Section>
+
+      <button
+        type="button"
+        onClick={() => setShowAICompose(!showAICompose)}
+        className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-slate-400 hover:text-slate-200"
+      >
+        {showAICompose ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Sparkles className="h-3 w-3 text-sky-500" />
+        AI 编排（可选）
+        {composedAgents.length > 0 && (
+          <span className="rounded bg-sky-900/60 px-1.5 py-0.5 text-[9px] text-sky-300">
+            {composedAgents.length} 个 agent
+          </span>
+        )}
+      </button>
+      {showAICompose && (
+        <Section icon={<Sparkles className="h-3 w-3 text-sky-500" />} title="AI 编排 Agent 流水线" compact={compact}>
+          <StudyDAGComposer
+            objective={objective}
+            onGraphReady={(graph, agents) => {
+              setComposedGraph(graph)
+              setComposedAgents(agents)
+            }}
+          />
+        </Section>
+      )}
 
       <Section
         icon={<Target className="h-3 w-3 text-primary-400" />}

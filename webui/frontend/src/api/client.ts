@@ -316,6 +316,11 @@ class APIClient {
         `/study/${studyId}/agents/approve`,
         { decision },
       ),
+
+    agents: () => this.get<StudyAgentsResponse>('/study/agents'),
+    presets: () => this.get<StudyPresetsResponse>('/study/presets'),
+    planDag: (body: StudyPlanDagRequest) =>
+      this.post<StudyPlanDagResponse>('/study/plan-dag', body),
   }
 
   // ── Web search (MiniMax Token Plan / DuckDuckGo fallback) ──
@@ -648,6 +653,9 @@ export interface StudyStartRequest {
   max_rounds?: number
   behavior?: string
   monitor_interval_seconds?: number
+  auto_compose_graph?: boolean
+  selected_agents?: string[]
+  graph_override?: Record<string, unknown>
 }
 
 export interface StudyStartResponse {
@@ -913,6 +921,40 @@ export interface StudyGraphResponse {
   study_id: string
   graph: StudyGraphBody
   persisted?: boolean
+}
+
+export interface StudyAgentSpec {
+  id: string
+  name: string
+  category: string
+  description: string
+  optional: boolean
+  keywords: string[]
+  tools: string[]
+}
+
+export interface StudyAgentsResponse {
+  agents: StudyAgentSpec[]
+  required: string[]
+}
+
+export interface StudyPresetsResponse {
+  presets: string[]
+}
+
+export interface StudyPlanDagRequest {
+  objective: string
+  max_agents?: number
+  force_agents?: string[]
+  exclude_agents?: string[]
+}
+
+export interface StudyPlanDagResponse {
+  status: string
+  selected_agents: string[]
+  reasoning: string
+  graph: StudyGraphBody
+  dag_config?: Record<string, unknown>
 }
 
 // ── chat Message-shape alias used by AgentChatLog group-chat view ──
