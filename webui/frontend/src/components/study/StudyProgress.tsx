@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { clampRound } from './utils'
 import { Pause, Play, X, ArrowRightCircle, ExternalLink } from 'lucide-react'
 import { useStudyStore } from '../../stores/study'
 import { api, type StudySummaryResponse, type FlowNodeData } from '../../api/client'
@@ -42,7 +43,7 @@ export function StudyProgress(_props: Props) {
     if (!studyId) return
 
     // Only re-fetch if study changed or round advanced
-    const round = Math.max(1, current?.current_round ?? 1)
+    const round = clampRound(current?.current_round)
     if (studyId === lastSummaryStudyId.current && round === lastSummaryRound.current) {
       return
     }
@@ -84,8 +85,8 @@ export function StudyProgress(_props: Props) {
 
         setFlowNodes(nodes)
       }
-    } catch {
-      // Silent - summary is non-critical
+    } catch (err) {
+      console.warn('fetchSummary: non-critical summary fetch failed', err)
     }
   }, [current?.study_id, current?.execution_status, current?.current_round])
 
@@ -150,7 +151,7 @@ export function StudyProgress(_props: Props) {
           {STUDY_STATUS_LABELS[status] ?? status}
         </span>
         <span className="font-mono text-xs text-slate-400">
-          Round {Math.max(1, current.current_round ?? 1)}/{maxRounds}
+          Round {clampRound(current.current_round)}/{maxRounds}
         </span>
         <div className="flex-1" />
         {(status === 'running' || status === 'monitoring') && (
@@ -198,14 +199,14 @@ export function StudyProgress(_props: Props) {
       {/* Flow Card */}
       <FlowCard
         nodes={flowNodes}
-        currentRound={Math.max(1, current.current_round ?? 1)}
+        currentRound={clampRound(current.current_round)}
         totalRounds={maxRounds}
       />
 
       {/* Round History */}
       <RoundHistory
         rounds={summary?.recent_rounds ?? []}
-        currentRound={Math.max(1, current.current_round ?? 1)}
+        currentRound={clampRound(current.current_round)}
       />
 
       {/* Scoreboard */}

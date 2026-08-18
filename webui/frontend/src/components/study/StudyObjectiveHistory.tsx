@@ -1,22 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { History, Loader2, X } from 'lucide-react'
 import { api, type StudyObjectiveHistoryEntry } from '../../api/client'
+import { formatDateTime } from './utils'
 
 interface StudyObjectiveHistoryProps {
   studyId: string
   open: boolean
   onClose: () => void
-}
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—'
-  try {
-    const d = new Date(iso)
-    const pad = (n: number) => n.toString().padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  } catch {
-    return iso
-  }
 }
 
 export function StudyObjectiveHistory({
@@ -27,24 +17,29 @@ export function StudyObjectiveHistory({
   const [history, setHistory] = useState<StudyObjectiveHistoryEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const r = await api.study.objectiveHistory(studyId)
-      setHistory(r.history)
-    } catch (err) {
-      setError((err as Error).message)
-      setHistory([])
-    } finally {
-      setLoading(false)
-    }
-  }, [studyId])
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
-    if (open) void load()
-  }, [open, load])
+    if (!open) return
+    let cancelled = false
+    const run = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const r = await api.study.objectiveHistory(studyId)
+        if (!cancelled) setHistory(r.history)
+      } catch (err) {
+        if (!cancelled) {
+          setError((err as Error).message)
+          setHistory([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [open, studyId, reloadKey])
 
   if (!open) return null
 
@@ -146,7 +141,7 @@ export function StudyObjectiveHistory({
 
         <button
           type="button"
-          onClick={() => void load()}
+          onClick={() => setReloadKey((k) => k + 1)}
           disabled={loading}
           className="mt-auto self-start rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1 text-[10px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-50"
         >

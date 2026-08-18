@@ -19,6 +19,7 @@ import { PageShell } from '../layout/PageShell'
 import { StudyFlowTab } from './StudyFlowTab'
 import { EditObjectiveDialog } from './EditObjectiveDialog'
 import { AgentChatLog } from './AgentChatLog'
+import { formatDateTime, clampRound } from './utils'
 
 type TabKey = 'overview' | 'flow' | 'logs'
 
@@ -27,17 +28,6 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
   { key: 'flow', label: '研究流程', icon: <GitBranch className="h-3 w-3" /> },
   { key: 'logs', label: '日志', icon: <MessageSquare className="h-3 w-3" /> },
 ]
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—'
-  try {
-    const d = new Date(iso)
-    const pad = (n: number) => n.toString().padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  } catch {
-    return '—'
-  }
-}
 
 function KpiCard({
   icon,
@@ -420,7 +410,7 @@ export function StudyDetailPage() {
         <KpiCard
           icon={<RotateCcw className="h-4 w-4" />}
           iconCls="border border-sky-500/30 bg-sky-500/10 text-sky-400"
-          value={`${Math.max(1, summary.current_round ?? 1)}/${summary.max_rounds ?? 5}`}
+          value={`${clampRound(summary.current_round)}/${summary.max_rounds ?? 5}`}
           label="当前轮次 / 最大轮数"
           valueCls="text-sky-400"
         />
@@ -502,7 +492,7 @@ export function StudyDetailPage() {
           />
           <RoundHistory
             rounds={summary.recent_rounds ?? []}
-            currentRound={Math.max(1, summary.current_round ?? 1)}
+            currentRound={clampRound(summary.current_round)}
             onOpenRun={openRun}
             studyId={studyId}
           />
@@ -693,7 +683,7 @@ export function StudyDetailPage() {
             {/* Agent chat logs */}
             <AgentChatLog
               studyId={studyId}
-              currentRound={Math.max(1, summary.current_round ?? 1)}
+              currentRound={clampRound(summary.current_round)}
             />
 
             {/* Directives audit trail */}

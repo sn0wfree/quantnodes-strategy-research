@@ -4,6 +4,7 @@ import { Clock, ArrowRight, RefreshCw, ListChecks, Archive } from 'lucide-react'
 import { api, type StudySummary } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { StudyActionMenu } from './StudyActionMenu'
+import { formatDateTime, clampRound } from './utils'
 
 const ACTIVE_STATUSES = ['running', 'queued', 'monitoring', 'paused', 'interrupted', 'budget_limited']
 
@@ -14,17 +15,6 @@ const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: 'active', label: '进行中' },
   { key: 'complete', label: '已完成' },
 ]
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—'
-  try {
-    const d = new Date(iso)
-    const pad = (n: number) => n.toString().padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  } catch {
-    return '—'
-  }
-}
 
 function HistoryCard({
   study,
@@ -108,7 +98,7 @@ function HistoryCard({
             {study.last_verdict === 'keep' && ' ✓'}
           </span>
         )}
-        <span className="text-[10px] text-slate-500">Round {Math.max(1, study.current_round ?? 1)}</span>
+        <span className="text-[10px] text-slate-500">Round {clampRound(study.current_round)}</span>
         <span className="inline-flex items-center gap-0.5 text-[10px] text-slate-600">
           <Clock className="h-2.5 w-2.5" />
           {formatDateTime(study.updated_at ?? study.created_at)}

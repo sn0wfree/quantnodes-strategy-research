@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Clock, FolderOpen, Target, User, ExternalLink } from 'lucide-react'
 import { api, type StudySummaryResponse } from '../../api/client'
@@ -6,20 +6,10 @@ import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { MetricsCompare } from './MetricsCompare'
 import { StudyActionMenu } from './StudyActionMenu'
 import { EmptyState } from '../common/EmptyState'
+import { formatDateTime, clampRound } from './utils'
 
 interface Props {
   studyId: string | null
-}
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—'
-  try {
-    const d = new Date(iso)
-    const pad = (n: number) => n.toString().padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  } catch {
-    return '—'
-  }
 }
 
 function MetaRow({ icon, label, value, title }: { icon: React.ReactNode; label: string; value: string; title?: string }) {
@@ -42,27 +32,39 @@ export function StudyTaskSummary({ studyId }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     if (!studyId) {
       setSummary(null)
       return
     }
-    setLoading(true)
-    setError('')
-    try {
-      const r = await api.study.summary(studyId)
-      setSummary(r)
-    } catch (err) {
-      setError((err as Error).message)
-      setSummary(null)
-    } finally {
-      setLoading(false)
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const run = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const r = await api.study.summary(studyId)
+        if (!cancelled) setSummary(r)
+      } catch (err) {
+        if (!cancelled) {
+          setError((err as Error).message)
+          setSummary(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void run()
+    // Poll every 10s so the right-side summary stays fresh while
+    // the detail page is open (only when studyId is set).
+    timer = setInterval(() => void run(), 10_000)
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
     }
   }, [studyId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
 
   if (!studyId) {
     return (
@@ -97,7 +99,7 @@ export function StudyTaskSummary({ studyId }: Props) {
                 if (action === 'unarchive' && !window.confirm('取消归档后状态将变为「已中断」，可手动恢复。继续？')) return
                 try {
                   await api.study.dispatchAction(summary.study_id, action)
-                  void load()
+                  void api.study.summary(summary.study_id).then((r) => setSummary(r))
                 } catch (err) {
                   setError((err as Error).message)
                 }
@@ -187,7 +189,7 @@ export function StudyTaskSummary({ studyId }: Props) {
                 />
               </div>
               <p className="mt-1.5 text-[10px] text-slate-500">
-                Round {Math.max(1, summary!.current_round ?? 1)}/{summary!.max_rounds ?? 5}
+                Round {clampRound(summary!.current_round)}/{summary!.max_rounds ?? 5}
               </p>
             </div>
           </div>

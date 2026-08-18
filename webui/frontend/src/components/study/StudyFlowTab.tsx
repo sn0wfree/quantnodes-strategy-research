@@ -2,6 +2,7 @@ import { Send } from 'lucide-react'
 import { type StudySummaryResponse } from '../../api/client'
 import { ObjectiveProgress } from './ObjectiveProgress'
 import { AgentFlowCanvas } from './AgentFlowCanvas'
+import { clampRound } from './utils'
 
 interface StudyFlowTabProps {
   studyId: string
@@ -67,7 +68,7 @@ export function StudyFlowTab({
       {/* Middle: Agent flow canvas */}
       <AgentFlowCanvas
         studyId={studyId}
-currentRound={Math.max(1, summary.current_round ?? 1)}
+currentRound={clampRound(summary.current_round)}
             totalRounds={summary.max_rounds}
       />
     </div>
