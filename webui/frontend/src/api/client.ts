@@ -236,6 +236,11 @@ class APIClient {
     roundManifest: (studyId: string, roundNum: number) =>
       this.get<StudyRoundManifestResponse>(`/study/${studyId}/rounds/${roundNum}/manifest`),
 
+    roundAgentOutputs: (studyId: string, roundNum: number) =>
+      this.get<StudyRoundAgentOutputsResponse>(
+        `/study/${studyId}/rounds/${roundNum}/agent_outputs`
+      ),
+
     roundDiff: (studyId: string, roundNum: number, against: number) =>
       this.get<StudyRoundDiffResponse>(
         `/study/${studyId}/rounds/${roundNum}/diff?against=${against}`
@@ -820,6 +825,20 @@ export interface StudyRoundManifestResponse {
   study_id: string
   round: number
   manifest: Record<string, unknown>
+}
+
+export interface StudyRoundAgentOutputsResponse {
+  status: string
+  study_id: string
+  round: number
+  agent_outputs: Record<string, {
+    agent?: string
+    output?: string
+    input?: string
+    duration_ms?: number
+    timestamp?: string
+    [key: string]: unknown
+  }>
 }
 
 export interface DiffLine {

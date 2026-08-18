@@ -242,6 +242,13 @@ class StudyRoundManifestResponse(BaseModel):
     manifest: dict
 
 
+class StudyRoundAgentOutputsResponse(BaseModel):
+    status: str
+    study_id: str
+    round: int
+    agent_outputs: dict
+
+
 class DiffLine(BaseModel):
     line: str
     kind: str  # "context" | "add" | "del"

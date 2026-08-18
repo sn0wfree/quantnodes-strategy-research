@@ -32,6 +32,7 @@ from ..schemas.study import (
     StudyKnowledgeResponse,
     StudyListResponse,
     StudyObjectiveHistoryResponse,
+    StudyRoundAgentOutputsResponse,
     StudyRoundArtifactsResponse,
     StudyRoundDiffResponse,
     StudyRoundManifestResponse,
@@ -954,6 +955,55 @@ async def study_round_manifest(request: Request, study_id: str, round_num: int):
     if m is None:
         raise HTTPException(status_code=404, detail="round manifest not found")
     return {"status": "ok", "study_id": study_id, "round": round_num, "manifest": m}
+
+
+@router.get(
+    "/{study_id}/rounds/{round_num}/agent_outputs",
+    response_model=StudyRoundAgentOutputsResponse,
+)
+async def study_round_agent_outputs(
+    request: Request, study_id: str, round_num: int,
+):
+    """Agent chat outputs for a round.
+
+    Reads ``{rounds_dir}/round_{N}/run_{latest}/agents/*.json`` and
+    returns a dict keyed by agent name. Each value contains the full
+    agent JSON (output, input, duration_ms, etc.).
+    """
+    study = _owned_study(request, study_id)
+    from pathlib import Path
+    ws = Path(study.workspace_path).resolve()
+    rounds_dir = ws / "study" / study_id / "rounds"
+    round_dir = rounds_dir / f"round_{round_num:04d}"
+    if not round_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"round {round_num} not found")
+
+    # Find the latest run directory (run_NNNN)
+    run_dirs = sorted(
+        [d for d in round_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
+        key=lambda d: d.name,
+    )
+    if not run_dirs:
+        raise HTTPException(status_code=404, detail=f"no runs found for round {round_num}")
+
+    agents_dir = run_dirs[-1] / "agents"
+    agent_outputs: dict = {}
+    if agents_dir.is_dir():
+        import json
+        for agent_file in sorted(agents_dir.glob("*.json")):
+            agent_name = agent_file.stem
+            try:
+                data = json.loads(agent_file.read_text(encoding="utf-8"))
+                agent_outputs[agent_name] = data
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "round": round_num,
+        "agent_outputs": agent_outputs,
+    }
 
 
 @router.get("/{study_id}/rounds/{round_num}/diff", response_model=StudyRoundDiffResponse)

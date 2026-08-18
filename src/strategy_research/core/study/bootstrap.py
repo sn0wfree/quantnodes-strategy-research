@@ -230,6 +230,15 @@ def create_study_record(
         )
         study = store.update_goal_id(study.study_id, goal.goal_id)
 
+        # Record guidance_md as the startup directive so it appears in
+        # the "指令记录" audit trail.
+        if guidance_md and guidance_md.strip():
+            store.add_directive(
+                study.study_id,
+                guidance_md.strip(),
+                issued_by="system",
+            )
+
     init_study_dir(ws, study.study_id, strategy_name, objective, guidance_md=guidance_md)
     return study
 

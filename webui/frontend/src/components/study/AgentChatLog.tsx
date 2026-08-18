@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { MessageSquare, Filter, ChevronDown, ChevronRight, Bot, User } from 'lucide-react'
-import { api, type StudyRoundManifestResponse } from '../../api/client'
+import { api, type StudyRoundAgentOutputsResponse } from '../../api/client'
 
 interface ChatEntry {
   agent: string
@@ -87,42 +87,52 @@ function ChatBubble({ entry }: { entry: ChatEntry }) {
 }
 
 export function AgentChatLog({ studyId, currentRound, agents }: Props) {
-  const [manifest, setManifest] = useState<StudyRoundManifestResponse | null>(null)
+  const [agentOutputs, setAgentOutputs] = useState<StudyRoundAgentOutputsResponse['agent_outputs']>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedAgent, setSelectedAgent] = useState<string>('all')
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
 
-  const loadManifest = useCallback(async () => {
+  const loadAgentOutputs = useCallback(async () => {
     if (!studyId || currentRound <= 0) return
     setLoading(true)
     setError('')
     try {
-      const r = await api.study.roundManifest(studyId, currentRound)
-      setManifest(r)
-    } catch (err) {
-      setManifest(null)
+      const r = await api.study.roundAgentOutputs(studyId, currentRound)
+      setAgentOutputs(r.agent_outputs ?? {})
+    } catch {
+      setAgentOutputs({})
     } finally {
       setLoading(false)
     }
   }, [studyId, currentRound])
 
   useEffect(() => {
-    void loadManifest()
-  }, [loadManifest])
+    void loadAgentOutputs()
+  }, [loadAgentOutputs])
 
-  // Build chat entries from manifest
+  // Build chat entries from agent outputs
   const chatEntries: ChatEntry[] = []
-  const agentOutputs = manifest?.manifest?.agent_outputs ?? {}
 
-  for (const [agentName, output] of Object.entries(agentOutputs)) {
+  for (const [agentName, data] of Object.entries(agentOutputs)) {
     if (selectedAgent !== 'all' && selectedAgent !== agentName) continue
 
-    const outputStr = typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+    // data may be the full agent JSON {output, input, duration_ms, ...}
+    // or a plain string for older formats
+    let content: string
+    if (typeof data === 'string') {
+      content = data
+    } else if (data && typeof data === 'object') {
+      content = data.output ?? JSON.stringify(data, null, 2)
+    } else {
+      content = String(data)
+    }
+
     chatEntries.push({
       agent: agentName,
       role: 'assistant',
-      content: outputStr,
+      content,
+      tokens: data?.tokens as ChatEntry['tokens'] | undefined,
     })
   }
 
