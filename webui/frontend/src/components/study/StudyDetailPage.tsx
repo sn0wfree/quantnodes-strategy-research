@@ -20,6 +20,8 @@ import { StudyFlowTab } from './StudyFlowTab'
 import { EditObjectiveDialog } from './EditObjectiveDialog'
 import { AgentChatLog } from './AgentChatLog'
 import { formatDateTime, clampRound } from './utils'
+import { RetryModeMenu } from './RetryModeMenu'
+import { AgentApprovalDialog } from './AgentApprovalDialog'
 
 type TabKey = 'overview' | 'flow' | 'logs'
 
@@ -181,11 +183,11 @@ export function StudyDetailPage() {
     }
   }
 
-  const onRetry = async (fromRound: number | null) => {
+  const onRetry = async (mode: 'append' | 'restart') => {
     setRetryMenuOpen(false)
     setBusy(true)
     try {
-      await api.study.retry(studyId, fromRound ?? undefined)
+      await api.study.retry(studyId, undefined, mode)
       await loadActions()
       // Refresh summary to show new INTERRUPTED status
       await loadSummary()
@@ -359,32 +361,18 @@ export function StudyDetailPage() {
             <RotateCcw className="h-3.5 w-3.5" /> 重试
           </button>
           {retryMenuOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 min-w-[10rem] rounded-lg border border-slate-700 bg-slate-900/95 py-1 shadow-elevated backdrop-blur">
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm('从第 1 轮重新开始？历史轮次将被清除。')) {
-                    void onRetry(1)
-                  }
-                }}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[11px] text-slate-200 transition-colors hover:bg-slate-800"
-              >
-                <RotateCcw className="h-3.5 w-3.5 text-sky-400" />
-                从第 1 轮重试
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm('从下一轮继续？历史轮次将保留。')) {
-                    void onRetry(null)
-                  }
-                }}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[11px] text-slate-200 transition-colors hover:bg-slate-800"
-              >
-                <RotateCcw className="h-3.5 w-3.5 text-emerald-400" />
-                从下一轮继续
-              </button>
-            </div>
+            <RetryModeMenu
+              onSelect={(mode) => {
+                const label =
+                  mode === 'append' ? '从下一轮继续？历史轮次将保留。' :
+                  '从第 1 轮重试？历史轮次将被清除。'
+                if (window.confirm(label)) {
+                  void onRetry(mode)
+                } else {
+                  setRetryMenuOpen(false)
+                }
+              }}
+            />
           )}
         </div>
       )}
@@ -744,6 +732,8 @@ export function StudyDetailPage() {
           void loadActions()
         }}
       />
+
+      <AgentApprovalDialog studyId={studyId} />
     </PageShell>
   )
 }

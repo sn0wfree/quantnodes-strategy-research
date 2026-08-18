@@ -311,14 +311,15 @@ class StudyActionRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=512)
     round_num: Optional[int] = Field(None, ge=1)
     archived_by: Optional[str] = Field(None, max_length=128)
-    # ── REPLACE_OBJECTIVE-only ────────────────────────────────────────
+    # ── REPLACE_OBJECTIVE-only ─────────────────────────────────────
     new_objective: Optional[str] = Field(
         None, min_length=10, max_length=2000,
     )
     expected_goal_id: Optional[str] = Field(None, max_length=128)
-    # ── RETRY-only ───────────────────────────────────────────────────
+    # ── RETRY-only ────────────────────────────────────────
     # None or 1 = retry from round 1; N = retry from round N+1.
     from_round: Optional[int] = Field(None, ge=1)
+    mode: Optional[str] = Field(None, pattern="^(append|restart)$")
 
 
 class StudyReplaceObjectiveRequest(BaseModel):

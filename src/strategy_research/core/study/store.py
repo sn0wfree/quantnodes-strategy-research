@@ -679,20 +679,27 @@ class StudyStore:
 
     @synchronized
     def reset_round_counter(
-        self, study_id: str, start_round: int = 1,
+        self, study_id: str,
+        *,
+        mode: str = "append",
+        start_round: int = 1,
     ) -> None:
-        """Reset current_round to ``start_round`` for a retry.
+        """Adjust round counter for a retry.
 
-        When ``start_round == 1`` this is a full restart: all round
-        history rows are deleted so the study runs from scratch.
-        When ``start_round > 1`` only the heartbeat is updated — the
-        existing round history is preserved so the runner picks up
-        from where it left off.
+        mode="append" (default): keep history; only refresh heartbeat.
+            The runner will increment current_round on its own. Use this
+            when the user wants to continue from where the study left off.
+        mode="restart": full restart — wipe round history and reset
+            current_round to 1 (or ``start_round``). Use this when the
+            user wants to throw away all previous rounds and start over.
+
+        When ``start_round > 1`` (only valid in restart mode), the runner
+        begins at ``start_round`` instead of 1.
         """
 
         now = now_iso()
         with write_transaction(self._conn):
-            if start_round <= 1:
+            if mode == "restart":
                 # Full restart: wipe round history
                 self._conn.execute(
                     "DELETE FROM study_rounds WHERE study_id = ?",
@@ -704,11 +711,19 @@ class StudyStore:
                     "AND consumed_at IS NULL",
                     (study_id,),
                 )
-            self._conn.execute(
-                "UPDATE studies SET current_round = ?, heartbeat = ?, "
-                "updated_at = ? WHERE study_id = ?",
-                (start_round, now, now, study_id),
-            )
+                new_round = max(1, start_round)
+                self._conn.execute(
+                    "UPDATE studies SET current_round = ?, heartbeat = ?, "
+                    "updated_at = ? WHERE study_id = ?",
+                    (new_round, now, now, study_id),
+                )
+            else:
+                # mode="append": leave current_round alone, just bump heartbeat
+                self._conn.execute(
+                    "UPDATE studies SET heartbeat = ?, updated_at = ? "
+                    "WHERE study_id = ?",
+                    (now, now, study_id),
+                )
 
     def delete_round(self, study_id: str, round_num: int) -> int:
         """Delete a round's DB row (redo: remove the discarded round)."""

@@ -157,6 +157,7 @@ def build_agent_loop(
         enable_claim_validation=enable_claim_validation,
         strict_claim_validation=strict_claim_validation,
         strategy=strategy,
+        role=role,  # passed for the approval gate (event payload)
     )
 
 

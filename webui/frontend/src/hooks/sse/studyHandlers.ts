@@ -89,3 +89,49 @@ export const studyDriftDetected: SSEHandler = (data) => {
 export const studyMonitorCheck: SSEHandler = (data) => {
   patch(data)
 }
+
+/**
+ * Agent-loop approval gate (Step C of round/retry/loop fix).
+ * Emitted by ``AgentLoop._check_no_progress`` when the LLM calls the
+ * same tool N times in a row. The store keeps a queue so the dialog
+ * component can show each pending approval in order.
+ */
+export const agentApprovalRequested: SSEHandler = (data) => {
+  const studyId = data.study_id as string | undefined
+  if (!studyId) return
+  useStudyStore.getState().enqueueAgentApproval({
+    study_id: studyId,
+    role: (data.role as string) ?? null,
+    tool_hash: (data.tool_hash as string) ?? '',
+    window: (data.window as number) ?? 3,
+    iteration: (data.iteration as number) ?? 0,
+    timeout_s: (data.timeout_s as number) ?? 1800,
+    on_timeout: (data.on_timeout as string) ?? 'continue',
+    message: (data.message as string) ?? '',
+    requested_at: Date.now(),
+  })
+}
+
+export const agentApprovalResponded: SSEHandler = (data) => {
+  const studyId = data.study_id as string | undefined
+  if (!studyId) return
+  const role = data.role as string | undefined
+  const iter = data.iteration as number | undefined
+  useStudyStore.getState().resolveAgentApproval(studyId, role ?? null, iter)
+}
+
+/**
+ * parse_failed auto-retry notification (Step B). The StudyPage shows
+ * a small toast so the user knows the round is being retried with
+ * exponential backoff instead of silently failing.
+ */
+export const studyParseRetry: SSEHandler = (data) => {
+  // Just log for now; UI can show a transient toast.
+  const failed = data.failed_agents as string[] | undefined
+  const attempt = data.attempt as number | undefined
+  const delay = data.delay_s as number | undefined
+  // eslint-disable-next-line no-console
+  console.info(
+    '[study] parse_failed retry:', failed, 'attempt', attempt, 'delay', delay
+  )
+}

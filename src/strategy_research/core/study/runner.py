@@ -29,6 +29,32 @@ SR_STUDY_MAX_DEVIATION = 3          # consecutive high deviations → stop
 SR_STUDY_COLLECT_INTERVAL = 5       # force info collection every K rounds
 SR_STUDY_MAX_DISCARD = 5            # consecutive discards → stagnation stop
 
+# Agent resilience (Step B of round/retry/loop fix)
+SR_AGENT_MAX_ITER = 50              # high-iteration default for complex agents
+SR_AGENT_NO_PROGRESS_WINDOW = 5     # tolerate 5 identical tool calls before approval gate
+SR_AGENT_MAX_PARSE_RETRIES = 2      # retries per round on parse_failed
+SR_AGENT_PARSE_BACKOFF_BASE = 5.0   # base seconds for parse_failed backoff
+SR_AGENT_PARSE_BACKOFF_MAX = 30.0   # cap on backoff wait
+
+# Agent names whose parse_failed output triggers round-level retry
+_PARSE_FAILED_AGENT_KEYS: tuple[str, ...] = (
+    "data_quality_output",
+    "factor_analyst_output",
+    "strategist_output",
+    "portfolio_construction_output",
+)
+
+
+def _parse_failed_agents(exec_result: dict) -> list[str]:
+    """Return the names of agents that returned parse_failed for this round."""
+    failed: list[str] = []
+    for key in _PARSE_FAILED_AGENT_KEYS:
+        out = exec_result.get(key)
+        if isinstance(out, dict) and out.get("error") == "parse_failed":
+            # key like "data_quality_output" → "data_quality"
+            failed.append(key[: -len("_output")])
+    return failed
+
 
 def _dlog(module: str, msg: str, *args) -> None:
     msg_fmt = msg % args if args else msg
@@ -201,6 +227,16 @@ class AutoresearchRunner:
         self._prev_passed: set[str] = set()
         self._best_score: float = 0.0
         self._idle_rounds: int = 0
+        # Agent resilience: ExplorerStrategy (max_iter=50, no_progress_window=5)
+        # replaces the hardcoded defaults of 10/3 to give complex agents
+        # (strategist, factor_analyst) more headroom before the no_progress
+        # approval gate fires.
+        try:
+            from ..agent.strategy.explorer import ExplorerStrategyFactory
+            self._loop_strategy = ExplorerStrategyFactory.create()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ExplorerStrategy unavailable, falling back to default: %s", exc)
+            self._loop_strategy = None
         # Budget accumulators
         self._round_start_clock: float | None = None
         self._total_used_time: float = 0.0
@@ -822,11 +858,13 @@ class AutoresearchRunner:
         researcher_result = run_researcher_phase(
             path, strategy, current_state, run_dir,
             session_id=session, run_name=run_name,
-            behavior=self._get_study().behavior, max_retries=3, max_iterations=10,
+            behavior=self._get_study().behavior, max_retries=3,
+            max_iterations=SR_AGENT_MAX_ITER,
             directives=directive_text,
             lazy_detection_interval=self._get_study().lazy_detection_interval,
             keep_recent=self._get_study().keep_recent, round_num=round_num,
             runs_dir=runs_dir,
+            loop_strategy=self._loop_strategy,
         )
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
@@ -844,13 +882,10 @@ class AutoresearchRunner:
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "execution", "status": "started",
         })
-        exec_result = run_execution_phase(
+        exec_result = self._run_execution_with_parse_retry(
             path, strategy, current_state, researcher_output, run_dir,
-            session_id=session, run_name=run_name,
-            behavior=self._get_study().behavior, max_retries=3, max_iterations=10,
-            strategy_dir=run_dir,
-            results_tsv=results_tsv,
-            round_num=round_num,
+            session=session, run_name=run_name,
+            results_tsv=results_tsv, round_num=round_num,
         )
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "execution", "status": "done",
@@ -864,7 +899,9 @@ class AutoresearchRunner:
         })
         eval_result = run_evaluation_phase(
             path, strategy, exec_result["backtest_result"], metrics, run_dir,
-            behavior=self._get_study().behavior, max_retries=3, max_iterations=10,
+            behavior=self._get_study().behavior, max_retries=3,
+            max_iterations=SR_AGENT_MAX_ITER,
+            loop_strategy=self._loop_strategy,
         )
         self._emit(session, "study_phase", {
             "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
@@ -1235,6 +1272,86 @@ class AutoresearchRunner:
         if state.continuous_deviation >= SR_STUDY_MAX_DEVIATION:
             return ShutdownReason.REPEATED_DEVIATION
         return None
+
+    def _run_execution_with_parse_retry(
+        self,
+        path: Path,
+        strategy: str,
+        current_state: dict,
+        researcher_output: dict,
+        run_dir: Path,
+        *,
+        session: str,
+        run_name: str,
+        results_tsv: Path,
+        round_num: int,
+    ) -> dict:
+        """Wrap ``run_execution_phase`` with parse_failed auto-recovery.
+
+        The execution phase spawns 4 agents (data_quality, factor_analyst,
+        strategist, portfolio_construction). If any of them return
+        ``parse_failed`` (LLM JSON-parse failure or repeated identical
+        tool calls beyond the approval gate), the entire round would
+        be wasted. This helper detects that and retries the whole round up
+        to `` ``SR_AGENT_MAX_PARSE_RETRIES`` times with exponential
+        backoff. A persistent failure surfaces as a normal ``discard``
+        round that consumes one idle round (early-stop aware).
+        """
+        from ..autoresearch import run_execution_phase
+
+        last_failed_agents: list[str] = []
+
+        for attempt in range(SR_AGENT_MAX_PARSE_RETRIES):
+            result = run_execution_phase(
+                path, strategy, current_state, researcher_output, run_dir,
+                session_id=session, run_name=run_name,
+                behavior=self._get_study().behavior, max_retries=3,
+                max_iterations=SR_AGENT_MAX_ITER,
+                strategy_dir=run_dir,
+                results_tsv=results_tsv,
+                round_num=round_num,
+                loop_strategy=self._loop_strategy,
+            )
+            last_failed_agents = _parse_failed_agents(result)
+            if not last_failed_agents:
+                return result
+            # Partial success: some agents produced valid output — keep
+            # the working ones, only retry if no strategist output exists.
+            if result.get("strategist_output"):
+                logger.warning(
+                    "Round %d partial parse_failed (%s) but strategist OK; "
+                    "continuing without retry",
+                    round_num, last_failed_agents,
+                )
+                return result
+            if attempt < SR_AGENT_MAX_PARSE_RETRIES - 1:
+                delay = min(
+                    SR_AGENT_PARSE_BACKOFF_BASE * (2 ** attempt),
+                    SR_AGENT_PARSE_BACKOFF_MAX,
+                )
+                logger.warning(
+                    "Round %d parse_failed agents=%s, retrying in %ds "
+                    "(attempt %d/%d)",
+                    round_num, last_failed_agents, delay,
+                    attempt + 1, SR_AGENT_MAX_PARSE_RETRIES,
+                )
+                self._emit(session, "study_parse_retry", {
+                    "study_id": self._get_study().study_id,
+                    "round": round_num,
+                    "failed_agents": last_failed_agents,
+                    "delay_s": delay,
+                    "attempt": attempt + 1,
+                    "max_attempts": SR_AGENT_MAX_PARSE_RETRIES,
+                })
+                time.sleep(delay)
+
+        # Exhausted retries — count as idle to trigger early stop.
+        logger.error(
+            "Round %d parse_failed after %d retries (%s); counting as idle",
+            round_num, SR_AGENT_MAX_PARSE_RETRIES, last_failed_agents,
+        )
+        self._idle_rounds += 1
+        return result
 
     def _collect_knowledge(self, topics: list[str]) -> int:
         """v2: run the collector agent and append to knowledge.md.

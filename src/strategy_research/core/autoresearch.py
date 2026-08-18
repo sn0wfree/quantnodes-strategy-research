@@ -247,17 +247,31 @@ def retry_agent_spawn(
 ) -> dict[str, Any]:
     """重试 Agent spawn,直到成功或达到最大重试次数。
 
+    Uses exponential backoff via ``RetryPolicy`` when ``retry_delay`` is
+    the base delay (default 5s). Sequence for max_retries=3:
+        attempt 1→2: 5s  (× 0.5..1.5 jitter)
+        attempt 2→3: 10s
+    Capped at ``RetryPolicy.max_delay`` (60s).
+
     Args:
         spawn_fn: spawn 函数,返回原始字符串
         agent_name: Agent 名称 (用于日志)
         max_retries: 最大重试次数
-        retry_delay: 重试间隔 (秒)
+        retry_delay: base delay in seconds (doubles each attempt, ±50% jitter)
 
     Returns:
         解析后的字典
     """
+    from .agent.circuit_breaker import RetryPolicy
+
+    policy = RetryPolicy(
+        max_retries=max_retries,
+        base_delay=retry_delay,
+        max_delay=60.0,
+        jitter=True,
+    )
     last_raw = ""
-    for attempt in range(max_retries):
+    for attempt in range(1, policy.max_retries + 1):
         try:
             raw_output = spawn_fn()
             last_raw = raw_output
@@ -268,8 +282,8 @@ def retry_agent_spawn(
                 return parsed
 
             # 解析失败 — 返回错误信息而非全量重启
-            print(f"[autoresearch] {agent_name} 解析失败 (attempt {attempt + 1}/{max_retries}): {parsed.get('error')}")
-            if attempt == max_retries - 1:
+            print(f"[autoresearch] {agent_name} 解析失败 (attempt {attempt}/{policy.max_retries}): {parsed.get('error')}")
+            if attempt == policy.max_retries:
                 return {
                     "error": "parse_failed",
                     "agent": agent_name,
@@ -279,16 +293,17 @@ def retry_agent_spawn(
                 }
 
         except Exception as e:
-            print(f"[autoresearch] {agent_name} 执行异常 (attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt == max_retries - 1:
+            print(f"[autoresearch] {agent_name} 执行异常 (attempt {attempt}/{policy.max_retries}): {e}")
+            if attempt == policy.max_retries:
                 return {"error": "execution_failed", "agent": agent_name, "detail": str(e)}
 
-        # 等待后重试
-        if attempt < max_retries - 1:
-            time.sleep(retry_delay)
+        # Exponential backoff before the next attempt
+        if attempt < policy.max_retries:
+            delay = policy.get_delay(attempt)
+            time.sleep(delay)
 
     # 所有重试都失败
-    return {"error": "max_retries_exceeded", "agent": agent_name, "attempts": max_retries}
+    return {"error": "max_retries_exceeded", "agent": agent_name, "attempts": policy.max_retries}
 
 
 def get_cooldown_seconds(base_cooldown: float = 30.0, jitter: float = 10.0, min_cooldown: float = 1.0) -> float:
@@ -1870,6 +1885,7 @@ def _make_spawn_fn(
     results_tsv: Path | None = None,
     write_roots: tuple[str, ...] | None = None,
     read_roots: tuple[str, ...] | None = None,
+    loop_strategy: Any | None = None,
 ):
     """Create the _spawn closure for agent execution."""
     def _spawn(name: str, prevs: list) -> dict:
@@ -1883,6 +1899,7 @@ def _make_spawn_fn(
                 write_roots=write_roots,
                 read_roots=read_roots,
                 max_iterations=max_iterations,
+                loop_strategy=loop_strategy,
             ),
             name,
             max_retries=max_retries,
@@ -1909,11 +1926,11 @@ def run_researcher_phase(
     keep_recent: int = 10,
     round_num: int = 1,
     runs_dir: Path | None = None,
+    loop_strategy: Any | None = None,
 ) -> dict:
     """Phase 1: run researcher agent + lazy detection + hypothesis registration.
 
     Returns::
-
         {"researcher_output": dict}
     """
     from strategy_research.core.autoresearch import (
@@ -1956,6 +1973,7 @@ def run_researcher_phase(
     spawn = _make_spawn_fn(
         path, strategy_name, state, behavior, max_retries,
         max_iterations=max_iterations,
+        loop_strategy=loop_strategy,
     )
     researcher_output = spawn("researcher", [])
     save_agent_record(run_dir, "researcher", 2, state, researcher_output)
@@ -1982,6 +2000,7 @@ def run_execution_phase(
     strategy_dir: Path | None = None,
     results_tsv: Path | None = None,
     round_num: int | None = None,
+    loop_strategy: Any | None = None,
 ) -> dict:
     """Phase 2: data_quality → factor_analyst → strategist → portfolio → backtest.
 
@@ -1997,6 +2016,7 @@ def run_execution_phase(
     spawn = _make_spawn_fn(
         path, strategy_name, current_state, behavior, max_retries,
         max_iterations=max_iterations, inter_agent_sleep=inter_agent_sleep,
+        loop_strategy=loop_strategy,
     )
 
     dq = spawn("data_quality", [researcher_output])
@@ -2053,6 +2073,7 @@ def run_evaluation_phase(
     max_retries: int = 3,
     max_iterations: int = 8,
     acceptance_config=None,
+    loop_strategy: Any | None = None,
 ) -> dict:
     """Phase 3: risk_controller → attribution_analyst → anti_overfit → backtest_diag → decide.
 
@@ -2074,6 +2095,7 @@ def run_evaluation_phase(
     spawn = _make_spawn_fn(
         path, strategy_name, {}, behavior, max_retries,
         max_iterations=max_iterations,
+        loop_strategy=loop_strategy,
     )
 
     risk = spawn("risk_controller", [metrics])

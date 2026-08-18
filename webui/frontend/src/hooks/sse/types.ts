@@ -59,6 +59,9 @@ export type SSEEventType =
   | 'study_monitoring_started'
   | 'study_monitor_check'
   | 'study_drift_detected'
+  | 'agent_approval_requested'
+  | 'agent_approval_responded'
+  | 'study_parse_retry'
   | 'subagent_started'
   | 'subagent_tool_call'
   | 'subagent_tool_result'
@@ -95,6 +98,9 @@ export const EVENT_TYPES: SSEEventType[] = [
   'study_paused', 'study_resumed', 'study_interrupted', 'study_cancelled',
   'study_monitoring_started', 'study_monitor_check',
   'study_drift_detected',
+  // Agent loop approval gate (Step C) + parse retry (Step B)
+  'agent_approval_requested', 'agent_approval_responded',
+  'study_parse_retry',
   // Subagent events
   'subagent_started', 'subagent_tool_call', 'subagent_tool_result',
   'subagent_text_delta', 'subagent_completed', 'subagent_failed',

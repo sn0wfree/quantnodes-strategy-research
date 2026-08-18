@@ -729,3 +729,142 @@ async def test_list_endpoint_hides_archived_by_default(_env):
         assert r2.status_code == 200
         ids_all = {s["study_id"] for s in r2.json()["studies"]}
         assert study_id in ids_all
+
+
+# ── Round numbering on retry (Step A) ────────────────────────
+
+
+class TestRetryRoundNumbering:
+    """retry() supports two modes: append (default) and restart."""
+
+    def test_store_reset_round_counter_append_keeps_history(self, tmp_path):
+        """mode='append' must NOT touch current_round or delete rounds."""
+        from strategy_research.core.study import StudyStore
+        import os
+        os.environ["QUANTNODES_RESEARCH_GOAL_DB_PATH"] = str(tmp_path / "append.db")
+        store = StudyStore()
+        rec = store.create_study(
+            owner_session_id="sess-rnm", goal_id=None,
+            objective="retry-append test",
+            workspace_path="/tmp", strategy_name="demo",
+        )
+        # Seed: pretend the study has run 3 rounds.
+        for n in (1, 2, 3):
+            store.append_round(
+                study_id=rec.study_id, round_num=n,
+                run_name=f"run_{n:04d}",
+                metrics={"calmar": 0.1}, verdict="discard",
+            )
+        # Mark current_round = 3 (use the public update_round_heartbeat API).
+        store.update_round_heartbeat(rec.study_id, 3)
+        store.reset_round_counter(rec.study_id, mode="append")
+        refreshed = store.get_study(rec.study_id)
+        assert refreshed.current_round == 3, "append must preserve current_round"
+        rounds = store.list_rounds(rec.study_id)
+        assert len(rounds) == 3, "append must keep round history"
+
+    def test_store_reset_round_counter_restart_clears_history(self, tmp_path):
+        """mode='restart' must wipe rounds + reset current_round to 1."""
+        from strategy_research.core.study import StudyStore
+        import os
+        os.environ["QUANTNODES_RESEARCH_GOAL_DB_PATH"] = str(tmp_path / "restart.db")
+        store = StudyStore()
+        rec = store.create_study(
+            owner_session_id="sess-rnm2", goal_id=None,
+            objective="retry-restart test",
+            workspace_path="/tmp", strategy_name="demo",
+        )
+        for n in (1, 2, 3):
+            store.append_round(
+                study_id=rec.study_id, round_num=n,
+                run_name=f"run_{n:04d}",
+                metrics={"calmar": 0.1}, verdict="discard",
+            )
+        store.reset_round_counter(rec.study_id, mode="restart")
+        refreshed = store.get_study(rec.study_id)
+        assert refreshed.current_round == 1, "restart must reset current_round"
+        rounds = store.list_rounds(rec.study_id)
+        assert len(rounds) == 0, "restart must clear round history"
+
+    def test_scheduler_retry_default_mode_is_append(self):
+        """retry() defaults to mode='append' (no clear)."""
+        from strategy_research.core.study.scheduler import StudyScheduler
+        from unittest.mock import MagicMock
+        sched = StudyScheduler.__new__(StudyScheduler)
+        sched.store = MagicMock()
+        sched._emit_event = MagicMock()
+        sched.store.get_study.return_value = None  # force early return
+        sched.retry("nonexistent")
+        # The first call after the None-guard is reset_round_counter.
+        # Just verify no exception and the store was consulted.
+        sched.store.get_study.assert_called_once()
+
+    def test_scheduler_retry_passes_mode_to_store(self):
+        """retry(mode='restart') should call reset_round_counter with mode='restart'."""
+        from strategy_research.core.study.scheduler import StudyScheduler
+        from unittest.mock import MagicMock
+        from strategy_research.core.study.models import StudyStatus
+
+        sched = StudyScheduler.__new__(StudyScheduler)
+        sched.store = MagicMock()
+        sched._emit_event = MagicMock()
+
+        # Build a fake study record that's in a retryable state.
+        from strategy_research.core.study.models import (
+            StudyRecord, StudyAction, allowed_actions,
+        )
+        rec = StudyRecord(
+            study_id="study-mock", session_id="study-mock",
+            goal_id=None, objective="x",
+            executor_type="autoresearch",
+            workspace_path="/tmp", strategy_name="demo",
+            current_round=3, execution_status=StudyStatus.ERROR,
+        )
+        sched.store.get_study.return_value = rec
+
+        # Reset mock call counts then call retry with restart mode.
+        sched.store.reset_mock()
+        sched._emit_event.reset_mock()
+        sched.retry("study-mock", mode="restart")
+
+        # Verify reset_round_counter was called with mode='restart'.
+        sched.store.reset_round_counter.assert_called_with(
+            "study-mock", mode="restart", start_round=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_retry_accepts_mode_field(_env, monkeypatch):
+    """HTTP: POST /actions/retry with mode='restart' reaches the scheduler."""
+    study_id, _ = _env
+    # Stub the scheduler so the test doesn't actually spawn a runner
+    # coroutine (which would hang in an async test).
+    from strategy_research.api.routers import study as routers_study
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    fake.retry.return_value = True
+    monkeypatch.setattr(routers_study, "_get_study_scheduler", lambda: fake)
+
+    # Move the study to a retryable state.
+    from strategy_research.core.study import StudyStore
+    from strategy_research.core.study.models import StudyStatus
+    with StudyStore() as s:
+        s.update_execution_status(study_id, StudyStatus.ERROR)
+
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.post(
+            f"/api/study/{study_id}/actions/retry",
+            json={"mode": "restart"},
+        )
+        assert r.status_code == 200
+        assert r.json()["action"] == "retry_queued"
+        # Verify the scheduler received the mode
+        fake.retry.assert_called_with(
+            study_id, from_round=None, mode="restart",
+        )

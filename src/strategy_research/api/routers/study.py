@@ -1255,7 +1255,8 @@ async def study_dispatch_action(
         }
     if act == StudyAction.RETRY:
         from_round = body.from_round if body else None
-        if not sched.retry(study_id, from_round=from_round):
+        mode = body.mode if body else "append"
+        if not sched.retry(study_id, from_round=from_round, mode=mode):
             raise HTTPException(
                 status_code=409,
                 detail="study not retryable (not in a retryable terminal state?)",
@@ -1295,6 +1296,45 @@ async def study_objective_history(request: Request, study_id: str):
             }
             for e in entries
         ],
+    }
+
+
+class AgentApprovalRequest(BaseModel):
+    decision: str = Field(..., pattern="^(approved|reject)$")
+
+
+class AgentApprovalResponse(BaseModel):
+    status: str
+    study_id: str
+    decision: str
+    forwarded: bool
+
+
+@router.post(
+    "/{study_id}/agents/approve",
+    response_model=AgentApprovalResponse,
+)
+async def study_approve_agent_loop(
+    request: Request, study_id: str, req: AgentApprovalRequest,
+):
+    """Resolve a pending agent-loop approval gate.
+
+    The frontend POSTs here after seeing the
+    ``agent_approval_requested`` event on the SSE stream. The scheduler
+    forwards the decision to the active ``AgentLoop`` which unblocks
+    ``_check_no_progress``.
+
+    If no runner is currently waiting on approval (e.g. it has already
+    timed out), the call returns ``forwarded: false`` instead of erroring.
+    """
+    _owned_study(request, study_id)
+    sched = _get_study_scheduler()
+    forwarded = sched.approve_agent_loop(study_id, req.decision)
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "decision": req.decision,
+        "forwarded": forwarded,
     }
 
 

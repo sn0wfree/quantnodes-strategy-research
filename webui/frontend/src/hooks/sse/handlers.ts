@@ -37,6 +37,9 @@ import {
   studyMonitoringStarted,
   studyDriftDetected,
   studyMonitorCheck,
+  agentApprovalRequested,
+  agentApprovalResponded,
+  studyParseRetry,
 } from './studyHandlers'
 import {
   subagentStarted,
@@ -109,6 +112,10 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   study_monitoring_started: studyMonitoringStarted,
   study_monitor_check: studyMonitorCheck,
   study_drift_detected: studyDriftDetected,
+  // Agent loop approval gate + parse retry (Step B/C)
+  agent_approval_requested: agentApprovalRequested,
+  agent_approval_responded: agentApprovalResponded,
+  study_parse_retry: studyParseRetry,
   // Subagent lifecycle
   subagent_started: subagentStarted,
   subagent_tool_call: subagentToolCall,

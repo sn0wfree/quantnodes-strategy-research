@@ -278,15 +278,21 @@ class StudyScheduler:
         study_id: str,
         *,
         from_round: int | None = None,
+        mode: str = "append",
     ) -> bool:
         """Retry a failed/limited study.
 
-        ``from_round=None|1``: reset to round 1 (clear round history).
-        ``from_round=N``: continue from round N+1 (keep round history).
+        ``mode="append"`` (default): keep all round history. The runner
+        will simply increment ``current_round`` and keep appending new
+        rounds. The journal will show a contiguous sequence
+        (1, 2, 3, 4, ...) instead of repeating (1, 2, 3, 1, 2, 3).
 
-        After resetting the round counter, the study is set to
-        INTERRUPTED and ``resume_interrupted`` re-queues it for
-        execution. Returns ``True`` on success.
+        ``mode="restart"``: throw away all round history and reset
+        ``current_round`` to 1 (or ``from_round`` if > 1).
+
+        After the counter adjustment, the study is set to INTERRUPTED
+        and ``resume_interrupted`` re-queues it for execution. Returns
+        ``True`` on success.
         """
 
         study = self.store.get_study(study_id)
@@ -303,10 +309,15 @@ class StudyScheduler:
         if study.execution_status not in retryable:
             return False
 
+        # Normalize mode + from_round
+        if mode not in ("append", "restart"):
+            mode = "append"
         start_round = 1 if (from_round is None or from_round <= 1) else from_round
 
-        # Reset round counter + clear error
-        self.store.reset_round_counter(study_id, start_round)
+        # Adjust round counter (clear history only on restart)
+        self.store.reset_round_counter(
+            study_id, mode=mode, start_round=start_round,
+        )
         self.store.update_execution_status(
             study_id,
             StudyStatus.INTERRUPTED,
@@ -317,6 +328,7 @@ class StudyScheduler:
         self._emit_event(study.session_id, "study_retry_queued", {
             "study_id": study_id,
             "from_round": start_round,
+            "mode": mode,
             "previous_status": study.execution_status.value,
         })
 
@@ -329,6 +341,28 @@ class StudyScheduler:
         except RuntimeError:
             # No event loop — sync context (tests)
             pass
+        return True
+
+    def approve_agent_loop(self, study_id: str, decision: str) -> bool:
+        """Forward an agent-loop approval to the active runner.
+
+        Called when the frontend POSTs to
+        ``/api/study/{id}/agents/approve`` after seeing
+        ``agent_approval_requested`` on the SSE stream. ``decision`` is
+        ``"approved"`` or ``"reject"``. Returns ``True`` when an active
+        runner picked up the signal.
+
+        The runner forwards it to ``AgentLoop.approve_loop()`` which
+        unblocks ``_check_no_progress``. If no runner is waiting on
+        approval, the call is a no-op and returns ``False``.
+        """
+        runner = self._active_executors.get(study_id)
+        if runner is None:
+            return False
+        loop = getattr(runner, "agent_loop", None)
+        if loop is None:
+            return False
+        loop.approve_loop(decision)
         return True
 
     def replace_objective(

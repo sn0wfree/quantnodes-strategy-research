@@ -297,10 +297,18 @@ class APIClient {
         `/study/${studyId}/objective_history`
       ),
 
-    retry: (studyId: string, fromRound?: number) =>
+    retry: (studyId: string, fromRound?: number, mode: 'append' | 'restart' = 'append') =>
       this.post<StudyActionResponse>(
         `/study/${studyId}/actions/retry`,
-        fromRound != null ? { from_round: fromRound } : {},
+        fromRound != null || mode !== 'append'
+          ? { from_round: fromRound ?? null, mode }
+          : {},
+      ),
+
+    approveAgentLoop: (studyId: string, decision: 'approved' | 'reject') =>
+      this.post<{ status: string; study_id: string; decision: string; forwarded: boolean }>(
+        `/study/${studyId}/agents/approve`,
+        { decision },
       ),
   }
 
