@@ -207,6 +207,7 @@ class APIClient {
 
     pause: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/pause`),
     resume: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume`),
+    resumeInterrupted: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume_interrupted`),
     cancel: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/cancel`),
 
     directive: (studyId: string, content: string, issuedBy?: string) =>

@@ -42,7 +42,7 @@ export function StudyProgress(_props: Props) {
     if (!studyId) return
 
     // Only re-fetch if study changed or round advanced
-    const round = current?.current_round ?? 0
+    const round = Math.max(1, current?.current_round ?? 1)
     if (studyId === lastSummaryStudyId.current && round === lastSummaryRound.current) {
       return
     }
@@ -112,9 +112,13 @@ export function StudyProgress(_props: Props) {
   const status = current.execution_status ?? 'unknown'
   const maxRounds = summary?.max_rounds ?? 5
 
-  const onAction = async (action: 'pause' | 'resume' | 'cancel') => {
+  const onAction = async (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel') => {
     try {
-      await api.study[action](studyId)
+      if (action === 'resume_interrupted') {
+        await api.study.resumeInterrupted(studyId)
+      } else {
+        await api.study[action](studyId)
+      }
     } catch (err) {
       setError((err as Error).message)
     }
@@ -146,7 +150,7 @@ export function StudyProgress(_props: Props) {
           {STUDY_STATUS_LABELS[status] ?? status}
         </span>
         <span className="font-mono text-xs text-slate-400">
-          Round {current.current_round ?? 0}/{maxRounds}
+          Round {Math.max(1, current.current_round ?? 1)}/{maxRounds}
         </span>
         <div className="flex-1" />
         {(status === 'running' || status === 'monitoring') && (
@@ -167,7 +171,7 @@ export function StudyProgress(_props: Props) {
         )}
         {status === 'interrupted' && (
           <button
-            onClick={() => onAction('resume')}
+            onClick={() => onAction('resume_interrupted')}
             className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs transition-all hover:bg-emerald-500 active:scale-95"
           >
             <Play className="h-3 w-3" /> 继续运行
@@ -194,14 +198,14 @@ export function StudyProgress(_props: Props) {
       {/* Flow Card */}
       <FlowCard
         nodes={flowNodes}
-        currentRound={current.current_round ?? 1}
+        currentRound={Math.max(1, current.current_round ?? 1)}
         totalRounds={maxRounds}
       />
 
       {/* Round History */}
       <RoundHistory
         rounds={summary?.recent_rounds ?? []}
-        currentRound={current.current_round ?? 1}
+        currentRound={Math.max(1, current.current_round ?? 1)}
       />
 
       {/* Scoreboard */}

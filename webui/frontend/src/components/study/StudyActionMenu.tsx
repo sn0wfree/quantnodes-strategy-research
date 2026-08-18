@@ -65,7 +65,7 @@ export function StudyActionMenu({ study, onAction, onRefresh }: StudyActionMenuP
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const handleClick = (name: string) => {
+  const handleClick = async (name: string) => {
     setOpen(false)
     if (
       name === 'pause' ||
@@ -75,7 +75,7 @@ export function StudyActionMenu({ study, onAction, onRefresh }: StudyActionMenuP
       name === 'archive' ||
       name === 'unarchive'
     ) {
-      onAction(name)
+      await onAction(name)
       onRefresh?.()
     }
   }

@@ -187,7 +187,7 @@ export function StudyTaskSummary({ studyId }: Props) {
                 />
               </div>
               <p className="mt-1.5 text-[10px] text-slate-500">
-                Round {summary!.current_round ?? 0}/{summary!.max_rounds ?? 5}
+                Round {Math.max(1, summary!.current_round ?? 1)}/{summary!.max_rounds ?? 5}
               </p>
             </div>
           </div>

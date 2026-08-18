@@ -40,16 +40,15 @@ export function AgentNodeDetail({ agentId, studyId, currentRound, onClose }: Age
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     const loadData = async () => {
       setLoading(true)
       try {
-        const r = await api.study.roundManifest(studyId, currentRound)
-        const manifest = r.manifest as Record<string, unknown> | undefined
-        const agentOutputs = manifest?.agent_outputs as Record<string, unknown> | undefined
-        const hypothesisData = manifest?.hypothesis as { text?: string } | undefined
-        const strategyChanges = manifest?.strategy_changes as Record<string, unknown> | undefined
+        const r = await api.study.roundAgentOutputs(studyId, currentRound)
+        if (cancelled) return
+        const agentOutputs = r.agent_outputs ?? {}
 
-        const agentOutput = agentOutputs?.[agentId] as Record<string, unknown> | undefined
+        const agentOutput = agentOutputs[agentId]
 
         let outputSummary = ''
         if (agentOutput) {
@@ -65,8 +64,6 @@ export function AgentNodeDetail({ agentId, studyId, currentRound, onClose }: Age
         setAgentData({
           label: AGENT_LABELS[agentId] ?? agentId,
           status: agentOutput ? 'completed' : 'pending',
-          hypothesis: agentId === 'researcher' ? hypothesisData?.text : undefined,
-          changes: agentId === 'strategist' ? strategyChanges : undefined,
           output: outputSummary,
         })
 
@@ -80,11 +77,12 @@ export function AgentNodeDetail({ agentId, studyId, currentRound, onClose }: Age
           status: 'pending',
         })
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
 
     void loadData()
+    return () => { cancelled = true }
   }, [agentId, studyId, currentRound])
 
   const StatusIcon = agentData?.status === 'completed' ? CheckCircle

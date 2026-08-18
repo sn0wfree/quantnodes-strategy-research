@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { MessageSquare, Filter, ChevronDown, ChevronRight, Bot, User } from 'lucide-react'
 import { api, type StudyRoundAgentOutputsResponse } from '../../api/client'
 
@@ -93,23 +93,24 @@ export function AgentChatLog({ studyId, currentRound, agents }: Props) {
   const [selectedAgent, setSelectedAgent] = useState<string>('all')
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
 
-  const loadAgentOutputs = useCallback(async () => {
-    if (!studyId || currentRound <= 0) return
-    setLoading(true)
-    setError('')
-    try {
-      const r = await api.study.roundAgentOutputs(studyId, currentRound)
-      setAgentOutputs(r.agent_outputs ?? {})
-    } catch {
-      setAgentOutputs({})
-    } finally {
-      setLoading(false)
-    }
-  }, [studyId, currentRound])
-
   useEffect(() => {
-    void loadAgentOutputs()
-  }, [loadAgentOutputs])
+    let cancelled = false
+    const run = async () => {
+      if (!studyId || currentRound <= 0) return
+      setLoading(true)
+      setError('')
+      try {
+        const r = await api.study.roundAgentOutputs(studyId, currentRound)
+        if (!cancelled) setAgentOutputs(r.agent_outputs ?? {})
+      } catch {
+        if (!cancelled) setAgentOutputs({})
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [studyId, currentRound])
 
   // Build chat entries from agent outputs
   const chatEntries: ChatEntry[] = []

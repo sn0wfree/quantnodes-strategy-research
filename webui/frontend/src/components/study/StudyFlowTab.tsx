@@ -67,8 +67,8 @@ export function StudyFlowTab({
       {/* Middle: Agent flow canvas */}
       <AgentFlowCanvas
         studyId={studyId}
-        currentRound={summary.current_round ?? 1}
-        totalRounds={summary.max_rounds}
+currentRound={Math.max(1, summary.current_round ?? 1)}
+            totalRounds={summary.max_rounds}
       />
     </div>
   )

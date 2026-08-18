@@ -78,39 +78,40 @@ export function AgentFlowCanvas({ studyId, currentRound, totalRounds }: AgentFlo
   const [agentStatuses, setAgentStatuses] = useState<Record<string, { status: string; duration_s?: number }>>({})
   const [loading, setLoading] = useState(false)
 
-  const loadAgentStatuses = useCallback(async () => {
-    if (!studyId || currentRound <= 0) return
-    setLoading(true)
-    try {
-      const r = await api.study.roundManifest(studyId, currentRound)
-      const manifest = r.manifest as Record<string, unknown> | undefined
-      const agentOutputs = manifest?.agent_outputs as Record<string, unknown> | undefined
-
-      const statuses: Record<string, { status: string; duration_s?: number }> = {}
-      let doneCount = 0
-
-      for (const agent of AGENT_SEQUENCE) {
-        const isDone = !!agentOutputs?.[agent.id]
-        if (isDone) doneCount++
-        statuses[agent.id] = { status: isDone ? 'completed' : 'pending' }
-      }
-
-      // Mark current running agent
-      if (doneCount < AGENT_SEQUENCE.length) {
-        statuses[AGENT_SEQUENCE[doneCount].id].status = 'running'
-      }
-
-      setAgentStatuses(statuses)
-    } catch {
-      // Manifest may not exist yet
-    } finally {
-      setLoading(false)
-    }
-  }, [studyId, currentRound])
-
   useEffect(() => {
-    void loadAgentStatuses()
-  }, [loadAgentStatuses])
+    let cancelled = false
+    const run = async () => {
+      if (!studyId || currentRound <= 0) return
+      setLoading(true)
+      try {
+        const r = await api.study.roundAgentOutputs(studyId, currentRound)
+        if (cancelled) return
+        const agentOutputs = r.agent_outputs ?? {}
+
+        const statuses: Record<string, { status: string; duration_s?: number }> = {}
+        let doneCount = 0
+
+        for (const agent of AGENT_SEQUENCE) {
+          const isDone = !!agentOutputs[agent.id]
+          if (isDone) doneCount++
+          statuses[agent.id] = { status: isDone ? 'completed' : 'pending' }
+        }
+
+        // Mark current running agent
+        if (doneCount < AGENT_SEQUENCE.length) {
+          statuses[AGENT_SEQUENCE[doneCount].id].status = 'running'
+        }
+
+        setAgentStatuses(statuses)
+      } catch {
+        // Agent outputs may not exist yet
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [studyId, currentRound])
 
   // Build nodes and edges for ReactFlow
   const rawNodes = useMemo(() => {

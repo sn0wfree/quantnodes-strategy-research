@@ -165,6 +165,17 @@ export function StudyDetailPage() {
     loadSummary,
   ])
 
+  // Close retry menu on outside click
+  const retryMenuRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    const handler = (e: MouseEvent) => {
+      if (!el.contains(e.target as Node)) setRetryMenuOpen(false)
+    }
+    if (retryMenuOpen) {
+      document.addEventListener('mousedown', handler, { once: true })
+    }
+  }, [retryMenuOpen])
+
   const onAction = async (
     action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive',
     reason?: string,
@@ -349,14 +360,7 @@ export function StudyDetailPage() {
         </button>
       )}
       {canRetry && (
-        <div className="relative" ref={(el) => {
-          // close on outside click
-          if (!el) return
-          const handler = (e: MouseEvent) => {
-            if (!el.contains(e.target as Node)) setRetryMenuOpen(false)
-          }
-          if (retryMenuOpen) document.addEventListener('mousedown', handler, { once: true })
-        }}>
+        <div className="relative" ref={retryMenuRef}>
           <button
             onClick={() => setRetryMenuOpen((v) => !v)}
             disabled={busy}
@@ -416,7 +420,7 @@ export function StudyDetailPage() {
         <KpiCard
           icon={<RotateCcw className="h-4 w-4" />}
           iconCls="border border-sky-500/30 bg-sky-500/10 text-sky-400"
-          value={`${summary.current_round ?? 0}/${summary.max_rounds ?? 5}`}
+          value={`${Math.max(1, summary.current_round ?? 1)}/${summary.max_rounds ?? 5}`}
           label="当前轮次 / 最大轮数"
           valueCls="text-sky-400"
         />
@@ -498,7 +502,7 @@ export function StudyDetailPage() {
           />
           <RoundHistory
             rounds={summary.recent_rounds ?? []}
-            currentRound={summary.current_round ?? 1}
+            currentRound={Math.max(1, summary.current_round ?? 1)}
             onOpenRun={openRun}
             studyId={studyId}
           />
@@ -689,7 +693,7 @@ export function StudyDetailPage() {
             {/* Agent chat logs */}
             <AgentChatLog
               studyId={studyId}
-              currentRound={summary.current_round ?? 1}
+              currentRound={Math.max(1, summary.current_round ?? 1)}
             />
 
             {/* Directives audit trail */}

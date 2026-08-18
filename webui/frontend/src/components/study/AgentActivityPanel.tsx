@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Activity, ChevronDown, ChevronRight, CheckCircle, Clock, AlertCircle, Loader } from 'lucide-react'
 import { api, type StudyRoundManifestResponse } from '../../api/client'
 
@@ -96,24 +96,27 @@ export function AgentActivityPanel({ studyId, currentRound }: Props) {
   const [error, setError] = useState('')
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set())
 
-  const loadManifest = useCallback(async () => {
-    if (!studyId || currentRound <= 0) return
-    setLoading(true)
-    setError('')
-    try {
-      const r = await api.study.roundManifest(studyId, currentRound)
-      setManifest(r)
-    } catch (err) {
-      // Manifest may not exist yet for in-progress rounds
-      setManifest(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [studyId, currentRound])
-
   useEffect(() => {
-    void loadManifest()
-  }, [loadManifest])
+    let cancelled = false
+    const run = async () => {
+      if (!studyId || currentRound <= 0) return
+      setLoading(true)
+      setError('')
+      try {
+        const r = await api.study.roundAgentOutputs(studyId, currentRound)
+        if (!cancelled) {
+          // Store agent_outputs in a compatible format for downstream consumers
+          setManifest({ status: 'ok', study_id: studyId, round: currentRound, manifest: { agent_outputs: r.agent_outputs } })
+        }
+      } catch {
+        if (!cancelled) setManifest(null)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [studyId, currentRound])
 
   // Build agent statuses from manifest
   const manifestData = manifest?.manifest as Record<string, unknown> | undefined
