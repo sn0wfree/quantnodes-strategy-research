@@ -290,6 +290,12 @@ class APIClient {
       this.get<StudyObjectiveHistoryResponse>(
         `/study/${studyId}/objective_history`
       ),
+
+    retry: (studyId: string, fromRound?: number) =>
+      this.post<StudyActionResponse>(
+        `/study/${studyId}/actions/retry`,
+        fromRound != null ? { from_round: fromRound } : {},
+      ),
   }
 
   run = {

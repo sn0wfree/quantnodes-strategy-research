@@ -309,6 +309,9 @@ class StudyActionRequest(BaseModel):
         None, min_length=10, max_length=2000,
     )
     expected_goal_id: Optional[str] = Field(None, max_length=128)
+    # ── RETRY-only ───────────────────────────────────────────────────
+    # None or 1 = retry from round 1; N = retry from round N+1.
+    from_round: Optional[int] = Field(None, ge=1)
 
 
 class StudyReplaceObjectiveRequest(BaseModel):

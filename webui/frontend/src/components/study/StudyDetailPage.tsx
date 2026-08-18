@@ -81,6 +81,7 @@ export function StudyDetailPage() {
   const [submittingDirective, setSubmittingDirective] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const [editObjectiveOpen, setEditObjectiveOpen] = useState(false)
+  const [retryMenuOpen, setRetryMenuOpen] = useState(false)
 
   const loadDirectives = useCallback(async () => {
     try {
@@ -179,6 +180,21 @@ export function StudyDetailPage() {
     }
   }
 
+  const onRetry = async (fromRound: number | null) => {
+    setRetryMenuOpen(false)
+    setBusy(true)
+    try {
+      await api.study.retry(studyId, fromRound ?? undefined)
+      await loadActions()
+      // Refresh summary to show new INTERRUPTED status
+      await loadSummary()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onDirective = async () => {
     const text = directiveText.trim()
     if (!text) return
@@ -252,6 +268,7 @@ export function StudyDetailPage() {
   const canReplaceObjective = (actions?.actions ?? []).some(
     (a) => a.name === 'replace_objective',
   )
+  const canRetry = (actions?.actions ?? []).some((a) => a.name === 'retry')
   const canDirective = canPause || canResume
 
   const controlActions = (
@@ -330,6 +347,52 @@ export function StudyDetailPage() {
         >
           <Edit3 className="h-3.5 w-3.5" /> 修改目标
         </button>
+      )}
+      {canRetry && (
+        <div className="relative" ref={(el) => {
+          // close on outside click
+          if (!el) return
+          const handler = (e: MouseEvent) => {
+            if (!el.contains(e.target as Node)) setRetryMenuOpen(false)
+          }
+          if (retryMenuOpen) document.addEventListener('mousedown', handler, { once: true })
+        }}>
+          <button
+            onClick={() => setRetryMenuOpen((v) => !v)}
+            disabled={busy}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-sky-500 active:scale-95 disabled:opacity-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> 重试
+          </button>
+          {retryMenuOpen && (
+            <div className="absolute right-0 top-full z-30 mt-1 min-w-[10rem] rounded-lg border border-slate-700 bg-slate-900/95 py-1 shadow-elevated backdrop-blur">
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('从第 1 轮重新开始？历史轮次将被清除。')) {
+                    void onRetry(1)
+                  }
+                }}
+                className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[11px] text-slate-200 transition-colors hover:bg-slate-800"
+              >
+                <RotateCcw className="h-3.5 w-3.5 text-sky-400" />
+                从第 1 轮重试
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('从下一轮继续？历史轮次将保留。')) {
+                    void onRetry(null)
+                  }
+                }}
+                className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[11px] text-slate-200 transition-colors hover:bg-slate-800"
+              >
+                <RotateCcw className="h-3.5 w-3.5 text-emerald-400" />
+                从下一轮继续
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

@@ -273,6 +273,64 @@ class StudyScheduler:
         })
         return True
 
+    def retry(
+        self,
+        study_id: str,
+        *,
+        from_round: int | None = None,
+    ) -> bool:
+        """Retry a failed/limited study.
+
+        ``from_round=None|1``: reset to round 1 (clear round history).
+        ``from_round=N``: continue from round N+1 (keep round history).
+
+        After resetting the round counter, the study is set to
+        INTERRUPTED and ``resume_interrupted`` re-queues it for
+        execution. Returns ``True`` on success.
+        """
+
+        study = self.store.get_study(study_id)
+        if study is None:
+            return False
+        # Only retryable terminal states
+        from .models import StudyStatus
+        retryable = {
+            StudyStatus.ERROR,
+            StudyStatus.EARLY_STOPPED,
+            StudyStatus.BUDGET_LIMITED,
+            StudyStatus.NEEDS_REFRESH,
+        }
+        if study.execution_status not in retryable:
+            return False
+
+        start_round = 1 if (from_round is None or from_round <= 1) else from_round
+
+        # Reset round counter + clear error
+        self.store.reset_round_counter(study_id, start_round)
+        self.store.update_execution_status(
+            study_id,
+            StudyStatus.INTERRUPTED,
+            last_error=None,
+            last_traceback=None,
+        )
+
+        self._emit_event(study.session_id, "study_retry_queued", {
+            "study_id": study_id,
+            "from_round": start_round,
+            "previous_status": study.execution_status.value,
+        })
+
+        # Re-queue via resume_interrupted
+        # Must be called via asyncio (it's async), so schedule it
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.resume_interrupted(study_id))
+        except RuntimeError:
+            # No event loop — sync context (tests)
+            pass
+        return True
+
     def replace_objective(
         self,
         study_id: str,

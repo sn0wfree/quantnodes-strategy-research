@@ -106,13 +106,22 @@ class TestActionMatrix:
         assert StudyAction.PAUSE not in acts
         assert StudyAction.CANCEL not in acts
 
-    def test_terminal_statuses_allow_archive_only(self):
-        for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED,
-                   StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
+    def test_complete_cancelled_allow_archive_only(self):
+        for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED):
+            acts = allowed_actions(st)
+            assert acts == frozenset({StudyAction.ARCHIVE}), st
+
+    def test_retryable_terminal_states_allow_retry_and_archive(self):
+        for st in (StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
                    StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
             acts = allowed_actions(st)
-            # soft-delete: ARCHIVE allowed in every terminal state
-            assert acts == frozenset({StudyAction.ARCHIVE}), st
+            assert StudyAction.RETRY in acts, st
+            assert StudyAction.ARCHIVE in acts, st
+            assert len(acts) == 2, st
+
+    def test_archived_only_allows_unarchive(self):
+        acts = allowed_actions(StudyStatus.ARCHIVED)
+        assert acts == frozenset({StudyAction.UNARCHIVE})
 
 
 # ── HTTP: available_actions + dispatch ───────────────────────────────

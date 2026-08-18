@@ -131,17 +131,17 @@ class TestStateMachine:
         assert StudyAction.RESUME in ACTION_MATRIX[StudyStatus.PAUSED]
         assert StudyAction.CANCEL in ACTION_MATRIX[StudyStatus.PAUSED]
 
-    def test_terminal_states_allow_archive_only(self):
-        # Phase 5+: terminal states expose only ARCHIVE (soft-delete).
-        for status in [
-            StudyStatus.COMPLETE,
-            StudyStatus.CANCELLED,
-            StudyStatus.ERROR,
-            StudyStatus.BUDGET_LIMITED,
-            StudyStatus.EARLY_STOPPED,
-        ]:
+    def test_complete_cancelled_allow_archive_only(self):
+        for status in (StudyStatus.COMPLETE, StudyStatus.CANCELLED):
             assert ACTION_MATRIX.get(status, frozenset()) == frozenset(
                 {StudyAction.ARCHIVE}
+            ), status
+
+    def test_retryable_states_allow_retry_and_archive(self):
+        for status in (StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
+                       StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
+            assert ACTION_MATRIX.get(status, frozenset()) == frozenset(
+                {StudyAction.RETRY, StudyAction.ARCHIVE}
             ), status
 
 

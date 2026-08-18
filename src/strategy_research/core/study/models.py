@@ -69,6 +69,7 @@ class StudyAction(str, Enum):
     ARCHIVE = "archive"        # soft-delete: hide from default list, detail still readable
     UNARCHIVE = "unarchive"    # revert ARCHIVED -> INTERRUPTED (user can then resume)
     REPLACE_OBJECTIVE = "replace_objective"  # mid-run objective update (next round takes effect)
+    RETRY = "retry"            # ERROR/EARLY_STOPPED/BUDGET_LIMITED/NEEDS_REFRESH → restart (round 1 or N+1)
 
 
 # status × allowed actions — the action matrix. Any status not listed
@@ -105,10 +106,10 @@ ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
     }),
     StudyStatus.COMPLETE: frozenset({StudyAction.ARCHIVE}),
     StudyStatus.CANCELLED: frozenset({StudyAction.ARCHIVE}),
-    StudyStatus.ERROR: frozenset({StudyAction.ARCHIVE}),
-    StudyStatus.BUDGET_LIMITED: frozenset({StudyAction.ARCHIVE}),
-    StudyStatus.NEEDS_REFRESH: frozenset({StudyAction.ARCHIVE}),
-    StudyStatus.EARLY_STOPPED: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.ERROR: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
+    StudyStatus.BUDGET_LIMITED: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
+    StudyStatus.NEEDS_REFRESH: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
+    StudyStatus.EARLY_STOPPED: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
     StudyStatus.ARCHIVED: frozenset({StudyAction.UNARCHIVE}),
 }
 

@@ -1085,6 +1085,7 @@ _ACTION_META: dict[str, dict] = {
     "archive": {"label": "归档", "destructive": True},
     "unarchive": {"label": "取消归档", "destructive": False},
     "replace_objective": {"label": "修改目标", "destructive": False},
+    "retry": {"label": "重试", "destructive": False},
 }
 
 
@@ -1201,6 +1202,18 @@ async def study_dispatch_action(
             "status": "ok",
             "study_id": study_id,
             "action": f"replaced_objective_history_{res['history_id']}",
+        }
+    if act == StudyAction.RETRY:
+        from_round = body.from_round if body else None
+        if not sched.retry(study_id, from_round=from_round):
+            raise HTTPException(
+                status_code=409,
+                detail="study not retryable (not in a retryable terminal state?)",
+            )
+        return {
+            "status": "ok",
+            "study_id": study_id,
+            "action": "retry_queued",
         }
     raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
 
