@@ -138,7 +138,9 @@ class TestMaxIterations:
 
 class TestNoProgress:
     def test_same_tool_call_3_times_triggers_no_progress(self, workspace):
-        # Always call list_history with same args
+        # Always call list_history with same args. The no-progress path
+        # now routes through the approval gate: short timeout + reject
+        # policy keeps the test non-blocking.
         mock = MockLLM([
             tool_resp([ToolCall(id=f"c{i}", name="list_history", arguments={})])
             for i in range(5)
@@ -150,11 +152,13 @@ class TestNoProgress:
             workspace=workspace,
             max_iterations=10,
             no_progress_window=3,
+            approval_timeout=0.1,
+            approval_on_timeout="reject",
         )
         loop.client.chat = mock.chat
         r = loop.run("loop")
-        assert r.finished_reason == "no_progress"
-        assert "No progress" in r.answer
+        assert r.finished_reason == "approval_timeout_rejected"
+        assert "no-progress approval timed out" in r.answer
 
     def test_different_tool_calls_continue(self, workspace):
         # Each call has different arguments → no_progress NOT triggered
@@ -177,7 +181,8 @@ class TestNoProgress:
         assert r.iterations == 6
 
     def test_no_progress_window_configurable(self, workspace):
-        # With window=2, 2 identical calls triggers
+        # With window=2, 2 identical calls triggers (approval gate
+        # configured to reject immediately on timeout).
         mock = MockLLM([
             tool_resp([ToolCall(id="c1", name="list_history", arguments={})]),
             tool_resp([ToolCall(id="c2", name="list_history", arguments={})]),
@@ -189,10 +194,12 @@ class TestNoProgress:
             workspace=workspace,
             max_iterations=10,
             no_progress_window=2,
+            approval_timeout=0.1,
+            approval_on_timeout="reject",
         )
         loop.client.chat = mock.chat
         r = loop.run("window")
-        assert r.finished_reason == "no_progress"
+        assert r.finished_reason == "approval_timeout_rejected"
 
 
 # ── Error handling ───────────────────────────────────────────────────
@@ -422,8 +429,8 @@ class TestIntegration:
         assert r.success
 
     def test_run_with_no_max_iterations_unlimited(self, workspace):
-        # All calls return tool_calls forever; verify loop continues
-        # (but no_progress should stop it)
+        # All calls return tool_calls forever; verify the no-progress
+        # approval gate stops it (short timeout + reject policy).
         mock = MockLLM([
             tool_resp([ToolCall(id="c1", name="list_history", arguments={})])
             for _ in range(20)
@@ -435,10 +442,12 @@ class TestIntegration:
             workspace=workspace,
             max_iterations=100,
             no_progress_window=3,
+            approval_timeout=0.1,
+            approval_on_timeout="reject",
         )
         loop.client.chat = mock.chat
         r = loop.run("loopy")
-        assert r.finished_reason == "no_progress"
+        assert r.finished_reason == "approval_timeout_rejected"
         assert r.iterations == 3  # stopped at window=3
 
 

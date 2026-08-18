@@ -221,11 +221,13 @@ class TestAruncNoProgress:
             max_iterations=10,
             no_progress_window=3,
             stream_mode=False,
+            approval_timeout=0.1,
+            approval_on_timeout="reject",
         )
         loop.client.achat = mock.achat
         r = await loop.arun("loop")
-        assert r.finished_reason == "no_progress"
-        assert "No progress" in r.answer
+        assert r.finished_reason == "approval_timeout_rejected"
+        assert "no-progress approval timed out" in r.answer
 
 
 # ── arun error handling ──────────────────────────────────────────────

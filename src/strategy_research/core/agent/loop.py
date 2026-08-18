@@ -229,7 +229,7 @@ class LoopResult:
     answer: str = ""
     iterations: int = 0
     tool_calls_made: int = 0
-    finished_reason: str = "stop"     # stop | max_iter | no_progress | error
+    finished_reason: str = "stop"     # stop | max_iter | no_progress | error | timeout
     error: str | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
@@ -242,6 +242,16 @@ class LoopResult:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+# SwarmWorker parity (unified engine): wrap-up nudge fires once at 80%
+# of max_iterations to push the model toward a final text answer.
+WRAP_UP_RATIO = 0.8
+WRAP_UP_NUDGE_TEXT = (
+    "Wrap-up: 2 sentences max. If you must write a file, "
+    "do so now via write_file (if available). End your reply "
+    "with a clear final summary."
+)
 
 
 def _tool_call_hash(tc: ToolCall) -> str:
@@ -315,6 +325,16 @@ class AgentLoop:
         approval_timeout: float = 1800.0,
         approval_on_timeout: str = "continue",  # "continue" | "reject"
         role: str | None = None,  # agent name (used in approval event)
+        # ── SwarmWorker parity (unified engine) ─────────────────────
+        # Per-iteration wall-clock timeout for the LLM call. Async mode
+        # cancels via asyncio.wait_for; sync mode post-checks elapsed
+        # (matching SwarmWorker semantics). None = disabled (default).
+        iteration_timeout_s: float | None = None,
+        # One-shot wrap-up nudge system message at 0.8×max_iterations.
+        wrap_up_nudge: bool = False,
+        # Final iteration passes tools=None so the model must answer
+        # in text instead of issuing more tool calls.
+        force_final_text: bool = False,
     ):
         self.config = config
         self.memory = memory
@@ -398,6 +418,9 @@ class AgentLoop:
         self._approval_timeout = approval_timeout
         self._approval_on_timeout = approval_on_timeout
         self._role = role
+        self._iteration_timeout_s = iteration_timeout_s
+        self._wrap_up_nudge = wrap_up_nudge
+        self._force_final_text = force_final_text
         self._approval_event = threading.Event()
         self._approval_response: str | None = None
         self._approval_thread: threading.Thread | None = None
@@ -501,7 +524,7 @@ class AgentLoop:
         accumulated_tool_calls: list[dict[str, Any]] = []
         usage: dict[str, int] | None = None
 
-        tools = self.registry.get_definitions() or None
+        tools = self._effective_tools(iteration)
         try:
             for chunk in self.client.stream(messages, tools=tools):
                 # Thinking tokens (extracted by provider adapter). The raw
@@ -622,7 +645,7 @@ class AgentLoop:
         accumulated_tool_calls: list[dict[str, Any]] = []
         usage: dict[str, int] | None = None
 
-        tools = self.registry.get_definitions() or None
+        tools = self._effective_tools(iteration)
         try:
             chunk_count = 0
             async for chunk in self.client.astream(messages, tools=tools):
@@ -1080,6 +1103,76 @@ class AgentLoop:
         self._approval_response = decision
         self._approval_event.set()
 
+    # ── SwarmWorker parity helpers (unified engine) ──────────────
+
+    def _effective_max_iterations(self) -> int:
+        """Effective iteration cap (explicit strategy config wins)."""
+        if self._strategy_explicit:
+            return getattr(
+                self._strategy.config, "max_iterations", self.max_iterations,
+            )
+        return self.max_iterations
+
+    def _is_final_iteration(self, iteration: int) -> bool:
+        return iteration >= self._effective_max_iterations()
+
+    def _effective_tools(self, iteration: int) -> list[Any] | None:
+        """Tool definitions for this iteration.
+
+        With ``force_final_text`` the final iteration passes
+        ``tools=None`` so the model must answer in text.
+        """
+        if self._force_final_text and self._is_final_iteration(iteration):
+            return None
+        return self.registry.get_definitions() or None
+
+    async def _with_iteration_timeout(
+        self, coro: Any, iteration: int, result: LoopResult,
+    ) -> Any:
+        """Await ``coro`` with the per-iteration wall-clock timeout.
+
+        On timeout the result is finalized with
+        ``finished_reason="timeout"`` and ``None`` is returned (the
+        caller breaks the loop on a None response).
+        """
+        if self._iteration_timeout_s is None:
+            return await coro
+        try:
+            return await asyncio.wait_for(coro, timeout=self._iteration_timeout_s)
+        except (asyncio.TimeoutError, TimeoutError):
+            self._handle_iteration_timeout(result, iteration)
+            return None
+
+    def _with_iteration_timeout_sync(
+        self, fn: Callable[[], Any], iteration: int, result: LoopResult,
+    ) -> Any:
+        """Blocking variant: post-call elapsed check (SwarmWorker parity).
+
+        A blocking ``client.chat`` cannot be cancelled safely from the
+        same thread; like SwarmWorker we measure the wall clock after
+        the call returns and terminate when it exceeded the budget.
+        """
+        t0 = time.perf_counter()
+        out = fn()
+        if (
+            self._iteration_timeout_s is not None
+            and (time.perf_counter() - t0) > self._iteration_timeout_s
+        ):
+            self._handle_iteration_timeout(result, iteration)
+            return None
+        return out
+
+    def _handle_iteration_timeout(self, result: LoopResult, iteration: int) -> None:
+        """Finalize the result for a per-iteration timeout."""
+        result.finished_reason = "timeout"
+        result.error = f"iteration {iteration} exceeded {self._iteration_timeout_s}s"
+        self._trace_and_emit("loop_end", {"reason": "timeout", "iteration": iteration})
+        self._emit("iter_end", {
+            "iteration": iteration,
+            "finish_reason": "timeout",
+            "tool_calls_made": result.tool_calls_made,
+        })
+
     def _handle_max_iter(self, result: LoopResult) -> None:
         """Populate max_iter result fields, emit trace + event."""
         result.finished_reason = "max_iter"
@@ -1288,12 +1381,21 @@ class AgentLoop:
         # it (a profile said max_iterations=N); otherwise fall back to
         # the constructor ``self.max_iterations`` so existing tests /
         # callers that pass max_iterations=2 keep working unchanged.
-        max_iter = getattr(
-            self._strategy.config, "max_iterations", self.max_iterations,
-        ) if self._strategy_explicit else self.max_iterations
+        max_iter = self._effective_max_iterations()
         for iteration in range(1, max_iter + 1):
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
+
+            # SwarmWorker parity: one-shot wrap-up nudge at 0.8×max_iter
+            # to push the model toward a final text answer.
+            if (
+                self._wrap_up_nudge
+                and iteration == max(1, int(max_iter * WRAP_UP_RATIO))
+            ):
+                messages.append({
+                    "role": "system",
+                    "content": WRAP_UP_NUDGE_TEXT,
+                })
 
             # L7 v0.5: compaction + per-iteration observability delegated
             # to the strategy's CompactionStep. The step runs the
@@ -1468,14 +1570,22 @@ class AgentLoop:
                 # Trace LLM request envelope before streaming
                 self._trace_llm_request(messages, iteration, tools=None)
                 if async_mode:
-                    return await self._astream_chat(messages, iteration)
-                return self._stream_chat(messages, iteration)
-            tools = self.registry.get_definitions() or None
+                    return await self._with_iteration_timeout(
+                        self._astream_chat(messages, iteration), iteration, result,
+                    )
+                return self._with_iteration_timeout_sync(
+                    lambda: self._stream_chat(messages, iteration), iteration, result,
+                )
+            tools = self._effective_tools(iteration)
             # Trace LLM request envelope before non-streaming call
             self._trace_llm_request(messages, iteration, tools=tools)
             if async_mode:
-                return await self.client.achat(messages, tools=tools)
-            return self.client.chat(messages, tools=tools)
+                return await self._with_iteration_timeout(
+                    self.client.achat(messages, tools=tools), iteration, result,
+                )
+            return self._with_iteration_timeout_sync(
+                lambda: self.client.chat(messages, tools=tools), iteration, result,
+            )
         except LLMError as exc:
             if not (self._stream_mode and not self._is_stream_required_error(exc)):
                 raise
@@ -1483,12 +1593,16 @@ class AgentLoop:
             # (e.g. provider doesn't support SSE, parsing error on a
             # partial chunk). Fall back to non-streaming chat().
             try:
-                tools = self.registry.get_definitions() or None
+                tools = self._effective_tools(iteration)
                 # Trace fallback LLM request
                 self._trace_llm_request(messages, iteration, tools=tools)
                 if async_mode:
-                    return await self.client.achat(messages, tools=tools)
-                return self.client.chat(messages, tools=tools)
+                    return await self._with_iteration_timeout(
+                        self.client.achat(messages, tools=tools), iteration, result,
+                    )
+                return self._with_iteration_timeout_sync(
+                    lambda: self.client.chat(messages, tools=tools), iteration, result,
+                )
             except LLMError as exc2:
                 self._handle_llm_error(exc2, iteration, result)
                 await self._afire_hooks("on_error", hook_ctx, exc2)
