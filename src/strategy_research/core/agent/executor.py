@@ -20,7 +20,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .dag_config import AgentNodeConfig
 from .plugin import AgentPlugin
@@ -108,6 +108,7 @@ class AgentExecutor:
         previous_outputs: list[Any] | None = None,
         history: list[dict[str, Any]] | None = None,
         node: AgentNodeConfig | None = None,
+        on_event: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> AgentExecutionResult:
         """Execute one agent.
 
@@ -145,6 +146,7 @@ class AgentExecutor:
                 previous_outputs=previous_outputs,
                 history=history,
                 node=node,
+                on_event=on_event,
                 t0=t0,
             )
         except Exception as exc:  # noqa: BLE001
@@ -280,6 +282,7 @@ class AgentExecutor:
         previous_outputs: list[Any] | None,
         history: list[dict[str, Any]] | None,
         node: AgentNodeConfig | None,
+        on_event: Callable[[str, dict[str, Any]], None] | None,
         t0: float,
     ) -> AgentExecutionResult:
         from .builtin_tools import build_default_registry
@@ -333,6 +336,7 @@ class AgentExecutor:
             allowed_tools=tools,
             max_iterations=max_iterations,
             role=plugin.id,
+            on_event=on_event,
             **loop_kwargs,
         )
 

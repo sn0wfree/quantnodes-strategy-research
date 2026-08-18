@@ -225,34 +225,6 @@ class GoalEvidenceCollector:
             return 0
 
 
-class _AgentConfigExecutor:
-    """Minimal AgentExecutor adapter for workflow config agents.
-
-    Phase 4 P1.1: Wraps a GoalAgentConfig into the AgentExecutor protocol
-    so agents from the YAML can be registered in AgentRegistry.
-    """
-
-    def __init__(self, agent_id: str, tools: list[str] | None = None) -> None:
-        self._agent_id = agent_id
-        self._tools = tools or []
-
-    @property
-    def name(self) -> str:
-        return self._agent_id
-
-    def run(self, prompt: str, context: dict | None = None) -> dict:
-        """Execute the agent. In CLI standalone mode, returns a stub.
-
-        The real execution path goes through SwarmRuntime → SwarmWorker
-        → AgentLoop, which bypasses this adapter. This adapter is only
-        used by WorkflowController for fallback/legacy paths.
-        """
-        logger.info(
-            "_AgentConfigExecutor.run(%s): stub execution", self._agent_id
-        )
-        return {"answer": f"[stub] {self._agent_id}: completed", "agent_id": self._agent_id}
-
-
 # ── Workflow Runner (P3.9: delegates to SwarmRuntime) ────────
 
 
@@ -558,8 +530,7 @@ class GoalWorkflowRunner:
 
         # 5. Build SwarmRuntime
         from ..swarm.runtime import SwarmRuntime
-        controller = self._build_controller()
-        runtime = SwarmRuntime(controller=controller)
+        runtime = SwarmRuntime(controller=None)  # P8: controller ignored by AgentExecutor path
 
         # 6. Execute via SwarmRuntime (in thread since it's sync)
         try:
@@ -692,8 +663,7 @@ class GoalWorkflowRunner:
 
         # Convert config → SwarmPreset (same as start)
         preset = self._config.to_swarm_preset()
-        controller = self._build_controller()
-        runtime = SwarmRuntime(controller=controller)
+        runtime = SwarmRuntime(controller=None)  # P8: controller ignored by AgentExecutor path
 
         try:
             # Need the original objective for prompts; reload from goal
@@ -803,8 +773,7 @@ class GoalWorkflowRunner:
 
         preset = self._config.to_swarm_preset()
         from ..swarm.runtime import SwarmRuntime
-        controller = self._build_controller()
-        runtime = SwarmRuntime(controller=controller)
+        runtime = SwarmRuntime(controller=None)  # P8: controller ignored by AgentExecutor path
 
         try:
             result = await asyncio.to_thread(
@@ -835,34 +804,6 @@ class GoalWorkflowRunner:
             logger.error("Sub-workflow failed: %s", exc)
 
         return self._goal_id
-
-    def _build_controller(self) -> Any:
-        """Build a WorkflowController for SwarmRuntime.
-
-        Phase 4 P1.1: Populates the AgentRegistry with agents from the
-        workflow config. Each agent is registered as a simple executor
-        that can run through the controller pipeline.
-        """
-        try:
-            from ..workflow.agents import AgentRegistry
-            from ..workflow.controller import ControllerConfig, WorkflowController
-
-            registry = AgentRegistry()
-            # Register each agent from the YAML config as a simple executor
-            for agent_cfg in self._config.agents:
-                executor = _AgentConfigExecutor(
-                    agent_id=agent_cfg.id,
-                    tools=agent_cfg.tools,
-                )
-                registry.register(executor)
-
-            cfg = ControllerConfig(timeout_seconds=120.0)
-            return WorkflowController(
-                registry=registry, adj={}, config=cfg,
-            )
-        except Exception as exc:
-            logger.warning("Cannot build WorkflowController: %s", exc)
-            return None
 
     def pause(self, *, immediate: bool = False) -> None:
         """Pause workflow execution.

@@ -150,7 +150,7 @@ class SubAgentTool(BaseTool):
         return filtered
 
     def execute(self, **kwargs: Any) -> str:
-        """Execute delegation — runs a SwarmWorker in a thread."""
+        """Execute delegation — runs AgentExecutor in a thread."""
         # Extract params
         task = kwargs.get("task", "")
         if not task:
@@ -195,47 +195,50 @@ class SubAgentTool(BaseTool):
             "message_id": message_id,
         })
 
-        # ── Build child SwarmWorker ────────────────────────────────
+        # ── Build child agent via unified AgentExecutor ──────────
         try:
-            from ...workflow.worker import SwarmWorker
+            from ..dag_config import AgentNodeConfig
+            from ..executor import AgentExecutor
+            from ..plugin import AgentPlugin
+            from ..registry import get_default_registry
 
-            config = LLMConfig.load()
-            client = OpenAICompatClient(config)
-
-            # Build filtered registry (exclude delegate_to_agent)
+            # Filtered registry (exclude delegate_to_agent)
             parent_registry: ToolRegistry | None = kwargs.get("_parent_registry")
             filtered = self._build_child_registry(parent_registry, tools_whitelist)
 
-            # System prompt for sub-agent
-            system_prompt = (
+            child_plugin = AgentPlugin(
+                id=agent_id, name="SubAgent", category="execution",
+                description="sub-agent delegation",
+                tools=tuple(tools_whitelist or []),
+            )
+            node = AgentNodeConfig(
+                id=agent_id, tools_override=tools_whitelist,
+                max_iterations=max_iterations,
+            )
+
+            # Build the user-message: sub-agent role prefix + task.
+            full_task = (
                 "你是一个专注的子 agent。根据给定的任务独立完成工作，"
                 "使用可用工具读取数据、运行分析、生成报告。\n"
-                "回复简洁，直接给出结果。"
+                "回复简洁，直接给出结果。\n\n## 当前任务\n" + task,
             )
 
-            worker = SwarmWorker(
-                client=client,
-                registry=filtered,
-                system_prompt=system_prompt,
-                max_iterations=max_iterations,
-                timeout_s=120.0,
-                tool_context=ToolContext(
-                    workspace=Path(workspace) if workspace else None,
-                    session_id=session_id,
-                ),
+            executor = AgentExecutor(
+                registry=get_default_registry(),
+                llm_config=LLMConfig.load(),
             )
 
-            # Set event callback for forwarding
-            worker.set_event_callback(
-                lambda et, data: _forward_event(
-                    emit_event, agent_id, message_id, et, data,
-                ),
+            def _forward(et: str, data: dict[str, Any]) -> None:
+                _forward_event(emit_event, agent_id, message_id, et, data)
+
+            workspace_path = Path(workspace) if workspace else Path.cwd()
+            result = executor.execute(
+                child_plugin, full_task, workspace_path,
+                context={"session_id": session_id},
+                node=node,
+                on_event=_forward,
             )
 
-            # ── Run (sync — execute() is already in a thread via to_thread) ─
-            result = worker.run(task)
-
-            # ── Emit subagent_completed ────────────────────────────
             _forward_event(emit_event, agent_id, message_id, "subagent_completed", {
                 "agent_id": agent_id,
                 "message_id": message_id,
@@ -243,11 +246,11 @@ class SubAgentTool(BaseTool):
 
             return json.dumps(
                 {
-                    "status": "ok",
-                    "answer": result.answer,
+                    "status": "ok" if result.success else "error",
+                    "answer": result.output,
                     "summary": result.summary,
-                    "iterations": result.iterations,
-                    "tool_calls_made": result.tool_calls_made,
+                    "iterations": result.metrics.get("iterations", 0),
+                    "tool_calls_made": result.metrics.get("tool_calls_made", 0),
                 },
                 ensure_ascii=False,
             )

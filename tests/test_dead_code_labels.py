@@ -12,7 +12,6 @@ EXPECTED_LABELS: list[tuple[str, str]] = [
     ("src/strategy_research/core/llm/config.py", "legacy CLI flag"),
     ("src/strategy_research/core/agent/progress.py", "inline callback"),
     ("src/strategy_research/core/agent/to_llm_message.py", "inline projection"),
-    ("src/strategy_research/core/workflow/agent_runner.py", "deprecated kwargs only"),
     ("src/strategy_research/core/hooks/unified.py", "composite.AgentHook"),
     ("src/strategy_research/core/hooks/adapter.py", "composite.AgentHook"),
     ("src/strategy_research/core/swarm/runtime.py", "GroundingProvider never read"),

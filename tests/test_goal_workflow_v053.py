@@ -41,6 +41,7 @@ def workflow_config():
 class TestP1BuildController:
     """_build_controller should populate registry from config agents."""
 
+    @pytest.mark.skip(reason="_build_controller removed (P8 cleanup)")
     def test_build_controller_has_agents(self, workflow_config, fresh_db):
         runner = GoalWorkflowRunner(
             config=workflow_config,
@@ -58,6 +59,7 @@ class TestP1BuildController:
             registered_ids = set(registry.list_agents())
             assert config_agent_ids == registered_ids
 
+    @pytest.mark.skip(reason="_build_controller removed (P8 cleanup)")
     def test_build_controller_returns_controller(self, workflow_config, fresh_db):
         runner = GoalWorkflowRunner(
             config=workflow_config,

@@ -349,6 +349,7 @@ class TestBranchWiring:
         assert "portfolio" not in result.agent_results
         assert "risk" in result.agent_results
 
+    @pytest.mark.skip(reason="WorkflowController module removed (P8 cleanup)")
     def test_retry_reruns_target_in_next_layer(self):
         outputs = {
             "a": '{"agent": "a", "status": "success", "answer": "{\\"x\\": 1}"}',

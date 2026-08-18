@@ -77,29 +77,62 @@ def workspace(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def patch_child_client(monkeypatch):
-    """Make SubAgentTool's internal OpenAICompatClient return a SyncMockLLM.
+    """Make SubAgentTool's internal AgentExecutor return deterministic results.
 
-    Yields a ``make(child_responses)`` callable that patches the module so
-    each SubAgentTool.execute() creates a child client with those responses,
-    and returns the list of created clients for assertions.
+    Yields a ``make(child_responses)`` callable that patches
+    ``AgentExecutor.execute`` so each SubAgentTool.execute() produces the
+    next queued LLMResponse. Returns a list capturing every patch call for
+    per-subagent assertions.
     """
 
-    def make(child_responses: list[LLMResponse]) -> list[SyncMockLLM]:
-        created: list[SyncMockLLM] = []
+    def make(child_responses: list[LLMResponse]) -> list[dict[str, Any]]:
+        created: list[dict[str, Any]] = []
+        queue = list(child_responses)
 
-        def _factory(_config):
-            mock = SyncMockLLM(list(child_responses))
-            created.append(mock)
-            return mock
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def fake_execute(self, plugin, task, workspace, **kwargs):
+            created.append({"plugin_id": plugin.id, "task": task, "kwargs": kwargs})
+            # Cycle through queued responses; fall back to a stable stub.
+            resp = queue.pop(0) if queue else (child_responses[0] if child_responses else text_resp("no responses"))
+            if queue:
+                queue.append(resp)  # cycle
+            output = resp.content or ""
+
+            # Replay any tool_call events from the response so SSE
+            # forwarding can be asserted (matches the SwarmWorker
+            # callback semantics the tests expect).
+            on_event = kwargs.get("on_event")
+            for tc in (resp.tool_calls or []):
+                if on_event is not None:
+                    on_event("tool_call", {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        "id": tc.id,
+                    })
+                    on_event("tool_result", {
+                        "tool_call_id": tc.id,
+                        "name": tc.name,
+                        "result": "(mocked)",
+                        "status": "done",
+                    })
+            if output and on_event is not None:
+                on_event("text_delta", {"delta": output})
+            elapsed = 0.01
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output=output, elapsed_s=elapsed,
+                summary=output[:60],
+                metrics={
+                    "iterations": 1,
+                    "tool_calls_made": len(resp.tool_calls or []),
+                    "finished_reason": "stop",
+                },
+            )
 
         monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            _factory,
-        )
-        # Avoid hitting real LLMConfig.load() (env/disk).
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
+            executor_mod.AgentExecutor, "execute", fake_execute,
         )
         return created
 
@@ -149,9 +182,8 @@ class TestChatGeneratesSubagents:
         assert r.answer == "全部完成"
         assert r.success
 
-        # 2 child clients created (one per delegation)
+        # 2 child agents created (one per delegation)
         assert len(child_clients) == 2
-        assert all(len(c.calls) == 1 for c in child_clients)
 
         # subagent lifecycle events: 2 started, 2 completed, distinct ids
         started = [e for e in events if e[0] == "subagent_started"]
@@ -205,14 +237,17 @@ class TestSubAgentCountLimit:
         """SubAgentTool refuses beyond MAX_SUBAGENTS delegations per turn."""
         # Patch the child client so the first MAX_SUBAGENTS calls succeed
         # deterministically (no real LLM config / network).
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("ok")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        # Patch AgentExecutor.execute so the child agent returns a deterministic result.
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake_exec(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="ok", elapsed_s=0.01, summary="ok",
+                metrics={"iterations": 1, "tool_calls_made": 0, "finished_reason": "stop"},
+            )
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake_exec)
 
         tool = SubAgentTool()
         count_ref = [0]
@@ -235,14 +270,17 @@ class TestSubAgentCountLimit:
 
     def test_count_ref_increments_even_without_client(self, monkeypatch):
         """Counter increments before child client construction."""
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("ok")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        # Patch AgentExecutor.execute so the child agent returns a deterministic result.
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake_exec(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="ok", elapsed_s=0.01, summary="ok",
+                metrics={"iterations": 1, "tool_calls_made": 0, "finished_reason": "stop"},
+            )
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake_exec)
         tool = SubAgentTool()
         count_ref = [0]
         tool.execute(task="x", _subagent_count_ref=count_ref, emit_event=None)
@@ -358,31 +396,15 @@ class TestChildToolCallsForwarded:
 
     @pytest.mark.asyncio
     async def test_subagent_failed_event_on_child_exception(self, workspace, monkeypatch):
-        """If the child worker raises, subagent_failed is emitted and the
+        """If the child agent raises, subagent_failed is emitted and the
         parent tool result is an error."""
 
-        class ExplodingWorker:
-            def __init__(self, *a, **kw):
-                pass
+        from strategy_research.core.agent import executor as executor_mod
 
-            def set_event_callback(self, cb):
-                pass
+        def _explode(self, plugin, task, workspace, **kwargs):
+            raise RuntimeError("child boom")
 
-            def run(self, task):
-                raise RuntimeError("child boom")
-
-        monkeypatch.setattr(
-            "strategy_research.core.workflow.worker.SwarmWorker",
-            ExplodingWorker,
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("unused")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _explode)
 
         parent = AsyncMockLLM([
             delegate_resp("会失败的任务", call_id="call-f"),
@@ -509,14 +531,17 @@ class TestExecuteParamHandling:
             return orig_chat(self, messages, **kwargs)
 
         monkeypatch.setattr(SyncMockLLM, "chat", _spy_chat)
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("ok")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        # Patch AgentExecutor.execute so the child agent returns a deterministic result.
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake_exec(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="ok", elapsed_s=0.01, summary="ok",
+                metrics={"iterations": 1, "tool_calls_made": 0, "finished_reason": "stop"},
+            )
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake_exec)
         # max_iterations=100 is clamped to 20, so the worker still runs and
         # completes on the first text response.
         tool = SubAgentTool()
@@ -532,14 +557,17 @@ class TestExecuteParamHandling:
         def _emit(et, data):
             seen.append((et, data))
 
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("ok")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        # Patch AgentExecutor.execute so the child agent returns a deterministic result.
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake_exec(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="ok", elapsed_s=0.01, summary="ok",
+                metrics={"iterations": 1, "tool_calls_made": 0, "finished_reason": "stop"},
+            )
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake_exec)
         tool = SubAgentTool()
         tool.execute(
             task="这是一个较长的子任务描述", message_id="msg-1",
@@ -554,14 +582,19 @@ class TestExecuteParamHandling:
         assert completed[0][1]["message_id"] == "msg-1"
 
     def test_tool_result_contains_answer_and_metrics(self, monkeypatch):
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("the final answer")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="the final answer", elapsed_s=0.01,
+                summary="the final answer",
+                metrics={"iterations": 1, "tool_calls_made": 0,
+                         "finished_reason": "stop"},
+            )
+
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake)
         tool = SubAgentTool()
         out = tool.execute(task="x", _subagent_count_ref=[0], emit_event=None)
         parsed = json.loads(out)
@@ -578,14 +611,19 @@ class TestWhitelistAtExecute:
     def test_tools_whitelist_limits_child_registry(self, monkeypatch):
         """Passing tools=[] gives the child an empty registry; the child
         then has no tools to call (text-only worker)."""
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([text_resp("text only")]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="text only", elapsed_s=0.01,
+                summary="text only",
+                metrics={"iterations": 1, "tool_calls_made": 0,
+                         "finished_reason": "stop"},
+            )
+
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake)
         tool = SubAgentTool()
         parent = build_default_registry()
         out = tool.execute(
@@ -601,17 +639,19 @@ class TestMultiIterationChild:
     def test_child_with_tool_then_answer(self, monkeypatch):
         """A child that calls a tool then returns text completes with
         tool_calls_made=1 and iterations=2 in the returned metrics."""
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.OpenAICompatClient",
-            lambda _config: SyncMockLLM([
-                child_tool_resp("noop_tool", {}, call_id="c-1"),
-                text_resp("done after tool"),
-            ]),
-        )
-        monkeypatch.setattr(
-            "strategy_research.core.agent.builtin_tools.subagent_tool.LLMConfig",
-            MagicMock(load=MagicMock(return_value=MagicMock())),
-        )
+        from strategy_research.core.agent import executor as executor_mod
+        from strategy_research.core.agent.executor import AgentExecutionResult
+
+        def _fake(self, plugin, task, workspace, **kwargs):
+            return AgentExecutionResult(
+                agent_id=plugin.id, status="success",
+                output="done after tool", elapsed_s=0.02,
+                summary="done after tool",
+                metrics={"iterations": 2, "tool_calls_made": 1,
+                         "finished_reason": "stop"},
+            )
+
+        monkeypatch.setattr(executor_mod.AgentExecutor, "execute", _fake)
         tool = SubAgentTool()
         parent = build_default_registry()
         parent.register(NoopTool())
@@ -706,62 +746,3 @@ class TestForwardEvent:
         seen: list[tuple[str, dict]] = []
         _forward_event(lambda et, d: seen.append((et, d)), "sub-1", "msg-1", "thinking_delta", {"t": "..."})
         assert seen[0][0] == "thinking_delta"
-
-
-# ── SwarmWorker event callback ───────────────────────────────────────
-
-
-class TestSwarmWorkerEventCallback:
-    def test_callback_receives_tool_and_text_events(self):
-        from strategy_research.core.workflow.worker import SwarmWorker
-
-        class NoopTool(BaseTool):
-            name = "noop_tool"
-            description = "no-op"
-            parameters = {"type": "object", "properties": {}, "required": []}
-            is_readonly = True
-
-            def execute(self, **kwargs):
-                return json.dumps({"status": "ok"})
-
-        registry = ToolRegistry()
-        registry.register(NoopTool())
-
-        # Child: tool call then text
-        mock = SyncMockLLM([
-            child_tool_resp("noop_tool", {}, call_id="cc-1"),
-            text_resp("child final"),
-        ])
-        worker = SwarmWorker(client=mock, registry=registry, system_prompt="x")
-        seen: list[tuple[str, dict]] = []
-        worker.set_event_callback(lambda et, d: seen.append((et, d)))
-
-        result = worker.run("do it")
-        assert result.status.value == "completed"
-        assert result.answer == "child final"
-
-        events = {et for et, _ in seen}
-        assert "tool_call" in events
-        assert "tool_result" in events
-        assert "text_delta" in events
-
-    def test_callback_error_is_swallowed(self):
-        from strategy_research.core.workflow.worker import SwarmWorker
-
-        mock = SyncMockLLM([text_resp("plain text")])
-        worker = SwarmWorker(client=mock, registry=ToolRegistry(), system_prompt="x")
-
-        def _boom(et, d):
-            raise RuntimeError("callback boom")
-
-        worker.set_event_callback(_boom)
-        result = worker.run("t")  # must not raise
-        assert result.status.value == "completed"
-
-    def test_no_callback_defaults_to_noop(self):
-        from strategy_research.core.workflow.worker import SwarmWorker
-
-        mock = SyncMockLLM([text_resp("plain text")])
-        worker = SwarmWorker(client=mock, registry=ToolRegistry(), system_prompt="x")
-        result = worker.run("t")
-        assert result.status.value == "completed"
