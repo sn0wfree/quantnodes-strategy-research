@@ -119,6 +119,7 @@ def init_study_dir(
     objective: str,
     guidance_md: str | None = None,
     graph: "StudyGraph | None" = None,
+    auto_compose: bool = False,
 ) -> dict:
     """v2 bootstrap: autonomous study directory (design §6.2).
 
@@ -126,7 +127,10 @@ def init_study_dir(
     todos.md, knowledge.md, state.json and graph.json.
 
     ``graph`` (optional): custom execution graph (multi-entry/exit).
-    When None, ``DEFAULT_STANDARD_GRAPH`` is used.
+    When None and ``auto_compose=False``, ``DEFAULT_STANDARD_GRAPH`` is
+    used. When ``auto_compose=True``, :class:`DAGPlanner` is invoked
+    and its output written to ``graph.json``; failure falls back to
+    the standard 8-node template.
     """
     root = ws / "study" / study_id
     (root / "baseline").mkdir(parents=True, exist_ok=True)
@@ -168,6 +172,21 @@ def init_study_dir(
     graph_path = root / "graph.json"
     if not graph_path.exists():
         graph_to_write = graph if graph is not None else DEFAULT_STANDARD_GRAPH
+        if graph is None and auto_compose:
+            try:
+                from .dag_planner import DAGPlanner
+                plan = DAGPlanner().plan(objective)
+                graph_to_write = plan.config.to_study_graph()
+                logger.info(
+                    "auto_compose: selected %s for objective %r",
+                    plan.selected_agents, objective[:40],
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "auto_compose failed (%s); falling back to standard graph",
+                    exc,
+                )
+                graph_to_write = DEFAULT_STANDARD_GRAPH
         graph_path.write_text(
             graph_to_write.to_json(),
             encoding="utf-8",
@@ -198,6 +217,9 @@ def create_study_record(
     guidance_md: str | None = None,
     lazy_detection_interval: int = 10,
     keep_recent: int = 10,
+    auto_compose_graph: bool = False,
+    selected_agents: list[str] | None = None,
+    graph_override: "StudyGraph | None" = None,
 ) -> "StudyRecord":
     """Create a study (validation + ledger + autonomous dir), not queued.
 
@@ -260,6 +282,8 @@ def create_study_record(
     init_study_dir(
         ws, study.study_id, strategy_name, objective,
         guidance_md=guidance_md,
+        graph=graph_override,
+        auto_compose=auto_compose_graph,
     )
     return study
 

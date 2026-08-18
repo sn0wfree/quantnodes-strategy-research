@@ -231,6 +231,9 @@ class StudyStartRequest(BaseModel):
     keep_recent: int = 10
     monitor_interval_seconds: Optional[int] = None
     guidance_md: Optional[str] = None  # v2: per-task guidance override (§13)
+    auto_compose_graph: bool = False  # P6: LLM-generate graph from objective
+    selected_agents: Optional[list[str]] = None  # P6: manual override of planner
+    graph_override: Optional[dict] = None  # P6: raw graph.json to persist
 
 
 class DirectiveRequest(BaseModel):
@@ -321,6 +324,8 @@ async def study_start(req: StudyStartRequest, request: Request):
             guidance_md=req.guidance_md,
             lazy_detection_interval=req.lazy_detection_interval,
             keep_recent=req.keep_recent,
+            auto_compose_graph=req.auto_compose_graph,
+            selected_agents=req.selected_agents,
         )
         # Queue without blocking the request; uncaught submit errors
         # are logged via the done callback.
@@ -1445,3 +1450,70 @@ async def study_round_redo(
         "status": "ok", "study_id": study_id,
         "action": f"redo_round_{round_num}",
     }
+
+
+# ── Agent catalog + DAG planning (P6 unified engine) ─────────────────
+
+
+@router.get("/agents")
+async def study_agents():
+    """Return the unified agent catalog available for study DAGs."""
+    from ...core.agent.plugin import AgentPlugin
+    from ...core.agent.registry import get_default_registry
+
+    registry = get_default_registry()
+    return {
+        "agents": [p.to_dict() for p in registry.list_plugins()],
+        "required": sorted(
+            p.id for p in registry.list_plugins() if not p.optional
+        ),
+    }
+
+
+@router.post("/plan-dag")
+async def study_plan_dag(body: dict):
+    """LLM-driven study DAG generation.
+
+    Body::
+
+        {
+          "objective": "研究 A 股动量因子",
+          "max_agents": 12,
+          "force_agents": ["researcher"],
+          "exclude_agents": []
+        }
+    """
+    from ...core.study.dag_planner import (
+        DAGPlanner,
+        PlannerConstraints,
+    )
+
+    objective = str(body.get("objective", "")).strip()
+    if not objective:
+        raise HTTPException(status_code=422, detail="objective is required")
+    constraints = PlannerConstraints(
+        max_agents=int(body.get("max_agents") or 12),
+        exclude_agents=list(body.get("exclude_agents") or []),
+        force_agents=list(body.get("force_agents") or []),
+    )
+    planner = DAGPlanner()
+    plan = planner.plan(objective, constraints)
+    return {
+        "status": "ok",
+        "selected_agents": plan.selected_agents,
+        "reasoning": plan.reasoning,
+        "graph": plan.config.to_study_graph().to_dict(),
+        "dag_config": plan.config.to_dict(),
+    }
+
+
+@router.get("/presets")
+async def study_presets():
+    """List YAML preset names available as planner few-shot candidates."""
+    from pathlib import Path
+
+    d = Path(__file__).parent.parent.parent / "core" / "swarm" / "presets"
+    if not d.is_dir():
+        return {"presets": []}
+    presets = sorted(p.stem.replace("goal_", "") for p in d.glob("goal_*.yaml"))
+    return {"presets": presets}
