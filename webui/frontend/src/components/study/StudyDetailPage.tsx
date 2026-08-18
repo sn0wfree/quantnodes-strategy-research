@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
   Target, Activity, RotateCcw, BarChart3, BookOpen, Info, FileText,
-  ShieldAlert, GitBranch, MessageSquare,
+  ShieldAlert, GitBranch, MessageSquare, Archive, ArchiveRestore,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyJournalResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
@@ -153,10 +153,13 @@ export function StudyDetailPage() {
     }
   }, [studyId, loadDirectives, loadJournal, loadHanging, loadActions])
 
-  const onAction = async (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel') => {
+  const onAction = async (
+    action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive',
+    reason?: string,
+  ) => {
     setBusy(true)
     try {
-      await api.study.dispatchAction(studyId, action)
+      await api.study.dispatchAction(studyId, action, reason ? { reason } : undefined)
       await loadActions()
     } catch (err) {
       setError((err as Error).message)
@@ -233,6 +236,8 @@ export function StudyDetailPage() {
     (a) => a.name === 'resume' || a.name === 'resume_interrupted'
   )
   const canCancel = (actions?.actions ?? []).some((a) => a.name === 'cancel')
+  const canArchive = (actions?.actions ?? []).some((a) => a.name === 'archive')
+  const canUnarchive = (actions?.actions ?? []).some((a) => a.name === 'unarchive')
   const canDirective = canPause || canResume
 
   const controlActions = (
@@ -274,7 +279,33 @@ export function StudyDetailPage() {
           disabled={busy}
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-rose-700 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-rose-600 active:scale-95 disabled:opacity-50"
         >
-          <X className="h-3.5 w-3.5" /> 取消
+          <X className="h-3.5 w-3.5" /> 中止
+        </button>
+      )}
+      {canArchive && (
+        <button
+          onClick={() => {
+            if (window.confirm('确定归档此研究？归档后默认列表不再显示，可在「显示已归档」中查看。')) {
+              void onAction('archive')
+            }
+          }}
+          disabled={busy}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-amber-600/40 bg-amber-700/20 px-2.5 py-1.5 text-xs text-amber-200 transition-all hover:bg-amber-700/40 hover:text-amber-50 active:scale-95 disabled:opacity-50"
+        >
+          <Archive className="h-3.5 w-3.5" /> 归档
+        </button>
+      )}
+      {canUnarchive && (
+        <button
+          onClick={() => {
+            if (window.confirm('取消归档后，状态将变为「已中断」，可手动恢复运行。继续？')) {
+              void onAction('unarchive')
+            }
+          }}
+          disabled={busy}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-sky-600/40 bg-sky-700/20 px-2.5 py-1.5 text-xs text-sky-200 transition-all hover:bg-sky-700/40 hover:text-sky-50 active:scale-95 disabled:opacity-50"
+        >
+          <ArchiveRestore className="h-3.5 w-3.5" /> 取消归档
         </button>
       )}
     </div>

@@ -223,6 +223,21 @@ class StudyStore:
                     self._conn.execute(
                         f"ALTER TABLE study_rounds ADD COLUMN {_col} TEXT"
                     )
+            # Soft-delete (archive) metadata: retained on the row, only
+            # the default list query filters it out.
+            study_cols = [r[1] for r in self._conn.execute("PRAGMA table_info(studies)")]
+            for _col, _ddl in (
+                ("archived_at", "TEXT"),
+                ("archived_by", "TEXT"),
+            ):
+                if _col not in study_cols:
+                    self._conn.execute(
+                        f"ALTER TABLE studies ADD COLUMN {_col} {_ddl}"
+                    )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_studies_archived "
+                "ON studies(execution_status, archived_at)"
+            )
             # Release any implicit transaction (migration UPDATE above)
             # so other connections (GoalStore, same DB file) can write.
             self._conn.commit()
@@ -455,6 +470,64 @@ class StudyStore:
             )
 
     @synchronized
+    def archive_study(
+        self,
+        study_id: str,
+        *,
+        archived_by: str | None = None,
+    ) -> StudyRecord | None:
+        """Soft-archive: set status=ARCHIVED + archived_at/by metadata.
+
+        All data (rounds, directives, journal, etc.) is retained. The
+        default ``list_studies`` query hides archived rows; pass
+        ``include_archived=True`` to retrieve them. Returns the updated
+        record, or ``None`` if the study no longer exists.
+        """
+
+        now = now_iso()
+        with write_transaction(self._conn):
+            self._conn.execute(
+                "UPDATE studies SET "
+                "execution_status = ?, archived_at = ?, archived_by = ?, "
+                "updated_at = ?, heartbeat = ? "
+                "WHERE study_id = ?",
+                (
+                    StudyStatus.ARCHIVED.value,
+                    now,
+                    archived_by,
+                    now,
+                    now,
+                    study_id,
+                ),
+            )
+        row = self._conn.execute(
+            "SELECT * FROM studies WHERE study_id = ?", (study_id,)
+        ).fetchone()
+        return self._study_from_row(row) if row else None
+
+    @synchronized
+    def unarchive_study(self, study_id: str) -> StudyRecord | None:
+        """Revert an ARCHIVED row to INTERRUPTED + clear archive fields.
+
+        INTERRUPTED is the natural landing state — the user must then
+        ``RESUME_INTERRUPTED`` to actually re-queue the executor.
+        """
+
+        now = now_iso()
+        with write_transaction(self._conn):
+            self._conn.execute(
+                "UPDATE studies SET "
+                "execution_status = ?, archived_at = NULL, archived_by = NULL, "
+                "updated_at = ?, heartbeat = ? "
+                "WHERE study_id = ?",
+                (StudyStatus.INTERRUPTED.value, now, now, study_id),
+            )
+        row = self._conn.execute(
+            "SELECT * FROM studies WHERE study_id = ?", (study_id,)
+        ).fetchone()
+        return self._study_from_row(row) if row else None
+
+    @synchronized
     def delete_round(self, study_id: str, round_num: int) -> int:
         """Delete a round's DB row (redo: remove the discarded round)."""
         with write_transaction(self._conn):
@@ -513,12 +586,15 @@ class StudyStore:
         status: StudyStatus | None = None,
         limit: int = 100,
         before_created_at: str | None = None,
+        include_archived: bool = False,
     ) -> list[StudyRecord]:
         """List studies, optionally filtered by owner session; newest first.
 
         ``before_created_at`` enables keyset pagination (pass the
         ``created_at`` of the last row from the previous page to fetch
-        older studies).
+        older studies). ``include_archived=False`` (default) hides
+        soft-deleted studies; the detail page still works for archived
+        studies via direct id lookup.
         """
 
         query = "SELECT * FROM studies WHERE 1=1"
@@ -529,6 +605,9 @@ class StudyStore:
         if status:
             query += " AND execution_status = ?"
             params.append(status.value)
+        elif not include_archived:
+            query += " AND execution_status != ?"
+            params.append(StudyStatus.ARCHIVED.value)
         if before_created_at:
             query += " AND created_at < ?"
             params.append(before_created_at)
@@ -545,6 +624,7 @@ class StudyStore:
         status: StudyStatus | None = None,
         limit: int = 100,
         before_created_at: str | None = None,
+        include_archived: bool = False,
     ) -> list[StudyRecord]:
         """List studies owned by any of the given owner sessions (newest first).
 
@@ -560,6 +640,9 @@ class StudyStore:
         if status:
             query += " AND execution_status = ?"
             params.append(status.value)
+        elif not include_archived:
+            query += " AND execution_status != ?"
+            params.append(StudyStatus.ARCHIVED.value)
         if before_created_at:
             query += " AND created_at < ?"
             params.append(before_created_at)
@@ -982,4 +1065,6 @@ class StudyStore:
             monitor_interval_seconds=row["monitor_interval_seconds"],
             last_monitor_check_at=row["last_monitor_check_at"],
             monitor_drift_count=row["monitor_drift_count"] or 0,
+            archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
+            archived_by=row["archived_by"] if "archived_by" in row.keys() else None,
         )

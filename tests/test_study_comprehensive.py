@@ -1282,7 +1282,7 @@ class TestStudyStatusEnum:
         expected = {
             "queued", "running", "paused", "interrupted", "error",
             "complete", "cancelled", "budget_limited", "monitoring",
-            "needs_refresh", "early_stopped",
+            "needs_refresh", "early_stopped", "archived",
         }
         actual = {s.value for s in StudyStatus}
         assert actual == expected

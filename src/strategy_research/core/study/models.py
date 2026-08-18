@@ -34,6 +34,7 @@ class StudyStatus(str, Enum):
     MONITORING = "monitoring"   # Phase 3: post-completion periodic checks
     NEEDS_REFRESH = "needs_refresh"  # Phase 3: monitor drift detected
     EARLY_STOPPED = "early_stopped"  # AEGIS: 3+ idle rounds without improvement
+    ARCHIVED = "archived"  # Soft-delete marker: list filtered out by default; detail page still readable
 
 
 # Execution statuses that count as "active" — a session may have at
@@ -65,17 +66,50 @@ class StudyAction(str, Enum):
     CANCEL = "cancel"
     REDO = "redo"              # discard current round and restart from round N-1
     DIRECTIVE = "directive"    # inject a mid-execution research direction
+    ARCHIVE = "archive"        # soft-delete: hide from default list, detail still readable
+    UNARCHIVE = "unarchive"    # revert ARCHIVED -> INTERRUPTED (user can then resume)
+    REPLACE_OBJECTIVE = "replace_objective"  # mid-run objective update (next round takes effect)
 
 
 # status × allowed actions — the action matrix. Any status not listed
 # here has NO user actions (terminal states: complete / cancelled /
 # error / budget_limited / early_stopped / needs_refresh).
 ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
-    StudyStatus.QUEUED: frozenset({StudyAction.CANCEL}),
-    StudyStatus.RUNNING: frozenset({StudyAction.PAUSE, StudyAction.CANCEL}),
-    StudyStatus.PAUSED: frozenset({StudyAction.RESUME, StudyAction.CANCEL}),
-    StudyStatus.INTERRUPTED: frozenset({StudyAction.RESUME_INTERRUPTED}),
-    StudyStatus.MONITORING: frozenset({StudyAction.PAUSE, StudyAction.CANCEL}),
+    StudyStatus.QUEUED: frozenset({
+        StudyAction.CANCEL,
+        StudyAction.ARCHIVE,
+        StudyAction.REPLACE_OBJECTIVE,
+    }),
+    StudyStatus.RUNNING: frozenset({
+        StudyAction.PAUSE,
+        StudyAction.CANCEL,
+        StudyAction.ARCHIVE,
+        StudyAction.REPLACE_OBJECTIVE,
+    }),
+    StudyStatus.PAUSED: frozenset({
+        StudyAction.RESUME,
+        StudyAction.CANCEL,
+        StudyAction.ARCHIVE,
+        StudyAction.REPLACE_OBJECTIVE,
+    }),
+    StudyStatus.INTERRUPTED: frozenset({
+        StudyAction.RESUME_INTERRUPTED,
+        StudyAction.ARCHIVE,
+        StudyAction.REPLACE_OBJECTIVE,
+    }),
+    StudyStatus.MONITORING: frozenset({
+        StudyAction.PAUSE,
+        StudyAction.CANCEL,
+        StudyAction.ARCHIVE,
+        StudyAction.REPLACE_OBJECTIVE,
+    }),
+    StudyStatus.COMPLETE: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.CANCELLED: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.ERROR: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.BUDGET_LIMITED: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.NEEDS_REFRESH: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.EARLY_STOPPED: frozenset({StudyAction.ARCHIVE}),
+    StudyStatus.ARCHIVED: frozenset({StudyAction.UNARCHIVE}),
 }
 
 
@@ -146,6 +180,9 @@ class StudyRecord:
     monitor_interval_seconds: int | None = None  # None = no monitoring
     last_monitor_check_at: str | None = None
     monitor_drift_count: int = 0
+    # ── Soft-delete (archive): metadata only, all data retained ────
+    archived_at: str | None = None
+    archived_by: str | None = None
 
 
 @dataclass(frozen=True)

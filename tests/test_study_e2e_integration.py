@@ -131,7 +131,8 @@ class TestStateMachine:
         assert StudyAction.RESUME in ACTION_MATRIX[StudyStatus.PAUSED]
         assert StudyAction.CANCEL in ACTION_MATRIX[StudyStatus.PAUSED]
 
-    def test_terminal_states_no_actions(self):
+    def test_terminal_states_allow_archive_only(self):
+        # Phase 5+: terminal states expose only ARCHIVE (soft-delete).
         for status in [
             StudyStatus.COMPLETE,
             StudyStatus.CANCELLED,
@@ -139,7 +140,9 @@ class TestStateMachine:
             StudyStatus.BUDGET_LIMITED,
             StudyStatus.EARLY_STOPPED,
         ]:
-            assert len(ACTION_MATRIX.get(status, set())) == 0
+            assert ACTION_MATRIX.get(status, frozenset()) == frozenset(
+                {StudyAction.ARCHIVE}
+            ), status
 
 
 # ── Runner budget tests ──────────────────────────────────────────

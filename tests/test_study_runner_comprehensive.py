@@ -68,8 +68,13 @@ class TestStudyStatus:
         assert StudyStatus.RUNNING in ACTION_MATRIX
         assert StudyStatus.PAUSED in ACTION_MATRIX
 
-    def test_queued_can_only_cancel(self):
-        assert ACTION_MATRIX[StudyStatus.QUEUED] == {StudyAction.CANCEL}
+    def test_queued_can_cancel_archive_replace(self):
+        # QUEUED now exposes CANCEL + ARCHIVE + REPLACE_OBJECTIVE
+        assert ACTION_MATRIX[StudyStatus.QUEUED] == frozenset({
+            StudyAction.CANCEL,
+            StudyAction.ARCHIVE,
+            StudyAction.REPLACE_OBJECTIVE,
+        })
 
     def test_running_can_pause_or_cancel(self):
         assert StudyAction.PAUSE in ACTION_MATRIX[StudyStatus.RUNNING]

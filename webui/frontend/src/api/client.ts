@@ -202,7 +202,7 @@ class APIClient {
           (studyId ? `&study_id=${studyId}` : '')
       ),
 
-    list: (params: { session_id?: string; status?: string; limit?: number } = {}) =>
+    list: (params: { session_id?: string; status?: string; limit?: number; include_archived?: boolean } = {}) =>
       this.get<StudyListResponse>('/study/list' + qs(params)),
 
     pause: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/pause`),
@@ -255,10 +255,8 @@ class APIClient {
     availableActions: (studyId: string) =>
       this.get<StudyAvailableActionsResponse>(`/study/${studyId}/available_actions`),
 
-    dispatchAction: (studyId: string, name: string, reason?: string) =>
-      this.post<StudyActionResponse>(`/study/${studyId}/actions/${name}`, {
-        reason,
-      }),
+    dispatchAction: (studyId: string, name: string, body?: { reason?: string; archived_by?: string }) =>
+      this.post<StudyActionResponse>(`/study/${studyId}/actions/${name}`, body ?? {}),
 
     redoRound: (studyId: string, roundNum: number) =>
       this.post<StudyActionResponse>(`/study/${studyId}/rounds/${roundNum}/redo`),
@@ -644,6 +642,8 @@ export interface StudySummary {
   created_at?: string
   updated_at?: string
   completed_at?: string | null
+  archived_at?: string | null
+  archived_by?: string | null
 }
 
 export interface StudyControlResponse {
@@ -741,6 +741,8 @@ export interface StudySummaryResponse {
     last_check_at?: string | null
     interval_seconds?: number | null
   } | null
+  archived_at?: string | null
+  archived_by?: string | null
 }
 
 // ── Phase 3: round detail / artifacts / diff / adopt types ──────────
@@ -973,7 +975,7 @@ export interface WorkflowStatusResponse {
   }
 }
 
-function qs(params: Record<string, string | number | undefined>): string {
+function qs(params: Record<string, string | number | boolean | undefined>): string {
   const entries: string[] = []
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null) continue

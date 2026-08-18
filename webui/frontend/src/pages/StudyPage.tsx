@@ -30,18 +30,19 @@ export function StudyPage() {
   const [studies, setStudies] = useState<StudySummary[]>([])
   const [loadingList, setLoadingList] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [includeArchived, setIncludeArchived] = useState(false)
 
   const loadList = useCallback(async () => {
     setLoadingList(true)
     try {
-      const res = await api.study.list({ limit: 50 })
+      const res = await api.study.list({ limit: 50, include_archived: includeArchived })
       setStudies(res.studies ?? [])
     } catch {
       // Non-critical — history list can be empty
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [includeArchived])
 
   useEffect(() => {
     void loadList()
@@ -94,6 +95,9 @@ export function StudyPage() {
             loading={loadingList}
             onSelect={select}
             onRefresh={() => void loadList()}
+            includeArchived={includeArchived}
+            onToggleArchived={(v) => setIncludeArchived(v)}
+            onAction={() => void loadList()}
           />
         </section>
 

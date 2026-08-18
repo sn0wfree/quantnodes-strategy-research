@@ -51,6 +51,7 @@ _TERMINAL_STATUSES = frozenset({
     StudyStatus.BUDGET_LIMITED,
     StudyStatus.EARLY_STOPPED,
     StudyStatus.NEEDS_REFRESH,
+    StudyStatus.ARCHIVED,  # unarchive first, then resume_interrupted
 })
 
 
@@ -209,6 +210,67 @@ class StudyScheduler:
                 )
             except Exception:  # noqa: BLE001 — best-effort audit trail
                 pass
+        return True
+
+    def archive(
+        self,
+        study_id: str,
+        *,
+        archived_by: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        """Soft-archive a study.
+
+        1. If a runner is active, request cancel first so the executor
+           doesn't write a row while the status flips to ARCHIVED.
+        2. Persist ARCHIVED + archived_at / archived_by via the store.
+        3. Emit ``study_archived`` so the UI can refresh.
+        Returns True when the DB row was successfully flipped.
+        """
+
+        study = self.store.get_study(study_id)
+        if study is None:
+            return False
+        if study.execution_status == StudyStatus.ARCHIVED:
+            return False  # already archived — caller should treat as 409
+
+        # If a runner is active, signal cancel before the status flip.
+        tok = self._control_tokens.get(study_id)
+        if tok is not None:
+            tok.cancelled = True
+
+        updated = self.store.archive_study(study_id, archived_by=archived_by)
+        if updated is None:
+            return False
+
+        self._emit_event(study.session_id, "study_archived", {
+            "study_id": study_id,
+            "archived_by": archived_by,
+            "reason": reason,
+            "previous_status": study.execution_status.value,
+        })
+        return True
+
+    def unarchive(self, study_id: str) -> bool:
+        """Revert ARCHIVED -> INTERRUPTED + emit study_unarchived.
+
+        INTERRUPTED is the natural landing state — the user must then
+        ``RESUME_INTERRUPTED`` to actually re-queue the executor.
+        """
+
+        study = self.store.get_study(study_id)
+        if study is None:
+            return False
+        if study.execution_status != StudyStatus.ARCHIVED:
+            return False
+
+        updated = self.store.unarchive_study(study_id)
+        if updated is None:
+            return False
+
+        self._emit_event(study.session_id, "study_unarchived", {
+            "study_id": study_id,
+        })
         return True
 
     async def redo(

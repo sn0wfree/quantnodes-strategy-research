@@ -67,6 +67,8 @@ class StudyListItem(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     completed_at: Optional[str] = None
+    archived_at: Optional[str] = None
+    archived_by: Optional[str] = None
 
 
 # ── goal snapshot (flattened, not the raw GoalStore shape) ─────────
@@ -136,6 +138,8 @@ class StudySummaryResponse(BaseModel):
     last_verdict: Optional[str] = None
     last_error: Optional[str] = None
     last_traceback: Optional[str] = None
+    archived_at: Optional[str] = None
+    archived_by: Optional[str] = None
     recent_rounds: list[StudyRoundModel] = Field(default_factory=list)
     scoreboard: list = Field(default_factory=list)
     goal_snapshot: Optional[GoalSnapshotModel] = None
@@ -299,6 +303,7 @@ class StudyAvailableActionsResponse(BaseModel):
 class StudyActionRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=512)
     round_num: Optional[int] = Field(None, ge=1)
+    archived_by: Optional[str] = Field(None, max_length=128)
 
 
 class StudyRedoRequest(BaseModel):

@@ -4,6 +4,7 @@ import { ArrowRight, Clock, FolderOpen, Target, User, ExternalLink } from 'lucid
 import { api, type StudySummaryResponse } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { MetricsCompare } from './MetricsCompare'
+import { StudyActionMenu } from './StudyActionMenu'
 import { EmptyState } from '../common/EmptyState'
 
 interface Props {
@@ -88,14 +89,29 @@ export function StudyTaskSummary({ studyId }: Props) {
           任务摘要
         </h2>
         {summary && (
-          <Link
-            to={`/study/${summary.study_id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-[10px] font-medium text-primary-300 transition-colors hover:bg-primary-500/20 hover:text-primary-200"
-          >
-            <ExternalLink className="h-3 w-3" />
-            查看详情
-          </Link>
+          <div className="flex items-center gap-1">
+            <StudyActionMenu
+              study={summary}
+              onAction={async (action) => {
+                if (action === 'archive' && !window.confirm('确定归档此研究？归档后默认列表不再显示。')) return
+                if (action === 'unarchive' && !window.confirm('取消归档后状态将变为「已中断」，可手动恢复。继续？')) return
+                try {
+                  await api.study.dispatchAction(summary.study_id, action)
+                  void load()
+                } catch (err) {
+                  setError((err as Error).message)
+                }
+              }}
+            />
+            <Link
+              to={`/study/${summary.study_id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-[10px] font-medium text-primary-300 transition-colors hover:bg-primary-500/20 hover:text-primary-200"
+            >
+              <ExternalLink className="h-3 w-3" />
+              查看详情
+            </Link>
+          </div>
         )}
       </div>
 

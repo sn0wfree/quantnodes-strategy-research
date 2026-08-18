@@ -22,6 +22,11 @@ from strategy_research.core.study.models import (
 )
 
 
+def _force_status(store, study_id: str, status: StudyStatus) -> None:
+    """Helper: directly set execution_status (test-only shortcut)."""
+    store.update_execution_status(study_id, status)
+
+
 def _bearer(user_id: str = "tester") -> dict:
     from strategy_research.api.auth_tokens import create_token
 
@@ -91,15 +96,23 @@ class TestActionMatrix:
         assert StudyAction.RESUME in acts
         assert StudyAction.CANCEL in acts
 
-    def test_interrupted_allows_only_resume_interrupted(self):
+    def test_interrupted_allows_resume_archive_replace(self):
         acts = allowed_actions(StudyStatus.INTERRUPTED)
-        assert acts == frozenset({StudyAction.RESUME_INTERRUPTED})
+        # INTERRUPTED now also allows ARCHIVE + REPLACE_OBJECTIVE
+        # (still no PAUSE / RESUME — those are for active runners).
+        assert StudyAction.RESUME_INTERRUPTED in acts
+        assert StudyAction.ARCHIVE in acts
+        assert StudyAction.REPLACE_OBJECTIVE in acts
+        assert StudyAction.PAUSE not in acts
+        assert StudyAction.CANCEL not in acts
 
-    def test_terminal_statuses_have_no_actions(self):
+    def test_terminal_statuses_allow_archive_only(self):
         for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED,
                    StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
                    StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
-            assert allowed_actions(st) == frozenset(), st
+            acts = allowed_actions(st)
+            # soft-delete: ARCHIVE allowed in every terminal state
+            assert acts == frozenset({StudyAction.ARCHIVE}), st
 
 
 # ── HTTP: available_actions + dispatch ───────────────────────────────
@@ -119,8 +132,17 @@ async def test_available_actions_matches_matrix(_env):
         body = r.json()
         assert body["execution_status"] == StudyStatus.QUEUED.value
         names = {a["name"] for a in body["actions"]}
-        assert names == {StudyAction.CANCEL.value}
-        assert body["actions"][0]["destructive"] is True
+        # QUEUED now: CANCEL + ARCHIVE + REPLACE_OBJECTIVE
+        assert names == {
+            StudyAction.CANCEL.value,
+            StudyAction.ARCHIVE.value,
+            StudyAction.REPLACE_OBJECTIVE.value,
+        }
+        # CANCEL + ARCHIVE are destructive; REPLACE_OBJECTIVE is not
+        action_map = {a["name"]: a for a in body["actions"]}
+        assert action_map[StudyAction.CANCEL.value]["destructive"] is True
+        assert action_map[StudyAction.ARCHIVE.value]["destructive"] is True
+        assert action_map[StudyAction.REPLACE_OBJECTIVE.value]["destructive"] is False
 
 
 @pytest.mark.asyncio
@@ -492,3 +514,209 @@ def test_idor_empty_owner_denied_for_named_user(tmp_path, monkeypatch):
     # owner session doesn't exist for alice → 404 (session not found) or 403.
     r = client.get(f"/api/study/{rec.study_id}/summary")
     assert r.status_code in (403, 404)
+
+
+# ── archive / unarchive (A1: soft-delete) ────────────────────────────
+
+
+class TestArchiveActionMatrix:
+    """ARCHIVED status + ARCHIVE/UNARCHIVE action wiring."""
+
+    def test_archived_status_present(self):
+        assert StudyStatus.ARCHIVED.value == "archived"
+
+    def test_archive_action_present(self):
+        assert StudyAction.ARCHIVE.value == "archive"
+        assert StudyAction.UNARCHIVE.value == "unarchive"
+
+    def test_running_allows_archive(self):
+        acts = allowed_actions(StudyStatus.RUNNING)
+        assert StudyAction.ARCHIVE in acts
+        assert StudyAction.PAUSE in acts
+
+    def test_paused_allows_archive(self):
+        acts = allowed_actions(StudyStatus.PAUSED)
+        assert StudyAction.ARCHIVE in acts
+
+    def test_terminal_statuses_allow_archive(self):
+        for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED,
+                   StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
+                   StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
+            assert StudyAction.ARCHIVE in allowed_actions(st), st
+
+    def test_archived_allows_only_unarchive(self):
+        acts = allowed_actions(StudyStatus.ARCHIVED)
+        assert acts == frozenset({StudyAction.UNARCHIVE})
+
+
+def test_store_archive_sets_status_and_metadata(tmp_path, monkeypatch):
+    """store.archive_study sets ARCHIVED + archived_at/archived_by."""
+    from strategy_research.core.study import StudyStore
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="sess-archive", goal_id=None,
+        objective="archive test", workspace_path=str(tmp_path),
+        strategy_name="demo",
+    )
+    updated = store.archive_study(rec.study_id, archived_by="tester")
+    assert updated is not None
+    assert updated.execution_status == StudyStatus.ARCHIVED
+    assert updated.archived_at is not None
+    assert updated.archived_by == "tester"
+
+    # detail read still works
+    again = store.get_study(rec.study_id)
+    assert again is not None
+    assert again.execution_status == StudyStatus.ARCHIVED
+
+
+def test_store_unarchive_clears_metadata_and_sets_interrupted(tmp_path, monkeypatch):
+    """store.unarchive_study reverts ARCHIVED -> INTERRUPTED + clears archive fields."""
+    from strategy_research.core.study import StudyStore
+
+    store = StudyStore()
+    rec = store.create_study(
+        owner_session_id="sess-unarchive", goal_id=None,
+        objective="unarchive test", workspace_path=str(tmp_path),
+        strategy_name="demo",
+    )
+    store.archive_study(rec.study_id, archived_by="tester")
+    reverted = store.unarchive_study(rec.study_id)
+    assert reverted is not None
+    assert reverted.execution_status == StudyStatus.INTERRUPTED
+    assert reverted.archived_at is None
+    assert reverted.archived_by is None
+
+
+def test_list_studies_excludes_archived_by_default(tmp_path, monkeypatch):
+    """list_studies() default behavior: ARCHIVED rows are hidden."""
+    from strategy_research.core.study import StudyStore
+
+    store = StudyStore()
+    visible = store.create_study(
+        owner_session_id="sess-list", goal_id=None,
+        objective="visible", workspace_path=str(tmp_path),
+        strategy_name="demo",
+    )
+    hidden = store.create_study(
+        owner_session_id="sess-list", goal_id=None,
+        objective="to be archived", workspace_path=str(tmp_path),
+        strategy_name="demo",
+    )
+    store.archive_study(hidden.study_id)
+
+    rows = store.list_studies(session_id="sess-list")
+    ids = {r.study_id for r in rows}
+    assert visible.study_id in ids
+    assert hidden.study_id not in ids
+
+    rows_all = store.list_studies(session_id="sess-list", include_archived=True)
+    ids_all = {r.study_id for r in rows_all}
+    assert hidden.study_id in ids_all
+    assert visible.study_id in ids_all
+
+
+@pytest.mark.asyncio
+async def test_available_actions_includes_archive(_env):
+    """HTTP: GET /available_actions surfaces archive for COMPLETE."""
+    study_id, _ = _env
+    from strategy_research.core.study import StudyStore
+    with StudyStore() as store:
+        store.archive_study(study_id)  # already archived
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.get(f"/api/study/{study_id}/available_actions")
+        assert r.status_code == 200
+        names = {a["name"] for a in r.json()["actions"]}
+        # ARCHIVED only allows UNARCHIVE
+        assert names == {StudyAction.UNARCHIVE.value}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_archive_then_unarchive(_env):
+    """End-to-end: POST archive → 200, POST unarchive → 200."""
+    study_id, _ = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        # Archive
+        r1 = await client.post(f"/api/study/{study_id}/actions/archive")
+        assert r1.status_code == 200
+        body1 = r1.json()
+        assert body1["action"] == "archived"
+        assert body1["study_id"] == study_id
+
+        # Verify status persisted
+        r2 = await client.get(f"/api/study/{study_id}/available_actions")
+        assert r2.status_code == 200
+        names = {a["name"] for a in r2.json()["actions"]}
+        assert names == {StudyAction.UNARCHIVE.value}
+
+        # Unarchive
+        r3 = await client.post(f"/api/study/{study_id}/actions/unarchive")
+        assert r3.status_code == 200
+        assert r3.json()["action"] == "unarchived"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_archive_twice_returns_409(_env):
+    """Re-archiving an already-archived study returns 409 (scheduler.archive returns False)."""
+    study_id, _ = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r1 = await client.post(f"/api/study/{study_id}/actions/archive")
+        assert r1.status_code == 200
+        r2 = await client.post(f"/api/study/{study_id}/actions/archive")
+        assert r2.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_dispatch_unarchive_non_archived_returns_409(_env):
+    """Unarchive on a non-archived study returns 409."""
+    study_id, _ = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        r = await client.post(f"/api/study/{study_id}/actions/unarchive")
+        assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_list_endpoint_hides_archived_by_default(_env):
+    """HTTP: GET /list hides ARCHIVED unless include_archived=true."""
+    study_id, _ = _env
+    app = _build_asgi_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=_bearer(),
+    ) as client:
+        # Archive
+        await client.post(f"/api/study/{study_id}/actions/archive")
+
+        # Default list
+        r1 = await client.get("/api/study/list")
+        assert r1.status_code == 200
+        ids = {s["study_id"] for s in r1.json()["studies"]}
+        assert study_id not in ids
+
+        # Include archived
+        r2 = await client.get("/api/study/list?include_archived=true")
+        assert r2.status_code == 200
+        ids_all = {s["study_id"] for s in r2.json()["studies"]}
+        assert study_id in ids_all

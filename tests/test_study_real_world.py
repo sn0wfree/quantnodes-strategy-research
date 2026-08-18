@@ -270,9 +270,9 @@ class TestStateTransitions:
         from strategy_research.core.study.models import StudyStatus, StudyAction, ACTION_MATRIX
         assert StudyAction.RESUME in ACTION_MATRIX[StudyStatus.PAUSED]
 
-    def test_terminal_states_no_actions(self):
-        """Terminal states should have no allowed actions."""
-        from strategy_research.core.study.models import StudyStatus, ACTION_MATRIX
+    def test_terminal_states_allow_archive_only(self):
+        """Terminal states only expose ARCHIVE (soft-delete)."""
+        from strategy_research.core.study.models import StudyStatus, StudyAction, ACTION_MATRIX
         for status in [
             StudyStatus.COMPLETE,
             StudyStatus.CANCELLED,
@@ -280,7 +280,9 @@ class TestStateTransitions:
             StudyStatus.BUDGET_LIMITED,
             StudyStatus.EARLY_STOPPED,
         ]:
-            assert len(ACTION_MATRIX.get(status, set())) == 0
+            assert ACTION_MATRIX.get(status, frozenset()) == frozenset(
+                {StudyAction.ARCHIVE}
+            ), status
 
 
 # ── Goal completion test ─────────────────────────────────────────

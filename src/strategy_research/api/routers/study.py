@@ -351,12 +351,15 @@ async def study_list(
     status: Optional[str] = None,
     limit: int = 50,
     before_created_at: Optional[str] = None,
+    include_archived: bool = False,
 ):
     """List studies, optionally filtered by session/status.
 
     When session_id is provided, enforces ownership (IDOR).
     ``before_created_at`` enables keyset pagination: pass the
     ``created_at`` of the last row from the previous page.
+    ``include_archived=False`` (default) hides soft-deleted studies;
+    pass True to surface them in the dedicated UI toggle.
     """
     if session_id:
         # Security: only allow listing studies for sessions the caller
@@ -374,6 +377,7 @@ async def study_list(
             rows = store.list_studies(
                 session_id=session_id, status=status_enum,
                 limit=limit, before_created_at=before_created_at,
+                include_archived=include_archived,
             )
         else:
             # No session filter: scope to the caller's own sessions (IDOR).
@@ -383,6 +387,7 @@ async def study_list(
                 rows = store.list_studies(
                     session_id=None, status=status_enum,
                     limit=limit, before_created_at=before_created_at,
+                    include_archived=include_archived,
                 )
             else:
                 user_id = getattr(request.state, "user_id", None) or "anonymous"
@@ -390,6 +395,7 @@ async def study_list(
                 rows = store.list_studies_for_owner_sessions(
                     owner_sids, status=status_enum,
                     limit=limit, before_created_at=before_created_at,
+                    include_archived=include_archived,
                 )
     def _shape(r):
         return {
@@ -403,6 +409,8 @@ async def study_list(
             "last_error": r.last_error,
             "created_at": r.created_at, "updated_at": r.updated_at,
             "completed_at": r.completed_at,
+            "archived_at": r.archived_at,
+            "archived_by": r.archived_by,
         }
     # Keyset cursor: expose the last row's created_at so the client can
     # fetch older pages (None when the page is exhausted).
@@ -552,6 +560,8 @@ async def study_summary(request: Request, study_id: str):
         "last_verdict": study.last_verdict,
         "last_error": study.last_error,
         "last_traceback": study.last_traceback,
+        "archived_at": study.archived_at,
+        "archived_by": study.archived_by,
         "recent_rounds": [_serialize_round(r) for r in recent_rounds],
         "scoreboard": scoreboard,
         "goal_snapshot": _snapshot(goal_snapshot),
@@ -1069,8 +1079,11 @@ _ACTION_META: dict[str, dict] = {
     "pause": {"label": "暂停", "destructive": False},
     "resume": {"label": "恢复", "destructive": False},
     "resume_interrupted": {"label": "恢复（重新排队）", "destructive": False},
-    "cancel": {"label": "取消", "destructive": True},
+    "cancel": {"label": "中止", "destructive": True},
     "redo": {"label": "重跑本轮", "destructive": True},
+    "archive": {"label": "归档", "destructive": True},
+    "unarchive": {"label": "取消归档", "destructive": False},
+    "replace_objective": {"label": "修改目标", "destructive": False},
 }
 
 
@@ -1146,6 +1159,15 @@ async def study_dispatch_action(
         if not sched.cancel(study_id, reason=reason):
             raise HTTPException(status_code=409, detail="study not cancellable")
         return {"status": "ok", "study_id": study_id, "action": "cancelled"}
+    if act == StudyAction.ARCHIVE:
+        archived_by = body.archived_by if body else None
+        if not sched.archive(study_id, archived_by=archived_by, reason=reason):
+            raise HTTPException(status_code=409, detail="study not archivable (already archived?)")
+        return {"status": "ok", "study_id": study_id, "action": "archived"}
+    if act == StudyAction.UNARCHIVE:
+        if not sched.unarchive(study_id):
+            raise HTTPException(status_code=409, detail="study not archived")
+        return {"status": "ok", "study_id": study_id, "action": "unarchived"}
     if act == StudyAction.REDO:
         round_num = body.round_num if body and body.round_num else study.current_round
         if study.execution_status == StudyStatus.RUNNING:
