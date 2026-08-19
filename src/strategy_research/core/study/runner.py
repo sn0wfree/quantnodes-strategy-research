@@ -276,6 +276,21 @@ class AutoresearchRunner:
         self._study_cache = None
         self._study_cache_ts = 0.0
 
+    def _current_db_status(self) -> StudyStatus | None:
+        """Bypass the 5s study cache to read the freshest execution_status.
+
+        Used by the cancel / exception / monitor exit paths so a runner
+        that observes ``control.cancelled`` (or raises) does NOT
+        overwrite a status another actor (typically ``scheduler.archive``)
+        has since persisted (e.g. ARCHIVED). Returns ``None`` if the row
+        vanished (defensive — caller treats as 'fall through to default').
+        """
+        try:
+            fresh = self.study_store.get_study(self.study_id)
+        except Exception:  # noqa: BLE001 — best-effort live read
+            return None
+        return fresh.execution_status if fresh else None
+
     # ── public entrypoint ───────────────────────────────────────────
 
     async def run(self) -> str:
@@ -311,11 +326,22 @@ class AutoresearchRunner:
             _dlog("runner", "run() FAILED: study=%s error=%s", sid, exc)
             logger.exception("study %s failed: %s", sid, exc)
             tb = traceback.format_exc()
-            self.study_store.update_execution_status(
-                sid, StudyStatus.ERROR,
-                last_error=f"{type(exc).__name__}: {exc}"[:500],
-                last_traceback=tb[:8000],
-            )
+            # Honour any status another actor (e.g. scheduler.archive)
+            # may have persisted while the round was in flight — don't
+            # overwrite ARCHIVED with ERROR.
+            live_status = self._current_db_status()
+            if live_status == StudyStatus.ARCHIVED:
+                _dlog(
+                    "runner",
+                    "run() exception suppressed: study=%s is ARCHIVED",
+                    sid,
+                )
+            else:
+                self.study_store.update_execution_status(
+                    sid, StudyStatus.ERROR,
+                    last_error=f"{type(exc).__name__}: {exc}"[:500],
+                    last_traceback=tb[:8000],
+                )
             self._emit(session, "study_failed", {"study_id": sid, "error": f"{type(exc).__name__}: {exc}"[:500], "reason": ShutdownReason.ERROR})
         finally:
             if self._own_goal_store:
@@ -427,6 +453,16 @@ class AutoresearchRunner:
 
         while True:
             if self.control.cancelled:
+                # Honour any status another actor (e.g. scheduler.archive)
+                # may have persisted while this iteration was in flight —
+                # never overwrite an ARCHIVED row with CANCELLED.
+                live_status = self._current_db_status()
+                if live_status == StudyStatus.ARCHIVED:
+                    self._emit(session, "study_cancelled", {
+                        "study_id": sid,
+                        "note": f"preserved live status={live_status.value}",
+                    })
+                    return ShutdownReason.CANCELLED
                 self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
                 self._emit(session, "study_cancelled", {"study_id": sid})
                 return ShutdownReason.CANCELLED
@@ -563,6 +599,16 @@ class AutoresearchRunner:
         _dlog("monitor", "monitoring started study=%s interval=%ss", sid, interval)
         while True:
             if self.control.cancelled:
+                # Honour any status another actor (e.g. scheduler.archive)
+                # may have persisted while this iteration was in flight —
+                # never overwrite an ARCHIVED row with CANCELLED.
+                live_status = self._current_db_status()
+                if live_status == StudyStatus.ARCHIVED:
+                    self._emit(session, "study_cancelled", {
+                        "study_id": sid,
+                        "note": f"preserved live status={live_status.value}",
+                    })
+                    return ShutdownReason.CANCELLED
                 self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
                 self._emit(session, "study_cancelled", {"study_id": sid})
                 return ShutdownReason.CANCELLED
