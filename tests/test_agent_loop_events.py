@@ -1,15 +1,21 @@
 """Tests for AgentLoop event vocabulary (Stage 1).
 
 Verifies that the event bus emits the expected types and payloads after
-the vibe-trading-inspired expansion.  Each test captures all events
+the vibe-trading-inspired expansion. Each test captures all events
 emitted during a single run and asserts on their structure.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import pytest
+
 from strategy_research.core.agent.loop import AgentLoop
+from strategy_research.core.agent.tools import BaseTool, ToolRegistry
+from strategy_research.core.llm import LLMConfig, LLMResponse, ToolCall
 
 
 class EventSink:
@@ -28,43 +34,77 @@ class EventSink:
         return [d for et, d in self.events if et == t]
 
 
-def _make_loop(sink: EventSink, *, max_iterations: int = 1) -> AgentLoop:
+class _ReadTool(BaseTool):
+    """Minimal read tool returning a fixed string."""
+
+    name = "read"
+    description = "read a file"
+    parameters = {"type": "object", "properties": {"path": {"type": "string"}}}
+
+    def __init__(self, output: str = "ok") -> None:
+        super().__init__()
+        self._output = output
+
+    def execute(self, **kwargs) -> str:
+        return self._output
+
+
+class _BrokenTool(BaseTool):
+    """Tool that returns a JSON error marker (loop translates to status='error')."""
+
+    name = "broken"
+    description = "always errors"
+    parameters = {"type": "object", "properties": {}}
+
+    def execute(self, **kwargs) -> str:
+        return json.dumps({"status": "error", "error": "boom"})
+
+
+def _make_loop(
+    sink: EventSink,
+    *,
+    registry: ToolRegistry | None = None,
+    workspace: Path | None = None,
+    max_iterations: int = 1,
+) -> AgentLoop:
     """Construct a minimal AgentLoop with a captured event sink."""
-    from strategy_research.core.llm import LLMConfig
     cfg = LLMConfig(api_key="sk-test", model="fake-model", temperature=0.7)
-    registry = mock.MagicMock()
-    memory = mock.MagicMock()
-    memory.history = []
     return AgentLoop(
         stream_mode=False,
         config=cfg,
-        registry=registry,
-        memory=memory,
-        workspace=None,
+        registry=registry or ToolRegistry(),
+        workspace=workspace,
         on_event=sink,
         max_iterations=max_iterations,
     )
 
 
+def _text_resp(content: str) -> LLMResponse:
+    return LLMResponse(content=content, tool_calls=[], finish_reason="stop")
+
+
+def _tool_resp(name: str, arguments: dict, call_id: str = "c1") -> LLMResponse:
+    return LLMResponse(
+        content="",
+        tool_calls=[ToolCall(id=call_id, name=name, arguments=arguments)],
+        finish_reason="tool_calls",
+    )
+
+
 class TestIterLifecycle:
     def test_iter_start_and_end_emit(self):
-        """Each iteration emits iter_start and iter_end with iteration + reason."""
-        loop = _make_loop(EventSink(), max_iterations=3)
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
-        # Stub the LLM call to return a 'stop' response immediately
-        resp = mock.MagicMock()
-        resp.content = "answer"
-        resp.finish_reason = "stop"
-        resp.has_tool_calls = lambda: False
-        resp.tool_calls = []
+        sink = EventSink()
+        loop = _make_loop(sink, max_iterations=3)
+
+        def fake_chat(messages, **kwargs):
+            return _text_resp("answer")
+
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(return_value=resp)
+        loop.client.chat = fake_chat
         loop.run('hello')
 
-        events = loop._on_event.events
-        iter_starts = [d for et, d in events if et == "iter_start"]
-        iter_ends = [d for et, d in events if et == "iter_end"]
+        iter_starts = [d for et, d in sink.events if et == "iter_start"]
+        iter_ends = [d for et, d in sink.events if et == "iter_end"]
 
         assert len(iter_starts) == 1
         assert iter_starts[0]["iteration"] == 1
@@ -80,39 +120,23 @@ class TestToolEventPayload:
     def test_tool_call_has_arguments_and_iter(self):
         """tool_call emits {tool, arguments, call_id, iter}; 'args' is dropped."""
         sink = EventSink()
-        loop = _make_loop(sink)
-        # Pretend the LLM requested one tool call then stops
-        tc = mock.MagicMock()
-        tc.id = "call_abc"
-        tc.name = "read"
-        tc.arguments = {"path": "/x.py"}
-        resp_tool = mock.MagicMock()
-        resp_tool.content = ""
-        resp_tool.finish_reason = "tool_calls"
-        resp_tool.has_tool_calls = lambda: True
-        resp_tool.tool_calls = [tc]
-        resp_stop = mock.MagicMock()
-        resp_stop.content = "ok"
-        resp_stop.finish_reason = "stop"
-        resp_stop.has_tool_calls = lambda: False
-        resp_stop.tool_calls = []
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
+        reg = ToolRegistry()
+        reg.register(_ReadTool())
+        loop = _make_loop(sink, registry=reg)
+
+        responses = [
+            _tool_resp("read", {"path": "/x.py"}, call_id="call_abc"),
+            _text_resp("ok"),
+        ]
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
-
-        # Register a fake tool so tool_call is emitted
-        fake_tool = mock.MagicMock()
-        fake_tool.invoke = mock.MagicMock(return_value="ok")
-        loop.registry.get = mock.MagicMock(return_value=fake_tool)
-
+        loop.client.chat = mock.MagicMock(side_effect=lambda *a, **kw: responses.pop(0))
         loop.run("do something")
 
         tool_calls = [d for et, d in sink.events if et == "tool_call"]
         assert len(tool_calls) == 1
         tc_payload = tool_calls[0]
         assert tc_payload["tool"] == "read"
-        # arguments is serialized to a JSON string (loop.py json.dumps it)
+        # arguments is serialized to a JSON string
         assert tc_payload["arguments"] == '{"path": "/x.py"}'
         assert tc_payload["call_id"] == "call_abc"
         assert tc_payload["iter"] == 1
@@ -122,41 +146,21 @@ class TestToolEventPayload:
     def test_tool_result_has_status_preview_and_ok_compat(self):
         """tool_result emits {status, preview, ok (compat), elapsed_ms}."""
         sink = EventSink()
-        loop = _make_loop(sink)
+        reg = ToolRegistry()
+        reg.register(_ReadTool(output="output preview text"))
+        loop = _make_loop(sink, registry=reg)
 
-        tc = mock.MagicMock()
-        tc.id = "call_xyz"
-        tc.name = "echo"
-        tc.arguments = {"text": "hi"}
-
-        resp_tool = mock.MagicMock()
-        resp_tool.content = ""
-        resp_tool.finish_reason = "tool_calls"
-        resp_tool.has_tool_calls = lambda: True
-        resp_tool.tool_calls = [tc]
-        resp_stop = mock.MagicMock()
-        resp_stop.content = "ok"
-        resp_stop.finish_reason = "stop"
-        resp_stop.has_tool_calls = lambda: False
-        resp_stop.tool_calls = []
-
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
+        responses = [
+            _tool_resp("read", {"text": "hi"}, call_id="call_xyz"),
+            _text_resp("ok"),
+        ]
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
-
-        # Fake tool that returns plain text
-        fake_tool = mock.MagicMock()
-        fake_tool.invoke = mock.MagicMock(return_value="output preview text")
-        loop.registry.get = mock.MagicMock(return_value=fake_tool)
-
+        loop.client.chat = mock.MagicMock(side_effect=lambda *a, **kw: responses.pop(0))
         loop.run("do something")
 
         results = [d for et, d in sink.events if et == "tool_result"]
         assert len(results) == 1
         payload = results[0]
-        # status value changed from "ok" to "done" (loop.py), ok stays as
-        # boolean compat key
         assert payload["status"] == "done"
         assert payload["ok"] is True  # backward compat
         assert "elapsed_ms" in payload
@@ -164,36 +168,16 @@ class TestToolEventPayload:
 
     def test_tool_result_error_status(self):
         sink = EventSink()
-        loop = _make_loop(sink)
+        reg = ToolRegistry()
+        reg.register(_BrokenTool())
+        loop = _make_loop(sink, registry=reg)
 
-        tc = mock.MagicMock()
-        tc.id = "c1"
-        tc.name = "broken"
-        tc.arguments = {}
-
-        resp_tool = mock.MagicMock()
-        resp_tool.content = ""
-        resp_tool.finish_reason = "tool_calls"
-        resp_tool.has_tool_calls = lambda: True
-        resp_tool.tool_calls = [tc]
-        resp_stop = mock.MagicMock()
-        resp_stop.content = "ok"
-        resp_stop.finish_reason = "stop"
-        resp_stop.has_tool_calls = lambda: False
-        resp_stop.tool_calls = []
-
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
+        responses = [
+            _tool_resp("broken", {}),
+            _text_resp("ok"),
+        ]
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
-
-        fake_tool = mock.MagicMock()
-        # Tool returns a JSON error string starting with the marker
-        fake_tool.invoke = mock.MagicMock(
-            return_value='{"status": "error", "error": "boom"}'
-        )
-        loop.registry.get = mock.MagicMock(return_value=fake_tool)
-
+        loop.client.chat = mock.MagicMock(side_effect=lambda *a, **kw: responses.pop(0))
         loop.run("do something")
 
         results = [d for et, d in sink.events if et == "tool_result"]
@@ -216,21 +200,16 @@ class TestThinkingDone:
             yield StreamChunk(delta_content="lo", finish_reason="stop")
 
         loop._stream_mode = True
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
         loop.client = mock.MagicMock()
         loop.client.stream = fake_stream
 
         loop.run("hi")
 
         events = sink.types()
-        # Order: thinking_start → thinking_done → text_delta × N → thinking_end
         assert "thinking_start" in events
         assert "thinking_done" in events
         assert "thinking_end" in events
         assert "text_delta" in events
-        # thinking_done marks the transition from thinking to text,
-        # so it must come after thinking_start, before first text_delta,
-        # and before thinking_end.
         start_idx = events.index("thinking_start")
         done_idx = events.index("thinking_done")
         first_delta = events.index("text_delta")
@@ -249,17 +228,9 @@ class TestCompactEvent:
         loop._maybe_compact = mock.MagicMock(
             return_value=(real_messages, ["microcompact", "context_collapse"])
         )
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
 
-        # Stub chat to return stop immediately
-        resp = mock.MagicMock()
-        resp.content = "ok"
-        resp.finish_reason = "stop"
-        resp.has_tool_calls = lambda: False
-        resp.tool_calls = []
-        loop._stream_mode = False
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(return_value=resp)
+        loop.client.chat = mock.MagicMock(return_value=_text_resp("ok"))
 
         loop.run("hi")
 
@@ -300,9 +271,6 @@ class TestErrorEvent:
 
         from strategy_research.core.llm.errors import LLMRateLimitError
 
-        mock.MagicMock()
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
         loop.client = mock.MagicMock()
         loop.client.chat = mock.MagicMock(side_effect=LLMRateLimitError("rate"))
 
@@ -318,33 +286,16 @@ class TestBackwardCompat:
     def test_old_args_key_no_longer_in_tool_call(self):
         """The legacy 'args' key must be absent so downstream code can rely on 'arguments'."""
         sink = EventSink()
-        loop = _make_loop(sink)
+        reg = ToolRegistry()
+        reg.register(_ReadTool())
+        loop = _make_loop(sink, registry=reg)
 
-        tc = mock.MagicMock()
-        tc.id = "x"
-        tc.name = "t"
-        tc.arguments = {"k": "v"}
-
-        resp_tool = mock.MagicMock()
-        resp_tool.content = ""
-        resp_tool.finish_reason = "tool_calls"
-        resp_tool.has_tool_calls = lambda: True
-        resp_tool.tool_calls = [tc]
-        resp_stop = mock.MagicMock()
-        resp_stop.content = "ok"
-        resp_stop.finish_reason = "stop"
-        resp_stop.has_tool_calls = lambda: False
-        resp_stop.tool_calls = []
-
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
+        responses = [
+            _tool_resp("read", {"k": "v"}),
+            _text_resp("ok"),
+        ]
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
-
-        fake_tool = mock.MagicMock()
-        fake_tool.invoke = mock.MagicMock(return_value="ok")
-        loop.registry.get = mock.MagicMock(return_value=fake_tool)
-
+        loop.client.chat = mock.MagicMock(side_effect=lambda *a, **kw: responses.pop(0))
         loop.run("hi")
 
         tc_payload = sink.of_type("tool_call")[0]
@@ -354,32 +305,16 @@ class TestBackwardCompat:
     def test_old_ok_key_still_present_in_tool_result(self):
         """The legacy 'ok' key remains in tool_result for backward compat."""
         sink = EventSink()
-        loop = _make_loop(sink)
+        reg = ToolRegistry()
+        reg.register(_ReadTool())
+        loop = _make_loop(sink, registry=reg)
 
-        tc = mock.MagicMock()
-        tc.id = "x"
-        tc.name = "t"
-        tc.arguments = {}
-
-        resp_tool = mock.MagicMock()
-        resp_tool.content = ""
-        resp_tool.finish_reason = "tool_calls"
-        resp_tool.has_tool_calls = lambda: True
-        resp_tool.tool_calls = [tc]
-        resp_stop = mock.MagicMock()
-        resp_stop.content = "ok"
-        resp_stop.finish_reason = "stop"
-        resp_stop.has_tool_calls = lambda: False
-        resp_stop.tool_calls = []
-
-        loop._stream_mode = False
-        loop._get_goal_snapshot = lambda: None  # noqa: E731
+        responses = [
+            _tool_resp("read", {}),
+            _text_resp("ok"),
+        ]
         loop.client = mock.MagicMock()
-        loop.client.chat = mock.MagicMock(side_effect=[resp_tool, resp_stop])
-        fake_tool = mock.MagicMock()
-        fake_tool.invoke = mock.MagicMock(return_value="ok")
-        loop.registry.get = mock.MagicMock(return_value=fake_tool)
-
+        loop.client.chat = mock.MagicMock(side_effect=lambda *a, **kw: responses.pop(0))
         loop.run("hi")
 
         result_payload = sink.of_type("tool_result")[0]
