@@ -113,13 +113,9 @@ export function StudyProgress(_props: Props) {
   const status = current.execution_status ?? 'unknown'
   const maxRounds = summary?.max_rounds ?? 5
 
-  const onAction = async (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel') => {
+  const onAction = async (action: 'pause' | 'continue' | 'cancel') => {
     try {
-      if (action === 'resume_interrupted') {
-        await api.study.resumeInterrupted(studyId)
-      } else {
-        await api.study[action](studyId)
-      }
+      await api.study.dispatchAction(studyId, action)
     } catch (err) {
       setError((err as Error).message)
     }
@@ -162,20 +158,12 @@ export function StudyProgress(_props: Props) {
             <Pause className="h-3 w-3" /> 暂停
           </button>
         )}
-        {status === 'paused' && (
+        {(status === 'paused' || status === 'interrupted') && (
           <button
-            onClick={() => onAction('resume')}
+            onClick={() => onAction('continue')}
             className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs transition-all hover:bg-emerald-500 active:scale-95"
           >
-            <Play className="h-3 w-3" /> 恢复
-          </button>
-        )}
-        {status === 'interrupted' && (
-          <button
-            onClick={() => onAction('resume_interrupted')}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs transition-all hover:bg-emerald-500 active:scale-95"
-          >
-            <Play className="h-3 w-3" /> 继续运行
+            <Play className="h-3 w-3" /> 继续
           </button>
         )}
         {status !== 'complete' && status !== 'cancelled' && status !== 'error' && status !== 'needs_refresh' && status !== 'interrupted' && (

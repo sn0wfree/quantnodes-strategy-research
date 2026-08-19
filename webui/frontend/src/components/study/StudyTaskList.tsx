@@ -27,7 +27,7 @@ function HistoryCard({
   selected: boolean
   onClick: () => void
   onDoubleClick?: () => void
-  onAction: (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive') => void
+  onAction: (action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive') => void
 }) {
   const status = study.execution_status ?? 'unknown'
   const isActive = ACTIVE_STATUSES.includes(status)
@@ -116,7 +116,7 @@ interface Props {
   onRefresh?: () => void
   includeArchived?: boolean
   onToggleArchived?: (v: boolean) => void
-  onAction?: (studyId: string, action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive') => void
+  onAction?: (studyId: string, action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive') => void
 }
 
 export function StudyTaskList({
@@ -134,7 +134,7 @@ export function StudyTaskList({
 
   const handleAction = async (
     study: StudySummary,
-    action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive',
+    action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive',
   ) => {
     if (action === 'archive' && !window.confirm('确定归档此研究？归档后默认列表不再显示。')) {
       return

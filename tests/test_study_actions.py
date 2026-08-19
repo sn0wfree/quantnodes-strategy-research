@@ -89,33 +89,33 @@ class TestActionMatrix:
         acts = allowed_actions(StudyStatus.RUNNING)
         assert StudyAction.PAUSE in acts
         assert StudyAction.CANCEL in acts
-        assert StudyAction.RESUME not in acts
+        assert StudyAction.CONTINUE not in acts
 
-    def test_paused_allows_resume_cancel(self):
+    def test_paused_allows_continue_cancel(self):
         acts = allowed_actions(StudyStatus.PAUSED)
-        assert StudyAction.RESUME in acts
+        assert StudyAction.CONTINUE in acts
         assert StudyAction.CANCEL in acts
 
-    def test_interrupted_allows_resume_archive_replace(self):
+    def test_interrupted_allows_continue_archive_replace(self):
         acts = allowed_actions(StudyStatus.INTERRUPTED)
-        # INTERRUPTED now also allows ARCHIVE + REPLACE_OBJECTIVE
-        # (still no PAUSE / RESUME — those are for active runners).
-        assert StudyAction.RESUME_INTERRUPTED in acts
+        assert StudyAction.CONTINUE in acts
         assert StudyAction.ARCHIVE in acts
         assert StudyAction.REPLACE_OBJECTIVE in acts
         assert StudyAction.PAUSE not in acts
         assert StudyAction.CANCEL not in acts
 
-    def test_complete_cancelled_allow_archive_only(self):
+    def test_complete_cancelled_allow_continue_archive(self):
         for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED):
             acts = allowed_actions(st)
-            assert acts == frozenset({StudyAction.ARCHIVE}), st
+            assert StudyAction.CONTINUE in acts, st
+            assert StudyAction.ARCHIVE in acts, st
+            assert len(acts) == 2, st
 
-    def test_retryable_terminal_states_allow_retry_and_archive(self):
+    def test_retryable_terminal_states_allow_continue_archive(self):
         for st in (StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
                    StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
             acts = allowed_actions(st)
-            assert StudyAction.RETRY in acts, st
+            assert StudyAction.CONTINUE in acts, st
             assert StudyAction.ARCHIVE in acts, st
             assert len(acts) == 2, st
 
@@ -835,18 +835,15 @@ class TestRetryRoundNumbering:
 
 @pytest.mark.asyncio
 async def test_dispatch_retry_accepts_mode_field(_env, monkeypatch):
-    """HTTP: POST /actions/retry with mode='restart' reaches the scheduler."""
+    """HTTP: POST /actions/retry (deprecated → CONTINUE) with mode='restart'."""
     study_id, _ = _env
-    # Stub the scheduler so the test doesn't actually spawn a runner
-    # coroutine (which would hang in an async test).
     from strategy_research.api.routers import study as routers_study
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock, MagicMock
 
     fake = MagicMock()
-    fake.retry.return_value = True
+    fake.continue_study = AsyncMock(return_value=True)
     monkeypatch.setattr(routers_study, "_get_study_scheduler", lambda: fake)
 
-    # Move the study to a retryable state.
     from strategy_research.core.study import StudyStore
     from strategy_research.core.study.models import StudyStatus
     with StudyStore() as s:
@@ -863,8 +860,8 @@ async def test_dispatch_retry_accepts_mode_field(_env, monkeypatch):
             json={"mode": "restart"},
         )
         assert r.status_code == 200
-        assert r.json()["action"] == "retry_queued"
+        assert r.json()["action"] == "continue"
         # Verify the scheduler received the mode
-        fake.retry.assert_called_with(
+        fake.continue_study.assert_called_once_with(
             study_id, from_round=None, mode="restart",
         )

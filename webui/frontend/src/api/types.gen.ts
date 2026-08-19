@@ -2715,6 +2715,16 @@ export interface components {
         StudyActionRequest: {
             /** Reason */
             reason?: string | null;
+            /**
+             * Mode
+             * @description Mode for continue/retry actions: append or restart
+             */
+            mode?: string | null;
+            /**
+             * From Round
+             * @description Start from round N+1 for continue/retry actions
+             */
+            from_round?: number | null;
         };
         /** StudyActionResponse */
         StudyActionResponse: {

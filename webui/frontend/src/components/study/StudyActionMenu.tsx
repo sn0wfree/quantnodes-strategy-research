@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, MoreVertical, Pause, Play, RotateCcw, X } from 'lucide-react'
+import { Archive, ArchiveRestore, MoreVertical, Pause, Play, X } from 'lucide-react'
 import { api, type StudyActionItem, type StudySummary, type StudySummaryResponse } from '../../api/client'
 
 type StudyLike = Pick<StudySummary, 'study_id' | 'execution_status'> &
@@ -7,14 +7,13 @@ type StudyLike = Pick<StudySummary, 'study_id' | 'execution_status'> &
 
 interface StudyActionMenuProps {
   study: StudyLike
-  onAction: (action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive') => void
+  onAction: (action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive') => void
   onRefresh?: () => void
 }
 
 const ICONS: Record<string, typeof Pause> = {
   pause: Pause,
-  resume: Play,
-  resume_interrupted: RotateCcw,
+  continue: Play,
   cancel: X,
   archive: Archive,
   unarchive: ArchiveRestore,
@@ -22,8 +21,7 @@ const ICONS: Record<string, typeof Pause> = {
 
 const ICON_CLS: Record<string, string> = {
   pause: 'text-amber-400',
-  resume: 'text-emerald-400',
-  resume_interrupted: 'text-emerald-400',
+  continue: 'text-emerald-400',
   cancel: 'text-rose-400',
   archive: 'text-amber-500',
   unarchive: 'text-sky-400',
@@ -69,8 +67,7 @@ export function StudyActionMenu({ study, onAction, onRefresh }: StudyActionMenuP
     setOpen(false)
     if (
       name === 'pause' ||
-      name === 'resume' ||
-      name === 'resume_interrupted' ||
+      name === 'continue' ||
       name === 'cancel' ||
       name === 'archive' ||
       name === 'unarchive'

@@ -209,6 +209,10 @@ class APIClient {
     resume: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume`),
     resumeInterrupted: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume_interrupted`),
     cancel: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/cancel`),
+    continue: (studyId: string, mode?: string, fromRound?: number) =>
+      this.post<StudyControlResponse>(`/study/${studyId}/continue`, {
+        mode, from_round: fromRound,
+      }),
 
     directive: (studyId: string, content: string, issuedBy?: string) =>
       this.post<StudyDirectiveResponse>(`/study/${studyId}/directive`, {
@@ -307,6 +311,8 @@ class APIClient {
         new_objective?: string
         expected_goal_id?: string
         round_num?: number
+        mode?: string
+        from_round?: number
       },
     ) =>
       this.post<StudyActionResponse>(`/study/${studyId}/actions/${name}`, body ?? {}),

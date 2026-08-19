@@ -176,6 +176,7 @@ class StudyScheduler:
         return True
 
     def resume(self, study_id: str) -> bool:
+        """Unpause an active runner (deprecated: use continue_study instead)."""
         tok = self._control_tokens.get(study_id)
         if tok is None:
             return False
@@ -183,12 +184,7 @@ class StudyScheduler:
         return True
 
     async def resume_interrupted(self, study_id: str) -> bool:
-        """Resume an INTERRUPTED study by re-submitting it to the scheduler.
-
-        Unlike ``resume()`` which unpauses an active runner, this method
-        rebuilds the runner from the persisted study state and queues it
-        on the session's consumer loop.
-        """
+        """Resume an INTERRUPTED study (deprecated: use continue_study instead)."""
         study = self.store.get_study(study_id)
         if study is None:
             return False
@@ -196,6 +192,91 @@ class StudyScheduler:
             return False
         await self.submit(study)
         return True
+
+    async def continue_study(
+        self,
+        study_id: str,
+        *,
+        from_round: int | None = None,
+        mode: str = "append",
+    ) -> bool:
+        """Unified continue action (replaces RESUME_INTERRUPTED + RETRY).
+
+        Behavior depends on the current study status:
+
+        - INTERRUPTED / PAUSED: re-queue at current round (no reset).
+        - ERROR / BUDGET_LIMITED / EARLY_STOPPED / NEEDS_REFRESH:
+          reset round counter and restart (``mode="append"`` keeps
+          history; ``mode="restart"`` clears it). Default ``from_round=1``.
+        - CANCELLED: restart from round 1 (same as restart mode).
+        - COMPLETE: run a fresh round from current state (no reset).
+
+        Returns True on success, False if the status is not continueable.
+        """
+        study = self.store.get_study(study_id)
+        if study is None:
+            return False
+        from .models import StudyStatus
+
+        status = study.execution_status
+
+        # ── Resume-like: INTERRUPTED / PAUSED ──────────────────
+        if status in (StudyStatus.INTERRUPTED, StudyStatus.PAUSED):
+            if status == StudyStatus.PAUSED:
+                tok = self._control_tokens.get(study_id)
+                if tok is not None:
+                    tok.paused = False
+                    return True
+            await self.submit(study)
+            return True
+
+        # ── Restart-like: ERROR / BUDGET_LIMITED / EARLY_STOPPED / NEEDS_REFRESH / CANCELLED ──
+        restartable = {
+            StudyStatus.ERROR,
+            StudyStatus.BUDGET_LIMITED,
+            StudyStatus.EARLY_STOPPED,
+            StudyStatus.NEEDS_REFRESH,
+            StudyStatus.CANCELLED,
+        }
+        if status in restartable:
+            effective_mode = mode or "restart"
+            start_round = from_round if from_round and from_round > 1 else 1
+            self.store.reset_round_counter(
+                study_id, mode=effective_mode, start_round=start_round,
+            )
+            self.store.update_execution_status(
+                study_id,
+                StudyStatus.INTERRUPTED,
+                last_error=None,
+                last_traceback=None,
+            )
+            self._emit_event(study.session_id, "study_retry_queued", {
+                "study_id": study_id,
+                "from_round": start_round,
+                "mode": effective_mode,
+                "previous_status": status.value,
+            })
+            await self.submit(study)
+            return True
+
+        # ── Continue-like: COMPLETE ────────────────────────────
+        if status == StudyStatus.COMPLETE:
+            self.store.update_execution_status(
+                study_id,
+                StudyStatus.INTERRUPTED,
+                last_error=None,
+                last_traceback=None,
+            )
+            self._emit_event(study.session_id, "study_retry_queued", {
+                "study_id": study_id,
+                "from_round": study.current_round,
+                "mode": "continue",
+                "previous_status": status.value,
+            })
+            await self.submit(study)
+            return True
+
+        return False
 
     def cancel(self, study_id: str, reason: str | None = None) -> bool:
         tok = self._control_tokens.get(study_id)

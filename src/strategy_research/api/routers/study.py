@@ -753,6 +753,31 @@ async def study_resume(request: Request, study_id: str):
     return {"status": "ok", "study_id": study_id, "action": "resumed"}
 
 
+# ── POST /study/{study_id}/continue (unified resume/retry) ───────
+
+
+@router.post("/{study_id}/continue", response_model=StudyActionResponse)
+async def study_continue(request: Request, study_id: str, body: StudyActionRequest | None = None):
+    """Unified continue action (replaces resume/retry/resume_interrupted).
+
+    Mode:
+    - ``resume`` (default for INTERRUPTED/PAUSED): continue at current round.
+    - ``restart`` (default for ERROR/CANCELLED/etc.): restart from round 1.
+    - ``from_round=N``: start from round N+1.
+
+    COMPLETE: continues exploring from current state (no round reset).
+    """
+    _owned_study(request, study_id)
+    sched = _get_study_scheduler()
+    from_round = body.from_round if body else None
+    mode = body.mode or "append" if body else "append"
+
+    if not await sched.continue_study(study_id, from_round=from_round, mode=mode):
+        raise HTTPException(status_code=409, detail="study not continueable in current state")
+    _invalidate_summary_cache(study_id)
+    return {"status": "ok", "study_id": study_id, "action": "continue"}
+
+
 @router.post("/{study_id}/cancel", response_model=StudyActionResponse)
 async def study_cancel(request: Request, study_id: str, req: CancelRequest | None = None):
     _owned_study(request, study_id)  # IDOR: caller must own the study
@@ -1258,10 +1283,15 @@ async def study_dispatch_action(
             raise HTTPException(status_code=404, detail="study not found")
 
     from ...core.study.models import StudyAction, allowed_actions
+    # Backward-compat: map deprecated action names to CONTINUE
+    _DEPRECATED_TO_CONTINUE = {"resume", "resume_interrupted", "retry"}
     try:
         act = StudyAction(action_name)
     except ValueError:
-        raise HTTPException(status_code=404, detail=f"unknown action: {action_name}")
+        if action_name in _DEPRECATED_TO_CONTINUE:
+            act = StudyAction.CONTINUE
+        else:
+            raise HTTPException(status_code=404, detail=f"unknown action: {action_name}")
     if act not in allowed_actions(study.execution_status):
         raise HTTPException(
             status_code=409,
@@ -1275,14 +1305,6 @@ async def study_dispatch_action(
         if not sched.pause(study_id):
             raise HTTPException(status_code=409, detail="study not pausable")
         return {"status": "ok", "study_id": study_id, "action": "paused"}
-    if act == StudyAction.RESUME:
-        if not sched.resume(study_id):
-            raise HTTPException(status_code=409, detail="study not resumable")
-        return {"status": "ok", "study_id": study_id, "action": "resumed"}
-    if act == StudyAction.RESUME_INTERRUPTED:
-        if not await sched.resume_interrupted(study_id):
-            raise HTTPException(status_code=409, detail="study not resumable")
-        return {"status": "ok", "study_id": study_id, "action": "resumed_from_interrupted"}
     if act == StudyAction.CANCEL:
         if not sched.cancel(study_id, reason=reason):
             raise HTTPException(status_code=409, detail="study not cancellable")
@@ -1331,18 +1353,19 @@ async def study_dispatch_action(
             "study_id": study_id,
             "action": f"replaced_objective_history_{res['history_id']}",
         }
-    if act == StudyAction.RETRY:
+    if act == StudyAction.CONTINUE:
         from_round = body.from_round if body else None
         mode = body.mode if body else "append"
-        if not sched.retry(study_id, from_round=from_round, mode=mode):
+        if not await sched.continue_study(study_id, from_round=from_round, mode=mode):
             raise HTTPException(
                 status_code=409,
-                detail="study not retryable (not in a retryable terminal state?)",
+                detail="study not continueable in current state",
             )
+        _invalidate_summary_cache(study_id)
         return {
             "status": "ok",
             "study_id": study_id,
-            "action": "retry_queued",
+            "action": "continue",
         }
     raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
 

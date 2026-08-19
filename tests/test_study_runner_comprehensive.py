@@ -80,8 +80,8 @@ class TestStudyStatus:
         assert StudyAction.PAUSE in ACTION_MATRIX[StudyStatus.RUNNING]
         assert StudyAction.CANCEL in ACTION_MATRIX[StudyStatus.RUNNING]
 
-    def test_paused_can_resume_or_cancel(self):
-        assert StudyAction.RESUME in ACTION_MATRIX[StudyStatus.PAUSED]
+    def test_paused_can_continue_or_cancel(self):
+        assert StudyAction.CONTINUE in ACTION_MATRIX[StudyStatus.PAUSED]
         assert StudyAction.CANCEL in ACTION_MATRIX[StudyStatus.PAUSED]
 
 

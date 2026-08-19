@@ -268,24 +268,26 @@ class TestStateTransitions:
     def test_paused_to_running(self):
         """Study should transition from PAUSED to RUNNING."""
         from strategy_research.core.study.models import StudyStatus, StudyAction, ACTION_MATRIX
-        assert StudyAction.RESUME in ACTION_MATRIX[StudyStatus.PAUSED]
+        assert StudyAction.CONTINUE in ACTION_MATRIX[StudyStatus.PAUSED]
 
-    def test_complete_cancelled_allow_archive_only(self):
-        """COMPLETE/CANCELLED only expose ARCHIVE."""
+    def test_complete_cancelled_allow_continue_archive(self):
+        """COMPLETE/CANCELLED expose CONTINUE + ARCHIVE."""
         from strategy_research.core.study.models import StudyStatus, StudyAction, ACTION_MATRIX
         for status in (StudyStatus.COMPLETE, StudyStatus.CANCELLED):
-            assert ACTION_MATRIX.get(status, frozenset()) == frozenset(
-                {StudyAction.ARCHIVE}
-            ), status
+            acts = ACTION_MATRIX.get(status, frozenset())
+            assert StudyAction.CONTINUE in acts, status
+            assert StudyAction.ARCHIVE in acts, status
+            assert len(acts) == 2, status
 
-    def test_retryable_states_allow_retry_and_archive(self):
-        """ERROR/BUDGET_LIMITED/EARLY_STOPPED/NEEDS_REFRESH allow RETRY + ARCHIVE."""
+    def test_retryable_states_allow_continue_and_archive(self):
+        """ERROR/BUDGET_LIMITED/EARLY_STOPPED/NEEDS_REFRESH allow CONTINUE + ARCHIVE."""
         from strategy_research.core.study.models import StudyStatus, StudyAction, ACTION_MATRIX
         for status in (StudyStatus.ERROR, StudyStatus.BUDGET_LIMITED,
                        StudyStatus.EARLY_STOPPED, StudyStatus.NEEDS_REFRESH):
-            assert ACTION_MATRIX.get(status, frozenset()) == frozenset(
-                {StudyAction.RETRY, StudyAction.ARCHIVE}
-            ), status
+            acts = ACTION_MATRIX.get(status, frozenset())
+            assert StudyAction.CONTINUE in acts, status
+            assert StudyAction.ARCHIVE in acts, status
+            assert len(acts) == 2, status
 
 
 # ── Goal completion test ─────────────────────────────────────────

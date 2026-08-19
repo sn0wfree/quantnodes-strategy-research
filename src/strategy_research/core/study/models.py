@@ -61,20 +61,17 @@ class StudyAction(str, Enum):
     """
 
     PAUSE = "pause"
-    RESUME = "resume"          # unpause a paused study
-    RESUME_INTERRUPTED = "resume_interrupted"  # re-queue an interrupted study
+    CONTINUE = "continue"        # unified: resume (INTERRUPTED/PAUSED) or restart (ERROR/CANCELLED/COMPLETE)
     CANCEL = "cancel"
     REDO = "redo"              # discard current round and restart from round N-1
     DIRECTIVE = "directive"    # inject a mid-execution research direction
     ARCHIVE = "archive"        # soft-delete: hide from default list, detail still readable
-    UNARCHIVE = "unarchive"    # revert ARCHIVED -> INTERRUPTED (user can then resume)
+    UNARCHIVE = "unarchive"    # revert ARCHIVED -> INTERRUPTED (user can then continue)
     REPLACE_OBJECTIVE = "replace_objective"  # mid-run objective update (next round takes effect)
-    RETRY = "retry"            # ERROR/EARLY_STOPPED/BUDGET_LIMITED/NEEDS_REFRESH → restart (round 1 or N+1)
 
 
-# status × allowed actions — the action matrix. Any status not listed
-# here has NO user actions (terminal states: complete / cancelled /
-# error / budget_limited / early_stopped / needs_refresh).
+# status × allowed actions — the action matrix.
+# The UI renders buttons only for actions listed here.
 ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
     StudyStatus.QUEUED: frozenset({
         StudyAction.CANCEL,
@@ -88,13 +85,13 @@ ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
         StudyAction.REPLACE_OBJECTIVE,
     }),
     StudyStatus.PAUSED: frozenset({
-        StudyAction.RESUME,
+        StudyAction.CONTINUE,       # resume at current round
         StudyAction.CANCEL,
         StudyAction.ARCHIVE,
         StudyAction.REPLACE_OBJECTIVE,
     }),
     StudyStatus.INTERRUPTED: frozenset({
-        StudyAction.RESUME_INTERRUPTED,
+        StudyAction.CONTINUE,       # resume at current round
         StudyAction.ARCHIVE,
         StudyAction.REPLACE_OBJECTIVE,
     }),
@@ -104,12 +101,30 @@ ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
         StudyAction.ARCHIVE,
         StudyAction.REPLACE_OBJECTIVE,
     }),
-    StudyStatus.COMPLETE: frozenset({StudyAction.ARCHIVE}),
-    StudyStatus.CANCELLED: frozenset({StudyAction.ARCHIVE}),
-    StudyStatus.ERROR: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
-    StudyStatus.BUDGET_LIMITED: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
-    StudyStatus.NEEDS_REFRESH: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
-    StudyStatus.EARLY_STOPPED: frozenset({StudyAction.RETRY, StudyAction.ARCHIVE}),
+    StudyStatus.COMPLETE: frozenset({
+        StudyAction.CONTINUE,       # continue exploring from current state
+        StudyAction.ARCHIVE,
+    }),
+    StudyStatus.CANCELLED: frozenset({
+        StudyAction.CONTINUE,       # restart from round 1
+        StudyAction.ARCHIVE,
+    }),
+    StudyStatus.ERROR: frozenset({
+        StudyAction.CONTINUE,       # restart (round 1 or N+1)
+        StudyAction.ARCHIVE,
+    }),
+    StudyStatus.BUDGET_LIMITED: frozenset({
+        StudyAction.CONTINUE,
+        StudyAction.ARCHIVE,
+    }),
+    StudyStatus.NEEDS_REFRESH: frozenset({
+        StudyAction.CONTINUE,
+        StudyAction.ARCHIVE,
+    }),
+    StudyStatus.EARLY_STOPPED: frozenset({
+        StudyAction.CONTINUE,
+        StudyAction.ARCHIVE,
+    }),
     StudyStatus.ARCHIVED: frozenset({StudyAction.UNARCHIVE}),
 }
 

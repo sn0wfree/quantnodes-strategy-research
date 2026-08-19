@@ -20,7 +20,7 @@ import { StudyFlowTab } from './StudyFlowTab'
 import { EditObjectiveDialog } from './EditObjectiveDialog'
 import { AgentChatLog } from './AgentChatLog'
 import { formatDateTime, clampRound } from './utils'
-import { RetryModeMenu } from './RetryModeMenu'
+import { ContinueDialog } from './ContinueDialog'
 import { AgentApprovalDialog } from './AgentApprovalDialog'
 
 type TabKey = 'overview' | 'flow' | 'logs'
@@ -72,7 +72,7 @@ export function StudyDetailPage() {
   const [submittingDirective, setSubmittingDirective] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const [editObjectiveOpen, setEditObjectiveOpen] = useState(false)
-  const [retryMenuOpen, setRetryMenuOpen] = useState(false)
+  const [continueDialogOpen, setContinueDialogOpen] = useState(false)
   const [logsSelectedRound, setLogsSelectedRound] = useState<number>(1)
 
   // Refs for ETag-conditional polling and terminal-state detection
@@ -158,19 +158,8 @@ export function StudyDetailPage() {
     loadSummary,
   ])
 
-  // Close retry menu on outside click
-  const retryMenuRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el) return
-    const handler = (e: MouseEvent) => {
-      if (!el.contains(e.target as Node)) setRetryMenuOpen(false)
-    }
-    if (retryMenuOpen) {
-      document.addEventListener('mousedown', handler, { once: true })
-    }
-  }, [retryMenuOpen])
-
   const onAction = async (
-    action: 'pause' | 'resume' | 'resume_interrupted' | 'cancel' | 'archive' | 'unarchive',
+    action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive',
     reason?: string,
   ) => {
     setBusy(true)
@@ -184,13 +173,14 @@ export function StudyDetailPage() {
     }
   }
 
-  const onRetry = async (mode: 'append' | 'restart') => {
-    setRetryMenuOpen(false)
+  const onContinue = async (mode: 'resume' | 'restart', fromRound?: number) => {
     setBusy(true)
     try {
-      await api.study.retry(studyId, undefined, mode)
+      await api.study.dispatchAction(studyId, 'continue', {
+        mode: mode === 'restart' ? 'restart' : 'append',
+        ...(fromRound ? { from_round: fromRound } : {}),
+      })
       await loadActions()
-      // Refresh summary to show new INTERRUPTED status
       await loadSummary()
     } catch (err) {
       setError((err as Error).message)
@@ -263,17 +253,14 @@ export function StudyDetailPage() {
   }
 
   const canPause = (actions?.actions ?? []).some((a) => a.name === 'pause')
-  const canResume = (actions?.actions ?? []).some(
-    (a) => a.name === 'resume' || a.name === 'resume_interrupted'
-  )
+  const canContinue = (actions?.actions ?? []).some((a) => a.name === 'continue')
   const canCancel = (actions?.actions ?? []).some((a) => a.name === 'cancel')
   const canArchive = (actions?.actions ?? []).some((a) => a.name === 'archive')
   const canUnarchive = (actions?.actions ?? []).some((a) => a.name === 'unarchive')
   const canReplaceObjective = (actions?.actions ?? []).some(
     (a) => a.name === 'replace_objective',
   )
-  const canRetry = (actions?.actions ?? []).some((a) => a.name === 'retry')
-  const canDirective = canPause || canResume
+  const canDirective = canPause || canContinue
 
   const controlActions = (
     <div className="flex items-center gap-1.5">
@@ -293,19 +280,13 @@ export function StudyDetailPage() {
           <Pause className="h-3.5 w-3.5" /> 暂停
         </button>
       )}
-      {canResume && (
+      {canContinue && (
         <button
-          onClick={() =>
-            onAction(
-              (actions?.actions ?? []).some((a) => a.name === 'resume_interrupted')
-                ? 'resume_interrupted'
-                : 'resume'
-            )
-          }
+          onClick={() => setContinueDialogOpen(true)}
           disabled={busy}
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-emerald-500 active:scale-95 disabled:opacity-50"
         >
-          <Play className="h-3.5 w-3.5" /> 恢复
+          <Play className="h-3.5 w-3.5" /> 继续
         </button>
       )}
       {canCancel && (
@@ -352,31 +333,7 @@ export function StudyDetailPage() {
           <Edit3 className="h-3.5 w-3.5" /> 修改目标
         </button>
       )}
-      {canRetry && (
-        <div className="relative" ref={retryMenuRef}>
-          <button
-            onClick={() => setRetryMenuOpen((v) => !v)}
-            disabled={busy}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-sky-500 active:scale-95 disabled:opacity-50"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> 重试
-          </button>
-          {retryMenuOpen && (
-            <RetryModeMenu
-              onSelect={(mode) => {
-                const label =
-                  mode === 'append' ? '从下一轮继续？历史轮次将保留。' :
-                  '从第 1 轮重试？历史轮次将被清除。'
-                if (window.confirm(label)) {
-                  void onRetry(mode)
-                } else {
-                  setRetryMenuOpen(false)
-                }
-              }}
-            />
-          )}
-        </div>
-      )}
+
     </div>
   )
 
@@ -710,6 +667,13 @@ export function StudyDetailPage() {
           void loadSummary()
           void loadActions()
         }}
+      />
+
+      <ContinueDialog
+        open={continueDialogOpen}
+        summary={summary}
+        onClose={() => setContinueDialogOpen(false)}
+        onContinue={onContinue}
       />
 
       <AgentApprovalDialog studyId={studyId} />

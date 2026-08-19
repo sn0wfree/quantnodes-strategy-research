@@ -6230,6 +6230,32 @@
               }
             ],
             "title": "Reason"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(append|restart)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode",
+            "description": "Mode for continue/retry actions: append or restart"
+          },
+          "from_round": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Round",
+            "description": "Start from round N+1 for continue/retry actions"
           }
         },
         "type": "object",
