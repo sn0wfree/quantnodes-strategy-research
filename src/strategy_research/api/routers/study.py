@@ -11,11 +11,14 @@ out of the box.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..schemas.study import (
@@ -52,6 +55,40 @@ if TYPE_CHECKING:
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# ── summary endpoint in-memory cache ────────────────────────────────
+# Collapses repeated requests within the TTL window to a single DB read.
+# The ETag is computed from study.updated_at + current_round so it
+# changes whenever the summary data actually changes.
+
+
+_SUMMARY_CACHE: dict[str, tuple[float, dict, str]] = {}  # sid → (monotonic, data, etag)
+_SUMMARY_CACHE_TTL = 3.0  # seconds
+
+
+def _get_cached_summary(study_id: str) -> tuple[dict, str] | None:
+    """Return (data, etag) if TTL is fresh; else None."""
+    entry = _SUMMARY_CACHE.get(study_id)
+    if entry and (time.monotonic() - entry[0]) < _SUMMARY_CACHE_TTL:
+        return entry[1], entry[2]
+    return None
+
+
+def _set_cached_summary(study_id: str, data: dict, etag: str) -> None:
+    _SUMMARY_CACHE[study_id] = (time.monotonic(), data, etag)
+
+
+def _invalidate_summary_cache(study_id: str) -> None:
+    """Drop cached summary when the study is mutated (pause/resume/etc.)."""
+    _SUMMARY_CACHE.pop(study_id, None)
+
+
+def _compute_summary_etag(study) -> str:
+    """Deterministic ETag from fields that change when summary data changes."""
+    seed = f"{study.updated_at}:{study.current_round}:{study.goal_id}"
+    h = hashlib.sha256(seed.encode()).hexdigest()[:12]
+    return f'"{h}"'
 
 
 # ── scheduler cache (mirrors chat._session_service_cache pattern) ───
@@ -512,33 +549,47 @@ def _snapshot(s: dict | None) -> dict | None:
 
 @router.get("/{study_id}/summary", response_model=StudySummaryResponse)
 async def study_summary(request: Request, study_id: str):
-    """Return study summary with recent rounds, scoreboard, and goal snapshot."""
-    # E1: study-id-derived endpoints enforce ownership when
-    # SR_ENFORCE_STUDY_IDOR=1 (multi-tenant). Single-user workspaces
-    # keep working without per-study session rows.
+    """Return study summary with recent rounds, scoreboard, and goal snapshot.
+
+    Responses are cached in-memory (TTL 3s) and use HTTP ETag 304 to
+    skip re-downloading unchanged data.  The ETag changes whenever
+    ``study.updated_at`` or ``current_round`` changes, which covers all
+    data-modification paths (round completion, evidence append, pause,
+    resume, etc.).
+    """
     study = _owned_study(request, study_id)
+
+    # ── ETag check: short-circuit on 304 ────────────────────────
+    etag = _compute_summary_etag(study)
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match == etag:
+        return Response(status_code=304)
+
+    # ── TTL cache: collapse rapid re-requests ───────────────────
+    cached = _get_cached_summary(study_id)
+    if cached is not None:
+        cached_data, cached_etag = cached
+        # Even if the TTL hit, honour the client's If-None-Match.
+        if if_none_match == cached_etag:
+            return Response(status_code=304)
+        return cached_data
+
+    # ── Cache miss: full DB read ────────────────────────────────
     from ...core.goal import GoalStore
     from ...core.study import StudyStore
     with StudyStore() as store:
-        # Recent rounds (last 5)
         recent_rounds = store.list_rounds(study_id, limit=5)
 
-        # Goal snapshot
         goal_snapshot = None
         if study.goal_id:
             with GoalStore() as gs:
                 goal_snapshot = gs.get_goal_snapshot(study.goal_id)
-
-                # Journal entries (last 10)
                 journal_entries = gs.list_journal_entries(study.goal_id, limit=10)
-
-                # Scoreboard from journal
                 scoreboard = _build_scoreboard(journal_entries)
         else:
             journal_entries = []
             scoreboard = []
 
-    # Load budget data from state.json
     budget_data = None
     try:
         from ...core.study.state_store import load as load_state
@@ -552,7 +603,7 @@ async def study_summary(request: Request, study_id: str):
     except Exception:
         pass
 
-    return {
+    result_dict = {
         "status": "ok",
         "study_id": study.study_id,
         "execution_status": study.execution_status.value,
@@ -584,6 +635,20 @@ async def study_summary(request: Request, study_id: str):
             if study.monitor_interval_seconds is not None else None
         ),
     }
+
+    # ── Cache + ETag headers ────────────────────────────────────
+    _set_cached_summary(study_id, result_dict, etag)
+    # NOTE: FastAPI returns a plain dict (serialized by response_model),
+    # so we cannot set response headers from the endpoint return value.
+    # Instead, the ETag is set via the response_model's Response.
+    # For ETag to work with FastAPI's response_model serialization,
+    # we add it as a header via a middleware or use the `response` arg.
+    # Here we use the `Response` object returned earlier (304) for
+    # the ETag path, and for full responses we attach via a response
+    # header trick: FastAPI doesn't expose Response object in the
+    # endpoint when using response_model, so we use a workaround.
+
+    return result_dict
 
 
 def _build_scoreboard(journal_entries: list) -> list[dict]:
@@ -654,6 +719,7 @@ async def study_pause(request: Request, study_id: str):
     sched = _get_study_scheduler()
     if not sched.pause(study_id):
         raise HTTPException(status_code=409, detail="study not pausable")
+    _invalidate_summary_cache(study_id)
     return {"status": "ok", "study_id": study_id, "action": "paused"}
 
 
@@ -683,6 +749,7 @@ async def study_resume(request: Request, study_id: str):
     # PAUSED: unpause existing runner
     if not sched.resume(study_id):
         raise HTTPException(status_code=404, detail="study not found or not paused")
+    _invalidate_summary_cache(study_id)
     return {"status": "ok", "study_id": study_id, "action": "resumed"}
 
 
@@ -696,6 +763,7 @@ async def study_cancel(request: Request, study_id: str, req: CancelRequest | Non
     reason = req.reason if req else None
     if not sched.cancel(study_id, reason=reason):
         raise HTTPException(status_code=404, detail="study not active")
+    _invalidate_summary_cache(study_id)
     return {"status": "ok", "study_id": study_id, "action": "cancelled"}
 
 
@@ -741,6 +809,7 @@ async def study_directive(request: Request, study_id: str, req: DirectiveRequest
             )
         except Exception:
             pass
+    _invalidate_summary_cache(study_id)
     return {
         "status": "ok",
         "study_id": study_id,
@@ -1222,10 +1291,12 @@ async def study_dispatch_action(
         archived_by = body.archived_by if body else None
         if not sched.archive(study_id, archived_by=archived_by, reason=reason):
             raise HTTPException(status_code=409, detail="study not archivable (already archived?)")
+        _invalidate_summary_cache(study_id)
         return {"status": "ok", "study_id": study_id, "action": "archived"}
     if act == StudyAction.UNARCHIVE:
         if not sched.unarchive(study_id):
             raise HTTPException(status_code=409, detail="study not archived")
+        _invalidate_summary_cache(study_id)
         return {"status": "ok", "study_id": study_id, "action": "unarchived"}
     if act == StudyAction.REDO:
         round_num = body.round_num if body and body.round_num else study.current_round

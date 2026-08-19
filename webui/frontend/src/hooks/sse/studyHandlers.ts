@@ -14,6 +14,9 @@ import { useStudyStore } from '../../stores/study'
  *   study_round        {study_id, round, run, metrics, verdict, agent_statuses}
  *   study_directives_consumed {study_id, round, consumed_ids, count}
  *   study_progress     {study_id, covered, total, percent}
+ *   study_goal_snapshot {study_id, goal_snapshot}  — real-time goal state
+ *   study_scoreboard   {study_id, round, scoreboard}
+ *   study_budget       {study_id, budget}
  *   study_completed    {study_id, goal_id, metrics, round, recap}
  *   study_failed       {study_id, error, reason}
  *   study_budget_limited {study_id, used}
@@ -118,6 +121,46 @@ export const agentApprovalResponded: SSEHandler = (data) => {
   const role = data.role as string | undefined
   const iter = data.iteration as number | undefined
   useStudyStore.getState().resolveAgentApproval(studyId, role ?? null, iter)
+}
+
+/**
+ * Real-time scoreboard update (lever precision per round).
+ * Emitted after each round to keep the summary's scoreboard fresh
+ * without requiring a /summary poll.
+ */
+export const studyScoreboard: SSEHandler = (data) => {
+  const cur = useStudyStore.getState().current
+  if (!cur) return
+  useStudyStore.getState().setCurrent({
+    ...cur,
+    scoreboard: data.scoreboard,
+  } as never)
+}
+
+/**
+ * Real-time goal snapshot update (progress, evidence count, criteria).
+ * Emitted after each keep-round evidence append.
+ */
+export const studyGoalSnapshot: SSEHandler = (data) => {
+  const cur = useStudyStore.getState().current
+  if (!cur) return
+  useStudyStore.getState().setCurrent({
+    ...cur,
+    goal_snapshot: data.goal_snapshot,
+  } as never)
+}
+
+/**
+ * Real-time budget usage update (turns/time used).
+ * Emitted after each round's accounting.
+ */
+export const studyBudget: SSEHandler = (data) => {
+  const cur = useStudyStore.getState().current
+  if (!cur) return
+  useStudyStore.getState().setCurrent({
+    ...cur,
+    budget: data.budget,
+  } as never)
 }
 
 /**

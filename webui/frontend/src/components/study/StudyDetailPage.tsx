@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
@@ -75,6 +75,10 @@ export function StudyDetailPage() {
   const [retryMenuOpen, setRetryMenuOpen] = useState(false)
   const [logsSelectedRound, setLogsSelectedRound] = useState<number>(1)
 
+  // Refs for ETag-conditional polling and terminal-state detection
+  const summaryRef = useRef<StudySummaryResponse | null>(null)
+  const etagRef = useRef<string | null>(null)
+
   const loadDirectives = useCallback(async () => {
     try {
       const r = await api.study.directives(studyId)
@@ -95,10 +99,15 @@ export function StudyDetailPage() {
 
   const loadSummary = useCallback(async () => {
     try {
-      const r = await api.study.summary(studyId)
-      setSummary(r)
-      setNotFound(false)
-      setError('')
+      const { data, etag } = await api.study.summaryWithEtag(studyId, etagRef.current ?? undefined)
+      if (data) {
+        setSummary(data)
+        summaryRef.current = data
+        etagRef.current = etag
+        setNotFound(false)
+        setError('')
+      }
+      // data === null → 304 Not Modified, no update needed
     } catch (err) {
       const status = (err as { status?: number })?.status
       if (status === 404) {
@@ -126,7 +135,10 @@ export function StudyDetailPage() {
       await loadSummary()
       if (!cancelled) {
         setLoading(false)
-        timer = setTimeout(poll, 5000)
+        // Stop polling when study reaches a terminal status
+        const st = summaryRef.current?.execution_status
+        const isTerminal = ['complete', 'cancelled', 'archived'].includes(st ?? '')
+        timer = isTerminal ? null : setTimeout(poll, 10_000)
       }
     }
 

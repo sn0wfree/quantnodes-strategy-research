@@ -540,6 +540,32 @@ class AutoresearchRunner:
                 "metrics": metrics, "verdict": verdict,
             })
 
+            # ── SSE: study_budget (per-round accounting) ─────────
+            self._emit(session, "study_budget", {
+                "study_id": sid,
+                "budget": {
+                    "budget_used_turns": self._total_used_turns,
+                    "budget_used_time_s": round(self._total_used_time, 1),
+                    "budget_turn": self._get_study().budget_turn,
+                    "budget_time_seconds": self._get_study().budget_time_seconds,
+                },
+            })
+
+            # ── SSE: study_scoreboard (lever precision) ──────────
+            if hasattr(self, "_scoreboard"):
+                sb = self._scoreboard.get_scoreboard()
+                sb_data = [
+                    {"lever": s.lever, "attempts": s.attempts,
+                     "accepted": s.accepted, "reverted": s.reverted}
+                    for s in sb if s.attempts > 0
+                ]
+                if sb_data:
+                    self._emit(session, "study_scoreboard", {
+                        "study_id": sid,
+                        "round": round_num,
+                        "scoreboard": sb_data,
+                    })
+
             # ── shutdown conditions (targets/budget/stagnation/review/discard) ──
             stop_reason = self._check_stop_conditions(
                 result, metrics, verdict, round_num, session, sid
@@ -1788,6 +1814,27 @@ class AutoresearchRunner:
                 "study_id": sid, "covered": covered, "total": total,
                 "percent": round(covered / total * 100) if total else 100,
             })
+            # ── SSE: study_goal_snapshot (real-time goal state) ──
+            snap = self._goal_store.get_goal_snapshot(
+                self._get_study().goal_id,
+            )
+            if snap:
+                g = snap.get("goal", {}) or {}
+                self._emit(session, "study_goal_snapshot", {
+                    "study_id": sid,
+                    "goal_snapshot": {
+                        "goal_id": g.get("goal_id"),
+                        "goal_status": g.get("status"),
+                        "objective": g.get("objective"),
+                        "progress_percent": g.get("progress_percent", 0),
+                        "evidence_count": snap.get("evidence_count", 0),
+                        "criteria": [
+                            {"criterion_id": c.get("criterion_id"), "text": c.get("text"),
+                             "status": c.get("status"), "required": c.get("required", True)}
+                            for c in snap.get("criteria", []) or []
+                        ],
+                    },
+                })
         except Exception as exc:  # noqa: BLE001
             logger.warning("study %s keep evidence failed: %s", sid, exc)
 

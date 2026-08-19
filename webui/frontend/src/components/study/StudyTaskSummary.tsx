@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Clock, FolderOpen, Target, User, ExternalLink } from 'lucide-react'
 import { api, type StudySummaryResponse } from '../../api/client'
@@ -31,40 +31,54 @@ export function StudyTaskSummary({ studyId }: Props) {
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const summaryRef = useRef<StudySummaryResponse | null>(null)
+  const etagRef = useRef<string | null>(null)
+
+  const run = useCallback(async () => {
+    if (!studyId) return
+    setLoading(true)
+    setError('')
+    try {
+      const { data, etag } = await api.study.summaryWithEtag(studyId, etagRef.current ?? undefined)
+      if (data) {
+        setSummary(data)
+        summaryRef.current = data
+        etagRef.current = etag
+      }
+      // data === null → 304, no update needed
+    } catch (err) {
+      setError((err as Error).message)
+      setSummary(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [studyId])
 
   useEffect(() => {
     if (!studyId) {
       setSummary(null)
+      summaryRef.current = null
+      etagRef.current = null
       return
     }
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
 
-    const run = async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const r = await api.study.summary(studyId)
-        if (!cancelled) setSummary(r)
-      } catch (err) {
-        if (!cancelled) {
-          setError((err as Error).message)
-          setSummary(null)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+    const poll = async () => {
+      await run()
+      if (!cancelled) {
+        const st = summaryRef.current?.execution_status
+        const isTerminal = ['complete', 'cancelled', 'archived'].includes(st ?? '')
+        timer = isTerminal ? null : setTimeout(poll, 10_000)
       }
     }
 
-    void run()
-    // Poll every 10s so the right-side summary stays fresh while
-    // the detail page is open (only when studyId is set).
-    timer = setInterval(() => void run(), 10_000)
+    void poll()
     return () => {
       cancelled = true
-      if (timer) clearInterval(timer)
+      if (timer) clearTimeout(timer)
     }
-  }, [studyId])
+  }, [studyId, run])
 
   if (!studyId) {
     return (
@@ -99,7 +113,8 @@ export function StudyTaskSummary({ studyId }: Props) {
                 if (action === 'unarchive' && !window.confirm('取消归档后状态将变为「已中断」，可手动恢复。继续？')) return
                 try {
                   await api.study.dispatchAction(summary.study_id, action)
-                  void api.study.summary(summary.study_id).then((r) => setSummary(r))
+                  etagRef.current = null // force re-fetch after action
+                  void run()
                 } catch (err) {
                   setError((err as Error).message)
                 }

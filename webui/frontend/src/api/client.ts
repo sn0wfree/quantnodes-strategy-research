@@ -219,6 +219,43 @@ class APIClient {
     summary: (studyId: string) =>
       this.get<StudySummaryResponse>(`/study/${studyId}/summary`),
 
+    /**
+     * Fetch summary with ETag support for conditional requests.
+     * Returns null data + the original etag on 304 Not Modified;
+     * returns parsed data + new etag on 200.
+     */
+    summaryWithEtag: async (
+      studyId: string,
+      etag?: string,
+    ): Promise<{ data: StudySummaryResponse | null; etag: string | null }> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const token = this.getToken()
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      if (etag) headers['if-none-match'] = etag
+
+      const res = await fetch(`${API_BASE}/study/${studyId}/summary`, { headers })
+
+      if (res.status === 304) {
+        return { data: null, etag: etag ?? null }
+      }
+      if (res.status === 401) {
+        useAuthStore.getState().logout()
+        window.location.href = '/login'
+        throw new Error('Unauthorized')
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        const detail = (err as { detail?: string })?.detail
+        const message = typeof detail === 'string' && detail ? detail : 'Request failed'
+        throw new ApiError(res.status, message, detail)
+      }
+
+      const text = await res.text()
+      const data = text ? (JSON.parse(text) as StudySummaryResponse) : null
+      const newEtag = res.headers.get('etag')
+      return { data, etag: newEtag }
+    },
+
     directives: (studyId: string) =>
       this.get<StudyDirectivesResponse>(`/study/${studyId}/directives`),
 
