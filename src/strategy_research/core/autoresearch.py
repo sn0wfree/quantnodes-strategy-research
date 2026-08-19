@@ -987,6 +987,7 @@ def spawn_agent(
     results_tsv: Path | None = None,
     write_roots: tuple[str, ...] | None = None,
     read_roots: tuple[str, ...] | None = None,
+    loop_strategy: Any | None = None,
 ) -> str:
     """Spawn a single agent (real LLM or stub) and return JSON text.
 
@@ -1026,6 +1027,7 @@ def spawn_agent(
                 results_tsv=results_tsv,
                 write_roots=write_roots,
                 read_roots=read_roots,
+                loop_strategy=loop_strategy,
             )
         except Exception as exc:
             # 真 LLM 失败 → 退到 stub, 不让主循环崩

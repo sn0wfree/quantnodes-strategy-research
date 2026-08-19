@@ -1,14 +1,18 @@
+import pytest
+
 from strategy_research.core.workflow import (
     AgentRegistry,
     AgentStatus,
-    ControllerConfig,
-    PromptBuilder,
-    WorkflowController,
     topological_layers,
     validate_dag,
 )
 from strategy_research.core.workflow.executors import StubExecutor
 from strategy_research.core.workflow.validator import AgentValidator
+
+# P8 cleanup: WorkflowController / ControllerConfig / PromptBuilder removed
+_WorkflowController = None  # type: ignore[assignment,misc]
+_ControllerConfig = None  # type: ignore[assignment,misc]
+_PromptBuilder = None  # type: ignore[assignment,misc]
 
 
 class FailingExecutor:
@@ -24,6 +28,7 @@ class FailingExecutor:
 
 
 class TestWorkflowE2E:
+    @pytest.mark.skip(reason="P8 cleanup: WorkflowController/ControllerConfig removed")
     def test_full_workflow_single_round(self):
         reg = AgentRegistry()
         reg.register(StubExecutor("researcher", {"action": "tweak_factor", "hypothesis": "momentum works"}))
@@ -62,6 +67,7 @@ class TestWorkflowE2E:
         success_count = sum(1 for e in round_result.executions if e.status == AgentStatus.SUCCESS)
         assert success_count == 9
 
+    @pytest.mark.skip(reason="P8 cleanup: WorkflowController/ControllerConfig removed")
     def test_workflow_with_failed_agent(self):
         reg = AgentRegistry()
         reg.register(StubExecutor("a"))
@@ -75,6 +81,7 @@ class TestWorkflowE2E:
         assert result.executions[0].status == AgentStatus.SUCCESS
         assert result.executions[1].status == AgentStatus.ERROR
 
+    @pytest.mark.skip(reason="P8 cleanup: PromptBuilder removed")
     def test_prompt_builder_with_templates(self, tmp_path):
         prompt_file = tmp_path / "researcher.md"
         prompt_file.write_text("# Researcher\nAnalyze the strategy.")
@@ -118,6 +125,7 @@ class TestWorkflowE2E:
         assert layers[6] == ["anti_overfit_analyst"]
         assert layers[7] == ["backtest_diagnostics"]
 
+    @pytest.mark.skip(reason="P8 cleanup: WorkflowController removed")
     def test_round_execution_time(self):
         reg = AgentRegistry()
         reg.register(StubExecutor("a"))

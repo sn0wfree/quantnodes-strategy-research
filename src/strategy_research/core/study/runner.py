@@ -1280,6 +1280,7 @@ class AutoresearchRunner:
                     strategy_name=self._get_study().strategy_name,
                     task=review_input,
                     max_iterations=3,
+                    loop_strategy=self._loop_strategy,
                 )
             else:
                 raw_review = json.dumps({
@@ -1760,6 +1761,7 @@ class AutoresearchRunner:
                         f"existing knowledge:\n{knowledge_text[-2000:]}\n"
                     ),
                     max_iterations=3,
+                    loop_strategy=self._loop_strategy,
                 )
                 entries = rl.parse_review_output(raw_entries)
                 if isinstance(entries, dict):

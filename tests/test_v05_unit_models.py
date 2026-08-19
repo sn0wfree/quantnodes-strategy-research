@@ -19,9 +19,11 @@ from strategy_research.core.goal.workflow import (
     GoalEvidenceCollector,
     GoalWorkflowConfig,
     GoalWorkflowState,
-    _AgentConfigExecutor,
 )
 from strategy_research.core.goal.workflow_config import load_goal_workflow
+
+# _AgentConfigExecutor removed in P8 cleanup
+_AgentConfigExecutor = None  # type: ignore[assignment,misc]
 
 
 @pytest.fixture
@@ -149,6 +151,7 @@ class TestGoalEvidenceCollector:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.skip(reason="P8 cleanup: _AgentConfigExecutor removed from goal.workflow")
 class TestAgentConfigExecutor:
     def test_name_returns_agent_id(self):
         assert _AgentConfigExecutor("researcher").name == "researcher"
