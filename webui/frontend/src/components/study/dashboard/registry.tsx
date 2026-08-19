@@ -52,6 +52,9 @@ const TodosView = lazy(() =>
 const JournalView = lazy(() =>
   import('./widgets/JournalView').then(m => ({ default: m.JournalView })),
 )
+const StudyChat = lazy(() =>
+  import('./widgets/StudyChat').then(m => ({ default: m.StudyChat })),
+)
 
 // ── Wrapper components (adapt existing props → WidgetProps) ───────
 
@@ -281,6 +284,14 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     defaultEnabled: false,
     defaultSpan: 12,
     component: JournalView,
+  },
+  'study-chat': {
+    id: 'study-chat',
+    label: '研究聊天',
+    icon: '💬',
+    defaultEnabled: true,
+    defaultSpan: 12,
+    component: StudyChat,
   },
 }
 

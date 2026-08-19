@@ -34,8 +34,9 @@ export function getDefaultLayout(): DashboardConfig {
       w('dag-flow'),             // 2  — span 12
       w('metrics-compare', 6),   // 3  — span 6
       w('round-history', 6),     // 4  — span 6
-      w('scoreboard'),           // 5  — span 12 (disabled by default)
-      w('budget'),               // 6  — span 12 (disabled by default)
+      w('study-chat'),           // 5  — span 12
+      w('scoreboard'),           // 6  — span 12 (disabled by default)
+      w('budget'),               // 7  — span 12 (disabled by default)
     ],
   }
 }

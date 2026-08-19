@@ -18,6 +18,7 @@ import { ContinueDialog } from './ContinueDialog'
 import { AgentApprovalDialog } from './AgentApprovalDialog'
 import { DashboardGrid, WidgetPicker } from './dashboard'
 import { useStudyDashboardStore } from '../../stores/studyDashboard'
+import { useSSE } from '../../hooks/useSSE'
 
 type TabKey = 'overview' | 'flow' | 'logs'
 
@@ -146,6 +147,9 @@ export function StudyDetailPage() {
   const loadDashboard = useStudyDashboardStore(s => s.load)
   const dashboardEditMode = useStudyDashboardStore(s => s.editMode)
   const setDashboardEditMode = useStudyDashboardStore(s => s.setEditMode)
+
+  // ── SSE connection for study events ────────────────────────────
+  useSSE(studyId)
 
   useEffect(() => {
     loadDashboard(studyId)
