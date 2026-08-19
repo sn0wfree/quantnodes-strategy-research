@@ -3,30 +3,15 @@
  * for the study detail page.  Persisted to localStorage per study.
  */
 import { create } from 'zustand'
-import type { DashboardConfig } from '../components/study/dashboard/types'
+import type { DashboardConfig, DashboardWidget } from '../components/study/dashboard/types'
 import { CONFIG_VERSION, GRID_COLUMNS, STORAGE_KEY_PREFIX } from '../components/study/dashboard/types'
 import { getDefaultLayout } from '../components/study/dashboard/defaultLayout'
+import { WIDGET_REGISTRY } from '../components/study/dashboard/registry'
 
 // ── localStorage helpers ─────────────────────────────────────────
 
 function storageKey(studyId: string): string {
   return `${STORAGE_KEY_PREFIX}-${studyId}`
-}
-
-function loadConfig(studyId: string): DashboardConfig {
-  if (typeof window === 'undefined') return getDefaultLayout()
-  try {
-    const raw = localStorage.getItem(storageKey(studyId))
-    if (!raw) return getDefaultLayout()
-    const parsed = JSON.parse(raw) as DashboardConfig
-    // Basic validation
-    if (parsed.version !== CONFIG_VERSION || !Array.isArray(parsed.widgets)) {
-      return getDefaultLayout()
-    }
-    return parsed
-  } catch {
-    return getDefaultLayout()
-  }
 }
 
 function saveConfig(studyId: string, config: DashboardConfig): void {
@@ -36,6 +21,75 @@ function saveConfig(studyId: string, config: DashboardConfig): void {
   } catch {
     // localStorage full or blocked — silently ignore
   }
+}
+
+// ── Migration helpers ────────────────────────────────────────────
+
+/** Create a default widget entry from its registry definition. */
+function createWidgetEntry(type: string, order: number): DashboardWidget {
+  const def = WIDGET_REGISTRY[type]
+  return {
+    id: type,
+    type,
+    enabled: def?.defaultEnabled ?? true,
+    span: def?.defaultSpan ?? GRID_COLUMNS,
+    order,
+  }
+}
+
+/**
+ * Migrate a saved config to the current schema.
+ *
+ * Behavior:
+ * - Wrong version → return fresh default layout (old prefs discarded)
+ * - Correct version but missing widget types → append them with
+ *   registry defaults (respect user's existing order/spans/enabled flags)
+ * - No changes needed → return the saved config unchanged
+ */
+function migrateConfig(saved: DashboardConfig): DashboardConfig {
+  // Version mismatch → reset
+  if (saved.version !== CONFIG_VERSION || !Array.isArray(saved.widgets)) {
+    return getDefaultLayout()
+  }
+
+  // Find missing widget types
+  const existing = new Set(saved.widgets.map((w) => w.type))
+  const missingTypes = Object.keys(WIDGET_REGISTRY).filter((t) => !existing.has(t))
+  if (missingTypes.length === 0) return saved
+
+  // Re-normalize order to 0..N-1, preserving relative order
+  const renumbered = saved.widgets.map((w, i) => ({ ...w, order: i }))
+  const startOrder = renumbered.length
+  const additions = missingTypes.map((t, i) => createWidgetEntry(t, startOrder + i))
+  return { ...saved, widgets: [...renumbered, ...additions] }
+}
+
+/**
+ * Read config from localStorage and apply migration.
+ * Returns the (possibly migrated) config + a flag indicating whether
+ * the config was modified.
+ */
+function loadConfig(studyId: string): { config: DashboardConfig; migrated: boolean } {
+  if (typeof window === 'undefined') {
+    return { config: getDefaultLayout(), migrated: false }
+  }
+  let saved: DashboardConfig | null = null
+  try {
+    const raw = localStorage.getItem(storageKey(studyId))
+    if (raw) {
+      const parsed = JSON.parse(raw) as DashboardConfig
+      if (parsed.version === CONFIG_VERSION && Array.isArray(parsed.widgets)) {
+        saved = parsed
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  if (!saved) {
+    return { config: getDefaultLayout(), migrated: false }
+  }
+  const migrated = migrateConfig(saved)
+  return { config: migrated, migrated: migrated !== saved }
 }
 
 // ── Store ────────────────────────────────────────────────────────
@@ -70,7 +124,11 @@ export const useStudyDashboardStore = create<DashboardState>((set, get) => ({
   studyId: null,
 
   load: (studyId: string) => {
-    const config = loadConfig(studyId)
+    const { config, migrated } = loadConfig(studyId)
+    if (migrated) {
+      // Persist the migrated config so we only migrate once
+      saveConfig(studyId, config)
+    }
     set({ config, studyId })
   },
 
