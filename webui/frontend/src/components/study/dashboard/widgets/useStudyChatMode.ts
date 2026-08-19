@@ -1,5 +1,5 @@
 /**
- * useStudyChatMode — manages directive/chat mode and chat session
+ * useStudyChatMode — manages plan/build mode and chat session
  * association for a study's embedded chat widget.
  *
  * Mode is persisted to localStorage per study.
@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSessionStore } from '../../../../stores/session'
 
-export type ChatMode = 'directive' | 'chat'
+export type ChatMode = 'plan' | 'build'
 
 function modeKey(studyId: string): string {
   return `sr-study-chat-mode-${studyId}`
@@ -19,11 +19,16 @@ function sessionKey(studyId: string): string {
 }
 
 function readMode(studyId: string): ChatMode {
-  if (typeof window === 'undefined') return 'directive'
+  if (typeof window === 'undefined') return 'plan'
   try {
-    return (localStorage.getItem(modeKey(studyId)) as ChatMode) || 'directive'
+    const raw = localStorage.getItem(modeKey(studyId))
+    if (raw === 'build') return 'build'
+    // Migrate old values
+    if (raw === 'chat') return 'build'
+    if (raw === 'directive') return 'plan'
+    return 'plan'
   } catch {
-    return 'directive'
+    return 'plan'
   }
 }
 
@@ -62,15 +67,13 @@ export function useStudyChatMode(studyId: string) {
 
   /**
    * Ensure a chat session exists for this study.
-   * Creates one on-demand if needed (lazy — only when switching to chat mode).
+   * Creates one on-demand if needed (lazy — created on first message).
    */
   const ensureChatSession = useCallback(async (): Promise<string> => {
-    // Return existing if valid
     if (chatSessionId) return chatSessionId
 
     setCreating(true)
     try {
-      // Use session store's createNewSession
       const session = await useSessionStore.getState().createNewSession(
         `Study: ${studyId.slice(0, 12)}...`,
       )

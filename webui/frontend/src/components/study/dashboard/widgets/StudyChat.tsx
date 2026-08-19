@@ -1,22 +1,26 @@
 /**
- * StudyChat — hybrid chat widget for the study detail page.
+ * StudyChat — unified chat widget for the study detail page.
  *
- * Two modes:
- * 1. Directive Mode (default): read-only agent outputs + send directives
- * 2. Chat Mode: full conversational chat via chat session
+ * Layout:
+ *   Header: [Plan | Build] mode switcher + current round + panel toggle
+ *   Body (flex row):
+ *     Main column: MessageList (with round separators) + StudyChatComposer
+ *     Right panel: KeyPointsPanel (all rounds, collapsible)
+ *
+ * Both modes show the same message stream.
+ * Plan mode defaults composer to 指令, Build mode defaults to 对话.
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { MessageSquare, Send, Loader2 } from 'lucide-react'
+import { Loader2, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import { api, type StudyRoundAgentOutputsResponse } from '../../../../api/client'
 import { useStudyStore } from '../../../../stores/study'
 import { useChatStore, type Message, type TextPart } from '../../../../stores/chat'
 import { ChatSessionProvider } from '../../../../contexts/ChatSessionContext'
 import { MessageList } from '../../../chat/MessageList'
-import { Composer } from '../../../chat/Composer'
-import { useSSE } from '../../../../hooks/useSSE'
 import type { WidgetProps } from '../types'
-import { useStudyChatMode, type ChatMode } from './useStudyChatMode'
-import { StudyDirectiveComposer } from './StudyDirectiveComposer'
+import { useStudyChatMode } from './useStudyChatMode'
+import { StudyChatComposer } from './StudyChatComposer'
+import { KeyPointsPanel } from './KeyPointsPanel'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -33,88 +37,93 @@ function buildMessagesFromOutputs(
     const textPart: TextPart = { type: 'text', id: partId, text }
     return {
       id: `study:${studyId}:r${round}:${agentId}`,
-      session_id: `study:${studyId}:directive`,
+      session_id: `study:${studyId}:stream`,
       role: 'assistant',
       agent_id: agentId,
       parts: [textPart],
       created_at: Date.now() / 1000,
       metadata: {
         model: agentId,
+        kind: 'agent',
+        round,
         ...(out.error ? { error: String(out.error) } : {}),
       },
     }
   })
 }
 
-function buildEventMessage(event: { type: string; message: string; timestamp: number }, studyId: string): Message {
+function buildEventMessage(
+  event: { type: string; message: string; timestamp: number },
+  studyId: string,
+  currentRound: number,
+): Message {
   return {
     id: `sse:${event.timestamp}:${event.type}`,
-    session_id: `study:${studyId}:directive`,
+    session_id: `study:${studyId}:stream`,
     role: 'system',
     parts: [{ type: 'text', id: `evt:${event.timestamp}`, text: event.message }],
     created_at: event.timestamp / 1000,
+    metadata: {
+      kind: 'system',
+      round: currentRound,
+    },
   }
 }
 
-// ── Mode Switcher ────────────────────────────────────────────────
+/** separatorKey function: extracts round from metadata for round dividers. */
+function roundKey(msg: Message): string | null {
+  const round = msg.metadata?.round
+  if (round != null) return String(round)
+  return null
+}
 
-function ModeSwitcher({
-  mode,
-  onModeChange,
-  chatCreating,
+// ── Panel toggle button ──────────────────────────────────────────
+
+function PanelToggle({
+  open,
+  onClick,
 }: {
-  mode: ChatMode
-  onModeChange: (m: ChatMode) => void
-  chatCreating: boolean
+  open: boolean
+  onClick: () => void
 }) {
   return (
-    <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
-      <button
-        onClick={() => onModeChange('directive')}
-        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-          mode === 'directive'
-            ? 'bg-slate-700 text-slate-200'
-            : 'text-slate-500 hover:text-slate-300'
-        }`}
-      >
-        <Send className="h-3 w-3" />
-        指令
-      </button>
-      <button
-        onClick={() => onModeChange('chat')}
-        disabled={chatCreating}
-        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-          mode === 'chat'
-            ? 'bg-slate-700 text-slate-200'
-            : 'text-slate-500 hover:text-slate-300'
-        }`}
-      >
-        {chatCreating ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
-        ) : (
-          <MessageSquare className="h-3 w-3" />
-        )}
-        对话
-      </button>
-    </div>
+    <button
+      onClick={onClick}
+      className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300"
+      title={open ? '收起右栏' : '展开右栏'}
+    >
+      {open ? (
+        <PanelRightClose className="h-4 w-4" />
+      ) : (
+        <PanelRightOpen className="h-4 w-4" />
+      )}
+    </button>
   )
 }
 
-// ── Directive Mode ───────────────────────────────────────────────
+// ── Main Widget ──────────────────────────────────────────────────
 
-function DirectiveMode({
-  studyId,
-  summary,
-}: {
-  studyId: string
-  summary: Record<string, unknown>
-}) {
-  const currentRound = (summary.current_round as number) ?? 1
+export function StudyChat({ studyId, summary }: WidgetProps) {
+  const {
+    mode,
+    setMode,
+  } = useStudyChatMode(studyId)
+
+  const currentRound = (summary?.current_round as number) ?? 1
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
-  const recentEvents = useStudyStore(s => s.recentEvents)
+  const [panelOpen, setPanelOpen] = useState(true)
+  const recentEvents = useStudyStore((s) => s.recentEvents)
   const chatStore = useChatStore()
   const eventCountRef = useRef(0)
+  const prevStudyIdRef = useRef<string | null>(null)
+
+  // Sync selectedRound with currentRound when it changes
+  useEffect(() => {
+    if (currentRound > 0) {
+      setSelectedRound(currentRound)
+    }
+  }, [currentRound])
 
   // Load agent outputs for selected round
   useEffect(() => {
@@ -126,169 +135,155 @@ function DirectiveMode({
       .then((r) => {
         if (!cancelled) {
           const msgs = buildMessagesFromOutputs(r.agent_outputs, studyId, selectedRound)
+          // Replace agent messages in stream (keep chat/directive messages)
+          const existing = Array.from(chatStore.messages.values())
+          const nonAgent = existing.filter(
+            (m) => m.metadata?.kind !== 'agent',
+          )
           chatStore.setMessages([])
+          nonAgent.forEach((m) => chatStore.addMessage(m))
           msgs.forEach((m) => chatStore.addMessage(m))
           setLoading(false)
         }
       })
       .catch(() => {
         if (!cancelled) {
+          // Remove agent messages on error
+          const existing = Array.from(chatStore.messages.values())
+          const nonAgent = existing.filter(
+            (m) => m.metadata?.kind !== 'agent',
+          )
           chatStore.setMessages([])
+          nonAgent.forEach((m) => chatStore.addMessage(m))
           setLoading(false)
         }
       })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [studyId, selectedRound])
 
-  // Inject SSE events as system messages (only new ones)
+  // Inject SSE events as system messages
   useEffect(() => {
     if (recentEvents.length === 0) return
-    // Only add events newer than what we've seen
-    const newEvents = recentEvents.slice(0, recentEvents.length - eventCountRef.current)
+    const newEvents = recentEvents.slice(eventCountRef.current)
     eventCountRef.current = recentEvents.length
 
     newEvents.forEach((event) => {
-      chatStore.addMessage(buildEventMessage(event, studyId))
+      chatStore.addMessage(buildEventMessage(event, studyId, selectedRound))
     })
   }, [recentEvents.length])
 
+  // Clear messages on studyId change
+  useEffect(() => {
+    if (prevStudyIdRef.current !== studyId) {
+      chatStore.setMessages([])
+      eventCountRef.current = 0
+      prevStudyIdRef.current = studyId
+    }
+  }, [studyId])
+
+  const handleSelectRound = useCallback((round: number) => {
+    setSelectedRound(round)
+  }, [])
+
+  const handlePanelToggle = useCallback(() => {
+    setPanelOpen((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(`sr-study-chat-panel-${studyId}`, String(next))
+      } catch { /* ignore */ }
+      return next
+    })
+  }, [studyId])
+
+  // Restore panel state from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`sr-study-chat-panel-${studyId}`)
+      if (saved !== null) setPanelOpen(saved !== 'false')
+    } catch { /* ignore */ }
+  }, [studyId])
+
   return (
-    <ChatSessionProvider sessionId={`study:${studyId}:directive`}>
-      <div className="flex flex-col" style={{ height: '28rem' }}>
-        {/* Round picker */}
-        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
-          <span className="text-[10px] text-slate-500">轮次</span>
-          <select
-            value={selectedRound}
-            onChange={(e) => setSelectedRound(Number(e.target.value))}
-            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 outline-none"
-          >
-            {Array.from({ length: currentRound }, (_, i) => i + 1)
-              .reverse()
-              .map((r) => (
-                <option key={r} value={r}>
-                  Round {r}
-                </option>
-              ))}
-          </select>
-          {loading && (
-            <Loader2 className="h-3 w-3 animate-spin text-slate-500" />
+    <ChatSessionProvider sessionId={`study:${studyId}:stream`}>
+      <div className="flex h-full flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
+          <div className="flex items-center gap-3">
+            {/* Mode switcher */}
+            <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
+              <button
+                onClick={() => setMode('plan')}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  mode === 'plan'
+                    ? 'bg-slate-700 text-slate-200'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                📋 Plan
+              </button>
+              <button
+                onClick={() => setMode('build')}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  mode === 'build'
+                    ? 'bg-slate-700 text-slate-200'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                🔧 Build
+              </button>
+            </div>
+
+            {/* Current round indicator */}
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span>
+                Round {selectedRound}
+                {loading && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
+              </span>
+              {selectedRound !== currentRound && (
+                <button
+                  onClick={() => setSelectedRound(currentRound)}
+                  className="text-[10px] text-primary-400 hover:text-primary-300"
+                >
+                  (回到最新)
+                </button>
+              )}
+            </div>
+          </div>
+
+          <PanelToggle open={panelOpen} onClick={handlePanelToggle} />
+        </div>
+
+        {/* Body: main column + right panel */}
+        <div className="flex min-h-0 flex-1">
+          {/* Main column */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Message stream */}
+            <div className="min-h-0 flex-1">
+              <MessageList separatorKey={roundKey} />
+            </div>
+
+            {/* Composer */}
+            <div className="flex-shrink-0">
+              <StudyChatComposer
+                studyId={studyId}
+                mode={mode}
+              />
+            </div>
+          </div>
+
+          {/* Right panel */}
+          {panelOpen && (
+            <div className="w-64 flex-shrink-0 border-l border-slate-800">
+              <KeyPointsPanel
+                studyId={studyId}
+                selectedRound={selectedRound}
+                onSelectRound={handleSelectRound}
+                refreshKey={recentEvents.length}
+              />
+            </div>
           )}
         </div>
-
-        {/* Message list */}
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <MessageList />
-        </div>
-
-        {/* Directive composer */}
-        <div className="flex-shrink-0 p-3">
-          <StudyDirectiveComposer
-            studyId={studyId}
-            placeholder="输入研究指令（下轮 researcher 生效）..."
-          />
-        </div>
       </div>
     </ChatSessionProvider>
-  )
-}
-
-// ── Chat Mode ────────────────────────────────────────────────────
-
-function ChatModeContent({
-  chatSessionId,
-}: {
-  chatSessionId: string
-}) {
-  // Activate SSE for this chat session
-  useSSE(chatSessionId)
-
-  // Load messages on mount
-  const chatStore = useChatStore()
-  useEffect(() => {
-    chatStore.loadMessages(chatSessionId)
-  }, [chatSessionId])
-
-  return (
-    <div className="flex flex-col" style={{ height: '28rem' }}>
-      {/* Message list */}
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <MessageList />
-      </div>
-
-      {/* Composer */}
-      <div className="flex-shrink-0 border-t border-slate-800">
-        <Composer />
-      </div>
-    </div>
-  )
-}
-
-function ChatMode({
-  chatSessionId,
-}: {
-  chatSessionId: string | null
-}) {
-  if (!chatSessionId) {
-    return (
-      <div className="flex h-96 items-center justify-center text-xs text-slate-500">
-        正在创建对话会话...
-      </div>
-    )
-  }
-
-  return (
-    <ChatSessionProvider sessionId={chatSessionId}>
-      <ChatModeContent chatSessionId={chatSessionId} />
-    </ChatSessionProvider>
-  )
-}
-
-// ── Main Widget ──────────────────────────────────────────────────
-
-export function StudyChat({ studyId, summary }: WidgetProps) {
-  const {
-    mode,
-    setMode,
-    chatSessionId,
-    ensureChatSession,
-    creating,
-  } = useStudyChatMode(studyId)
-
-  const handleModeChange = useCallback(async (m: ChatMode) => {
-    if (m === 'chat') {
-      await ensureChatSession()
-    }
-    setMode(m)
-  }, [setMode, ensureChatSession])
-
-  return (
-    <div className="space-y-3">
-      {/* Mode switcher */}
-      <div className="flex items-center justify-between">
-        <ModeSwitcher
-          mode={mode}
-          onModeChange={handleModeChange}
-          chatCreating={creating}
-        />
-        <span className="text-[10px] text-slate-600">
-          {mode === 'directive'
-            ? '指令模式: 输入方向，下轮生效'
-            : '对话模式: 实时与 LLM 交互'}
-        </span>
-      </div>
-
-      {/* Mode content */}
-      {mode === 'directive' ? (
-        <DirectiveMode
-          studyId={studyId}
-          summary={summary as unknown as Record<string, unknown>}
-        />
-      ) : (
-        <ChatMode chatSessionId={chatSessionId} />
-      )}
-    </div>
   )
 }

@@ -1,7 +1,7 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import type { VirtuosoHandle } from 'react-virtuoso'
-import { useChatStore } from '../../stores/chat'
+import { useChatStore, type Message } from '../../stores/chat'
 import { useLayoutStore } from '../../stores/layout'
 import { useChatSessionId } from '../../contexts/ChatSessionContext'
 import { MessageBubble } from './MessageBubble'
@@ -15,8 +15,63 @@ import { QuickStartChips } from './QuickStartChips'
 import { MessageSquare } from 'lucide-react'
 import { formatTime, dayLabel } from '../../utils/time'
 
+// ── Separator support ─────────────────────────────────────────
 
-export function MessageList() {
+interface SeparatorItem {
+  _type: 'separator'
+  _key: string
+  round: number
+}
+
+type ListItem = Message | SeparatorItem
+
+function isSeparator(item: ListItem): item is SeparatorItem {
+  return (item as SeparatorItem)._type === 'separator'
+}
+
+/**
+ * Inject round separator items into a sorted message list.
+ * Inserts a separator before the first message of each new round.
+ */
+function injectSeparators(messages: Message[], keyFn: (m: Message) => string | null): ListItem[] {
+  const items: ListItem[] = []
+  let lastKey: string | null = null
+  for (const msg of messages) {
+    const key = keyFn(msg)
+    if (key != null && key !== lastKey) {
+      items.push({ _type: 'separator', _key: `sep-${key}`, round: parseInt(key.replace(/\D/g, ''), 10) || 0 })
+      lastKey = key
+    }
+    items.push(msg)
+  }
+  return items
+}
+
+// ── Round separator component ─────────────────────────────────
+
+function RoundSeparator({ round }: { round: number }) {
+  return (
+    <div className="flex items-center gap-3 px-4 pt-4 pb-1">
+      <div className="h-px flex-1 bg-slate-700/60" />
+      <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-[11px] font-medium text-slate-400">
+        Round {round}
+      </span>
+      <div className="h-px flex-1 bg-slate-700/60" />
+    </div>
+  )
+}
+
+export interface MessageListProps {
+  /**
+   * When provided, round separator dividers are injected between messages
+   * whose key changes. The key is derived from the message metadata
+   * (e.g. metadata.round). Messages with a null key get no separator.
+   */
+  separatorKey?: (msg: Message) => string | null
+}
+
+
+export function MessageList({ separatorKey }: MessageListProps = {}) {
   const messages = useChatStore((s) => s.messages)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const chatLayout = useLayoutStore((s) => s.chatLayout)
@@ -26,9 +81,15 @@ export function MessageList() {
   const currentSessionId = useChatSessionId()
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
-  const messageList = Array.from(messages.values())
-  .filter((m) => !currentSessionId || m.session_id === currentSessionId)
-  .sort((a, b) => a.created_at - b.created_at)
+  const rawMessages = Array.from(messages.values())
+    .filter((m) => !currentSessionId || m.session_id === currentSessionId)
+    .sort((a, b) => a.created_at - b.created_at)
+
+  const messageList: ListItem[] = useMemo(
+    () => separatorKey ? injectSeparators(rawMessages, separatorKey) : rawMessages,
+    [rawMessages, separatorKey],
+  )
+
   const isQueuePaused = currentSessionId
     ? queuePaused.get(currentSessionId) ?? false
     : false
@@ -106,13 +167,20 @@ export function MessageList() {
               )
             : undefined,
         }}
-        itemContent={(_index, message) => {
+        itemContent={(_index, item) => {
+          // Round separator items
+          if (isSeparator(item)) {
+            return <RoundSeparator round={item.round} />
+          }
+
+          const message = item as Message
+
           // Day separator: show a date divider when the calendar day
           // changes from the previous message.
           const prev = _index > 0 ? messageList[_index - 1] : null
           const showDay =
             _index === 0 ||
-            (prev && dayLabel(prev.created_at) !== dayLabel(message.created_at))
+            (prev && !isSeparator(prev) && dayLabel((prev as Message).created_at) !== dayLabel(message.created_at))
           const daySeparator = showDay ? (
             <div className="flex items-center gap-3 px-4 pt-3">
               <div className="h-px flex-1 bg-slate-800/60" />

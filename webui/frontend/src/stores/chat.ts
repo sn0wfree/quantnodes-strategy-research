@@ -138,6 +138,10 @@ export interface Message {
     evidence_count?: number
     evidence_text?: string
     recap?: string
+    /** Study chat: message category for filtering/display. */
+    kind?: 'agent' | 'directive' | 'chat' | 'system' | 'round-separator'
+    /** Study chat: round number this message belongs to. */
+    round?: number
   }
 }
 
