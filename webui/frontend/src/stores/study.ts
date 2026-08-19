@@ -13,6 +13,14 @@ export interface AgentApprovalRequest {
   requested_at: number
 }
 
+/** Live event for the event timeline widget */
+export interface LiveEvent {
+  type: 'phase' | 'agent' | 'knowledge' | 'review' | 'retry' | 'evidence' | 'directive' | 'other'
+  message: string
+  timestamp: number
+  round?: number
+}
+
 export interface StudyState {
   /** Most recent status response for the active session. */
   current: StudyStatusResponse | null
@@ -25,6 +33,18 @@ export interface StudyState {
   /** Pending agent-loop approval gates, keyed by study_id+role+iteration. */
   agentApprovals: Record<string, AgentApprovalRequest>
 
+  // ── Live activity tracking (Phase D) ──────────────────────────
+  /** Current phase within a round (e.g. "researcher", "execution", "evaluation") */
+  currentPhase: string | null
+  /** Current agent running within the phase */
+  currentAgent: string | null
+  /** Timestamp when currentPhase started (Date.now()) */
+  phaseStartedAt: number | null
+  /** Per-node DAG status from SSE events */
+  nodeStatuses: Record<string, string>
+  /** Recent SSE events for the event timeline (max 50) */
+  recentEvents: LiveEvent[]
+
   setCurrent: (s: StudyStatusResponse | null) => void
   setList: (rows: StudySummary[]) => void
   setBusy: (b: boolean) => void
@@ -32,6 +52,13 @@ export interface StudyState {
   reset: () => void
   enqueueAgentApproval: (req: AgentApprovalRequest) => void
   resolveAgentApproval: (studyId: string, role: string | null, iter: number | undefined) => void
+
+  // ── Live activity actions ─────────────────────────────────────
+  setPhase: (phase: string | null) => void
+  setAgent: (agent: string | null) => void
+  updateNodeStatus: (nodeId: string, status: string) => void
+  addLiveEvent: (event: Omit<LiveEvent, 'timestamp'>) => void
+  clearLiveActivity: () => void
 }
 
 const approvalKey = (studyId: string, role: string | null, iter: number | undefined) =>
@@ -43,11 +70,22 @@ export const useStudyStore = create<StudyState>()((set) => ({
   busy: false,
   error: '',
   agentApprovals: {},
+  // Live activity defaults
+  currentPhase: null,
+  currentAgent: null,
+  phaseStartedAt: null,
+  nodeStatuses: {},
+  recentEvents: [],
+
   setCurrent: (current) => set({ current }),
   setList: (list) => set({ list }),
   setBusy: (busy) => set({ busy }),
   setError: (error) => set({ error }),
-  reset: () => set({ current: null, list: [], busy: false, error: '', agentApprovals: {} }),
+  reset: () => set({
+    current: null, list: [], busy: false, error: '', agentApprovals: {},
+    currentPhase: null, currentAgent: null, phaseStartedAt: null,
+    nodeStatuses: {}, recentEvents: [],
+  }),
   enqueueAgentApproval: (req) =>
     set((s) => ({
       agentApprovals: {
@@ -63,6 +101,31 @@ export const useStudyStore = create<StudyState>()((set) => ({
       delete next[key]
       return { agentApprovals: next }
     }),
+
+  // ── Live activity actions ─────────────────────────────────────
+  setPhase: (phase) => set({
+    currentPhase: phase,
+    phaseStartedAt: phase ? Date.now() : null,
+  }),
+  setAgent: (agent) => set({ currentAgent: agent }),
+  updateNodeStatus: (nodeId, status) =>
+    set((s) => ({
+      nodeStatuses: { ...s.nodeStatuses, [nodeId]: status },
+    })),
+  addLiveEvent: (event) =>
+    set((s) => ({
+      recentEvents: [
+        { ...event, timestamp: Date.now() },
+        ...s.recentEvents,
+      ].slice(0, 50),
+    })),
+  clearLiveActivity: () => set({
+    currentPhase: null,
+    currentAgent: null,
+    phaseStartedAt: null,
+    nodeStatuses: {},
+    recentEvents: [],
+  }),
 }))
 
 // Convenience helpers (kept here so components don't re-import api).

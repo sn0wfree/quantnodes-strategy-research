@@ -43,6 +43,18 @@ import {
   studyScoreboard,
   studyGoalSnapshot,
   studyBudget,
+  // Phase D: live activity handlers
+  studyPhase,
+  studyAgentComplete,
+  studyGraphNode,
+  studyKnowledgeCheck,
+  studyKnowledgeUpdate,
+  studyReview,
+  studyEvidence,
+  studyDirectiveAdded,
+  studyObjectiveApplied,
+  studyEarlyStopped,
+  studyTodosUpdated,
 } from './studyHandlers'
 import {
   subagentStarted,
@@ -123,6 +135,18 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   agent_approval_requested: agentApprovalRequested,
   agent_approval_responded: agentApprovalResponded,
   study_parse_retry: studyParseRetry,
+  // Phase D: live activity events (runner.py → SSE)
+  study_phase: studyPhase,
+  study_agent_complete: studyAgentComplete,
+  study_graph_node: studyGraphNode,
+  study_knowledge_check: studyKnowledgeCheck,
+  study_knowledge_update: studyKnowledgeUpdate,
+  study_review: studyReview,
+  study_evidence: studyEvidence,
+  study_directive_added: studyDirectiveAdded,
+  study_objective_applied: studyObjectiveApplied,
+  study_early_stopped: studyEarlyStopped,
+  study_todos_updated: studyTodosUpdated,
   // Subagent lifecycle
   subagent_started: subagentStarted,
   subagent_tool_call: subagentToolCall,

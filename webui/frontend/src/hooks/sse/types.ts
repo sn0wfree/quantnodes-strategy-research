@@ -65,6 +65,18 @@ export type SSEEventType =
   | 'agent_approval_requested'
   | 'agent_approval_responded'
   | 'study_parse_retry'
+  // Phase D: live activity events (emitted by runner.py)
+  | 'study_phase'
+  | 'study_agent_complete'
+  | 'study_graph_node'
+  | 'study_knowledge_check'
+  | 'study_knowledge_update'
+  | 'study_review'
+  | 'study_evidence'
+  | 'study_directive_added'
+  | 'study_objective_applied'
+  | 'study_early_stopped'
+  | 'study_todos_updated'
   | 'subagent_started'
   | 'subagent_tool_call'
   | 'subagent_tool_result'
@@ -105,6 +117,11 @@ export const EVENT_TYPES: SSEEventType[] = [
   // Agent loop approval gate (Step C) + parse retry (Step B)
   'agent_approval_requested', 'agent_approval_responded',
   'study_parse_retry',
+  // Phase D: live activity events
+  'study_phase', 'study_agent_complete', 'study_graph_node',
+  'study_knowledge_check', 'study_knowledge_update', 'study_review',
+  'study_evidence', 'study_directive_added', 'study_objective_applied',
+  'study_early_stopped', 'study_todos_updated',
   // Subagent events
   'subagent_started', 'subagent_tool_call', 'subagent_tool_result',
   'subagent_text_delta', 'subagent_completed', 'subagent_failed',

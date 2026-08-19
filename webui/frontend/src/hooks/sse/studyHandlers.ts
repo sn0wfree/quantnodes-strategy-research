@@ -169,7 +169,6 @@ export const studyBudget: SSEHandler = (data) => {
  * exponential backoff instead of silently failing.
  */
 export const studyParseRetry: SSEHandler = (data) => {
-  // Just log for now; UI can show a transient toast.
   const failed = data.failed_agents as string[] | undefined
   const attempt = data.attempt as number | undefined
   const delay = data.delay_s as number | undefined
@@ -177,4 +176,224 @@ export const studyParseRetry: SSEHandler = (data) => {
   console.info(
     '[study] parse_failed retry:', failed, 'attempt', attempt, 'delay', delay
   )
+  // Also add to live event timeline
+  const store = useStudyStore.getState()
+  if (failed && failed.length > 0) {
+    store.addLiveEvent({
+      type: 'retry',
+      message: `解析重试: ${failed.join(', ')} (第${attempt ?? '?'}次, ${delay ?? '?'}s后)`,
+      round: data.round as number | undefined,
+    })
+  }
+}
+
+// ── Phase D: live activity handlers ──────────────────────────────
+
+/**
+ * study_phase — emitted at start/end of each phase within a round.
+ * Payload: { study_id, round, phase: "researcher"|"execution"|"evaluation", status: "started"|"done" }
+ */
+export const studyPhase: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const phase = data.phase as string | undefined
+  const status = data.status as string | undefined
+  const round = data.round as number | undefined
+
+  if (phase && status === 'started') {
+    store.setPhase(phase)
+    const phaseLabel = PHASE_LABELS[phase] ?? phase
+    store.addLiveEvent({ type: 'phase', message: `${phaseLabel} 开始`, round })
+  } else if (status === 'done') {
+    store.setPhase(null)
+    const phaseLabel = PHASE_LABELS[phase ?? ''] ?? phase
+    store.addLiveEvent({ type: 'phase', message: `${phaseLabel} 完成`, round })
+  }
+  patch(data)
+}
+
+/**
+ * study_agent_complete — emitted when a single agent finishes within DAG execution.
+ * Payload: { study_id, round, agent, status, elapsed_s }
+ */
+export const studyAgentComplete: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const agent = data.agent as string | undefined
+  const status = data.status as string | undefined
+  const elapsed = data.elapsed_s as number | undefined
+  const round = data.round as number | undefined
+
+  if (agent) {
+    store.updateNodeStatus(agent, status ?? 'completed')
+    const label = AGENT_LABELS[agent] ?? agent
+    const elapsedStr = elapsed != null ? ` (${elapsed.toFixed(1)}s)` : ''
+    store.addLiveEvent({
+      type: 'agent',
+      message: `${label} ${status === 'completed' ? '完成' : status === 'failed' ? '失败' : status}${elapsedStr}`,
+      round,
+    })
+    // Clear current agent when agent completes
+    store.setAgent(null)
+  }
+}
+
+/**
+ * study_graph_node — per-node status update from DAG execution.
+ * Payload: { study_id, round, layer, node_id, node_type, node_label, enabled, status }
+ */
+export const studyGraphNode: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const nodeId = data.node_id as string | undefined
+  const status = data.status as string | undefined
+
+  if (nodeId && status) {
+    store.updateNodeStatus(nodeId, status)
+    if (status === 'running') {
+      store.setAgent(nodeId)
+    }
+  }
+}
+
+/**
+ * study_knowledge_check — pre-round knowledge gap check.
+ * Payload: { study_id, round, gap_topics, collected }
+ */
+export const studyKnowledgeCheck: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const topics = data.gap_topics as string[] | undefined
+  const collected = data.collected as boolean | undefined
+  const round = data.round as number | undefined
+
+  if (topics && topics.length > 0) {
+    store.addLiveEvent({
+      type: 'knowledge',
+      message: `知识检查: 缺口 [${topics.join(', ')}]${collected ? ' (已收集)' : ''}`,
+      round,
+    })
+  }
+}
+
+/**
+ * study_knowledge_update — knowledge collector appended entries.
+ * Payload: { study_id, entries_added }
+ */
+export const studyKnowledgeUpdate: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const added = data.entries_added as number | undefined
+  if (added && added > 0) {
+    store.addLiveEvent({
+      type: 'knowledge',
+      message: `知识更新: +${added} 条`,
+    })
+  }
+}
+
+/**
+ * study_review — review cycle completed.
+ * Payload: { study_id, round, deviation, info_gap }
+ */
+export const studyReview: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const deviation = data.deviation as string | undefined
+  const infoGap = data.info_gap as boolean | undefined
+  const round = data.round as number | undefined
+
+  store.addLiveEvent({
+    type: 'review',
+    message: `审核: 偏差=${deviation ?? '?'}, 信息缺口=${infoGap ? '是' : '否'}`,
+    round,
+  })
+  patch(data)
+}
+
+/**
+ * study_evidence — keep round recorded evidence.
+ * Payload: { study_id, evidence_id, run }
+ */
+export const studyEvidence: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const evidenceId = data.evidence_id as string | undefined
+  store.addLiveEvent({
+    type: 'evidence',
+    message: `证据记录: ${evidenceId ?? '新证据'}`,
+  })
+}
+
+/**
+ * study_directive_added — new user directive injected.
+ * Payload: { study_id, directive_id, content, issued_by, created_at }
+ */
+export const studyDirectiveAdded: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const content = data.content as string | undefined
+  store.addLiveEvent({
+    type: 'directive',
+    message: `新指令: "${(content ?? '').slice(0, 50)}${(content ?? '').length > 50 ? '...' : ''}"`,
+  })
+}
+
+/**
+ * study_objective_applied — pending objective replacement applied.
+ * Payload: { study_id, round, count }
+ */
+export const studyObjectiveApplied: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const count = data.count as number | undefined
+  const round = data.round as number | undefined
+  store.addLiveEvent({
+    type: 'directive',
+    message: `目标替换已应用 (${count ?? '?'} 项)`,
+    round,
+  })
+}
+
+/**
+ * study_early_stopped — early stopping triggered.
+ * Payload: { study_id, round, reason, idle_rounds?, best_score? }
+ */
+export const studyEarlyStopped: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const reason = data.reason as string | undefined
+  const round = data.round as number | undefined
+  store.addLiveEvent({
+    type: 'other',
+    message: `提前停止: ${reason ?? '未知原因'}`,
+    round,
+  })
+  patch({ ...data, execution_status: 'early_stopped' })
+}
+
+/**
+ * study_todos_updated — todos list updated from reviewer.
+ * Payload: { study_id, updates: [...] }
+ */
+export const studyTodosUpdated: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const updates = data.updates as Array<{ text?: string; status?: string }> | undefined
+  const count = updates?.length ?? 0
+  store.addLiveEvent({
+    type: 'other',
+    message: `待办更新: ${count} 项`,
+  })
+}
+
+// ── Label maps ───────────────────────────────────────────────────
+
+const PHASE_LABELS: Record<string, string> = {
+  researcher: '研究',
+  execution: '回测执行',
+  evaluation: '评估',
+  review: '审核',
+  knowledge: '知识收集',
+}
+
+const AGENT_LABELS: Record<string, string> = {
+  researcher: 'Researcher',
+  data_quality: 'DataQuality',
+  factor_analyst: 'FactorAnalyst',
+  strategist: 'Strategist',
+  portfolio_construction: 'Portfolio',
+  risk_controller: 'RiskCtrl',
+  attribution_analyst: 'Attribution',
+  anti_overfit_analyst: 'AntiOverfit',
+  backtest_diagnostics: 'BacktestDiag',
 }
