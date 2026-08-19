@@ -4,16 +4,10 @@ import {
   ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
   Target, Activity, RotateCcw, BarChart3, BookOpen, Info,
   ShieldAlert, GitBranch, MessageSquare, Archive, ArchiveRestore,
-  Edit3,
+  Edit3, LayoutGrid,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
-import { ObjectiveProgress } from './ObjectiveProgress'
-import { RoundHistory } from './RoundHistory'
-import { ScoreboardMini } from './ScoreboardMini'
-import { MetricsCompare } from './MetricsCompare'
-import { MetricsTrendChart } from './MetricsTrendChart'
-import { BudgetBar } from './BudgetBar'
 import { EmptyState } from '../common/EmptyState'
 import { PageShell } from '../layout/PageShell'
 import { StudyFlowTab } from './StudyFlowTab'
@@ -22,6 +16,8 @@ import { AgentChatLog } from './AgentChatLog'
 import { formatDateTime, clampRound } from './utils'
 import { ContinueDialog } from './ContinueDialog'
 import { AgentApprovalDialog } from './AgentApprovalDialog'
+import { DashboardGrid, WidgetPicker } from './dashboard'
+import { useStudyDashboardStore } from '../../stores/studyDashboard'
 
 type TabKey = 'overview' | 'flow' | 'logs'
 
@@ -157,6 +153,16 @@ export function StudyDetailPage() {
     loadActions,
     loadSummary,
   ])
+
+  // ── Dashboard layout store ────────────────────────────────────
+  const loadDashboard = useStudyDashboardStore(s => s.load)
+  const dashboardEditMode = useStudyDashboardStore(s => s.editMode)
+  const setDashboardEditMode = useStudyDashboardStore(s => s.setEditMode)
+
+  useEffect(() => {
+    loadDashboard(studyId)
+    return () => useStudyDashboardStore.getState().clear()
+  }, [studyId, loadDashboard])
 
   const onAction = async (
     action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive',
@@ -334,6 +340,18 @@ export function StudyDetailPage() {
         </button>
       )}
 
+      {/* Dashboard layout toggle */}
+      <button
+        onClick={() => setDashboardEditMode(!dashboardEditMode)}
+        className={`inline-flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs transition-all active:scale-95 ${
+          dashboardEditMode
+            ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+            : 'border border-slate-700 bg-slate-800/50 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+        }`}
+      >
+        <LayoutGrid className="h-3.5 w-3.5" /> {dashboardEditMode ? '完成' : '编辑布局'}
+      </button>
+
     </div>
   )
 
@@ -428,173 +446,15 @@ export function StudyDetailPage() {
 
       {/* Tab content */}
       {activeTab === 'overview' && (
-        <main className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="min-w-0 space-y-4 xl:col-span-2">
-          <ObjectiveProgress
-            objective={summary.objective}
-            progressPercent={progressPercent}
-            evidenceCount={evidenceCount}
-            criteria={summary.goal_snapshot?.criteria ?? []}
-          />
-          <RoundHistory
-            rounds={summary.recent_rounds ?? []}
-            currentRound={clampRound(summary.current_round)}
-            onOpenRun={openRun}
-            studyId={studyId}
-          />
-          <MetricsCompare
-            rounds={summary.recent_rounds ?? []}
-            onOpenRun={openRun}
-          />
-          <MetricsTrendChart
-            rounds={summary.recent_rounds ?? []}
-            metricTargets={summary.metric_targets ?? []}
-          />
-          {summary.budget && (
-            <BudgetBar
-              usedTurns={summary.budget.budget_used_turns}
-              totalTurns={summary.budget.budget_turn}
-              usedTimeS={summary.budget.budget_used_time_s}
-              totalTimes={summary.budget.budget_time_seconds}
-            />
-          )}
-          <ScoreboardMini scoreboard={summary.scoreboard ?? []} />
-        </div>
+        <div className="mt-4 flex gap-4">
+          {/* Widget Picker (edit mode only) */}
+          {dashboardEditMode && <WidgetPicker />}
 
-        <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-          {/* Task info */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              <Info className="h-3 w-3" /> 任务信息
-            </div>
-            <div className="space-y-1.5 text-[10px]">
-              <div className="flex items-center gap-2">
-                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
-                  <FolderOpen className="h-3 w-3" /> 工作区
-                </span>
-                <span className="min-w-0 truncate font-mono text-slate-300" title={workspacePath}>
-                  {workspacePath || '—'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
-                  <Clock className="h-3 w-3" /> 创建
-                </span>
-                <span className="font-mono text-slate-300">{formatDateTime(summary.created_at)}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
-                  <Clock className="h-3 w-3" /> 更新
-                </span>
-                <span className="font-mono text-slate-300">{formatDateTime(summary.updated_at)}</span>
-              </div>
-              {summary.completed_at && (
-                <div className="flex items-center gap-2">
-                  <span className="flex w-14 flex-shrink-0 items-center gap-1 text-slate-600">
-                    <Clock className="h-3 w-3" /> 完成
-                  </span>
-                  <span className="font-mono text-slate-300">{formatDateTime(summary.completed_at)}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Directive input */}
-          {(canDirective) && (
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft space-y-2">
-              <label className="block text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                注入研究方向（下一轮 researcher 看到）
-              </label>
-              <textarea
-                rows={2}
-                value={directiveText}
-                onChange={(e) => setDirectiveText(e.target.value)}
-                placeholder="例：改成动量因子 + 减小 top_n"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none transition-shadow focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-              />
-              <button
-                type="button"
-                onClick={onDirective}
-                disabled={submittingDirective || !directiveText.trim()}
-                className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-indigo-500 active:scale-95 disabled:opacity-50"
-              >
-                <Send className="h-3.5 w-3.5" /> 提交指令
-              </button>
-            </div>
-          )}
-
-          {/* Hanging events (observability) */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                <ShieldAlert className="h-3 w-3" /> 卡死防护事件
-              </div>
-              {hanging && hanging.recent.length > 0 && (
-                <span className="rounded-full border border-rose-700/50 bg-rose-950/40 px-1.5 py-0.5 text-[9px] font-medium text-rose-400">
-                  {hanging.recent.length} 个事件
-                </span>
-              )}
-            </div>
-            {!hanging || hanging.recent.length === 0 ? (
-              <p className="text-xs text-slate-500">近 24h 无异常事件</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {hanging.recent.map((e, i) => (
-                  <li
-                    key={i}
-                    className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium text-rose-400">
-                        {HANGING_EVENT_LABELS[e.event_type] ?? e.event_type}
-                      </span>
-                      <span className="font-mono text-[9px] text-slate-600">
-                        {new Date(e.created_at_iso).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    {e.detail && (
-                      <p className="mt-0.5 truncate text-[10px] text-slate-500" title={e.detail}>
-                        {e.detail}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Directives audit trail */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 shadow-soft">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              <Clock className="h-3 w-3" /> 指令记录
-            </div>
-            {(directives?.directives?.length ?? 0) === 0 ? (
-              <p className="text-xs text-slate-500">暂无指令</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {directives!.directives.map((d) => (
-                  <li key={d.directive_id} className="rounded-lg border border-slate-800/60 bg-slate-950/60 p-2 text-[11px]">
-                    <p className="text-slate-300">{d.content}</p>
-                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
-                      <span>{formatDateTime(d.created_at)}</span>
-                      {d.issued_by && <span>· {d.issued_by}</span>}
-                      <span
-                        className={
-                          d.consumed_at
-                            ? 'rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-emerald-400'
-                            : 'rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-amber-400'
-                        }
-                      >
-                        {d.consumed_at ? '已消费' : '待消费'}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+          {/* Dashboard Grid */}
+          <div className="min-w-0 flex-1">
+            <DashboardGrid studyId={studyId} summary={summary} />
           </div>
         </div>
-      </main>
       )}
 
       {/* Flow tab - merged agents + todos */}

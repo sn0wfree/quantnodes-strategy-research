@@ -1,0 +1,13 @@
+/**
+ * KnowledgeView — renders knowledge.md content.
+ * Stub: will fetch from API in Phase C.
+ */
+import type { WidgetProps } from '../types'
+
+export function KnowledgeView(_props: WidgetProps) {
+  return (
+    <div className="text-xs text-slate-500 italic">
+      知识库内容将在 API 接通后显示
+    </div>
+  )
+}
