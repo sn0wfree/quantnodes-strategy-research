@@ -1229,13 +1229,14 @@ async def study_hanging_events(
 # Human labels + destructive flags for the action matrix.
 _ACTION_META: dict[str, dict] = {
     "pause": {"label": "暂停", "destructive": False},
-    "resume": {"label": "恢复", "destructive": False},
-    "resume_interrupted": {"label": "恢复（重新排队）", "destructive": False},
+    "continue": {"label": "继续", "destructive": False},
     "cancel": {"label": "中止", "destructive": True},
     "redo": {"label": "重跑本轮", "destructive": True},
     "archive": {"label": "归档", "destructive": True},
     "unarchive": {"label": "取消归档", "destructive": False},
     "replace_objective": {"label": "修改目标", "destructive": False},
+    "resume": {"label": "恢复", "destructive": False},
+    "resume_interrupted": {"label": "恢复（重新排队）", "destructive": False},
     "retry": {"label": "重试", "destructive": False},
 }
 
