@@ -5,6 +5,7 @@
  * component to render.  The component receives a uniform `WidgetProps`
  * shape; wrappers extract the relevant fields from `summary`.
  */
+import { useState } from 'react'
 import type { WidgetDef, WidgetProps } from './types'
 
 // ── Lazy-load heavy components to keep initial bundle small ──────
@@ -86,8 +87,21 @@ function MetricsTrendWrapper({ summary }: WidgetProps) {
 }
 
 function BudgetWrapper({ summary }: WidgetProps) {
-  if (!summary.budget) return null
-  return <BudgetBar budget={summary.budget} />
+  const b = summary.budget as {
+    budget_used_turns?: number
+    budget_used_time_s?: number
+    budget_turn?: number | null
+    budget_time_seconds?: number | null
+  } | null
+  if (!b) return null
+  return (
+    <BudgetBar
+      usedTurns={b.budget_used_turns}
+      totalTurns={b.budget_turn}
+      usedTimeS={b.budget_used_time_s}
+      totalTimes={b.budget_time_seconds}
+    />
+  )
 }
 
 function ScoreboardWrapper({ summary }: WidgetProps) {
@@ -95,20 +109,24 @@ function ScoreboardWrapper({ summary }: WidgetProps) {
 }
 
 function DAGFlowWrapper({ studyId, summary }: WidgetProps) {
+  const [selectedRound, setSelectedRound] = useState(summary.current_round || 1)
   return (
     <AgentFlowCanvas
       studyId={studyId}
-      selectedRound={summary.current_round}
+      selectedRound={selectedRound}
+      onSelectedRoundChange={setSelectedRound}
       totalRounds={summary.current_round}
     />
   )
 }
 
 function AgentChatWrapper({ studyId, summary }: WidgetProps) {
+  const [selectedRound, setSelectedRound] = useState(summary.current_round || 1)
   return (
     <AgentChatLog
       studyId={studyId}
-      selectedRound={summary.current_round}
+      selectedRound={selectedRound}
+      onSelectedRoundChange={setSelectedRound}
       totalRounds={summary.current_round}
     />
   )

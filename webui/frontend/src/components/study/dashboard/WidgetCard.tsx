@@ -2,7 +2,7 @@
  * WidgetCard — wraps a single dashboard widget in a styled container
  * with a title bar and content area.
  */
-import React, { Suspense } from 'react'
+import { Suspense } from 'react'
 import type { DashboardWidget, WidgetDef } from './types'
 
 interface WidgetCardProps {

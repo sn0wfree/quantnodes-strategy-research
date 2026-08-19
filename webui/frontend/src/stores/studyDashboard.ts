@@ -3,7 +3,7 @@
  * for the study detail page.  Persisted to localStorage per study.
  */
 import { create } from 'zustand'
-import type { DashboardConfig, DashboardWidget } from '../components/study/dashboard/types'
+import type { DashboardConfig } from '../components/study/dashboard/types'
 import { CONFIG_VERSION, GRID_COLUMNS, STORAGE_KEY_PREFIX } from '../components/study/dashboard/types'
 import { getDefaultLayout } from '../components/study/dashboard/defaultLayout'
 

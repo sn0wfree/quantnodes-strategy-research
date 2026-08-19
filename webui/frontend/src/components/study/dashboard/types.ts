@@ -1,4 +1,4 @@
-import type { StudySummaryResponse } from '../../api/client'
+import type { StudySummaryResponse } from '../../../api/client'
 
 // ── Node status (shared across widgets) ──────────────────────────
 export type NodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'

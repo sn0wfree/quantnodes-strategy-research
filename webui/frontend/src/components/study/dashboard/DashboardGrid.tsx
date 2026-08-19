@@ -4,7 +4,6 @@
  * Reads from useStudyDashboardStore and renders enabled widgets
  * in a CSS Grid with 12 columns.
  */
-import React from 'react'
 import type { StudySummaryResponse } from '../../../api/client'
 import { useStudyDashboardStore } from '../../../stores/studyDashboard'
 import { WIDGET_REGISTRY } from './registry'
@@ -41,7 +40,7 @@ export function DashboardGrid({ studyId, summary }: DashboardGridProps) {
             widget={w}
             def={def}
             studyId={studyId}
-            summary={summary}
+            summary={summary as unknown as Record<string, unknown>}
             editMode={editMode}
             onRemove={() => toggleWidget(w.type)}
           />

@@ -4,9 +4,9 @@
  * Shows all available widgets with toggle switches, drag handles,
  * and span sliders.  Only visible when editMode is true.
  */
-import React, { useCallback, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 import { useStudyDashboardStore } from '../../../stores/studyDashboard'
-import { WIDGET_REGISTRY, WIDGET_ORDER } from './registry'
+import { WIDGET_REGISTRY } from './registry'
 import { GRID_COLUMNS } from './types'
 
 export function WidgetPicker() {

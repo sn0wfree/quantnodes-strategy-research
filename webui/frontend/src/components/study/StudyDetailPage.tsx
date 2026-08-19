@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
-  ArrowLeft, Pause, Play, X, Send, Clock, FolderOpen,
-  Target, Activity, RotateCcw, BarChart3, BookOpen, Info,
-  ShieldAlert, GitBranch, MessageSquare, Archive, ArchiveRestore,
+  ArrowLeft, Pause, Play, X, Clock, FolderOpen,
+  Target, Activity, RotateCcw, BarChart3, BookOpen,
+  GitBranch, MessageSquare, Archive, ArchiveRestore,
   Edit3, LayoutGrid,
 } from 'lucide-react'
-import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyHangingEventsResponse, type StudyAvailableActionsResponse, HANGING_EVENT_LABELS } from '../../api/client'
+import { api, type StudySummaryResponse, type StudyDirectivesResponse, type StudyAvailableActionsResponse } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { EmptyState } from '../common/EmptyState'
 import { PageShell } from '../layout/PageShell'
@@ -58,7 +58,6 @@ export function StudyDetailPage() {
   const navigate = useNavigate()
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [directives, setDirectives] = useState<StudyDirectivesResponse | null>(null)
-  const [hanging, setHanging] = useState<StudyHangingEventsResponse | null>(null)
   const [actions, setActions] = useState<StudyAvailableActionsResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -81,15 +80,6 @@ export function StudyDetailPage() {
       setDirectives(r)
     } catch {
       // Non-critical — audit trail can be absent
-    }
-  }, [studyId])
-
-  const loadHanging = useCallback(async () => {
-    try {
-      const r = await api.study.hangingEvents(studyId)
-      setHanging(r)
-    } catch {
-      // Non-critical — observability panel can be absent
     }
   }, [studyId])
 
@@ -140,7 +130,6 @@ export function StudyDetailPage() {
 
     void poll()
     void loadDirectives()
-    void loadHanging()
     void loadActions()
     return () => {
       cancelled = true
@@ -149,7 +138,6 @@ export function StudyDetailPage() {
   }, [
     studyId,
     loadDirectives,
-    loadHanging,
     loadActions,
     loadSummary,
   ])
@@ -238,7 +226,6 @@ export function StudyDetailPage() {
 
   const status = summary.execution_status ?? 'unknown'
   const strategyName = summary.strategy_name ?? ''
-  const workspacePath = summary.workspace_path ?? ''
   const progressPercent = summary.goal_snapshot?.progress_percent ?? 0
   const evidenceCount = summary.goal_snapshot?.evidence_count ?? 0
   const lastVerdict = summary.last_verdict ?? '—'
@@ -250,13 +237,6 @@ export function StudyDetailPage() {
     .reduce((a, b) => Math.max(a, b), 0)
   const driftCount = summary.monitor_state?.drift_count ?? 0
   const isDrifting = status === 'needs_refresh' || driftCount > 0
-
-  const openRun = (runName: string) => {
-    if (!strategyName) return
-    navigate(
-      `/run/${encodeURIComponent(strategyName)}/${encodeURIComponent(runName)}`
-    )
-  }
 
   const canPause = (actions?.actions ?? []).some((a) => a.name === 'pause')
   const canContinue = (actions?.actions ?? []).some((a) => a.name === 'continue')
