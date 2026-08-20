@@ -10,16 +10,66 @@ P1: Serial layer execution (matches DAG engine behavior).
 P2: Parallel fan-out via LangGraph super-steps + DuckDB write mutex.
 P3: Checkpointing via SqliteSaver (per-round, resume on failure).
 P4: HITL via interrupt().
+P5: Parity verification tests.
+P6: Profile system — phases/dag/langgraph presets.
 """
 from __future__ import annotations
 
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict, Annotated
 
 logger = logging.getLogger(__name__)
+
+
+# ── Profile system (P6) ───────────────────────────────────────────
+
+@dataclass(frozen=True)
+class LangGraphProfile:
+    """Execution profile for the LangGraph engine.
+
+    Presets:
+    - ``phases``: linear graph, serial, no checkpoint, no HITL
+    - ``dag``: StudyGraph, serial, no checkpoint, no HITL
+    - ``langgraph``: StudyGraph, parallel, checkpoint, HITL
+    """
+    serial: bool = True           # True = serial layer execution; False = parallel
+    checkpoint: bool = False      # True = SqliteSaver checkpointing
+    hitl: bool = False            # True = novelty gate interrupt
+
+    @classmethod
+    def phases(cls) -> "LangGraphProfile":
+        """Preset: linear graph, serial, no checkpoint, no HITL."""
+        return cls(serial=True, checkpoint=False, hitl=False)
+
+    @classmethod
+    def dag(cls) -> "LangGraphProfile":
+        """Preset: StudyGraph, serial, no checkpoint, no HITL."""
+        return cls(serial=True, checkpoint=False, hitl=False)
+
+    @classmethod
+    def langgraph(cls) -> "LangGraphProfile":
+        """Preset: StudyGraph, parallel, checkpoint, HITL."""
+        return cls(serial=False, checkpoint=True, hitl=True)
+
+
+_PROFILES = {
+    "phases": LangGraphProfile.phases,
+    "dag": LangGraphProfile.dag,
+    "langgraph": LangGraphProfile.langgraph,
+}
+
+
+def get_profile(name: str) -> LangGraphProfile:
+    """Get a profile by name. Falls back to langgraph profile."""
+    factory = _PROFILES.get(name)
+    if factory is None:
+        logger.warning("unknown profile %r, using langgraph default", name)
+        return LangGraphProfile.langgraph()
+    return factory()
 
 
 # ── State schema ──────────────────────────────────────────────────
@@ -191,15 +241,19 @@ def build_langgraph(
     study_id: str,
     round_num: int,
     checkpointer=None,
-    hitl_enabled: bool = False,
+    profile: LangGraphProfile | None = None,
 ):
     """Convert StudyGraph → compiled LangGraph StateGraph.
 
     P1: Serial (topological sort, one node at a time).
     P2: Parallel fan-out via LangGraph super-steps.
     P3: Checkpointing via SqliteSaver.
-    P4: HITL via interrupt() at novelty gate.
+    P4: HITL via interrupt().
+    P6: Profile system (serial, checkpoint, hitl params).
     """
+    if profile is None:
+        profile = LangGraphProfile()
+
     from langgraph.graph import StateGraph, START, END
 
     g = StateGraph(StudyRoundState)
@@ -228,7 +282,7 @@ def build_langgraph(
         )
 
     # P4: Inject novelty gate node when HITL is enabled
-    if hitl_enabled:
+    if profile.hitl:
         g.add_node("novelty_gate", _make_novelty_gate_node(study_id, round_num, emit_fn))
 
     # Add edges
@@ -236,13 +290,13 @@ def build_langgraph(
         source = edge.source
         target = edge.target
         # P4: Route researcher → novelty_gate → original targets
-        if hitl_enabled and source == "researcher" and target in _find_entry_nodes(graph):
+        if profile.hitl and source == "researcher" and target in _find_entry_nodes(graph):
             g.add_edge("researcher", "novelty_gate")
             continue
         g.add_edge(source, target)
 
     # P4: Route novelty_gate → original targets of researcher
-    if hitl_enabled:
+    if profile.hitl:
         researcher_targets = [
             e.target for e in graph.edges
             if e.source == "researcher"
@@ -253,7 +307,7 @@ def build_langgraph(
     # Entry points (START → nodes with no incoming edges)
     entry_nodes = _find_entry_nodes(graph)
     for nid in entry_nodes:
-        if hitl_enabled and nid in researcher_targets if hitl_enabled else False:
+        if profile.hitl and nid in researcher_targets if profile.hitl else False:
             continue  # routed through novelty_gate
         g.add_edge(START, nid)
 
@@ -310,7 +364,7 @@ def run_round_langgraph(
     sid: str,
     round_num: int,
     directive_text: str | None,
-    hitl_enabled: bool = False,
+    profile: LangGraphProfile | str | None = None,
 ) -> dict:
     """Execute one round using the LangGraph engine.
 
@@ -321,12 +375,23 @@ def run_round_langgraph(
     ``resume_round_langgraph`` can pick up from the last successful
     super-step.
 
-    When ``hitl_enabled=True``, a novelty gate interrupt is injected
-    after the researcher phase, pausing execution for human approval.
+    When ``profile`` is provided, controls execution behavior:
+    - ``serial``: run nodes layer by layer (True) or parallel (False)
+    - ``checkpoint``: enable SqliteSaver checkpointing
+    - ``hitl``: enable novelty gate interrupt
+
+    ``profile`` can be a ``LangGraphProfile`` instance or a string name
+    (``"phases"`` | ``"dag"`` | ``"langgraph"``).
     """
     from ..agent.dag_config import AgentDAGConfig
     from ..agent.executor import AgentExecutor
     from ..agent.registry import get_default_registry
+
+    # Resolve profile
+    if profile is None:
+        profile = LangGraphProfile.langgraph()
+    elif isinstance(profile, str):
+        profile = get_profile(profile)
 
     dag_config = AgentDAGConfig.from_study_graph(
         graph, name=f"study_{sid}_r{round_num}",
@@ -362,7 +427,7 @@ def run_round_langgraph(
         graph, executor, task_text, path,
         agent_ctx, runner._emit, sid, round_num,
         checkpointer=checkpointer,
-        hitl_enabled=hitl_enabled,
+        profile=profile,
     )
 
     # Initial state

@@ -1643,8 +1643,10 @@ class AutoresearchRunner:
                 "Install with: pip install strategy-research[langgraph]"
             )
 
-        # P4: HITL enabled for langgraph engine
-        hitl_enabled = True
+        # P6: Determine profile from engine field
+        profile_name = getattr(self._get_study(), "engine", None) or "langgraph"
+        from .langgraph_engine import get_profile
+        profile = get_profile(profile_name)
 
         return run_round_langgraph(
             runner=self,
@@ -1657,7 +1659,7 @@ class AutoresearchRunner:
             sid=sid,
             round_num=round_num,
             directive_text=directive_text,
-            hitl_enabled=hitl_enabled,
+            profile=profile,
         )
 
     async def _wait_for_approval(
