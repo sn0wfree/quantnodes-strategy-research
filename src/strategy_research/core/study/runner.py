@@ -433,6 +433,9 @@ class AutoresearchRunner:
             result = await asyncio.to_thread(
                 self._run_one_round, round_num, previous_summary, directive_text,
             )
+            _dlog("loop", "round %d result: aborted=%s, paused=%s, metrics=%s, verdict=%s",
+                  round_num, result.get("aborted"), result.get("paused_for_approval"),
+                  bool(result.get("metrics")), result.get("verdict"))
 
             # Mark directives consumed
             if pending:
@@ -440,10 +443,12 @@ class AutoresearchRunner:
 
             # Handle aborted round (novelty rejected)
             if result.get("aborted"):
+                _dlog("loop", "round %d aborted: %s", round_num, result.get("reason"))
                 continue
 
             # P4: Handle HITL approval pause
             if result.get("paused_for_approval"):
+                _dlog("loop", "round %d paused for HITL approval", round_num)
                 self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
                 self._emit(session, "study_paused", {
                     "study_id": sid, "round": round_num,

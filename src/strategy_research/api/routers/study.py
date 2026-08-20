@@ -615,6 +615,7 @@ async def study_summary(request: Request, study_id: str):
         "objective": study.objective,
         "strategy_name": study.strategy_name,
         "workspace_path": study.workspace_path,
+        "engine": getattr(study, "engine", "phases"),
         "metric_targets": study.metric_targets,
         "created_at": study.created_at,
         "updated_at": study.updated_at,

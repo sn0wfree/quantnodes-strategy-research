@@ -129,8 +129,9 @@ def run_round_phases(
 
     # ── Engine dispatch ──────────────────────────────────────
     engine = getattr(study, "engine", None) or "phases"
+    logger.info("phase_engine: round %d, engine=%s, study.engine=%s", round_num, engine, getattr(study, "engine", "NOT_SET"))
     if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
-        engine = "dag"
+        engine = "dag"  # backward compat: legacy env var overrides phases
 
     if engine == "langgraph":
         return runner._run_round_via_langgraph(

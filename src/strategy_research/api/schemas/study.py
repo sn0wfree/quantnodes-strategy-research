@@ -130,6 +130,7 @@ class StudySummaryResponse(BaseModel):
     objective: str
     strategy_name: str
     workspace_path: str
+    engine: str = "phases"
     metric_targets: Optional[list[MetricTargetModel]] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

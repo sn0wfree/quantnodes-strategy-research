@@ -408,6 +408,8 @@ def run_round_langgraph(
     elif isinstance(profile, str):
         profile = get_profile(profile)
 
+    logger.info("langgraph: starting round %d, profile=%s", round_num, profile)
+
     dag_config = AgentDAGConfig.from_study_graph(
         graph, name=f"study_{sid}_r{round_num}",
         description=runner._get_study().objective,
@@ -500,11 +502,19 @@ def run_round_langgraph(
         "phase": "langgraph_exec", "status": "done",
     })
 
+    # Extract agent outputs from graph result
+    agent_outputs = result.get("agent_outputs", {}) if isinstance(result, dict) else {}
+    logger.info("langgraph: round %d completed, agent_outputs=%s", round_num, list(agent_outputs.keys()))
+
     # Save agent outputs (mirrors DAG engine)
     save_agent_outputs(runner, run_dir, agent_outputs, round_num)
 
     # Rebuild legacy schema (same as DAG engine)
-    return runner._rebuild_phase_outputs(agent_outputs, graph)
+    result = runner._rebuild_phase_outputs(agent_outputs, graph)
+    # Add round info for the runner loop
+    result["round"] = round_num
+    result["run_name"] = f"round_{round_num}"
+    return result
 
 
 def resume_round_langgraph(
