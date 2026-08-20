@@ -325,25 +325,30 @@ def build_langgraph(
 
 # ── Checkpoint helpers ────────────────────────────────────────────
 
-def _get_checkpointer(sid: str, study_root: Path):
+def _get_checkpointer(sid: str, study_root: Path, conn=None):
     """Create or open a SqliteSaver for this study.
 
-    Checkpoint DB lives at ``study/{sid}/checkpoints.db``.
+    Checkpoint tables live in studies.db (shared connection).
+    Falls back to creating a separate checkpoints.db if conn is None.
     Returns None if langgraph-checkpoint-sqlite is not installed.
     """
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
-        import sqlite3
     except ImportError:
         logger.info("langgraph-checkpoint-sqlite not installed; checkpointing disabled")
         return None
 
-    db_path = study_root / "checkpoints.db"
     try:
+        if conn is not None:
+            # Use shared connection from studies.db
+            return SqliteSaver(conn)
+        # Fallback: create separate checkpoints.db (legacy path)
+        import sqlite3
+        db_path = study_root / "checkpoints.db"
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
         return SqliteSaver(conn)
     except Exception as exc:
-        logger.warning("Failed to open checkpoint DB %s: %s", db_path, exc)
+        logger.warning("Failed to create checkpointer: %s", exc)
         return None
 
 
@@ -422,7 +427,9 @@ def run_round_langgraph(
     # Checkpoint setup
     from strategy_research.core.study.state_store import study_root as _study_root
     study_root = _study_root(path, sid)
-    checkpointer = _get_checkpointer(sid, study_root)
+    # Use shared connection from studies.db (merged checkpoint tables)
+    checkpoint_conn = getattr(runner.study_store, "get_checkpoint_conn", lambda: None)()
+    checkpointer = _get_checkpointer(sid, study_root, conn=checkpoint_conn)
 
     # Build and compile the graph
     compiled = build_langgraph(
@@ -550,7 +557,8 @@ def resume_round_langgraph(
     # Checkpoint setup
     from strategy_research.core.study.state_store import study_root as _study_root
     study_root = _study_root(path, sid)
-    checkpointer = _get_checkpointer(sid, study_root)
+    checkpoint_conn = getattr(runner.study_store, "get_checkpoint_conn", lambda: None)()
+    checkpointer = _get_checkpointer(sid, study_root, conn=checkpoint_conn)
 
     if checkpointer is None:
         logger.warning("No checkpointer available; falling back to fresh run")

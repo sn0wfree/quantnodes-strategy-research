@@ -211,6 +211,36 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_study_interrupts_study "
                 "ON study_interrupts(study_id, status)"
             )
+            # P3+P6: LangGraph checkpoint tables (merged from checkpoints.db)
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS langgraph_checkpoints (
+                    thread_id TEXT NOT NULL,
+                    checkpoint_ns TEXT NOT NULL DEFAULT '',
+                    checkpoint_id TEXT NOT NULL,
+                    parent_checkpoint_id TEXT,
+                    type TEXT,
+                    checkpoint BLOB,
+                    metadata BLOB,
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS langgraph_writes (
+                    thread_id TEXT NOT NULL,
+                    checkpoint_ns TEXT NOT NULL DEFAULT '',
+                    checkpoint_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    idx INTEGER NOT NULL,
+                    channel TEXT NOT NULL,
+                    type TEXT,
+                    value BLOB,
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+                )
+                """
+            )
             # AEGIS: study_rounds — per-round history for attribution/journal
             self._conn.execute(
                 """
@@ -779,6 +809,17 @@ class StudyStore:
             )
 
     # ── reads ────────────────────────────────────────────────────────
+
+    def get_checkpoint_conn(self):
+        """Return the SQLite connection for LangGraph checkpoint tables.
+
+        The checkpoint tables (langgraph_checkpoints, langgraph_writes)
+        are stored in the same studies.db file. This method returns the
+        raw connection for use with LangGraph's SqliteSaver.
+
+        Thread-safe: the connection is already protected by the store's lock.
+        """
+        return self._conn
 
     @synchronized
     def get_study(self, study_id: str) -> StudyRecord | None:
