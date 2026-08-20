@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+
+# Mutex for concurrent DuckDB writes (parallel agent fan-out safety)
+_DUCKDB_WRITE_LOCK = threading.Lock()
 
 # ============================================================
 # 连接管理
@@ -212,6 +216,9 @@ def save_ohlcv_to_db(
 ) -> int:
     """Save OHLCV data from online sources into DuckDB.
 
+    Thread-safe: uses a module-level mutex to prevent concurrent DuckDB
+    writes from parallel agent fan-out (data_quality + factor_analyst).
+
     Reusable by config_runner, import_data tool, and CLI.
 
     Args:
@@ -222,56 +229,57 @@ def save_ohlcv_to_db(
     Returns:
         Total rows saved.
     """
-    init_db(workspace_path)
-    conn = get_connection(workspace_path)
-    if conn is None:
-        raise RuntimeError("failed to open DuckDB")
+    with _DUCKDB_WRITE_LOCK:
+        init_db(workspace_path)
+        conn = get_connection(workspace_path)
+        if conn is None:
+            raise RuntimeError("failed to open DuckDB")
 
-    total_rows = 0
-    for code, df in data_map.items():
-        if df is None or df.empty:
-            continue
+        total_rows = 0
+        for code, df in data_map.items():
+            if df is None or df.empty:
+                continue
 
-        # Move date-like index to column so normalization can find it.
-        # Loaders (tencent, eastmoney, akshare, etc.) return DataFrames with
-        # trade_date as the index, not as a regular column.
-        idx_name = df.index.name
-        if idx_name and idx_name.lower() in ("trade_date", "tradedate", "datetime", "date"):
-            df = df.reset_index()
+            # Move date-like index to column so normalization can find it.
+            # Loaders (tencent, eastmoney, akshare, etc.) return DataFrames with
+            # trade_date as the index, not as a regular column.
+            idx_name = df.index.name
+            if idx_name and idx_name.lower() in ("trade_date", "tradedate", "datetime", "date"):
+                df = df.reset_index()
 
-        # Normalize column names
-        col_map = {}
-        for col in df.columns:
-            cl = col.lower()
-            if cl in ("trade_date", "tradedate", "datetime"):
-                col_map[col] = "date"
-            elif cl in ("code", "symbol", "ticker", "asset"):
-                col_map[col] = "asset_code"
-        if col_map:
-            df = df.rename(columns=col_map)
+            # Normalize column names
+            col_map = {}
+            for col in df.columns:
+                cl = col.lower()
+                if cl in ("trade_date", "tradedate", "datetime"):
+                    col_map[col] = "date"
+                elif cl in ("code", "symbol", "ticker", "asset"):
+                    col_map[col] = "asset_code"
+            if col_map:
+                df = df.rename(columns=col_map)
 
-        if "asset_code" not in df.columns:
-            df["asset_code"] = code
-        if "date" not in df.columns:
-            continue
+            if "asset_code" not in df.columns:
+                df["asset_code"] = code
+            if "date" not in df.columns:
+                continue
 
-        for c in ("open", "high", "low", "close", "volume"):
-            if c not in df.columns:
-                df[c] = df["close"] if c != "volume" else 0.0
+            for c in ("open", "high", "low", "close", "volume"):
+                if c not in df.columns:
+                    df[c] = df["close"] if c != "volume" else 0.0
 
-        df["strategy_name"] = strategy_name
-        df = df[["strategy_name", "asset_code", "date", "open", "high", "low", "close", "volume"]]
+            df["strategy_name"] = strategy_name
+            df = df[["strategy_name", "asset_code", "date", "open", "high", "low", "close", "volume"]]
 
-        conn.execute("""
-            INSERT OR REPLACE INTO price_data
-            (strategy_name, asset_code, date, open, high, low, close, volume)
-            SELECT strategy_name, asset_code, date, open, high, low, close, volume
-            FROM df
-        """)
-        total_rows += len(df)
+            conn.execute("""
+                INSERT OR REPLACE INTO price_data
+                (strategy_name, asset_code, date, open, high, low, close, volume)
+                SELECT strategy_name, asset_code, date, open, high, low, close, volume
+                FROM df
+            """)
+            total_rows += len(df)
 
-    conn.close()
-    return total_rows
+        conn.close()
+        return total_rows
 
 
 # ============================================================
