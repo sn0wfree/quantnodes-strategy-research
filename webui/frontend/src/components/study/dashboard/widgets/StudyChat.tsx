@@ -26,16 +26,101 @@ import { InterruptApprovalCard } from './InterruptApprovalCard'
 // ── Helpers ──────────────────────────────────────────────────────
 
 function extractAgentText(out: Record<string, unknown>): string {
-  const o = out.output
+  const o = out.output as Record<string, unknown> | undefined
+  if (!o) return JSON.stringify(out, null, 2)
   if (typeof o === 'string') return o
-  if (o && typeof o === 'object') {
-    const obj = o as Record<string, unknown>
-    // 优先显示 analysis，其次 error，最后 stringify
-    return (obj.analysis as string)
-      || (obj.error as string)
-      || JSON.stringify(obj, null, 2)
+
+  const agent = out.agent as string | undefined
+  const lines: string[] = []
+
+  switch (agent) {
+    case 'researcher':
+    case 'strategist': {
+      if (o.action) lines.push(`**行动**: ${o.action}`)
+      if (o.hypothesis) lines.push(`**假设**: ${o.hypothesis}`)
+      if (o.reason) lines.push(`**理由**: ${o.reason}`)
+      if (o.factor_direction) lines.push(`**方向**: ${o.factor_direction}`)
+      if (o.expected_impact) lines.push(`**预期影响**: ${o.expected_impact}`)
+      if (o.change_plan && typeof o.change_plan === 'object') {
+        lines.push(`**变更计划**: ${JSON.stringify(o.change_plan)}`)
+      }
+      break
+    }
+    case 'data_quality': {
+      const passed = o.passed ? '✅ 通过' : '❌ 未通过'
+      lines.push(`**数据质量**: ${passed}`)
+      const warnings = (o.warnings as string[]) ?? []
+      if (warnings.length > 0) {
+        lines.push(`**告警** (${warnings.length}):`)
+        warnings.forEach((w, i) => lines.push(`  ${i + 1}. ${w}`))
+      }
+      break
+    }
+    case 'factor_analyst': {
+      if (o.recommendation) lines.push(`**建议**: ${o.recommendation}`)
+      const flags = (o.risk_flags as string[]) ?? []
+      if (flags.length > 0) {
+        lines.push('**风险标记**:')
+        flags.forEach((f, i) => lines.push(`  ${i + 1}. ${f}`))
+      }
+      break
+    }
+    case 'portfolio_construction': {
+      if (o.method) lines.push(`**方法**: ${o.method}`)
+      if (o.portfolio_vol) lines.push(`**组合波动率**: ${o.portfolio_vol}`)
+      if (o.recommendation && typeof o.recommendation === 'object') {
+        const rec = o.recommendation as Record<string, unknown>
+        if (rec.ready_for_backtest !== undefined) {
+          lines.push(`**回测就绪**: ${rec.ready_for_backtest ? '✅' : '❌'}`)
+        }
+        if (rec.next_step) lines.push(`**下一步**: ${rec.next_step}`)
+      }
+      if (o.proposed_change && typeof o.proposed_change === 'object') {
+        lines.push(`**变更方案**: ${JSON.stringify(o.proposed_change)}`)
+      }
+      break
+    }
+    case 'risk_controller':
+    case 'attribution_analyst': {
+      if (o.error) {
+        lines.push(`**状态**: ❌ ${o.error}`)
+        if (o.hint) lines.push(`**提示**: ${o.hint}`)
+      } else {
+        if (o.risk_passed !== undefined) {
+          lines.push(`**风控**: ${o.risk_passed ? '✅ 通过' : '❌ 未通过'} (${o.risk_rating ?? '-'})`)
+        }
+        if (o.alpha !== undefined) lines.push(`**Alpha**: ${o.alpha}`)
+        if (o.beta_mkt !== undefined) lines.push(`**Beta**: ${o.beta_mkt}`)
+      }
+      break
+    }
+    case 'anti_overfit_analyst': {
+      if (o.verdict) lines.push(`**结论**: ${o.verdict}`)
+      if (o.weighted_score !== undefined) lines.push(`**加权分**: ${o.weighted_score}`)
+      if (o.analysis) lines.push(o.analysis as string)
+      const suggestions = (o.suggestions as string[]) ?? []
+      if (suggestions.length > 0) {
+        lines.push('**建议**:')
+        suggestions.forEach((s, i) => lines.push(`  ${i + 1}. ${s}`))
+      }
+      break
+    }
+    case 'backtest_diagnostics': {
+      if (o.severity) lines.push(`**严重度**: ${o.severity}`)
+      if (o.root_cause) lines.push(`**根因**: ${o.root_cause}`)
+      if (o.fix_suggestion) lines.push(`**修复建议**: ${o.fix_suggestion}`)
+      break
+    }
+    default: {
+      return (o.analysis as string)
+        || (o.error as string)
+        || JSON.stringify(o, null, 2)
+    }
   }
-  return JSON.stringify(out, null, 2)
+
+  return lines.length > 0
+    ? lines.join('\n')
+    : JSON.stringify(o, null, 2)
 }
 
 function buildMessagesFromOutputs(
