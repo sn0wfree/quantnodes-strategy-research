@@ -955,29 +955,39 @@ class AutoresearchRunner:
             current_state["factor_failures"] = previous_summary["factor_failures"]
 
         # ── Engine dispatch ──────────────────────────────────────
-        # P7: All engines now route through langgraph with profiles.
+        # P7: Engine field determines execution path.
         # Legacy env var SR_STUDY_DAG_ENGINE=1 maps to 'dag' profile.
         engine = getattr(self._get_study(), "engine", None) or "phases"
         if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
             engine = "dag"  # backward compat: legacy env var overrides phases
 
-        # P7: All engine values route through langgraph with profiles
-        if engine in ("phases", "dag", "langgraph"):
+        if engine == "langgraph":
             return self._run_round_via_langgraph(
                 path, strategy, current_state, run_dir, graph,
                 session=session, sid=sid, round_num=round_num,
                 directive_text=directive_text,
             )
 
-        # P8: Unknown engine value — fallback to langgraph with phases profile
-        logger.warning("Unknown engine %r, falling back to langgraph phases profile", engine)
-        return self._run_round_via_langgraph(
-            path, strategy, current_state, run_dir, graph,
-            session=session, sid=sid, round_num=round_num,
-            directive_text=directive_text,
+        # Phase 1: researcher (phases/dag engines)
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
+        })
+        researcher_result = run_researcher_phase(
+            path, strategy, current_state, run_dir,
+            session_id=session, run_name=run_name,
+            behavior=self._get_study().behavior, max_retries=3,
+            max_iterations=SR_AGENT_MAX_ITER,
+            directives=directive_text,
+            lazy_detection_interval=self._get_study().lazy_detection_interval,
+            keep_recent=self._get_study().keep_recent, round_num=round_num,
+            runs_dir=runs_dir,
+            loop_strategy=self._loop_strategy,
         )
+        self._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
+        })
+        researcher_output = researcher_result["researcher_output"]
 
-        # AEGIS: Novelty Gate
         hypothesis = researcher_output.get("hypothesis", "")
         predicted_affected = researcher_output.get("predicted_affected") or [t["name"] for t in metric_targets]
         if not self._novelty_gate(round_num, hypothesis, predicted_affected):

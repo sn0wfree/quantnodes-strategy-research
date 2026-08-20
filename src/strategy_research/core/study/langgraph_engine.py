@@ -333,13 +333,15 @@ def _get_checkpointer(sid: str, study_root: Path):
     """
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
+        import sqlite3
     except ImportError:
         logger.info("langgraph-checkpoint-sqlite not installed; checkpointing disabled")
         return None
 
     db_path = study_root / "checkpoints.db"
     try:
-        return SqliteSaver.from_conn_string(str(db_path))
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        return SqliteSaver(conn)
     except Exception as exc:
         logger.warning("Failed to open checkpoint DB %s: %s", db_path, exc)
         return None
@@ -408,7 +410,7 @@ def run_round_langgraph(
         "runs_dir": run_dir,
         "results_tsv": run_dir / "results.tsv",
         "session_id": session,
-        "session_manager": runner._session_manager,
+        "session_manager": getattr(runner, "_session_manager", None),
     }
 
     # SSE: round started
@@ -542,7 +544,7 @@ def resume_round_langgraph(
         "runs_dir": run_dir,
         "results_tsv": run_dir / "results.tsv",
         "session_id": session,
-        "session_manager": runner._session_manager,
+        "session_manager": getattr(runner, "_session_manager", None),
     }
 
     # Checkpoint setup
