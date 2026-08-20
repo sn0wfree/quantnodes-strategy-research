@@ -7,8 +7,8 @@ via ``AgentExecutor``, and returns the legacy ``exec_result + eval_result``
 schema so downstream callers (manifest, budget, review, state.json) are untouched.
 
 P1: Serial layer execution (matches DAG engine behavior).
-P2: Parallel fan-out via LangGraph super-steps.
-P3: Checkpointing via SqliteSaver.
+P2: Parallel fan-out via LangGraph super-steps + DuckDB write mutex.
+P3: Checkpointing via SqliteSaver (per-round, resume on failure).
 P4: HITL via interrupt().
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, TypedDict, Annotated, Literal
+from typing import Any, TypedDict, Annotated
 
 logger = logging.getLogger(__name__)
 
@@ -129,17 +129,13 @@ def build_langgraph(
     emit_fn,
     study_id: str,
     round_num: int,
+    checkpointer=None,
 ):
     """Convert StudyGraph → compiled LangGraph StateGraph.
 
-    Serial execution: LangGraph runs nodes layer by layer (topological
-    super-steps). Within each layer, nodes run in parallel by default,
-    but our node functions are idempotent (write to separate files),
-    so serial or parallel is safe.
-
     P1: Serial (topological sort, one node at a time).
-    P2: Enable parallel by using add_edge for all edges (LangGraph
-    handles parallelism automatically).
+    P2: Parallel fan-out via LangGraph super-steps.
+    P3: Checkpointing via SqliteSaver.
     """
     from langgraph.graph import StateGraph, START, END
 
@@ -182,7 +178,38 @@ def build_langgraph(
     for nid in exit_nodes:
         g.add_edge(nid, END)
 
-    return g.compile()
+    compile_kwargs = {}
+    if checkpointer is not None:
+        compile_kwargs["checkpointer"] = checkpointer
+
+    return g.compile(**compile_kwargs)
+
+
+# ── Checkpoint helpers ────────────────────────────────────────────
+
+def _get_checkpointer(sid: str, study_root: Path):
+    """Create or open a SqliteSaver for this study.
+
+    Checkpoint DB lives at ``study/{sid}/checkpoints.db``.
+    Returns None if langgraph-checkpoint-sqlite is not installed.
+    """
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+    except ImportError:
+        logger.info("langgraph-checkpoint-sqlite not installed; checkpointing disabled")
+        return None
+
+    db_path = study_root / "checkpoints.db"
+    try:
+        return SqliteSaver.from_conn_string(str(db_path))
+    except Exception as exc:
+        logger.warning("Failed to open checkpoint DB %s: %s", db_path, exc)
+        return None
+
+
+def _thread_id(sid: str, round_num: int) -> str:
+    """Checkpoint thread ID for a specific round."""
+    return f"{sid}:r{round_num}"
 
 
 # ── Main entry point ──────────────────────────────────────────────
@@ -203,7 +230,11 @@ def run_round_langgraph(
     """Execute one round using the LangGraph engine.
 
     Mirrors ``AutoresearchRunner._run_round_via_dag`` but uses
-    LangGraph StateGraph for orchestration.
+    LangGraph StateGraph for orchestration with checkpointing.
+
+    On failure, the checkpoint preserves completed agent outputs so
+    ``resume_round_langgraph`` can pick up from the last successful
+    super-step.
     """
     from ..agent.dag_config import AgentDAGConfig
     from ..agent.executor import AgentExecutor
@@ -233,10 +264,16 @@ def run_round_langgraph(
         "phase": "langgraph_init", "status": "started",
     })
 
+    # Checkpoint setup
+    from strategy_research.core.study.state_store import study_root as _study_root
+    study_root = _study_root(path, sid)
+    checkpointer = _get_checkpointer(sid, study_root)
+
     # Build and compile the graph
     compiled = build_langgraph(
         graph, executor, task_text, path,
         agent_ctx, runner._emit, sid, round_num,
+        checkpointer=checkpointer,
     )
 
     # Initial state
@@ -262,7 +299,8 @@ def run_round_langgraph(
         "phase": "langgraph_exec", "status": "started",
     })
 
-    result = compiled.invoke(initial_state)
+    config = {"configurable": {"thread_id": _thread_id(sid, round_num)}}
+    result = compiled.invoke(initial_state, config=config)
 
     runner._emit(session, "study_phase", {
         "study_id": sid, "round": round_num,
@@ -280,4 +318,93 @@ def run_round_langgraph(
         })
 
     # Rebuild legacy schema (same as DAG engine)
+    return runner._rebuild_phase_outputs(agent_outputs, graph)
+
+
+def resume_round_langgraph(
+    runner: Any,
+    path: Path,
+    strategy: str,
+    current_state: dict,
+    run_dir: Path,
+    graph: Any,
+    *,
+    session: str,
+    sid: str,
+    round_num: int,
+    directive_text: str | None,
+) -> dict:
+    """Resume a failed round from the last checkpoint.
+
+    Uses the same checkpointer to load the saved state, then re-invokes
+    the graph. Completed agents are skipped (their outputs are already in
+    the checkpoint).
+    """
+    from ..agent.dag_config import AgentDAGConfig
+    from ..agent.executor import AgentExecutor
+    from ..agent.registry import get_default_registry
+
+    dag_config = AgentDAGConfig.from_study_graph(
+        graph, name=f"study_{sid}_r{round_num}",
+        description=runner._get_study().objective,
+    )
+    registry = getattr(runner, "_plugin_registry", None) or get_default_registry()
+    executor = AgentExecutor(registry)
+
+    task_text = runner._build_round_task_text(current_state, directive_text)
+
+    agent_ctx = {
+        "strategy_name": strategy,
+        "strategy_dir": run_dir,
+        "runs_dir": run_dir,
+        "results_tsv": run_dir / "results.tsv",
+        "session_id": session,
+        "session_manager": runner._session_manager,
+    }
+
+    # Checkpoint setup
+    from strategy_research.core.study.state_store import study_root as _study_root
+    study_root = _study_root(path, sid)
+    checkpointer = _get_checkpointer(sid, study_root)
+
+    if checkpointer is None:
+        logger.warning("No checkpointer available; falling back to fresh run")
+        return run_round_langgraph(
+            runner, path, strategy, current_state, run_dir, graph,
+            session=session, sid=sid, round_num=round_num,
+            directive_text=directive_text,
+        )
+
+    # Build and compile the graph
+    compiled = build_langgraph(
+        graph, executor, task_text, path,
+        agent_ctx, runner._emit, sid, round_num,
+        checkpointer=checkpointer,
+    )
+
+    # Resume from checkpoint (no initial state needed)
+    config = {"configurable": {"thread_id": _thread_id(sid, round_num)}}
+
+    runner._emit(session, "study_phase", {
+        "study_id": sid, "round": round_num,
+        "phase": "langgraph_resume", "status": "started",
+    })
+
+    result = compiled.invoke(None, config=config)
+
+    runner._emit(session, "study_phase", {
+        "study_id": sid, "round": round_num,
+        "phase": "langgraph_resume", "status": "done",
+    })
+
+    # Save agent outputs
+    agent_outputs = result.get("agent_outputs", {})
+    for agent_id, output in agent_outputs.items():
+        runner._save_agent_output(run_dir, agent_id, {
+            "agent": agent_id,
+            "output": json.dumps(output, ensure_ascii=False) if isinstance(output, (dict, list)) else str(output),
+            "status": "success",
+            "timestamp": time.time(),
+        })
+
     return runner._rebuild_phase_outputs(agent_outputs, graph)
