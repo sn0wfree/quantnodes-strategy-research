@@ -927,11 +927,20 @@ class AutoresearchRunner:
         if previous_summary and previous_summary.get("factor_failures"):
             current_state["factor_failures"] = previous_summary["factor_failures"]
 
-        # ── DAG-driven execution (P5 unified engine) ───────────
-        # Feature flag: SR_STUDY_DAG_ENGINE=1 → drive execution via
-        # graph.json + AgentExecutor (replaces hardcoded Phase 1/2/3).
-        if os.environ.get("SR_STUDY_DAG_ENGINE") == "1":
+        # ── Engine dispatch ──────────────────────────────────────
+        # Per-study engine field (preferred) or legacy env var fallback.
+        engine = getattr(self._get_study(), "engine", None) or "phases"
+        if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
+            engine = "dag"  # backward compat: legacy env var overrides phases
+
+        if engine == "dag":
             return self._run_round_via_dag(
+                path, strategy, current_state, run_dir, graph,
+                session=session, sid=sid, round_num=round_num,
+                directive_text=directive_text,
+            )
+        elif engine == "langgraph":
+            return self._run_round_via_langgraph(
                 path, strategy, current_state, run_dir, graph,
                 session=session, sid=sid, round_num=round_num,
                 directive_text=directive_text,
@@ -1572,6 +1581,49 @@ class AutoresearchRunner:
             })
 
         return self._rebuild_phase_outputs(agent_outputs, graph)
+
+    def _run_round_via_langgraph(
+        self,
+        path: Path,
+        strategy: str,
+        current_state: dict,
+        run_dir: Path,
+        graph: "StudyGraph",
+        *,
+        session: str,
+        sid: str,
+        round_num: int,
+        directive_text: str | None,
+    ) -> dict:
+        """Execute one round via LangGraph engine.
+
+        Requires ``langgraph`` extra: ``pip install strategy-research[langgraph]``.
+        Falls back to phase engine if langgraph is not installed.
+        """
+        try:
+            from .langgraph_engine import run_round_langgraph
+        except ImportError:
+            logger.warning(
+                "langgraph extra not installed; falling back to phases engine. "
+                "Install with: pip install strategy-research[langgraph]"
+            )
+            raise RuntimeError(
+                "langgraph engine selected but langgraph package not installed. "
+                "Install with: pip install strategy-research[langgraph]"
+            )
+
+        return run_round_langgraph(
+            runner=self,
+            path=path,
+            strategy=strategy,
+            current_state=current_state,
+            run_dir=run_dir,
+            graph=graph,
+            session=session,
+            sid=sid,
+            round_num=round_num,
+            directive_text=directive_text,
+        )
 
     def _layered_topological_layers(self, graph) -> list[list[str]]:
         """Fallback topological layer computation if AgentDAGConfig

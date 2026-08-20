@@ -174,6 +174,7 @@ class StudyStartResponse(BaseModel):
     session_id: str
     execution_status: str
     executor_type: str
+    engine: str = "phases"
 
 
 class StudyDirectiveCreatedResponse(BaseModel):

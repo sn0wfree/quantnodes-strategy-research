@@ -106,6 +106,7 @@ class StudyStore:
                     goal_id                 TEXT,
                     objective               TEXT NOT NULL,
                     executor_type           TEXT NOT NULL DEFAULT 'autoresearch',
+                    engine                  TEXT NOT NULL DEFAULT 'phases',
                     workspace_path          TEXT NOT NULL,
                     strategy_name           TEXT NOT NULL,
                     metric_targets          TEXT,
@@ -264,6 +265,11 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_studies_archived "
                 "ON studies(execution_status, archived_at)"
             )
+            # v3 migration: engine column for dual-engine support
+            if "engine" not in study_cols:
+                self._conn.execute(
+                    "ALTER TABLE studies ADD COLUMN engine TEXT NOT NULL DEFAULT 'phases'"
+                )
             # Release any implicit transaction (migration UPDATE above)
             # so other connections (GoalStore, same DB file) can write.
             self._conn.commit()
@@ -280,6 +286,7 @@ class StudyStore:
         workspace_path: str,
         strategy_name: str,
         executor_type: str = "autoresearch",
+        engine: str = "phases",
         metric_targets: list[dict] | None = None,
         budget_token: int | None = None,
         budget_turn: int | None = None,
@@ -352,7 +359,7 @@ class StudyStore:
                 """
                 INSERT INTO studies (
                     study_id, session_id, owner_session_id, goal_id, objective,
-                    executor_type, workspace_path, strategy_name,
+                    executor_type, engine, workspace_path, strategy_name,
                     metric_targets,
                     budget_token, budget_turn, budget_time_seconds,
                     cooldown_base, cooldown_jitter, min_cooldown,
@@ -363,7 +370,7 @@ class StudyStore:
                     monitor_interval_seconds, last_monitor_check_at,
                     monitor_drift_count
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
                 """,
                 (
                     study_id,
@@ -372,6 +379,7 @@ class StudyStore:
                     goal_id,
                     objective,
                     executor_type,
+                    engine,
                     workspace_path,
                     strategy_name,
                     targets_json,
@@ -1236,6 +1244,7 @@ class StudyStore:
             goal_id=row["goal_id"],
             objective=row["objective"],
             executor_type=row["executor_type"],
+            engine=row["engine"] if "engine" in row.keys() else "phases",
             workspace_path=row["workspace_path"],
             strategy_name=row["strategy_name"],
             metric_targets=metric_targets,

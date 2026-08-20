@@ -167,6 +167,7 @@ class StudyRecord:
     executor_type: str  # 'autoresearch' | 'workflow'
     workspace_path: str
     strategy_name: str
+    engine: str = 'phases'  # 'phases' | 'dag' | 'langgraph'
     # 创建者 chat 会话 — 归属查询（get_active_study/list_studies）与 IDOR
     # 校验（_verify_study_ownership）用途；旧数据回填=session_id。
     owner_session_id: str | None = None

@@ -686,6 +686,7 @@ export interface StudyStartRequest {
   objective: string
   workspace_path: string
   strategy_name: string
+  engine?: 'phases' | 'dag' | 'langgraph'
   metric_targets?: MetricTarget[]
   budget_token?: number
   budget_turn?: number
@@ -706,6 +707,7 @@ export interface StudyStartResponse {
   study_id: string
   goal_id?: string
   execution_status: string
+  engine?: string
 }
 
 export interface StudyStatusResponse {

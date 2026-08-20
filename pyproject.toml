@@ -54,6 +54,10 @@ engine = [
     "pydantic>=2.5",
     "QuantOPT>=0.1.1",
 ]
+langgraph = [
+    "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2.0",
+]
 webui = [
 ]
 webui-api = [

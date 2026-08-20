@@ -55,6 +55,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
   const [maxRounds, setMaxRounds] = useState<number | ''>('')
   const [monitorSec, setMonitorSec] = useState<number | ''>('')
   const [behavior, setBehavior] = useState<string>('')
+  const [engine, setEngine] = useState<'phases' | 'dag' | 'langgraph'>('phases')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -108,6 +109,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
         objective: objective.trim(),
         workspace_path: workspacePath,
         strategy_name: strategyName,
+        engine,
         metric_targets: metrics,
         budget_turn: budgetTurn === '' ? undefined : Number(budgetTurn),
         max_rounds: maxRounds === '' ? undefined : Number(maxRounds),
@@ -262,6 +264,8 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
                 setMonitorSec={setMonitorSec}
                 behavior={behavior}
                 setBehavior={setBehavior}
+                engine={engine}
+                setEngine={setEngine}
                 compact
               />
             </div>
@@ -278,6 +282,8 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
             setMonitorSec={setMonitorSec}
             behavior={behavior}
             setBehavior={setBehavior}
+            engine={engine}
+            setEngine={setEngine}
           />
         </Section>
       )}
@@ -305,6 +311,7 @@ function AdvancedParams({
   maxRounds, setMaxRounds,
   monitorSec, setMonitorSec,
   behavior, setBehavior,
+  engine, setEngine,
   compact,
 }: {
   budgetTurn: number | ''
@@ -315,6 +322,8 @@ function AdvancedParams({
   setMonitorSec: (v: number | '') => void
   behavior: string
   setBehavior: (v: string) => void
+  engine: 'phases' | 'dag' | 'langgraph'
+  setEngine: (v: 'phases' | 'dag' | 'langgraph') => void
   compact?: boolean
 }) {
   const inputCls = INPUT_CLS(compact)
@@ -370,6 +379,18 @@ function AdvancedParams({
           <option value="static">static</option>
           <option value="varying">varying</option>
           <option value="improving">improving</option>
+        </select>
+      </div>
+      <div>
+        <label className={`mb-1 block ${compact ? 'text-[9px]' : 'text-[10px]'} text-slate-500`}>执行引擎</label>
+        <select
+          className={`w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 ${compact ? 'text-xs' : 'text-sm'} text-slate-200 outline-none focus:border-primary-500`}
+          value={engine}
+          onChange={(e) => setEngine(e.target.value as 'phases' | 'dag' | 'langgraph')}
+        >
+          <option value="phases">Phases (默认)</option>
+          <option value="dag">DAG (图执行)</option>
+          <option value="langgraph">LangGraph (高级)</option>
         </select>
       </div>
     </div>

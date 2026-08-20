@@ -220,6 +220,7 @@ def create_study_record(
     auto_compose_graph: bool = False,
     selected_agents: list[str] | None = None,
     graph_override: "StudyGraph | None" = None,
+    engine: str = "phases",
 ) -> "StudyRecord":
     """Create a study (validation + ledger + autonomous dir), not queued.
 
@@ -255,6 +256,7 @@ def create_study_record(
             monitor_interval_seconds=monitor_interval_seconds,
             lazy_detection_interval=lazy_detection_interval,
             keep_recent=keep_recent,
+            engine=engine,
         )
         # Goal ledger under the study's own identity: parallel studies
         # never supersede each other's goals (supersede=False).
