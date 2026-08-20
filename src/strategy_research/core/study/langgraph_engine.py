@@ -258,7 +258,13 @@ def build_langgraph(
     reg = registry or get_default_registry()
     node_map = {n.id: n for n in graph.nodes}
 
-    # Add agent nodes
+    # Add agent nodes with caching
+    try:
+        from langgraph.types import CachePolicy
+        default_cache_policy = CachePolicy(ttl=300)  # 5 min TTL
+    except ImportError:
+        default_cache_policy = None
+
     for node in graph.nodes:
         if not node.enabled:
             continue
@@ -267,13 +273,14 @@ def build_langgraph(
             logger.warning("langgraph: unknown plugin %r, skipping", node.id)
             continue
         node_config = node_map.get(node.id)
-        g.add_node(
-            node.id,
-            _make_agent_node(
-                executor, plugin, node_config, task_text,
-                workspace, agent_ctx, emit_fn, study_id, round_num,
-            ),
+        node_fn = _make_agent_node(
+            executor, plugin, node_config, task_text,
+            workspace, agent_ctx, emit_fn, study_id, round_num,
         )
+        add_kwargs = {}
+        if default_cache_policy is not None:
+            add_kwargs["cache_policy"] = default_cache_policy
+        g.add_node(node.id, node_fn, **add_kwargs)
 
     # P4: Inject novelty gate node when HITL is enabled
     if profile.hitl:
@@ -313,6 +320,13 @@ def build_langgraph(
     compile_kwargs = {}
     if checkpointer is not None:
         compile_kwargs["checkpointer"] = checkpointer
+
+    # Add LRU cache for agent nodes (skips LLM calls on identical inputs)
+    try:
+        from langgraph.cache.memory import InMemoryCache
+        compile_kwargs["cache"] = InMemoryCache()
+    except ImportError:
+        logger.info("langgraph cache not available; caching disabled")
 
     return g.compile(**compile_kwargs)
 
