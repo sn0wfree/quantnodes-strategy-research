@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict, Annotated
 
+from .engine_common import safe_json_loads, build_agent_ctx, save_agent_outputs
+
 logger = logging.getLogger(__name__)
 
 
@@ -156,12 +158,7 @@ def _make_agent_node(
             })
 
         # Parse output
-        output = result.output
-        if isinstance(output, str):
-            try:
-                output = json.loads(output)
-            except (json.JSONDecodeError, TypeError):
-                pass
+        output = safe_json_loads(result.output, fallback=result.output)
 
         return {
             "agent_outputs": {agent_id: output},
@@ -185,10 +182,7 @@ def _make_novelty_gate_node(
     def novelty_gate_node(state: StudyRoundState) -> dict:
         researcher_output = state.get("agent_outputs", {}).get("researcher", {})
         if isinstance(researcher_output, str):
-            try:
-                researcher_output = json.loads(researcher_output)
-            except (json.JSONDecodeError, TypeError):
-                researcher_output = {}
+            researcher_output = safe_json_loads(researcher_output, fallback={})
 
         hypothesis = researcher_output.get("hypothesis", "")
         predicted_affected = researcher_output.get("predicted_affected", [])
@@ -409,14 +403,7 @@ def run_round_langgraph(
 
     task_text = runner._build_round_task_text(current_state, directive_text)
 
-    agent_ctx = {
-        "strategy_name": strategy,
-        "strategy_dir": run_dir,
-        "runs_dir": run_dir,
-        "results_tsv": run_dir / "results.tsv",
-        "session_id": session,
-        "session_manager": getattr(runner, "_session_manager", None),
-    }
+    agent_ctx = build_agent_ctx(strategy, run_dir, session, runner)
 
     # SSE: round started
     runner._emit(session, "study_phase", {
@@ -500,14 +487,7 @@ def run_round_langgraph(
     })
 
     # Save agent outputs (mirrors DAG engine)
-    agent_outputs = result.get("agent_outputs", {})
-    for agent_id, output in agent_outputs.items():
-        runner._save_agent_output(run_dir, agent_id, {
-            "agent": agent_id,
-            "output": json.dumps(output, ensure_ascii=False) if isinstance(output, (dict, list)) else str(output),
-            "status": "success",
-            "timestamp": time.time(),
-        })
+    save_agent_outputs(runner, run_dir, agent_outputs, round_num)
 
     # Rebuild legacy schema (same as DAG engine)
     return runner._rebuild_phase_outputs(agent_outputs, graph)
@@ -545,14 +525,7 @@ def resume_round_langgraph(
 
     task_text = runner._build_round_task_text(current_state, directive_text)
 
-    agent_ctx = {
-        "strategy_name": strategy,
-        "strategy_dir": run_dir,
-        "runs_dir": run_dir,
-        "results_tsv": run_dir / "results.tsv",
-        "session_id": session,
-        "session_manager": getattr(runner, "_session_manager", None),
-    }
+    agent_ctx = build_agent_ctx(strategy, run_dir, session, runner)
 
     # Checkpoint setup
     from strategy_research.core.study.state_store import study_root as _study_root
