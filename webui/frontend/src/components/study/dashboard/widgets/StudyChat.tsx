@@ -177,7 +177,8 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
       chatStore.addMessage(buildEventMessage(event, studyId, selectedRound))
 
       // Detect HITL interrupt from SSE events
-      if ((event as any).type === 'study_phase' && (event as any).status === 'awaiting_approval') {
+      // Backend emits study_paused with reason="hitl_approval"
+      if ((event as any).type === 'study_paused' && (event as any).reason === 'hitl_approval') {
         setPendingInterrupt({
           interruptId: `pending:${studyId}:${selectedRound}`,
           hypothesis: (event as any).hypothesis,
