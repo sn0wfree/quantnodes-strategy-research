@@ -1428,93 +1428,13 @@ class AutoresearchRunner:
         round_num: int,
         directive_text: str | None,
     ) -> dict:
-        """Execute one round by driving graph.json through AgentExecutor.
-
-        Serial execution (topological layer by layer, one agent at a
-        time). Replaces the hardcoded Phase 1/2/3 block in
-        ``_run_one_round_impl``. The returned dict matches the legacy
-        ``exec_result`` + ``eval_result`` schema so downstream code
-        (``generate_run_summary``, ``_update_results_tsv``, etc.) is
-        untouched.
-        """
-        from ..agent.dag_config import AgentDAGConfig
-        from ..agent.executor import AgentExecutor
-        from ..agent.registry import get_default_registry
-
-        dag_config = AgentDAGConfig.from_study_graph(
-            graph, name=f"study_{sid}_r{round_num}",
-            description=self._get_study().objective,
+        """Execute one round via DAG engine (delegated to dag_engine.py)."""
+        from .dag_engine import run_round_dag
+        return run_round_dag(
+            self, path, strategy, current_state, run_dir, graph,
+            session=session, sid=sid, round_num=round_num,
+            directive_text=directive_text,
         )
-        # Class-level hook for test injection; defaults to the global
-        # builtin registry.
-        registry = getattr(self, "_plugin_registry", None) or get_default_registry()
-        executor = AgentExecutor(registry)
-
-        # Build the shared task text injected into each agent's user
-        # message (mirrors the study context fields the legacy
-        # phase functions received via current_state).
-        task_text = self._build_round_task_text(
-            current_state, directive_text,
-        )
-
-        layers = self._layered_topological_layers(graph)
-        agent_outputs: dict[str, Any] = {}
-        node_map = dag_config.node_map()
-
-        for layer_idx, layer_ids in enumerate(layers):
-            self._emit(session, "study_phase", {
-                "study_id": sid, "round": round_num,
-                "phase": f"layer_{layer_idx}", "status": "started",
-            })
-            upstream: dict[str, str] = {}
-            for agent_id in layer_ids:
-                plugin = registry.get(agent_id)
-                if plugin is None:
-                    logger.warning(
-                        "study %s round %d: unknown plugin %r; skipping",
-                        sid, round_num, agent_id,
-                    )
-                    continue
-                node = node_map.get(agent_id)
-                # Build per-agent context (study-specific kwargs forwarded
-                # to AgentLoop).
-                agent_ctx = {
-                    "strategy_name": strategy,
-                    "strategy_dir": run_dir,
-                    "runs_dir": run_dir,
-                    "results_tsv": run_dir / "results.tsv",
-                    "session_id": session,
-                    "session_manager": self._session_manager,
-                }
-                result = executor.execute(
-                    plugin, task_text, path,
-                    context=agent_ctx,
-                    upstream_outputs=upstream,
-                    node=node,
-                )
-                if result.status == "success":
-                    agent_outputs[agent_id] = self._try_parse_json(result.output)
-                    upstream[agent_id] = result.output
-                    self._save_agent_output(run_dir, agent_id, result)
-                else:
-                    agent_outputs[agent_id] = {
-                        "error": result.error or "unknown error",
-                        "parse_failed": True,
-                    }
-                    upstream[agent_id] = result.output or "{}"
-                    self._save_agent_output(run_dir, agent_id, result)
-                self._emit(session, "study_agent_complete", {
-                    "study_id": sid, "round": round_num,
-                    "agent": agent_id,
-                    "status": result.status,
-                    "elapsed_s": result.elapsed_s,
-                })
-            self._emit(session, "study_phase", {
-                "study_id": sid, "round": round_num,
-                "phase": f"layer_{layer_idx}", "status": "done",
-            })
-
-        return self._rebuild_phase_outputs(agent_outputs, graph)
 
     def _run_round_via_langgraph(
         self,
