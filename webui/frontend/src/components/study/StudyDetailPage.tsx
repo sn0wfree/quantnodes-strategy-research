@@ -1,13 +1,13 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pause, Play, X, FolderOpen,
-  RotateCcw, BarChart3, BookOpen,
-  Archive, ArchiveRestore, Edit3, LayoutGrid,
+  Target, Activity, RotateCcw, BarChart3, BookOpen,
+  Archive, ArchiveRestore, Edit3,
   ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyAvailableActionsResponse } from '../../api/client'
-import { STUDY_STATUS_LABELS } from './constants'
+import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
 import { EmptyState } from '../common/EmptyState'
 import { PageShell } from '../layout/PageShell'
 import { EditObjectiveDialog } from './EditObjectiveDialog'
@@ -19,10 +19,34 @@ import { StudyChat } from './dashboard/widgets/StudyChat'
 import { MetricsCompare } from './MetricsCompare'
 import { RoundHistory } from './RoundHistory'
 
+function KpiCard({
+  icon,
+  iconCls,
+  value,
+  label,
+  valueCls = 'text-slate-100',
+}: {
+  icon: React.ReactNode
+  iconCls: string
+  value: string
+  label: string
+  valueCls?: string
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3.5 shadow-soft transition-colors hover:border-slate-700">
+      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${iconCls}`}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className={`font-mono text-xl font-bold tabular-nums ${valueCls}`}>{value}</div>
+        <div className="text-[10px] text-slate-500">{label}</div>
+      </div>
+    </div>
+  )
+}
+
 export function StudyDetailPage() {
   const { studyId = '' } = useParams<{ studyId: string }>()
-  const [searchParams] = useSearchParams()
-  const showEditLayout = searchParams.get('editLayout') === 'true'
   const navigate = useNavigate()
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [actions, setActions] = useState<StudyAvailableActionsResponse | null>(null)
@@ -34,6 +58,7 @@ export function StudyDetailPage() {
   const [continueDialogOpen, setContinueDialogOpen] = useState(false)
   const [roundHistoryOpen, setRoundHistoryOpen] = useState(false)
 
+  // Refs for ETag-conditional polling and terminal-state detection
   const summaryRef = useRef<StudySummaryResponse | null>(null)
   const etagRef = useRef<string | null>(null)
 
@@ -47,6 +72,7 @@ export function StudyDetailPage() {
         setNotFound(false)
         setError('')
       }
+      // data === null → 304 Not Modified, no update needed
     } catch (err) {
       const status = (err as { status?: number })?.status
       if (status === 404) {
@@ -74,6 +100,7 @@ export function StudyDetailPage() {
       await loadSummary()
       if (!cancelled) {
         setLoading(false)
+        // Stop polling when study reaches a terminal status
         const st = summaryRef.current?.execution_status
         const isTerminal = ['complete', 'cancelled', 'archived'].includes(st ?? '')
         timer = isTerminal ? null : setTimeout(poll, 10_000)
@@ -86,8 +113,13 @@ export function StudyDetailPage() {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, loadActions, loadSummary])
+  }, [
+    studyId,
+    loadActions,
+    loadSummary,
+  ])
 
+  // ── SSE connection for study events ────────────────────────────
   useSSE(studyId)
 
   const onAction = async (
@@ -149,12 +181,17 @@ export function StudyDetailPage() {
 
   const status = summary.execution_status ?? 'unknown'
   const strategyName = summary.strategy_name ?? ''
-  const currentRound = clampRound(summary.current_round)
+  const progressPercent = summary.goal_snapshot?.progress_percent ?? 0
+  const evidenceCount = summary.goal_snapshot?.evidence_count ?? 0
+  const lastVerdict = summary.last_verdict ?? '—'
+  const metricTargets = summary.metric_targets ?? []
 
   const bestCalmar = (summary.recent_rounds ?? [])
     .map((r) => r.metrics?.calmar)
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
     .reduce((a, b) => Math.max(a, b), 0)
+  const driftCount = summary.monitor_state?.drift_count ?? 0
+  const isDrifting = status === 'needs_refresh' || driftCount > 0
 
   const canPause = (actions?.actions ?? []).some((a) => a.name === 'pause')
   const canContinue = (actions?.actions ?? []).some((a) => a.name === 'continue')
@@ -164,14 +201,6 @@ export function StudyDetailPage() {
   const canReplaceObjective = (actions?.actions ?? []).some(
     (a) => a.name === 'replace_objective',
   )
-
-  const subtitle = [
-    strategyName || '—',
-    formatDateTime(summary.created_at),
-    `R${currentRound}/${summary.max_rounds ?? 5}`,
-    `${STUDY_STATUS_LABELS[status] ?? status}`,
-    `Calmar ${bestCalmar.toFixed(2)}`,
-  ].join(' · ')
 
   const controlActions = (
     <div className="flex items-center gap-1.5">
@@ -244,20 +273,13 @@ export function StudyDetailPage() {
           <Edit3 className="h-3.5 w-3.5" /> 修改目标
         </button>
       )}
-      {showEditLayout && (
-        <button
-          className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/50 px-2.5 py-1.5 text-xs text-slate-400 transition-all hover:border-slate-600 hover:text-slate-200 active:scale-95"
-        >
-          <LayoutGrid className="h-3.5 w-3.5" /> 编辑布局
-        </button>
-      )}
     </div>
   )
 
   return (
     <PageShell
       title={summary.objective || '研究详情'}
-      subtitle={subtitle}
+      subtitle={`策略 ${strategyName || '—'} · 创建于 ${formatDateTime(summary.created_at)}`}
       icon={<BookOpen className="h-4 w-4" />}
       actions={controlActions}
     >
@@ -268,8 +290,64 @@ export function StudyDetailPage() {
         </div>
       )}
 
+      {/* KPI band */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+        <KpiCard
+          icon={<RotateCcw className="h-4 w-4" />}
+          iconCls="border border-sky-500/30 bg-sky-500/10 text-sky-400"
+          value={`${clampRound(summary.current_round)}/${summary.max_rounds ?? 5}`}
+          label="当前轮次 / 最大轮数"
+          valueCls="text-sky-400"
+        />
+        <KpiCard
+          icon={<Activity className="h-4 w-4" />}
+          iconCls="border border-amber-500/30 bg-amber-500/10 text-amber-400"
+          value={STUDY_STATUS_LABELS[status] ?? status}
+          label={isDrifting ? `漂移 ×${driftCount}（需检查）` : '执行状态'}
+          valueCls={STUDY_STATUS_COLORS[status]?.split(' ')[0] ? 'text-slate-100' : 'text-slate-100'}
+        />
+        <KpiCard
+          icon={<BarChart3 className="h-4 w-4" />}
+          iconCls="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          value={lastVerdict}
+          label="最近 round 结论"
+          valueCls="text-emerald-400"
+        />
+        <KpiCard
+          icon={<Target className="h-4 w-4" />}
+          iconCls="border border-primary-500/30 bg-primary-500/10 text-primary-400"
+          value={`${progressPercent}%`}
+          label={`目标进度 · ${evidenceCount} 证据`}
+          valueCls="text-primary-400"
+        />
+        <KpiCard
+          icon={<BarChart3 className="h-4 w-4" />}
+          iconCls="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          value={bestCalmar.toFixed(2)}
+          label="最佳 Calmar（历史轮次）"
+          valueCls="text-emerald-400"
+        />
+      </div>
+
+      {/* Metric targets */}
+      {metricTargets.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            验收线:
+          </span>
+          {metricTargets.map((t, i) => (
+            <span
+              key={i}
+              className="rounded-full border border-primary-500/30 bg-primary-500/10 px-2 py-0.5 font-mono text-[10px] text-primary-400"
+            >
+              {t.name} {t.op} {t.value}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Main content: left StudyChat + right panel */}
-      <div className="flex min-h-0 flex-1 gap-4" style={{ height: 'calc(100vh - 120px)' }}>
+      <div className="mt-4 flex min-h-0 flex-1 gap-4" style={{ height: 'calc(100vh - 280px)' }}>
         {/* Left: StudyChat */}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-800 bg-slate-900/40">
           <StudyChat studyId={studyId} summary={summary} />
@@ -326,6 +404,7 @@ export function StudyDetailPage() {
         open={editObjectiveOpen}
         onClose={() => setEditObjectiveOpen(false)}
         onSuccess={() => {
+          // Refresh summary so the new objective + history show immediately
           void loadSummary()
           void loadActions()
         }}
