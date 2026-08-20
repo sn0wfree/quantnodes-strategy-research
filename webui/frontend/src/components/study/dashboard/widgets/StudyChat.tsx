@@ -4,7 +4,7 @@
  * Layout:
  *   Header: [Plan | Build] mode switcher + current round + panel toggle
  *   Body (flex row):
- *     Main column: MessageList (with round separators) + StudyChatComposer
+ *     Main column: MessageList (with round separators) + InterruptApprovalCard + StudyChatComposer
  *     Right panel: KeyPointsPanel (all rounds, collapsible)
  *
  * Both modes show the same message stream.
@@ -21,6 +21,7 @@ import type { WidgetProps } from '../types'
 import { useStudyChatMode } from './useStudyChatMode'
 import { StudyChatComposer } from './StudyChatComposer'
 import { KeyPointsPanel } from './KeyPointsPanel'
+import { InterruptApprovalCard } from './InterruptApprovalCard'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -113,6 +114,11 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
   const [panelOpen, setPanelOpen] = useState(true)
+  const [pendingInterrupt, setPendingInterrupt] = useState<{
+    interruptId: string
+    hypothesis?: string
+    message?: string
+  } | null>(null)
   const recentEvents = useStudyStore((s) => s.recentEvents)
   const chatStore = useChatStore()
   const eventCountRef = useRef(0)
@@ -169,6 +175,15 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
 
     newEvents.forEach((event) => {
       chatStore.addMessage(buildEventMessage(event, studyId, selectedRound))
+
+      // Detect HITL interrupt from SSE events
+      if ((event as any).type === 'study_phase' && (event as any).status === 'awaiting_approval') {
+        setPendingInterrupt({
+          interruptId: `pending:${studyId}:${selectedRound}`,
+          hypothesis: (event as any).hypothesis,
+          message: (event as any).message || '等待审批...',
+        })
+      }
     })
   }, [recentEvents.length])
 
@@ -261,6 +276,20 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
             <div className="min-h-0 flex-1">
               <MessageList separatorKey={roundKey} />
             </div>
+
+            {/* HITL Approval Card (shown when interrupt is pending) */}
+            {pendingInterrupt && (
+              <div className="flex-shrink-0 border-t border-slate-800 p-3">
+                <InterruptApprovalCard
+                  studyId={studyId}
+                  interruptId={pendingInterrupt.interruptId}
+                  hypothesis={pendingInterrupt.hypothesis}
+                  message={pendingInterrupt.message}
+                  onApproved={() => setPendingInterrupt(null)}
+                  onRejected={() => setPendingInterrupt(null)}
+                />
+              </div>
+            )}
 
             {/* Composer */}
             <div className="flex-shrink-0">
