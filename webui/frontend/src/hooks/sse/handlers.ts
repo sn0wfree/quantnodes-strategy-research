@@ -55,6 +55,7 @@ import {
   studyObjectiveApplied,
   studyEarlyStopped,
   studyTodosUpdated,
+  studyInterruptResponded,
 } from './studyHandlers'
 import {
   subagentStarted,
@@ -147,6 +148,8 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   study_objective_applied: studyObjectiveApplied,
   study_early_stopped: studyEarlyStopped,
   study_todos_updated: studyTodosUpdated,
+  // P4: HITL interrupt handlers
+  study_interrupt_responded: studyInterruptResponded,
   // Subagent lifecycle
   subagent_started: subagentStarted,
   subagent_tool_call: subagentToolCall,

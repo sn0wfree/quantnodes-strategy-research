@@ -189,6 +189,28 @@ class StudyStore:
                 "CREATE INDEX IF NOT EXISTS idx_study_directives_study "
                 "ON study_directives(study_id, consumed_at)"
             )
+            # v3: study_interrupts — HITL approval requests
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS study_interrupts (
+                    interrupt_id   TEXT PRIMARY KEY,
+                    study_id       TEXT NOT NULL,
+                    round_num      INTEGER NOT NULL,
+                    interrupt_type TEXT NOT NULL,
+                    payload        TEXT,
+                    status         TEXT NOT NULL DEFAULT 'pending',
+                    response       TEXT,
+                    created_at     TEXT NOT NULL,
+                    responded_at   TEXT,
+                    FOREIGN KEY (study_id) REFERENCES studies(study_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_study_interrupts_study "
+                "ON study_interrupts(study_id, status)"
+            )
             # AEGIS: study_rounds — per-round history for attribution/journal
             self._conn.execute(
                 """
@@ -1015,6 +1037,87 @@ class StudyStore:
                 [now, study_id, *directive_ids],
             )
         return cur.rowcount
+
+    # ── Phase 3: HITL interrupts ──────────────────────────────────
+
+    @synchronized
+    def create_interrupt(
+        self,
+        study_id: str,
+        round_num: int,
+        interrupt_type: str,
+        payload: str | None = None,
+    ) -> "StudyInterrupt":
+        """Create an interrupt record (status=pending)."""
+        from .models import StudyInterrupt
+        interrupt_id = new_id("interrupt")
+        now = now_iso()
+        with write_transaction(self._conn):
+            self._conn.execute(
+                """
+                INSERT INTO study_interrupts
+                    (interrupt_id, study_id, round_num, interrupt_type,
+                     payload, status, created_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (interrupt_id, study_id, round_num, interrupt_type, payload, now),
+            )
+        return StudyInterrupt(
+            interrupt_id=interrupt_id,
+            study_id=study_id,
+            round_num=round_num,
+            interrupt_type=interrupt_type,
+            payload=payload,
+            status="pending",
+            created_at=now,
+        )
+
+    @synchronized
+    def get_pending_interrupt(
+        self, study_id: str, round_num: int
+    ) -> "StudyInterrupt | None":
+        """Return the pending interrupt for a study round, or None."""
+        from .models import StudyInterrupt
+        row = self._conn.execute(
+            """
+            SELECT interrupt_id, study_id, round_num, interrupt_type,
+                   payload, status, response, created_at, responded_at
+            FROM study_interrupts
+            WHERE study_id = ? AND round_num = ? AND status = 'pending'
+            LIMIT 1
+            """,
+            (study_id, round_num),
+        ).fetchone()
+        if row is None:
+            return None
+        return StudyInterrupt(
+            interrupt_id=row["interrupt_id"],
+            study_id=row["study_id"],
+            round_num=row["round_num"],
+            interrupt_type=row["interrupt_type"],
+            payload=row["payload"],
+            status=row["status"],
+            response=row["response"],
+            created_at=row["created_at"],
+            responded_at=row["responded_at"],
+        )
+
+    @synchronized
+    def respond_interrupt(
+        self, interrupt_id: str, status: str, response: str | None = None
+    ) -> bool:
+        """Respond to an interrupt (approve/reject). Returns True if updated."""
+        now = now_iso()
+        with write_transaction(self._conn):
+            cur = self._conn.execute(
+                """
+                UPDATE study_interrupts
+                SET status = ?, response = ?, responded_at = ?
+                WHERE interrupt_id = ? AND status = 'pending'
+                """,
+                (status, response, now, interrupt_id),
+            )
+        return cur.rowcount > 0
 
     # ── Phase 3: monitoring hooks ──────────────────────────────────
 

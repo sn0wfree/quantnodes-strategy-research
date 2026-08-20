@@ -120,6 +120,67 @@ def _make_agent_node(
     return agent_node
 
 
+def _make_novelty_gate_node(
+    study_id: str,
+    round_num: int,
+    emit_fn,
+):
+    """Create a LangGraph node for the novelty gate with optional HITL interrupt.
+
+    When HITL is enabled, this node calls ``interrupt()`` to pause
+    execution and wait for human approval of the researcher's hypothesis.
+    """
+    from langgraph.types import interrupt
+
+    def novelty_gate_node(state: StudyRoundState) -> dict:
+        researcher_output = state.get("agent_outputs", {}).get("researcher", {})
+        if isinstance(researcher_output, str):
+            try:
+                researcher_output = json.loads(researcher_output)
+            except (json.JSONDecodeError, TypeError):
+                researcher_output = {}
+
+        hypothesis = researcher_output.get("hypothesis", "")
+        predicted_affected = researcher_output.get("predicted_affected", [])
+
+        # Simplified novelty check (full logic lives in runner._check_novelty)
+        # For HITL, we always interrupt for approval when the hypothesis exists
+        if not hypothesis:
+            return {"aborted": True, "abort_reason": "no_hypothesis"}
+
+        # SSE: gate check started
+        if emit_fn:
+            emit_fn(study_id, "study_phase", {
+                "study_id": study_id,
+                "round": round_num,
+                "phase": "novelty_gate",
+                "status": "interrupted",
+                "hypothesis": hypothesis[:200],
+            })
+
+        # HITL: pause for human approval
+        approval = interrupt({
+            "type": "novelty_gate",
+            "study_id": study_id,
+            "round_num": round_num,
+            "hypothesis": hypothesis,
+            "predicted_affected": predicted_affected,
+            "message": f"Round {round_num}: 请审批 researcher 假设",
+        })
+
+        # After resume: approval is the response from the API
+        if approval and isinstance(approval, dict):
+            if approval.get("decision") == "reject":
+                return {"aborted": True, "abort_reason": "human_rejected"}
+        elif approval == "reject":
+            return {"aborted": True, "abort_reason": "human_rejected"}
+
+        # Approved: continue
+        return {}
+
+    return novelty_gate_node
+
+
 def build_langgraph(
     graph,
     executor,
@@ -130,12 +191,14 @@ def build_langgraph(
     study_id: str,
     round_num: int,
     checkpointer=None,
+    hitl_enabled: bool = False,
 ):
     """Convert StudyGraph → compiled LangGraph StateGraph.
 
     P1: Serial (topological sort, one node at a time).
     P2: Parallel fan-out via LangGraph super-steps.
     P3: Checkpointing via SqliteSaver.
+    P4: HITL via interrupt() at novelty gate.
     """
     from langgraph.graph import StateGraph, START, END
 
@@ -147,7 +210,7 @@ def build_langgraph(
     reg = registry or get_default_registry()
     node_map = {n.id: n for n in graph.nodes}
 
-    # Add nodes
+    # Add agent nodes
     for node in graph.nodes:
         if not node.enabled:
             continue
@@ -164,13 +227,34 @@ def build_langgraph(
             ),
         )
 
+    # P4: Inject novelty gate node when HITL is enabled
+    if hitl_enabled:
+        g.add_node("novelty_gate", _make_novelty_gate_node(study_id, round_num, emit_fn))
+
     # Add edges
     for edge in graph.edges:
-        g.add_edge(edge.source, edge.target)
+        source = edge.source
+        target = edge.target
+        # P4: Route researcher → novelty_gate → original targets
+        if hitl_enabled and source == "researcher" and target in _find_entry_nodes(graph):
+            g.add_edge("researcher", "novelty_gate")
+            continue
+        g.add_edge(source, target)
+
+    # P4: Route novelty_gate → original targets of researcher
+    if hitl_enabled:
+        researcher_targets = [
+            e.target for e in graph.edges
+            if e.source == "researcher"
+        ]
+        for target in researcher_targets:
+            g.add_edge("novelty_gate", target)
 
     # Entry points (START → nodes with no incoming edges)
     entry_nodes = _find_entry_nodes(graph)
     for nid in entry_nodes:
+        if hitl_enabled and nid in researcher_targets if hitl_enabled else False:
+            continue  # routed through novelty_gate
         g.add_edge(START, nid)
 
     # Exit points (nodes with no outgoing edges → END)
@@ -226,6 +310,7 @@ def run_round_langgraph(
     sid: str,
     round_num: int,
     directive_text: str | None,
+    hitl_enabled: bool = False,
 ) -> dict:
     """Execute one round using the LangGraph engine.
 
@@ -235,6 +320,9 @@ def run_round_langgraph(
     On failure, the checkpoint preserves completed agent outputs so
     ``resume_round_langgraph`` can pick up from the last successful
     super-step.
+
+    When ``hitl_enabled=True``, a novelty gate interrupt is injected
+    after the researcher phase, pausing execution for human approval.
     """
     from ..agent.dag_config import AgentDAGConfig
     from ..agent.executor import AgentExecutor
@@ -274,6 +362,7 @@ def run_round_langgraph(
         graph, executor, task_text, path,
         agent_ctx, runner._emit, sid, round_num,
         checkpointer=checkpointer,
+        hitl_enabled=hitl_enabled,
     )
 
     # Initial state
@@ -301,6 +390,35 @@ def run_round_langgraph(
 
     config = {"configurable": {"thread_id": _thread_id(sid, round_num)}}
     result = compiled.invoke(initial_state, config=config)
+
+    # P4: Detect interrupt (HITL approval needed)
+    if isinstance(result, dict) and "__interrupt__" in result:
+        interrupt_info = result["__interrupt__"]
+        # Save interrupt to DB for the runner loop to poll
+        from .store import StudyStore
+        payload = {}
+        if interrupt_info:
+            try:
+                payload = interrupt_info[0].value if hasattr(interrupt_info[0], "value") else {}
+            except (IndexError, AttributeError):
+                payload = {"raw": str(interrupt_info)}
+        with StudyStore() as store:
+            store.create_interrupt(
+                study_id=sid,
+                round_num=round_num,
+                interrupt_type=payload.get("type", "novelty_gate"),
+                payload=json.dumps(payload, ensure_ascii=False),
+            )
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num,
+            "phase": "langgraph_exec", "status": "awaiting_approval",
+        })
+        return {
+            "round": round_num,
+            "run_name": f"round_{round_num}",
+            "paused_for_approval": True,
+            "study_id": sid,
+        }
 
     runner._emit(session, "study_phase", {
         "study_id": sid, "round": round_num,

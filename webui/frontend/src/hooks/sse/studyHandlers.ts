@@ -207,6 +207,13 @@ export const studyPhase: SSEHandler = (data) => {
     store.setPhase(null)
     const phaseLabel = PHASE_LABELS[phase ?? ''] ?? phase
     store.addLiveEvent({ type: 'phase', message: `${phaseLabel} 完成`, round })
+  } else if (status === 'awaiting_approval') {
+    store.setPhase(null)
+    store.addLiveEvent({
+      type: 'other',
+      message: `等待审批: ${phase ?? 'novelty_gate'}`,
+      round,
+    })
   }
   patch(data)
 }
@@ -384,6 +391,10 @@ const PHASE_LABELS: Record<string, string> = {
   evaluation: '评估',
   review: '审核',
   knowledge: '知识收集',
+  novelty_gate: '假设审批',
+  langgraph_init: '引擎初始化',
+  langgraph_exec: '图执行',
+  langgraph_resume: '恢复执行',
 }
 
 const AGENT_LABELS: Record<string, string> = {
@@ -396,4 +407,35 @@ const AGENT_LABELS: Record<string, string> = {
   attribution_analyst: 'Attribution',
   anti_overfit_analyst: 'AntiOverfit',
   backtest_diagnostics: 'BacktestDiag',
+}
+
+// ── P4: HITL interrupt handlers ──────────────────────────────────
+
+/**
+ * study_phase with status="awaiting_approval" — HITL approval needed.
+ * Emitted by LangGraph engine when interrupt() fires.
+ */
+export const studyAwaitingApproval: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const round = data.round as number | undefined
+  const hypothesis = data.hypothesis as string | undefined
+  store.addLiveEvent({
+    type: 'other',
+    message: `等待审批: Round ${round ?? '?'} — ${hypothesis?.slice(0, 60) ?? '假设审批'}`,
+    round,
+  })
+  patch({ ...data, execution_status: 'awaiting_approval' })
+}
+
+/**
+ * study_interrupt_responded — user responded to HITL interrupt.
+ */
+export const studyInterruptResponded: SSEHandler = (data) => {
+  const store = useStudyStore.getState()
+  const decision = data.decision as string | undefined
+  const interruptId = data.interrupt_id as string | undefined
+  store.addLiveEvent({
+    type: 'other',
+    message: `审批${decision === 'approve' ? '通过' : '拒绝'}: ${interruptId ?? ''}`,
+  })
 }

@@ -77,6 +77,7 @@ export type SSEEventType =
   | 'study_objective_applied'
   | 'study_early_stopped'
   | 'study_todos_updated'
+  | 'study_interrupt_responded'
   | 'subagent_started'
   | 'subagent_tool_call'
   | 'subagent_tool_result'
@@ -122,6 +123,8 @@ export const EVENT_TYPES: SSEEventType[] = [
   'study_knowledge_check', 'study_knowledge_update', 'study_review',
   'study_evidence', 'study_directive_added', 'study_objective_applied',
   'study_early_stopped', 'study_todos_updated',
+  // P4: HITL interrupt events
+  'study_interrupt_responded',
   // Subagent events
   'subagent_started', 'subagent_tool_call', 'subagent_tool_result',
   'subagent_text_delta', 'subagent_completed', 'subagent_failed',

@@ -871,6 +871,55 @@ async def study_directives_list(request: Request, study_id: str):
         ],
     }
 
+
+# ── POST /study/{study_id}/interrupts/{iid}/respond (P4: HITL) ──────
+
+class InterruptRespondRequest(BaseModel):
+    decision: str = Field(..., pattern="^(approve|reject)$")
+    payload: Optional[dict] = None
+
+
+@router.post("/{study_id}/interrupts/{iid}/respond")
+async def study_interrupt_respond(
+    request: Request, study_id: str, iid: str, req: InterruptRespondRequest
+):
+    """Respond to a pending HITL interrupt (approve or reject).
+
+    The study loop polls for the interrupt response and resumes execution
+    accordingly.
+    """
+    _owned_study(request, study_id)
+    sid = _study_session_id(study_id)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="study not found")
+
+    from ...core.study import StudyStore
+    with StudyStore() as store:
+        updated = store.respond_interrupt(
+            interrupt_id=iid,
+            status=req.decision,
+            response=json.dumps(req.payload) if req.payload else None,
+        )
+    if not updated:
+        raise HTTPException(status_code=404, detail="interrupt not found or already responded")
+
+    # Emit SSE event so the study loop can detect the response
+    sched = _get_study_scheduler()
+    if sched.session_service is not None and sched.session_service.event_bus is not None:
+        try:
+            sched.session_service.event_bus.emit(
+                "", "study_interrupt_responded", {
+                    "study_id": study_id,
+                    "interrupt_id": iid,
+                    "decision": req.decision,
+                },
+            )
+        except Exception:
+            pass
+
+    return {"status": "ok", "interrupt_id": iid, "decision": req.decision}
+
+
 # ── v2 artifacts endpoints (design §17) ────────────────────────────────
 
 

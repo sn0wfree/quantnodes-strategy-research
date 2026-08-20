@@ -514,6 +514,33 @@ class AutoresearchRunner:
             if result.get("aborted"):
                 continue
 
+            # P4: Handle HITL approval pause
+            if result.get("paused_for_approval"):
+                self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
+                self._emit(session, "study_paused", {
+                    "study_id": sid, "round": round_num,
+                    "reason": "hitl_approval",
+                })
+                # Poll for approval (max 10 minutes, check every 5 seconds)
+                approved = await self._wait_for_approval(sid, round_num, timeout_s=600)
+                if not approved:
+                    # Timeout or rejection — skip this round
+                    self._emit(session, "study_round_rejected", {
+                        "study_id": sid, "round": round_num,
+                        "reason": "hitl_timeout",
+                    })
+                    continue
+                # Resume the round from checkpoint
+                self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+                result = await asyncio.to_thread(
+                    self._resume_round_langgraph, path, strategy,
+                    current_state, run_dir, graph,
+                    session=session, sid=sid, round_num=round_num,
+                    directive_text=directive_text,
+                )
+                if result.get("aborted"):
+                    continue
+
             metrics = result.get("metrics", {})
             verdict = result.get("verdict", "discard")
             summary = result.get("summary")
@@ -1599,6 +1626,10 @@ class AutoresearchRunner:
 
         Requires ``langgraph`` extra: ``pip install strategy-research[langgraph]``.
         Falls back to phase engine if langgraph is not installed.
+
+        P4: HITL is enabled by default for langgraph engine. The novelty
+        gate interrupt pauses execution for human approval of the
+        researcher's hypothesis.
         """
         try:
             from .langgraph_engine import run_round_langgraph
@@ -1612,7 +1643,60 @@ class AutoresearchRunner:
                 "Install with: pip install strategy-research[langgraph]"
             )
 
+        # P4: HITL enabled for langgraph engine
+        hitl_enabled = True
+
         return run_round_langgraph(
+            runner=self,
+            path=path,
+            strategy=strategy,
+            current_state=current_state,
+            run_dir=run_dir,
+            graph=graph,
+            session=session,
+            sid=sid,
+            round_num=round_num,
+            directive_text=directive_text,
+            hitl_enabled=hitl_enabled,
+        )
+
+    async def _wait_for_approval(
+        self, sid: str, round_num: int, timeout_s: int = 600
+    ) -> bool:
+        """Poll for HITL approval. Returns True if approved, False if timeout/rejected."""
+        import asyncio
+        start = time.time()
+        while time.time() - start < timeout_s:
+            with self.study_store() as store:
+                interrupt = store.get_pending_interrupt(sid, round_num)
+                if interrupt is None:
+                    # No pending interrupt — check if it was responded to
+                    break
+                if interrupt.status in ("approved", "rejected"):
+                    return interrupt.status == "approved"
+            await asyncio.sleep(5)
+        return False
+
+    def _resume_round_langgraph(
+        self,
+        path: Path,
+        strategy: str,
+        current_state: dict,
+        run_dir: Path,
+        graph: "StudyGraph",
+        *,
+        session: str,
+        sid: str,
+        round_num: int,
+        directive_text: str | None,
+    ) -> dict:
+        """Resume a HITL-paused round from checkpoint."""
+        try:
+            from .langgraph_engine import resume_round_langgraph
+        except ImportError:
+            raise RuntimeError("langgraph package not installed")
+
+        return resume_round_langgraph(
             runner=self,
             path=path,
             strategy=strategy,

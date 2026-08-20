@@ -247,6 +247,27 @@ class StudyDirective:
 
 
 @dataclass(frozen=True)
+class StudyInterrupt:
+    """HITL approval request for a running study round.
+
+    When the LangGraph engine encounters an interrupt (e.g., novelty gate
+    approval), it pauses execution and creates a StudyInterrupt record.
+    The study loop marks the study as AWAITING_APPROVAL and waits for
+    the user to respond via the API.
+    """
+
+    interrupt_id: str
+    study_id: str
+    round_num: int
+    interrupt_type: str  # 'novelty_gate' | 'custom'
+    payload: str | None = None  # JSON
+    status: str = "pending"  # pending | approved | rejected | expired
+    response: str | None = None  # JSON
+    created_at: str = ""
+    responded_at: str | None = None
+
+
+@dataclass(frozen=True)
 class ObjectiveHistoryEntry:
     """Audit record for an objective replacement on a study.
 
