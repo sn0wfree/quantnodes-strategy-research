@@ -22,6 +22,7 @@ from typing import Any, Protocol
 from ..observability import new_trace_id
 from .models import StudyRecord, StudyStatus
 from .store import StudyStore
+from .runner_context import RunnerContext
 
 logger = logging.getLogger(__name__)
 
@@ -190,19 +191,33 @@ class AutoresearchRunner:
         self._study_cache_ts = 0.0
 
     def _current_db_status(self) -> StudyStatus | None:
-        """Bypass the 5s study cache to read the freshest execution_status.
-
-        Used by the cancel / exception / monitor exit paths so a runner
-        that observes ``control.cancelled`` (or raises) does NOT
-        overwrite a status another actor (typically ``scheduler.archive``)
-        has since persisted (e.g. ARCHIVED). Returns ``None`` if the row
-        vanished (defensive — caller treats as 'fall through to default').
-        """
+        """Bypass the 5s study cache to read the freshest execution_status."""
         try:
             fresh = self.study_store.get_study(self.study_id)
-        except Exception:  # noqa: BLE001 — best-effort live read
+        except Exception:  # noqa: BLE001
             return None
         return fresh.execution_status if fresh else None
+
+    def _to_context(self) -> RunnerContext:
+        """Create a RunnerContext for passing to extracted modules."""
+        study = self._get_study()
+        return RunnerContext(
+            study_id=self.study_id,
+            session=study.session_id,
+            study=study,
+            study_store=self.study_store,
+            control=self.control,
+            emit_fn=self._emit,
+            goal_store=self._goal_store,
+            prev_passed=self._prev_passed,
+            best_score=self._best_score,
+            idle_rounds=self._idle_rounds,
+            total_used_time=self._total_used_time,
+            total_used_turns=self._total_used_turns,
+            trace_id=self._trace_id,
+            plugin_registry=getattr(self, "_plugin_registry", None),
+            loop_strategy=self._loop_strategy,
+        )
 
     # ── public entrypoint ───────────────────────────────────────────
 
