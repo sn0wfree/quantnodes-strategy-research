@@ -25,6 +25,19 @@ import { InterruptApprovalCard } from './InterruptApprovalCard'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
+function extractAgentText(out: Record<string, unknown>): string {
+  const o = out.output
+  if (typeof o === 'string') return o
+  if (o && typeof o === 'object') {
+    const obj = o as Record<string, unknown>
+    // 优先显示 analysis，其次 error，最后 stringify
+    return (obj.analysis as string)
+      || (obj.error as string)
+      || JSON.stringify(obj, null, 2)
+  }
+  return JSON.stringify(out, null, 2)
+}
+
 function buildMessagesFromOutputs(
   outputs: StudyRoundAgentOutputsResponse['agent_outputs'],
   studyId: string,
@@ -33,7 +46,7 @@ function buildMessagesFromOutputs(
   if (!outputs) return []
   return Object.entries(outputs).map(([agentId, output]): Message => {
     const out = output as Record<string, unknown>
-    const text = (out.output as string) || JSON.stringify(out, null, 2)
+    const text = extractAgentText(out)
     const partId = `part:${studyId}:r${round}:${agentId}`
     const textPart: TextPart = { type: 'text', id: partId, text }
     return {
