@@ -955,43 +955,27 @@ class AutoresearchRunner:
             current_state["factor_failures"] = previous_summary["factor_failures"]
 
         # ── Engine dispatch ──────────────────────────────────────
-        # Per-study engine field (preferred) or legacy env var fallback.
+        # P7: All engines now route through langgraph with profiles.
+        # Legacy env var SR_STUDY_DAG_ENGINE=1 maps to 'dag' profile.
         engine = getattr(self._get_study(), "engine", None) or "phases"
         if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
             engine = "dag"  # backward compat: legacy env var overrides phases
 
-        if engine == "dag":
-            return self._run_round_via_dag(
-                path, strategy, current_state, run_dir, graph,
-                session=session, sid=sid, round_num=round_num,
-                directive_text=directive_text,
-            )
-        elif engine == "langgraph":
+        # P7: All engine values route through langgraph with profiles
+        if engine in ("phases", "dag", "langgraph"):
             return self._run_round_via_langgraph(
                 path, strategy, current_state, run_dir, graph,
                 session=session, sid=sid, round_num=round_num,
                 directive_text=directive_text,
             )
 
-        # Phase 1: researcher
-        self._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
-        })
-        researcher_result = run_researcher_phase(
-            path, strategy, current_state, run_dir,
-            session_id=session, run_name=run_name,
-            behavior=self._get_study().behavior, max_retries=3,
-            max_iterations=SR_AGENT_MAX_ITER,
-            directives=directive_text,
-            lazy_detection_interval=self._get_study().lazy_detection_interval,
-            keep_recent=self._get_study().keep_recent, round_num=round_num,
-            runs_dir=runs_dir,
-            loop_strategy=self._loop_strategy,
+        # P8: Unknown engine value — fallback to langgraph with phases profile
+        logger.warning("Unknown engine %r, falling back to langgraph phases profile", engine)
+        return self._run_round_via_langgraph(
+            path, strategy, current_state, run_dir, graph,
+            session=session, sid=sid, round_num=round_num,
+            directive_text=directive_text,
         )
-        self._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
-        })
-        researcher_output = researcher_result["researcher_output"]
 
         # AEGIS: Novelty Gate
         hypothesis = researcher_output.get("hypothesis", "")
