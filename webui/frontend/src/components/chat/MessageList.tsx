@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useState } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import type { VirtuosoHandle } from 'react-virtuoso'
 import { useChatStore, type Message } from '../../stores/chat'
@@ -12,7 +12,7 @@ import { QueuePauseBanner } from './QueuePauseBanner'
 import { ContextUsageBar } from './ContextUsageBar'
 import { CompactBanner } from './CompactBanner'
 import { QuickStartChips } from './QuickStartChips'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, ChevronDown } from 'lucide-react'
 import { formatTime, dayLabel } from '../../utils/time'
 
 // ── Separator support ─────────────────────────────────────────
@@ -68,10 +68,15 @@ export interface MessageListProps {
    * (e.g. metadata.round). Messages with a null key get no separator.
    */
   separatorKey?: (msg: Message) => string | null
+  /**
+   * When this string changes, scroll the list to the top.
+   * Used by callers (e.g. StudyChat) to jump to a new round's messages.
+   */
+  scrollKey?: string
 }
 
 
-export function MessageList({ separatorKey }: MessageListProps = {}) {
+export function MessageList({ separatorKey, scrollKey }: MessageListProps = {}) {
   const messages = useChatStore((s) => s.messages)
   const streamingMessageId = useChatStore((s) => s.streamingMessageId)
   const chatLayout = useLayoutStore((s) => s.chatLayout)
@@ -80,6 +85,7 @@ export function MessageList({ separatorKey }: MessageListProps = {}) {
   const loadMoreMessages = useChatStore((s) => s.loadMoreMessages)
   const currentSessionId = useChatSessionId()
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const [atBottom, setAtBottom] = useState(true)
 
   const rawMessages = Array.from(messages.values())
     .filter((m) => !currentSessionId || m.session_id === currentSessionId)
@@ -107,6 +113,14 @@ export function MessageList({ separatorKey }: MessageListProps = {}) {
       }, 50)
     }
   }, [messageList.length])
+
+  // Scroll to top when scrollKey changes (e.g. round switch)
+  useEffect(() => {
+    if (scrollKey === undefined) return
+    setTimeout(() => {
+      virtuosoRef.current?.scrollToIndex({ index: 0, align: 'start' })
+    }, 50)
+  }, [scrollKey])
 
   // Listen for global "focus chat" event (from sidebar chat icon)
   useEffect(() => {
@@ -153,6 +167,7 @@ export function MessageList({ separatorKey }: MessageListProps = {}) {
         ref={virtuosoRef}
         data={messageList}
         totalCount={messageList.length}
+        atBottomStateChange={setAtBottom}
         components={{
           Header: showLoadMore
             ? () => (
@@ -301,6 +316,25 @@ export function MessageList({ separatorKey }: MessageListProps = {}) {
         overscan={200}
         style={{ height: '100%' }}
       />
+
+      {/* Floating scroll-to-bottom arrow (DeepSeek-style).
+          Visible only when user has scrolled away from the latest message. */}
+      {!atBottom && messageList.length > 0 && (
+        <button
+          type="button"
+          onClick={() =>
+            virtuosoRef.current?.scrollToIndex({
+              index: messageList.length - 1,
+              align: 'end',
+            })
+          }
+          className="absolute bottom-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-slate-700 bg-slate-800/90 text-slate-300 shadow-lg backdrop-blur transition-all hover:border-primary-500 hover:bg-slate-700 hover:text-primary-300 active:scale-95"
+          title="回到最新"
+          aria-label="回到最新消息"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      )}
     </div>
   )
 }

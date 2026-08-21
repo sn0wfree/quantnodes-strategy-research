@@ -2,21 +2,24 @@
  * StudyChat — unified chat widget for the study detail page.
  *
  * Layout:
- *   Header: [Plan | Build] mode switcher + current round indicator
- *   Body: MessageList (with round separators) + InterruptApprovalCard + StudyChatComposer
- *
- * Both modes show the same message stream.
- * Plan mode defaults composer to 指令, Build mode defaults to 对话.
+ *   Header: current round indicator + (回到最新) link
+ *   Body: MessageList (with round separators + scroll-to-bottom arrow)
+ *         + RoundNavRail (right-edge overlay dots for quick round switching)
+ *         + InterruptApprovalCard (when HITL pending)
+ *         + StudyChatComposer (directive-only)
  */
 import { useState, useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
-import { api, type StudyRoundAgentOutputsResponse } from '../../../../api/client'
+import {
+  api,
+  type StudyRoundAgentOutputsResponse,
+  type StudyRoundSummary,
+} from '../../../../api/client'
 import { useStudyStore } from '../../../../stores/study'
 import { useChatStore, type Message, type TextPart } from '../../../../stores/chat'
 import { ChatSessionProvider } from '../../../../contexts/ChatSessionContext'
 import { MessageList } from '../../../chat/MessageList'
 import type { WidgetProps } from '../types'
-import { useStudyChatMode } from './useStudyChatMode'
 import { StudyChatComposer } from './StudyChatComposer'
 import { InterruptApprovalCard } from './InterruptApprovalCard'
 
@@ -173,14 +176,63 @@ function roundKey(msg: Message): string | null {
   return null
 }
 
+// ── RoundNavRail (right-edge overlay progress dots) ──────────────
+
+function RoundNavRail({
+  rounds,
+  selectedRound,
+  onSelectRound,
+}: {
+  rounds: StudyRoundSummary[]
+  selectedRound: number
+  onSelectRound: (n: number) => void
+}) {
+  // Sort R1 (top) → R{N} (bottom)
+  const sorted = [...rounds].sort((a, b) => a.round_num - b.round_num)
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-y-0 right-1 z-10 flex items-center"
+      aria-label="轮次导航"
+    >
+      <div className="pointer-events-auto flex flex-col items-center gap-0 rounded-full bg-slate-900/40 px-1 py-2 backdrop-blur-sm">
+        {sorted.map((r, i) => {
+          const isActive = r.round_num === selectedRound
+          return (
+            <div key={r.round_num} className="flex flex-col items-center">
+              <button
+                type="button"
+                onClick={() => onSelectRound(r.round_num)}
+                title={`Round ${r.round_num} · ${r.verdict ?? '—'}`}
+                aria-label={`跳转到 Round ${r.round_num}`}
+                className={`group relative rounded-full transition-all duration-200 ${
+                  isActive
+                    ? 'h-2.5 w-2.5 bg-primary-400 shadow-[0_0_8px_rgba(99,179,237,0.5)]'
+                    : 'h-1.5 w-1.5 bg-slate-600 hover:bg-slate-400'
+                }`}
+              >
+                {/* Tooltip on hover */}
+                <div className="pointer-events-none absolute right-full top-1/2 mr-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md border border-slate-700 bg-slate-800/95 px-2 py-1 text-[10px] text-slate-200 shadow-lg backdrop-blur group-hover:block">
+                  <div className="font-medium text-slate-100">Round {r.round_num}</div>
+                  <div className="text-slate-400">
+                    {r.verdict ?? '—'} · {r.run_name.slice(0, 24)}
+                  </div>
+                </div>
+              </button>
+              {i < sorted.length - 1 && (
+                <div className="my-0.5 h-3 w-px bg-slate-700" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Widget ──────────────────────────────────────────────────
 
 export function StudyChat({ studyId, summary }: WidgetProps) {
-  const {
-    mode,
-    setMode,
-  } = useStudyChatMode(studyId)
-
   const currentRound = (summary?.current_round as number) ?? 1
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
@@ -193,6 +245,8 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   const chatStore = useChatStore()
   const eventCountRef = useRef(0)
   const prevStudyIdRef = useRef<string | null>(null)
+
+  const rounds: StudyRoundSummary[] = summary?.recent_rounds ?? []
 
   // Sync selectedRound with currentRound when it changes
   useEffect(() => {
@@ -267,38 +321,16 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     }
   }, [studyId])
 
+  // scrollKey: change when switching rounds so MessageList scrolls to top
+  const scrollKey = `${studyId}:${selectedRound}`
+
   return (
     <ChatSessionProvider sessionId={`study:${studyId}:stream`}>
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-slate-800 px-3 py-2">
-          {/* Mode switcher */}
-          <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
-            <button
-              onClick={() => setMode('plan')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === 'plan'
-                  ? 'bg-slate-700 text-slate-200'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              📋 Plan
-            </button>
-            <button
-              onClick={() => setMode('build')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === 'build'
-                  ? 'bg-slate-700 text-slate-200'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              🔧 Build
-            </button>
-          </div>
-
-          {/* Current round indicator */}
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span>
+            <span className="font-mono text-slate-300">
               Round {selectedRound}
               {loading && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
             </span>
@@ -315,9 +347,16 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
 
         {/* Body */}
         <div className="flex min-h-0 flex-1 flex-col">
-          {/* Message stream */}
-          <div className="min-h-0 flex-1">
-            <MessageList separatorKey={roundKey} />
+          {/* Message stream with round nav rail overlay */}
+          <div className="relative min-h-0 flex-1">
+            <MessageList separatorKey={roundKey} scrollKey={scrollKey} />
+            {rounds.length > 1 && (
+              <RoundNavRail
+                rounds={rounds}
+                selectedRound={selectedRound}
+                onSelectRound={setSelectedRound}
+              />
+            )}
           </div>
 
           {/* HITL Approval Card (shown when interrupt is pending) */}
@@ -336,10 +375,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
 
           {/* Composer */}
           <div className="flex-shrink-0">
-            <StudyChatComposer
-              studyId={studyId}
-              mode={mode}
-            />
+            <StudyChatComposer studyId={studyId} />
           </div>
         </div>
       </div>
