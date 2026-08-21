@@ -1127,8 +1127,10 @@ class AutoresearchRunner:
         """Persist an agent's output to ``run_dir/<agent_id>.json``."""
         from ..autoresearch import save_agent_record
         try:
+            # result is a dict from save_agent_outputs, not an object
+            output_data = result.get("output", result) if isinstance(result, dict) else result
             save_agent_record(
-                run_dir, agent_id, 3, {}, result.output,
+                run_dir, agent_id, 3, {}, output_data,
             )
         except Exception:  # noqa: BLE001
             logger.debug("save_agent_record failed for %s", agent_id)
