@@ -319,13 +319,13 @@ class AgentExecutor:
             from .strategy.profile_resolver import resolve_loop_strategy
             loop_kwargs["strategy"] = resolve_loop_strategy(loop_spec)
         max_iterations = (
-            (node.max_iterations if node and node.max_iterations else None)
+            (getattr(node, 'max_iterations', None) if node else None)
             or loop_kwargs.pop("max_iterations", None)
             or plugin.default_max_iterations
         )
 
         tools = (
-            node.tools_override if node and node.tools_override is not None
+            getattr(node, 'tools_override', None) if node and getattr(node, 'tools_override', None) is not None
             else list(plugin.tools)
         )
 
