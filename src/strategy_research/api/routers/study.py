@@ -456,6 +456,7 @@ async def study_list(
             "last_verdict": r.last_verdict,
             "last_metrics": r.last_metrics,
             "last_error": r.last_error,
+            "engine": getattr(r, "engine", None),
             "created_at": r.created_at, "updated_at": r.updated_at,
             "completed_at": r.completed_at,
             "archived_at": r.archived_at,

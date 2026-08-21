@@ -64,6 +64,7 @@ class StudyListItem(BaseModel):
     last_verdict: Optional[str] = None
     last_metrics: Optional[dict] = None
     last_error: Optional[str] = None
+    engine: Optional[str] = None  # 'phases' | 'dag' | 'langgraph'
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     completed_at: Optional[str] = None
