@@ -157,6 +157,19 @@ def _make_agent_node(
                 "elapsed_s": result.elapsed_s,
             })
 
+        # Check execution status
+        if result.status != "success":
+            logger.warning(
+                "langgraph: agent %s failed (status=%s): %s",
+                agent_id, result.status, result.error,
+            )
+            return {
+                "agent_outputs": {agent_id: {
+                    "error": result.error or f"execution failed: {result.status}",
+                    "status": result.status,
+                }},
+            }
+
         # Parse output
         output = safe_json_loads(result.output, fallback=result.output)
 

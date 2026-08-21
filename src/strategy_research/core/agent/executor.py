@@ -28,7 +28,8 @@ from .plugin import AgentPlugin
 logger = logging.getLogger(__name__)
 
 _AGENT_LOOP_KWARGS = (
-    "strategy_dir", "runs_dir", "results_tsv", "write_roots", "read_roots",
+    "strategy_name", "strategy_dir", "runs_dir", "results_tsv",
+    "write_roots", "read_roots",
     "session_manager", "session_id", "iteration_timeout_s",
     "wrap_up_nudge", "force_final_text", "no_progress_window",
     "max_iterations",
