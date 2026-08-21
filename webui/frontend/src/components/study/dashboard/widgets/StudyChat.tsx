@@ -2,16 +2,14 @@
  * StudyChat — unified chat widget for the study detail page.
  *
  * Layout:
- *   Header: [Plan | Build] mode switcher + current round + panel toggle
- *   Body (flex row):
- *     Main column: MessageList (with round separators) + InterruptApprovalCard + StudyChatComposer
- *     Right panel: KeyPointsPanel (all rounds, collapsible)
+ *   Header: [Plan | Build] mode switcher + current round indicator
+ *   Body: MessageList (with round separators) + InterruptApprovalCard + StudyChatComposer
  *
  * Both modes show the same message stream.
  * Plan mode defaults composer to 指令, Build mode defaults to 对话.
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2, PanelRightOpen, PanelRightClose } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Loader2 } from 'lucide-react'
 import { api, type StudyRoundAgentOutputsResponse } from '../../../../api/client'
 import { useStudyStore } from '../../../../stores/study'
 import { useChatStore, type Message, type TextPart } from '../../../../stores/chat'
@@ -20,7 +18,6 @@ import { MessageList } from '../../../chat/MessageList'
 import type { WidgetProps } from '../types'
 import { useStudyChatMode } from './useStudyChatMode'
 import { StudyChatComposer } from './StudyChatComposer'
-import { KeyPointsPanel } from './KeyPointsPanel'
 import { InterruptApprovalCard } from './InterruptApprovalCard'
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -176,30 +173,6 @@ function roundKey(msg: Message): string | null {
   return null
 }
 
-// ── Panel toggle button ──────────────────────────────────────────
-
-function PanelToggle({
-  open,
-  onClick,
-}: {
-  open: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300"
-      title={open ? '收起右栏' : '展开右栏'}
-    >
-      {open ? (
-        <PanelRightClose className="h-4 w-4" />
-      ) : (
-        <PanelRightOpen className="h-4 w-4" />
-      )}
-    </button>
-  )
-}
-
 // ── Main Widget ──────────────────────────────────────────────────
 
 export function StudyChat({ studyId, summary }: WidgetProps) {
@@ -211,7 +184,6 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   const currentRound = (summary?.current_round as number) ?? 1
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
-  const [panelOpen, setPanelOpen] = useState(true)
   const [pendingInterrupt, setPendingInterrupt] = useState<{
     interruptId: string
     hypothesis?: string
@@ -295,121 +267,80 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     }
   }, [studyId])
 
-  const handleSelectRound = useCallback((round: number) => {
-    setSelectedRound(round)
-  }, [])
-
-  const handlePanelToggle = useCallback(() => {
-    setPanelOpen((prev) => {
-      const next = !prev
-      try {
-        localStorage.setItem(`sr-study-chat-panel-${studyId}`, String(next))
-      } catch { /* ignore */ }
-      return next
-    })
-  }, [studyId])
-
-  // Restore panel state from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`sr-study-chat-panel-${studyId}`)
-      if (saved !== null) setPanelOpen(saved !== 'false')
-    } catch { /* ignore */ }
-  }, [studyId])
-
   return (
     <ChatSessionProvider sessionId={`study:${studyId}:stream`}>
       <div className="flex h-full flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
-          <div className="flex items-center gap-3">
-            {/* Mode switcher */}
-            <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
-              <button
-                onClick={() => setMode('plan')}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  mode === 'plan'
-                    ? 'bg-slate-700 text-slate-200'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                📋 Plan
-              </button>
-              <button
-                onClick={() => setMode('build')}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  mode === 'build'
-                    ? 'bg-slate-700 text-slate-200'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                🔧 Build
-              </button>
-            </div>
-
-            {/* Current round indicator */}
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span>
-                Round {selectedRound}
-                {loading && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
-              </span>
-              {selectedRound !== currentRound && (
-                <button
-                  onClick={() => setSelectedRound(currentRound)}
-                  className="text-[10px] text-primary-400 hover:text-primary-300"
-                >
-                  (回到最新)
-                </button>
-              )}
-            </div>
+        <div className="flex items-center gap-3 border-b border-slate-800 px-3 py-2">
+          {/* Mode switcher */}
+          <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
+            <button
+              onClick={() => setMode('plan')}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === 'plan'
+                  ? 'bg-slate-700 text-slate-200'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              📋 Plan
+            </button>
+            <button
+              onClick={() => setMode('build')}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === 'build'
+                  ? 'bg-slate-700 text-slate-200'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              🔧 Build
+            </button>
           </div>
 
-          <PanelToggle open={panelOpen} onClick={handlePanelToggle} />
+          {/* Current round indicator */}
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>
+              Round {selectedRound}
+              {loading && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
+            </span>
+            {selectedRound !== currentRound && (
+              <button
+                onClick={() => setSelectedRound(currentRound)}
+                className="text-[10px] text-primary-400 hover:text-primary-300"
+              >
+                (回到最新)
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Body: main column + right panel */}
-        <div className="flex min-h-0 flex-1">
-          {/* Main column */}
-          <div className="flex min-h-0 flex-1 flex-col">
-            {/* Message stream */}
-            <div className="min-h-0 flex-1">
-              <MessageList separatorKey={roundKey} />
-            </div>
-
-            {/* HITL Approval Card (shown when interrupt is pending) */}
-            {pendingInterrupt && (
-              <div className="flex-shrink-0 border-t border-slate-800 p-3">
-                <InterruptApprovalCard
-                  studyId={studyId}
-                  interruptId={pendingInterrupt.interruptId}
-                  hypothesis={pendingInterrupt.hypothesis}
-                  message={pendingInterrupt.message}
-                  onApproved={() => setPendingInterrupt(null)}
-                  onRejected={() => setPendingInterrupt(null)}
-                />
-              </div>
-            )}
-
-            {/* Composer */}
-            <div className="flex-shrink-0">
-              <StudyChatComposer
-                studyId={studyId}
-                mode={mode}
-              />
-            </div>
+        {/* Body */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Message stream */}
+          <div className="min-h-0 flex-1">
+            <MessageList separatorKey={roundKey} />
           </div>
 
-          {/* Right panel */}
-          {panelOpen && (
-            <div className="w-64 flex-shrink-0 border-l border-slate-800">
-              <KeyPointsPanel
+          {/* HITL Approval Card (shown when interrupt is pending) */}
+          {pendingInterrupt && (
+            <div className="flex-shrink-0 border-t border-slate-800 p-3">
+              <InterruptApprovalCard
                 studyId={studyId}
-                selectedRound={selectedRound}
-                onSelectRound={handleSelectRound}
-                refreshKey={recentEvents.length}
+                interruptId={pendingInterrupt.interruptId}
+                hypothesis={pendingInterrupt.hypothesis}
+                message={pendingInterrupt.message}
+                onApproved={() => setPendingInterrupt(null)}
+                onRejected={() => setPendingInterrupt(null)}
               />
             </div>
           )}
+
+          {/* Composer */}
+          <div className="flex-shrink-0">
+            <StudyChatComposer
+              studyId={studyId}
+              mode={mode}
+            />
+          </div>
         </div>
       </div>
     </ChatSessionProvider>
