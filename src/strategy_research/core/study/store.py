@@ -494,7 +494,23 @@ class StudyStore:
 
         Sets ``completed_at`` for terminal statuses; returns the updated
         record (or ``None`` when the study no longer exists).
+
+        Guard: if the study is already ARCHIVED, silently skip the
+        update. ARCHIVED is a terminal user-driven state; the runner
+        loop or other writers must not overwrite it with later
+        status transitions (e.g. early_stopped / error). This was the
+        root cause of duplicate "task" entries showing up after
+        archiving — see git history for the full diagnostic.
         """
+        # Guard: never overwrite ARCHIVED status
+        current = self.get_study(study_id)
+        if current is not None and current.execution_status == StudyStatus.ARCHIVED:
+            _dlog(
+                "store",
+                "update_status suppressed: study=%s is ARCHIVED (attempted %s)",
+                study_id, status.value,
+            )
+            return current
 
         _dlog("store", "update_status study=%s → %s error=%s metrics=%s",
               study_id, status.value,
