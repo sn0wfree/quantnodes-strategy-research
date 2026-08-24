@@ -134,5 +134,19 @@
     "visibility": {
       "showThemeToggle": true
     }
+  },
+  "studyChat": {
+    "defaultViewMode": "card",
+    "card": {
+      "thinkingCollapsed": true,
+      "toolCallsCollapsed": true,
+      "maxToolResultChars": 500
+    },
+    "compact": {
+      "showExpandButton": true
+    },
+    "timeline": {
+      "defaultSelectedAgent": "first"
+    }
   }
 }
