@@ -329,6 +329,21 @@ class AgentExecutor:
             else list(plugin.tools)
         )
 
+        # Enforce a per-iteration timeout derived from the plugin/node
+        # timeout budget. Without this, a single hung LLM stream (with
+        # wallclock_timeout_s defaulting to 1800s) can stall an agent
+        # for 30 minutes per iteration. The context key (explicit
+        # caller override) always wins.
+        if "iteration_timeout_s" not in loop_kwargs:
+            total_budget = (
+                getattr(node, 'timeout', None) if node else None
+            ) or plugin.default_timeout or 180
+            # Split the budget across max iterations, floor 120s,
+            # ceiling 600s — long enough for thinking models + tool
+            # calls, short enough to bound a stuck iteration.
+            per_iter = max(120.0, min(600.0, float(total_budget) / max(1, max_iterations)))
+            loop_kwargs["iteration_timeout_s"] = per_iter
+
         loop = AgentLoop(
             config=cfg,
             registry=build_default_registry(),

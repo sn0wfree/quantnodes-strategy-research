@@ -26,7 +26,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         prompt_file=".prompts/researcher.md",
         tools=_RESEARCHER_TOOLS,
         requires=(), provides="researcher_output",
-        default_timeout=180, default_max_iterations=40, default_max_retries=3,
+        default_timeout=180, default_max_iterations=20, default_max_retries=3,
         optional=False, keywords=("研究", "假设", "方向", "hypothesis"),
     ),
     AgentPlugin(
@@ -36,7 +36,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         tools=("read", "websearch", "webfetch", "get_market_data",
                "list_data_sources", "check_data", "clean_data", "run_bg_command"),
         requires=("researcher",), provides="data_quality_output",
-        default_timeout=120, default_max_iterations=20, default_max_retries=2,
+        default_timeout=120, default_max_iterations=12, default_max_retries=2,
         keywords=("数据", "质量", "清洗", "NaN", "data quality"),
     ),
     AgentPlugin(
@@ -46,7 +46,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         tools=("read", "compute_factor", "factor_analysis",
                "get_market_data", "run_bg_command"),
         requires=("researcher",), provides="factor_analyst_output",
-        default_timeout=180, default_max_iterations=30, default_max_retries=3,
+        default_timeout=180, default_max_iterations=15, default_max_retries=3,
         keywords=("因子", "IC", "alpha", "选股", "factor"),
     ),
     AgentPlugin(
@@ -55,7 +55,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         prompt_file=".prompts/researcher.md",
         tools=_RESEARCHER_TOOLS,
         requires=("researcher",), provides="explore_output",
-        default_timeout=180, default_max_iterations=40, default_max_retries=2,
+        default_timeout=180, default_max_iterations=20, default_max_retries=2,
         keywords=("探索", "新颖", "尝试", "explore"),
     ),
     AgentPlugin(
@@ -66,7 +66,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
                "webfetch", "get_market_data", "show_chart", "show_report",
                "run_bg_command"),
         requires=("researcher",), provides="strategist_output",
-        default_timeout=240, default_max_iterations=50, default_max_retries=3,
+        default_timeout=240, default_max_iterations=25, default_max_retries=3,
         optional=False, keywords=("策略", "集成", "信号", "strategy"),
     ),
     AgentPlugin(
@@ -76,7 +76,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         prompt_file=".prompts/portfolio_construction.md",
         tools=("read", "get_market_data"),
         requires=("strategist",), provides="portfolio_construction_output",
-        default_timeout=120, default_max_iterations=30, default_max_retries=2,
+        default_timeout=120, default_max_iterations=12, default_max_retries=2,
         keywords=("组合", "权重", "配置", "portfolio"),
     ),
     AgentPlugin(
@@ -95,7 +95,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         prompt_file=".prompts/risk_controller.md",
         tools=("read", "factor_analysis", "get_market_data"),
         requires=("backtest",), provides="risk_controller_output",
-        default_timeout=180, default_max_iterations=20, default_max_retries=2,
+        default_timeout=180, default_max_iterations=12, default_max_retries=2,
         optional=False, keywords=("风险", "回撤", "VaR", "risk"),
     ),
     AgentPlugin(
@@ -105,7 +105,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         prompt_file=".prompts/attribution_analyst.md",
         tools=("read", "factor_analysis"),
         requires=("risk_controller",), provides="attribution_analyst_output",
-        default_timeout=180, default_max_iterations=20, default_max_retries=2,
+        default_timeout=180, default_max_iterations=12, default_max_retries=2,
         keywords=("归因", "分解", "因子暴露", "attribution"),
     ),
     AgentPlugin(
@@ -115,7 +115,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         prompt_file=".prompts/anti_overfit_analyst.md",
         tools=("read", "list_history", "factor_analysis"),
         requires=("risk_controller",), provides="anti_overfit_analyst_output",
-        default_timeout=180, default_max_iterations=20, default_max_retries=2,
+        default_timeout=180, default_max_iterations=12, default_max_retries=2,
         keywords=("过拟合", "鲁棒", "验证", "overfit"),
     ),
     AgentPlugin(
@@ -126,7 +126,7 @@ BUILTIN_PLUGINS: tuple[AgentPlugin, ...] = (
         tools=("read", "run_backtest", "git_diff", "show_chart",
                "show_report", "run_bg_command"),
         requires=("backtest",), provides="backtest_diagnostics_output",
-        default_timeout=120, default_max_iterations=15, default_max_retries=2,
+        default_timeout=120, default_max_iterations=12, default_max_retries=2,
         keywords=("诊断", "错误", "调试", "diagnostics"),
     ),
     AgentPlugin(
