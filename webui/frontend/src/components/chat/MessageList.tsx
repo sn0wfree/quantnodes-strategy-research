@@ -14,6 +14,7 @@ import { CompactBanner } from './CompactBanner'
 import { QuickStartChips } from './QuickStartChips'
 import { MessageSquare, ChevronDown } from 'lucide-react'
 import { formatTime, dayLabel } from '../../utils/time'
+import { getMessageListConfig } from './chatUiConfig'
 
 // ── Separator support ─────────────────────────────────────────
 
@@ -50,13 +51,15 @@ function injectSeparators(messages: Message[], keyFn: (m: Message) => string | n
 // ── Round separator component ─────────────────────────────────
 
 function RoundSeparator({ round }: { round: number }) {
+  const config = getMessageListConfig()
+  const label = config.labels.roundSeparator.replace('{n}', String(round))
   return (
     <div className="flex items-center gap-3 px-4 pt-4 pb-1">
-      <div className="h-px flex-1 bg-slate-700/60" />
-      <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-[11px] font-medium text-slate-400">
-        Round {round}
+      <div className={`h-px flex-1 bg-${config.colors.separatorLine}`} />
+      <span className={`rounded-full bg-${config.colors.separatorPill} px-2.5 py-0.5 text-[11px] font-medium text-${config.colors.separatorText}`}>
+        {label}
       </span>
-      <div className="h-px flex-1 bg-slate-700/60" />
+      <div className={`h-px flex-1 bg-${config.colors.separatorLine}`} />
     </div>
   )
 }
@@ -139,6 +142,7 @@ export function MessageList({ separatorKey, scrollKey }: MessageListProps = {}) 
   const usageBar = <ContextUsageBar />
 
   if (messageList.length === 0) {
+    const config = getMessageListConfig()
     return (
       <div className="flex h-full flex-col">
         {banner}
@@ -147,8 +151,8 @@ export function MessageList({ separatorKey, scrollKey }: MessageListProps = {}) 
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             icon={<MessageSquare className="h-12 w-12" />}
-            title="开始对话"
-            description="发送消息与 Agent 交流"
+            title={config.labels.emptyTitle}
+            description={config.labels.emptyDescription}
           />
         </div>
         <div className="flex flex-col items-center pb-6">
@@ -329,8 +333,8 @@ export function MessageList({ separatorKey, scrollKey }: MessageListProps = {}) 
             })
           }
           className="absolute bottom-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-slate-700 bg-slate-800/90 text-slate-300 shadow-lg backdrop-blur transition-all hover:border-primary-500 hover:bg-slate-700 hover:text-primary-300 active:scale-95"
-          title="回到最新"
-          aria-label="回到最新消息"
+          title={getMessageListConfig().labels.scrollToBottom}
+          aria-label={getMessageListConfig().labels.scrollToBottom}
         >
           <ChevronDown className="h-4 w-4" />
         </button>

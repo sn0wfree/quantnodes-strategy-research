@@ -1,0 +1,138 @@
+{
+  "assistant": {
+    "avatar": {
+      "icon": "Bot",
+      "size": 28,
+      "gradient": ["primary-500", "accent-400"]
+    },
+    "labels": {
+      "modelPrefix": "Agent",
+      "modelSeparator": " · ",
+      "queuedLabel": "等待中...",
+      "toolCountFormat": "· {n} 工具",
+      "tokenCountFormat": "· {n} tokens"
+    },
+    "colors": {
+      "streamingDot": "primary-500",
+      "flatLabel": "emerald-400",
+      "bubbleLabel": "slate-400",
+      "timestamp": "slate-600"
+    },
+    "visibility": {
+      "showVerifiabilityBadge": true,
+      "showStreamingStatus": true
+    }
+  },
+  "userBubble": {
+    "labels": {
+      "userLabel": "You",
+      "editLabel": "编辑",
+      "resendLabel": "重发",
+      "cancelLabel": "取消"
+    },
+    "colors": {
+      "label": "primary-400",
+      "timestamp": "slate-600",
+      "gradient": ["primary-500", "accent-400"]
+    },
+    "sizing": {
+      "maxWidth": "70%",
+      "borderRadius": "2xl",
+      "padding": { "x": 4, "y": 2.5 }
+    },
+    "visibility": {
+      "allowEdit": true
+    }
+  },
+  "toolCall": {
+    "icons": {
+      "default": "Wrench",
+      "status": {
+        "running": "Loader2",
+        "done": "CheckCircle",
+        "error": "XCircle"
+      }
+    },
+    "colors": {
+      "running": { "border": "amber-500/50", "bg": "amber-500/5" },
+      "error": { "border": "red-500/40", "bg": "red-500/5" },
+      "done": { "border": "emerald-500/30", "bg": "emerald-500/5" },
+      "pending": { "border": "slate-700", "bg": "slate-800/30" }
+    },
+    "labels": {
+      "dangerousBadge": "危险",
+      "dangerousTooltip": "此工具会修改文件系统或执行外部命令"
+    },
+    "dangerousTools": ["write_file", "edit", "delete_file", "run_command", "run_backtest", "import_data"],
+    "visibility": {
+      "showArgsPreview": true,
+      "showResultSummary": true,
+      "showDuration": true,
+      "showCopy": true,
+      "showRetry": true,
+      "showDangerousBadge": true
+    }
+  },
+  "thinking": {
+    "icons": {
+      "header": "Sparkles"
+    },
+    "colors": {
+      "border": "violet-500/30",
+      "background": "violet-950/5",
+      "headerText": "violet-300/70",
+      "contentText": "violet-200/60",
+      "accent": "violet-400/70"
+    },
+    "labels": {
+      "streamingFormat": "Thinking for {duration}",
+      "doneFormat": "Thought for {duration}",
+      "charCountSuffix": " 字"
+    },
+    "sizing": {
+      "maxHeight": 288,
+      "charThreshold": 50
+    },
+    "visibility": {
+      "showCopy": true,
+      "showCharCount": true
+    }
+  },
+  "messageList": {
+    "labels": {
+      "roundSeparator": "Round {n}",
+      "emptyTitle": "开始对话",
+      "emptyDescription": "发送消息与 Agent 交流",
+      "loadMore": "↑ 加载更早消息",
+      "errorLabel": "请求失败",
+      "errorDetail": "查看详情",
+      "compactionLabel": "📋 历史摘要",
+      "scrollToBottom": "回到最新"
+    },
+    "colors": {
+      "separatorLine": "slate-700/60",
+      "separatorPill": "slate-800",
+      "separatorText": "slate-400"
+    },
+    "visibility": {
+      "showDaySeparators": true,
+      "showQuickStartChips": true,
+      "showContextBar": true,
+      "showCompactBanner": true
+    }
+  },
+  "pageShell": {
+    "layout": {
+      "headerHeight": 48,
+      "contentMaxWidth": 1440,
+      "contentPadding": { "x": 6, "y": 5 }
+    },
+    "labels": {
+      "themeLightLabel": "切换到浅色模式",
+      "themeDarkLabel": "切换到深色模式"
+    },
+    "visibility": {
+      "showThemeToggle": true
+    }
+  }
+}

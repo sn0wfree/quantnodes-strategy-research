@@ -1,0 +1,79 @@
+{
+  "agents": {
+    "researcher": {
+      "name": "Researcher",
+      "icon": "🔬",
+      "color": "blue",
+      "category": "research",
+      "description": "量化策略研究员"
+    },
+    "strategist": {
+      "name": "Strategist",
+      "icon": "📋",
+      "color": "violet",
+      "category": "execution",
+      "description": "策略集成专家"
+    },
+    "data_quality": {
+      "name": "Data Quality",
+      "icon": "📊",
+      "color": "emerald",
+      "category": "evaluation",
+      "description": "数据质量检查专家"
+    },
+    "factor_analyst": {
+      "name": "Factor Analyst",
+      "icon": "📈",
+      "color": "cyan",
+      "category": "execution",
+      "description": "因子分析专家"
+    },
+    "portfolio_construction": {
+      "name": "Portfolio",
+      "icon": "💼",
+      "color": "amber",
+      "category": "execution",
+      "description": "组合构建专家"
+    },
+    "risk_controller": {
+      "name": "Risk Control",
+      "icon": "⚠️",
+      "color": "red",
+      "category": "evaluation",
+      "description": "风险控制官"
+    },
+    "attribution_analyst": {
+      "name": "Attribution",
+      "icon": "🔍",
+      "color": "yellow",
+      "category": "evaluation",
+      "description": "归因分析专家"
+    },
+    "anti_overfit_analyst": {
+      "name": "Anti-Overfit",
+      "icon": "🛡️",
+      "color": "pink",
+      "category": "evaluation",
+      "description": "过拟合检测专家"
+    },
+    "backtest_diagnostics": {
+      "name": "Diagnostics",
+      "icon": "🔧",
+      "color": "orange",
+      "category": "evaluation",
+      "description": "回测诊断专家"
+    }
+  },
+  "categories": {
+    "research": { "label": "研究", "color": "blue" },
+    "execution": { "label": "执行", "color": "violet" },
+    "evaluation": { "label": "评估", "color": "emerald" },
+    "tool": { "label": "工具", "color": "amber" }
+  },
+  "default": {
+    "name": "Agent",
+    "icon": "🤖",
+    "color": "slate",
+    "category": "research"
+  }
+}

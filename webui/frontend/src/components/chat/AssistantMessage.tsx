@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from 'react'
-import { Bot } from 'lucide-react'
 import type { Message, MessagePart, ToolCallPart } from '../../stores/chat'
 import type { ChatLayout } from '../../stores/layout'
 import { useSystemStore } from '../../stores/system'
@@ -25,6 +24,8 @@ import { StreamingText } from './StreamingText'
 import { MessageActions } from './MessageActions'
 import { formatTime } from '../../utils/time'
 import { useChatStore } from '../../stores/chat'
+import { getAgentStyle } from '../study/agentStyles'
+import { getAssistantConfig } from './chatUiConfig'
 
 interface AssistantMessageProps {
   message: Message
@@ -362,9 +363,13 @@ export function AssistantMessage({
     }
   }
 
+  // Use agent styles from config
+  const agentStyle = getAgentStyle(message.agent_id || '')
+  const chatConfig = getAssistantConfig()
+
   const modelLabel = message.metadata?.model
-    ? `Agent · ${message.metadata.model}`
-    : 'Agent'
+    ? `${chatConfig.labels.modelPrefix} ${chatConfig.labels.modelSeparator} ${agentStyle.name}`
+    : chatConfig.labels.modelPrefix
 
   // Live status line while streaming: tool-call count (from parts) and
   // token usage (from metadata.tokens_used when the backend has pushed it).
@@ -385,9 +390,9 @@ export function AssistantMessage({
   const headerLine = (
     <div className="mb-1.5 flex items-center gap-2">
       {layout === 'bubble' && (
-        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
+        <span className={`flex items-center gap-1.5 text-xs font-medium ${agentStyle.text}`}>
           {isStreaming && (
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-500 shadow-glow" />
+            <span className={`h-1.5 w-1.5 animate-pulse rounded-full bg-${chatConfig.colors.streamingDot} shadow-glow`} />
           )}
           {modelLabel}
           <VerifiabilityBadge cv={message.metadata?.claim_validation} />
@@ -396,15 +401,15 @@ export function AssistantMessage({
       )}
       {layout === 'flat' && (
         <>
-          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+          <span className={`flex items-center gap-1.5 text-xs font-medium ${agentStyle.text}`}>
             {isStreaming && (
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-500 shadow-glow" />
+              <span className={`h-1.5 w-1.5 animate-pulse rounded-full bg-${chatConfig.colors.streamingDot} shadow-glow`} />
             )}
             {modelLabel}
             <VerifiabilityBadge cv={message.metadata?.claim_validation} />
             {statusChips}
           </span>
-          <span className="text-xs text-slate-600">{formatTime(message.created_at)}</span>
+          <span className={`text-xs text-${chatConfig.colors.timestamp}`}>{formatTime(message.created_at)}</span>
         </>
       )}
       {message.agent_id && (
@@ -471,8 +476,15 @@ export function AssistantMessage({
   return (
     <div className="group relative flex gap-3 px-4 py-2.5">
       <div className="absolute right-2 top-2.5">{actions}</div>
-      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-accent-400 text-white text-xs font-medium">
-        <Bot className="h-3.5 w-3.5" />
+      <div
+        className="flex shrink-0 items-center justify-center rounded-full text-white text-xs font-medium"
+        style={{
+          width: chatConfig.avatar.size,
+          height: chatConfig.avatar.size,
+          background: `linear-gradient(135deg, var(--${chatConfig.avatar.gradient[0]}), var(--${chatConfig.avatar.gradient[1]}))`,
+        }}
+      >
+        <span className="text-sm">{agentStyle.icon}</span>
       </div>
       <div className="min-w-0 flex-1">
         {headerLine}

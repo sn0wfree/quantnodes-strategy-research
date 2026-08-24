@@ -22,6 +22,7 @@ import { MessageList } from '../../../chat/MessageList'
 import type { WidgetProps } from '../types'
 import { StudyChatComposer } from './StudyChatComposer'
 import { InterruptApprovalCard } from './InterruptApprovalCard'
+import { getAgentStyle } from '../../agentStyles'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -272,6 +273,9 @@ function buildAgentEventMessage(
   const data = event.data || {}
   const ts = event.timestamp || Date.now()
 
+  // Get agent style from config
+  const agentStyle = getAgentStyle(agentId)
+
   let text = ''
 
   if (eventType === 'agent_tool_call') {
@@ -286,7 +290,7 @@ function buildAgentEventMessage(
     const resultStr = typeof result === 'string' ? result.slice(0, 500) : JSON.stringify(result, null, 2).slice(0, 500)
     text = `📋 \`${toolName}\` → ${status}\n\`\`\`\n${resultStr}\n\`\`\``
   } else if (eventType === 'agent_thinking_start') {
-    text = '🧠 正在思考...'
+    text = `${agentStyle.icon} 正在思考...`
   } else if (eventType === 'agent_thinking_delta') {
     text = data.delta || data.text || ''
   } else if (eventType === 'agent_text_delta') {
@@ -314,6 +318,7 @@ function buildAgentEventMessage(
     created_at: ts / 1000,
     metadata: {
       kind: 'agent',
+      model: agentId,
       round: currentRound,
     },
   }
