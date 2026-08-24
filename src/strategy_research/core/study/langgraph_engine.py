@@ -125,6 +125,8 @@ def _make_agent_node(
     emit_fn,
     study_id: str,
     round_num: int,
+    *,
+    agent_histories: dict[str, list] | None = None,
 ):
     """Create a LangGraph node function for one agent."""
     agent_id = plugin.id
@@ -140,12 +142,32 @@ def _make_agent_node(
             else:
                 upstream[dep_id] = str(dep_output)
 
+        # Collect agent execution history for stage 3 persistence
+        history: list[dict[str, Any]] = []
+
+        def _forward_event(event_type: str, data: dict[str, Any]) -> None:
+            """Adapter: AgentLoop calls on_event(event_type, data),
+            we forward via emit_fn to SSE, and collect for persistence."""
+            history.append({"type": event_type, "data": data, "ts": time.time()})
+            if emit_fn:
+                emit_fn(study_id, f"agent_{event_type}", {
+                    "study_id": study_id,
+                    "round": round_num,
+                    "agent": agent_id,
+                    **(data if isinstance(data, dict) else {}),
+                })
+
         result = executor.execute(
             plugin, task_text, workspace,
             context=agent_ctx,
             upstream_outputs=upstream,
             node=node_config,
+            on_event=_forward_event,
         )
+
+        # Store history for stage 3 persistence
+        if agent_histories is not None:
+            agent_histories[agent_id] = history
 
         # SSE: agent complete
         if emit_fn:
@@ -249,6 +271,7 @@ def build_langgraph(
     round_num: int,
     checkpointer=None,
     profile: LangGraphProfile | None = None,
+    agent_histories: dict[str, list] | None = None,
 ):
     """Convert StudyGraph → compiled LangGraph StateGraph.
 
@@ -289,6 +312,7 @@ def build_langgraph(
         node_fn = _make_agent_node(
             executor, plugin, node_config, task_text,
             workspace, agent_ctx, emit_fn, study_id, round_num,
+            agent_histories=agent_histories,
         )
         add_kwargs = {}
         if default_cache_policy is not None:
@@ -447,12 +471,16 @@ def run_round_langgraph(
     checkpoint_conn = getattr(runner.study_store, "get_checkpoint_conn", lambda: None)()
     checkpointer = _get_checkpointer(sid, study_root, conn=checkpoint_conn)
 
+    # Collect per-agent execution histories (populated during graph execution)
+    agent_histories: dict[str, list] = {}
+
     # Build and compile the graph
     compiled = build_langgraph(
         graph, executor, task_text, path,
         agent_ctx, runner._emit, sid, round_num,
         checkpointer=checkpointer,
         profile=profile,
+        agent_histories=agent_histories,
     )
 
     # Initial state
@@ -519,8 +547,9 @@ def run_round_langgraph(
     agent_outputs = result.get("agent_outputs", {}) if isinstance(result, dict) else {}
     logger.info("langgraph: round %d completed, agent_outputs=%s", round_num, list(agent_outputs.keys()))
 
-    # Save agent outputs (mirrors DAG engine)
-    save_agent_outputs(runner, run_dir, agent_outputs, round_num)
+    # Save agent outputs (mirrors DAG engine) + execution histories
+    save_agent_outputs(runner, run_dir, agent_outputs, round_num,
+                       agent_histories=agent_histories)
 
     # Rebuild legacy schema (same as DAG engine)
     result = runner._rebuild_phase_outputs(agent_outputs, graph)

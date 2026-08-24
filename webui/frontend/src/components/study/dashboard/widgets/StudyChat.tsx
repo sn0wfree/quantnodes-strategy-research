@@ -16,7 +16,7 @@ import {
   type StudyRoundSummary,
 } from '../../../../api/client'
 import { useStudyStore } from '../../../../stores/study'
-import { useChatStore, type Message, type TextPart } from '../../../../stores/chat'
+import { useChatStore, type Message } from '../../../../stores/chat'
 import { ChatSessionProvider } from '../../../../contexts/ChatSessionContext'
 import { MessageList } from '../../../chat/MessageList'
 import type { WidgetProps } from '../types'
@@ -131,15 +131,106 @@ function buildMessagesFromOutputs(
   if (!outputs) return []
   return Object.entries(outputs).map(([agentId, output]): Message => {
     const out = output as Record<string, unknown>
+
+    // Stage 3: If history exists, build multi-part message from execution trace
+    const history = out.history as Array<{ type: string; data: Record<string, any>; ts: number }> | undefined
+    let parts: Message['parts'] = []
+
+    if (history && history.length > 0) {
+      // Convert history events to message parts
+      for (const evt of history) {
+        const evtType = evt.type as string
+        const d = evt.data || {}
+
+        if (evtType.startsWith('thinking')) {
+          // Skip empty thinking_delta events
+          if (evtType === 'thinking_delta' && !d.delta) continue
+          // Create a collapsed thinking part for start/done
+          if (evtType === 'thinking_start' || evtType === 'thinking_done') {
+            parts.push({
+              type: 'thinking',
+              id: `think:${agentId}:${evt.ts}`,
+              text: '',
+              collapsed: true,
+            } as any)
+          } else if (evtType === 'thinking_delta') {
+            // Accumulate thinking text into existing thinking part
+            const lastThinking = parts.findLast(p => p.type === 'thinking' && !(p as any).collapsed)
+            if (lastThinking) {
+              ;(lastThinking as any).text = ((lastThinking as any).text || '') + (d.delta || '')
+            }
+          }
+        } else if (evtType === 'tool_call') {
+          parts.push({
+            type: 'tool_call',
+            id: d.id || `tc:${agentId}:${evt.ts}`,
+            name: d.tool || d.name || 'unknown',
+            arguments: d.arguments || d.args || {},
+            status: 'running',
+          } as any)
+        } else if (evtType === 'tool_result') {
+          // Find the matching tool_call and update its status
+          const tcId = d.id || d.tool_call_id
+          const tcPart = parts.findLast(p => p.type === 'tool_call' && (p as any).id === tcId) as any
+          if (tcPart) {
+            tcPart.status = d.status || 'completed'
+            tcPart.result = d.result || d.output || ''
+          } else {
+            // No matching tool_call found — add as text
+            parts.push({
+              type: 'text',
+              id: `tr:${agentId}:${evt.ts}`,
+              text: `📋 ${d.tool || ''}: ${JSON.stringify(d.result || d.output || '').slice(0, 200)}`,
+            })
+          }
+        } else if (evtType === 'text_delta' || evtType === 'text_started' || evtType === 'text_ended') {
+          // Accumulate text into existing text part or create new
+          const lastText = parts.findLast(p => p.type === 'text') as any
+          if (lastText && evtType === 'text_delta') {
+            lastText.text = (lastText.text || '') + (d.text || d.delta || '')
+          } else if (evtType === 'text_delta' || evtType === 'text_started') {
+            parts.push({
+              type: 'text',
+              id: `txt:${agentId}:${evt.ts}`,
+              text: d.text || d.delta || '',
+            })
+          }
+        } else if (evtType === 'assistant_message') {
+          const content = d.content || d.text || ''
+          if (content) {
+            parts.push({
+              type: 'text',
+              id: `msg:${agentId}:${evt.ts}`,
+              text: typeof content === 'string' ? content : JSON.stringify(content),
+            })
+          }
+        } else if (evtType === 'loop_end') {
+          // Skip loop_end — the final answer is already in the output
+        }
+      }
+    }
+
+    // Always include the final formatted output as a text part
     const text = extractAgentText(out)
-    const partId = `part:${studyId}:r${round}:${agentId}`
-    const textPart: TextPart = { type: 'text', id: partId, text }
+    if (text) {
+      parts.push({
+        type: 'text',
+        id: `part:${studyId}:r${round}:${agentId}`,
+        text: text,
+      })
+    }
+
+    // Fallback: if no parts were created, use single text part
+    if (parts.length === 0) {
+      parts = [{ type: 'text', id: `part:${studyId}:r${round}:${agentId}`, text }]
+    }
+
     return {
       id: `study:${studyId}:r${round}:${agentId}`,
       session_id: `study:${studyId}:stream`,
       role: 'assistant',
       agent_id: agentId,
-      parts: [textPart],
+      parts,
       created_at: Date.now() / 1000,
       metadata: {
         model: agentId,
@@ -164,6 +255,65 @@ function buildEventMessage(
     created_at: event.timestamp / 1000,
     metadata: {
       kind: 'system',
+      round: currentRound,
+    },
+  }
+}
+
+// ── Agent-level SSE event → chat message ──────────────────────
+
+function buildAgentEventMessage(
+  event: any,
+  studyId: string,
+  currentRound: number,
+): Message {
+  const eventType = event.type as string
+  const agentId = event.agent || event.data?.agent || ''
+  const data = event.data || {}
+  const ts = event.timestamp || Date.now()
+
+  let text = ''
+
+  if (eventType === 'agent_tool_call') {
+    const toolName = data.tool || data.name || '未知工具'
+    const args = data.arguments || data.args || {}
+    const argsStr = typeof args === 'string' ? args : JSON.stringify(args, null, 2)
+    text = `🔧 \`${toolName}\`\n\`\`\`json\n${argsStr}\n\`\`\``
+  } else if (eventType === 'agent_tool_result') {
+    const toolName = data.tool || data.name || ''
+    const status = data.status || 'ok'
+    const result = data.result || data.output || ''
+    const resultStr = typeof result === 'string' ? result.slice(0, 500) : JSON.stringify(result, null, 2).slice(0, 500)
+    text = `📋 \`${toolName}\` → ${status}\n\`\`\`\n${resultStr}\n\`\`\``
+  } else if (eventType === 'agent_thinking_start') {
+    text = '🧠 正在思考...'
+  } else if (eventType === 'agent_thinking_delta') {
+    text = data.delta || data.text || ''
+  } else if (eventType === 'agent_text_delta') {
+    text = data.text || data.delta || ''
+  } else if (eventType === 'agent_assistant_message') {
+    const content = data.content || data.text || ''
+    text = typeof content === 'string' ? content : JSON.stringify(content)
+  } else if (eventType === 'agent_loop_end') {
+    const reason = data.reason || data.finished_reason || ''
+    text = `✅ 完成 (${reason})`
+  } else {
+    // Generic fallback
+    const message = data.message || data.text || ''
+    text = message || `${eventType.replace('agent_', '')}`
+  }
+
+  if (!text) return { id: `skip:${ts}:${eventType}`, session_id: `study:${studyId}:stream`, role: 'system', parts: [], created_at: ts / 1000, metadata: { kind: 'system', round: currentRound } }
+
+  return {
+    id: `agent:${ts}:${eventType}:${agentId}`,
+    session_id: `study:${studyId}:stream`,
+    role: 'system',
+    agent_id: agentId || undefined,
+    parts: [{ type: 'text', id: `aevt:${ts}:${eventType}`, text }],
+    created_at: ts / 1000,
+    metadata: {
+      kind: 'agent',
       round: currentRound,
     },
   }
@@ -291,18 +441,27 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     return () => { cancelled = true }
   }, [studyId, selectedRound])
 
-  // Inject SSE events as system messages
+  // Inject SSE events as system messages + agent-level events
   useEffect(() => {
     if (recentEvents.length === 0) return
     const newEvents = recentEvents.slice(eventCountRef.current)
     eventCountRef.current = recentEvents.length
 
     newEvents.forEach((event) => {
+      const eventType = (event as any).type as string
+
+      // Agent-level events: forwarded from AgentLoop via on_event adapter
+      // These have type like "agent_thinking_start", "agent_tool_call", etc.
+      if (eventType?.startsWith('agent_')) {
+        chatStore.addMessage(buildAgentEventMessage(event, studyId, selectedRound))
+        return
+      }
+
+      // Study-level events (phase, complete, etc.)
       chatStore.addMessage(buildEventMessage(event, studyId, selectedRound))
 
       // Detect HITL interrupt from SSE events
-      // Backend emits study_paused with reason="hitl_approval"
-      if ((event as any).type === 'study_paused' && (event as any).reason === 'hitl_approval') {
+      if (eventType === 'study_paused' && (event as any).reason === 'hitl_approval') {
         setPendingInterrupt({
           interruptId: `pending:${studyId}:${selectedRound}`,
           hypothesis: (event as any).hypothesis,

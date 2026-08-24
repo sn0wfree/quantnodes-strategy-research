@@ -1145,11 +1145,23 @@ async def study_round_agent_outputs(
     agent_outputs: dict = {}
     if agents_dir.is_dir():
         import json
+        # Read agent output files (agent_name.json)
         for agent_file in sorted(agents_dir.glob("*.json")):
             agent_name = agent_file.stem
             try:
                 data = json.loads(agent_file.read_text(encoding="utf-8"))
                 agent_outputs[agent_name] = data
+            except (json.JSONDecodeError, OSError):
+                pass
+        # Read agent execution history files (agent_name_history.json)
+        for hist_file in sorted(agents_dir.glob("*_history.json")):
+            agent_name = hist_file.stem.replace("_history", "")
+            try:
+                history = json.loads(hist_file.read_text(encoding="utf-8"))
+                if agent_name in agent_outputs:
+                    agent_outputs[agent_name]["history"] = history
+                else:
+                    agent_outputs[agent_name] = {"history": history}
             except (json.JSONDecodeError, OSError):
                 pass
 

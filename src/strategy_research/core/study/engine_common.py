@@ -116,10 +116,14 @@ def save_agent_outputs(
     run_dir: Path,
     agent_outputs: dict[str, Any],
     round_num: int = 0,
+    *,
+    agent_histories: dict[str, list] | None = None,
 ) -> None:
     """Save agent outputs to disk using runner's _save_agent_output.
 
-    Unified saving across all engines.
+    Unified saving across all engines.  When *agent_histories* is
+    provided (populated by the langgraph engine's on_event adapter),
+    the full execution trace is persisted alongside the final answer.
     """
     for agent_id, output in agent_outputs.items():
         # Normalize output to string
@@ -136,6 +140,16 @@ def save_agent_outputs(
             "status": "success",
             "timestamp": time.time(),
         })
+
+    # Persist full agent execution histories (stage 3)
+    if agent_histories:
+        agents_dir = run_dir / "agents"
+        agents_dir.mkdir(exist_ok=True)
+        for agent_id, history in agent_histories.items():
+            if history:
+                hist_path = agents_dir / f"{agent_id}_history.json"
+                with open(hist_path, "w", encoding="utf-8") as f:
+                    json.dump(history, f, ensure_ascii=False, indent=2)
 
 
 # ── Cancel/ARCHIVED guard ────────────────────────────────────────
