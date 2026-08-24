@@ -415,26 +415,22 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
       .then((r) => {
         if (!cancelled) {
           const msgs = buildMessagesFromOutputs(r.agent_outputs, studyId, selectedRound)
-          // Replace agent messages in stream (keep chat/directive messages)
+          // Merge with existing messages — don't clear SSE events
           const existing = Array.from(chatStore.messages.values())
-          const nonAgent = existing.filter(
-            (m) => m.metadata?.kind !== 'agent',
+          const existingAgentIds = new Set(
+            existing
+              .filter((m) => m.agent_id)
+              .map((m) => m.agent_id),
           )
-          chatStore.setMessages([])
-          nonAgent.forEach((m) => chatStore.addMessage(m))
-          msgs.forEach((m) => chatStore.addMessage(m))
+          // Only add API response messages for agents that don't already have messages
+          const newMsgs = msgs.filter((m) => !m.agent_id || !existingAgentIds.has(m.agent_id))
+          newMsgs.forEach((m) => chatStore.addMessage(m))
           setLoading(false)
         }
       })
       .catch(() => {
         if (!cancelled) {
-          // Remove agent messages on error
-          const existing = Array.from(chatStore.messages.values())
-          const nonAgent = existing.filter(
-            (m) => m.metadata?.kind !== 'agent',
-          )
-          chatStore.setMessages([])
-          nonAgent.forEach((m) => chatStore.addMessage(m))
+          // On error, just stop loading — keep existing SSE messages
           setLoading(false)
         }
       })
