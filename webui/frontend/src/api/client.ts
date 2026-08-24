@@ -278,10 +278,19 @@ class APIClient {
     roundManifest: (studyId: string, roundNum: number) =>
       this.get<StudyRoundManifestResponse>(`/study/${studyId}/rounds/${roundNum}/manifest`),
 
-    roundAgentOutputs: (studyId: string, roundNum: number) =>
-      this.get<StudyRoundAgentOutputsResponse>(
-        `/study/${studyId}/rounds/${roundNum}/agent_outputs`
-      ),
+    roundAgentOutputs: (
+      studyId: string,
+      roundNum: number,
+      options?: { include_history?: boolean; history_limit?: number },
+    ) => {
+      const params = new URLSearchParams()
+      if (options?.include_history) params.set('include_history', 'true')
+      if (options?.history_limit) params.set('history_limit', String(options.history_limit))
+      const qs = params.toString()
+      return this.get<StudyRoundAgentOutputsResponse>(
+        `/study/${studyId}/rounds/${roundNum}/agent_outputs${qs ? '?' + qs : ''}`,
+      )
+    },
 
     roundDiff: (studyId: string, roundNum: number, against: number) =>
       this.get<StudyRoundDiffResponse>(

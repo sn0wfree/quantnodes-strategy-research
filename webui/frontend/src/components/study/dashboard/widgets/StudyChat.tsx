@@ -406,12 +406,19 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   }, [currentRound])
 
   // Load agent outputs for selected round
+  // When study is completed, load history for full execution trace
   useEffect(() => {
     let cancelled = false
     setLoading(true)
 
+    const studyStatus = summary?.execution_status
+    const shouldLoadHistory = studyStatus !== 'running'
+
     api.study
-      .roundAgentOutputs(studyId, selectedRound)
+      .roundAgentOutputs(studyId, selectedRound, {
+        include_history: shouldLoadHistory,
+        history_limit: 200,
+      })
       .then((r) => {
         if (!cancelled) {
           const msgs = buildMessagesFromOutputs(r.agent_outputs, studyId, selectedRound)
