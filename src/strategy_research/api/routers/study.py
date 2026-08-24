@@ -1118,19 +1118,12 @@ async def study_round_manifest(request: Request, study_id: str, round_num: int):
 )
 async def study_round_agent_outputs(
     request: Request, study_id: str, round_num: int,
-    include_history: bool = Query(False),
-    history_limit: int = Query(500, ge=0, le=5000),
 ):
     """Agent chat outputs for a round.
 
     Reads ``{rounds_dir}/round_{N}/run_{latest}/agents/*.json`` and
     returns a dict keyed by agent name. Each value contains the full
     agent JSON (output, input, duration_ms, etc.).
-
-    When ``include_history=True``, also reads ``*_history.json`` files
-    containing the full execution trace (thinking, tool calls, etc.).
-    History is truncated to ``history_limit`` events to keep the
-    response size manageable.
     """
     study = _owned_study(request, study_id)
     from pathlib import Path
@@ -1154,9 +1147,6 @@ async def study_round_agent_outputs(
         import json
         # Read agent output files (agent_name.json)
         for agent_file in sorted(agents_dir.glob("*.json")):
-            # Skip history files — they are large and read separately below
-            if agent_file.stem.endswith("_history"):
-                continue
             agent_name = agent_file.stem
             try:
                 data = json.loads(agent_file.read_text(encoding="utf-8"))
@@ -1164,21 +1154,16 @@ async def study_round_agent_outputs(
             except (json.JSONDecodeError, OSError):
                 pass
         # Read agent execution history files (agent_name_history.json)
-        # Only when explicitly requested — history files can be huge (MB)
-        if include_history:
-            for hist_file in sorted(agents_dir.glob("*_history.json")):
-                agent_name = hist_file.stem.replace("_history", "")
-                try:
-                    history = json.loads(hist_file.read_text(encoding="utf-8"))
-                    # Truncate to history_limit most recent events
-                    if history_limit > 0 and len(history) > history_limit:
-                        history = history[-history_limit:]
-                    if agent_name in agent_outputs:
-                        agent_outputs[agent_name]["history"] = history
-                    else:
-                        agent_outputs[agent_name] = {"history": history}
-                except (json.JSONDecodeError, OSError):
-                    pass
+        for hist_file in sorted(agents_dir.glob("*_history.json")):
+            agent_name = hist_file.stem.replace("_history", "")
+            try:
+                history = json.loads(hist_file.read_text(encoding="utf-8"))
+                if agent_name in agent_outputs:
+                    agent_outputs[agent_name]["history"] = history
+                else:
+                    agent_outputs[agent_name] = {"history": history}
+            except (json.JSONDecodeError, OSError):
+                pass
 
     return {
         "status": "ok",
