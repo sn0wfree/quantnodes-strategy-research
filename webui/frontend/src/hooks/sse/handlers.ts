@@ -23,6 +23,7 @@ import {
   goalUpdated,
   sessionMetaUpdated,
 } from './metaHandlers'
+import { useStudyStore } from '../../stores/study'
 import {
   studyRound,
   studyCompleted,
@@ -150,6 +151,46 @@ export const HANDLERS: Partial<Record<SSEEventType, SSEHandler>> = {
   study_todos_updated: studyTodosUpdated,
   // P4: HITL interrupt handlers
   study_interrupt_responded: studyInterruptResponded,
+  // Agent loop events (from langgraph engine on_event adapter)
+  agent_thinking_start: (data: Record<string, unknown>) => {
+    useStudyStore.getState().addLiveEvent({
+      type: 'other', message: `🧠 ${data.agent || 'agent'} 思考中...`,
+      round: data.round as number | undefined,
+    })
+  },
+  agent_thinking_done: (data: Record<string, unknown>) => {
+    useStudyStore.getState().addLiveEvent({
+      type: 'other', message: `🧠 ${data.agent || 'agent'} 思考完成`,
+      round: data.round as number | undefined,
+    })
+  },
+  agent_tool_call: (data: Record<string, unknown>) => {
+    useStudyStore.getState().addLiveEvent({
+      type: 'other', message: `🔧 ${data.agent || 'agent'} 调用 ${data.tool || data.name || '工具'}`,
+      round: data.round as number | undefined,
+    })
+  },
+  agent_tool_result: (data: Record<string, unknown>) => {
+    useStudyStore.getState().addLiveEvent({
+      type: 'other', message: `📋 ${data.agent || 'agent'} 工具返回 ${data.status || 'ok'}`,
+      round: data.round as number | undefined,
+    })
+  },
+  agent_text_delta: (_data: Record<string, unknown>) => {
+    // Text deltas are high-frequency; skip to avoid noise
+  },
+  agent_assistant_message: (data: Record<string, unknown>) => {
+    useStudyStore.getState().addLiveEvent({
+      type: 'other', message: `💬 ${data.agent || 'agent'} 输出完成`,
+      round: data.round as number | undefined,
+    })
+  },
+  agent_loop_end: (data: Record<string, unknown>) => {
+    useStudyStore.getState().addLiveEvent({
+      type: 'other', message: `✅ ${data.agent || 'agent'} 完成 (${data.reason || data.finished_reason || ''})`,
+      round: data.round as number | undefined,
+    })
+  },
   // Subagent lifecycle
   subagent_started: subagentStarted,
   subagent_tool_call: subagentToolCall,

@@ -1146,7 +1146,10 @@ async def study_round_agent_outputs(
     if agents_dir.is_dir():
         import json
         # Read agent output files (agent_name.json)
+        # Exclude *_history.json — they are large and loaded separately
         for agent_file in sorted(agents_dir.glob("*.json")):
+            if agent_file.stem.endswith("_history"):
+                continue
             agent_name = agent_file.stem
             try:
                 data = json.loads(agent_file.read_text(encoding="utf-8"))
