@@ -829,7 +829,7 @@ async def study_directive(request: Request, study_id: str, req: DirectiveRequest
     if sched.session_service is not None and sched.session_service.event_bus is not None:
         try:
             sched.session_service.event_bus.emit(
-                "", "study_directive_added", {
+                study_id, "study_directive_added", {
                     "study_id": study_id,
                     "directive_id": directive.directive_id,
                     "content": directive.content,
@@ -910,7 +910,7 @@ async def study_interrupt_respond(
     if sched.session_service is not None and sched.session_service.event_bus is not None:
         try:
             sched.session_service.event_bus.emit(
-                "", "study_interrupt_responded", {
+                study_id, "study_interrupt_responded", {
                     "study_id": study_id,
                     "interrupt_id": iid,
                     "decision": req.decision,

@@ -287,6 +287,20 @@ def create_study_record(
         graph=graph_override,
         auto_compose=auto_compose_graph,
     )
+
+    # Create a sessions table row for the study_id so the SSE endpoint
+    # (/api/chat/events?session_id={study_id}) can validate the
+    # subscription. Without this row, the study detail page's
+    # useSSE(studyId) gets a 404 and live events never arrive.
+    from .engine_common import ensure_study_session, get_study_session_db_path
+    session_db = get_study_session_db_path(Path(workspace_path))
+    if session_db.exists():
+        ensure_study_session(
+            session_db,
+            study.study_id,
+            f"Study: {objective[:60]}",
+        )
+
     return study
 
 

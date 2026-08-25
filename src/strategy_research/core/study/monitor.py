@@ -26,7 +26,7 @@ async def monitor_phase(runner: Any) -> str:
     Every ``monitor_interval_seconds`` the last keep run is re-backtested
     (no LLM) and compared to ``metric_targets`` only.
     """
-    from ..models import StudyStatus
+    from .models import StudyStatus
     from .runner import ShutdownReason
 
     study = runner._get_study()
@@ -115,8 +115,8 @@ async def monitor_phase(runner: Any) -> str:
 
 async def _monitor_repair_rounds(runner: Any) -> bool:
     """Up to 3 full repair rounds; True when an E2 pass restores the study."""
-    from ..models import StudyStatus
-    from ..budget import budget_exceeded, budget_summary, account_round_budget, maybe_load_previous_summary
+    from .models import StudyStatus
+    from .budget import budget_exceeded, budget_summary, account_round_budget, maybe_load_previous_summary
 
     study = runner._get_study()
     sid = study.study_id

@@ -465,9 +465,22 @@ class AutoresearchRunner:
                     continue
                 # Resume the round from checkpoint
                 self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+                # Reconstruct context from study object (same as _run_one_round)
+                study = self._get_study()
+                _path = Path(study.workspace_path).resolve()
+                _strategy = study.strategy_name
+                _graph = self._load_graph(_path, sid)
+                from strategy_research.core.autoresearch import read_current_state
+                from strategy_research.core.study import state_store as ss
+                _root = ss.study_root(_path, sid)
+                _state = ss.load(_path, sid)
+                _current_state = read_current_state(_path, _strategy)
+                _current_state["study_strategy_path"] = str(
+                    (ss.round_dir(_path, sid, round_num)).relative_to(_path) / f"round_{round_num}" / "strategy.py"
+                )
                 result = await asyncio.to_thread(
-                    self._resume_round_langgraph, path, strategy,
-                    current_state, run_dir, graph,
+                    self._resume_round_langgraph, _path, _strategy,
+                    _current_state, ss.round_dir(_path, sid, round_num), _graph,
                     session=session, sid=sid, round_num=round_num,
                     directive_text=directive_text,
                 )
@@ -1050,13 +1063,9 @@ class AutoresearchRunner:
         import asyncio
         start = time.time()
         while time.time() - start < timeout_s:
-            with self.study_store() as store:
-                interrupt = store.get_pending_interrupt(sid, round_num)
-                if interrupt is None:
-                    # No pending interrupt — check if it was responded to
-                    break
-                if interrupt.status in ("approved", "rejected"):
-                    return interrupt.status == "approved"
+            interrupt = self.study_store.get_interrupt_for_round(sid, round_num)
+            if interrupt is not None and interrupt.status in ("approved", "rejected"):
+                return interrupt.status == "approved"
             await asyncio.sleep(5)
         return False
 
@@ -1576,6 +1585,41 @@ class AutoresearchRunner:
             lines.append(f"- [{d.created_at}] {d.content.replace(chr(10), ' ').strip()}")
         lines.append("</user-directives>")
         return "\n".join(lines)
+
+    def _run_monitor_check(self) -> dict:
+        """Re-backtest the last keep run and check if metrics still meet targets.
+
+        Called by the monitor phase. Returns a dict with:
+        - meets_targets: bool
+        - metrics: dict
+        - now_iso: str
+        - verdict: "monitor"
+        """
+        from datetime import datetime, timezone
+        from strategy_research.core.study import state_store as ss
+        from strategy_research.core.autoresearch import read_current_state
+        from strategy_research.core.study.metric_targets import meets_metric_targets
+
+        study = self._get_study()
+        sid = study.study_id
+        path = Path(study.workspace_path).resolve()
+        state = ss.load(path, sid)
+
+        # Read current metrics from state.json (already updated by last keep round)
+        metrics = state.best_metrics or {}
+
+        # Check if metrics meet targets
+        meets = bool(
+            study.metric_targets
+            and meets_metric_targets(metrics, study.metric_targets)
+        )
+
+        return {
+            "meets_targets": meets,
+            "metrics": metrics,
+            "now_iso": datetime.now(timezone.utc).isoformat(),
+            "verdict": "monitor",
+        }
 
 
 # ── Backward-compat alias ──────────────────────────────────────────

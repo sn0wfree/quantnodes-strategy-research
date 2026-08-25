@@ -1160,6 +1160,42 @@ class StudyStore:
         )
 
     @synchronized
+    def get_interrupt_for_round(
+        self, study_id: str, round_num: int
+    ) -> "StudyInterrupt | None":
+        """Return the latest interrupt for a study round (any status).
+
+        Unlike get_pending_interrupt (which only returns status='pending'),
+        this returns the interrupt regardless of status so the HITL poll
+        loop can detect approved/rejected responses.
+        """
+        from .models import StudyInterrupt
+        row = self._conn.execute(
+            """
+            SELECT interrupt_id, study_id, round_num, interrupt_type,
+                   payload, status, response, created_at, responded_at
+            FROM study_interrupts
+            WHERE study_id = ? AND round_num = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (study_id, round_num),
+        ).fetchone()
+        if row is None:
+            return None
+        return StudyInterrupt(
+            interrupt_id=row["interrupt_id"],
+            study_id=row["study_id"],
+            round_num=row["round_num"],
+            interrupt_type=row["interrupt_type"],
+            payload=row["payload"],
+            status=row["status"],
+            response=row["response"],
+            created_at=row["created_at"],
+            responded_at=row["responded_at"],
+        )
+
+    @synchronized
     def respond_interrupt(
         self, interrupt_id: str, status: str, response: str | None = None
     ) -> bool:
@@ -1167,6 +1203,8 @@ class StudyStore:
         now = now_iso()
         with write_transaction(self._conn):
             cur = self._conn.execute(
+
+
                 """
                 UPDATE study_interrupts
                 SET status = ?, response = ?, responded_at = ?

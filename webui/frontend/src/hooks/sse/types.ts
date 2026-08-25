@@ -137,6 +137,10 @@ export const EVENT_TYPES: SSEEventType[] = [
   'study_early_stopped', 'study_todos_updated',
   // P4: HITL interrupt events
   'study_interrupt_responded',
+  // Agent-level execution events (langgraph engine live streaming)
+  'agent_thinking_start', 'agent_thinking_done',
+  'agent_tool_call', 'agent_tool_result',
+  'agent_text_delta', 'agent_assistant_message', 'agent_loop_end',
   // Subagent events
   'subagent_started', 'subagent_tool_call', 'subagent_tool_result',
   'subagent_text_delta', 'subagent_completed', 'subagent_failed',

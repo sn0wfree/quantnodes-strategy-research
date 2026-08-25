@@ -660,7 +660,9 @@ def resume_round_langgraph(
         checkpointer=checkpointer,
     )
 
-    # Resume from checkpoint (no initial state needed)
+    # Resume from checkpoint — Command(resume=True) consumes the
+    # interrupt() node so execution continues past the gate.
+    from langgraph.types import Command
     config = {"configurable": {"thread_id": _thread_id(sid, round_num)}}
 
     runner._emit(session, "study_phase", {
@@ -668,12 +670,22 @@ def resume_round_langgraph(
         "phase": "langgraph_resume", "status": "started",
     })
 
-    result = compiled.invoke(None, config=config)
+    result = compiled.invoke(Command(resume=True), config=config)
 
     runner._emit(session, "study_phase", {
         "study_id": sid, "round": round_num,
         "phase": "langgraph_resume", "status": "done",
     })
+
+    # If the graph hit another interrupt during resume, return pause signal
+    if isinstance(result, dict) and "__interrupt__" in result:
+        logger.warning("langgraph: resume hit another interrupt for round %d", round_num)
+        return {
+            "round": round_num,
+            "run_name": f"round_{round_num}",
+            "paused_for_approval": True,
+            "study_id": sid,
+        }
 
     # Save agent outputs
     agent_outputs = result.get("agent_outputs", {})
