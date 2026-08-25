@@ -4,7 +4,7 @@ import {
   ArrowLeft, Pause, Play, X, FolderOpen,
   Target, Activity, RotateCcw, BarChart3, BookOpen,
   Archive, ArchiveRestore, Edit3,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, LineChart,
 } from 'lucide-react'
 import { api, type StudySummaryResponse, type StudyAvailableActionsResponse } from '../../api/client'
 import { STUDY_STATUS_LABELS, STUDY_STATUS_COLORS } from './constants'
@@ -17,6 +17,7 @@ import { AgentApprovalDialog } from './AgentApprovalDialog'
 import { useSSE } from '../../hooks/useSSE'
 import { StudyChat } from './dashboard/widgets/StudyChat'
 import { MetricsCompare } from './MetricsCompare'
+import { MetricsTrendChart } from './MetricsTrendChart'
 import { RoundHistory } from './RoundHistory'
 
 function KpiCard({
@@ -365,9 +366,17 @@ export function StudyDetailPage() {
             </div>
           </div>
 
-          {/* Placeholder chart area */}
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/20 p-4">
-            <span className="text-xs text-slate-600">图表区（待添加）</span>
+          {/* Metrics trend chart */}
+          <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              <LineChart className="h-3 w-3" /> 指标趋势
+            </div>
+            <div className="min-h-0 flex-1">
+              <MetricsTrendChart
+                rounds={summary.recent_rounds ?? []}
+                metricTargets={metricTargets}
+              />
+            </div>
           </div>
 
           {/* RoundHistory — collapsible */}
