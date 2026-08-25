@@ -670,7 +670,7 @@ def _row_to_message(
             and to support the new message_parts table (commit 5).
 
     Reads parts from:
-    1. The `parts` parameter (preferred; batch-fetched by caller)
+   1. The `parts` parameter (preferred; batch-fetched by caller)
     2. The legacy `parts_json` column (fallback for pre-migration
        rows and test fixtures)
     """
@@ -690,6 +690,12 @@ def _row_to_message(
             metadata = json.loads(row["metadata_json"])
         except (json.JSONDecodeError, TypeError):
             metadata = None
+
+    # Extract agent_id from metadata (set by projector for study agents)
+    agent_id = None
+    if metadata and "agent_id" in metadata:
+        agent_id = metadata.pop("agent_id")
+
     # For user messages without explicit parts, build a single text part
     # from content so the frontend doesn't need to handle null parts.
     # Same for error messages (friendly text in content → text part).
@@ -703,6 +709,7 @@ def _row_to_message(
         "content": row["content"],
         "parts": parts,
         "tool_call_id": row["tool_call_id"] if "tool_call_id" in row.keys() else None,
+        "agent_id": agent_id,
         "created_at": row["created_at"],
         "seq": row["seq"] if "seq" in row.keys() else 0,
         "metadata": metadata,

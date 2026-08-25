@@ -22,7 +22,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict, Annotated
 
-from .engine_common import safe_json_loads, build_agent_ctx, save_agent_outputs
+from .engine_common import (
+    safe_json_loads,
+    build_agent_ctx,
+    save_agent_outputs,
+    get_study_session_db_path,
+    ensure_study_session,
+)
+from ..agent.event_store import EventStoreFactory
 
 logger = logging.getLogger(__name__)
 
@@ -126,10 +133,13 @@ def _make_agent_node(
     study_id: str,
     round_num: int,
     *,
+    event_store=None,
+    study_session_id: str | None = None,
     agent_histories: dict[str, list] | None = None,
 ):
     """Create a LangGraph node function for one agent."""
     agent_id = plugin.id
+    message_id = f"study:{study_id}:r{round_num}:{agent_id}"
 
     def agent_node(state: StudyRoundState) -> dict:
         # Collect upstream outputs from state
@@ -147,15 +157,30 @@ def _make_agent_node(
 
         def _forward_event(event_type: str, data: dict[str, Any]) -> None:
             """Adapter: AgentLoop calls on_event(event_type, data),
-            we forward via emit_fn to SSE, and collect for persistence."""
-            history.append({"type": event_type, "data": data, "ts": time.time()})
+            we forward via emit_fn to SSE, write to EventStore, and collect for persistence."""
+            event_data = data if isinstance(data, dict) else {}
+
+            # Write to EventStore (for projector → messages + message_parts)
+            if event_store and study_session_id:
+                # Inject message_id and agent_id for projector
+                store_data = {
+                    **event_data,
+                    "message_id": message_id,
+                    "agent_id": agent_id,
+                }
+                event_store.emit(study_session_id, event_type, store_data)
+
+            # SSE push (with agent_ prefix for frontend real-time streaming)
             if emit_fn:
                 emit_fn(study_id, f"agent_{event_type}", {
                     "study_id": study_id,
                     "round": round_num,
                     "agent": agent_id,
-                    **(data if isinstance(data, dict) else {}),
+                    **event_data,
                 })
+
+            # Keep history for backward compatibility (JSON file persistence)
+            history.append({"type": event_type, "data": event_data, "ts": time.time()})
 
         result = executor.execute(
             plugin, task_text, workspace,
@@ -294,6 +319,25 @@ def build_langgraph(
     reg = registry or get_default_registry()
     node_map = {n.id: n for n in graph.nodes}
 
+    # Create EventStore and study session for this round.
+    # Explicit db_path (workspace-local) so the singleton can never bind
+    # to the wrong file via cwd. flush_to_messages=True materializes
+    # messages + message_parts live so the session API serves the
+    # round's agent messages without a manual projector flush.
+    event_store = EventStoreFactory.create(
+        db_path=get_study_session_db_path(workspace),
+        flush_to_messages=True,
+    )
+    study_session_id = f"study:{study_id}:round:{round_num}"
+    ensure_study_session(
+        get_study_session_db_path(workspace),
+        study_session_id,
+        f"Study {study_id} Round {round_num}",
+    )
+    event_store.emit(study_session_id, "session.created", {
+        "title": f"Study {study_id} Round {round_num}",
+    })
+
     # Add agent nodes with caching
     try:
         from langgraph.types import CachePolicy
@@ -312,6 +356,8 @@ def build_langgraph(
         node_fn = _make_agent_node(
             executor, plugin, node_config, task_text,
             workspace, agent_ctx, emit_fn, study_id, round_num,
+            event_store=event_store,
+            study_session_id=study_session_id,
             agent_histories=agent_histories,
         )
         add_kwargs = {}

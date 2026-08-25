@@ -176,3 +176,49 @@ def check_cancelled(runner: Any, session: str, sid: str) -> str | None:
     runner._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
     runner._emit(session, "study_cancelled", {"study_id": sid})
     return ShutdownReason.CANCELLED
+
+
+# ── Study chat session (event-sourced agent traces) ───────────────
+
+SESSION_DB_FILENAME = ".quantnodes_strategy_research_session.db"
+
+
+def get_study_session_db_path(workspace: Path) -> Path:
+    """Session DB that lives inside the study workspace (same file the
+    backend uses when started with that workspace as cwd)."""
+    return workspace / SESSION_DB_FILENAME
+
+
+def ensure_study_session(
+    db_path: Path,
+    session_id: str,
+    title: str,
+) -> None:
+    """Create the chat-session row for a study round.
+
+    The row must exist before the projector flush (messages FK) and
+    must be owned by the real backend user so the session API's IDOR
+    check (``_fetch_session_owned``) passes. Ownership is inherited
+    from the most common non-system user among existing sessions.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT user_id, COUNT(*) AS c FROM sessions "
+            "WHERE user_id IS NOT NULL AND user_id != 'system' "
+            "GROUP BY user_id ORDER BY c DESC LIMIT 1"
+        ).fetchone()
+        owner = row["user_id"] if row else "system"
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, title, user_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (session_id, title, owner, time.time(), time.time()),
+        )
+        conn.commit()
+    except Exception:
+        logger.warning("ensure_study_session failed for %s", session_id, exc_info=True)
+    finally:
+        conn.close()

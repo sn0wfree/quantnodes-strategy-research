@@ -1,22 +1,19 @@
 /**
  * StudyChat — unified chat widget for the study detail page.
  *
- * Three view modes:
- *   card:    Agent card view with collapsible details (default)
- *   compact: Streamlined message flow with expand button
- *   timeline: Left agent list + right detail panel
+ * Uses the chat session API for loading messages (event-sourced via Projector).
+ * Each round creates a session: study:{studyId}:round:{roundNum}
  *
  * Layout:
- *   Header: round indicator + view mode toggle
- *   Body: View-specific renderer
+ *   Header: round indicator
+ *   Body: MessageList (with round separators + scroll-to-bottom arrow)
  *         + RoundNavRail (right-edge overlay dots)
  *         + InterruptApprovalCard (when HITL pending)
  *         + StudyChatComposer (directive-only)
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, LayoutGrid, AlignLeft, GitBranch } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Loader2 } from 'lucide-react'
 import {
-  api,
   type StudyRoundSummary,
 } from '../../../../api/client'
 import { useStudyStore } from '../../../../stores/study'
@@ -27,62 +24,8 @@ import type { WidgetProps } from '../types'
 import { StudyChatComposer } from './StudyChatComposer'
 import { InterruptApprovalCard } from './InterruptApprovalCard'
 import { getAgentStyle } from '../../agentStyles'
-import { buildAgentTraces, buildCompactMessages } from '../../buildAgentTraces'
-import type { AgentTrace, StudyChatViewMode } from '../../agentTraceTypes'
-import { AgentCardView } from '../../AgentCardView'
-import { TimelineView } from '../../TimelineView'
 
-// ── View mode persistence ─────────────────────────────────────
-
-const VIEW_MODE_KEY = 'study-chat-view-mode'
-
-function loadViewMode(): StudyChatViewMode {
-  const stored = localStorage.getItem(VIEW_MODE_KEY)
-  if (stored === 'card' || stored === 'compact' || stored === 'timeline') return stored
-  return 'card'
-}
-
-function saveViewMode(mode: StudyChatViewMode) {
-  localStorage.setItem(VIEW_MODE_KEY, mode)
-}
-
-// ── View mode toggle ──────────────────────────────────────────
-
-function ViewModeToggle({
-  mode,
-  onChange,
-}: {
-  mode: StudyChatViewMode
-  onChange: (m: StudyChatViewMode) => void
-}) {
-  const buttons: Array<{ value: StudyChatViewMode; icon: typeof LayoutGrid; label: string }> = [
-    { value: 'card', icon: LayoutGrid, label: '卡片' },
-    { value: 'compact', icon: AlignLeft, label: '精简' },
-    { value: 'timeline', icon: GitBranch, label: '时间线' },
-  ]
-
-  return (
-    <div className="flex items-center gap-0.5 rounded-md border border-slate-700 bg-slate-800/50 p-0.5">
-      {buttons.map(({ value, icon: Icon, label }) => (
-        <button
-          key={value}
-          type="button"
-          onClick={() => onChange(value)}
-          title={label}
-          className={`rounded px-1.5 py-0.5 transition-colors ${
-            mode === value
-              ? 'bg-slate-700 text-slate-200'
-              : 'text-slate-500 hover:text-slate-400'
-          }`}
-        >
-          <Icon className="h-3 w-3" />
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ── SSE event → Message (for compact mode + live streaming) ───
+// ── SSE event → Message (for live streaming) ──────────────────
 
 function buildEventMessage(
   event: { type: string; message: string; timestamp: number },
@@ -225,8 +168,6 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   const currentRound = (summary?.current_round as number) ?? 1
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
-  const [viewMode, setViewMode] = useState<StudyChatViewMode>(loadViewMode)
-  const [agentTraces, setAgentTraces] = useState<AgentTrace[]>([])
   const [pendingInterrupt, setPendingInterrupt] = useState<{
     interruptId: string
     hypothesis?: string
@@ -239,12 +180,6 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
 
   const rounds: StudyRoundSummary[] = summary?.recent_rounds ?? []
 
-  // View mode change handler
-  const handleViewModeChange = useCallback((mode: StudyChatViewMode) => {
-    setViewMode(mode)
-    saveViewMode(mode)
-  }, [])
-
   // Sync selectedRound with currentRound when it changes
   useEffect(() => {
     if (currentRound > 0) {
@@ -252,36 +187,16 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     }
   }, [currentRound])
 
-  // Load agent outputs for selected round
+  // Load messages for selected round from chat session API (event-sourced)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
 
-    const studyStatus = summary?.execution_status
-    const shouldLoadHistory = studyStatus !== 'running'
+    const sessionId = `study:${studyId}:round:${selectedRound}`
 
-    api.study
-      .roundAgentOutputs(studyId, selectedRound, {
-        include_history: shouldLoadHistory,
-        history_limit: 200,
-      })
-      .then((r) => {
-        if (cancelled) return
-
-        // Build structured traces (for card + timeline views)
-        const traces = buildAgentTraces(r.agent_outputs, studyId, selectedRound)
-        setAgentTraces(traces)
-
-        // For compact view, build messages from traces
-        const compactMsgs = buildCompactMessages(traces, studyId, selectedRound)
-        const existing = Array.from(chatStore.messages.values())
-        const existingAgentIds = new Set(
-          existing.filter((m) => m.agent_id).map((m) => m.agent_id),
-        )
-        const newMsgs = compactMsgs.filter((m) => !m.agent_id || !existingAgentIds.has(m.agent_id))
-        newMsgs.forEach((m) => chatStore.addMessage(m))
-
-        setLoading(false)
+    chatStore.loadMessages(sessionId)
+      .then(() => {
+        if (!cancelled) setLoading(false)
       })
       .catch(() => {
         if (!cancelled) setLoading(false)
@@ -289,7 +204,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     return () => { cancelled = true }
   }, [studyId, selectedRound])
 
-  // Inject SSE events as system messages + agent-level events
+  // Inject SSE events as system messages + agent-level events (live streaming)
   useEffect(() => {
     if (recentEvents.length === 0) return
     const newEvents = recentEvents.slice(eventCountRef.current)
@@ -319,7 +234,6 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   useEffect(() => {
     if (prevStudyIdRef.current !== studyId) {
       chatStore.setMessages([])
-      setAgentTraces([])
       eventCountRef.current = 0
       prevStudyIdRef.current = studyId
     }
@@ -346,31 +260,13 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
               </button>
             )}
           </div>
-          <div className="ml-auto">
-            <ViewModeToggle mode={viewMode} onChange={handleViewModeChange} />
-          </div>
         </div>
 
         {/* Body */}
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
-            {/* View A: Card mode */}
-            {viewMode === 'card' && (
-              <AgentCardView traces={agentTraces} />
-            )}
-
-            {/* View B: Compact mode (existing MessageList) */}
-            {viewMode === 'compact' && (
-              <MessageList separatorKey={roundKey} scrollKey={scrollKey} />
-            )}
-
-            {/* View C: Timeline mode */}
-            {viewMode === 'timeline' && (
-              <TimelineView traces={agentTraces} />
-            )}
-
-            {/* RoundNavRail — hidden in timeline mode (has its own nav) */}
-            {viewMode !== 'timeline' && rounds.length > 1 && (
+            <MessageList separatorKey={roundKey} scrollKey={scrollKey} />
+            {rounds.length > 1 && (
               <RoundNavRail
                 rounds={rounds}
                 selectedRound={selectedRound}

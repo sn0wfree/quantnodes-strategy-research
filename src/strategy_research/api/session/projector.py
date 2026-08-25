@@ -864,8 +864,15 @@ class Projector:
             # Update content and type with the final summary
             state.messages[message_id].content = event.data.get("content", "")
             state.messages[message_id].message_type = msg_type
+            # Preserve agent_id if present in event and not yet set
+            if "agent_id" in event.data and "agent_id" not in state.messages[message_id].metadata:
+                state.messages[message_id].metadata["agent_id"] = event.data["agent_id"]
             return
         msg_seq = len(state.messages) + 1
+        metadata: Dict[str, Any] = {}
+        # Propagate agent_id from event data
+        if "agent_id" in event.data:
+            metadata["agent_id"] = event.data["agent_id"]
         state.messages[message_id] = ProjectedMessage(
             id=message_id,
             session_id=event.aggregate_id,
@@ -874,6 +881,7 @@ class Projector:
             message_type=msg_type,
             created_at=event.time_created,
             seq=msg_seq,
+            metadata=metadata,
             attempt_id=event.data.get("attempt_id"),
         )
 
@@ -892,9 +900,17 @@ class Projector:
         if not message_id:
             return None
         if message_id in state.messages:
-            return state.messages[message_id]
+            msg = state.messages[message_id]
+            # Propagate agent_id if present in event and not yet set
+            if "agent_id" in event.data and "agent_id" not in msg.metadata:
+                msg.metadata["agent_id"] = event.data["agent_id"]
+            return msg
         # Lazy-create
         msg_seq = len(state.messages) + 1
+        metadata: Dict[str, Any] = {}
+        # Propagate agent_id from event data
+        if "agent_id" in event.data:
+            metadata["agent_id"] = event.data["agent_id"]
         msg = ProjectedMessage(
             id=message_id,
             session_id=event.aggregate_id,
@@ -903,6 +919,7 @@ class Projector:
             message_type="assistant",
             created_at=event.time_created,
             seq=msg_seq,
+            metadata=metadata,
             attempt_id=event.data.get("attempt_id"),
         )
         state.messages[message_id] = msg
