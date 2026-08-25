@@ -63,10 +63,6 @@ export default function App() {
           element={<Navigate to="/dag" replace />}
         />
         <Route
-          path="/monitor"
-          element={<Navigate to="/" replace />}
-        />
-        <Route
           path="/"
           element={
             <AuthGuard>

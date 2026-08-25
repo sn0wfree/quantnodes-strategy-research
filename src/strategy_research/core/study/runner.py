@@ -453,6 +453,8 @@ class AutoresearchRunner:
                 self._emit(session, "study_paused", {
                     "study_id": sid, "round": round_num,
                     "reason": "hitl_approval",
+                    "interrupt_id": result.get("interrupt_id"),
+                    "hypothesis": result.get("hypothesis"),
                 })
                 # Poll for approval (max 10 minutes, check every 5 seconds)
                 approved = await self._wait_for_approval(sid, round_num, timeout_s=600)

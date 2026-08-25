@@ -191,6 +191,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setPendingInterrupt(null)  // Clear any stale HITL card on round switch
 
     const sessionId = `study:${studyId}:round:${selectedRound}`
 
@@ -207,7 +208,11 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   // Inject SSE events as system messages + agent-level events (live streaming)
   useEffect(() => {
     if (recentEvents.length === 0) return
-    const newEvents = recentEvents.slice(eventCountRef.current)
+    // Store prepends newest-first: [newest, ..., oldest].
+    // New events are at the front; count from the front.
+    const newCount = recentEvents.length - eventCountRef.current
+    if (newCount <= 0) return
+    const newEvents = recentEvents.slice(0, newCount)
     eventCountRef.current = recentEvents.length
 
     newEvents.forEach((event) => {
@@ -222,7 +227,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
 
       if (eventType === 'study_paused' && (event as any).reason === 'hitl_approval') {
         setPendingInterrupt({
-          interruptId: `pending:${studyId}:${selectedRound}`,
+          interruptId: (event as any).interrupt_id || `pending:${studyId}:${selectedRound}`,
           hypothesis: (event as any).hypothesis,
           message: (event as any).message || '等待审批...',
         })
@@ -234,6 +239,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   useEffect(() => {
     if (prevStudyIdRef.current !== studyId) {
       chatStore.setMessages([])
+      setPendingInterrupt(null)
       eventCountRef.current = 0
       prevStudyIdRef.current = studyId
     }

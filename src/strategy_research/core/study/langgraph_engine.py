@@ -567,7 +567,7 @@ def run_round_langgraph(
             except (IndexError, AttributeError):
                 payload = {"raw": str(interrupt_info)}
         with StudyStore() as store:
-            store.create_interrupt(
+            interrupt = store.create_interrupt(
                 study_id=sid,
                 round_num=round_num,
                 interrupt_type=payload.get("type", "novelty_gate"),
@@ -582,6 +582,7 @@ def run_round_langgraph(
             "run_name": f"round_{round_num}",
             "paused_for_approval": True,
             "study_id": sid,
+            "interrupt_id": interrupt.interrupt_id,
         }
 
     runner._emit(session, "study_phase", {

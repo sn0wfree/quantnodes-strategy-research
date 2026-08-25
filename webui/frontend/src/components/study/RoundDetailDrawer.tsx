@@ -69,7 +69,6 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
   }, [studyId, round.round_num])
 
   useEffect(() => {
-    if (diffAgainst === 0) return
     let cancelled = false
     api.study
       .roundDiff(studyId, round.round_num, diffAgainst)

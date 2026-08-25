@@ -172,8 +172,8 @@ export function StudyDetailPage() {
           title="研究任务不存在"
           description="该 study 可能已被删除，或链接不正确。"
         />
-        <Link to="/" className="text-sm text-primary-400 hover:text-primary-300 hover:underline">
-          返回聊天
+        <Link to="/study" className="text-sm text-primary-400 hover:text-primary-300 hover:underline">
+          返回研究列表
         </Link>
       </div>
     )
@@ -304,7 +304,7 @@ export function StudyDetailPage() {
           iconCls="border border-amber-500/30 bg-amber-500/10 text-amber-400"
           value={STUDY_STATUS_LABELS[status] ?? status}
           label={isDrifting ? `漂移 ×${driftCount}（需检查）` : '执行状态'}
-          valueCls={STUDY_STATUS_COLORS[status]?.split(' ')[0] ? 'text-slate-100' : 'text-slate-100'}
+          valueCls={STUDY_STATUS_COLORS[status]?.split(' ').find((c: string) => c.startsWith('text-')) ?? 'text-slate-100'}
         />
         <KpiCard
           icon={<BarChart3 className="h-4 w-4" />}
