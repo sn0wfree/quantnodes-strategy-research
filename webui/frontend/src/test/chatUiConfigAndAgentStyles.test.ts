@@ -12,7 +12,6 @@ import { describe, it, expect } from 'vitest'
 import {
   getAgentStyle,
   getCategoryStyle,
-  type AgentStyle,
 } from '../components/study/agentStyles'
 
 describe('getAgentStyle', () => {
@@ -67,7 +66,6 @@ import {
   getThinkingConfig,
   getMessageListConfig,
   getPageShellConfig,
-  type ChatUiConfig,
 } from '../components/chat/chatUiConfig'
 
 describe('getChatConfig', () => {
