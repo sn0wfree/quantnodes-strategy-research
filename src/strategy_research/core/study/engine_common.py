@@ -203,8 +203,8 @@ def ensure_study_session(
     """
     import sqlite3
 
-    conn = sqlite3.connect(str(db_path))
     try:
+        conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT user_id, COUNT(*) AS c FROM sessions "
@@ -221,4 +221,7 @@ def ensure_study_session(
     except Exception:
         logger.warning("ensure_study_session failed for %s", session_id, exc_info=True)
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
