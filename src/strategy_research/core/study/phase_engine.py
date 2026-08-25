@@ -134,74 +134,122 @@ def run_round_phases(
         engine = "dag"  # backward compat: legacy env var overrides phases
 
     if engine == "langgraph":
-        return runner._run_round_via_langgraph(
+        lg_result = runner._run_round_via_langgraph(
             path, strategy, current_state, run_dir, graph,
             session=session, sid=sid, round_num=round_num,
             directive_text=directive_text,
         )
+        # HITL approval pause — return early, runner will re-enter on resume
+        if lg_result.get("paused_for_approval"):
+            return lg_result
 
-    # Phase 1: researcher
-    runner._emit(session, "study_phase", {
-        "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
-    })
-    researcher_result = run_researcher_phase(
-        path, strategy, current_state, run_dir,
-        session_id=session, run_name=run_name,
-        behavior=study.behavior, max_retries=3,
-        max_iterations=SR_AGENT_MAX_ITER,
-        directives=directive_text,
-        lazy_detection_interval=study.lazy_detection_interval,
-        keep_recent=study.keep_recent, round_num=round_num,
-        runs_dir=runs_dir,
-        loop_strategy=runner._loop_strategy,
-    )
-    runner._emit(session, "study_phase", {
-        "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
-    })
-    researcher_output = researcher_result["researcher_output"]
+        # Map langgraph result to the variables expected by the
+        # shared finalization pipeline below.
+        researcher_output = lg_result.get("researcher_output", {})
+        strategist_output = lg_result.get("strategist_output", {})
+        metrics = lg_result.get("metrics", {})
+        verdict = lg_result.get("verdict", "discard")
+        decision = lg_result.get("decision")
+        backtest_error = lg_result.get("backtest_error")
 
-    hypothesis = researcher_output.get("hypothesis", "")
-    predicted_affected = researcher_output.get("predicted_affected") or [t["name"] for t in metric_targets]
-    if not _novelty_gate(runner, round_num, hypothesis, predicted_affected):
-        return {"round": round_num, "run_name": run_name, "aborted": True,
-                "reason": "novelty_rejected"}
+        agent_outputs = {"researcher": researcher_output}
+        for _k in (
+            "data_quality_output", "factor_analyst_output",
+            "strategist_output", "portfolio_construction_output",
+            "risk_controller_output", "attribution_analyst_output",
+            "anti_overfit_analyst_output", "backtest_diagnostics_output",
+        ):
+            if _k in lg_result:
+                agent_outputs[_k] = lg_result[_k]
 
-    # Phase 2: execution
-    runner._emit(session, "study_phase", {
-        "study_id": sid, "round": round_num, "phase": "execution", "status": "started",
-    })
-    exec_result = _run_execution_with_parse_retry(
-        runner, path, strategy, current_state, researcher_output, run_dir,
-        session=session, run_name=run_name,
-        results_tsv=results_tsv, round_num=round_num,
-    )
-    runner._emit(session, "study_phase", {
-        "study_id": sid, "round": round_num, "phase": "execution", "status": "done",
-    })
-    metrics = exec_result["metrics"]
-    strategist_output = exec_result["strategist_output"]
+        hypothesis = researcher_output.get("hypothesis", "")
+        predicted_affected = (
+            researcher_output.get("predicted_affected")
+            or [t["name"] for t in metric_targets]
+        )
 
-    # Phase 3: evaluation
-    runner._emit(session, "study_phase", {
-        "study_id": sid, "round": round_num, "phase": "evaluation", "status": "started",
-    })
-    eval_result = run_evaluation_phase(
-        path, strategy, exec_result["backtest_result"], metrics, run_dir,
-        behavior=study.behavior, max_retries=3,
-        max_iterations=SR_AGENT_MAX_ITER,
-        loop_strategy=runner._loop_strategy,
-    )
-    runner._emit(session, "study_phase", {
-        "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
-    })
-    verdict = eval_result["verdict"]
+        # Shim dicts so finalization references like
+        # eval_result["decision"] and exec_result.get("backtest_error")
+        # resolve without AttributeError.
+        eval_result = {"decision": decision, "aoa_llm_verdict": lg_result.get("aoa_llm_verdict")}
+        exec_result = {"backtest_error": backtest_error}
 
-    # ── guidance gates hard check ────────────────────────────
+    else:
+        # Phase 1: researcher
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
+        })
+        researcher_result = run_researcher_phase(
+            path, strategy, current_state, run_dir,
+            session_id=session, run_name=run_name,
+            behavior=study.behavior, max_retries=3,
+            max_iterations=SR_AGENT_MAX_ITER,
+            directives=directive_text,
+            lazy_detection_interval=study.lazy_detection_interval,
+            keep_recent=study.keep_recent, round_num=round_num,
+            runs_dir=runs_dir,
+            loop_strategy=runner._loop_strategy,
+        )
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
+        })
+        researcher_output = researcher_result["researcher_output"]
+
+        hypothesis = researcher_output.get("hypothesis", "")
+        predicted_affected = researcher_output.get("predicted_affected") or [t["name"] for t in metric_targets]
+        if not _novelty_gate(runner, round_num, hypothesis, predicted_affected):
+            return {"round": round_num, "run_name": run_name, "aborted": True,
+                    "reason": "novelty_rejected"}
+
+        # Phase 2: execution
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "execution", "status": "started",
+        })
+        exec_result = _run_execution_with_parse_retry(
+            runner, path, strategy, current_state, researcher_output, run_dir,
+            session=session, run_name=run_name,
+            results_tsv=results_tsv, round_num=round_num,
+        )
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "execution", "status": "done",
+        })
+        metrics = exec_result["metrics"]
+        strategist_output = exec_result["strategist_output"]
+
+        # Phase 3: evaluation
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "evaluation", "status": "started",
+        })
+        eval_result = run_evaluation_phase(
+            path, strategy, exec_result["backtest_result"], metrics, run_dir,
+            behavior=study.behavior, max_retries=3,
+            max_iterations=SR_AGENT_MAX_ITER,
+            loop_strategy=runner._loop_strategy,
+        )
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
+        })
+        verdict = eval_result["verdict"]
+
+        agent_outputs = {
+            "researcher": researcher_output,
+            **{k: exec_result.get(k) for k in (
+                "data_quality_output", "factor_analyst_output",
+                "strategist_output", "portfolio_construction_output",
+            )},
+            **{k: eval_result.get(k) for k in (
+                "risk_controller_output", "attribution_analyst_output",
+                "anti_overfit_analyst_output", "backtest_diagnostics_output",
+            )},
+        }
+        backtest_error = exec_result.get("backtest_error")
+
+    # ── guidance gates hard check (shared) ────────────────────
     gate_violations = _check_guidance_gates(guidance, metrics)
     if gate_violations:
         verdict = "discard"
 
-    # E2 completion semantics
+    # E2 completion semantics (shared)
     e2_passed = bool(
         study.metric_targets
         and meets_metric_targets(metrics, study.metric_targets)
@@ -214,17 +262,6 @@ def run_round_phases(
         runs_dir, run_name, verdict,
         round_num=round_num, results_tsv=results_tsv,
     )
-    agent_outputs = {
-        "researcher": researcher_output,
-        **{k: exec_result.get(k) for k in (
-            "data_quality_output", "factor_analyst_output",
-            "strategist_output", "portfolio_construction_output",
-        )},
-        **{k: eval_result.get(k) for k in (
-            "risk_controller_output", "attribution_analyst_output",
-            "anti_overfit_analyst_output", "backtest_diagnostics_output",
-        )},
-    }
     summary = generate_run_summary(agent_outputs, metrics, verdict, round_num, previous_summary)
     summary["acceptance_decision"] = eval_result["decision"].to_dict()
     save_run_summary(run_dir, summary)
@@ -310,7 +347,7 @@ def run_round_phases(
         "metrics": metrics, "verdict": verdict,
         "decision": eval_result["decision"].to_dict(),
         "agent_outputs": agent_outputs, "summary": summary,
-        "backtest_error": exec_result.get("backtest_error"),
+        "backtest_error": backtest_error,
         "passed_now": passed_now,
         "manifest": manifest,
         "state": state,
