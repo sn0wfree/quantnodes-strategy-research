@@ -197,3 +197,29 @@ def test_resume_calls_compiler_with_correct_thread_id(mock_build, env):
     assert config is not None
     thread_id = config.get("configurable", {}).get("thread_id", "")
     assert thread_id == f"{sid}:r3", f"thread_id mismatch: {thread_id}"
+
+
+@patch("strategy_research.core.study.langgraph_engine.build_langgraph")
+def test_resume_falls_back_to_fresh_run_when_no_checkpointer(mock_build, env):
+    """When _get_checkpointer returns None, resume_round_langgraph
+    falls back to calling run_round_langgraph for a fresh run."""
+    runner, compiled, sid, run_dir = _make_resume_env(env)
+    mock_build.return_value = compiled
+
+    with patch(
+        "strategy_research.core.study.langgraph_engine._get_checkpointer",
+        return_value=None,
+    ), patch(
+        "strategy_research.core.study.langgraph_engine.run_round_langgraph",
+    ) as mock_run_fresh:
+        mock_run_fresh.return_value = {"verdict": "keep", "agent_outputs": {}}
+        result = resume_round_langgraph(
+            runner=runner, path=env, strategy="demo",
+            current_state={}, run_dir=run_dir,
+            graph=MagicMock(), session=sid, sid=sid,
+            round_num=1, directive_text=None,
+        )
+
+    # Must have fallen back to run_round_langgraph
+    mock_run_fresh.assert_called_once()
+    assert result["verdict"] == "keep"
