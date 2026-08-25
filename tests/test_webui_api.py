@@ -315,6 +315,7 @@ class TestMessages:
         assert m["parts"] == parts
 
     def test_delete_session_cascades_messages(self, client):
+        """Soft-delete preserves messages (no CASCADE)."""
         from strategy_research.api.routers.web_session import persist_message
         sid = self._create_session(client)
         persist_message(session_id=sid, role="user", content="msg1")
@@ -322,15 +323,48 @@ class TestMessages:
         # Verify 2 messages exist
         res = client.get(f"/api/chat/session/{sid}/messages")
         assert res.json()["total"] == 2
-        # Delete session
+        # Delete session (soft-delete)
         client.delete(f"/api/chat/session/{sid}")
-        # Messages should be gone
+        # Messages should still be there (soft delete preserves them)
         from strategy_research.api.routers.web_session import _get_db
         conn = _get_db()
         count = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE session_id = ?", (sid,)
         ).fetchone()["c"]
-        assert count == 0
+        assert count == 2
+
+    def test_soft_delete_session_hidden_from_list(self, client):
+        """Soft-deleted session is hidden from list_sessions default view."""
+        res = client.post("/api/chat/session", json={"title": "To Hide"})
+        sid = res.json()["id"]
+        # Verify it appears in list
+        res = client.get("/api/chat/session")
+        ids = [s["id"] for s in res.json()["sessions"]]
+        assert sid in ids
+        # Soft-delete
+        client.delete(f"/api/chat/session/{sid}")
+        # Should be hidden from default list
+        res = client.get("/api/chat/session")
+        ids = [s["id"] for s in res.json()["sessions"]]
+        assert sid not in ids
+
+    def test_soft_delete_session_visible_with_include_archived(self, client):
+        """Soft-deleted session visible when include_archived=True."""
+        res = client.post("/api/chat/session", json={"title": "Archived"})
+        sid = res.json()["id"]
+        client.delete(f"/api/chat/session/{sid}")
+        res = client.get("/api/chat/session?include_archived=true")
+        ids = [s["id"] for s in res.json()["sessions"]]
+        assert sid in ids
+
+    def test_soft_delete_session_still_readable(self, client):
+        """Soft-deleted session is still accessible via GET."""
+        res = client.post("/api/chat/session", json={"title": "Readable"})
+        sid = res.json()["id"]
+        client.delete(f"/api/chat/session/{sid}")
+        res = client.get(f"/api/chat/session/{sid}")
+        assert res.status_code == 200
+        assert res.json()["archived"] is True
 
     def test_messages_pagination(self, client):
         from strategy_research.api.routers.web_session import persist_message

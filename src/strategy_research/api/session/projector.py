@@ -15,6 +15,7 @@ import dataclasses
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -263,6 +264,13 @@ class Projector:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
+        # Reuse a single connection across flush calls to avoid the
+        # overhead of creating a new connection every time and to
+        # prevent "database is locked" errors from concurrent writers.
+        self._conn: sqlite3.Connection | None = None
+        # Serialize concurrent flush calls so two threads never
+        # interleave their BEGIN/COMMIT on the same connection.
+        self._flush_lock = threading.Lock()
         # Handler dispatch table: event_type → handler function
         self._handlers: Dict[str, Callable[[EventV2, ProjectedSession], None]] = {
             EventType.MESSAGE_RECEIVED: self._on_message_received,
@@ -311,6 +319,18 @@ class Projector:
         # function. Entries are invalidated on session deletion.
         # See docs/projector-incremental.md.
         self._cache: Dict[str, ProjectedSession] = {}
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Return a reusable connection, creating one on first call.
+
+        ``check_same_thread=False`` is safe here: the ``_flush_lock``
+        ensures only one thread uses the connection at a time.
+        """
+        if self._conn is None:
+            self._conn = sqlite3.connect(
+                str(self.db_path), check_same_thread=False,
+            )
+        return self._conn
 
     # ── Snapshot support (P0-1 B2) ─────────────────────────────────
 
@@ -586,121 +606,90 @@ class Projector:
         msg_rows = state.to_message_rows() if full else None
         part_rows = state.to_part_rows() if full else None
 
-        conn = sqlite3.connect(str(self.db_path))
-        try:
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("BEGIN")
+        with self._flush_lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("BEGIN")
 
-            if full:
-                # ── Full flush: UPSERT everything ──────────────
-                # Note: message.id is the table's PRIMARY KEY.
-                # Production message ids are UUIDs (unique per call),
-                # so INSERT OR REPLACE works correctly for the
-                # standard case. For tests with colliding ids across
-                # sessions, the previous code had a cross-session
-                # overwrite bug; tests should use unique ids per
-                # session to avoid this.
-                #
-                # metadata_json: the projection doesn't carry
-                # metadata, so a plain REPLACE would NULL out
-                # model/run_id/etc. Use ON CONFLICT DO UPDATE that
-                # preserves the existing metadata when the incoming
-                # row has none.
-                msg_ids = {row["id"] for row in msg_rows}
-                for row in msg_rows:
-                    self._upsert_message(conn, row)
+                if full:
+                    # ── Full flush: UPSERT everything ──────────────
+                    msg_ids = {row["id"] for row in msg_rows}
+                    for row in msg_rows:
+                        self._upsert_message(conn, row)
 
-                # B5: Delete messages that no longer exist in the
-                # projection (e.g., after compact.ended removed them).
-                # Without this, old messages linger in the DB and the
-                # invariant breaks.
-                #
-                # Safety guard: if projection is empty but DB has
-                # messages, event_log may be incomplete (e.g. session
-                # created before event-sourcing). Skip DELETE to
-                # prevent silent data loss.
-                if msg_ids:
-                    placeholders = ",".join("?" * len(msg_ids))
-                    conn.execute(
-                        f"DELETE FROM messages "
-                        f"WHERE session_id = ? AND id NOT IN ({placeholders})",
-                        (state.session_id, *msg_ids),
-                    )
-                else:
-                    existing_count = conn.execute(
-                        "SELECT COUNT(*) FROM messages WHERE session_id = ?",
-                        (state.session_id,),
-                    ).fetchone()[0]
-                    if existing_count > 0:
-                        logger.warning(
-                            "flush: projection empty but DB has %d messages "
-                            "for session %s — skipping DELETE "
-                            "(possible event_log gap)",
-                            existing_count, state.session_id,
+                    if msg_ids:
+                        placeholders = ",".join("?" * len(msg_ids))
+                        conn.execute(
+                            f"DELETE FROM messages "
+                            f"WHERE session_id = ? AND id NOT IN ({placeholders})",
+                            (state.session_id, *msg_ids),
+                        )
+                    else:
+                        existing_count = conn.execute(
+                            "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+                            (state.session_id,),
+                        ).fetchone()[0]
+                        if existing_count > 0:
+                            logger.warning(
+                                "flush: projection empty but DB has %d messages "
+                                "for session %s — skipping DELETE "
+                                "(possible event_log gap)",
+                                existing_count, state.session_id,
+                            )
+                        else:
+                            conn.execute(
+                                "DELETE FROM messages WHERE session_id = ?",
+                                (state.session_id,),
+                            )
+
+                    # UPSERT message_parts
+                    for row in part_rows:
+                        self._insert_part(conn, row)
+
+                    # Delete parts that no longer exist (session scope)
+                    part_ids = {r["id"] for r in part_rows}
+                    if part_ids:
+                        placeholders = ",".join("?" * len(part_ids))
+                        conn.execute(
+                            f"DELETE FROM message_parts "
+                            f"WHERE session_id = ? AND id NOT IN ({placeholders})",
+                            (state.session_id, *part_ids),
                         )
                     else:
                         conn.execute(
-                            "DELETE FROM messages WHERE session_id = ?",
+                            "DELETE FROM message_parts WHERE session_id = ?",
                             (state.session_id,),
                         )
-
-                # UPSERT message_parts
-                for row in part_rows:
-                    self._insert_part(conn, row)
-
-                # Delete parts that no longer exist (session scope)
-                part_ids = {r["id"] for r in part_rows}
-                if part_ids:
-                    placeholders = ",".join("?" * len(part_ids))
-                    conn.execute(
-                        f"DELETE FROM message_parts "
-                        f"WHERE session_id = ? AND id NOT IN ({placeholders})",
-                        (state.session_id, *part_ids),
-                    )
                 else:
-                    conn.execute(
-                        "DELETE FROM message_parts WHERE session_id = ?",
-                        (state.session_id,),
-                    )
-            else:
-                # ── Delta flush: only touched messages ──────────
-                # Each touched message is UPSERTed and its parts
-                # rewritten (DELETE + INSERT, idempotent). Messages
-                # are never deleted in the delta path — only compact
-                # events remove messages, and those signal "*".
-                for mid in sorted(touched):
-                    msg = state.messages.get(mid)
-                    if msg is None:
-                        continue
-                    self._upsert_message(conn, self._message_row(msg))
-                    conn.execute(
-                        "DELETE FROM message_parts WHERE message_id = ?",
-                        (mid,),
-                    )
-                    for row in self._part_rows(msg):
-                        self._insert_part(conn, row)
+                    # ── Delta flush: only touched messages ──────────
+                    for mid in sorted(touched):
+                        msg = state.messages.get(mid)
+                        if msg is None:
+                            continue
+                        self._upsert_message(conn, self._message_row(msg))
+                        conn.execute(
+                            "DELETE FROM message_parts WHERE message_id = ?",
+                            (mid,),
+                        )
+                        for row in self._part_rows(msg):
+                            self._insert_part(conn, row)
 
-            # P0-1 B2: snapshot persistence. Inside the same transaction
-            # so the snapshot is consistent with the messages +
-            # message_parts rows that were just UPSERTed. Triggered
-            # every ``snapshot_interval`` events so cold-start cost
-            # stays bounded (200 events = ~1s typical work avoided).
-            if (
-                snapshot_interval > 0
-                and state.last_seq > 0
-                and state.last_seq % snapshot_interval == 0
-            ):
-                self._save_snapshot(conn, state)
+                # P0-1 B2: snapshot persistence
+                if (
+                    snapshot_interval > 0
+                    and state.last_seq > 0
+                    and state.last_seq % snapshot_interval == 0
+                ):
+                    self._save_snapshot(conn, state)
 
-            conn.execute("COMMIT")
-        except Exception:
-            try:
-                conn.execute("ROLLBACK")
+                conn.execute("COMMIT")
             except Exception:
-                pass
-            raise
-        finally:
-            conn.close()
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
 
     @staticmethod
     def _upsert_message(conn: sqlite3.Connection, row: Dict[str, Any]) -> None:

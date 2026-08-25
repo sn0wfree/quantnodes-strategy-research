@@ -941,13 +941,17 @@ async def update_session(session_id: str, body: WebSessionUpdate, request: Reque
 
 @router.delete("/{session_id}")
 async def delete_session(session_id: str, request: Request):
-    """Delete a session. CASCADE removes its messages and FTS rows."""
+    """Soft-delete a session (mark as archived).
+
+    Messages and event_log are preserved so the projector can continue
+    flushing and SSE stays functional for active studies.  The session
+    disappears from ``list_sessions`` (which filters ``archived=0``)
+    but remains readable via ``GET /{session_id}``.
+    """
     user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
     _fetch_session_owned(conn, session_id, user_id)
-    # messages FK CASCADE handles the delete; explicit delete also fine
-    conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-    conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    conn.execute("UPDATE sessions SET archived = 1 WHERE id = ?", (session_id,))
     conn.commit()
     _invalidate_projection(session_id, request)
     return {"status": "ok", "deleted_id": session_id}
