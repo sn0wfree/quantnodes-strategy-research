@@ -14,6 +14,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
+  api,
   type StudyRoundSummary,
 } from '../../../../api/client'
 import { useStudyStore } from '../../../../stores/study'
@@ -110,6 +111,40 @@ function roundKey(msg: Message): string | null {
   return null
 }
 
+// ── Round discovery fallback ──────────────────────────────────
+
+/**
+ * Extract round numbers from chat session ids of the form
+ * `study:{studyId}:round:{N}`. Returns ascending unique numbers.
+ *
+ * Fallback for studies whose `study_rounds` DB rows are missing (e.g.
+ * rounds crashed before finalization) — the chat sessions still
+ * exist, so the round nav rail + message loading can recover from
+ * them instead of rendering an empty page.
+ */
+export function discoverRoundSessions(
+  sessions: { id: string }[],
+  studyId: string,
+): number[] {
+  const prefix = `study:${studyId}:round:`
+  const rounds = sessions
+    .filter((s) => s.id.startsWith(prefix))
+    .map((s) => parseInt(s.id.slice(prefix.length), 10))
+    .filter((n) => Number.isInteger(n) && n > 0)
+  return [...new Set(rounds)].sort((a, b) => a - b)
+}
+
+/** Build minimal round summaries for the nav rail from round numbers. */
+export function toRoundSummaries(roundNums: number[]): StudyRoundSummary[] {
+  return roundNums.map((n) => ({
+    round_num: n,
+    run_name: '',
+    metrics: null,
+    verdict: null,
+    created_at: '',
+  }))
+}
+
 // ── RoundNavRail ──────────────────────────────────────────────
 
 function RoundNavRail({
@@ -177,8 +212,39 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   const chatStore = useChatStore()
   const eventCountRef = useRef(0)
   const prevStudyIdRef = useRef<string | null>(null)
+  // Round discovery fallback: populated when study_rounds has no rows
+  // but chat sessions for the rounds exist (crashed before finalize).
+  const [discoveredRounds, setDiscoveredRounds] = useState<number[]>([])
 
-  const rounds: StudyRoundSummary[] = summary?.recent_rounds ?? []
+  const dbRounds: StudyRoundSummary[] = summary?.recent_rounds ?? []
+  const rounds: StudyRoundSummary[] = dbRounds.length > 0
+    ? dbRounds
+    : toRoundSummaries(discoveredRounds)
+
+  // Fallback discovery: only when the DB rounds list is empty. Scans
+  // the chat session list for `study:{studyId}:round:N` sessions and
+  // jumps to the latest discovered round (current_round may point at
+  // a session that no longer exists).
+  useEffect(() => {
+    if (dbRounds.length > 0) return
+    let cancelled = false
+    api
+      .get<{ sessions: { id: string }[] }>('/chat/session')
+      .then((res) => {
+        if (cancelled) return
+        const found = discoverRoundSessions(res.sessions ?? [], studyId)
+        if (found.length > 0) {
+          setDiscoveredRounds(found)
+          setSelectedRound((prev) =>
+            found.includes(prev) ? prev : found[found.length - 1],
+          )
+        }
+      })
+      .catch(() => {
+        /* best-effort — page just shows empty state */
+      })
+    return () => { cancelled = true }
+  }, [studyId, dbRounds.length])
 
   // Sync selectedRound with currentRound when it changes
   useEffect(() => {

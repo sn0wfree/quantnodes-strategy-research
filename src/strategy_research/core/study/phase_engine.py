@@ -146,6 +146,10 @@ def run_round_phases(
         # Map langgraph result to the variables expected by the
         # shared finalization pipeline below.
         researcher_output = lg_result.get("researcher_output", {})
+        # Defense: researcher may return a plain string on max_iter —
+        # never let a non-dict reach the .get() calls below.
+        if not isinstance(researcher_output, dict):
+            researcher_output = {}
         strategist_output = lg_result.get("strategist_output", {})
         metrics = lg_result.get("metrics", {})
         verdict = lg_result.get("verdict", "discard")
@@ -194,6 +198,9 @@ def run_round_phases(
             "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
         })
         researcher_output = researcher_result["researcher_output"]
+        # Defense: same non-dict guard as the langgraph branch above.
+        if not isinstance(researcher_output, dict):
+            researcher_output = {}
 
         hypothesis = researcher_output.get("hypothesis", "")
         predicted_affected = researcher_output.get("predicted_affected") or [t["name"] for t in metric_targets]

@@ -1154,6 +1154,20 @@ class AutoresearchRunner:
         result schema that downstream callers consume.
         """
         researcher_output = agent_outputs.get("researcher") or {}
+        # An agent that hits max_iterations yields a plain-text answer
+        # ("Reached max_iterations=... without a final answer.") instead
+        # of the expected JSON action object. Parse JSON strings when
+        # possible; fall back to {} so downstream .get() calls don't
+        # crash with AttributeError (same pattern as backtest/decide
+        # handling below).
+        if isinstance(researcher_output, str):
+            try:
+                parsed = json.loads(researcher_output)
+                researcher_output = parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                researcher_output = {}
+        elif not isinstance(researcher_output, dict):
+            researcher_output = {}
         backtest_raw = agent_outputs.get("backtest") or {}
         if isinstance(backtest_raw, str):
             try:

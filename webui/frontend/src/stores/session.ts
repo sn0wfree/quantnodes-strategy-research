@@ -147,10 +147,11 @@ export const useSessionStore = create<SessionState>()(
       loadSessions: async () => {
         try {
           const res = await api.get<{ sessions: Session[] }>('/chat/session')
-          // Filter out study round sessions (study:*) — they belong to the
-          // StudyChat widget, not the main chat sidebar.
+          // Filter out study sessions — both bare study ids (study_*)
+          // and round sessions (study:*) belong to the study detail
+          // page's StudyChat widget, not the main chat sidebar.
           const filtered = (res.sessions ?? []).filter(
-            (s) => !s.id.startsWith('study:'),
+            (s) => !s.id.startsWith('study'),
           )
           set({ sessions: filtered })
         } catch (err) {

@@ -472,7 +472,13 @@ class Projector:
 
     @staticmethod
     def _message_row(msg: ProjectedMessage) -> Dict[str, Any]:
-        """Serialize a single message to a messages-table row."""
+        """Serialize a single message to a messages-table row.
+
+        Includes ``metadata_json`` so delta flushes carry agent_id (and
+        any other metadata) — matching the full-flush path
+        (``to_message_rows``). Without this, the first delta INSERT
+        writes NULL and the UPSERT's COALESCE keeps it NULL forever.
+        """
         return {
             "id": msg.id,
             "session_id": msg.session_id,
@@ -481,6 +487,8 @@ class Projector:
             "message_type": msg.message_type,
             "created_at": msg.created_at,
             "seq": msg.seq,
+            "metadata_json": json.dumps(msg.metadata, ensure_ascii=False)
+            if msg.metadata else None,
         }
 
     @staticmethod

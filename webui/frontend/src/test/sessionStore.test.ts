@@ -112,6 +112,21 @@ describe('useSessionStore — async actions', () => {
     expect(useSessionStore.getState().sessions.length).toBe(2)
   })
 
+  it('loadSessions filters out study sessions (both prefixes)', async () => {
+    // Round sessions (study:*) and bare study sessions (study_*) belong
+    // to the study detail page, never the chat sidebar.
+    mockedApi.get.mockResolvedValueOnce({
+      sessions: [
+        makeSession('a'),
+        makeSession('study:study_x:round:3', { title: 'Study x Round 3' }),
+        makeSession('study_x', { title: 'Study: study_x' }),
+      ],
+    })
+    await useSessionStore.getState().loadSessions()
+    const ids = useSessionStore.getState().sessions.map((s) => s.id)
+    expect(ids).toEqual(['a'])
+  })
+
   it('createNewSession adds to open + current', async () => {
     mockedApi.post.mockResolvedValueOnce(makeSession('new', { title: '我的会话' }))
     const sess = await useSessionStore.getState().createNewSession('我的会话')
