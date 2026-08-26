@@ -39,12 +39,91 @@ const GENERIC_STYLE = { bg: 'bg-slate-800/60', text: 'text-slate-300', label: 'J
 /** Fields used as "hypothesis"-equivalent (highlighted above the field list). */
 const HYPOTHESIS_LIKE = ['hypothesis', 'interpretation', 'summary', 'description', 'reason', 'message']
 
+/**
+ * Core (decision/status) fields always shown by default — these carry the
+ * final conclusion and shouldn't require expanding the card.
+ *   - verdict / risk_passed / overfit_passed: pass/fail boolean
+ *   - risk_rating / status / level: state/level enum
+ *   - recommendation / decision / next_action: action advice
+ *   - thresholds_breached / blockers / open_required_items: why
+ */
+const KEY_FIELDS = [
+  'verdict', 'risk_passed', 'overfit_passed',
+  'risk_rating', 'status', 'level',
+  'recommendation', 'decision', 'next_action',
+  'thresholds_breached', 'blockers', 'open_required_items',
+]
+
+/** Chinese label overrides for the key fields. */
+const KEY_FIELD_LABELS: Record<string, string> = {
+  verdict: '结论',
+  risk_passed: '是否通过',
+  overfit_passed: '是否过拟合',
+  risk_rating: '风险评级',
+  status: '状态',
+  level: '等级',
+  recommendation: '建议',
+  decision: '决策',
+  next_action: '下一步',
+  thresholds_breached: '触发规则',
+  blockers: '阻塞原因',
+  open_required_items: '待办项',
+}
+
 function pickHypothesis(json: Record<string, unknown>): string | undefined {
   for (const key of HYPOTHESIS_LIKE) {
     const v = json[key]
     if (typeof v === 'string' && v.trim().length > 0) return v
   }
   return undefined
+}
+
+function labelOf(key: string): string {
+  return KEY_FIELD_LABELS[key] ?? key
+}
+
+function renderValue(v: unknown): React.ReactNode {
+  if (typeof v === 'boolean') {
+    return v
+      ? <span className="text-emerald-400 font-medium">✓</span>
+      : <span className="text-rose-400 font-medium">✗</span>
+  }
+  if (typeof v === 'number') {
+    return <span className="font-mono text-slate-200">{String(v)}</span>
+  }
+  if (typeof v === 'string') {
+    const s = v
+    if (s.length <= 80) {
+      return <span className="text-slate-200">{s}</span>
+    }
+    // Long string: show inline, full text on hover
+    return (
+      <span className="text-slate-200" title={s}>
+        {s.slice(0, 200)}
+        {s.length > 200 ? '…' : ''}
+      </span>
+    )
+  }
+  if (Array.isArray(v)) {
+    if (v.length === 0) return <span className="text-slate-500">[]</span>
+    // For small string arrays, join; otherwise render as compact list
+    const allStrings = v.every((x) => typeof x === 'string')
+    if (allStrings && v.length <= 4) {
+      const totalLen = v.reduce((s, x) => s + (x as string).length, 0)
+      if (totalLen <= 200) {
+        return <span className="text-slate-200">{(v as string[]).join(' · ')}</span>
+      }
+    }
+    return (
+      <span className="text-slate-300 font-mono text-[11px]">
+        [{v.length} 项]
+      </span>
+    )
+  }
+  if (v && typeof v === 'object') {
+    return <span className="text-slate-400 font-mono">{'{…}'}</span>
+  }
+  return <span className="text-slate-500">{String(v ?? 'null')}</span>
 }
 
 export function JsonActionCard({ action, hypothesis, fullJson }: JsonActionCardProps) {
@@ -54,8 +133,14 @@ export function JsonActionCard({ action, hypothesis, fullJson }: JsonActionCardP
     ? ACTION_STYLES[action!]
     : (action ? { bg: 'bg-slate-700/40', text: 'text-slate-300', label: action } : GENERIC_STYLE)
   const hyp = hypothesis ?? (isActionMode ? undefined : pickHypothesis(fullJson))
+
+  // Collect core (KEY_FIELDS) entries present in the JSON
+  const keyEntries = KEY_FIELDS
+    .filter((k) => k in fullJson)
+    .map((k) => [k, fullJson[k]] as const)
+
   const skipKeys = new Set(['action', 'hypothesis', ...HYPOTHESIS_LIKE])
-  const extraFields = Object.keys(fullJson).filter((k) => !skipKeys.has(k))
+  const extraFields = Object.keys(fullJson).filter((k) => !skipKeys.has(k) && !KEY_FIELDS.includes(k))
 
   return (
     <div className="my-1 rounded border border-slate-700/50 bg-slate-900/40 text-[12px] leading-relaxed overflow-hidden">
@@ -75,6 +160,20 @@ export function JsonActionCard({ action, hypothesis, fullJson }: JsonActionCardP
       {hyp && (
         <div className="px-3 py-2 text-slate-200 whitespace-pre-wrap">
           {hyp}
+        </div>
+      )}
+
+      {/* Core decision/status fields — always visible */}
+      {keyEntries.length > 0 && (
+        <div className="px-3 py-2 border-t border-slate-700/30 space-y-1.5">
+          {keyEntries.map(([k, v]) => (
+            <div key={k} className="flex items-baseline gap-2 leading-relaxed">
+              <span className="shrink-0 text-[11px] text-slate-500 min-w-20 text-right">
+                {labelOf(k)}:
+              </span>
+              <div className="min-w-0 flex-1 break-words">{renderValue(v)}</div>
+            </div>
+          ))}
         </div>
       )}
 

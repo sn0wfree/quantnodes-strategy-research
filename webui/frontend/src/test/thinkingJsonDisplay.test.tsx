@@ -5,11 +5,15 @@
  * 3. parseJsonAction JSON detection
  */
 import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import {
   splitTextIncremental,
   shouldSplitInline,
 } from '../utils/thinkingParsers/incremental'
-import { parseStructuredContent } from '../components/chat/JsonActionCard'
+import {
+  parseStructuredContent,
+  JsonActionCard,
+} from '../components/chat/JsonActionCard'
 
 describe('splitTextIncremental edge cases', () => {
   it('handles closed <think> tags correctly', () => {
@@ -171,6 +175,105 @@ describe('shouldSplitInline guard', () => {
     expect(shouldSplitInline(null)).toBe(false)
     expect(shouldSplitInline(undefined)).toBe(false)
     expect(shouldSplitInline('')).toBe(false)
+  })
+})
+
+describe('JsonActionCard core field display', () => {
+  it('shows verdict and recommendation in Chinese by default', () => {
+    render(
+      <JsonActionCard
+        fullJson={{
+          verdict: 'discard',
+          overfit_passed: false,
+          recommendation: 'BLOCK this round',
+          details: { foo: 'bar' },
+        }}
+      />,
+    )
+    // Chinese labels should be visible
+    expect(screen.getByText('结论:')).toBeInTheDocument()
+    expect(screen.getByText('是否过拟合:')).toBeInTheDocument()
+    expect(screen.getByText('建议:')).toBeInTheDocument()
+    // Values
+    expect(screen.getByText('discard')).toBeInTheDocument()
+    expect(screen.getByText('BLOCK this round')).toBeInTheDocument()
+  })
+
+  it('renders boolean false with ✗ and true with ✓', () => {
+    const { container: c1 } = render(
+      <JsonActionCard fullJson={{ risk_passed: false }} />,
+    )
+    expect(c1.textContent).toContain('✗')
+    expect(c1.textContent).toContain('是否通过:')
+
+    const { container: c2 } = render(
+      <JsonActionCard fullJson={{ risk_passed: true }} />,
+    )
+    expect(c2.textContent).toContain('✓')
+  })
+
+  it('shows risk_rating and status with Chinese labels', () => {
+    render(
+      <JsonActionCard
+        fullJson={{
+          risk_rating: 'Red',
+          status: 'degraded',
+          thresholds_breached: ['BACKTEST_NOT_RUN', 'GOAL_STALL'],
+        }}
+      />,
+    )
+    expect(screen.getByText('风险评级:')).toBeInTheDocument()
+    expect(screen.getByText('Red')).toBeInTheDocument()
+    expect(screen.getByText('状态:')).toBeInTheDocument()
+    expect(screen.getByText('degraded')).toBeInTheDocument()
+    expect(screen.getByText('触发规则:')).toBeInTheDocument()
+    expect(screen.getByText(/BACKTEST_NOT_RUN · GOAL_STALL/)).toBeInTheDocument()
+  })
+
+  it('excludes core fields from the "其他字段" count', () => {
+    render(
+      <JsonActionCard
+        fullJson={{
+          verdict: 'discard',
+          risk_rating: 'Red',
+          var_95: 0.05,           // ← not core, should be in "其他"
+          weights: { A: 0.5 },    // ← not core, should be in "其他"
+        }}
+      />,
+    )
+    // Only 2 fields should be in "其他字段" (var_95 + weights)
+    expect(screen.getByText('其他字段 (2)')).toBeInTheDocument()
+  })
+
+  it('puts non-key fields into "其他字段" section, not as labeled rows', () => {
+    // custom_metric is not in KEY_FIELDS, so it goes into the collapsible
+    // "其他字段" section instead of being shown as a labeled key.
+    render(<JsonActionCard fullJson={{ custom_metric: 'value' }} />)
+    // Only 1 extra field in the collapsible section
+    expect(screen.getByText('其他字段 (1)')).toBeInTheDocument()
+  })
+
+  it('truncates very long string values with hover title', () => {
+    const longStr = 'x'.repeat(500)
+    render(<JsonActionCard fullJson={{ thresholds_breached: longStr }} />)
+    // The element with title attribute should exist
+    const el = document.querySelector('[title]')
+    expect(el?.getAttribute('title')).toBe(longStr)
+  })
+
+  it('still shows hypothesis above core fields', () => {
+    render(
+      <JsonActionCard
+        fullJson={{
+          verdict: 'discard',
+          hypothesis: 'key finding here',
+          risk_rating: 'Red',
+        }}
+      />,
+    )
+    expect(screen.getByText('key finding here')).toBeInTheDocument()
+    expect(screen.getByText('结论:')).toBeInTheDocument()
+    expect(screen.getByText('风险评级:')).toBeInTheDocument()
   })
 })
 
