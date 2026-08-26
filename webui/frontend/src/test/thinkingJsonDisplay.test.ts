@@ -9,7 +9,7 @@ import {
   splitTextIncremental,
   shouldSplitInline,
 } from '../utils/thinkingParsers/incremental'
-import { parseJsonAction } from '../components/chat/JsonActionCard'
+import { parseStructuredContent } from '../components/chat/JsonActionCard'
 
 describe('splitTextIncremental edge cases', () => {
   it('handles closed <think> tags correctly', () => {
@@ -55,38 +55,111 @@ describe('splitTextIncremental edge cases', () => {
   })
 })
 
-describe('parseJsonAction', () => {
-  it('detects action objects with hypothesis', () => {
-    const r = parseJsonAction('{"action":"optimize_param","hypothesis":"try smaller top_n"}')
-    expect(r.isAction).toBe(true)
-    expect(r.action).toBe('optimize_param')
-    expect(r.hypothesis).toBe('try smaller top_n')
-    expect(r.fullJson).toEqual({ action: 'optimize_param', hypothesis: 'try smaller top_n' })
+describe('parseStructuredContent', () => {
+  // ── Pure JSON paths ──────────────────────────────────────────
+
+  it('detects action JSON with hypothesis', () => {
+    const r = parseStructuredContent('{"action":"optimize_param","hypothesis":"try smaller top_n"}')
+    expect(r.hasStructured).toBe(true)
+    expect(r.segments).toHaveLength(1)
+    expect(r.segments[0].kind).toBe('json')
+    expect(r.segments[0].action).toBe('optimize_param')
+    expect(r.segments[0].json?.action).toBe('optimize_param')
+    expect(r.segments[0].json?.hypothesis).toBe('try smaller top_n')
   })
 
-  it('detects action objects without hypothesis', () => {
-    const r = parseJsonAction('{"action":"blocker","reason":"rate limited"}')
-    expect(r.isAction).toBe(true)
-    expect(r.action).toBe('blocker')
-    expect(r.hypothesis).toBeUndefined()
+  it('detects action JSON without hypothesis', () => {
+    const r = parseStructuredContent('{"action":"blocker","reason":"rate limited"}')
+    expect(r.hasStructured).toBe(true)
+    expect(r.segments[0].action).toBe('blocker')
   })
 
-  it('returns false for non-JSON text', () => {
-    expect(parseJsonAction('This is plain text').isAction).toBe(false)
+  it('detects generic JSON without action field', () => {
+    const r = parseStructuredContent(
+      '{"method":"risk_parity_fallback_equal","weights":{"000001.SZ":0.10}}'
+    )
+    expect(r.hasStructured).toBe(true)
+    expect(r.segments[0].kind).toBe('json')
+    expect(r.segments[0].action).toBeUndefined()
+    expect(r.segments[0].json?.method).toBe('risk_parity_fallback_equal')
   })
 
-  it('returns false for JSON without action key', () => {
-    expect(parseJsonAction('{"status":"ok","data":[]}').isAction).toBe(false)
+  it('detects risk_controller style JSON (no action, string values)', () => {
+    const r = parseStructuredContent(
+      '{"risk_passed":"False","risk_rating":"Red","var_95":"None"}'
+    )
+    expect(r.hasStructured).toBe(true)
+    expect(r.segments[0].action).toBeUndefined()
+    expect((r.segments[0].json as Record<string, unknown>).risk_rating).toBe('Red')
   })
 
-  it('returns false for malformed JSON', () => {
-    expect(parseJsonAction('{bad json}').isAction).toBe(false)
+  it('returns text-only for plain markdown', () => {
+    const r = parseStructuredContent('# Hello\n\nSome **bold** text.')
+    expect(r.hasStructured).toBe(false)
+    expect(r.segments).toHaveLength(1)
+    expect(r.segments[0].kind).toBe('text')
+    expect(r.segments[0].text).toBe('# Hello\n\nSome **bold** text.')
   })
 
-  it('handles JSON with extra whitespace', () => {
-    const r = parseJsonAction('  {"action":"keep","hypothesis":"x"}  ')
-    expect(r.isAction).toBe(true)
-    expect(r.action).toBe('keep')
+  it('returns text-only for plain Chinese text', () => {
+    const r = parseStructuredContent('我无权写入文件（角色工具只给 read）')
+    expect(r.hasStructured).toBe(false)
+    expect(r.segments[0].kind).toBe('text')
+  })
+
+  // ── Embedded JSON paths ──────────────────────────────────────
+
+  it('handles markdown with embedded JSON block (text + JSON)', () => {
+    const text = '我无权写入文件（角色工具只给 read）。\n\n{"action":"report_progress","hypothesis":"attribution done"}'
+    const r = parseStructuredContent(text)
+    expect(r.hasStructured).toBe(true)
+    // Should have 2 segments: text + json
+    expect(r.segments.filter(s => s.kind === 'json')).toHaveLength(1)
+    expect(r.segments.filter(s => s.kind === 'text')).toHaveLength(1)
+    // First text segment contains the prose
+    const textSeg = r.segments.find(s => s.kind === 'text')!
+    expect(textSeg.text).toContain('我无权写入文件')
+    // JSON segment has the parsed action
+    const jsonSeg = r.segments.find(s => s.kind === 'json')!
+    expect(jsonSeg.action).toBe('report_progress')
+  })
+
+  it('handles multiple JSON blocks interleaved with text', () => {
+    const text = 'intro\n\n{"action":"a","hypothesis":"ha"}\n\nmiddle\n\n{"action":"b","hypothesis":"hb"}\n\nend'
+    const r = parseStructuredContent(text)
+    expect(r.hasStructured).toBe(true)
+    const jsons = r.segments.filter(s => s.kind === 'json')
+    expect(jsons).toHaveLength(2)
+    expect(jsons[0].action).toBe('a')
+    expect(jsons[1].action).toBe('b')
+    const texts = r.segments.filter(s => s.kind === 'text')
+    expect(texts).toHaveLength(3)
+  })
+
+  // ── Edge cases ───────────────────────────────────────────────
+
+  it('treats malformed JSON as plain text (no crash, no card)', () => {
+    const r = parseStructuredContent('{bad json with "unescaped quotes"}')
+    expect(r.hasStructured).toBe(false)
+    expect(r.segments[0].kind).toBe('text')
+  })
+
+  it('handles whitespace padding around JSON', () => {
+    const r = parseStructuredContent('   {"action":"keep","hypothesis":"x"}   ')
+    expect(r.hasStructured).toBe(true)
+    expect(r.segments[0].action).toBe('keep')
+  })
+
+  it('handles empty string', () => {
+    const r = parseStructuredContent('')
+    expect(r.segments).toEqual([])
+    expect(r.hasStructured).toBe(false)
+  })
+
+  it('handles JSON array as not structured (objects only)', () => {
+    const r = parseStructuredContent('[1, 2, 3]')
+    expect(r.hasStructured).toBe(false)
+    expect(r.segments[0].kind).toBe('text')
   })
 })
 

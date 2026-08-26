@@ -14,7 +14,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ThinkingBlock } from './ThinkingBlock'
-import { JsonActionCard, parseJsonAction } from './JsonActionCard'
+import { JsonActionCard, parseStructuredContent } from './JsonActionCard'
 import { FileEditBlock } from './FileEditBlock'
 import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
@@ -249,16 +249,29 @@ function PartRenderer({
       if (isStreaming) {
         return <StreamingText text={liveText} isDone={false} partId={part.id} />
       }
-      // Academic action card: render structured JSON action objects
-      // (from study agents) in a formatted card instead of raw markdown.
-      const action = parseJsonAction(liveText)
-      if (action.isAction) {
+      // Parse into ordered text + JSON segments.  Handles:
+      //   - pure JSON (action card / generic card)
+      //   - pure markdown
+      //   - markdown with embedded JSON blocks
+      const parsed = parseStructuredContent(liveText)
+      if (parsed.hasStructured) {
         return (
-          <JsonActionCard
-            action={action.action!}
-            hypothesis={action.hypothesis}
-            fullJson={action.fullJson!}
-          />
+          <>
+            {parsed.segments.map((seg, i) => {
+              if (seg.kind === 'json' && seg.json) {
+                return (
+                  <JsonActionCard
+                    key={`json-${i}`}
+                    action={seg.action}
+                    fullJson={seg.json}
+                  />
+                )
+              }
+              return (
+                <MarkdownRenderer key={`text-${i}`} content={seg.text ?? ''} />
+              )
+            })}
+          </>
         )
       }
       return <MarkdownRenderer content={liveText} />
