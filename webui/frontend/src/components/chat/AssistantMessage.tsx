@@ -14,6 +14,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ThinkingBlock } from './ThinkingBlock'
+import { JsonActionCard, parseJsonAction } from './JsonActionCard'
 import { FileEditBlock } from './FileEditBlock'
 import { TableBlock } from './TableBlock'
 import { ChartBlock } from './ChartBlock'
@@ -166,9 +167,17 @@ function useRenderedParts(
   return useMemo(() => {
     const out: MessagePart[] = []
     if (!shouldSplitInline(provider)) {
-      // Standard path — no client-side thinking extraction. Pass parts
-      // through; backend (or passthrough parser) has already split.
-      return parts
+      // Standard path — backend already split for known providers.
+      // Fallback: if ANY text part still contains inline <think> tags
+      // (provider context empty, or historical session from a study run),
+      // fall through to the splitting logic so the tags are extracted
+      // and rendered as ThinkingBlocks rather than displayed literally.
+      const hasInlineTags = parts.some(
+        (p) => p.type === 'text' && p.text && (
+          p.text.includes('<think>') || p.text.includes('')
+        ),
+      )
+      if (!hasInlineTags) return parts
     }
     for (const part of parts) {
       if (part.type !== 'text') {
@@ -239,6 +248,18 @@ function PartRenderer({
       const liveText = readPartText(part.id, part.text, isStreaming)
       if (isStreaming) {
         return <StreamingText text={liveText} isDone={false} partId={part.id} />
+      }
+      // Academic action card: render structured JSON action objects
+      // (from study agents) in a formatted card instead of raw markdown.
+      const action = parseJsonAction(liveText)
+      if (action.isAction) {
+        return (
+          <JsonActionCard
+            action={action.action!}
+            hypothesis={action.hypothesis}
+            fullJson={action.fullJson!}
+          />
+        )
       }
       return <MarkdownRenderer content={liveText} />
     }
