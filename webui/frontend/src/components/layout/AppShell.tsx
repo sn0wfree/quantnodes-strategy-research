@@ -28,6 +28,11 @@ export function AppShell() {
     let cancelled = false
     const init = async () => {
       try {
+        // 0. Warm the agent-schema cache (fire-and-forget; JsonActionCard
+        //    reads it synchronously via getSchemaFor when rendering).
+        void import('../../api/agentSchemas').then(({ loadAgentSchemas }) =>
+          loadAgentSchemas().catch(() => {}),
+        )
         // 1. Load all sessions metadata (await so filter below works)
         await loadSessions()
         if (cancelled) return

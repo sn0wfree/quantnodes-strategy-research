@@ -232,11 +232,13 @@ function PartRenderer({
   isStreaming,
   onRetry,
   readPartText,
+  agentId,
 }: {
   part: MessagePart
   isStreaming: boolean
   onRetry?: (tc: ToolCallPart) => void
   readPartText: (partId: string, fallback: string, isStreaming?: boolean) => string
+  agentId?: string
 }) {
   switch (part.type) {
     case 'text': {
@@ -262,6 +264,7 @@ function PartRenderer({
                 return (
                   <JsonActionCard
                     key={`json-${i}`}
+                    agentId={agentId}
                     action={seg.action}
                     fullJson={seg.json}
                   />
@@ -489,6 +492,7 @@ export function AssistantMessage({
               isStreaming={isPartStreaming}
               readPartText={readPartText}
               onRetry={handleToolRetry}
+              agentId={message.agent_id || undefined}
             />
           )
         })

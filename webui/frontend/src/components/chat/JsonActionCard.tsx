@@ -12,6 +12,7 @@
  * academic paper / lab-notebook aesthetic.
  */
 import { useState } from 'react'
+import { getSchemaFor, type FieldHints } from '../../api/agentSchemas'
 
 export interface JsonActionCardProps {
   /** The action type if the JSON contains an "action" field, else undefined. */
@@ -20,6 +21,13 @@ export interface JsonActionCardProps {
   hypothesis?: string
   /** The full parsed JSON object. */
   fullJson: Record<string, unknown>
+  /**
+   * Agent role (message.agent_id). When a prompt-derived schema is loaded
+   * (see /api/agents/schemas), field order / labels / core-visibility /
+   * enum mappings / percentage formats follow the schema instead of the
+   * generic KEY_FIELDS heuristics.
+   */
+  agentId?: string
 }
 
 const ACTION_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -78,20 +86,28 @@ function pickHypothesis(json: Record<string, unknown>): string | undefined {
   return undefined
 }
 
-function labelOf(key: string): string {
-  return KEY_FIELD_LABELS[key] ?? key
-}
-
-function renderValue(v: unknown): React.ReactNode {
+function renderValue(v: unknown, hints?: FieldHints | null): React.ReactNode {
   if (typeof v === 'boolean') {
     return v
       ? <span className="text-emerald-400 font-medium">✓</span>
       : <span className="text-rose-400 font-medium">✗</span>
   }
   if (typeof v === 'number') {
+    // Schema format hint: percentage (0.25 → "25.0%")
+    if (hints?.format === 'percentage') {
+      return (
+        <span className="font-mono text-slate-200">
+          {(v * 100).toFixed(1)}%
+        </span>
+      )
+    }
     return <span className="font-mono text-slate-200">{String(v)}</span>
   }
   if (typeof v === 'string') {
+    // Schema enum mapping: display label takes precedence over raw value
+    if (hints?.enum_values && v in hints.enum_values) {
+      return <span className="text-slate-200">{hints.enum_values[v]}</span>
+    }
     const s = v
     if (s.length <= 80) {
       return <span className="text-slate-200">{s}</span>
@@ -126,7 +142,7 @@ function renderValue(v: unknown): React.ReactNode {
   return <span className="text-slate-500">{String(v ?? 'null')}</span>
 }
 
-export function JsonActionCard({ action, hypothesis, fullJson }: JsonActionCardProps) {
+export function JsonActionCard({ action, hypothesis, fullJson, agentId }: JsonActionCardProps) {
   const [expanded, setExpanded] = useState(false)
   const isActionMode = !!action && action in ACTION_STYLES
   const style = isActionMode
@@ -134,13 +150,42 @@ export function JsonActionCard({ action, hypothesis, fullJson }: JsonActionCardP
     : (action ? { bg: 'bg-slate-700/40', text: 'text-slate-300', label: action } : GENERIC_STYLE)
   const hyp = hypothesis ?? (isActionMode ? undefined : pickHypothesis(fullJson))
 
-  // Collect core (KEY_FIELDS) entries present in the JSON
-  const keyEntries = KEY_FIELDS
-    .filter((k) => k in fullJson)
-    .map((k) => [k, fullJson[k]] as const)
-
+  // ── Field selection ─────────────────────────────────────────────
+  // Schema-driven when a prompt-derived schema is loaded for this agent;
+  // generic KEY_FIELDS heuristics otherwise.
+  const schema = agentId ? getSchemaFor(agentId) : undefined
   const skipKeys = new Set(['action', 'hypothesis', ...HYPOTHESIS_LIKE])
-  const extraFields = Object.keys(fullJson).filter((k) => !skipKeys.has(k) && !KEY_FIELDS.includes(k))
+
+  const keyEntries: Array<readonly [string, unknown, FieldHints | null]> = []
+  const extraFields: Array<string> = []
+  const labelFor = (k: string, h: FieldHints | null | undefined): string =>
+    h?.label ?? KEY_FIELD_LABELS[k] ?? k
+
+  if (schema) {
+    const seen = new Set<string>()
+    // 1. Schema-declared fields, in schema order
+    for (const k of schema.fields) {
+      if (!(k in fullJson) || skipKeys.has(k)) continue
+      seen.add(k)
+      const h = schema.field_hints[k] ?? null
+      if (h?.core) keyEntries.push([k, fullJson[k], h] as const)
+      else extraFields.push(k)
+    }
+    // 2. Runtime fields beyond the prompt schema (agent output evolved):
+    //    fall back to the generic heuristics for core/label.
+    for (const k of Object.keys(fullJson)) {
+      if (seen.has(k) || skipKeys.has(k)) continue
+      if (KEY_FIELDS.includes(k)) keyEntries.push([k, fullJson[k], null] as const)
+      else extraFields.push(k)
+    }
+  } else {
+    for (const k of KEY_FIELDS) {
+      if (k in fullJson) keyEntries.push([k, fullJson[k], null] as const)
+    }
+    for (const k of Object.keys(fullJson)) {
+      if (!skipKeys.has(k) && !KEY_FIELDS.includes(k)) extraFields.push(k)
+    }
+  }
 
   return (
     <div className="my-1 rounded border border-slate-700/50 bg-slate-900/40 text-[12px] leading-relaxed overflow-hidden">
@@ -166,12 +211,14 @@ export function JsonActionCard({ action, hypothesis, fullJson }: JsonActionCardP
       {/* Core decision/status fields — always visible */}
       {keyEntries.length > 0 && (
         <div className="px-3 py-2 border-t border-slate-700/30 space-y-1.5">
-          {keyEntries.map(([k, v]) => (
+          {keyEntries.map(([k, v, h]) => (
             <div key={k} className="flex items-baseline gap-2 leading-relaxed">
               <span className="shrink-0 text-[11px] text-slate-500 min-w-20 text-right">
-                {labelOf(k)}:
+                {labelFor(k, h)}:
               </span>
-              <div className="min-w-0 flex-1 break-words">{renderValue(v)}</div>
+              <div className="min-w-0 flex-1 break-words" title={h?.description ?? undefined}>
+                {renderValue(v, h)}
+              </div>
             </div>
           ))}
         </div>
