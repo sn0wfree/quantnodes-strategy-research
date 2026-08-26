@@ -28,14 +28,14 @@ import { getAgentStyle } from '../../agentStyles'
 
 // ── SSE event → Message (for live streaming) ──────────────────
 
-function buildEventMessage(
+export function buildEventMessage(
   event: { type: string; message: string; timestamp: number },
   studyId: string,
   currentRound: number,
 ): Message {
   return {
     id: `sse:${event.timestamp}:${event.type}`,
-    session_id: `study:${studyId}:stream`,
+    session_id: `study:${studyId}:round:${currentRound}`,
     role: 'system',
     parts: [{ type: 'text', id: `evt:${event.timestamp}`, text: event.message }],
     created_at: event.timestamp / 1000,
@@ -46,18 +46,18 @@ function buildEventMessage(
   }
 }
 
-function buildAgentEventMessage(
-  event: any,
+export function buildAgentEventMessage(
+  event: { type: string; [k: string]: any },
   studyId: string,
   currentRound: number,
 ): Message {
   const eventType = event.type as string
-  const agentId = event.agent || event.data?.agent || ''
-  const data = event.data || {}
-  const ts = event.timestamp || Date.now()
-  const agentStyle = getAgentStyle(agentId)
+  const resolvedAgentId = event.agent || event.data?.agent || ''
+  const data = (event.data || {}) as Record<string, any>
+  const ts: number = event.timestamp || Date.now()
+  const agentStyle = getAgentStyle(resolvedAgentId)
 
-  let text = ''
+  let text: string = ''
 
   if (eventType === 'agent_tool_call') {
     const toolName = data.tool || data.name || '未知工具'
@@ -87,18 +87,18 @@ function buildAgentEventMessage(
     text = message || `${eventType.replace('agent_', '')}`
   }
 
-  if (!text) return { id: `skip:${ts}:${eventType}`, session_id: `study:${studyId}:stream`, role: 'system', parts: [], created_at: ts / 1000, metadata: { kind: 'system', round: currentRound } }
+  if (!text) return { id: `skip:${ts}:${eventType}`, session_id: `study:${studyId}:round:${currentRound}`, role: 'system', parts: [], created_at: ts / 1000, metadata: { kind: 'system', round: currentRound } }
 
   return {
-    id: `agent:${ts}:${eventType}:${agentId}`,
-    session_id: `study:${studyId}:stream`,
+    id: `agent:${ts}:${eventType}:${resolvedAgentId}`,
+    session_id: `study:${studyId}:round:${currentRound}`,
     role: 'system',
-    agent_id: agentId || undefined,
+    agent_id: resolvedAgentId || undefined,
     parts: [{ type: 'text', id: `aevt:${ts}:${eventType}`, text }],
     created_at: ts / 1000,
     metadata: {
       kind: 'agent',
-      model: agentId,
+      model: resolvedAgentId,
       round: currentRound,
     },
   }
@@ -312,9 +312,14 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   }, [studyId])
 
   const scrollKey = `${studyId}:${selectedRound}`
+  // Provider sessionId MUST equal the sessionId passed to chatStore.loadMessages
+  // (line below: `study:${studyId}:round:${selectedRound}`), otherwise the
+  // MessageList filter `m.session_id === currentSessionId` drops every message
+  // and the page renders the empty state.
+  const providerSessionId = `study:${studyId}:round:${selectedRound}`
 
   return (
-    <ChatSessionProvider sessionId={`study:${studyId}:stream`}>
+    <ChatSessionProvider sessionId={providerSessionId}>
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-slate-800 px-3 py-2">
