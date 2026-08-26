@@ -28,6 +28,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # irrelevant for the operator dump.
         "/api/study/_internal/",
         "/api/system/",
+        # Agent schemas are read-only prompt-derived metadata (no user
+        # data) — same exposure class as /api/system/*.
+        "/api/agents/",
         "/api/admin/",  # Admin endpoints use X-Admin-Token header
         "/assets/",
     ]

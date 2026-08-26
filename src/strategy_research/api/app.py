@@ -105,6 +105,9 @@ def create_app(
                 len(recovered),
             )
 
+        # Pre-parse agent schemas from .prompts/*.md (for /api/agents/schemas)
+        _agents_warmup()
+
         schedule_executor = ScheduledResearchExecutor(
             schedule_store,
             scheduler=scheduler,
@@ -230,6 +233,11 @@ def create_app(
     # System info (settings modal)
     from .routers import system
     app.include_router(system.router, prefix="/api/system", tags=["system"])
+
+    # Agent schemas (from .prompts/*.md — auto-refresh on file change)
+    from .routers import agents
+    app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
+    from .routers.agents import startup_warmup as _agents_warmup
 
     @app.get("/health")
     async def health():
