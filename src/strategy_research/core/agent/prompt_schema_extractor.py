@@ -129,24 +129,103 @@ def _find_output_section(text: str) -> tuple[int, int]:
     return start, end
 
 
+def _strip_hint_comments(text: str) -> str:
+    """Strip ``# @…`` comment lines from the JSON candidate.
+
+    JSON itself does not allow comments, but our hint convention places
+    ``# @label: x`` etc. on their own line ABOVE the field. Removing those
+    lines before ``json.loads`` makes the candidate valid JSON.
+
+    Only strips lines whose entire (stripped) content starts with
+    ``# @`` — protects against accidental ``#`` characters in string values
+    that happen to be on their own line.
+    """
+    lines = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("# @"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def _strip_trailing_commas(text: str) -> str:
+    """Remove trailing commas before ``}`` or ``]`` (JS-style → JSON).
+
+    Prompt examples sometimes use trailing commas (legal in JS, not in
+    JSON). Stripping them is safe as long as they appear outside string
+    values, which is the convention for object/array literals.
+    """
+    # Walk through the string, skipping over string literals
+    out = []
+    i = 0
+    in_string = False
+    escape = False
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        # Detect ", ]" or ", }" (possibly with whitespace / newline between
+        # the comma and the closer).
+        if ch == "," and i + 1 < len(text):
+            j = i + 1
+            while j < len(text) and text[j] in " \t\r\n":
+                j += 1
+            if j < len(text) and text[j] in "}]":
+                # Skip the comma and whitespace, keep the closer
+                i = j
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _extract_json_blocks(section_text: str) -> List[str]:
     """Extract JSON blocks from a section — both fenced and raw.
 
-    Priority: fenced first (more explicit), then raw blocks.
+    Priority: fenced first (more explicit), then raw blocks. For raw
+    blocks the candidate is scanned: ``# @hint`` comment lines are
+    stripped, trailing commas are removed (prompt examples sometimes use
+    JS-style trailing commas), and the result is parsed with
+    ``json.loads``. A balanced JSON object is only accepted if it parses
+    cleanly to a dict. This rejects prose sentences like
+    "{ 开头,以 } 结尾。" that happen to contain a balanced brace pair.
     """
+    def _normalize(candidate: str) -> str:
+        return _strip_trailing_commas(_strip_hint_comments(candidate))
+
     blocks = []
-    # 1. Fenced blocks (```json ... ``` or ``` ... ```)
+    # 1. Fenced blocks (```json ... ``` or ``` ... ```) — strip comments
     for m in _FENCED_JSON_RE.finditer(section_text):
-        blocks.append(m.group(1))
+        candidate = _normalize(m.group(1))
+        try:
+            json.loads(candidate)
+            blocks.append(candidate)
+        except json.JSONDecodeError:
+            pass
     # 2. Raw blocks (bare { ... } not inside fences)
     if not blocks:
-        # Only try raw if no fenced found
         idx = 0
         while idx < len(section_text):
             start = section_text.find("{", idx)
             if start == -1:
                 break
-            # Check this isn't inside a fenced block
+            # Skip fenced regions
             fence_before = section_text.rfind("```", 0, start)
             if fence_before > 0:
                 fence_close = section_text.find("```", fence_before + 3)
@@ -156,7 +235,7 @@ def _extract_json_blocks(section_text: str) -> List[str]:
             # Find balanced end
             end = _find_balanced_end(section_text, start)
             if end > start:
-                candidate = section_text[start:end + 1]
+                candidate = _normalize(section_text[start:end + 1])
                 try:
                     obj = json.loads(candidate)
                     if isinstance(obj, dict):

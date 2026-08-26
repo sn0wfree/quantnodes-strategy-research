@@ -81,27 +81,47 @@ p = 1 - norm.cdf(abs(t))
 
 ```json
 {
+  # @label: 结论 @core: true @type: enum @enum: {"keep":"保留","discard":"丢弃"}
   "verdict": "keep | discard",
+  # @label: 是否过拟合 @core: true @type: bool
   "overfit_passed": true,
+  # @label: 综合评分 @core: true @type: number
   "weighted_score": 0.85,
+  # @label: 方法通过情况 @type: object
   "methods_passed": {
+    # @label: 起点依赖
     "start_dependency": true,
+    # @label: 调仓日偏移
     "rebalance_offset": true,
+    # @label: 参数扰动
     "parameter_perturbation": true,
+    # @label: 消融实验
     "ablation": true,
+    # @label: Bootstrap 显著性
     "bootstrap": true,
+    # @label: Monte Carlo 排列检验
     "monte_carlo": true
   },
+  # @label: 量化指标 @type: object
   "metrics": {
+    # @label: 起点依赖变异系数
     "cv_start_dependency": 12.5,
+    # @label: 调仓日偏移变异系数
     "cv_rebalance_offset": 8.2,
+    # @label: 参数退化率 @format: percentage
     "param_degradation_pct": 15.3,
+    # @label: 消融最小退化 @format: percentage
     "ablation_min_drop": 7.1,
+    # @label: Bootstrap t 统计量
     "bootstrap_t_stat": 2.5,
+    # @label: Bootstrap p 值
     "bootstrap_p_value": 0.012,
+    # @label: Monte Carlo p 值
     "monte_carlo_p_value": 0.008
   },
+  # @label: 分析 @core: true
   "analysis": "量化分析 + 失败原因",
+  # @label: 改进建议 @type: array
   "suggestions": ["具体改进建议"]
 }
 ```

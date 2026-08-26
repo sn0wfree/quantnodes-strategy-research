@@ -18,17 +18,29 @@
 
 ```json
 {
+  # @label: 动作 @core: true @type: enum @enum: {"optimize_param":"参数优化","blocker":"阻塞","discover_local":"本地发现","search_external":"外部搜索","remove_factor":"移除因子","integrate":"整合","hold":"维持"}
   "action": "<discover_local|search_external|optimize_param|remove_factor|integrate|hold>",
+  # @label: 假设 @core: true
   "hypothesis": "<string,必填,假设描述>",
+  # @label: 理由 @core: true
   "reason": "<string,理由,支持上述 action>",
+  # @label: 预期影响指标 @core: true @type: array
   "predicted_affected": ["calmar", "sharpe", "max_dd"],
+  # @label: 避免的操作 @type: array
   "avoid_actions": ["instruction", "..."],
+  # @label: 因子方向
   "factor_direction": "<string,因子方向描述>",
+  # @label: 偏差检查 @type: object
   "bias_check": {
+    # @label: 龙头偏见 @type: enum @enum: {"pass":"通过","fail":"失败"}
     "leader_bias": "pass|fail",
+    # @label: 英文偏见 @type: enum @enum: {"pass":"通过","fail":"失败"}
     "english_bias": "pass|fail",
+    # @label: 叙事偏见 @type: enum @enum: {"pass":"通过","fail":"失败"}
     "narrative_bias": "pass|fail",
+    # @label: 确认偏见 @type: enum @enum: {"pass":"通过","fail":"失败"}
     "confirmation_bias": "pass|fail",
+    # @label: 近因偏见 @type: enum @enum: {"pass":"通过","fail":"失败"}
     "recency_bias": "pass|fail"
   }
 }

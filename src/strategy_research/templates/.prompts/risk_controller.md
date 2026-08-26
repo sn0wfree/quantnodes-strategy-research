@@ -58,18 +58,30 @@ CVaR_95 = -returns[returns < -VaR_95].mean()
 直接以 { 开头,以 } 结尾。
 
 {
+  # @label: 是否通过 @core: true @type: bool
   "risk_passed": true,
+  # @label: 风险评级 @core: true @type: enum @enum: {"Green":"🟢绿","Yellow":"🟡黄","Red":"🔴红"}
   "risk_rating": "Green | Yellow | Red",
+  # @label: VaR 95% @type: number @format: percentage
   "var_95": -0.021,
+  # @label: CVaR 95% @type: number @format: percentage
   "cvar_95": -0.034,
+  # @label: 最大回撤 @type: number @format: percentage
   "max_drawdown": -0.125,
+  # @label: 压力测试 @type: object
   "stress_results": {
+    # @label: 2008 金融危机
     "2008_crisis": -0.65,
+    # @label: 2015 A 股崩盘
     "2015_crash": -0.45,
+    # @label: 2020 COVID
     "covid": -0.15
   },
+  # @label: 尾部风险 @type: object
   "tail_risk": {
+    # @label: 峰度
     "kurtosis": 3.2,
+    # @label: 偏度
     "skewness": -0.15
   }
 }

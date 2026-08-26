@@ -104,11 +104,27 @@ class TestParseHints:
         hints = _parse_hints_from_line('# @label: 是否通过')
         assert hints["label"] == "是否通过"
 
-    def test_multiple_hints(self):
-        hints = _parse_hints_from_line('# @label: 风险评级 @type: enum @core: true')
+    def test_multiple_hints_on_one_line(self):
+        # Non-greedy value capture stops at next @key:
+        hints = _parse_hints_from_line(
+            '# @label: 风险评级 @type: enum @core: true'
+        )
         assert hints["label"] == "风险评级"
         assert hints["type"] == "enum"
         assert hints["core"] == "true"
+
+    def test_multiple_hints_on_separate_lines(self):
+        # Each line carries one hint; both bind to the next JSON field.
+        all_hints: dict[str, str] = {}
+        for line in [
+            "# @label: 是否通过",
+            "# @core: true",
+            "# @type: bool",
+        ]:
+            all_hints.update(_parse_hints_from_line(line))
+        assert all_hints["label"] == "是否通过"
+        assert all_hints["core"] == "true"
+        assert all_hints["type"] == "bool"
 
     def test_enum_json(self):
         hints = _parse_hints_from_line('# @enum: {"Green":"🟢绿","Red":"🔴红"}')
@@ -122,6 +138,94 @@ class TestParseHints:
     def test_empty_line(self):
         hints = _parse_hints_from_line("")
         assert hints == {}
+
+    def test_ignores_non_hint_hash(self):
+        # A line starting with # but NOT "# @" should not be parsed
+        # (would be a real prose comment, not our hint convention).
+        hints = _parse_hints_from_line('# just a comment, not a hint')
+        assert hints == {}
+
+
+# ── Comment stripping in JSON candidates ────────────────────────────
+
+class TestStripHintComments:
+    def test_strips_single_hint_line(self):
+        text = (
+            '{\n'
+            '  # @label: foo @type: bool\n'
+            '  "key": true\n'
+            '}'
+        )
+        from strategy_research.core.agent.prompt_schema_extractor import _strip_hint_comments
+        cleaned = _strip_hint_comments(text)
+        assert "#" not in cleaned
+        assert json.loads(cleaned) == {"key": True}
+
+    def test_preserves_hash_in_string_value(self):
+        text = (
+            '{\n'
+            '  # @label: sample\n'
+            '  "note": "this # is fine"\n'
+            '}'
+        )
+        from strategy_research.core.agent.prompt_schema_extractor import _strip_hint_comments
+        cleaned = _strip_hint_comments(text)
+        assert '"this # is fine"' in cleaned
+        assert json.loads(cleaned) == {"note": "this # is fine"}
+
+    def test_extracts_schema_with_hint_comments(self):
+        """End-to-end: prompt with # @label: comments parses into a schema
+        with the hint label populated."""
+        import tempfile
+        from strategy_research.core.agent.prompt_schema_extractor import extract_agent_schema
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "test_role.md").write_text(
+                "## 输出\n\n"
+                "{\n"
+                "  # @label: 是否通过 @core: true @type: bool\n"
+                '  "risk_passed": true,\n'
+                "}\n",
+                encoding="utf-8",
+            )
+            schema = extract_agent_schema("test_role", Path(td))
+        assert schema is not None
+        assert schema.field_hints["risk_passed"].label == "是否通过"
+        assert schema.field_hints["risk_passed"].core is True
+
+
+# ── Trailing comma stripping (prompt JS-style → JSON) ────────────────
+
+class TestStripTrailingCommas:
+    def test_object_trailing_comma(self):
+        from strategy_research.core.agent.prompt_schema_extractor import _strip_trailing_commas
+        cleaned = _strip_trailing_commas('{\n  "a": 1,\n}')
+        assert json.loads(cleaned) == {"a": 1}
+
+    def test_array_trailing_comma(self):
+        from strategy_research.core.agent.prompt_schema_extractor import _strip_trailing_commas
+        cleaned = _strip_trailing_commas('[\n  1,\n  2,\n]')
+        assert json.loads(cleaned) == [1, 2]
+
+    def test_preserves_comma_in_string(self):
+        from strategy_research.core.agent.prompt_schema_extractor import _strip_trailing_commas
+        cleaned = _strip_trailing_commas('{"a": "x, y", }')
+        assert json.loads(cleaned) == {"a": "x, y"}
+
+    def test_extracts_schema_with_trailing_commas(self):
+        import tempfile
+        from strategy_research.core.agent.prompt_schema_extractor import extract_agent_schema
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "demo.md").write_text(
+                "## 输出\n\n"
+                "{\n"
+                '  "verdict": "keep",\n'
+                '  "score": 0.85,\n'
+                "}\n",
+                encoding="utf-8",
+            )
+            schema = extract_agent_schema("demo", Path(td))
+        assert schema is not None
+        assert "verdict" in schema.fields
 
 
 # ── Field type inference ───────────────────────────────────────────────

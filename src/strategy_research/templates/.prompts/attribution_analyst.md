@@ -38,16 +38,27 @@ R_p - R_f = α + β_mkt × MKT + β_smb × SMB + β_hml × HML + β_mom × MOM +
 直接以 { 开头,以 } 结尾。
 
 {
+  # @label: Alpha @core: true @type: number @format: percentage
   "alpha": 0.008,
+  # @label: 市场 Beta @core: true @type: number
   "beta_mkt": 0.85,
+  # @label: SMB Beta @type: number
   "beta_smb": 0.12,
+  # @label: HML Beta @type: number
   "beta_hml": -0.05,
+  # @label: MOM Beta @type: number
   "beta_mom": 0.15,
+  # @label: 行业配置 @type: number @format: percentage
   "sector_allocation": 0.005,
+  # @label: 选股收益 @type: number @format: percentage
   "stock_selection": 0.009,
+  # @label: 交互效应 @type: number @format: percentage
   "interaction": 0.001,
+  # @label: 牛市捕获率 @core: true @type: number @format: percentage
   "bull_capture": 1.05,
+  # @label: 熊市捕获率 @core: true @type: number @format: percentage
   "bear_capture": 0.85,
+  # @label: R² @type: number
   "r_squared": 0.92
 }
 

@@ -42,10 +42,15 @@
 直接以 { 开头,以 } 结尾。
 
 {
+  # @label: 配置方法 @core: true @type: enum @enum: {"equal":"等权","inv_vol":"逆波动率","risk_parity":"风险平价","max_diversification":"最大分散化"}
   "method": "risk_parity",
+  # @label: 权重明细 @type: object
   "weights": {"asset_001": 0.3, "asset_002": 0.7},
+  # @label: 风险贡献 @type: object
   "risk_contributions": {"asset_001": 0.5, "asset_002": 0.5},
+  # @label: 分散度 @type: number
   "diversification_ratio": 1.2,
+  # @label: 组合波动率 @type: number @format: percentage
   "portfolio_vol": 0.15
 }
 
