@@ -749,9 +749,26 @@ async def chat_events(
     request: Request = None,
 ):
     """SSE event stream for a session."""
-    from .web_session import _fetch_session_owned, _get_db
+    from fastapi import HTTPException as _HTTPExc
+    from .web_session import _fetch_session_owned, _get_db, _get_db_path
     user_id = getattr(request.state, "user_id", "anonymous")
-    _fetch_session_owned(_get_db(), session_id, user_id)
+    try:
+        _fetch_session_owned(_get_db(), session_id, user_id)
+    except _HTTPExc as exc:
+        # Auto-recreate bare study_id session on 404 so SSE works
+        # even after the session row was deleted or never created.
+        if exc.status_code == 404 and session_id.startswith("study_"):
+            try:
+                from ...core.study.engine_common import ensure_study_session
+                ensure_study_session(
+                    _get_db_path(), session_id,
+                    f"Study: {session_id}",
+                )
+                _fetch_session_owned(_get_db(), session_id, user_id)
+            except Exception:
+                raise exc from exc
+        else:
+            raise
     resolved_last_event_id = last_event_id or last_event_id_query or ""
     logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, resolved_last_event_id)
 

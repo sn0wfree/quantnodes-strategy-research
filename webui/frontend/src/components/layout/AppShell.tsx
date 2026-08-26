@@ -35,7 +35,7 @@ export function AppShell() {
         // 2. Read latest persisted state AFTER loadSessions
         const state = useSessionStore.getState()
         const validOpenIds = (state.openSessionIds ?? []).filter((id) =>
-          state.sessions.some((s) => s.id === id)
+          state.sessions.some((s) => s.id === id) && !id.startsWith('study:')
         )
 
         if (validOpenIds.length > 0) {

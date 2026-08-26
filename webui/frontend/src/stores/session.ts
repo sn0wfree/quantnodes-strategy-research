@@ -147,7 +147,12 @@ export const useSessionStore = create<SessionState>()(
       loadSessions: async () => {
         try {
           const res = await api.get<{ sessions: Session[] }>('/chat/session')
-          set({ sessions: res.sessions })
+          // Filter out study round sessions (study:*) — they belong to the
+          // StudyChat widget, not the main chat sidebar.
+          const filtered = (res.sessions ?? []).filter(
+            (s) => !s.id.startsWith('study:'),
+          )
+          set({ sessions: filtered })
         } catch (err) {
           console.error('loadSessions failed:', err)
         }
