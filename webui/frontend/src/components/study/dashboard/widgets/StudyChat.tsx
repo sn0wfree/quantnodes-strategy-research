@@ -25,6 +25,7 @@ import type { WidgetProps } from '../types'
 import { StudyChatComposer } from './StudyChatComposer'
 import { InterruptApprovalCard } from './InterruptApprovalCard'
 import { getAgentStyle } from '../../agentStyles'
+import { clampRound } from '../../utils'
 
 // ── SSE event → Message (for live streaming) ──────────────────
 
@@ -200,7 +201,8 @@ function RoundNavRail({
 // ── Main Widget ────────────────────────────────────────────────
 
 export function StudyChat({ studyId, summary }: WidgetProps) {
-  const currentRound = (summary?.current_round as number) ?? 1
+  // DB may persist a real 0 for current_round; `??` would not catch it.
+  const currentRound = clampRound(summary?.current_round as number | undefined) ?? 1
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
   const [pendingInterrupt, setPendingInterrupt] = useState<{
@@ -210,7 +212,10 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   } | null>(null)
   const recentEvents = useStudyStore((s) => s.recentEvents)
   const chatStore = useChatStore()
-  const eventCountRef = useRef(0)
+  // Consume cursor: highest LiveEvent.seq already injected into the
+  // chat. Length-diff broke once the store buffer hit its 50-entry cap
+  // (length pinned at 50 → newCount ≤ 0 forever).
+  const lastSeqRef = useRef(0)
   const prevStudyIdRef = useRef<string | null>(null)
   // Round discovery fallback: populated when study_rounds has no rows
   // but chat sessions for the rounds exist (crashed before finalize).
@@ -271,45 +276,59 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     return () => { cancelled = true }
   }, [studyId, selectedRound])
 
+  // Clear messages on studyId change. Declared BEFORE the inject effect:
+  // within one commit effects run in declaration order, so the cursor
+  // must skip the outgoing study's buffered events before injection sees
+  // them — otherwise up to 50 stale events replay into the new study's
+  // chat (events are tagged with the NEW studyId at build time).
+  useEffect(() => {
+    if (prevStudyIdRef.current !== studyId) {
+      chatStore.setMessages([])
+      setPendingInterrupt(null)
+      lastSeqRef.current = recentEvents.reduce(
+        (m, e) => Math.max(m, e.seq ?? 0), 0,
+      )
+      prevStudyIdRef.current = studyId
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chatStore/recentEvents intentionally read once per study switch
+  }, [studyId])
+
   // Inject SSE events as system messages + agent-level events (live streaming)
   useEffect(() => {
     if (recentEvents.length === 0) return
-    // Store prepends newest-first: [newest, ..., oldest].
-    // New events are at the front; count from the front.
-    const newCount = recentEvents.length - eventCountRef.current
-    if (newCount <= 0) return
-    const newEvents = recentEvents.slice(0, newCount)
-    eventCountRef.current = recentEvents.length
+    // Store prepends newest-first: [newest, ..., oldest]. The consume
+    // cursor is the monotonic LiveEvent.seq — length-diff silently died
+    // once the buffer reached its 50-entry cap.
+    const fresh = recentEvents.filter((e) => (e.seq ?? 0) > lastSeqRef.current)
+    if (fresh.length === 0) return
+    lastSeqRef.current = fresh.reduce((m, e) => Math.max(m, e.seq ?? 0), lastSeqRef.current)
 
-    newEvents.forEach((event) => {
-      const eventType = (event as any).type as string
-
-      if (eventType?.startsWith('agent_')) {
-        chatStore.addMessage(buildAgentEventMessage(event, studyId, selectedRound))
+    fresh.forEach((event) => {
+      const raw = event.raw
+      if (raw?.type?.startsWith('agent_')) {
+        chatStore.addMessage(
+          buildAgentEventMessage(
+            { ...raw.data, type: raw.type, timestamp: event.timestamp },
+            studyId,
+            selectedRound,
+          ),
+        )
         return
       }
 
       chatStore.addMessage(buildEventMessage(event, studyId, selectedRound))
 
-      if (eventType === 'study_paused' && (event as any).reason === 'hitl_approval') {
+      if (
+        event.type === 'phase' &&
+        (event.message.includes('等待审批') || event.message.includes('hitl'))
+      ) {
         setPendingInterrupt({
-          interruptId: (event as any).interrupt_id || `pending:${studyId}:${selectedRound}`,
-          hypothesis: (event as any).hypothesis,
-          message: (event as any).message || '等待审批...',
+          interruptId: `pending:${studyId}:${selectedRound}`,
+          message: event.message,
         })
       }
     })
-  }, [recentEvents.length])
-
-  // Clear messages on studyId change
-  useEffect(() => {
-    if (prevStudyIdRef.current !== studyId) {
-      chatStore.setMessages([])
-      setPendingInterrupt(null)
-      eventCountRef.current = 0
-      prevStudyIdRef.current = studyId
-    }
-  }, [studyId])
+  }, [recentEvents, studyId, selectedRound])
 
   const scrollKey = `${studyId}:${selectedRound}`
   // Provider sessionId MUST equal the sessionId passed to chatStore.loadMessages

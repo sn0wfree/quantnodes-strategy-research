@@ -39,6 +39,7 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
   const [artifacts, setArtifacts] = useState<StudyRoundArtifactsResponse | null>(null)
   const [summaryMd, setSummaryMd] = useState<StudyRoundSummaryMdResponse | null>(null)
   const [diff, setDiff] = useState<StudyRoundDiffResponse | null>(null)
+  const [diffFailed, setDiffFailed] = useState(false)
   const [diffAgainst, setDiffAgainst] = useState(0)
   const [adopting, setAdopting] = useState(false)
   const [redoing, setRedoing] = useState(false)
@@ -75,9 +76,13 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
       .roundDiff(studyId, round.round_num, diffAgainst)
       .then((d) => {
         if (!cancelled) setDiff(d)
+        if (!cancelled) setDiffFailed(!d)
       })
       .catch(() => {
-        if (!cancelled) setDiff(null)
+        if (!cancelled) {
+          setDiff(null)
+          setDiffFailed(true)
+        }
       })
     return () => {
       cancelled = true
@@ -105,6 +110,12 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
   }
 
   const onRedo = async () => {
+    // Redo is destructive (wipes the round's artifacts + DB record) —
+    // require explicit confirmation before firing.
+    const ok = window.confirm(
+      `重跑 R${round.round_num} 会删除该轮现有产物与记录，确定继续？`,
+    )
+    if (!ok) return
     setRedoing(true)
     setError('')
     try {
@@ -247,6 +258,8 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
                   </div>
                 ))}
               </div>
+            ) : diffFailed ? (
+              <p className="text-[11px] text-rose-400/80">加载 diff 失败</p>
             ) : (
               <p className="text-[11px] text-slate-500">加载 diff...</p>
             )}

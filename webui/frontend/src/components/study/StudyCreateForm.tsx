@@ -119,8 +119,13 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
         selected_agents: composedAgents.length > 0 ? composedAgents : undefined,
         graph_override: composedGraph || undefined,
       })
+      // Reset form state — including the AI composition leftovers:
+      // keeping composedGraph/composedAgents would silently carry the
+      // previous study's orchestration into the next one.
       setObjective('')
       setStrategyName('')
+      setComposedGraph(null)
+      setComposedAgents([])
       onCreated?.(r.study_id)
     } catch (err) {
       setError((err as Error).message || 'Study start failed')

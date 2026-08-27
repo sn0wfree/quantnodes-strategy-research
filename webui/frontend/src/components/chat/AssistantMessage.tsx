@@ -404,9 +404,12 @@ export function AssistantMessage({
   const agentStyle = getAgentStyle(message.agent_id || '')
   const chatConfig = getAssistantConfig()
 
-  const modelLabel = message.metadata?.model
+  // Label precedence: known agent → "Agent · <name>"; unknown agent but
+  // with a model → model name; otherwise the generic prefix. (Never
+  // render "<prefix> · Agent" for an unresolved default style.)
+  const modelLabel = message.agent_id
     ? `${chatConfig.labels.modelPrefix} ${chatConfig.labels.modelSeparator} ${agentStyle.name}`
-    : chatConfig.labels.modelPrefix
+    : message.metadata?.model || chatConfig.labels.modelPrefix
 
   // Live status line while streaming: tool-call count (from parts) and
   // token usage (from metadata.tokens_used when the backend has pushed it).

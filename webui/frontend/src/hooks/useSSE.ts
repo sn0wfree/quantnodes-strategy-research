@@ -50,6 +50,9 @@ export function useSSE(sessionId: string | null) {
   // the backend with 403s every second.
   const failedAttempts = useRef(0)
   const MAX_FAILED_ATTEMPTS = 3
+  // Pending reconnect timer — cleared on unmount so a delayed connect()
+  // cannot create an orphan EventSource after the component is gone.
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const addMessage = useChatStore((s) => s.addMessage)
   const updateMessage = useChatStore((s) => s.updateMessage)
@@ -218,7 +221,11 @@ export function useSSE(sessionId: string | null) {
             return
           }
           console.warn('[SSE] EventSource CLOSED, reconnecting in 1s...')
-          setTimeout(() => connect(), 1000)
+          if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+          reconnectTimer.current = setTimeout(() => {
+            reconnectTimer.current = null
+            connect()
+          }, 1000)
           return
         }
       } else {
@@ -245,6 +252,10 @@ export function useSSE(sessionId: string | null) {
   useEffect(() => {
     connect()
     return () => {
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current)
+        reconnectTimer.current = null
+      }
       sourceRef.current?.close()
     }
   }, [connect])

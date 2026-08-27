@@ -19,6 +19,12 @@ export interface LiveEvent {
   message: string
   timestamp: number
   round?: number
+  /** Monotonic sequence — survives the 50-entry buffer truncation and
+   * same-millisecond collisions (used as the consume cursor). */
+  seq?: number
+  /** Original SSE payload for agent_* events, preserved so StudyChat
+   * can render structured agent cards (tool calls / output etc.). */
+  raw?: { type: string; data: Record<string, unknown> }
 }
 
 export interface StudyState {
@@ -60,6 +66,10 @@ export interface StudyState {
   addLiveEvent: (event: Omit<LiveEvent, 'timestamp'>) => void
   clearLiveActivity: () => void
 }
+
+/** Monotonic counter for live events — the StudyChat consume cursor
+ * must keep working once the buffer starts evicting old entries. */
+let liveEventSeq = 0
 
 const approvalKey = (studyId: string, role: string | null, iter: number | undefined) =>
   `${studyId}::${role ?? ''}::${iter ?? 0}`
@@ -115,7 +125,7 @@ export const useStudyStore = create<StudyState>()((set) => ({
   addLiveEvent: (event) =>
     set((s) => ({
       recentEvents: [
-        { ...event, timestamp: Date.now() },
+        { ...event, timestamp: Date.now(), seq: ++liveEventSeq },
         ...s.recentEvents,
       ].slice(0, 50),
     })),

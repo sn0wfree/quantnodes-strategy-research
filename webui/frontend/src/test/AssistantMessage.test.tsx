@@ -30,8 +30,8 @@ describe('AssistantMessage', () => {
     )
     // Has Bot avatar circle
     expect(container.querySelector('.rounded-full')).toBeTruthy()
-    // Label shows "Agent · gpt-4o"
-    expect(screen.getByText(/Agent · gpt-4o/)).toBeTruthy()
+    // No agent_id → label shows the model name (not "Agent · Agent")
+    expect(screen.getByText('gpt-4o')).toBeTruthy()
   })
 
   it('renders flat layout without avatar in flat mode', () => {
@@ -41,7 +41,7 @@ describe('AssistantMessage', () => {
     // No avatar circle in flat mode
     expect(container.querySelector('.rounded-full')).toBeFalsy()
     // Label + time visible
-    expect(screen.getByText(/Agent · gpt-4o/)).toBeTruthy()
+    expect(screen.getByText('gpt-4o')).toBeTruthy()
     // Text content visible
     expect(screen.getByText('回复内容')).toBeTruthy()
   })

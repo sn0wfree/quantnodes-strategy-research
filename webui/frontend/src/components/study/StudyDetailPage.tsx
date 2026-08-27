@@ -20,6 +20,17 @@ import { MetricsCompare } from './MetricsCompare'
 import { MetricsTrendChart } from './MetricsTrendChart'
 import { RoundHistory } from './RoundHistory'
 
+/** Statuses after which 10s summary polling stops (all terminal states). */
+const TERMINAL_POLL_STATUSES = [
+  'complete',
+  'cancelled',
+  'archived',
+  'error',
+  'budget_limited',
+  'early_stopped',
+  'needs_refresh',
+]
+
 function KpiCard({
   icon,
   iconCls,
@@ -101,9 +112,11 @@ export function StudyDetailPage() {
       await loadSummary()
       if (!cancelled) {
         setLoading(false)
-        // Stop polling when study reaches a terminal status
+        // Stop polling when study reaches a terminal status. error /
+        // budget_limited / early_stopped / needs_refresh are terminal
+        // too — polling them forever just burns requests.
         const st = summaryRef.current?.execution_status
-        const isTerminal = ['complete', 'cancelled', 'archived'].includes(st ?? '')
+        const isTerminal = TERMINAL_POLL_STATUSES.includes(st ?? '')
         timer = isTerminal ? null : setTimeout(poll, 10_000)
       }
     }
@@ -190,7 +203,8 @@ export function StudyDetailPage() {
   const bestCalmar = (summary.recent_rounds ?? [])
     .map((r) => r.metrics?.calmar)
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
-    .reduce((a, b) => Math.max(a, b), 0)
+    .reduce((a, b) => Math.max(a, b), Number.NEGATIVE_INFINITY)
+  const bestCalmarDisplay = Number.isFinite(bestCalmar) ? bestCalmar.toFixed(2) : '—'
   const driftCount = summary.monitor_state?.drift_count ?? 0
   const isDrifting = status === 'needs_refresh' || driftCount > 0
 
@@ -324,7 +338,7 @@ export function StudyDetailPage() {
         <KpiCard
           icon={<BarChart3 className="h-4 w-4" />}
           iconCls="border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-          value={bestCalmar.toFixed(2)}
+          value={bestCalmarDisplay}
           label="最佳 Calmar（历史轮次）"
           valueCls="text-emerald-400"
         />

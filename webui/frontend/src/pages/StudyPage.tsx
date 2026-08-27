@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { BookOpen } from 'lucide-react'
 import { PageShell } from '../components/layout/PageShell'
 import { StudyCreatePanel } from '../components/study/StudyCreatePanel'
@@ -32,15 +32,18 @@ export function StudyPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [includeArchived, setIncludeArchived] = useState(false)
 
+  const listReqRef = useRef(0)
   const loadList = useCallback(async () => {
+    const req = ++listReqRef.current
     setLoadingList(true)
     try {
       const res = await api.study.list({ limit: 50, include_archived: includeArchived })
+      if (req !== listReqRef.current) return // a newer request superseded this one
       setStudies(res.studies ?? [])
     } catch {
       // Non-critical — history list can be empty
     } finally {
-      setLoadingList(false)
+      if (req === listReqRef.current) setLoadingList(false)
     }
   }, [includeArchived])
 
@@ -48,11 +51,12 @@ export function StudyPage() {
     void loadList()
   }, [loadList])
 
-  // Auto-select the first active study once the list loads (or when a
-  // selected study disappears).
+  // Auto-select the first active study once the list loads, or clear
+  // the selection when the selected study disappears (otherwise the
+  // summary panel polls a dead id forever).
   useEffect(() => {
     if (studies.length === 0) {
-      setSelectedId((cur) => (cur && cur !== null ? cur : null))
+      setSelectedId(null)
       return
     }
     if (selectedId && studies.some((s) => s.study_id === selectedId)) return
