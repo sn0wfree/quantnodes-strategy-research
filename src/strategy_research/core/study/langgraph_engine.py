@@ -328,6 +328,16 @@ def build_langgraph(
         db_path=get_study_session_db_path(workspace),
         flush_to_messages=True,
     )
+    # The factory singleton is often created HERE first (before the API
+    # container builds its own instance) — without a bridge, every
+    # agent emit stays locked inside EventStore and never reaches the
+    # SSE buffer. Attach idempotently; failures fall back to the
+    # projector-materialized messages.
+    try:
+        from ...api.session.bridge_v2 import attach_eventstore_to_sse
+        attach_eventstore_to_sse(event_store)
+    except Exception as exc:  # noqa: BLE001 — live stream is best-effort
+        logger.warning("SSE bridge not attached to study EventStore: %s", exc)
     study_session_id = f"study:{study_id}:round:{round_num}"
     ensure_study_session(
         get_study_session_db_path(workspace),

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import time
 import uuid
@@ -205,6 +206,10 @@ class EventStore:
         # Live subscribers
         self._broadcast_live(session_id, event)
 
+        # Fan out to the parent study channel (round sessions only):
+        # SSE + live mirroring, no event_log/cache/projector writes.
+        self._fan_out_parent(session_id, event)
+
         # Projector flush (best-effort: event_log is the source of truth)
         if self._flush_to_messages and self._should_flush(event_type):
             try:
@@ -266,6 +271,7 @@ class EventStore:
             except Exception:
                 pass
         self._broadcast_live(event.aggregate_id, event)
+        self._fan_out_parent(event.aggregate_id, event)
 
     async def subscribe(self, session_id: str) -> AsyncIterator[EventV2]:
         """Async iterator: yield cache replay + live events as they arrive.
@@ -550,6 +556,24 @@ class EventStore:
             except asyncio.QueueFull:
                 logger.warning("Live queue full for session %s", session_id)
 
+    def _fan_out_parent(self, session_id: str, event: EventV2) -> None:
+        """Mirror a round-session event to its parent study channel.
+
+        Only SSE + live subscribers — the event_log row and projector
+        state remain bound to ``study:{id}:round:{n}`` so per-round
+        replay stays coherent. Best-effort: fan-out failures never
+        break the primary emit path.
+        """
+        parent = parent_study_channel(session_id)
+        if parent is None:
+            return
+        if self._sse_pusher is not None:
+            try:
+                self._sse_pusher(parent, event)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("SSE parent fan-out failed (%s): %s", parent, exc)
+        self._broadcast_live(parent, event)
+
     def _get_projector(self):
         """Lazy-import Projector to avoid circular imports at startup."""
         if self._projector is None and self._flush_to_messages:
@@ -610,6 +634,20 @@ class _noop_cm:
 
 
 _default_instance: EventStore | None = None
+
+
+# Channel naming: round sessions are ``study:{study_id}:round:{n}``.
+# The StudyDetailPage subscribes to the bare study channel via
+# /api/chat/events — round-scoped agent events must be fanned out to
+# that parent channel (SSE + live subscribers only; event_log stays
+# scoped to the round session so replay/projector semantics are kept).
+_ROUND_CHANNEL_RE = re.compile(r"^study:(?P<sid>[^:]+):round:\d+$")
+
+
+def parent_study_channel(session_id: str) -> str | None:
+    """Return the parent study channel for a round session id, else None."""
+    m = _ROUND_CHANNEL_RE.match(session_id)
+    return f"study:{m.group('sid')}" if m else None
 
 
 class EventStoreFactory:
