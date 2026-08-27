@@ -345,9 +345,27 @@ def run_round_phases(
         runner._record_keep_evidence(round_num, run_name, metrics)
 
     # ── v2 review cycle ──────────────────────────────────────
-    review_stop = _run_review_cycle(
-        runner, round_num, manifest, state, verdict, hypothesis,
-    )
+    # §4b short-circuit: if upstream agents produced max_iterations
+    # placeholders instead of structured output, skip the reviewer LLM —
+    # reviewing garbage wastes calls and feeds the failure cascade.
+    from .scenario_router import detect_max_iter_placeholders
+    short_circuited = detect_max_iter_placeholders(agent_outputs)
+    if short_circuited:
+        logger.warning(
+            "round %d short-circuit review: max_iter placeholders in %s",
+            round_num, short_circuited,
+        )
+        runner._emit(session, "study_phase", {
+            "study_id": sid, "round": round_num,
+            "phase": "review", "status": "short_circuited",
+            "agents": short_circuited,
+            "reason": "upstream_failed",
+        })
+        review_stop = None
+    else:
+        review_stop = _run_review_cycle(
+            runner, round_num, manifest, state, verdict, hypothesis,
+        )
 
     return {
         "round": round_num, "run_name": run_name, "run_dir": run_dir,

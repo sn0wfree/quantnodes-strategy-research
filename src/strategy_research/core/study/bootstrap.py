@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from .models import StudyStatus
 from .state_store import init as init_state
+from . import scenario_router
 
 if TYPE_CHECKING:
     from .models import StudyRecord
@@ -120,17 +121,23 @@ def init_study_dir(
     guidance_md: str | None = None,
     graph: "StudyGraph | None" = None,
     auto_compose: bool = False,
+    selection: "list[str] | None" = None,
 ) -> dict:
     """v2 bootstrap: autonomous study directory (design §6.2).
 
     Creates baseline/strategy.py, results.tsv header, guidance.md,
     todos.md, knowledge.md, state.json and graph.json.
 
-    ``graph`` (optional): custom execution graph (multi-entry/exit).
-    When None and ``auto_compose=False``, ``DEFAULT_STANDARD_GRAPH`` is
-    used. When ``auto_compose=True``, :class:`DAGPlanner` is invoked
-    and its output written to ``graph.json``; failure falls back to
-    the standard 8-node template.
+    Graph resolution order:
+        ``graph`` (custom override) >
+        ``selection`` (scenario-router subset) >
+        ``auto_compose=True`` (DAGPlanner LLM plan) >
+        ``DEFAULT_STANDARD_GRAPH``.
+
+    ``selection`` comes from :mod:`scenario_router.route` — the caller
+    performs the routing (async-safe wrapper) and hands in the validated
+    agent ids; failure to supply one falls through to the standard
+    8-node template.
     """
     root = ws / "study" / study_id
     (root / "baseline").mkdir(parents=True, exist_ok=True)
@@ -164,15 +171,28 @@ def init_study_dir(
         knowledge.write_text(_KNOWLEDGE_TEMPLATE, encoding="utf-8")
 
     # Execution graph (multi-entry/exit). Persisted so the runner can
-    # topologically schedule agents each round. Falls back to the
-    # standard 8-node template when no custom graph is supplied.
+    # topologically schedule agents each round.
     from .graph import StudyGraph
     from .graph_templates import DEFAULT_STANDARD_GRAPH
 
     graph_path = root / "graph.json"
     if not graph_path.exists():
         graph_to_write = graph if graph is not None else DEFAULT_STANDARD_GRAPH
-        if graph is None and auto_compose:
+        if graph is None and selection:
+            try:
+                from .scenario_router import build_graph_for_selection
+                graph_to_write = build_graph_for_selection(selection)
+                logger.info(
+                    "scenario_router: graph narrowed to %s for objective %r",
+                    selection, objective[:40],
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "scenario selection build failed (%s); standard graph",
+                    exc,
+                )
+                graph_to_write = DEFAULT_STANDARD_GRAPH
+        elif graph is None and auto_compose:
             try:
                 from .dag_planner import DAGPlanner
                 plan = DAGPlanner().plan(objective)
@@ -221,18 +241,66 @@ def create_study_record(
     selected_agents: list[str] | None = None,
     graph_override: "StudyGraph | None" = None,
     engine: str = "phases",
+    auto_route: bool = True,
 ) -> "StudyRecord":
     """Create a study (validation + ledger + autonomous dir), not queued.
 
     Sync: safe to call from the API route / dispatch bridge; returns the
     persisted ``StudyRecord`` for the caller to submit via
     ``StudyScheduler.submit``.
+
+    Graph resolution (design: docs/scenario-router-design.md):
+        explicit ``graph_override`` >
+        explicit ``selected_agents`` (user-chosen subset) >
+        scenario_router LLM routing when ``auto_route`` (default) —
+        with internal keyword/default-graph fallback, never raises >
+        ``auto_compose_graph`` legacy DAGPlanner path >
+        DEFAULT_STANDARD_GRAPH.
+
+    Callers running inside an asyncio event loop should invoke this
+    function via ``asyncio.to_thread`` (scenario routing may call the
+    LLM synchronously).
     """
     from .models import default_metric_targets
     from .store import StudyStore
 
     ws = validate_workspace_strategy(workspace_path, strategy_name)
     targets = metric_targets if metric_targets is not None else default_metric_targets()
+
+    # Resolve which agent subset this study runs (None -> standard graph).
+    resolved_selection: list[str] | None = None
+    if selected_agents is not None:
+        valid = [a for a in selected_agents
+                 if a in scenario_router.ALL_AGENT_IDS]
+        if valid:
+            resolved_selection = valid
+        else:
+            logger.warning(
+                "create_study_record: all %d requested agents unknown; "
+                "falling through to scenario routing",
+                len(selected_agents),
+            )
+    if resolved_selection is None and graph_override is None \
+            and not auto_compose_graph and auto_route:
+        try:
+            rr = scenario_router.route(scenario_router.RouteInput(
+                objective=objective,
+                strategy_name=strategy_name,
+                workspace_path=ws,
+                metric_targets=targets,
+            ))
+            logger.info(
+                "scenario_router: source=%s agents=%s repaired=%s notes=%s",
+                rr.source, rr.selected_agents, rr.repaired, rr.repair_notes,
+            )
+            # default_graph means "no useful narrowing" — persist the
+            # standard template instead of a lookalike rebuild.
+            if rr.source != "default_graph":
+                resolved_selection = rr.selected_agents
+        except Exception as exc:  # noqa: BLE001 — routing must not block start
+            logger.warning(
+                "scenario_router crashed (%s); standard graph", exc,
+            )
 
     # v2 single identity: the study row is created first so its
     # session_id (== study_id) can be the goal's isolation domain.
@@ -286,6 +354,7 @@ def create_study_record(
         guidance_md=guidance_md,
         graph=graph_override,
         auto_compose=auto_compose_graph,
+        selection=resolved_selection,
     )
 
     # Create a sessions table row for the study_id so the SSE endpoint

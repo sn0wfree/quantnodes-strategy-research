@@ -323,6 +323,7 @@ async def study_start(req: StudyStartRequest, request: Request):
           f"strategy={req.strategy_name} objective={req.objective[:40]}",
           flush=True)
 
+    import asyncio
     from ...core.study.bootstrap import create_study_record
 
     try:
@@ -340,8 +341,10 @@ async def study_start(req: StudyStartRequest, request: Request):
         from ...core.study import StudyStatus
         # AEGIS: round-based AutoresearchRunner via the scheduler.
         # Shared orchestration (validation / ledger / autonomous dir)
-        # lives in core/study/bootstrap.py.
-        study = create_study_record(
+        # lives in core/study/bootstrap.py. Scenario routing inside may
+        # call the LLM synchronously — keep the event loop free (R1).
+        study = await asyncio.to_thread(
+            create_study_record,
             owner_session_id=req.session_id,
             objective=req.objective,
             workspace_path=req.workspace_path,
@@ -370,7 +373,6 @@ async def study_start(req: StudyStartRequest, request: Request):
         # Queue without blocking the request; uncaught submit errors
         # are logged via the done callback.
         sched = _get_study_scheduler()
-        import asyncio
         task = asyncio.create_task(sched.submit(study))
         task.add_done_callback(log_task_exception)
         return {
