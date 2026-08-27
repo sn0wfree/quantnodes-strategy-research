@@ -70,6 +70,7 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
 
   useEffect(() => {
     let cancelled = false
+    if (typeof api.study?.roundDiff !== 'function') return
     api.study
       .roundDiff(studyId, round.round_num, diffAgainst)
       .then((d) => {
@@ -222,7 +223,7 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
                   )
                 })}
               </select>
-              {diff && (
+              {diff?.stats && (
                 <span className="text-[10px] text-slate-500">
                   +{diff.stats.adds} / -{diff.stats.dels} / {diff.stats.context} ctx
                 </span>
@@ -230,7 +231,7 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
             </div>
             {diff ? (
               <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/80 font-mono text-[10px] leading-relaxed">
-                {diff.diff.map((d, i) => (
+                {(diff.diff ?? []).map((d, i) => (
                   <div
                     key={i}
                     className={
@@ -261,10 +262,10 @@ export function RoundDetailDrawer({ studyId, round, onClose, onAdopted }: Props)
           )}
 
           {/* Artifacts */}
-          {artifacts && artifacts.artifacts.length > 0 && (
+          {artifacts && (artifacts.artifacts?.length ?? 0) > 0 && (
             <Section title={`产物 · ${artifacts.artifacts.length} 个文件`}>
-              <div className="max-h-48 space-y-0.5 overflow-y-auto">
-                {artifacts.artifacts.map((a) => (
+              <div className="max-h-40 space-y-1 overflow-y-auto">
+                {(artifacts.artifacts ?? []).map((a) => (
                   <div
                     key={a.path}
                     className="flex items-center justify-between gap-2 rounded-lg bg-slate-950/60 px-2 py-1 text-[10px]"

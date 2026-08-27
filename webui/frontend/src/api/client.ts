@@ -1029,7 +1029,8 @@ export interface StudyRoundDiffResponse {
   round_a: number
   round_b: number
   diff: DiffLine[]
-  stats: { adds: number; dels: number; context: number }
+  /** Optional: older persisted payloads may omit stats */
+  stats?: { adds: number; dels: number; context: number }
 }
 
 export interface StudyRoundSummaryMdResponse {

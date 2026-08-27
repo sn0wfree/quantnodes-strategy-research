@@ -828,7 +828,7 @@ async def chat_available_actions(session_id: str, request: Request):
 async def chat_export(
     session_id: str,
     request: Request,
-    format: str = Query("markdown", regex="^(markdown|json)$"),
+    format: str = Query("markdown", pattern="^(markdown|json)$"),
 ):
     """C4: export chat history as markdown or JSON.
 
