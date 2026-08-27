@@ -1,8 +1,12 @@
 // StudyTaskList — filter chips, active-first sorting, selection highlight,
 // refresh button, loading skeleton and empty states.
+//
+// The component uses useNavigate() (double-click → detail page), so every
+// render must be wrapped in a <MemoryRouter>.
 
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { StudyTaskList } from '../components/study/StudyTaskList'
 import type { StudySummary } from '../api/client'
 
@@ -12,6 +16,7 @@ vi.mock('lucide-react', () => {
     Clock: Stub, ArrowRight: Stub, RefreshCw: Stub, ListChecks: Stub,
     Archive: Stub, ArchiveRestore: Stub, Pause: Stub, Play: Stub,
     RotateCcw: Stub, X: Stub, MoreVertical: Stub, Info: Stub,
+    default: Stub,
   }
 })
 
@@ -30,20 +35,24 @@ function study(overrides: Partial<StudySummary> = {}): StudySummary {
   }
 }
 
+function renderList(ui: React.ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>)
+}
+
 describe('StudyTaskList', () => {
   it('shows the empty state without studies', () => {
-    render(<StudyTaskList studies={[]} selectedId={null} onSelect={() => {}} />)
+    renderList(<StudyTaskList studies={[]} selectedId={null} onSelect={() => {}} />)
     expect(screen.getByText('任务列表')).toBeInTheDocument()
     expect(screen.getByText(/暂无研究任务/)).toBeInTheDocument()
   })
 
   it('renders task cards with objective, strategy and verdict', () => {
-    render(
+    renderList(
       <StudyTaskList
         studies={[study(), study({ study_id: 'st-2', objective: '价值因子研究', strategy_name: 'value', execution_status: 'complete' })]}
         selectedId={null}
         onSelect={() => {}}
-      />
+      />,
     )
     expect(screen.getByText('动量因子研究')).toBeInTheDocument()
     expect(screen.getByText('价值因子研究')).toBeInTheDocument()
@@ -53,7 +62,7 @@ describe('StudyTaskList', () => {
   })
 
   it('sorts active studies first regardless of update time', () => {
-    render(
+    renderList(
       <StudyTaskList
         studies={[
           study({ study_id: 'old-active', updated_at: '2026-07-01T00:00:00Z' }),
@@ -61,7 +70,7 @@ describe('StudyTaskList', () => {
         ]}
         selectedId={null}
         onSelect={() => {}}
-      />
+      />,
     )
     const cards = screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))
     expect(cards[0]).toHaveTextContent('动量因子研究')
@@ -73,7 +82,7 @@ describe('StudyTaskList', () => {
       study(),
       study({ study_id: 'st-2', objective: '价值因子研究', execution_status: 'complete' }),
     ]
-    render(<StudyTaskList studies={studies} selectedId={null} onSelect={() => {}} />)
+    renderList(<StudyTaskList studies={studies} selectedId={null} onSelect={() => {}} />)
     fireEvent.click(screen.getByText('进行中'))
     expect(screen.getByText('动量因子研究')).toBeInTheDocument()
     expect(screen.queryByText('价值因子研究')).not.toBeInTheDocument()
@@ -88,12 +97,12 @@ describe('StudyTaskList', () => {
   })
 
   it('marks the selected card with the selected state', () => {
-    const { container } = render(
+    const { container } = renderList(
       <StudyTaskList
         studies={[study(), study({ study_id: 'st-2' })]}
         selectedId="st-2"
         onSelect={() => {}}
-      />
+      />,
     )
     const selected = container.querySelector('.border-primary-500\\/60')
     expect(selected).toBeTruthy()
@@ -102,23 +111,23 @@ describe('StudyTaskList', () => {
 
   it('calls onSelect when a card is clicked', () => {
     const onSelect = vi.fn()
-    render(<StudyTaskList studies={[study()]} selectedId={null} onSelect={onSelect} />)
+    renderList(<StudyTaskList studies={[study()]} selectedId={null} onSelect={onSelect} />)
     fireEvent.click(screen.getByText('动量因子研究'))
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ study_id: 'st-1' }))
   })
 
   it('calls onRefresh from the refresh button', () => {
     const onRefresh = vi.fn()
-    render(
-      <StudyTaskList studies={[study()]} selectedId={null} onSelect={() => {}} onRefresh={onRefresh} />
+    renderList(
+      <StudyTaskList studies={[study()]} selectedId={null} onSelect={() => {}} onRefresh={onRefresh} />,
     )
     fireEvent.click(screen.getByTitle('刷新'))
     expect(onRefresh).toHaveBeenCalledTimes(1)
   })
 
   it('shows a loading skeleton instead of the empty state while loading', () => {
-    const { container } = render(
-      <StudyTaskList studies={[]} selectedId={null} loading onSelect={() => {}} />
+    const { container } = renderList(
+      <StudyTaskList studies={[]} selectedId={null} loading onSelect={() => {}} />,
     )
     expect(screen.queryByText(/暂无研究任务/)).not.toBeInTheDocument()
     expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)

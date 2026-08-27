@@ -23,6 +23,7 @@ vi.mock('lucide-react', () => {
   return {
     Plus: Stub, X: Stub, Send: Stub, SlidersHorizontal: Stub,
     ChevronDown: Stub, ChevronRight: Stub, RefreshCw: Stub,
+    Target: Stub, Sparkles: Stub,
   }
 })
 
@@ -36,10 +37,23 @@ beforeEach(() => {
 })
 
 describe('StudyCreatePanel', () => {
-  it('shows a session prompt without a session', () => {
+  it('stays mounted without a session and blocks submit at validation', async () => {
     render(<StudyCreatePanel sessionId={undefined} workspacePath="/w" />)
-    expect(screen.getByText('尚未选择 session')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /启动 study/ })).not.toBeInTheDocument()
+    // Old inline "尚未选择 session" state was removed; the panel stays
+    // mounted and submit-time validation reports the missing session.
+    fireEvent.change(screen.getByPlaceholderText(/研究 A 股动量因子/), {
+      target: { value: '测试目标' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/自动生成/), {
+      target: { value: 'demo_strategy' },
+    })
+    const btn = screen.getByRole('button', { name: /启动 study/ })
+    expect(btn).toBeEnabled()
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(screen.getByText(/Session ID is required/i)).toBeInTheDocument(),
+    )
+    expect(mockStart).not.toHaveBeenCalled()
   })
 
   it('renders objective input and strategy name preview', () => {
@@ -59,10 +73,9 @@ describe('StudyCreatePanel', () => {
 
   it('collapses and expands advanced params', () => {
     render(<StudyCreatePanel sessionId="sess-1" workspacePath="/w" />)
-    expect(screen.queryByText('验收指标')).not.toBeInTheDocument()
+    expect(screen.getByText(/验收指标/)).toBeInTheDocument()
     fireEvent.click(screen.getByText('高级参数'))
-    expect(screen.getByText('验收指标')).toBeInTheDocument()
-    expect(screen.getByText('轮数预算 (turns)')).toBeInTheDocument()
+    expect(screen.getByText(/轮数预算 \(turns\)/)).toBeInTheDocument()
   })
 
   it('submits with objective + strategy name and reports the new study id', async () => {

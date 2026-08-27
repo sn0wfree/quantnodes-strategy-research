@@ -11,6 +11,7 @@ vi.mock('../api/client', async () => {
       study: {
         list: vi.fn(),
         summary: vi.fn(),
+        summaryWithEtag: vi.fn(),
         start: vi.fn(),
       },
     },
@@ -44,7 +45,7 @@ import { useStudyStore } from '../stores/study'
 import { useSystemStore } from '../stores/system'
 
 const mockList = vi.mocked(api.study.list)
-const mockSummary = vi.mocked(api.study.summary)
+const mockSummary = vi.mocked(api.study.summaryWithEtag)
 const mockStart = vi.mocked(api.study.start)
 
 const STUDIES = [
@@ -118,7 +119,7 @@ beforeEach(() => {
   useStudyStore.setState({ current: null, list: [], busy: false, error: '' })
   useSystemStore.setState({ workspacePath: '/ws' } as never)
   mockList.mockResolvedValue({ status: 'ok', studies: STUDIES } as never)
-  mockSummary.mockResolvedValue(summaryFixture() as never)
+  mockSummary.mockResolvedValue({ data: summaryFixture(), etag: '"v1"' } as never)
   vi.clearAllMocks()
 })
 
@@ -138,15 +139,16 @@ describe('StudyPage', () => {
     })
     // Auto-selected the running study → summary fetched and rendered
     await waitFor(() => {
-      expect(mockSummary).toHaveBeenCalledWith('st-1')
+      expect(mockSummary.mock.calls[0]?.[0]).toBe('st-1')
     })
     expect(await screen.findByText('任务摘要')).toBeTruthy()
   })
 
   it('switches the summary when clicking another task', async () => {
-    mockSummary.mockResolvedValue(
-      summaryFixture({ study_id: 'st-2', objective: '价值因子研究', execution_status: 'complete' }) as never
-    )
+    mockSummary.mockResolvedValue({
+      data: summaryFixture({ study_id: 'st-2', objective: '价值因子研究', execution_status: 'complete' }),
+      etag: null,
+    } as never)
     render(
       <MemoryRouter>
         <StudyPage />
@@ -154,7 +156,7 @@ describe('StudyPage', () => {
     )
     await waitFor(() => expect(screen.getByText('价值因子研究')).toBeTruthy())
     fireEvent.click(screen.getAllByText('价值因子研究')[0])
-    await waitFor(() => expect(mockSummary).toHaveBeenCalledWith('st-2'))
+    await waitFor(() => expect(mockSummary.mock.calls.at(-1)?.[0]).toBe('st-2'))
     expect(await screen.findByText('任务摘要')).toBeTruthy()
   })
 
@@ -198,14 +200,16 @@ describe('StudyPage', () => {
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
   })
 
-  it('shows a session prompt in the create panel without a session', () => {
+  it('still renders the create panel without a session (no crash)', () => {
     useSessionStore.setState({ currentSessionId: null } as never)
     render(
       <MemoryRouter>
         <StudyPage />
       </MemoryRouter>
     )
-    expect(screen.getByText('尚未选择 session')).toBeTruthy()
+    // The old inline "尚未选择 session" empty state was removed; the
+    // create panel now stays mounted and validates on submit.
+    expect(screen.getByText('任务列表')).toBeTruthy()
   })
 
   it('auto-selects the first study when none is active', async () => {
@@ -221,7 +225,7 @@ describe('StudyPage', () => {
         <StudyPage />
       </MemoryRouter>
     )
-    await waitFor(() => expect(mockSummary).toHaveBeenCalledWith('st-1'))
+    await waitFor(() => expect(mockSummary.mock.calls[0]?.[0]).toBe('st-1'))
   })
 
   it('clears the summary when the list becomes empty', async () => {

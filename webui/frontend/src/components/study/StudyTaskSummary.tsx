@@ -68,7 +68,10 @@ export function StudyTaskSummary({ studyId }: Props) {
       await run()
       if (!cancelled) {
         const st = summaryRef.current?.execution_status
-        const isTerminal = ['complete', 'cancelled', 'archived'].includes(st ?? '')
+        const isTerminal = [
+          'complete', 'cancelled', 'archived', 'error',
+          'budget_limited', 'early_stopped', 'needs_refresh',
+        ].includes(st ?? '')
         timer = isTerminal ? null : setTimeout(poll, 10_000)
       }
     }

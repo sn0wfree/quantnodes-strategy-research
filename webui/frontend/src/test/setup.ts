@@ -40,3 +40,24 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: () => false,
   }),
 })
+
+// EventSource is not provided by jsdom; useSSE() needs it. A no-op
+// stub is enough for component tests — they don't depend on live events.
+if (typeof (globalThis as { EventSource?: unknown }).EventSource === 'undefined') {
+  class StubEventSource {
+    onopen: ((this: StubEventSource, ev: Event) => unknown) | null = null
+    onerror: ((this: StubEventSource, ev: Event) => unknown) | null = null
+    onmessage: ((this: StubEventSource, ev: MessageEvent) => unknown) | null = null
+    readyState = 0
+    url = ''
+    withCredentials = false
+    constructor(_url?: string | URL, _init?: unknown) { /* no-op */ }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    dispatchEvent(): boolean { return true }
+    close(): void {}
+  }
+  const stub = StubEventSource as unknown as typeof EventSource
+  ;(globalThis as unknown as { EventSource: typeof EventSource }).EventSource = stub
+  ;(window as unknown as { EventSource: typeof EventSource }).EventSource = stub
+}

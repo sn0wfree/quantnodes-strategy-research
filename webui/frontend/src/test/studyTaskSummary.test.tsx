@@ -11,6 +11,7 @@ vi.mock('../api/client', async () => {
     api: {
       study: {
         summary: vi.fn(),
+        summaryWithEtag: vi.fn(),
       },
     },
     ApiError: class extends Error {},
@@ -28,7 +29,7 @@ vi.mock('lucide-react', () => {
 })
 
 import { api } from '../api/client'
-const mockSummary = vi.mocked(api.study.summary)
+const mockSummary = vi.mocked(api.study.summaryWithEtag)
 
 function fixture(overrides: Record<string, unknown> = {}) {
   return {
@@ -87,33 +88,33 @@ describe('StudyTaskSummary', () => {
   })
 
   it('loads and renders the summary for a selected study', async () => {
-    mockSummary.mockResolvedValue(fixture() as never)
+    mockSummary.mockResolvedValue({ data: fixture(), etag: '"v1"' } as never)
     render(
       <MemoryRouter>
         <StudyTaskSummary studyId="st-1" />
       </MemoryRouter>
     )
-    await waitFor(() => expect(mockSummary).toHaveBeenCalledWith('st-1'))
+    await waitFor(() => expect(mockSummary.mock.calls[0]?.[0]).toBe('st-1'))
     expect(await screen.findByText('动量因子研究')).toBeInTheDocument()
     expect(screen.getByText('运行中')).toBeInTheDocument()
     expect(screen.getByText(/40% · 2 证据/)).toBeInTheDocument()
     expect(screen.getByText('momentum')).toBeInTheDocument()
-    expect(screen.getByText('查看完整运行状况')).toBeInTheDocument()
+    expect(screen.getByText('查看详情')).toBeInTheDocument()
   })
 
   it('links to the detail page', async () => {
-    mockSummary.mockResolvedValue(fixture() as never)
+    mockSummary.mockResolvedValue({ data: fixture(), etag: '"v1"' } as never)
     render(
       <MemoryRouter>
         <StudyTaskSummary studyId="st-1" />
       </MemoryRouter>
     )
-    const link = await screen.findByRole('link', { name: /查看完整运行状况/ })
+    const link = await screen.findByRole('link', { name: /查看详情/ })
     expect(link).toHaveAttribute('href', '/study/st-1')
   })
 
   it('surfaces summary errors', async () => {
-    mockSummary.mockRejectedValueOnce(new Error('summary failed') as never)
+    mockSummary.mockRejectedValueOnce(new Error('summary failed'))
     render(
       <MemoryRouter>
         <StudyTaskSummary studyId="st-1" />
@@ -123,7 +124,7 @@ describe('StudyTaskSummary', () => {
   })
 
   it('reloads when the selected study changes', async () => {
-    mockSummary.mockResolvedValue(fixture() as never)
+    mockSummary.mockResolvedValue({ data: fixture(), etag: '"v1"' } as never)
     const { rerender } = render(
       <MemoryRouter>
         <StudyTaskSummary studyId="st-1" />
@@ -136,11 +137,11 @@ describe('StudyTaskSummary', () => {
       </MemoryRouter>
     )
     await waitFor(() => expect(mockSummary).toHaveBeenCalledTimes(2))
-    expect(mockSummary).toHaveBeenLastCalledWith('st-2')
+    expect(mockSummary.mock.calls.at(-1)?.[0]).toBe('st-2')
   })
 
   it('shows the metrics empty state when rounds have no metrics', async () => {
-    mockSummary.mockResolvedValue(fixture({ recent_rounds: [] }) as never)
+    mockSummary.mockResolvedValue({ data: fixture({ recent_rounds: [] }), etag: null } as never)
     render(
       <MemoryRouter>
         <StudyTaskSummary studyId="st-1" />
@@ -150,9 +151,10 @@ describe('StudyTaskSummary', () => {
   })
 
   it('omits the verdict badge when there is no last verdict', async () => {
-    mockSummary.mockResolvedValue(
-      fixture({ last_verdict: null, recent_rounds: [] }) as never
-    )
+    mockSummary.mockResolvedValue({
+      data: fixture({ last_verdict: null, recent_rounds: [] }),
+      etag: null,
+    } as never)
     render(
       <MemoryRouter>
         <StudyTaskSummary studyId="st-1" />
