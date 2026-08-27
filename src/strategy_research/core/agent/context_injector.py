@@ -191,6 +191,22 @@ class GoalContinuationInjector:
         result: LoopResult,
         iteration: int,
     ) -> bool:
+        # Final-JSON guard: a complete JSON object IS the turn's final
+        # structured answer. Study agents (researcher/strategist/…) emit
+        # exactly this shape every round; treating it as "goal not yet
+        # done" forced the loop to max_iterations and discarded valid
+        # output (see docs/rootcause-goal-injection-maxiter.md).
+        # Non-JSON / malformed / partial responses still get the
+        # continuation nudge — that is the injector's intended purpose.
+        c = (getattr(response, "content", "") or "").strip()
+        if c.startswith("{") and c.endswith("}"):
+            try:
+                import json as _json
+
+                if isinstance(_json.loads(c), dict):
+                    return False
+            except ValueError:
+                pass
         if not loop.enable_goal_injection:
             return False
         if not loop.session_id:
