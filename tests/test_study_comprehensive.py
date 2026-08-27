@@ -1294,8 +1294,10 @@ class TestStudyStatusEnum:
         }
         assert terminals.isdisjoint(ACTIVE_EXECUTION_STATUSES)
 
-    def test_active_set_excludes_monitoring(self):
-        assert StudyStatus.MONITORING not in ACTIVE_EXECUTION_STATUSES
+    def test_active_set_includes_monitoring(self):
+        # MONITORING is active so restart recovery can re-arm its monitor
+        # task (scheduler.recover_on_startup has an explicit branch).
+        assert StudyStatus.MONITORING in ACTIVE_EXECUTION_STATUSES
 
     def test_active_set_excludes_needs_refresh(self):
         assert StudyStatus.NEEDS_REFRESH not in ACTIVE_EXECUTION_STATUSES

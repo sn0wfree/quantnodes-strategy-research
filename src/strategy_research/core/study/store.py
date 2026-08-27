@@ -480,6 +480,24 @@ class StudyStore:
         return self._study_from_row(row) if row else None
 
     @synchronized
+    def _is_archived(self, study_id: str) -> bool:
+        """True when the study row exists and is ARCHIVED.
+
+        Used by the write guards (heartbeat / last_metrics / append_round)
+        mirroring update_execution_status's ARCHIVED protection: a study
+        the user archived must not keep receiving writer traffic from a
+        runner that is still winding down.
+        """
+        from .models import StudyStatus
+        current = self._conn.execute(
+            "SELECT execution_status FROM studies WHERE study_id = ?",
+            (study_id,),
+        ).fetchone()
+        return (
+            current is not None
+            and StudyStatus(current["execution_status"]) == StudyStatus.ARCHIVED
+        )
+
     def update_execution_status(
         self,
         study_id: str,
@@ -562,7 +580,9 @@ class StudyStore:
     @synchronized
     def update_round_heartbeat(self, study_id: str, current_round: int) -> None:
         """Bump the round counter + heartbeat timestamp (best-effort)."""
-
+        # ARCHIVED write guard — same contract as update_execution_status.
+        if self._is_archived(study_id):
+            return
         now = now_iso()
         with write_transaction(self._conn):
             self._conn.execute(
@@ -815,7 +835,9 @@ class StudyStore:
         self, study_id: str, metrics: dict, verdict: str
     ) -> None:
         """Record the most recent round's metrics + keep/discard verdict."""
-
+        # ARCHIVED write guard — same contract as update_execution_status.
+        if self._is_archived(study_id):
+            return
         now = now_iso()
         with write_transaction(self._conn):
             self._conn.execute(
@@ -1325,6 +1347,10 @@ class StudyStore:
     ) -> "StudyRoundRecord":
         """Append a round record to ``study_rounds``."""
         from .models import StudyRoundRecord
+        # ARCHIVED write guard — an archive request mid-round must not
+        # grow the round history of a study the user put away.
+        if self._is_archived(study_id):
+            raise ValueError(f"study is archived: {study_id}")
         now = now_iso()
         round_id = new_id("round")
         row = self._conn.execute(
@@ -1479,6 +1505,9 @@ class StudyStore:
             cooldown_jitter=row["cooldown_jitter"],
             min_cooldown=row["min_cooldown"],
             max_rounds=row["max_rounds"],
+            early_stop_patience=(
+                row["early_stop_patience"] if "early_stop_patience" in row.keys() else 3
+            ),
             lazy_detection_interval=row["lazy_detection_interval"],
             keep_recent=row["keep_recent"],
             behavior=row["behavior"],

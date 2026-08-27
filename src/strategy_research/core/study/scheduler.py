@@ -280,18 +280,34 @@ class StudyScheduler:
 
     def cancel(self, study_id: str, reason: str | None = None) -> bool:
         tok = self._control_tokens.get(study_id)
-        if tok is None:
-            return False
-        tok.cancelled = True
-        if reason:
-            try:
-                self.store.update_execution_status(
-                    study_id, StudyStatus.CANCELLED,
-                    last_error=f"cancelled: {reason}",
-                )
-            except Exception:  # noqa: BLE001 — best-effort audit trail
-                pass
-        return True
+        if tok is not None:
+            tok.cancelled = True
+            if reason:
+                try:
+                    self.store.update_execution_status(
+                        study_id, StudyStatus.CANCELLED,
+                        last_error=f"cancelled: {reason}",
+                    )
+                except Exception:  # noqa: BLE001 — best-effort audit trail
+                    pass
+            return True
+        # No control token yet — the study may still be sitting in its
+        # session queue (ACTION_MATRIX explicitly allows queued→cancel).
+        # Mark it CANCELLED in the store; _run_one_study_locked re-reads
+        # the row at dispatch time and silently drops terminal entries.
+        study = self.store.get_study(study_id)
+        if study is not None and study.execution_status == StudyStatus.QUEUED:
+            self._queued_study_ids.discard(study_id)
+            self.store.update_execution_status(
+                study_id, StudyStatus.CANCELLED,
+                last_error=f"cancelled while queued{': ' + reason if reason else ''}",
+            )
+            self._emit_event(study.session_id, "study_cancelled", {
+                "study_id": study_id, "session_id": study.session_id,
+                "reason": "cancelled while queued",
+            })
+            return True
+        return False
 
     def archive(
         self,
@@ -837,12 +853,21 @@ class StudyScheduler:
         self._watchdog_task = asyncio.create_task(self._watchdog_loop())
 
     async def _watchdog_loop(self) -> None:
-        try:
-            while not self._shutdown:
-                await asyncio.sleep(self._watchdog_interval)
+        """Periodic sweep for dead/stale studies.
+
+        The loop body is wrapped in a broad try/except: any tick error
+        (transient SQLite lock, unexpected row shape, ...) must be logged
+        and swallowed so the watchdog itself never dies silently — after
+        which every subsequent hang would go undetected forever.
+        """
+        while not self._shutdown:
+            await asyncio.sleep(self._watchdog_interval)
+            try:
                 await self._watchdog_tick()
-        except asyncio.CancelledError:
-            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — watchdog must survive ticks
+                logger.exception("watchdog tick failed (continuing)")
 
     async def _watchdog_tick(self) -> None:
         """Sweep active tasks: cleanup dead ones, interrupt stale ones."""

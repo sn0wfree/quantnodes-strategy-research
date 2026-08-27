@@ -94,13 +94,14 @@ async def monitor_phase(runner: Any) -> str:
             continue
 
         # Drift → needs_refresh + auto repair
+        drift_reason = check.get("reason") or "monitor drift"
         runner.study_store.update_execution_status(
             sid, StudyStatus.NEEDS_REFRESH,
-            last_error=f"monitor drift: {check['reason']}",
+            last_error=f"monitor drift: {drift_reason}",
         )
         runner._emit(session, "study_drift_detected", {
             "study_id": sid, "metrics": check["metrics"],
-            "reason": check["reason"],
+            "reason": drift_reason,
         })
         if await _monitor_repair_rounds(runner):
             runner.study_store.update_execution_status(sid, StudyStatus.MONITORING)

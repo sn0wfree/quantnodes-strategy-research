@@ -485,6 +485,8 @@ class TestStudyMonitoring:
             ACTIVE_EXECUTION_STATUSES,
             StudyStatus,
         )
-        # MONITORING is intentionally excluded — it's a passive background check
-        assert StudyStatus.MONITORING not in ACTIVE_EXECUTION_STATUSES
+        # MONITORING counts as active: the scheduler's recover path has
+        # an explicit branch that re-arms monitor tasks on restart — it
+        # was dead code while MONITORING was excluded from the scan.
+        assert StudyStatus.MONITORING in ACTIVE_EXECUTION_STATUSES
         assert StudyStatus.NEEDS_REFRESH not in ACTIVE_EXECUTION_STATUSES

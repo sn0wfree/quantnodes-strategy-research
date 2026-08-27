@@ -1640,31 +1640,62 @@ class AutoresearchRunner:
         - metrics: dict
         - now_iso: str
         - verdict: "monitor"
+        - reason: human-readable drift description ("all targets met"
+          when on target; carries backtest-failure notes when the
+          re-run could not execute)
+
+        §15.2 semantics: the check must RE-RUN the kept strategy, not
+        re-read ``state.best_metrics`` — comparing a stored snapshot to
+        itself can never detect drift.
         """
         from datetime import datetime, timezone
         from strategy_research.core.study import state_store as ss
-        from strategy_research.core.autoresearch import read_current_state
-        from strategy_research.core.study.metric_targets import meets_metric_targets
+        from strategy_research.core.backtest import run_backtest_script
 
         study = self._get_study()
         sid = study.study_id
         path = Path(study.workspace_path).resolve()
         state = ss.load(path, sid)
 
-        # Read current metrics from state.json (already updated by last keep round)
-        metrics = state.best_metrics or {}
+        # Re-backtest the last keep run (its own run dir supplies
+        # strategy.py / config.yaml / results.tsv).
+        metrics: dict = {}
+        notes: list[str] = []
+        keep_rel = state.last_keep_run_dir
+        keep_dir = ss.study_root(path, sid) / keep_rel if keep_rel else None
+        if keep_dir is not None and (keep_dir / "strategy.py").exists():
+            try:
+                bt = run_backtest_script(
+                    workspace_path=path,
+                    strategy_name=study.strategy_name,
+                    action="monitor",
+                    strategy_dir=keep_dir,
+                )
+            except Exception as exc:  # noqa: BLE001 — reported via reason
+                logger.warning("monitor re-backtest crashed study=%s: %s", sid, exc)
+                bt = {"success": False, "error": str(exc)}
+            if bt.get("success"):
+                metrics = dict(bt.get("metrics") or {})
+            else:
+                notes.append(f"re-backtest failed: {bt.get('error') or 'unknown error'}")
+                metrics = dict(state.best_metrics or {})
+        else:
+            notes.append(
+                f"keep run unavailable: {keep_rel or 'none recorded'}"
+            )
+            metrics = dict(state.best_metrics or {})
 
-        # Check if metrics meet targets
-        meets = bool(
-            study.metric_targets
-            and meets_metric_targets(metrics, study.metric_targets)
-        )
+        from strategy_research.core.study.metric_targets import target_failures
+        failures = target_failures(metrics, study.metric_targets or [])
+        meets = bool(study.metric_targets) and not failures
+        notes.extend(failures)
 
         return {
             "meets_targets": meets,
             "metrics": metrics,
             "now_iso": datetime.now(timezone.utc).isoformat(),
             "verdict": "monitor",
+            "reason": "; ".join(notes) if notes else "all targets met",
         }
 
 

@@ -1079,12 +1079,20 @@ async def study_round_summary_md(request: Request, study_id: str, round_num: int
 
 
 def _round_run_dirs(workspace_path: Path, study_id: str, round_num: int) -> list[Path]:
-    """All ``run_*`` directories inside a round dir (study layout)."""
+    """All ``run_*`` directories inside a round dir, name-ascending.
+
+    A redo leaves multiple run dirs for one round; every consumer of
+    this helper must agree on which run is "the" round content — the
+    lexically latest (matches _create_run_dir's zero-padded naming).
+    """
     from ...core.study import round_manifest as rm
     rd = rm.round_dir(workspace_path, study_id, round_num)
     if not rd.exists():
         return []
-    return [d for d in rd.iterdir() if d.is_dir() and d.name.startswith("run_")]
+    return sorted(
+        (d for d in rd.iterdir() if d.is_dir() and d.name.startswith("run_")),
+        key=lambda d: d.name,
+    )
 
 
 @router.get("/{study_id}/rounds/{round_num}/artifacts", response_model=StudyRoundArtifactsResponse)
@@ -1227,8 +1235,8 @@ async def study_round_diff(
         runs = _round_run_dirs(ws, study_id, rn)
         if not runs:
             return None
-        # adopted strategy is in the round's (single) run dir
-        return runs[0] / "strategy.py"
+        # adopted strategy lives in the latest run dir (redo-safe)
+        return runs[-1] / "strategy.py"
 
     pa = _strategy_of(against)
     pb = _strategy_of(round_num)
@@ -1275,7 +1283,7 @@ async def study_round_adopt(request: Request, study_id: str, round_num: int):
     runs = _round_run_dirs(ws, study_id, round_num)
     if not runs:
         raise HTTPException(status_code=404, detail="round run dir not found")
-    src = runs[0] / "strategy.py"
+    src = runs[-1] / "strategy.py"
     if not src.exists():
         raise HTTPException(status_code=404, detail="round strategy.py not found")
     study_baseline = ws / "study" / study_id / "baseline"
@@ -1287,7 +1295,7 @@ async def study_round_adopt(request: Request, study_id: str, round_num: int):
         "status": "ok",
         "study_id": study_id,
         "round": round_num,
-        "adopted_run_dir": str(runs[0].relative_to(ws)),
+        "adopted_run_dir": str(runs[-1].relative_to(ws)),
         "note": "copied to study baseline; next resume will start from this round's strategy",
     }
 

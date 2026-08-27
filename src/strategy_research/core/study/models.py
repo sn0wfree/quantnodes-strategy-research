@@ -47,6 +47,7 @@ ACTIVE_EXECUTION_STATUSES = frozenset(
         StudyStatus.QUEUED,
         StudyStatus.RUNNING,
         StudyStatus.PAUSED,
+        StudyStatus.MONITORING,
     }
 )
 

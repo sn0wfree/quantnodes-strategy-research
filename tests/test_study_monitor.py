@@ -46,7 +46,8 @@ def env(tmp_path, monkeypatch):
     return ws
 
 
-def _make_runner(env, *, monitor_interval: int | None = 60, status=None, metrics=None):
+def _make_runner(env, *, monitor_interval: int | None = 60, status=None,
+                 metrics=None, budget_turn: int | None = None):
     gs = GoalStore()
     store = StudyStore()
     goal = gs.replace_goal(
@@ -59,6 +60,7 @@ def _make_runner(env, *, monitor_interval: int | None = 60, status=None, metrics
         metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
         cooldown_base=0.01, cooldown_jitter=0.01, min_cooldown=0.01,
         max_rounds=None, monitor_interval_seconds=monitor_interval,
+        budget_turn=budget_turn,
     )
     store.update_goal_id(study.study_id, goal.goal_id)
     from strategy_research.core.study.bootstrap import init_study_dir as _init_study_dir
@@ -107,10 +109,14 @@ def _patch_monitor_check(monkeypatch, results: list[dict]):
 
     monkeypatch.setattr(AutoresearchRunner, "_run_monitor_check", _check)
 
-    async def _no_sleep(self, interval):
+    # _monitor_sleep is a module-level function in monitor.py since the
+    # runner refactor — patch it there (the loop calls it unqualified).
+    import strategy_research.core.study.monitor as monitor_mod
+
+    async def _no_sleep(interval):
         return None
 
-    monkeypatch.setattr(AutoresearchRunner, "_monitor_sleep", _no_sleep)
+    monkeypatch.setattr(monitor_mod, "_monitor_sleep", _no_sleep)
 
 
 def _check(meets_targets: bool, metrics=None) -> dict:
@@ -242,11 +248,12 @@ def test_repair_budget_exhausted_stays_needs_refresh(env, monkeypatch):
     rounds = {"n": 0}
     _patch_round(monkeypatch, e2_passed=lambda i: i == 1, rounds_counter=rounds)
     _patch_monitor_check(monkeypatch, [_check(False)])
-    gs, store, study = _make_runner(env, monitor_interval=60)
-    from dataclasses import replace as dc_replace
-    study = dc_replace(study, budget_turn=1)  # exhausted: 1 turn used of 1 allowed
-    store.update_execution_status(study.study_id, StudyStatus.MONITORING)
-    study = dc_replace(store.get_study(study.study_id), budget_turn=1)
+    # budget_turn must be persisted (budget_exceeded reads the store
+    # snapshot, not an in-memory dataclass replacement).
+    gs, store, study = _make_runner(
+        env, monitor_interval=60, status=StudyStatus.MONITORING,
+        budget_turn=1,
+    )
     collector = _Collector()
     runner = AutoresearchRunner(study, store, control=ControlToken(), emitter=collector)
     runner._total_used_turns = 1
