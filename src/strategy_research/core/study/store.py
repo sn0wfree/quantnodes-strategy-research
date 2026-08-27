@@ -1195,6 +1195,32 @@ class StudyStore:
             responded_at=row["responded_at"],
         )
 
+    def get_interrupt(self, interrupt_id: str) -> "StudyInterrupt | None":
+        """Return a single interrupt by id (any status), or None."""
+        from .models import StudyInterrupt
+        row = self._conn.execute(
+            """
+            SELECT interrupt_id, study_id, round_num, interrupt_type,
+                   payload, status, response, created_at, responded_at
+            FROM study_interrupts
+            WHERE interrupt_id = ?
+            """,
+            (interrupt_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return StudyInterrupt(
+            interrupt_id=row["interrupt_id"],
+            study_id=row["study_id"],
+            round_num=row["round_num"],
+            interrupt_type=row["interrupt_type"],
+            payload=row["payload"],
+            status=row["status"],
+            response=row["response"],
+            created_at=row["created_at"],
+            responded_at=row["responded_at"],
+        )
+
     @synchronized
     def respond_interrupt(
         self, interrupt_id: str, status: str, response: str | None = None

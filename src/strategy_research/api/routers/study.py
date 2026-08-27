@@ -12,6 +12,7 @@ out of the box.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from pathlib import Path
@@ -877,8 +878,18 @@ async def study_directives_list(request: Request, study_id: str):
 # ── POST /study/{study_id}/interrupts/{iid}/respond (P4: HITL) ──────
 
 class InterruptRespondRequest(BaseModel):
-    decision: str = Field(..., pattern="^(approve|reject)$")
+    decision: str = Field(..., pattern="^(approve|reject|approved|rejected)$")
     payload: Optional[dict] = None
+
+
+# API accepts both verb ("approve") and past-participle ("approved")
+# forms; the store and runner poll contract is the past participle.
+_DECISION_ALIASES = {
+    "approve": "approved",
+    "approved": "approved",
+    "reject": "rejected",
+    "rejected": "rejected",
+}
 
 
 @router.post("/{study_id}/interrupts/{iid}/respond")
@@ -895,11 +906,17 @@ async def study_interrupt_respond(
     if sid is None:
         raise HTTPException(status_code=404, detail="study not found")
 
+    status_value = _DECISION_ALIASES[req.decision]
     from ...core.study import StudyStore
+
+    # The interrupt must belong to this study — global ids are not a trust boundary.
     with StudyStore() as store:
+        interrupt = store.get_interrupt(iid)
+        if interrupt is None or interrupt.study_id != study_id:
+            raise HTTPException(status_code=404, detail="interrupt not found")
         updated = store.respond_interrupt(
             interrupt_id=iid,
-            status=req.decision,
+            status=status_value,
             response=json.dumps(req.payload) if req.payload else None,
         )
     if not updated:
@@ -913,13 +930,13 @@ async def study_interrupt_respond(
                 study_id, "study_interrupt_responded", {
                     "study_id": study_id,
                     "interrupt_id": iid,
-                    "decision": req.decision,
+                    "decision": status_value,
                 },
             )
         except Exception:
             pass
 
-    return {"status": "ok", "interrupt_id": iid, "decision": req.decision}
+    return {"status": "ok", "interrupt_id": iid, "decision": status_value}
 
 
 # ── v2 artifacts endpoints (design §17) ────────────────────────────────

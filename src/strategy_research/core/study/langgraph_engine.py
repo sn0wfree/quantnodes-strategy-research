@@ -618,12 +618,14 @@ def resume_round_langgraph(
     sid: str,
     round_num: int,
     directive_text: str | None,
+    profile: "LangGraphProfile | None" = None,
 ) -> dict:
-    """Resume a failed round from the last checkpoint.
+    """Resume a HITL-paused round from the last checkpoint.
 
     Uses the same checkpointer to load the saved state, then re-invokes
     the graph. Completed agents are skipped (their outputs are already in
-    the checkpoint).
+    the checkpoint). The stored interrupt decision (approved/rejected)
+    is mapped to the gate node's expected ``Command(resume=...)`` value.
     """
     from ..agent.dag_config import AgentDAGConfig
     from ..agent.executor import AgentExecutor
@@ -651,27 +653,47 @@ def resume_round_langgraph(
         return run_round_langgraph(
             runner, path, strategy, current_state, run_dir, graph,
             session=session, sid=sid, round_num=round_num,
-            directive_text=directive_text,
+            directive_text=directive_text, profile=profile,
         )
 
-    # Build and compile the graph
+    # Build and compile the graph — profile must match the original run
+    # so the checkpointed gate node exists in the rebuilt topology.
     compiled = build_langgraph(
         graph, executor, task_text, path,
         agent_ctx, runner._emit, sid, round_num,
         checkpointer=checkpointer,
+        profile=profile,
     )
 
-    # Resume from checkpoint — Command(resume=True) consumes the
-    # interrupt() node so execution continues past the gate.
+    # Read the stored decision and map it to the gate node's expected
+    # resume value: {"decision": "approve"} | {"decision": "reject"}
+    # (the gate treats everything non-"reject" as approved).
+    store_obj = getattr(runner, "study_store", None)
+    interrupt = None
+    if store_obj is not None and hasattr(store_obj, "get_interrupt_for_round"):
+        try:
+            interrupt = store_obj.get_interrupt_for_round(sid, round_num)
+        except Exception:  # noqa: BLE001 — polling must not crash resume
+            interrupt = None
+    else:
+        from .store import StudyStore
+        with StudyStore() as _tmp_store:
+            interrupt = _tmp_store.get_interrupt_for_round(sid, round_num)
+    status = getattr(interrupt, "status", None) or "approved"
+    decision = "reject" if status == "rejected" else "approve"
+
+    # Resume — Command(resume=...) consumes the interrupt() call in the
+    # gate node so execution continues past approval/rejection.
     from langgraph.types import Command
     config = {"configurable": {"thread_id": _thread_id(sid, round_num)}}
 
     runner._emit(session, "study_phase", {
         "study_id": sid, "round": round_num,
         "phase": "langgraph_resume", "status": "started",
+        "decision": decision,
     })
 
-    result = compiled.invoke(Command(resume=True), config=config)
+    result = compiled.invoke(Command(resume={"decision": decision}), config=config)
 
     runner._emit(session, "study_phase", {
         "study_id": sid, "round": round_num,

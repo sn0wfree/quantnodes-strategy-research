@@ -457,32 +457,50 @@ class AutoresearchRunner:
                     "hypothesis": result.get("hypothesis"),
                 })
                 # Poll for approval (max 10 minutes, check every 5 seconds)
-                approved = await self._wait_for_approval(sid, round_num, timeout_s=600)
-                if not approved:
-                    # Timeout or rejection — skip this round
+                decision = await self._wait_for_approval(sid, round_num, timeout_s=600)
+                if decision != "approved":
+                    # Timeout or rejection — skip this round and keep the
+                    # study loop alive (status must leave PAUSED).
+                    self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
                     self._emit(session, "study_round_rejected", {
                         "study_id": sid, "round": round_num,
-                        "reason": "hitl_timeout",
+                        "reason": f"hitl_{decision}",
                     })
                     continue
                 # Resume the round from checkpoint
                 self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
-                # Reconstruct context from study object (same as _run_one_round)
+                # Reconstruct context from study object (same as _run_one_round):
+                # read state against the run's own strategy copy so langgraph
+                # agents see exactly what the interrupted round was seeing.
                 study = self._get_study()
                 _path = Path(study.workspace_path).resolve()
                 _strategy = study.strategy_name
                 _graph = self._load_graph(_path, sid)
                 from strategy_research.core.autoresearch import read_current_state
-                from strategy_research.core.study import state_store as ss
-                _root = ss.study_root(_path, sid)
-                _state = ss.load(_path, sid)
-                _current_state = read_current_state(_path, _strategy)
+                from strategy_research.core.study import round_manifest as rm
+                _round_dir = rm.round_dir(_path, sid, round_num)
+                _run_dirs = sorted(
+                    d for d in _round_dir.iterdir()
+                    if d.is_dir() and d.name.startswith("run_")
+                ) if _round_dir.exists() else []
+                if _run_dirs:
+                    _run_dir = _run_dirs[-1]
+                else:
+                    logger.warning(
+                        "HITL resume: no run_* dirs under %s, falling back to run_0001",
+                        _round_dir,
+                    )
+                    _run_dir = _round_dir / "run_0001"
+                _current_state = read_current_state(
+                    _path, _strategy,
+                    strategy_file=_run_dir / "strategy.py",
+                )
                 _current_state["study_strategy_path"] = str(
-                    (ss.round_dir(_path, sid, round_num)).relative_to(_path) / f"round_{round_num}" / "strategy.py"
+                    _run_dir.relative_to(_path) / "strategy.py"
                 )
                 result = await asyncio.to_thread(
                     self._resume_round_langgraph, _path, _strategy,
-                    _current_state, ss.round_dir(_path, sid, round_num), _graph,
+                    _current_state, _run_dir, _graph,
                     session=session, sid=sid, round_num=round_num,
                     directive_text=directive_text,
                 )
@@ -1060,16 +1078,20 @@ class AutoresearchRunner:
 
     async def _wait_for_approval(
         self, sid: str, round_num: int, timeout_s: int = 600
-    ) -> bool:
-        """Poll for HITL approval. Returns True if approved, False if timeout/rejected."""
+    ) -> str:
+        """Poll for HITL approval.
+
+        Returns the resolved decision: ``"approved"``, ``"rejected"``,
+        or ``"timeout"`` when no response arrived within ``timeout_s``.
+        """
         import asyncio
         start = time.time()
         while time.time() - start < timeout_s:
             interrupt = self.study_store.get_interrupt_for_round(sid, round_num)
             if interrupt is not None and interrupt.status in ("approved", "rejected"):
-                return interrupt.status == "approved"
+                return interrupt.status
             await asyncio.sleep(5)
-        return False
+        return "timeout"
 
     def _resume_round_langgraph(
         self,
@@ -1090,6 +1112,13 @@ class AutoresearchRunner:
         except ImportError:
             raise RuntimeError("langgraph package not installed")
 
+        # Same profile resolution as _run_round_via_langgraph — the
+        # rebuilt graph must include the HITL gate node the checkpoint
+        # stopped at, otherwise resume fails or silently skips gating.
+        profile_name = getattr(self._get_study(), "engine", None) or "langgraph"
+        from .langgraph_engine import get_profile
+        profile = get_profile(profile_name)
+
         return resume_round_langgraph(
             runner=self,
             path=path,
@@ -1101,6 +1130,7 @@ class AutoresearchRunner:
             sid=sid,
             round_num=round_num,
             directive_text=directive_text,
+            profile=profile,
         )
 
     def _layered_topological_layers(self, graph) -> list[list[str]]:

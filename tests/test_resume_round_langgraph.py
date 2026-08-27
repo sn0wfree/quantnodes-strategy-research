@@ -1,13 +1,14 @@
-"""Tests for resume_round_langgraph Command(resume=True) fix (P0-3a).
+"""Tests for resume_round_langgraph HITL resume behavior.
 
-Pre-fix: ``compiled.invoke(None, config=config)`` re-triggered the
-interrupt node instead of consuming it, so approval could never
-actually resume the graph.
+History:
+- P0-3a: ``compiled.invoke(None, ...)`` re-triggered the interrupt node
+  instead of consuming it; fixed to pass a ``Command(resume=...)``.
+- PR-A (HITL chain repair): the resume value now carries the stored
+  decision as ``{"decision": "approve" | "reject"}`` so the gate node
+  can act on a human rejection, and the rebuilt graph receives the
+  study's langgraph profile.
 
-Post-fix: ``compiled.invoke(Command(resume=True), config=config)``
-correctly passes through the interrupt gate.
-
-Also covers the new __interrupt__ guard in resume (returns
+Also covers the __interrupt__ guard in resume (returns
 paused_for_approval if the graph hits another interrupt during resume).
 """
 
@@ -38,7 +39,7 @@ def env(tmp_path: Path, monkeypatch):
     return ws
 
 
-def _make_resume_env(env, *, invoke_result=None):
+def _make_resume_env(env, *, invoke_result=None, interrupt_status=None):
     """Build all the mocks needed for resume_round_langgraph."""
     sid = "study-r-1"
     run_dir = env / "study" / sid / "rounds" / "round_0001"
@@ -52,6 +53,12 @@ def _make_resume_env(env, *, invoke_result=None):
     study.objective = "test"
     runner._get_study.return_value = study
     runner.study_store = MagicMock()
+    if interrupt_status is not None:
+        interrupt_row = MagicMock()
+        interrupt_row.status = interrupt_status
+        runner.study_store.get_interrupt_for_round.return_value = interrupt_row
+    else:
+        runner.study_store.get_interrupt_for_round.return_value = None
     runner._emit = MagicMock()
     runner._build_round_task_text = MagicMock(return_value="task")
     runner._save_agent_output = MagicMock()
@@ -71,8 +78,12 @@ def _make_resume_env(env, *, invoke_result=None):
 
 
 @patch("strategy_research.core.study.langgraph_engine.build_langgraph")
-def test_resume_passes_command_resume_true(mock_build, env):
-    """compiled.invoke must receive Command(resume=True), not None."""
+def test_resume_passes_command_resume_decision(mock_build, env):
+    """compiled.invoke must receive Command(resume=<decision dict>).
+
+    Default (no stored interrupt) maps to approve — the runner loop only
+    calls resume after observing an approved status anyway.
+    """
     runner, compiled, sid, run_dir = _make_resume_env(env)
     mock_build.return_value = compiled
 
@@ -101,13 +112,62 @@ def test_resume_passes_command_resume_true(mock_build, env):
     args, kwargs = compiled.invoke.call_args
     first_arg = args[0]
 
-    # The first positional arg must be Command(resume=True), not None
+    # The first positional arg must be Command(resume={...}), not None
     assert first_arg is not None, "compiled.invoke received None — interrupt would re-trigger"
     assert hasattr(first_arg, "resume"), (
         f"first arg should be Command, got {type(first_arg)}"
     )
-    assert first_arg.resume is True, (
-        f"Command.resume should be True, got {first_arg.resume!r}"
+    assert first_arg.resume == {"decision": "approve"}, (
+        f"Command.resume should carry the approval decision, got {first_arg.resume!r}"
+    )
+
+
+@patch("strategy_research.core.study.langgraph_engine.build_langgraph")
+def test_resume_maps_rejected_decision(mock_build, env):
+    """A stored 'rejected' status must reach the gate as decision=reject."""
+    runner, compiled, sid, run_dir = _make_resume_env(env, interrupt_status="rejected")
+    mock_build.return_value = compiled
+
+    with patch(
+        "strategy_research.core.study.langgraph_engine._get_checkpointer",
+        return_value=MagicMock(),
+    ):
+        resume_round_langgraph(
+            runner=runner, path=env, strategy="demo",
+            current_state={}, run_dir=run_dir,
+            graph=MagicMock(), session=sid, sid=sid,
+            round_num=1, directive_text=None,
+        )
+
+    args, _kwargs = compiled.invoke.call_args
+    assert args[0].resume == {"decision": "reject"}
+
+
+@patch("strategy_research.core.study.langgraph_engine.build_langgraph")
+def test_resume_passes_profile_to_build(mock_build, env):
+    """The profile kwarg must be forwarded so the rebuilt graph keeps
+    the HITL gate node the checkpoint stopped at."""
+    from strategy_research.core.study.langgraph_engine import LangGraphProfile
+
+    runner, compiled, sid, run_dir = _make_resume_env(env)
+    mock_build.return_value = compiled
+
+    with patch(
+        "strategy_research.core.study.langgraph_engine._get_checkpointer",
+        return_value=MagicMock(),
+    ):
+        resume_round_langgraph(
+            runner=runner, path=env, strategy="demo",
+            current_state={}, run_dir=run_dir,
+            graph=MagicMock(), session=sid, sid=sid,
+            round_num=1, directive_text=None,
+            profile=LangGraphProfile.langgraph(),
+        )
+
+    _, build_kwargs = mock_build.call_args
+    assert build_kwargs.get("profile") is not None, (
+        "profile must be forwarded to build_langgraph — without it the "
+        "rebuilt graph has no gate node and resume fails"
     )
 
 
