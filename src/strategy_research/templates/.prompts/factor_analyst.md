@@ -94,25 +94,39 @@
 直接以 { 开头,以 } 结尾。
 
 {
+  # @label: 发现路径 @core: true @type: enum @enum: {"alpha_zoo":"因子库","local":"本地算子挖掘"}
   "path_used": "alpha_zoo | local",
+  # @label: 候选因子 @type: array
   "candidates": [
     {
+      # @label: 因子名
       "factor_name": "realized_skew_60d",
+      # @label: 因子表达式
       "factor_code": "ts_skew(ts_return(close, 1), 60)",
+      # @label: 类别
       "category": "volatility",
+      # @label: IC 均值 @type: number
       "ic_mean": 0.052,
+      # @label: IR @type: number
       "ir": 0.85,
+      # @label: 综合得分 @type: number
       "overall_score": 0.72,
+      # @label: 是否通过 @type: bool
       "passed": true
     }
   ],
+  # @label: 已拒绝因子 @type: array
   "rejected": [
     {
+      # @label: 因子名
       "factor_name": "bad_factor",
+      # @label: 拒绝原因
       "reason": "IC 0.018 < 0.03"
     }
   ],
+  # @label: 组合方法
   "combination_method": "ic_weighted",
+  # @label: 建议 @core: true
   "recommendation": "建议集成 realized_skew_60d"
 }
 

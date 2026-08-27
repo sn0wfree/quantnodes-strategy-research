@@ -39,11 +39,17 @@
 直接以 { 开头,以 } 结尾。
 
 {
+  # @label: 是否通过 @core: true @type: bool
   "passed": true,
+  # @label: 警告 @type: array
   "warnings": ["警告 1", "警告 2"],
+  # @label: 数据指纹
   "data_fingerprint": "SHA-256",
+  # @label: NaN 比例 @type: number @format: percentage
   "nan_ratio": 0.02,
+  # @label: 缺失天数 @type: number
   "missing_days": 0,
+  # @label: 价格异常 @type: array
   "price_anomalies": []
 }
 

@@ -46,11 +46,17 @@
 直接以 { 开头,以 } 结尾。
 
 {
+  # @label: 错误类型 @core: true @type: enum @enum: {"runtime_error":"运行时错误","logic_bug":"逻辑缺陷","none":"无错误"}
   "error_type": "runtime_error | logic_bug | none",
+  # @label: 严重程度 @core: true @type: enum @enum: {"critical":"严重","warning":"警告","info":"提示"}
   "severity": "critical | warning | info",
+  # @label: 症状
   "symptom": "零交易",
+  # @label: 根因 @core: true
   "root_cause": "信号逻辑条件太严格",
+  # @label: 修复建议 @core: true
   "fix_suggestion": "放宽 ts_return(close, 20) 的阈值",
+  # @label: 置信度 @type: number
   "confidence": 0.85
 }
 
