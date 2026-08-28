@@ -216,10 +216,12 @@ class SubAgentTool(BaseTool):
             )
 
             # Build the user-message: sub-agent role prefix + task.
+            # (No trailing comma — a stray one makes this a 1-tuple and
+            # downstream string concatenation would TypeError.)
             full_task = (
                 "你是一个专注的子 agent。根据给定的任务独立完成工作，"
                 "使用可用工具读取数据、运行分析、生成报告。\n"
-                "回复简洁，直接给出结果。\n\n## 当前任务\n" + task,
+                "回复简洁，直接给出结果。\n\n## 当前任务\n" + task
             )
 
             executor = AgentExecutor(

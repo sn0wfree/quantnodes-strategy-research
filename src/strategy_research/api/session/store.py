@@ -45,6 +45,8 @@ class SessionStore:
         # Set SR_EVENT_LOG_READ=0 to fall back to direct DB reads.
         import os
         self._use_event_log_read = os.environ.get("SR_EVENT_LOG_READ", "1") != "0"
+        # Lazily-built cached Projector (see _get_projector).
+        self._projector = None
 
     # ── Connection helper ──────────────────────────────────────────────
 
@@ -170,7 +172,7 @@ class SessionStore:
         logger.debug("[STORE] get_messages (event_log) session=%s limit=%d", session_id, limit)
         try:
             from .projector import Projector
-            proj = Projector(self.db_path)
+            proj = self._get_projector()
             msgs = proj.project_to_messages(session_id, limit=limit)
             logger.debug("[STORE] loaded %d messages (event_log)", len(msgs))
             return msgs
@@ -180,6 +182,15 @@ class SessionStore:
                 session_id, exc,
             )
             return self._get_messages_from_db(session_id, limit)
+
+    def _get_projector(self):
+        """Cached Projector instance — constructing one per call drops
+        its incremental cache and forces a full event_log replay every
+        time get_messages is hit."""
+        if self._projector is None:
+            from .projector import Projector
+            self._projector = Projector(self.db_path)
+        return self._projector
 
     # DELETE-CANDIDATE v0.6: 0 production callers.
     def create_attempt(self, attempt: Attempt) -> Attempt:

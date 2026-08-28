@@ -376,14 +376,15 @@ class APIClient {
   }
 
   // ── Web search (MiniMax Token Plan / DuckDuckGo fallback) ──
+  // NOTE: paths must NOT start with /api — request() prepends API_BASE.
   search = {
     minimax: (query: string, count: number = 5) =>
       this.get<MiniMaxSearchResponse>(
-        `/api/search/minimax?q=${encodeURIComponent(query)}&count=${count}`,
+        `/search/minimax?q=${encodeURIComponent(query)}&count=${count}`,
       ),
     minimaxHealth: () =>
       this.get<{ status: string; configured: boolean }>(
-        `/api/search/minimax/health`,
+        `/search/minimax/health`,
       ),
   }
 

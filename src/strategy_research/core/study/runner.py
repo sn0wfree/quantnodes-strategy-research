@@ -1352,7 +1352,7 @@ class AutoresearchRunner:
             state.last_collect_round = state.last_completed_round or 0
             ss.save(path, sid, state)
             if collected:
-                self._emit(sid, "study_knowledge_update", {
+                self._emit(session, "study_knowledge_update", {
                     "study_id": sid, "entries_added": collected,
                 })
             return collected
