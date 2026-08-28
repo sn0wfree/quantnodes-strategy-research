@@ -75,11 +75,16 @@ def _run_coro_in_sync(coro: Any) -> Any:
     result: dict[str, Any] = {}
 
     def _runner() -> None:
-        result["value"] = asyncio.run(coro)
+        try:
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:  # noqa: BLE001 — re-raised below
+            result["error"] = exc
 
     thread = threading.Thread(target=_runner, daemon=True)
     thread.start()
     thread.join()
+    if "error" in result:
+        raise result["error"]
     return result["value"]
 
 
@@ -1519,12 +1524,19 @@ class AgentLoop:
                 # circuit_breaker.record_no_progress, emit) intact.
                 # hashes_pre_recorded=True avoids double-counting the
                 # window (record_hash already did the extend above).
-                self._check_no_progress(
+                #
+                # Honour the return value: True = exit (user rejected /
+                # timeout-reject), False = user approved continuation —
+                # fall through to the next iteration instead of leaving.
+                # (Previously the value was discarded, so an approved
+                # continuation still exited — the approval gate was
+                # unreachable.)
+                if self._check_no_progress(
                     tool_hashes, response, result, iteration,
                     hashes_pre_recorded=True,
-                )
-                await _fire("after_run", hook_ctx, result)
-                return result
+                ):
+                    await _fire("after_run", hook_ctx, result)
+                    return result
         else:
             self._handle_max_iter(result)
 

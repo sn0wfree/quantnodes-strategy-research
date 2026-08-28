@@ -226,11 +226,14 @@ def _raise_for_status(response: httpx.Response, adapter: Any = None) -> None:
     except Exception:                              # noqa: BLE001
         body = {"raw": response.text[:500]}
 
-    # Provider-specific error mapping (e.g. MiniMax 403-as-quota)
-    if adapter is None:
+    # Provider-specific error mapping (e.g. MiniMax 403-as-quota).
+    # Defence: some call sites used to pass ``config.provider`` (a str)
+    # instead of the resolved adapter — resolve it rather than crashing
+    # with AttributeError and masking the real HTTP error.
+    if adapter is None or isinstance(adapter, str):
         from .provider import get_provider
 
-        adapter = get_provider(None)
+        adapter = get_provider(adapter if isinstance(adapter, str) else None)
     custom_exception = adapter.handle_error(status, body)
     if custom_exception is not None:
         raise custom_exception
@@ -442,7 +445,7 @@ class OpenAICompatClient:
 
         # Exhausted retries
         if last_response is not None:
-            _raise_for_status(last_response, self.config.provider)
+            _raise_for_status(last_response, adapter)
         raise LLMError("stream max retries exhausted")
 
     async def astream(  # noqa: C901
@@ -552,7 +555,7 @@ class OpenAICompatClient:
                 await asyncio.sleep(delay)
 
         if last_response is not None:
-            _raise_for_status(last_response, self.config.provider)
+            _raise_for_status(last_response, adapter)
         raise LLMError("stream max retries exhausted")
 
     def with_config(self, **kwargs: Any) -> "OpenAICompatClient":
@@ -695,5 +698,5 @@ class OpenAICompatClient:
                 await asyncio.sleep(delay)
 
         if last_response is not None:
-            _raise_for_status(last_response, self.config.provider)
+            _raise_for_status(last_response, adapter)
         raise LLMError("max retries exhausted")
