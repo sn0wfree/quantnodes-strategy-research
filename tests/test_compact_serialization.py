@@ -101,7 +101,7 @@ class TestSerializeToolCalls:
             ],
         }
         result = _serialize_message(msg)
-        assert "[Assistant tool call]: read_file(" in result
+        assert "[Assistant tool call]: read(" in result
         assert '"/tmp/test.py"' in result
 
     def test_multiple_tool_calls(self):
@@ -114,7 +114,7 @@ class TestSerializeToolCalls:
             ],
         }
         result = _serialize_message(msg)
-        assert "[Assistant tool call]: read_file(" in result
+        assert "[Assistant tool call]: read(" in result
         assert "[Assistant tool call]: search_code(" in result
 
     def test_tool_call_long_args_truncated(self):
@@ -138,7 +138,7 @@ class TestSerializeToolCalls:
             ],
         }
         result = _serialize_message(msg)
-        assert "[Assistant tool call]: read_file(" in result
+        assert "[Assistant tool call]: read(" in result
 
     def test_tool_call_with_content(self):
         """Tool calls AND text content."""
@@ -151,7 +151,7 @@ class TestSerializeToolCalls:
         }
         result = _serialize_message(msg)
         assert "[Assistant]: Let me read the file" in result
-        assert "[Assistant tool call]: read_file(" in result
+        assert "[Assistant tool call]: read(" in result
 
     def test_empty_tool_calls(self):
         msg = {"role": "assistant", "content": "text", "tool_calls": []}
@@ -168,7 +168,7 @@ class TestSerializeToolCalls:
             ],
         }
         result = _serialize_message(msg)
-        assert "[Assistant tool call]: read_file(" in result
+        assert "[Assistant tool call]: read(" in result
 
 
 class TestSerializeToolResult:

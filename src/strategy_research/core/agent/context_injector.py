@@ -205,7 +205,11 @@ class GoalContinuationInjector:
 
                 if isinstance(_json.loads(c), dict):
                     return False
-            except ValueError:
+            except (ValueError, TypeError):
+                # ValueError: malformed / partial JSON — still a
+                # continuation candidate. TypeError: content is not a
+                # str at all (e.g. test doubles) — same treatment; the
+                # real LLMResponse contract keeps content a str.
                 pass
         if not loop.enable_goal_injection:
             return False
