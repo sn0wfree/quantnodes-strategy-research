@@ -107,8 +107,70 @@ return _legacy(...)
 
 - [x] 复现脚本：条件三元组 → 必现占位符（等价生产 event_log 形态）
 - [x] 守卫实验：stop @ iters=5，answer 为合法结构化决策
-- [ ] 新增单测 ×3（JSON 响应 stop / 非 JSON 文本仍续推 / 无 goal 场景零回归）
-- [ ] test_agent_loop* 既有回归全绿
+- [x] 新增单测 ×3（JSON 响应 stop / 非 JSON 文本仍续推 / 无 goal 场景零回归）
+- [x] test_agent_loop* 既有回归全绿
 - [ ] 重启服务后创建实测 study：首轮 manifest.metrics 非空、state.best_metrics
       按 keep/discard 正确演化
+
+---
+
+## 8. 后续核实（2026-08-27 深夜）：显示层灾难的前端根因
+
+P0 修复部署后用户仍看到「只有 ok okok / undefined / 未知工具」的空洞卡片。
+两轮深入核实（含对早前"assistant_message payload 无 content"结论的推翻）后，
+后端链路被证明是**通的**，真正的问题全部在前端显示层。
+
+### 8.1 一次重要的自我纠错
+
+早前曾断言「assistant_message event payload 历来无 content 字段」。
+经查该结论源于**查询方法 bug**：event_log 的 `seq` 是 **per-aggregate 序列**
+（每个 aggregate_id 各自从 1 递增），用 `WHERE seq=N` 不带 aggregate 条件
+会命中任意频道的同号行（llm_usage / session_total_tokens 等）。
+用 `(aggregate_id, type, data_json LIKE)` 复合条件重查后：
+
+- researcher 的 stop assistant_message **携带 1213 字符完整 JSON**
+  （"strategy.py 与 MomRsrch baseline 完全一致…尚未产生任何 baseline"——
+  内容质量很高）
+- `_handle_stop → emit("assistant_message", {content})` 链路**历来通畅**
+
+### 8.2 前端两处渲染根因（用户所见卡片逐一对应）
+
+**路径 A：SSE 实时注入（StudyChat.buildAgentEventMessage）**
+
+| 用户所见 | 根因 |
+|---|---|
+| `thinking_done` 裸文本卡 | `agent_thinking_done` 等 7+ 种低层事件（text.started/ended、iter_end、llm_usage、session_total_tokens…）无显式分支，落入 else → **事件名字面量被渲染成消息** |
+| `📋 \`\` → ok` | 部分 tool_result 事件不带 tool/name 字段 → 空工具名 + status 默认 "ok" |
+| 同批卡片整组重复 | SSE 重连后 last_event_id 重放 + 消息 id 含 ms 级 timestamp，重放产生新 timestamp → addMessage 视为新消息 |
+
+**路径 B：Projector 物化历史（loadMessages → message_parts）**
+
+| 用户所见 | 根因 |
+|---|---|
+| 成片 `undefined` / 空 JSON 卡 | 120 条 `text_delta` 事件被物化为 **120 条空 text part**（delta 本身不含累积文本，content 在流末才合并）|
+| 成片 `🔬 正在思考...` | 120 条 thinking part 逐条成卡，无聚合 |
+
+后端物化与 SSE payload 本身无数据丢失——`tool_call` part 带
+`tool/name/arguments/result` 全字段。
+
+### 8.3 修复设计（仅前端，~25 行）
+
+1. **事件白名单**：`buildAgentEventMessage` 只渲染
+   `assistant_message / tool_call / tool_result / text_delta` 四类；
+   其余低层事件（thinking_*/text.*/iter_*/loop_*已知/llm_usage/
+   session_total_tokens）直接返回 skip（空 parts 已有丢弃机制）。
+2. **tool_result 空名兜底**：`data.tool || data.name || '工具'`。
+3. **重放去重**：消息 id 从 `agent:{timestamp}:{type}:{agent}` 改为
+   `agent:{timestamp}:{seq或计数}`——核实后若 addMessage 按 id set 语义
+   已足够（同 id 覆盖），保持 id 稳定键即可。
+
+Projector 侧空 text part 的物化行为留作低优先后端项（前端 skip 后不再
+影响显示）。
+
+### 8.4 修复后的预期 UI
+
+一个 agent loop = 一张结构化卡片（assistant_message 的完整 JSON 经
+JsonActionCard 渲染：假设/行动/风控评级），工具调用折叠为简短行，
+无低层噪音卡，无重放重复。
+
 
