@@ -24,7 +24,6 @@ import { MessageList } from '../../../chat/MessageList'
 import type { WidgetProps } from '../types'
 import { StudyChatComposer } from './StudyChatComposer'
 import { InterruptApprovalCard } from './InterruptApprovalCard'
-import { getAgentStyle } from '../../agentStyles'
 import { clampRound } from '../../utils'
 
 // ── SSE event → Message (for live streaming) ──────────────────
@@ -56,7 +55,28 @@ export function buildAgentEventMessage(
   const resolvedAgentId = event.agent || event.data?.agent || ''
   const data = (event.data || {}) as Record<string, any>
   const ts: number = event.timestamp || Date.now()
-  const agentStyle = getAgentStyle(resolvedAgentId)
+  // Display whitelist: only render events that carry user-visible
+  // conclusions or tool activity. Low-level lifecycle events
+  // (thinking_start/done, text.started/ended, iter_start/end,
+  // loop_start/final, llm_usage, session_total_tokens…) were rendered
+  // as bare event-name cards ("thinking_done") or empty placeholders —
+  // see docs/rootcause-goal-injection-maxiter.md §8.
+  const DISPLAYABLE = new Set([
+    'agent_assistant_message',
+    'agent_tool_call',
+    'agent_tool_result',
+    'agent_text_delta',
+  ])
+  if (!DISPLAYABLE.has(eventType)) {
+    return {
+      id: `skip:${ts}:${eventType}:${resolvedAgentId}`,
+      session_id: `study:${studyId}:round:${currentRound}`,
+      role: 'system',
+      parts: [],
+      created_at: ts / 1000,
+      metadata: { kind: 'system', round: currentRound },
+    }
+  }
 
   let text: string = ''
 
@@ -66,23 +86,16 @@ export function buildAgentEventMessage(
     const argsStr = typeof args === 'string' ? args : JSON.stringify(args, null, 2)
     text = `🔧 \`${toolName}\`\n\`\`\`json\n${argsStr}\n\`\`\``
   } else if (eventType === 'agent_tool_result') {
-    const toolName = data.tool || data.name || ''
+    const toolName = data.tool || data.name || '工具'
     const status = data.status || 'ok'
     const result = data.result || data.output || ''
     const resultStr = typeof result === 'string' ? result.slice(0, 500) : JSON.stringify(result, null, 2).slice(0, 500)
     text = `📋 \`${toolName}\` → ${status}\n\`\`\`\n${resultStr}\n\`\`\``
-  } else if (eventType === 'agent_thinking_start') {
-    text = `${agentStyle.icon} 正在思考...`
-  } else if (eventType === 'agent_thinking_delta') {
-    text = data.delta || data.text || ''
   } else if (eventType === 'agent_text_delta') {
     text = data.text || data.delta || ''
   } else if (eventType === 'agent_assistant_message') {
     const content = data.content || data.text || ''
     text = typeof content === 'string' ? content : JSON.stringify(content)
-  } else if (eventType === 'agent_loop_end') {
-    const reason = data.reason || data.finished_reason || ''
-    text = `✅ 完成 (${reason})`
   } else {
     const message = data.message || data.text || ''
     text = message || `${eventType.replace('agent_', '')}`
