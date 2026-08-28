@@ -92,34 +92,6 @@ class TestHypothesisAutoCreate:
 # ─── Goal context injection ─────────────────────────────────────────────
 
 
-class TestGoalContextInjection:
-    def test_no_session_id_returns_empty(self, cfg, registry):
-        loop = _make_loop(cfg, registry)
-        assert loop._get_goal_context() == ""
-
-    def test_disabled_returns_empty(self, cfg, registry):
-        loop = _make_loop(
-            cfg, registry,
-            session_id="s1", enable_goal_injection=False,
-        )
-        assert loop._get_goal_context() == ""
-
-    def test_no_goal_returns_empty(self, cfg, registry):
-        loop = _make_loop(cfg, registry, session_id="nonexistent")
-        assert loop._get_goal_context() == ""
-
-    def test_with_goal_returns_block(self, cfg, registry):
-        from strategy_research.core.goal import GoalStore
-        store = GoalStore()
-        store.replace_goal(
-            session_id="sess_inject",
-            objective="Test injection",
-            criteria=["a", "b"],
-        )
-        loop = _make_loop(cfg, registry, session_id="sess_inject")
-        ctx = loop._get_goal_context()
-        assert "<current-research-goal>" in ctx
-        assert "Test injection" in ctx
 
 
 # ─── Integration: full run() with mocks ──────────────────────────────────

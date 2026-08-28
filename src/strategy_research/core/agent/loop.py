@@ -905,32 +905,6 @@ class AgentLoop:
             "content_preview": (response.content or "")[:200],
         })
 
-    def _check_goal_continuation(
-        self, response: LLMResponse, messages: list[dict[str, Any]],
-        result: LoopResult, iteration: int,
-    ) -> bool:
-        """Check if goal needs continuation; inject prompt if so. Return True if continuing."""
-        goal_snapshot = self._get_goal_snapshot()
-        if goal_snapshot is None:
-            return False
-        from ..goal.context import (
-            format_goal_continuation_prompt,
-            goal_needs_continuation,
-        )
-        if not goal_needs_continuation(goal_snapshot):
-            return False
-        continuation = format_goal_continuation_prompt(
-            goal_snapshot, previous_answer=response.content or "",
-        )
-        messages.append({"role": "user", "content": continuation})
-        result.messages.append({"role": "user", "content": continuation})
-        self._trace({
-            "type": "goal_continuation",
-            "iteration": iteration,
-            "goal_id": goal_snapshot.get("goal", {}).get("goal_id", ""),
-        })
-        return True
-
     def _collect_tool_hashes(
         self, tool_calls: list[ToolCall], tool_result_msgs: list[dict[str, Any]],
     ) -> list[str]:
@@ -1621,15 +1595,7 @@ class AgentLoop:
                 return None
 
     @staticmethod
-    async def _fire_tool_result_hooks(_fire, hook_ctx, tool_calls, tool_result_msgs) -> None:
-        """Fire per-tool-result hooks (on_tool_error / after_tool_executed)."""
-        for tc, tool_result_msg in zip(tool_calls, tool_result_msgs):
-            if tool_result_msg.get("content", "").startswith('{"status": "error"'):
-                await _fire("on_tool_error", hook_ctx, tc, RuntimeError(tool_result_msg["content"]))
-            else:
-                await _fire("after_tool_executed", hook_ctx, tc, tool_result_msg)
-
-    def _response_to_assistant_msg(self, response: LLMResponse) -> dict[str, Any]:
+    def _response_to_assistant_msg(response: LLMResponse) -> dict[str, Any]:
         """Convert LLMResponse to an assistant message dict."""
         msg: dict[str, Any] = {
             "role": "assistant",
@@ -2429,31 +2395,6 @@ class AgentLoop:
                 "error": str(exc),
             })
 
-    def _get_goal_context(self) -> str:
-        """Return formatted <current-research-goal> block for this session.
-
-        Returns empty string when:
-          - enable_goal_injection is False
-          - no session_id is set
-          - no current goal exists for the session
-
-        Failures are swallowed to avoid breaking the loop.
-        """
-        if not self.enable_goal_injection:
-            return ""
-        if not self.session_id:
-            return ""
-        try:
-            from ..goal import get_current_goal_context
-            ctx, _ = get_current_goal_context(self.session_id)
-            return ctx
-        except Exception as exc:                     # noqa: BLE001
-            self._trace({
-                "type": "goal_context_failed",
-                "error": str(exc),
-            })
-            return ""
-
     def _get_goal_snapshot(self) -> dict[str, Any] | None:
         """Return the raw goal snapshot for continuation checks.
 
@@ -2467,28 +2408,6 @@ class AgentLoop:
             return _get_goal_store().get_current_snapshot(self.session_id)
         except Exception:  # noqa: BLE001
             return None
-
-    def _inject_todos_snapshot(self, messages: list[dict[str, Any]]) -> None:
-        """Append a <current-todos> system block when the session has todos.
-
-        Injects only when the snapshot changed since the last injection
-        (tracked via hash) so we don't spam identical system messages.
-        """
-        if not self.session_id:
-            return
-        try:
-            from .builtin_tools.todo_tools import TodoStore, _format_todos_snapshot
-            todos = TodoStore.get(self.session_id)
-        except Exception:  # noqa: BLE001
-            return
-        if not todos:
-            return
-        block = _format_todos_snapshot(todos)
-        h = hash(block)
-        if getattr(self, "_last_todos_hash", None) == h:
-            return
-        self._last_todos_hash = h
-        messages.append({"role": "system", "content": block})
 
     # ── Git commit after run ──────────────────────
 

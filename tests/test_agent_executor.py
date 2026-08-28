@@ -178,7 +178,9 @@ class TestLLMExec:
         try:
             r = executor.execute(
                 plugin, "研究动量因子", workspace,
-                context={"strategy_name": "foo"},
+                # strategy_name is a loop kwarg now — filtered from the
+                # prompt by _NON_PROMPT_KEYS; use a real context key.
+                context={"market": "a_share"},
                 upstream_outputs={"x": "prior"},
             )
         finally:
@@ -257,7 +259,11 @@ class TestBuildTaskText:
         plugin = PLUGINS["researcher"]
         text = executor.build_task_text(
             plugin, "DO IT",
-            context={"strategy_name": "foo", "session_id": "s1"},
+            context={
+                "market": "a_share",           # real context key → rendered
+                "strategy_name": "foo",        # loop kwarg → filtered
+                "session_id": "s1",            # loop kwarg → filtered
+            },
             upstream_outputs={"dq": "clean"},
             previous_outputs=[{"k": 1}],
         )
@@ -266,9 +272,10 @@ class TestBuildTaskText:
         assert text.index("## Upstream Agent Outputs") < text.index(
             "## 之前 Agent 输出")
         assert text.index("## 之前 Agent 输出") < text.index("## 当前任务")
-        # non-prompt keys excluded
+        # loop-kwargs / non-prompt keys excluded from the prompt
         assert "session_id" not in text
-        assert "strategy_name" in text
+        assert "strategy_name" not in text
+        assert "a_share" in text
 
     def test_task_only(self, executor):
         plugin = PLUGINS["researcher"]
