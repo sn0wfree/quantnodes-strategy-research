@@ -498,6 +498,7 @@ class StudyStore:
             and StudyStatus(current["execution_status"]) == StudyStatus.ARCHIVED
         )
 
+    @synchronized
     def update_execution_status(
         self,
         study_id: str,
@@ -821,6 +822,7 @@ class StudyStore:
                     (now, now, study_id),
                 )
 
+    @synchronized
     def delete_round(self, study_id: str, round_num: int) -> int:
         """Delete a round's DB row (redo: remove the discarded round)."""
         with write_transaction(self._conn):
@@ -884,7 +886,6 @@ class StudyStore:
         ).fetchone()
         return self._study_from_row(row) if row else None
 
-    @synchronized
     @synchronized
     def list_studies(
         self,
@@ -1217,6 +1218,7 @@ class StudyStore:
             responded_at=row["responded_at"],
         )
 
+    @synchronized
     def get_interrupt(self, interrupt_id: str) -> "StudyInterrupt | None":
         """Return a single interrupt by id (any status), or None."""
         from .models import StudyInterrupt

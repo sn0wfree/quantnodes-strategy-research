@@ -366,8 +366,9 @@ class AutoresearchRunner:
         sid = self._get_study().study_id
         session = self._get_study().session_id
 
-        # Load previous summary for cross-round context
-        previous_summary = self._maybe_load_previous_summary(self.study)
+        # Load previous summary for cross-round context (fresh record —
+        # strategy_name / workspace_path may have been updated).
+        previous_summary = self._maybe_load_previous_summary(self._get_study())
         # v2: best score comes from state.json (keep-only, design §8.4)
         from strategy_research.core.study import state_store as ss
         state = ss.load(Path(self._get_study().workspace_path), sid)
@@ -1469,7 +1470,10 @@ class AutoresearchRunner:
         self._total_used_turns += sum(1 for v in outs.values() if v and not (isinstance(v, dict) and v.get("error")))
 
     def _budget_exceeded(self) -> bool:
-        s = self.study
+        # Read the fresh study record (5s-cached), not the constructor
+        # snapshot — budget limits can be changed mid-run via
+        # replace_objective / API updates.
+        s = self._get_study()
         if s.budget_time_seconds is not None and self._total_used_time >= s.budget_time_seconds:
             return True
         if s.budget_turn is not None and self._total_used_turns >= s.budget_turn:

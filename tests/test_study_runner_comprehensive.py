@@ -145,6 +145,9 @@ class TestBudgetAccounting:
     def test_budget_exceeded_time(self):
         study = _make_study(budget_time_seconds=100, budget_turn=50)
         store = _make_store()
+        # _budget_exceeded reads the authoritative store record (fresh
+        # semantics), not the constructor snapshot.
+        store.get_study.return_value = study
         runner = AutoresearchRunner(study=study, store=store)
         runner._total_used_time = 200
         runner._total_used_turns = 10
@@ -153,6 +156,7 @@ class TestBudgetAccounting:
     def test_budget_exceeded_turns(self):
         study = _make_study(budget_time_seconds=3600, budget_turn=10)
         store = _make_store()
+        store.get_study.return_value = study
         runner = AutoresearchRunner(study=study, store=store)
         runner._total_used_time = 100
         runner._total_used_turns = 20

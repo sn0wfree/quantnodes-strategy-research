@@ -141,6 +141,40 @@ class TestProjectedSessionRoundTrip:
         assert s2.last_seq == 5
         assert s2.messages == {}
 
+    def test_round_trip_rebuilds_parts_as_objects(self):
+        """Regression: dataclasses.asdict() serializes parts values to
+        raw dicts. from_dict must rebuild ProjectedPart objects or
+        parts_in_order() (which reads .seq) crashes with
+        AttributeError on the snapshot round-trip path."""
+        from strategy_research.api.session.projector import (
+            ProjectedMessage,
+            ProjectedPart,
+        )
+        s = ProjectedSession(session_id="s", last_seq=3)
+        s.messages["m1"] = ProjectedMessage(
+            id="m1", session_id="s", role="assistant", content="",
+            parts={"p1": ProjectedPart(id="p1", type="text",
+                                       data={"text": "x"}, seq=1)},
+        )
+        s2 = ProjectedSession.from_dict(s.to_dict())
+        part = s2.messages["m1"].parts["p1"]
+        assert isinstance(part, ProjectedPart)
+        assert s2.messages["m1"].parts_in_order()[0].seq == 1
+        assert part.data == {"text": "x"}
+
+    def test_from_dict_tolerates_legacy_snapshot(self):
+        """Legacy snapshots lack the open_thinking_part_id bookkeeping
+        field — from_dict must not require its presence."""
+        d = {
+            "session_id": "s", "last_seq": 1,
+            "messages": {
+                "m1": {"id": "m1", "session_id": "s", "role": "user",
+                       "content": "x", "parts": {}},
+            },
+        }
+        s2 = ProjectedSession.from_dict(d)
+        assert s2.messages["m1"].open_thinking_part_id is None
+
     def test_round_trip_preserves_message_fields(self):
         from strategy_research.api.session.projector import ProjectedMessage
         s = ProjectedSession(session_id="s", last_seq=2)

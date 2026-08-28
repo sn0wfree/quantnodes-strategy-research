@@ -771,11 +771,17 @@ class StudyScheduler:
                 await user_sem.acquire()
         # Global concurrency cap: holds the slot for the whole study
         # lifetime (rounds + cooldown + review), per design §5.2.
-        await self._semaphore.acquire()
+        # Nested finally: a cancellation while waiting on the global
+        # semaphore must still release the already-acquired user slot.
+        if user_sem is not None:
+            await user_sem.acquire()
         try:
-            await self._run_one_study_locked(study_id)
+            await self._semaphore.acquire()
+            try:
+                await self._run_one_study_locked(study_id)
+            finally:
+                self._semaphore.release()
         finally:
-            self._semaphore.release()
             if user_sem is not None:
                 user_sem.release()
 

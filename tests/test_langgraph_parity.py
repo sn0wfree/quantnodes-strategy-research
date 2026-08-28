@@ -39,6 +39,71 @@ def _stub_agent_result(agent_id: str, output: dict):
     )
 
 
+class TestHitlEdgeRouting:
+    """Regression: researcher's non-entry targets used to keep their
+    direct edge AND get a novelty_gate edge — two incoming edges, so
+    the node could execute twice per round. All researcher targets
+    must be routed through the gate with exactly one incoming edge."""
+
+    def _three_node_graph(self):
+        from strategy_research.core.study.graph import GraphEdge, GraphNode, StudyGraph
+
+        return StudyGraph(
+            nodes=(
+                GraphNode(id="researcher", type="llm_agent", label="R", enabled=True),
+                GraphNode(id="strategist", type="planner", label="S", enabled=True),
+                GraphNode(id="risk", type="llm_agent", label="K", enabled=True),
+            ),
+            edges=(
+                GraphEdge(source="researcher", target="strategist"),
+                GraphEdge(source="researcher", target="risk"),
+                GraphEdge(source="strategist", target="risk"),
+            ),
+        )
+
+    def test_no_duplicate_incoming_edges_under_hitl(self, tmp_path):
+        from strategy_research.core.study.langgraph_engine import (
+            LangGraphProfile,
+            build_langgraph,
+        )
+
+        compiled = build_langgraph(
+            self._three_node_graph(), MagicMock(), "task", tmp_path,
+            {}, None, "study_1", 1,
+            profile=LangGraphProfile(serial=False, checkpoint=False, hitl=True),
+        )
+        edges = {(e.source, e.target) for e in compiled.get_graph().edges}
+
+        assert ("researcher", "novelty_gate") in edges
+        assert ("novelty_gate", "strategist") in edges
+        assert ("novelty_gate", "risk") in edges
+        # direct researcher→target edges must be gone
+        assert ("researcher", "strategist") not in edges
+        assert ("researcher", "risk") not in edges
+        # untouched edge preserved
+        assert ("strategist", "risk") in edges
+        # risk's predecessors: gate (replacing researcher) + strategist
+        # (legitimate direct edge) — researcher itself must be gone.
+        sources_of_risk = {s for (s, t) in edges if t == "risk"}
+        assert sources_of_risk == {"novelty_gate", "strategist"}
+
+    def test_no_hitl_keeps_direct_edges(self, tmp_path):
+        from strategy_research.core.study.langgraph_engine import (
+            LangGraphProfile,
+            build_langgraph,
+        )
+
+        compiled = build_langgraph(
+            self._three_node_graph(), MagicMock(), "task", tmp_path,
+            {}, None, "study_1", 1,
+            profile=LangGraphProfile(),
+        )
+        edges = {(e.source, e.target) for e in compiled.get_graph().edges}
+        assert ("researcher", "strategist") in edges
+        assert ("researcher", "risk") in edges
+        assert not any(s2 == "novelty_gate" for (s2, t) in edges)
+
+
 class TestLangGraphParity:
     """Verify langgraph engine output matches expected schema."""
 

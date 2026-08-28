@@ -162,7 +162,22 @@ class ProjectedSession:
         """
         state = cls(session_id=d["session_id"], last_seq=d.get("last_seq", 0))
         state.messages = {
-            mid: ProjectedMessage(**m)
+            mid: ProjectedMessage(
+                **{
+                    **m,
+                    # dataclasses.asdict() serializes parts values to raw
+                    # dicts; rebuild ProjectedPart so parts_in_order()
+                    # (which reads .seq) doesn't crash on snapshot
+                    # round-trip. Also normalize the open-thinking
+                    # bookkeeping field, which newer snapshots may omit.
+                    "parts": {
+                        pid: ProjectedPart(**p)
+                        if isinstance(p, dict) else p
+                        for pid, p in (m.get("parts") or {}).items()
+                    },
+                    "open_thinking_part_id": None,
+                }
+            )
             for mid, m in d.get("messages", {}).items()
         }
         return state

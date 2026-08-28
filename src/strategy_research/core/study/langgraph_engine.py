@@ -379,30 +379,38 @@ def build_langgraph(
     if profile.hitl:
         g.add_node("novelty_gate", _make_novelty_gate_node(study_id, round_num, emit_fn))
 
+    # P4: Route researcher → novelty_gate → ALL researcher targets.
+    # Every outgoing edge of researcher is re-routed through the gate.
+    # (Routing only *entry* targets, or keeping direct edges alongside
+    # gate edges, would give a target two incoming edges — researcher
+    # AND novelty_gate — so it could execute twice per round.)
+    routed_targets: list[str] = []
+    if profile.hitl:
+        routed_targets = sorted({
+            e.target for e in graph.edges if e.source == "researcher"
+        })
+        if routed_targets:
+            g.add_edge("researcher", "novelty_gate")
+
     # Add edges
     for edge in graph.edges:
         source = edge.source
         target = edge.target
-        # P4: Route researcher → novelty_gate → original targets
-        if profile.hitl and source == "researcher" and target in _find_entry_nodes(graph):
-            g.add_edge("researcher", "novelty_gate")
+        # Skip ALL researcher outgoing edges when routing is active —
+        # they are replaced by researcher→novelty_gate + gate→targets.
+        if profile.hitl and routed_targets and source == "researcher":
             continue
         g.add_edge(source, target)
 
-    # P4: Route novelty_gate → original targets of researcher
+    # P4: novelty_gate fans out to the routed targets
     if profile.hitl:
-        researcher_targets = [
-            e.target for e in graph.edges
-            if e.source == "researcher"
-        ]
-        for target in researcher_targets:
+        for target in routed_targets:
             g.add_edge("novelty_gate", target)
 
     # Entry points (START → nodes with no incoming edges)
-    entry_nodes = _find_entry_nodes(graph)
-    for nid in entry_nodes:
-        if profile.hitl and nid in researcher_targets if profile.hitl else False:
-            continue  # routed through novelty_gate
+    for nid in _find_entry_nodes(graph):
+        if profile.hitl and nid in routed_targets:
+            continue  # reached via researcher → novelty_gate
         g.add_edge(START, nid)
 
     # Exit points (nodes with no outgoing edges → END)

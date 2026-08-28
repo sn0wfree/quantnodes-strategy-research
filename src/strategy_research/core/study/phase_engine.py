@@ -172,6 +172,23 @@ def run_round_phases(
             or [t["name"] for t in metric_targets]
         )
 
+        # Novelty gate: the phases branch runs it below unconditionally;
+        # the langgraph branch relies on the in-graph novelty_gate node,
+        # which only exists when profile.hitl is enabled. Without HITL
+        # the round would bypass novelty deduplication entirely — run
+        # the gate here for that case.
+        try:
+            from .langgraph_engine import get_profile as _lg_get_profile
+            _lg_profile = _lg_get_profile(
+                getattr(study, "engine", None) or "langgraph"
+            )
+        except Exception:  # noqa: BLE001 — langgraph extra missing
+            _lg_profile = None
+        if _lg_profile is not None and not _lg_profile.hitl:
+            if not _novelty_gate(runner, round_num, hypothesis, predicted_affected):
+                return {"round": round_num, "run_name": run_name,
+                        "aborted": True, "reason": "novelty_rejected"}
+
         # Shim dicts so finalization references like
         # eval_result["decision"] and exec_result.get("backtest_error")
         # resolve without AttributeError.
