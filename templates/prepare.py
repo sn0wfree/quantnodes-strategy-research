@@ -35,10 +35,12 @@ def load_data() -> dict:
     """
     # 自动检测路径
     strategy_dir = Path(__file__).parent.resolve()
-    # 向上查找包含 config.yaml 的目录作为 workspace
+    # 向上查找 workspace 根：以 data.duckdb 为准（数据事实）。
+    # 注意不能用 config.yaml 判定——策略目录自身也有 config.yaml（策略
+    # 参数配置），会被误判成 workspace 根。
     workspace_dir = strategy_dir
     for _ in range(5):  # 最多向上查找 5 层
-        if (workspace_dir / "config.yaml").exists():
+        if (workspace_dir / "data.duckdb").exists():
             break
         workspace_dir = workspace_dir.parent
     else:

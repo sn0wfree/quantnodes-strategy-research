@@ -26,9 +26,35 @@ logger = logging.getLogger(__name__)
 
 
 def _create_minimal_strategy(strat_dir: Path, strategy_name: str) -> None:
-    """Create minimal strategy.py for new study."""
+    """Create a runnable strategy scaffold for a new study.
+
+    Copies the full template pair (strategy.py with the ``__main__``
+    backtest entrypoint + prepare.py data/evaluation engine). The
+    historical 5-line "PARAMS = {}" stub produced strategy dirs that
+    exit instantly under ``run_backtest_script`` — metrics all zero
+    while status was hardcoded "success" (see the data-layer
+    investigation, 2026-08-27).
+    """
     strategy_py = strat_dir / "strategy.py"
-    if not strategy_py.exists():
+    if strategy_py.exists():
+        return
+    templates = Path(__file__).resolve().parents[2] / "templates"
+    template_strategy = templates / "strategy.py"
+    template_prepare = templates / "prepare.py"
+    if template_strategy.exists() and template_prepare.exists():
+        strat_dir.mkdir(parents=True, exist_ok=True)
+        strategy_py.write_text(
+            template_strategy.read_text(encoding="utf-8")
+            .replace("{strategy_name}", strategy_name),
+            encoding="utf-8",
+        )
+        (strat_dir / "prepare.py").write_text(
+            template_prepare.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    else:
+        # Templates unavailable (packaged installs without templates):
+        # keep the legacy stub rather than failing study creation.
         strategy_py.write_text(
             f'"""Auto-generated strategy: {strategy_name}"""\n'
             f"# This file will be overwritten by the autoresearch agent.\n\n"
@@ -37,6 +63,55 @@ def _create_minimal_strategy(strat_dir: Path, strategy_name: str) -> None:
             f"FACTOR_WEIGHT_METHOD = \"equal\"\n",
             encoding="utf-8",
         )
+
+
+_MAIN_BLOCK_MARKER = 'if __name__ == "__main__":'
+
+
+def _ensure_strategy_runnable(strat_dir: Path) -> list[str]:
+    """Backfill pre-existing strategy dirs so backtests actually run.
+
+    Legacy strategy dirs contain a bare PARAMS/FACTOR_EXPRS config with
+    no execution entrypoint, so ``python strategy.py`` exits instantly
+    and every backtest reports zero metrics. Adds, without touching any
+    user-authored PARAMS/FACTOR_EXPRS content:
+      1. prepare.py (copied from templates when missing)
+      2. the standard ``__main__`` backtest block (appended when absent)
+
+    Returns a list of human-readable actions taken (empty = nothing to do).
+    """
+    actions: list[str] = []
+    strategy_py = strat_dir / "strategy.py"
+    if not strategy_py.exists():
+        return actions
+
+    templates = Path(__file__).resolve().parents[2] / "templates"
+    template_prepare = templates / "prepare.py"
+    template_strategy = templates / "strategy.py"
+
+    # 1. prepare.py — the data-loading / evaluation engine
+    prepare_py = strat_dir / "prepare.py"
+    if not prepare_py.exists() and template_prepare.exists():
+        prepare_py.write_text(
+            template_prepare.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        actions.append("added prepare.py from templates")
+
+    # 2. __main__ entrypoint — append when absent
+    body = strategy_py.read_text(encoding="utf-8")
+    if _MAIN_BLOCK_MARKER not in body and template_strategy.exists():
+        tsrc = template_strategy.read_text(encoding="utf-8")
+        idx = tsrc.find(_MAIN_BLOCK_MARKER)
+        if idx != -1:
+            main_block = tsrc[idx:]
+            strategy_py.write_text(
+                body.rstrip() + "\n\n\n" + main_block,
+                encoding="utf-8",
+            )
+            actions.append("appended __main__ backtest block")
+
+    return actions
 
 
 _RESULTS_TSV_HEADER = (
@@ -110,6 +185,17 @@ def validate_workspace_strategy(
     if not strat_dir.exists():
         strat_dir.mkdir(parents=True, exist_ok=True)
         _create_minimal_strategy(strat_dir, strategy_name)
+    else:
+        # Backfill legacy stubs (bare config, no prepare.py/__main__):
+        # without this every backtest silently reports zero metrics.
+        actions = _ensure_strategy_runnable(strat_dir)
+        if actions:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "strategy %s backfilled for runnability: %s",
+                strategy_name, actions,
+            )
     return ws_resolved
 
 
