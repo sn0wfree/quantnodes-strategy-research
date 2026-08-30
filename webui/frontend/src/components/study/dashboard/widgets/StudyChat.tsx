@@ -369,7 +369,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
       // payload), not the round the user happens to be viewing —
       // events streamed while browsing an old round used to land in
       // the wrong session bucket and vanish on reload.
-      const rawRound = Number(raw?.data?.round ?? raw?.round)
+      const rawRound = Number(raw?.data?.round)
       const evRound = Number.isFinite(rawRound) && rawRound > 0
         ? rawRound
         : currentRound
