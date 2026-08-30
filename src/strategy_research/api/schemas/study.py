@@ -21,6 +21,10 @@ from pydantic import BaseModel, Field
 
 
 class MetricTargetModel(BaseModel):
+    # NOTE: response shape — deliberately permissive. Legacy studies may
+    # hold empty-named targets in the DB; validating here would 500 every
+    # read. The strict min_length lives on the REQUEST model
+    # (MetricTargetIn, routers/study.py).
     name: str
     op: str = ">="
     value: float
@@ -145,6 +149,7 @@ class StudySummaryResponse(BaseModel):
     recent_rounds: list[StudyRoundModel] = Field(default_factory=list)
     scoreboard: list = Field(default_factory=list)
     goal_snapshot: Optional[GoalSnapshotModel] = None
+    budget: Optional[dict] = None
     monitor_state: Optional[dict] = None
 
 

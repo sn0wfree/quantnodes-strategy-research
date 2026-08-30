@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -64,20 +65,28 @@ logger = logging.getLogger(__name__)
 # changes whenever the summary data actually changes.
 
 
-_SUMMARY_CACHE: dict[str, tuple[float, dict, str]] = {}  # sid → (monotonic, data, etag)
+_SUMMARY_CACHE: "OrderedDict[str, tuple[float, dict, str]]" = OrderedDict()  # sid → (monotonic, data, etag)
 _SUMMARY_CACHE_TTL = 3.0  # seconds
+# Bound the cache: every study ever summarized used to stick around
+# forever (each entry holds a full summary payload). LRU cap keeps the
+# hot working set only.
+_SUMMARY_CACHE_MAX = 256
 
 
 def _get_cached_summary(study_id: str) -> tuple[dict, str] | None:
     """Return (data, etag) if TTL is fresh; else None."""
     entry = _SUMMARY_CACHE.get(study_id)
     if entry and (time.monotonic() - entry[0]) < _SUMMARY_CACHE_TTL:
+        # Refresh LRU recency on hit.
+        _SUMMARY_CACHE.move_to_end(study_id)
         return entry[1], entry[2]
     return None
 
 
 def _set_cached_summary(study_id: str, data: dict, etag: str) -> None:
     _SUMMARY_CACHE[study_id] = (time.monotonic(), data, etag)
+    while len(_SUMMARY_CACHE) > _SUMMARY_CACHE_MAX:
+        _SUMMARY_CACHE.popitem(last=False)  # evict least-recently-used
 
 
 def _invalidate_summary_cache(study_id: str) -> None:
@@ -242,8 +251,16 @@ async def study_internal_dump(
 
 
 class MetricTargetModel(BaseModel):
-    name: str
-    op: str = ">="
+    """Request-side metric target — strict (高-3).
+
+    An empty-named target silently makes meets_metric_targets() return
+    False for every round, so the study could never reach its targets.
+    The RESPONSE shape (api/schemas/study.py MetricTargetModel) stays
+    permissive so legacy rows with bad targets still serialize.
+    """
+
+    name: str = Field(..., min_length=1)
+    op: str = Field(">=", pattern="^(>=|<=|>|<|==)$")
     value: float
 
 
@@ -319,9 +336,10 @@ async def study_start(req: StudyStartRequest, request: Request):
     user_id = getattr(request.state, "user_id", None) or "anonymous"
     _fetch_session_owned(_get_db(), req.session_id, user_id)
 
-    print(f"[STUDY:api] POST /study/start session={req.session_id} "
-          f"strategy={req.strategy_name} objective={req.objective[:40]}",
-          flush=True)
+    logger.debug(
+        "POST /study/start session=%s strategy=%s objective=%.40s",
+        req.session_id, req.strategy_name, req.objective,
+    )
 
     import asyncio
     from ...core.study.bootstrap import create_study_record
@@ -484,8 +502,9 @@ async def study_status(
     studies. When `study_id` is also provided, verifies that the
     study belongs to the queried session (cross-session IDOR block).
     """
-    print(f"[STUDY:api] GET /study/status session={session_id} study_id={study_id}",
-          flush=True)
+    logger.debug(
+        "GET /study/status session=%s study_id=%s", session_id, study_id
+    )
     # Security: enforce session ownership.
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", None) or "anonymous"
@@ -555,7 +574,7 @@ def _snapshot(s: dict | None) -> dict | None:
 
 
 @router.get("/{study_id}/summary", response_model=StudySummaryResponse)
-async def study_summary(request: Request, study_id: str):
+async def study_summary(request: Request, response: Response, study_id: str):
     """Return study summary with recent rounds, scoreboard, and goal snapshot.
 
     Responses are cached in-memory (TTL 3s) and use HTTP ETag 304 to
@@ -568,17 +587,25 @@ async def study_summary(request: Request, study_id: str):
 
     # ── ETag check: short-circuit on 304 ────────────────────────
     etag = _compute_summary_etag(study)
+    # Every 200 path stamps the ETag header so the client's conditional
+    # polling (If-None-Match → 304) actually works; previously the
+    # header was never attached and clients re-downloaded every time.
+    # NOTE: the 304 branches must carry the header on the returned
+    # Response itself — FastAPI only merges injected-`response` headers
+    # into model-serialized returns.
+    response.headers["ETag"] = etag
     if_none_match = request.headers.get("if-none-match")
     if if_none_match == etag:
-        return Response(status_code=304)
+        return Response(status_code=304, headers={"ETag": etag})
 
     # ── TTL cache: collapse rapid re-requests ───────────────────
     cached = _get_cached_summary(study_id)
     if cached is not None:
         cached_data, cached_etag = cached
+        response.headers["ETag"] = cached_etag
         # Even if the TTL hit, honour the client's If-None-Match.
         if if_none_match == cached_etag:
-            return Response(status_code=304)
+            return Response(status_code=304, headers={"ETag": cached_etag})
         return cached_data
 
     # ── Cache miss: full DB read ────────────────────────────────
@@ -939,6 +966,48 @@ async def study_interrupt_respond(
             pass
 
     return {"status": "ok", "interrupt_id": iid, "decision": status_value}
+
+
+# ── GET /study/{study_id}/interrupts/pending (HITL reload recovery) ──
+
+
+@router.get("/{study_id}/interrupts/pending")
+async def study_pending_interrupt(request: Request, study_id: str):
+    """Return the most recent pending HITL interrupt for a study, or null.
+
+    Reload recovery for the webui approval card: the SSE ``study_paused``
+    event that carried the interrupt_id is gone after a page refresh, so
+    the card state is rebuilt from the DB here.
+    """
+    _owned_study(request, study_id)
+    from ...core.study import StudyStore
+
+    with StudyStore() as store:
+        interrupt = store.get_latest_pending_interrupt(study_id)
+    if interrupt is None:
+        return {"status": "ok", "study_id": study_id, "interrupt": None}
+
+    payload: dict = {}
+    if interrupt.payload:
+        try:
+            parsed = json.loads(interrupt.payload)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except (ValueError, TypeError):
+            payload = {}
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "interrupt": {
+            "interrupt_id": interrupt.interrupt_id,
+            "round_num": interrupt.round_num,
+            "interrupt_type": interrupt.interrupt_type,
+            "status": interrupt.status,
+            "hypothesis": payload.get("hypothesis", ""),
+            "message": payload.get("message", ""),
+            "created_at": interrupt.created_at,
+        },
+    }
 
 
 # ── v2 artifacts endpoints (design §17) ────────────────────────────────
