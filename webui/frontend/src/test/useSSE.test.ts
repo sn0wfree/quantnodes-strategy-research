@@ -60,6 +60,7 @@ const { useAgentStore } = await import('../stores/agents')
 const { useWorkflowStore } = await import('../stores/workflow')
 const { useToastStore } = await import('../stores/toast')
 const { useSSEStore } = await import('../stores/sse')
+const { useAuthStore } = await import('../stores/auth')
 
 // Helper to get current EventSource instance
 const getCurrentES = () => MockEventSource.instances[MockEventSource.instances.length - 1]
@@ -97,6 +98,7 @@ describe('useSSE', () => {
     })
     useToastStore.setState({ toasts: [] })
     useSSEStore.setState({ status: 'connecting' })
+    useAuthStore.setState({ token: null, user: null })
   })
 
   afterEach(() => {
@@ -120,15 +122,24 @@ describe('useSSE', () => {
       expect(es.url).toMatch(/^\/api\/chat\/events/)
     })
 
-    it('attaches token from sr-auth localStorage', () => {
-      localStorageMock.setItem('sr-auth', JSON.stringify({
-        state: { token: 'jwt-123' }
-      }))
+    it('attaches token from the auth store', () => {
+      // Token now comes from useAuthStore (LOW fix), not a hand-parsed
+      // zustand-persist localStorage record.
+      useAuthStore.setState({ token: 'jwt-123' })
 
       renderHook(() => useSSE('sess-1'))
 
       const es = getCurrentES()
       expect(es.url).toContain('token=jwt-123')
+    })
+
+    it('omits the token query param when unauthenticated', () => {
+      useAuthStore.setState({ token: null })
+
+      renderHook(() => useSSE('sess-1'))
+
+      const es = getCurrentES()
+      expect(es.url).not.toContain('token=')
     })
 
     it('closes EventSource on unmount', () => {
