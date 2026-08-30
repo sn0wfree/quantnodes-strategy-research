@@ -292,19 +292,23 @@ class StudyScheduler:
                     pass
             return True
         # No control token yet — the study may still be sitting in its
-        # session queue (ACTION_MATRIX explicitly allows queued→cancel).
+        # session queue (ACTION_MATRIX explicitly allows queued→cancel)
+        # or waiting for a manual resume after a crash (INTERRUPTED, M11).
         # Mark it CANCELLED in the store; _run_one_study_locked re-reads
         # the row at dispatch time and silently drops terminal entries.
         study = self.store.get_study(study_id)
-        if study is not None and study.execution_status == StudyStatus.QUEUED:
+        if study is not None and study.execution_status in (
+            StudyStatus.QUEUED,
+            StudyStatus.INTERRUPTED,
+        ):
             self._queued_study_ids.discard(study_id)
             self.store.update_execution_status(
                 study_id, StudyStatus.CANCELLED,
-                last_error=f"cancelled while queued{': ' + reason if reason else ''}",
+                last_error=f"cancelled while {study.execution_status.value}{': ' + reason if reason else ''}",
             )
             self._emit_event(study.session_id, "study_cancelled", {
                 "study_id": study_id, "session_id": study.session_id,
-                "reason": "cancelled while queued",
+                "reason": f"cancelled while {study.execution_status.value}",
             })
             return True
         return False
@@ -754,28 +758,27 @@ class StudyScheduler:
         _dlog("sched", "_run_one_study start study=%s", study_id)
         # G1: per-user cap first, then the global cap. Acquiring the
         # user slot before the global one means a user at their own
-        # user slot before the global one means a user at their own
         # ceiling never consumes global capacity they cannot use anyway.
+        #
+        # The user slot is acquired INSIDE the try so a cancellation or
+        # error between the two acquires still releases it — exactly one
+        # acquire per study, exactly one release in the nested finally.
         user_sem: asyncio.Semaphore | None = None
-        if self._per_user_limit > 0:
-            study = self.store.get_study(study_id)
-            owner = study.owner_session_id if study else None
-            if owner:
-                # Resolve owner session → user id so the per-user ceiling
-                # applies per real user, not per session (a user owning
-                # many sessions could otherwise bypass the cap).
-                uid = self._resolve_session_user_id(owner)
-                user_sem = self._user_semaphores.setdefault(
-                    uid, asyncio.Semaphore(self._per_user_limit)
-                )
-                await user_sem.acquire()
-        # Global concurrency cap: holds the slot for the whole study
-        # lifetime (rounds + cooldown + review), per design §5.2.
-        # Nested finally: a cancellation while waiting on the global
-        # semaphore must still release the already-acquired user slot.
-        if user_sem is not None:
-            await user_sem.acquire()
         try:
+            if self._per_user_limit > 0:
+                study = self.store.get_study(study_id)
+                owner = study.owner_session_id if study else None
+                if owner:
+                    # Resolve owner session → user id so the per-user ceiling
+                    # applies per real user, not per session (a user owning
+                    # many sessions could otherwise bypass the cap).
+                    uid = self._resolve_session_user_id(owner)
+                    user_sem = self._user_semaphores.setdefault(
+                        uid, asyncio.Semaphore(self._per_user_limit)
+                    )
+                    await user_sem.acquire()
+            # Global concurrency cap: holds the slot for the whole study
+            # lifetime (rounds + cooldown + review), per design §5.2.
             await self._semaphore.acquire()
             try:
                 await self._run_one_study_locked(study_id)

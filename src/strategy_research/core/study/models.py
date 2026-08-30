@@ -93,6 +93,7 @@ ACTION_MATRIX: dict[StudyStatus, frozenset[StudyAction]] = {
     }),
     StudyStatus.INTERRUPTED: frozenset({
         StudyAction.CONTINUE,       # resume at current round
+        StudyAction.CANCEL,         # abandon without resuming (M11)
         StudyAction.ARCHIVE,
         StudyAction.REPLACE_OBJECTIVE,
     }),
