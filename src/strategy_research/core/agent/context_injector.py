@@ -203,7 +203,10 @@ class GoalContinuationInjector:
             try:
                 import json as _json
 
-                if isinstance(_json.loads(c), dict):
+                # An EMPTY dict ({}) carries no answer at all — it is a
+                # degenerate response, not a complete structured one, and
+                # must stay a continuation candidate like malformed JSON.
+                if isinstance(_json.loads(c), dict) and _json.loads(c):
                     return False
             except (ValueError, TypeError):
                 # ValueError: malformed / partial JSON — still a

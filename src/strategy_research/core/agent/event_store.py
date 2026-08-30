@@ -293,7 +293,10 @@ class EventStore:
                 if ev.seq > last_cache_seq:
                     yield ev
         except Exception:
-            pass
+            # Degraded: continue with live events only, but never
+            # silently — a corrupted DB read must be distinguishable
+            # from a genuinely empty tail.
+            logger.exception("subscribe: tail replay failed for %s", session_id)
 
         # 3. Subscribe to live events
         queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
@@ -427,6 +430,7 @@ class EventStore:
                     return sum(len(v) for v in data.values())
                 return len(data.get(session_id, []))
         except Exception:
+            logger.exception("count: read failed for %s", session_id)
             return 0
 
     # ── Private helpers ───────────────────────────────────────────
@@ -526,6 +530,10 @@ class EventStore:
                     events = events[:limit]
                 return events
         except Exception:
+            # Degraded: callers treat [] as "no history", which is
+            # indistinguishable from a corrupt/unreadable DB unless we
+            # log. Keep the contract ([]) but make the failure visible.
+            logger.exception("_replay: read failed for %s", session_id)
             return []
 
     def _next_seq(self, session_id: str) -> int:
@@ -633,9 +641,6 @@ class _noop_cm:
 # ── EventStoreFactory ──────────────────────────────────────────────
 
 
-_default_instance: EventStore | None = None
-
-
 # Channel naming: round sessions are ``study:{study_id}:round:{n}``.
 # The StudyDetailPage subscribes to the bare study channel via
 # /api/chat/events — round-scoped agent events must be fanned out to
@@ -651,7 +656,22 @@ def parent_study_channel(session_id: str) -> str | None:
 
 
 class EventStoreFactory:
-    """Process-singleton factory for EventStore."""
+    """Process-wide factory for EventStore — one instance per db_path.
+
+    Thread-safe, and keyed by the RESOLVED db path: a caller passing an
+    explicit workspace-local db_path always gets a store bound to that
+    file. The previous single-slot singleton silently returned whichever
+    store was created first, so a later explicit db_path was ignored —
+    langgraph's "the singleton is bound to the right file" guarantee
+    did not actually hold (and concurrent first creation raced).
+
+    Non-path options (cache_config / sse_pusher / flush_to_messages)
+    remain first-caller-wins per path: they configure the shared
+    instance and later callers cannot re-configure it.
+    """
+
+    _instances: dict[str | None, EventStore] = {}
+    _lock = threading.Lock()
 
     @classmethod
     def create(
@@ -661,20 +681,23 @@ class EventStoreFactory:
         sse_pusher: Callable[[str, EventV2], None] | None = None,
         flush_to_messages: bool = False,
     ) -> EventStore:
-        global _default_instance
-        if _default_instance is None:
-            _default_instance = EventStore(
-                db_path=db_path,
-                cache_config=cache_config,
-                sse_pusher=sse_pusher,
-                flush_to_messages=flush_to_messages,
-            )
-        return _default_instance
+        key = str(Path(db_path).resolve()) if db_path is not None else None
+        with cls._lock:
+            store = cls._instances.get(key)
+            if store is None:
+                store = EventStore(
+                    db_path=db_path,
+                    cache_config=cache_config,
+                    sse_pusher=sse_pusher,
+                    flush_to_messages=flush_to_messages,
+                )
+                cls._instances[key] = store
+            return store
 
     @classmethod
     def reset(cls) -> None:
-        global _default_instance
-        _default_instance = None
+        with cls._lock:
+            cls._instances.clear()
 
 
 def get_default_event_store() -> EventStore:
