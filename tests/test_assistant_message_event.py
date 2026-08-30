@@ -102,8 +102,19 @@ class TestAssistantMessageEmission:
         assert result.finished_reason == "max_iter"
 
     def test_no_progress_path_emits_assistant_message(self):
+        """No-progress gate: repeated identical tool calls trigger the
+        HITL approval gate; with reject-on-timeout the loop ends and an
+        assistant_message is still emitted (A1 contract: assistant_message
+        BEFORE iter_end on every terminal path).
+
+        (Historically this asserted finished_reason == 'no_progress' —
+        that reason no longer exists since the no-progress hard stop was
+        replaced by the approval gate; timeout+reject is its terminal
+        equivalent.)"""
         sink = EventSink()
         loop = _make_loop(sink, max_iterations=10, no_progress_window=3)
+        loop._approval_timeout = 0.5
+        loop._approval_on_timeout = "reject"
         loop.client.chat = MockLLM([
             LLMResponse(content=None, tool_calls=[
                 ToolCall(id=f"c{i}", name="list_history", arguments={}),
@@ -114,8 +125,11 @@ class TestAssistantMessageEmission:
         types = sink.types()
         assert "assistant_message" in types
         am = sink.of_type("assistant_message")[0]
-        assert "No progress" in am["content"] or am["content"] != ""
-        assert result.finished_reason == "no_progress"
+        assert am["content"] != ""
+        idx_msg = types.index("assistant_message")
+        idx_end = types.index("iter_end")
+        assert idx_msg < idx_end
+        assert result.finished_reason == "approval_timeout_rejected"
 
     def test_assistant_message_emitted_exactly_once_per_turn(self):
         sink = EventSink()

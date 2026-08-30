@@ -207,16 +207,18 @@ class TestBuildTaskText:
             id="x", name="X", category="research", description="",
         )
         ctx = {
-            "strategy_name": "foo",          # ← rendered
+            "hypothesis": "momentum",        # ← rendered
+            "strategy_name": "foo",          # ← filtered (loop kwarg since
+                                             #   f558086 passed it to AgentLoop)
             "session_id": "s-1",            # ← filtered (loop kwarg)
             "executor_type": "llm",          # ← filtered (meta)
             "python_function": "fn",         # ← filtered (meta)
             "behavior": "static",            # ← filtered (meta)
         }
         out = e.build_task_text(plugin, "task", ctx, None, None)
-        assert "strategy_name" in out and "foo" in out
-        # session_id / executor_type / python_function / behavior must be absent
-        for forbidden in ("session_id", "executor_type",
+        assert "hypothesis" in out and "momentum" in out
+        # loop kwargs / meta keys must be absent
+        for forbidden in ("strategy_name", "session_id", "executor_type",
                           "python_function", '"behavior"'):
             assert forbidden not in out, (
                 f"non-prompt key leaked: {forbidden!r}"

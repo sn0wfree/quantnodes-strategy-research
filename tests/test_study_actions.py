@@ -102,7 +102,9 @@ class TestActionMatrix:
         assert StudyAction.ARCHIVE in acts
         assert StudyAction.REPLACE_OBJECTIVE in acts
         assert StudyAction.PAUSE not in acts
-        assert StudyAction.CANCEL not in acts
+        # M11: an interrupted study (crashed executor) can now be
+        # abandoned directly instead of only archive/resume-first.
+        assert StudyAction.CANCEL in acts
 
     def test_complete_cancelled_allow_continue_archive(self):
         for st in (StudyStatus.COMPLETE, StudyStatus.CANCELLED):
