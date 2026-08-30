@@ -402,10 +402,17 @@ def build_langgraph(
             continue
         g.add_edge(source, target)
 
-    # P4: novelty_gate fans out to the routed targets
-    if profile.hitl:
-        for target in routed_targets:
-            g.add_edge("novelty_gate", target)
+    # P4: novelty_gate fans out to the routed targets — conditional so a
+    # gate abort (human_rejected / no_hypothesis) routes to END instead
+    # of running every downstream agent (unconditional edges used to
+    # burn the full round's LLM budget after a rejection).
+    if profile.hitl and routed_targets:
+        def _gate_route(state: StudyRoundState):
+            if state.get("aborted"):
+                return [END]
+            return list(routed_targets)
+
+        g.add_conditional_edges("novelty_gate", _gate_route)
 
     # Entry points (START → nodes with no incoming edges)
     for nid in _find_entry_nodes(graph):
@@ -594,6 +601,12 @@ def run_round_langgraph(
         runner._emit(session, "study_phase", {
             "study_id": sid, "round": round_num,
             "phase": "langgraph_exec", "status": "awaiting_approval",
+            # Real DB interrupt id + hypothesis so the webui approval card
+            # can POST /study/{id}/interrupts/{iid}/respond directly
+            # (synthetic client-side ids 404'd — see F2).
+            "interrupt_id": interrupt.interrupt_id,
+            "hypothesis": payload.get("hypothesis", ""),
+            "gate_message": payload.get("message", ""),
         })
         return {
             "round": round_num,
@@ -601,6 +614,8 @@ def run_round_langgraph(
             "paused_for_approval": True,
             "study_id": sid,
             "interrupt_id": interrupt.interrupt_id,
+            # Runner re-emits this on study_paused for the webui card.
+            "hypothesis": payload.get("hypothesis", ""),
         }
 
     runner._emit(session, "study_phase", {
@@ -609,7 +624,8 @@ def run_round_langgraph(
     })
 
     # Extract agent outputs from graph result
-    agent_outputs = result.get("agent_outputs", {}) if isinstance(result, dict) else {}
+    raw_state = result if isinstance(result, dict) else {}
+    agent_outputs = raw_state.get("agent_outputs", {})
     logger.info("langgraph: round %d completed, agent_outputs=%s", round_num, list(agent_outputs.keys()))
 
     # Save agent outputs (mirrors DAG engine) + execution histories
@@ -618,6 +634,12 @@ def run_round_langgraph(
 
     # Rebuild legacy schema (same as DAG engine)
     result = runner._rebuild_phase_outputs(agent_outputs, graph)
+    # Re-attach gate abort signals — the rebuild returns a fixed key set
+    # that would otherwise drop ``aborted`` and the runner loop would
+    # finalize a round the novelty gate rejected.
+    if raw_state.get("aborted"):
+        result["aborted"] = True
+        result["reason"] = raw_state.get("abort_reason") or "novelty_rejected"
     # Add round info for the runner loop
     result["round"] = round_num
     result["run_name"] = f"round_{round_num}"
@@ -729,7 +751,8 @@ def resume_round_langgraph(
         }
 
     # Save agent outputs
-    agent_outputs = result.get("agent_outputs", {})
+    raw_state = result if isinstance(result, dict) else {}
+    agent_outputs = raw_state.get("agent_outputs", {})
     for agent_id, output in agent_outputs.items():
         runner._save_agent_output(run_dir, agent_id, {
             "agent": agent_id,
@@ -738,4 +761,10 @@ def resume_round_langgraph(
             "timestamp": time.time(),
         })
 
-    return runner._rebuild_phase_outputs(agent_outputs, graph)
+    # Re-attach gate abort signals dropped by the fixed-key rebuild —
+    # a resumed reject must surface as aborted to the runner loop.
+    rebuilt = runner._rebuild_phase_outputs(agent_outputs, graph)
+    if raw_state.get("aborted"):
+        rebuilt["aborted"] = True
+        rebuilt["reason"] = raw_state.get("abort_reason") or "novelty_rejected"
+    return rebuilt

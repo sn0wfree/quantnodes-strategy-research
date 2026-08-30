@@ -131,7 +131,16 @@ def run_round_phases(
     engine = getattr(study, "engine", None) or "phases"
     logger.info("phase_engine: round %d, engine=%s, study.engine=%s", round_num, engine, getattr(study, "engine", "NOT_SET"))
     if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
-        engine = "dag"  # backward compat: legacy env var overrides phases
+        # Backward compat: the legacy env var opts into the graph-based
+        # engine. It maps to "langgraph" — the only graph dispatch the
+        # engine switch below understands ("dag_engine" has no
+        # production callers; see phase_engine dispatch).
+        engine = "langgraph"
+    if engine == "dag":
+        # store/API still accept engine='dag' (M12), but no dag executor
+        # exists in production — map to langgraph instead of silently
+        # running the phases engine.
+        engine = "langgraph"
 
     if engine == "langgraph":
         lg_result = runner._run_round_via_langgraph(
@@ -141,6 +150,12 @@ def run_round_phases(
         )
         # HITL approval pause — return early, runner will re-enter on resume
         if lg_result.get("paused_for_approval"):
+            return lg_result
+        # Novelty gate rejected (graph routed to END before any
+        # downstream agent ran) — return before finalization; the runner
+        # loop sees ``aborted`` and skips the round, mirroring the
+        # phases branch below.
+        if lg_result.get("aborted"):
             return lg_result
 
         # Map langgraph result to the variables expected by the
@@ -172,22 +187,11 @@ def run_round_phases(
             or [t["name"] for t in metric_targets]
         )
 
-        # Novelty gate: the phases branch runs it below unconditionally;
-        # the langgraph branch relies on the in-graph novelty_gate node,
-        # which only exists when profile.hitl is enabled. Without HITL
-        # the round would bypass novelty deduplication entirely — run
-        # the gate here for that case.
-        try:
-            from .langgraph_engine import get_profile as _lg_get_profile
-            _lg_profile = _lg_get_profile(
-                getattr(study, "engine", None) or "langgraph"
-            )
-        except Exception:  # noqa: BLE001 — langgraph extra missing
-            _lg_profile = None
-        if _lg_profile is not None and not _lg_profile.hitl:
-            if not _novelty_gate(runner, round_num, hypothesis, predicted_affected):
-                return {"round": round_num, "run_name": run_name,
-                        "aborted": True, "reason": "novelty_rejected"}
+        # Novelty dedup on this branch is handled in-graph by the
+        # novelty_gate node (built when profile.hitl is enabled — the
+        # "langgraph" profile always is, see langgraph_engine profiles).
+        # The graph aborts before any downstream agent runs, and
+        # _run_round_via_langgraph re-attaches ``aborted`` to its result.
 
         # Shim dicts so finalization references like
         # eval_result["decision"] and exec_result.get("backtest_error")
