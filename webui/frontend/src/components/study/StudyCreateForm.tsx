@@ -100,6 +100,24 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
       setError('Strategy name is required.')
       return
     }
+    // 高-3: an empty-named target row makes meets_metric_targets() return
+    // False forever (metrics never carry a '' key) — the study could then
+    // never reach its targets. Drop empty rows; hard-fail on incomplete
+    // ones so the user notices.
+    const filledMetrics = metrics.filter((m) => m.name.trim() !== '')
+    if (filledMetrics.length !== metrics.length) {
+      const hasIncomplete = metrics.some(
+        (m) => m.name.trim() === '' && (m.value !== 0 || m.op !== '>='),
+      )
+      if (hasIncomplete) {
+        setError('有未填写完成的指标行（指标名/判定值），请补全或删除该行。')
+        return
+      }
+    }
+    if (filledMetrics.some((m) => Number.isNaN(Number(m.value)))) {
+      setError('指标判定值必须是数字。')
+      return
+    }
     setSubmitting(true)
     setBusy(true)
     setErrorGlobal('')
@@ -110,7 +128,7 @@ export function StudyCreateForm({ sessionId, workspacePath, onCreated, compact }
         workspace_path: workspacePath,
         strategy_name: strategyName,
         engine,
-        metric_targets: metrics,
+        metric_targets: filledMetrics,
         budget_turn: budgetTurn === '' ? undefined : Number(budgetTurn),
         max_rounds: maxRounds === '' ? undefined : Number(maxRounds),
         monitor_interval_seconds: monitorSec === '' ? undefined : Number(monitorSec),

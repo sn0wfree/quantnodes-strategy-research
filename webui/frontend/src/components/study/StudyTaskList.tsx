@@ -136,6 +136,9 @@ export function StudyTaskList({
     study: StudySummary,
     action: 'pause' | 'continue' | 'cancel' | 'archive' | 'unarchive',
   ) => {
+    if (action === 'cancel' && !window.confirm(`确定中止「${study.objective.slice(0, 30)}」？中止后可从 Round 1 重新开始。`)) {
+      return
+    }
     if (action === 'archive' && !window.confirm('确定归档此研究？归档后默认列表不再显示。')) {
       return
     }

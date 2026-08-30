@@ -65,6 +65,12 @@ export function StudyActionMenu({ study, onAction, onRefresh }: StudyActionMenuP
 
   const handleClick = async (name: string) => {
     setOpen(false)
+    if (name === 'cancel' && !window.confirm('确定中止此研究？中止后可从 Round 1 重新开始。')) {
+      return
+    }
+    if (name === 'archive' && !window.confirm('确定归档此研究？')) {
+      return
+    }
     if (
       name === 'pause' ||
       name === 'continue' ||
@@ -75,6 +81,9 @@ export function StudyActionMenu({ study, onAction, onRefresh }: StudyActionMenuP
       await onAction(name)
       onRefresh?.()
     }
+    // Other action names (replace_objective / directive / redo…) need an
+    // argument UI this menu doesn't have — they are filtered out below
+    // instead of rendering dead entries (中-1).
   }
 
   return (
@@ -101,26 +110,31 @@ export function StudyActionMenu({ study, onAction, onRefresh }: StudyActionMenuP
           ) : actions.length === 0 ? (
             <div className="px-3 py-2 text-[10px] text-slate-500">暂无可用操作</div>
           ) : (
-            actions.map((a) => {
-              const Icon = ICONS[a.name]
-              return (
-                <button
-                  key={a.name}
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleClick(a.name)
-                  }}
-                  role="menuitem"
-                  className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-slate-800 ${
-                    a.destructive ? 'text-rose-300 hover:text-rose-200' : 'text-slate-200 hover:text-slate-50'
-                  }`}
-                >
-                  {Icon && <Icon className={`h-3.5 w-3.5 ${ICON_CLS[a.name] ?? ''}`} />}
-                  <span>{a.label}</span>
-                </button>
-              )
-            })
+            actions
+              // 中-1: actions needing an argument UI (replace_objective's
+              // objective input, directive's text) live on the detail
+              // page — rendering them here produced dead menu items.
+              .filter((a) => ICONS[a.name] !== undefined)
+              .map((a) => {
+                const Icon = ICONS[a.name]
+                return (
+                  <button
+                    key={a.name}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleClick(a.name)
+                    }}
+                    role="menuitem"
+                    className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-slate-800 ${
+                      a.destructive ? 'text-rose-300 hover:text-rose-200' : 'text-slate-200 hover:text-slate-50'
+                    }`}
+                  >
+                    {Icon && <Icon className={`h-3.5 w-3.5 ${ICON_CLS[a.name] ?? ''}`} />}
+                    <span>{a.label}</span>
+                  </button>
+                )
+              })
           )}
         </div>
       )}

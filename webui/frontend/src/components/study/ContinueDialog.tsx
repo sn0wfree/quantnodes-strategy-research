@@ -56,6 +56,10 @@ const STATUS_COLORS: Record<string, string> = {
 export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueDialogProps) {
   const status = summary?.execution_status ?? 'unknown'
   const currentRound = summary?.current_round ?? 1
+  // Backend semantics (scheduler.continue): for paused/interrupted the
+  // mode/from_round payload is IGNORED — it always resumes at the
+  // current round. Only offer what the backend will actually honor.
+  const resumableOnly = status === 'paused' || status === 'interrupted'
 
   const [mode, setMode] = useState<ContinueMode>('restart')
   const [customRound, setCustomRound] = useState('')
@@ -72,8 +76,15 @@ export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueD
   }, [open, status])
 
   const handleSubmit = () => {
-    if (useCustom && customRound) {
+    if (resumableOnly) {
+      // Backend resumes at the current round regardless of mode.
+      onContinue('resume')
+    } else if (useCustom && customRound) {
       onContinue('restart', parseInt(customRound, 10))
+    } else if (mode === 'resume') {
+      // "从当前轮次继续" on a restartable status must pass from_round —
+      // without it the backend restarts from round 1 (高-2).
+      onContinue('resume', currentRound)
     } else {
       onContinue(mode)
     }
@@ -103,6 +114,11 @@ export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueD
 
         {/* Mode selection */}
         <div className="space-y-2">
+          {resumableOnly && (
+            <p className="rounded border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-[11px] text-slate-400">
+              已暂停/已中断的研究只能从当前轮次（Round {currentRound}）恢复。
+            </p>
+          )}
           <label
             className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition-colors ${
               mode === 'resume' && !useCustom
@@ -122,15 +138,18 @@ export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueD
           </label>
 
           <label
-            className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition-colors ${
-              mode === 'restart' && !useCustom
-                ? 'border-amber-500/50 bg-amber-900/20'
-                : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+            className={`flex items-center gap-2 rounded-lg border p-2.5 transition-colors ${
+              resumableOnly
+                ? 'cursor-not-allowed border-slate-800 bg-slate-800/30 opacity-40'
+                : mode === 'restart' && !useCustom
+                  ? 'cursor-pointer border-amber-500/50 bg-amber-900/20'
+                  : 'cursor-pointer border-slate-700 bg-slate-800/50 hover:border-slate-600'
             }`}
           >
             <input
               type="radio"
               name="mode"
+              disabled={resumableOnly}
               checked={mode === 'restart' && !useCustom}
               onChange={() => { setMode('restart'); setUseCustom(false) }}
               className="accent-amber-500"
@@ -140,15 +159,18 @@ export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueD
           </label>
 
           <label
-            className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition-colors ${
-              useCustom
-                ? 'border-sky-500/50 bg-sky-900/20'
-                : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+            className={`flex items-center gap-2 rounded-lg border p-2.5 transition-colors ${
+              resumableOnly
+                ? 'cursor-not-allowed border-slate-800 bg-slate-800/30 opacity-40'
+                : useCustom
+                  ? 'border-sky-500/50 bg-sky-900/20'
+                  : 'cursor-pointer border-slate-700 bg-slate-800/50 hover:border-slate-600'
             }`}
           >
             <input
               type="radio"
               name="mode"
+              disabled={resumableOnly}
               checked={useCustom}
               onChange={() => setUseCustom(true)}
               className="accent-sky-500"
@@ -157,6 +179,7 @@ export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueD
             <input
               type="number"
               min={1}
+              disabled={resumableOnly}
               value={customRound}
               onChange={(e) => {
                 setCustomRound(e.target.value)
@@ -164,7 +187,7 @@ export function ContinueDialog({ open, summary, onClose, onContinue }: ContinueD
               }}
               onFocus={() => setUseCustom(true)}
               placeholder="轮次"
-              className="w-16 rounded border border-slate-600 bg-slate-800 px-2 py-0.5 text-xs text-slate-200 outline-none focus:border-sky-500"
+              className="w-16 rounded border border-slate-600 bg-slate-800 px-2 py-0.5 text-xs text-slate-200 outline-none focus:border-sky-500 disabled:opacity-50"
             />
           </label>
         </div>

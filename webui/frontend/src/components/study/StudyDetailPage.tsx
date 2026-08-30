@@ -69,6 +69,10 @@ export function StudyDetailPage() {
   const [editObjectiveOpen, setEditObjectiveOpen] = useState(false)
   const [continueDialogOpen, setContinueDialogOpen] = useState(false)
   const [roundHistoryOpen, setRoundHistoryOpen] = useState(false)
+  // 高-1: bumped after continue/action so a polling chain that stopped
+  // on a terminal status restarts — otherwise the page froze on stale
+  // data until a manual reload.
+  const [pollGeneration, setPollGeneration] = useState(0)
 
   // Refs for ETag-conditional polling and terminal-state detection
   const summaryRef = useRef<StudySummaryResponse | null>(null)
@@ -131,6 +135,7 @@ export function StudyDetailPage() {
     studyId,
     loadActions,
     loadSummary,
+    pollGeneration,
   ])
 
   // ── SSE connection for study events ────────────────────────────
@@ -143,7 +148,12 @@ export function StudyDetailPage() {
     setBusy(true)
     try {
       await api.study.dispatchAction(studyId, action, reason ? { reason } : undefined)
+      // Force the next summary fetch past the ETag/TTL cache — the
+      // status just changed server-side.
+      etagRef.current = null
       await loadActions()
+      await loadSummary()
+      setPollGeneration((g) => g + 1) // restart polling if it had stopped
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -158,8 +168,10 @@ export function StudyDetailPage() {
         mode: mode === 'restart' ? 'restart' : 'append',
         ...(fromRound ? { from_round: fromRound } : {}),
       })
+      etagRef.current = null
       await loadActions()
       await loadSummary()
+      setPollGeneration((g) => g + 1)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -246,7 +258,11 @@ export function StudyDetailPage() {
       )}
       {canCancel && (
         <button
-          onClick={() => onAction('cancel')}
+          onClick={() => {
+            if (window.confirm('确定中止此研究？中止后可从 Round 1 重新开始，当前进度将保留但不再继续。')) {
+              void onAction('cancel')
+            }
+          }}
           disabled={busy}
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-rose-700 px-2.5 py-1.5 text-xs text-white transition-all hover:bg-rose-600 active:scale-95 disabled:opacity-50"
         >

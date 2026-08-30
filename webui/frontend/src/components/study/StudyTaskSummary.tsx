@@ -31,6 +31,9 @@ export function StudyTaskSummary({ studyId }: Props) {
   const [summary, setSummary] = useState<StudySummaryResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // 高-1: restarts the polling chain after a terminal status + action
+  // (e.g. continue on an errored study) — otherwise the panel froze.
+  const [pollGeneration, setPollGeneration] = useState(0)
   const summaryRef = useRef<StudySummaryResponse | null>(null)
   const etagRef = useRef<string | null>(null)
 
@@ -55,10 +58,14 @@ export function StudyTaskSummary({ studyId }: Props) {
   }, [studyId])
 
   useEffect(() => {
+    // 中-8: clear the previous study's summary immediately — the skeleton
+    // condition `loading && !summary` is otherwise short-circuited and
+    // the OLD study's data renders until (or after) the fetch lands.
+    setSummary(null)
+    summaryRef.current = null
+    etagRef.current = null
+    setError('')
     if (!studyId) {
-      setSummary(null)
-      summaryRef.current = null
-      etagRef.current = null
       return
     }
     let cancelled = false
@@ -81,7 +88,7 @@ export function StudyTaskSummary({ studyId }: Props) {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [studyId, run])
+  }, [studyId, run, pollGeneration])
 
   if (!studyId) {
     return (
@@ -112,12 +119,14 @@ export function StudyTaskSummary({ studyId }: Props) {
             <StudyActionMenu
               study={summary}
               onAction={async (action) => {
+                if (action === 'cancel' && !window.confirm('确定中止此研究？中止后可从 Round 1 重新开始。')) return
                 if (action === 'archive' && !window.confirm('确定归档此研究？归档后默认列表不再显示。')) return
                 if (action === 'unarchive' && !window.confirm('取消归档后状态将变为「已中断」，可手动恢复。继续？')) return
                 try {
                   await api.study.dispatchAction(summary.study_id, action)
                   etagRef.current = null // force re-fetch after action
                   void run()
+                  setPollGeneration((g) => g + 1) // restart polling (高-1)
                 } catch (err) {
                   setError((err as Error).message)
                 }
