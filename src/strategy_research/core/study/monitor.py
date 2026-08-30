@@ -60,6 +60,10 @@ async def monitor_phase(runner: Any) -> str:
                 "study_id": sid, "round": runner._get_study().current_round,
             })
             await runner._wait_until_resumed()
+            if runner.control.cancelled:
+                # Cancelled while paused (H3): let the loop top finalize
+                # CANCELLED instead of flipping back to MONITORING.
+                continue
             runner.study_store.update_execution_status(sid, StudyStatus.MONITORING)
             runner._emit(session, "study_resumed", {
                 "study_id": sid, "round": runner._get_study().current_round,
@@ -77,8 +81,17 @@ async def monitor_phase(runner: Any) -> str:
             continue
 
         drift = not check["meets_targets"]
-        runner.study_store.update_monitor_check(
+        # update_monitor_check returns the post-write record — its
+        # monitor_drift_count is authoritative. Reading the (cached)
+        # study snapshot and adding +1 double-counted whenever the
+        # cache had already picked up the incremented value.
+        updated = runner.study_store.update_monitor_check(
             sid, last_check_at=check["now_iso"], drift=drift,
+        )
+        drift_count = (
+            updated.monitor_drift_count
+            if updated is not None
+            else runner._get_study().monitor_drift_count
         )
         runner.study_store.update_last_metrics(
             sid, check["metrics"] or {}, check.get("verdict", "monitor"),
@@ -88,7 +101,7 @@ async def monitor_phase(runner: Any) -> str:
             "metrics": check["metrics"],
             "meets_targets": check["meets_targets"],
             "drift": drift,
-            "drift_count": runner._get_study().monitor_drift_count + (1 if drift else 0),
+            "drift_count": drift_count,
         })
         if not drift:
             continue
@@ -149,10 +162,34 @@ async def _monitor_repair_rounds(runner: Any) -> bool:
             runner._total_used_time, runner._total_used_turns,
             runner._round_start_clock, result,
         )
+        if result.get("paused_for_approval"):
+            # A repair round paused on the HITL gate is neither passed
+            # nor failed: burn no further attempts and leave the study
+            # in PAUSED (the previous behavior counted the pause as a
+            # failed repair 3× then dropped the checkpoint into
+            # NEEDS_REFRESH).
+            logger.info(
+                "monitor: repair round %d paused for approval study=%s",
+                round_num, sid,
+            )
+            runner._emit(session, "study_paused", {
+                "study_id": sid, "round": round_num,
+                "reason": "hitl_approval_repair",
+                "interrupt_id": result.get("interrupt_id"),
+                "hypothesis": result.get("hypothesis"),
+            })
+            runner.study_store.update_execution_status(sid, StudyStatus.PAUSED)
+            return False
         if result.get("aborted"):
+            # Researcher time/turns still count against the budget (M2).
+            runner._account_round_budget(result)
             continue
         metrics = result.get("metrics", {})
         verdict = result.get("verdict", "discard")
+        # Keep attribution honest: classify_attribution in the next
+        # repair round diffs against _prev_passed, which the main loop
+        # refreshes after every round — the repair loop never did.
+        runner._prev_passed = result.get("passed_now", set()) or set()
         runner.study_store.update_round_heartbeat(sid, round_num)
         runner.study_store.update_last_metrics(sid, metrics, verdict)
         runner._emit(session, "study_round", {

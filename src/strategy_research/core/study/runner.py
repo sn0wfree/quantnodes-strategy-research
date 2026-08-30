@@ -377,6 +377,16 @@ class AutoresearchRunner:
             self._best_score = float(best_calmar)
         elif previous_summary and previous_summary.get("metrics"):
             self._best_score = previous_summary["metrics"].get("calmar", 0.0)
+        # M2: restore budget counters from the authoritative workspace
+        # state. Without this, ERROR→continue/retry restarted the budget
+        # from zero and budget_turn/budget_time_seconds were soft limits.
+        # max() guards against double-restore on re-entry.
+        self._total_used_turns = max(
+            self._total_used_turns, int(state.budget_used_turns or 0),
+        )
+        self._total_used_time = max(
+            self._total_used_time, float(state.budget_used_time_s or 0.0),
+        )
 
         round_num = self._get_study().current_round
 
@@ -400,6 +410,11 @@ class AutoresearchRunner:
                 self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
                 self._emit(session, "study_paused", {"study_id": sid, "round": round_num})
                 await self._wait_until_resumed()
+                if self.control.cancelled:
+                    # Cancelled while paused: let the loop top finalize
+                    # CANCELLED instead of flipping back to RUNNING and
+                    # burning a full LLM round (H3).
+                    continue
                 self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
                 self._emit(session, "study_resumed", {"study_id": sid, "round": round_num})
 
@@ -444,6 +459,10 @@ class AutoresearchRunner:
 
             # Handle aborted round (novelty rejected)
             if result.get("aborted"):
+                # Budget accounting still happens: the researcher phase
+                # consumed real time/turns even though the round was
+                # rejected before execution (M2).
+                self._account_round_budget(result)
                 _dlog("loop", "round %d aborted: %s", round_num, result.get("reason"))
                 continue
 
@@ -457,16 +476,29 @@ class AutoresearchRunner:
                     "interrupt_id": result.get("interrupt_id"),
                     "hypothesis": result.get("hypothesis"),
                 })
+                # The approval wait must not count against the time
+                # budget (M2): bank the pre-wait elapsed time and stop
+                # the round clock; it restarts after the resume.
+                self._total_used_time += time.perf_counter() - self._round_start_clock
+                self._round_start_clock = None
                 # Poll for approval (max 10 minutes, check every 5 seconds)
                 decision = await self._wait_for_approval(sid, round_num, timeout_s=600)
                 if decision != "approved":
                     # Timeout or rejection — skip this round and keep the
                     # study loop alive (status must leave PAUSED).
+                    self._account_round_budget(result)
+                    self._expire_interrupt(sid, round_num)  # M1: no zombie pending interrupt
+                    if self.control.cancelled:
+                        continue  # loop top finalizes CANCELLED
                     self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
                     self._emit(session, "study_round_rejected", {
                         "study_id": sid, "round": round_num,
                         "reason": f"hitl_{decision}",
                     })
+                    continue
+                if self.control.cancelled:
+                    # Approved, but the study was cancelled while we
+                    # waited — same handling as the H3 pause path.
                     continue
                 # Resume the round from checkpoint
                 self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
@@ -499,14 +531,48 @@ class AutoresearchRunner:
                 _current_state["study_strategy_path"] = str(
                     _run_dir.relative_to(_path) / "strategy.py"
                 )
+                self._round_start_clock = time.perf_counter()
                 result = await asyncio.to_thread(
                     self._resume_round_langgraph, _path, _strategy,
                     _current_state, _run_dir, _graph,
                     session=session, sid=sid, round_num=round_num,
                     directive_text=directive_text,
                 )
-                if result.get("aborted"):
+                if result.get("paused_for_approval"):
+                    # The resume hit the gate again (typically: no
+                    # checkpointer → the fallback re-ran the round and
+                    # interrupted afresh). There is no safe way to
+                    # finalize this round here — skip it instead of
+                    # recording a ghost empty-metrics round (H2).
+                    self._expire_interrupt(sid, round_num)
+                    if self.control.cancelled:
+                        continue
+                    self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+                    self._emit(session, "study_round_rejected", {
+                        "study_id": sid, "round": round_num,
+                        "reason": "hitl_repause",
+                    })
                     continue
+                if result.get("aborted"):
+                    self._account_round_budget(result)
+                    continue
+                # H1 (partial): the resume path bypasses phase_engine's
+                # finalization, so e2_passed/passed_now would be missing
+                # and a targets-met round could never COMPLETE. Recompute
+                # them from the resumed metrics (the eval gate check is
+                # folded into verdict=="keep", same as the phases branch).
+                _study_now = self._get_study()
+                if _study_now.metric_targets:
+                    from .metric_targets import (
+                        meets_metric_targets as _meets,
+                        metric_pass_set as _pass_set,
+                    )
+                    _m = result.get("metrics", {})
+                    result["passed_now"] = _pass_set(_m, _study_now.metric_targets)
+                    result["e2_passed"] = bool(
+                        _m and _meets(_m, _study_now.metric_targets)
+                        and result.get("verdict", "discard") == "keep"
+                    )
 
             metrics = result.get("metrics", {})
             verdict = result.get("verdict", "discard")
@@ -799,16 +865,38 @@ class AutoresearchRunner:
         """Poll for HITL approval.
 
         Returns the resolved decision: ``"approved"``, ``"rejected"``,
-        or ``"timeout"`` when no response arrived within ``timeout_s``.
+        ``"cancelled"`` (cancel/pause observed while waiting), or
+        ``"timeout"`` when no response arrived within ``timeout_s``.
         """
         import asyncio
         start = time.time()
         while time.time() - start < timeout_s:
+            # M1/L9: cancel (and pause) must cut the wait short — the old
+            # loop slept through a cancel for up to the full timeout.
+            if self.control.cancelled or self.control.paused:
+                return "cancelled"
             interrupt = self.study_store.get_interrupt_for_round(sid, round_num)
             if interrupt is not None and interrupt.status in ("approved", "rejected"):
                 return interrupt.status
             await asyncio.sleep(5)
         return "timeout"
+
+    def _expire_interrupt(self, sid: str, round_num: int) -> None:
+        """Mark the round's pending HITL interrupt expired (M1).
+
+        Without this the interrupt row stayed ``pending`` forever after a
+        timeout/rejection: the webui approval card reappeared on reload
+        and a late answer was silently written to no consumer.
+        """
+        try:
+            interrupt = self.study_store.get_pending_interrupt(sid, round_num)
+            if interrupt is not None:
+                self.study_store.respond_interrupt(interrupt.interrupt_id, "expired")
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            logger.warning(
+                "failed to expire interrupt round=%s study=%s",
+                round_num, sid, exc_info=True,
+            )
 
     def _resume_round_langgraph(
         self,
