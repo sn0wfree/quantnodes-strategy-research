@@ -37,6 +37,12 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for update_execution_status kwargs: "leave the column
+# untouched". Passing ``None`` explicitly now CLEARs the column (used by
+# continue/retry/redo to erase a stale failure from the previous run);
+# omitting the kwarg preserves it (e.g. pause/resume transitions).
+_UNSET: Any = object()
+
 
 def _dlog(module: str, msg: str, *args) -> None:
     """Dual-output log: logger + stderr so both file and terminal see it."""
@@ -504,8 +510,8 @@ class StudyStore:
         study_id: str,
         status: StudyStatus,
         *,
-        last_error: str | None = None,
-        last_traceback: str | None = None,
+        last_error: Any = _UNSET,
+        last_traceback: Any = _UNSET,
         last_metrics: dict | None = None,
         last_verdict: str | None = None,
     ) -> StudyRecord | None:
@@ -533,7 +539,8 @@ class StudyStore:
 
         _dlog("store", "update_status study=%s → %s error=%s metrics=%s",
               study_id, status.value,
-              (last_error or "")[:60],
+              (last_error[:60] if isinstance(last_error, str) else
+               "<cleared>" if last_error is None else "<kept>"),
               "present" if last_metrics else "None")
 
         now = now_iso()
@@ -542,6 +549,10 @@ class StudyStore:
             StudyStatus.CANCELLED,
             StudyStatus.ERROR,
             StudyStatus.BUDGET_LIMITED,
+            # Both are scheduler-terminal (in _TERMINAL_STATUSES) but were
+            # missing here — completed_at stayed NULL forever.
+            StudyStatus.EARLY_STOPPED,
+            StudyStatus.NEEDS_REFRESH,
         }
         completed_at = now if status in terminals else None
 
@@ -551,10 +562,12 @@ class StudyStore:
             "heartbeat = ?",
         ]
         params: list[Any] = [status.value, now, now]
-        if last_error is not None:
+        if last_error is not _UNSET:
+            # Explicit None clears a stale failure (continue/retry/redo);
+            # the _UNSET default preserves the previous value.
             sets.append("last_error = ?")
             params.append(last_error)
-        if last_traceback is not None:
+        if last_traceback is not _UNSET:
             sets.append("last_traceback = ?")
             params.append(last_traceback)
         if last_metrics is not None:
@@ -1167,6 +1180,42 @@ class StudyStore:
             LIMIT 1
             """,
             (study_id, round_num),
+        ).fetchone()
+        if row is None:
+            return None
+        return StudyInterrupt(
+            interrupt_id=row["interrupt_id"],
+            study_id=row["study_id"],
+            round_num=row["round_num"],
+            interrupt_type=row["interrupt_type"],
+            payload=row["payload"],
+            status=row["status"],
+            response=row["response"],
+            created_at=row["created_at"],
+            responded_at=row["responded_at"],
+        )
+
+    @synchronized
+    def get_latest_pending_interrupt(
+        self, study_id: str
+    ) -> "StudyInterrupt | None":
+        """Return the most recent pending interrupt for a study, or None.
+
+        Used by the webui to recover the HITL approval card after a page
+        reload (the SSE ``study_paused`` event that carried the
+        interrupt_id is gone by then).
+        """
+        from .models import StudyInterrupt
+        row = self._conn.execute(
+            """
+            SELECT interrupt_id, study_id, round_num, interrupt_type,
+                   payload, status, response, created_at, responded_at
+            FROM study_interrupts
+            WHERE study_id = ? AND status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (study_id,),
         ).fetchone()
         if row is None:
             return None
