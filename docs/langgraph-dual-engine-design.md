@@ -232,7 +232,9 @@ StudyCreate schema 加 `engine` 字段（默认 `phases`）。StudyResponse 包�
 
 ### 7.4 兼容
 
-- `SR_STUDY_DAG_ENGINE=1` 全局变量映射为 `engine='dag'`（向后兼容）
+- `SR_STUDY_DAG_ENGINE=1` 全局变量映射为 `engine='langgraph'`（2026-08 修正：
+  原实现映射到 `'dag'`，但 dispatch 只认 `'langgraph'`，该开关曾静默无效。
+  注意：生效后需要安装 langgraph extra —— `pip install 'quantnodes-strategy-research[langgraph]'`）
 - 新 study 默认 `phases`
 - `engine` 字段优先级高于环境变量
 
