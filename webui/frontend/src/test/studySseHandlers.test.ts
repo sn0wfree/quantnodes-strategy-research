@@ -115,4 +115,43 @@ describe('study SSE handlers', () => {
     studyBudgetLimited({ study_id: 's1', used: 1000 }, ctx())
     expect(useStudyStore.getState().current?.execution_status).toBe('budget_limited')
   })
+
+  // ── F4: current_round is monotonic — stale/replayed events must not
+  // regress it ──
+  it('study_round never regresses current_round (stale replay)', () => {
+    useStudyStore.getState().setCurrent({
+      status: 'ok', study_id: 's1', execution_status: 'running',
+      current_round: 5, objective: 'x',
+    })
+    studyRound({ study_id: 's1', round: 2 }, ctx())
+    expect(useStudyStore.getState().current?.current_round).toBe(5)
+    // A genuinely newer round still advances.
+    studyRound({ study_id: 's1', round: 6 }, ctx())
+    expect(useStudyStore.getState().current?.current_round).toBe(6)
+  })
+
+  // ── F2: study_paused with the REAL interrupt_id opens the HITL card
+  // slot; resume closes it ──
+  it('study_paused captures interrupt_id + hypothesis; resumed clears', () => {
+    studyPaused(
+      {
+        study_id: 's1', round: 4, reason: 'hitl_approval',
+        interrupt_id: 'int-123', hypothesis: 'momentum works',
+      },
+      ctx(),
+    )
+    const hitl = useStudyStore.getState().hitlInterrupt
+    expect(hitl).not.toBeNull()
+    expect(hitl?.interrupt_id).toBe('int-123')
+    expect(hitl?.hypothesis).toBe('momentum works')
+    expect(hitl?.round).toBe(4)
+
+    studyResumed({ study_id: 's1', round: 4 }, ctx())
+    expect(useStudyStore.getState().hitlInterrupt).toBeNull()
+  })
+
+  it('study_paused WITHOUT interrupt_id does not open the card', () => {
+    studyPaused({ study_id: 's1', round: 2 }, ctx())
+    expect(useStudyStore.getState().hitlInterrupt).toBeNull()
+  })
 })

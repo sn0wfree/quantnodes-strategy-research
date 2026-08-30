@@ -40,42 +40,45 @@ describe('StudyChat session id consistency', () => {
   })
 
   describe('buildAgentEventMessage (agent_* events)', () => {
-    it('uses study:{id}:round:{N} session_id (matches loadMessages)', () => {
+    it('agent_text_delta is not whitelisted (dispatcher drops it upstream) → null', () => {
       const m = buildAgentEventMessage(
         { type: 'agent_text_delta', timestamp: 1000, agent: 'researcher', data: { text: 'hi' } },
         'study_abc',
         3,
       )
-      expect(m.session_id).toBe('study:study_abc:round:3')
+      expect(m).toBeNull()
     })
 
     it('whitelist: low-level lifecycle events are skipped entirely', () => {
       // thinking/text-lifecycle/iter/usage events used to render as bare
-      // event-name cards ("thinking_done") — must now return empty parts.
+      // event-name cards, then as empty-parts placeholder cards. They
+      // must now build to null so nothing is injected at all (F1).
       for (const type of [
         'agent_thinking_start', 'agent_thinking_done', 'agent_thinking_end',
         'agent_text_started', 'agent_text.ended', 'agent_iter_start',
         'agent_iter_end', 'agent_loop_start', 'agent_loop_final',
         'agent_llm_usage', 'agent_session_total_tokens',
+        'agent_text_delta',
       ]) {
         const m = buildAgentEventMessage(
           { type, timestamp: 1000, agent: 'researcher', data: {} },
           'study_abc', 3,
         )
-        expect(m.parts).toHaveLength(0)
+        expect(m).toBeNull()
       }
     })
 
-    it('whitelist: assistant_message / tool_call / tool_result / text_delta render', () => {
+    it('whitelist: assistant_message / tool_call / tool_result render', () => {
       for (const type of [
         'agent_assistant_message', 'agent_tool_call',
-        'agent_tool_result', 'agent_text_delta',
+        'agent_tool_result',
       ]) {
         const m = buildAgentEventMessage(
           { type, timestamp: 1000, agent: 'researcher', data: { text: 'x', content: 'x', tool: 'read' } },
           'study_abc', 3,
         )
-        expect(m.parts.length).toBeGreaterThan(0)
+        expect(m).not.toBeNull()
+        expect(m!.parts.length).toBeGreaterThan(0)
       }
     })
 
@@ -84,21 +87,28 @@ describe('StudyChat session id consistency', () => {
         { type: 'agent_tool_result', timestamp: 1000, agent: 'researcher', data: { status: 'ok' } },
         'study_abc', 3,
       )
-      expect(m.parts[0]).toMatchObject({ type: 'text' })
-      const text = (m.parts[0] as { text: string }).text
+      expect(m).not.toBeNull()
+      expect(m!.parts[0]).toMatchObject({ type: 'text' })
+      const text = (m!.parts[0] as { text: string }).text
       expect(text).toContain('工具')
       expect(text).not.toContain('`` ``')
     })
 
-    it('skipped-text fallback still uses round session_id', () => {
-      // No text path returns an empty-parts skip message; it must still
-      // land in the same session or it disappears too.
+    it('no-text displayable events build to null (no empty cards, F1)', () => {
       const m = buildAgentEventMessage(
-        { type: 'agent_text_delta', timestamp: 1000, data: {} },
+        { type: 'agent_tool_result', timestamp: 1000, data: {} },
         'study_abc',
         2,
       )
-      expect(m.session_id).toBe('study:study_abc:round:2')
+      // tool_result with no name still renders (工具 fallback), so use a
+      // non-whitelisted type to assert the null contract.
+      const skipped = buildAgentEventMessage(
+        { type: 'agent_llm_usage', timestamp: 1000, data: {} },
+        'study_abc',
+        2,
+      )
+      expect(m).not.toBeNull()
+      expect(skipped).toBeNull()
     })
   })
 
@@ -110,11 +120,12 @@ describe('StudyChat session id consistency', () => {
         3,
       )
       const agentMsg = buildAgentEventMessage(
-        { type: 'agent_text_delta', timestamp: 1, data: { text: 'x' } },
+        { type: 'agent_tool_call', timestamp: 1, data: { tool: 'read' } },
         'study_abc',
         3,
       )
-      for (const m of [eventMsg, agentMsg]) {
+      expect(agentMsg).not.toBeNull()
+      for (const m of [eventMsg, agentMsg!]) {
         expect(m.session_id).not.toContain(':stream')
       }
     })

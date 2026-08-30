@@ -204,4 +204,36 @@ describe('textHandlers — thinking protocol', () => {
     thinkingStart({}, ctx())
     expect(getMessage('m1').parts).toEqual([])
   })
+
+  // ── F5: think_id dedup + targeted routing ──
+
+  it('thinking_start with a known think_id is deduped (SSE replay)', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    thinkingStart({ message_id: 'm1', think_id: 't1' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'abc', think_id: 't1' }, c)
+    // Replay of the same thinking_start — must NOT push a second block.
+    thinkingStart({ message_id: 'm1', think_id: 't1' }, c)
+    const msg = getMessage('m1')
+    expect(msg.parts).toHaveLength(1)
+    expect((msg.parts[0] as { text: string }).text).toBe('abc')
+  })
+
+  it('interleaved thinking blocks route deltas by think_id', () => {
+    seedAssistant('m1')
+    const c = ctx()
+    thinkingStart({ message_id: 'm1', think_id: 'tA' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'A1', think_id: 'tA' }, c)
+    thinkingStart({ message_id: 'm1', think_id: 'tB' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'B1', think_id: 'tB' }, c)
+    thinkingDelta({ message_id: 'm1', delta: 'A2', think_id: 'tA' }, c)
+    const msg = getMessage('m1')
+    expect(msg.parts).toHaveLength(2)
+    const pa = msg.parts[0] as { id?: string; text: string }
+    const pb = msg.parts[1] as { id?: string; text: string }
+    expect(pa.id).toBe('tA')
+    expect(pa.text).toBe('A1A2')
+    expect(pb.id).toBe('tB')
+    expect(pb.text).toBe('B1')
+  })
 })
