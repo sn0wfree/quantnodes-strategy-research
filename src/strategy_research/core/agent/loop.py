@@ -59,6 +59,27 @@ from .trace import TraceWriter
 logger = logging.getLogger(__name__)
 
 
+# ── Shared persistent hook loop ────────────────────────────────────
+# One process-wide daemon loop for sync→async hook adapters. Creating
+# and tearing down an event loop per _fire_hooks call dominated the
+# adapter cost when hooks fired per iteration/event.
+_HOOK_LOOP: asyncio.AbstractEventLoop | None = None
+_HOOK_LOOP_LOCK = threading.Lock()
+
+
+def _get_hook_loop() -> asyncio.AbstractEventLoop:
+    global _HOOK_LOOP
+    with _HOOK_LOOP_LOCK:
+        if _HOOK_LOOP is None or _HOOK_LOOP.is_closed():
+            _HOOK_LOOP = asyncio.new_event_loop()
+            threading.Thread(
+                target=_HOOK_LOOP.run_forever,
+                daemon=True,
+                name="agent-hooks-loop",
+            ).start()
+        return _HOOK_LOOP
+
+
 def _run_coro_in_sync(coro: Any) -> Any:
     """Run a coroutine to completion from synchronous code.
 
@@ -439,19 +460,20 @@ class AgentLoop:
     # ── Hook sync adapter ─────────────────────────
 
     def _fire_hooks(self, method_name: str, *args: Any, **kwargs: Any) -> None:
-        """Sync adapter for async CompositeHook methods."""
+        """Sync adapter for async CompositeHook methods.
+
+        The coroutine runs on the shared persistent hook loop (see
+        ``_get_hook_loop``) via ``run_coroutine_threadsafe`` — safe from
+        any thread, and no per-call loop construction/teardown.
+        """
         if self._hooks is None:
             return
-        import asyncio
         try:
             method = getattr(self._hooks, method_name)
             coro = method(*args, **kwargs)
             if asyncio.iscoroutine(coro):
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(coro)
-                finally:
-                    loop.close()
+                fut = asyncio.run_coroutine_threadsafe(coro, _get_hook_loop())
+                fut.result()
         except Exception:  # noqa: BLE001
             logger.warning("Hook %s failed", method_name, exc_info=True)
 
@@ -519,11 +541,15 @@ class AgentLoop:
         Returns an LLMResponse-like object with content and tool_calls.
         """
         text_id = str(uuid.uuid4())
+        # thinking events share the text protocol's id discipline: a
+        # per-iteration think_id lets the frontend dedupe SSE replays and
+        # route deltas to the exact block instead of "last one wins".
+        think_id = str(uuid.uuid4())
         # thinking_start BEFORE text.started: both the frontend parts
         # array and the projector persist parts in event order, so the
         # thinking block must be created first to render above the text
         # body (both live and after refresh).
-        self._emit("thinking_start", {})
+        self._emit("thinking_start", {"think_id": think_id})
         self._emit("text.started", {"text_id": text_id})
         full_content = ""
         accumulated_tool_calls: list[dict[str, Any]] = []
@@ -539,13 +565,14 @@ class AgentLoop:
                 if chunk.delta_thinking:
                     self._emit("thinking_delta", {
                         "delta": chunk.delta_thinking,
+                        "think_id": think_id,
                         "raw": chunk.raw_thinking,
                     })
 
                 if chunk.delta_content:
                     if full_content == "" and chunk.delta_content:
                         # Transition: thinking_done before first text token
-                        self._emit("thinking_done", {})
+                        self._emit("thinking_done", {"think_id": think_id})
                     full_content += chunk.delta_content
                     self._emit("text_delta", {
                         "text": chunk.delta_content,
@@ -558,18 +585,23 @@ class AgentLoop:
                         self._accumulate_tool_call(accumulated_tool_calls, tc_delta)
 
                 if chunk.usage:
+                    # Keep only the final usage snapshot; emitting per chunk
+                    # floods the SSE channel and double-counts input tokens
+                    # downstream (mirrors the async path).
                     usage = chunk.usage
-                    self._emit("llm_usage", chunk.usage)
 
                 if chunk.finish_reason:
                     break
         except Exception:  # noqa: BLE001
-            self._emit("thinking_end", {})
+            self._emit("thinking_end", {"think_id": think_id})
             self._emit("text.ended", {"text_id": text_id, "text": full_content})
             raise
 
-        self._emit("thinking_end", {})
+        self._emit("thinking_end", {"think_id": think_id})
         self._emit("text.ended", {"text_id": text_id, "text": full_content})
+        # Single llm_usage at call end (not per chunk) — see _astream_chat.
+        if usage:
+            self._emit("llm_usage", usage)
 
         # Convert accumulated tool_calls to LLMResponse format
         raw_response: dict[str, Any] = {
@@ -640,11 +672,13 @@ class AgentLoop:
         when text and tool calls interleave.
         """
         text_id = str(uuid.uuid4())
+        # Per-iteration think_id — same rationale as _stream_chat.
+        think_id = str(uuid.uuid4())
         # thinking_start BEFORE text.started: both the frontend parts
         # array and the projector persist parts in event order, so the
         # thinking block must be created first to render above the text
         # body (both live and after refresh).
-        self._emit("thinking_start", {})
+        self._emit("thinking_start", {"think_id": think_id})
         self._emit("text.started", {"text_id": text_id})
         full_content = ""
         accumulated_tool_calls: list[dict[str, Any]] = []
@@ -669,6 +703,7 @@ class AgentLoop:
                 if chunk.delta_thinking:
                     self._emit("thinking_delta", {
                         "delta": chunk.delta_thinking,
+                        "think_id": think_id,
                         "raw": chunk.raw_thinking,
                     })
                     # 让出 event loop，让前端逐字看到 thinking
@@ -676,7 +711,7 @@ class AgentLoop:
 
                 if chunk.delta_content:
                     if full_content == "":
-                        self._emit("thinking_done", {})
+                        self._emit("thinking_done", {"think_id": think_id})
                     full_content += chunk.delta_content
                     self._emit("text_delta", {
                         "text": chunk.delta_content,
@@ -698,11 +733,11 @@ class AgentLoop:
                 if chunk.finish_reason:
                     break
         except Exception:  # noqa: BLE001
-            self._emit("thinking_end", {})
+            self._emit("thinking_end", {"think_id": think_id})
             self._emit("text.ended", {"text_id": text_id, "text": full_content})
             raise
 
-        self._emit("thinking_end", {})
+        self._emit("thinking_end", {"think_id": think_id})
         self._emit("text.ended", {"text_id": text_id, "text": full_content})
         # llm_usage 只在 LLM call 结束时 emit 一次（而非每 chunk）。
         # 每 chunk emit 会导致 event_callback 再 emit session_total_tokens，
@@ -1626,7 +1661,6 @@ class AgentLoop:
         The sync entry runs this core via ``_run_coro_in_sync`` (from a
         pool thread there is no running loop, so no nested thread).
         """
-        result.tool_calls_made += 1
         tool = self.registry.get(tc.name)
         if tool is None:
             logger.warning("tool '%s' not in registry", tc.name)
@@ -1738,6 +1772,10 @@ class AgentLoop:
             kwargs["emit_event"] = self._emit
 
         t0 = time.perf_counter()
+        # Count only calls that actually reached execution — the old
+        # top-of-function increment also counted missing tools and
+        # guard-denied calls, inflating the metric.
+        result.tool_calls_made += 1
         # ── Tool-level auto-retry for transient errors ──────────────
         last_exc = None
         for _attempt in range(_TOOL_MAX_RETRIES):
