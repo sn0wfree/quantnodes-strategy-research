@@ -135,7 +135,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return verify_token(token)
 
     def _is_active(self, user_id: str) -> bool:
-        """Return False if the user exists but is disabled."""
+        """Return False if the user exists but is disabled.
+
+        DB errors fail CLOSED (return False → 403): the disabled-account
+        check must not be bypassable by a database fault. Availability
+        recovers when the DB does; silently treating an unreadable user
+        table as "active" would let disabled accounts keep operating.
+        """
         try:
             from .user_db import get_user_db
             db = get_user_db()
@@ -144,4 +150,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return bool(user.get("is_active", 1))
             return True  # unknown user id → let downstream 401/404
         except Exception:
-            return True  # never fail-open on DB errors blocking requests
+            # Fail closed, and log loudly so an outage is diagnosable
+            # (the old comment said "never fail-open" while returning
+            # True — exactly the opposite).
+            import logging
+            logging.getLogger(__name__).warning(
+                "auth: user lookup failed for %s — failing closed", user_id,
+                exc_info=True,
+            )
+            return False
