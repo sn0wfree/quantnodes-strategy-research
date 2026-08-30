@@ -861,11 +861,24 @@ class SessionService:
                     break
         finally:
             self._processing_sessions.discard(session_id)
-            # Keep the queue object around briefly so a follow-up send_message
-            # call finds it and reuses it; the next consumer task will
-            # naturally drain it. But if truly empty, drop it.
+            # Exit-vs-enqueue handoff: a producer that fetched this queue
+            # before we decided to exit may have put an item into it (now
+            # or after any future await appears between its fetch and
+            # put). Popping a non-empty queue would strand that item
+            # forever, so instead of trusting the empty() sample taken
+            # before the finally, re-check here: restart the consumer
+            # when items remain, drop the queue only when truly drained.
             q = self._session_queues.get(session_id)
-            if q is not None and q.empty():
+            if q is not None and not q.empty():
+                self._processing_sessions.add(session_id)
+                consumer = asyncio.create_task(
+                    self._process_session_queue(session_id)
+                )
+                self._queue_consumers[session_id] = consumer
+                consumer.add_done_callback(
+                    lambda t: self._queue_consumers.pop(session_id, None)
+                )
+            elif q is not None and q.empty():
                 self._session_queues.pop(session_id, None)
 
     # ── Attempt execution ──────────────────────────────────────────────
