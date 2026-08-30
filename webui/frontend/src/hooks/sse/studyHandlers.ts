@@ -1,5 +1,6 @@
 import type { SSEHandler } from './types'
 import { useStudyStore } from '../../stores/study'
+import type { StudyStatusResponse } from '../../api/client'
 
 /**
  * Study event handlers — keep the Study panel's progress view in sync
@@ -35,34 +36,140 @@ const patch = (data: Record<string, unknown>) => {
   const merged: Record<string, unknown> = { ...(cur ?? {}), ...data }
   const studyId = (data.study_id as string) ?? merged.study_id
   if (studyId) merged.study_id = studyId
-  if (data.round !== undefined) merged.current_round = data.round as number
+  if (data.round !== undefined) {
+    // Monotonic guard: SSE replays and stale out-of-order events carry
+    // older rounds — never let current_round regress (F4).
+    const prevRound = typeof cur?.current_round === 'number' ? cur.current_round : 0
+    merged.current_round = Math.max(prevRound, data.round as number)
+  }
   if (data.metrics !== undefined) merged.last_metrics = data.metrics as Record<string, number>
   if (data.verdict !== undefined) merged.last_verdict = data.verdict as string
   if (data.error !== undefined) merged.last_error = data.error as string
   if (data.trace_id !== undefined) merged.trace_id = data.trace_id as string
-  useStudyStore.getState().setCurrent(merged as never)
+  useStudyStore.getState().setCurrent(merged as StudyStatusResponse)
 }
 
-export const studyRound: SSEHandler = (data) => patch(data)
+export const studyRound: SSEHandler = (data) => {
+  patch(data)
+  const store = useStudyStore.getState()
+  store.addLiveEvent({
+    type: 'phase',
+    message: `Round ${data.round ?? '?'} 完成 · verdict=${data.verdict ?? '—'}`,
+    round: data.round as number | undefined,
+  })
+}
 
 export const studyCompleted: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'complete' })
+  const store = useStudyStore.getState()
+  store.clearHitlInterrupt(data.study_id as string | undefined)
+  store.addLiveEvent({
+    type: 'review',
+    message: `🎉 研究完成 (Round ${data.round ?? '?'})`,
+    round: data.round as number | undefined,
+  })
 }
 
 export const studyFailed: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'error' })
+  const store = useStudyStore.getState()
+  store.clearHitlInterrupt(data.study_id as string | undefined)
+  store.addLiveEvent({
+    type: 'other',
+    message: `❌ 研究失败: ${data.error ?? data.reason ?? '未知原因'}`,
+    round: data.round as number | undefined,
+  })
 }
 
 export const studyBudgetLimited: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'budget_limited' })
 }
 
+/**
+ * study_paused — runner pauses on the HITL novelty gate. When the
+ * payload carries the REAL DB interrupt_id, open the webui approval
+ * card slot (the card POSTs /study/{id}/interrupts/{iid}/respond —
+ * synthetic ids used to 404 here, F2).
+ */
 export const studyPaused: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'paused' })
+  const studyId = data.study_id as string | undefined
+  const interruptId = data.interrupt_id as string | undefined
+  useStudyStore.getState().addLiveEvent({
+    type: 'other',
+    message: interruptId
+      ? `⏸ 等待人工审批 (Round ${data.round ?? '?'})`
+      : `⏸ 研究已暂停 (Round ${data.round ?? '?'})`,
+    round: data.round as number | undefined,
+  })
+  if (studyId && interruptId) {
+    useStudyStore.getState().setHitlInterrupt({
+      study_id: studyId,
+      interrupt_id: interruptId,
+      round: data.round as number | undefined,
+      hypothesis: (data.hypothesis as string) ?? '',
+      message:
+        (data.hypothesis as string) ||
+        `Round ${data.round ?? '?'}: 请审批 researcher 假设`,
+    })
+  }
 }
 
 export const studyResumed: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'running' })
+  useStudyStore.getState().clearHitlInterrupt(data.study_id as string | undefined)
+  useStudyStore.getState().addLiveEvent({
+    type: 'other',
+    message: `▶ 研究已恢复 (Round ${data.round ?? '?'})`,
+    round: data.round as number | undefined,
+  })
+}
+
+export const studyRoundRejected: SSEHandler = (data) => {
+  // Emitted after a HITL timeout/rejection (reason: hitl_timeout /
+  // hitl_rejected) — close the approval card and show the timeline note.
+  const store = useStudyStore.getState()
+  store.clearHitlInterrupt(data.study_id as string | undefined)
+  store.addLiveEvent({
+    type: 'other',
+    message: `轮次被拒绝/超时: ${data.reason ?? '未知原因'}`,
+    round: data.round as number | undefined,
+  })
+}
+
+/**
+ * study_progress — goal criteria coverage after a keep round
+ * (runner._record_keep_evidence). Payload: { study_id, covered, total, percent }
+ */
+export const studyProgress: SSEHandler = (data) => {
+  useStudyStore.getState().addLiveEvent({
+    type: 'evidence',
+    message: `目标进度: ${data.covered ?? '?'}/${data.total ?? '?'} (${data.percent ?? 0}%)`,
+  })
+  patch(data)
+}
+
+/**
+ * study_retry_queued — continue/retry re-enqueued the study
+ * (scheduler). Payload: { study_id, status }
+ */
+export const studyRetryQueued: SSEHandler = (data) => {
+  useStudyStore.getState().addLiveEvent({
+    type: 'other',
+    message: '已重新排队，等待调度执行',
+  })
+  patch({ ...data, execution_status: 'queued' })
+}
+
+/**
+ * study_monitor_check_failed — a periodic monitor check threw
+ * (monitor.py). Payload: { study_id, error }
+ */
+export const studyMonitorCheckFailed: SSEHandler = (data) => {
+  useStudyStore.getState().addLiveEvent({
+    type: 'other',
+    message: `监控检查失败: ${data.error ?? '未知错误'}`,
+  })
 }
 
 export const studyInterrupted: SSEHandler = (data) => {
@@ -71,6 +178,7 @@ export const studyInterrupted: SSEHandler = (data) => {
 
 export const studyCancelled: SSEHandler = (data) => {
   patch({ ...data, execution_status: 'cancelled' })
+  useStudyStore.getState().clearHitlInterrupt(data.study_id as string | undefined)
 }
 
 export const studyStarted: SSEHandler = (data) => {
@@ -134,7 +242,7 @@ export const studyScoreboard: SSEHandler = (data) => {
   useStudyStore.getState().setCurrent({
     ...cur,
     scoreboard: data.scoreboard,
-  } as never)
+  } as StudyStatusResponse)
 }
 
 /**
@@ -147,7 +255,7 @@ export const studyGoalSnapshot: SSEHandler = (data) => {
   useStudyStore.getState().setCurrent({
     ...cur,
     goal_snapshot: data.goal_snapshot,
-  } as never)
+  } as StudyStatusResponse)
 }
 
 /**
@@ -160,7 +268,7 @@ export const studyBudget: SSEHandler = (data) => {
   useStudyStore.getState().setCurrent({
     ...cur,
     budget: data.budget,
-  } as never)
+  } as StudyStatusResponse)
 }
 
 /**

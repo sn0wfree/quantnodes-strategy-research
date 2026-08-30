@@ -207,7 +207,9 @@ class APIClient {
 
     pause: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/pause`),
     resume: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume`),
-    resumeInterrupted: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/resume_interrupted`),
+    // NOTE: no resumeInterrupted() — the backend has no such route. The
+    // deprecated action lives on as POST /study/{id}/actions/resume_interrupted
+    // (aliased to CONTINUE); the UI uses `continue` below.
     cancel: (studyId: string) => this.post<StudyControlResponse>(`/study/${studyId}/cancel`),
     continue: (studyId: string, mode?: string, fromRound?: number) =>
       this.post<StudyControlResponse>(`/study/${studyId}/continue`, {
@@ -302,6 +304,22 @@ class APIClient {
 
     adoptRound: (studyId: string, roundNum: number) =>
       this.post<StudyAdoptResponse>(`/study/${studyId}/rounds/${roundNum}/adopt`),
+
+    /** Reload recovery: most recent pending HITL interrupt (or null). */
+    pendingInterrupt: (studyId: string) =>
+      this.get<{
+        status: string
+        study_id: string
+        interrupt: {
+          interrupt_id: string
+          round_num: number
+          interrupt_type: string
+          status: string
+          hypothesis: string
+          message: string
+          created_at: string
+        } | null
+      }>(`/study/${studyId}/interrupts/pending`),
 
     hangingEvents: (studyId: string, hours = 24, limit = 20) =>
       this.get<StudyHangingEventsResponse>(
@@ -840,8 +858,13 @@ export interface StudySummaryResponse {
   objective: string
   strategy_name?: string
   workspace_path?: string
+  /** Active execution engine ('phases' | 'dag' | 'langgraph'). */
+  engine?: string
   last_metrics?: Record<string, number> | null
   last_verdict?: string | null
+  last_error?: string | null
+  /** Full traceback of the last failed round (backend sends when set). */
+  last_traceback?: string | null
   metric_targets?: MetricTarget[]
   created_at?: string
   updated_at?: string

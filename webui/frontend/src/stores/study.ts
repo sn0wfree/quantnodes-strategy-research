@@ -27,6 +27,18 @@ export interface LiveEvent {
   raw?: { type: string; data: Record<string, unknown> }
 }
 
+/** Pending HITL (novelty gate) interrupt — carries the REAL DB
+ * interrupt_id so the approval card can answer
+ * POST /study/{id}/interrupts/{iid}/respond (synthetic client-side ids
+ * used to 404). Populated from study_paused SSE events. */
+export interface HitlInterrupt {
+  study_id: string
+  interrupt_id: string
+  round?: number
+  hypothesis: string
+  message: string
+}
+
 export interface StudyState {
   /** Most recent status response for the active session. */
   current: StudyStatusResponse | null
@@ -38,6 +50,9 @@ export interface StudyState {
   error: string
   /** Pending agent-loop approval gates, keyed by study_id+role+iteration. */
   agentApprovals: Record<string, AgentApprovalRequest>
+  /** Pending HITL novelty-gate interrupt (single slot — the gate pauses
+   * the whole round, so at most one can be open per study). */
+  hitlInterrupt: HitlInterrupt | null
 
   // ── Live activity tracking (Phase D) ──────────────────────────
   /** Current phase within a round (e.g. "researcher", "execution", "evaluation") */
@@ -58,6 +73,8 @@ export interface StudyState {
   reset: () => void
   enqueueAgentApproval: (req: AgentApprovalRequest) => void
   resolveAgentApproval: (studyId: string, role: string | null, iter: number | undefined) => void
+  setHitlInterrupt: (req: HitlInterrupt) => void
+  clearHitlInterrupt: (studyId?: string) => void
 
   // ── Live activity actions ─────────────────────────────────────
   setPhase: (phase: string | null) => void
@@ -80,6 +97,7 @@ export const useStudyStore = create<StudyState>()((set) => ({
   busy: false,
   error: '',
   agentApprovals: {},
+  hitlInterrupt: null,
   // Live activity defaults
   currentPhase: null,
   currentAgent: null,
@@ -93,6 +111,7 @@ export const useStudyStore = create<StudyState>()((set) => ({
   setError: (error) => set({ error }),
   reset: () => set({
     current: null, list: [], busy: false, error: '', agentApprovals: {},
+    hitlInterrupt: null,
     currentPhase: null, currentAgent: null, phaseStartedAt: null,
     nodeStatuses: {}, recentEvents: [],
   }),
@@ -110,6 +129,15 @@ export const useStudyStore = create<StudyState>()((set) => ({
       const next = { ...s.agentApprovals }
       delete next[key]
       return { agentApprovals: next }
+    }),
+  setHitlInterrupt: (req) => set({ hitlInterrupt: req }),
+  clearHitlInterrupt: (studyId) =>
+    set((s) => {
+      if (!s.hitlInterrupt) return s
+      // Scoped clear: only drop the slot when it belongs to this study
+      // (no studyId = unconditional clear on reset).
+      if (studyId && s.hitlInterrupt.study_id !== studyId) return s
+      return { hitlInterrupt: null }
     }),
 
   // ── Live activity actions ─────────────────────────────────────

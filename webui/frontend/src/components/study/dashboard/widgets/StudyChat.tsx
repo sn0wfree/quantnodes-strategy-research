@@ -50,7 +50,7 @@ export function buildAgentEventMessage(
   event: { type: string; [k: string]: any },
   studyId: string,
   currentRound: number,
-): Message {
+): Message | null {
   const eventType = event.type as string
   const resolvedAgentId = event.agent || event.data?.agent || ''
   const data = (event.data || {}) as Record<string, any>
@@ -61,21 +61,18 @@ export function buildAgentEventMessage(
   // loop_start/final, llm_usage, session_total_tokens…) were rendered
   // as bare event-name cards ("thinking_done") or empty placeholders —
   // see docs/rootcause-goal-injection-maxiter.md §8.
+  // (agent_text_delta is not here: the dispatcher drops those events
+  // upstream before they ever reach the timeline.)
   const DISPLAYABLE = new Set([
     'agent_assistant_message',
     'agent_tool_call',
     'agent_tool_result',
-    'agent_text_delta',
   ])
   if (!DISPLAYABLE.has(eventType)) {
-    return {
-      id: `skip:${ts}:${eventType}:${resolvedAgentId}`,
-      session_id: `study:${studyId}:round:${currentRound}`,
-      role: 'system',
-      parts: [],
-      created_at: ts / 1000,
-      metadata: { kind: 'system', round: currentRound },
-    }
+    // F1: return null so non-displayable events are never injected as
+    // messages. The old empty-parts placeholder still rendered as a
+    // header-only card and accumulated in the store.
+    return null
   }
 
   let text: string = ''
@@ -101,7 +98,7 @@ export function buildAgentEventMessage(
     text = message || `${eventType.replace('agent_', '')}`
   }
 
-  if (!text) return { id: `skip:${ts}:${eventType}`, session_id: `study:${studyId}:round:${currentRound}`, role: 'system', parts: [], created_at: ts / 1000, metadata: { kind: 'system', round: currentRound } }
+  if (!text) return null
 
   return {
     id: `agent:${ts}:${eventType}:${resolvedAgentId}`,
@@ -218,21 +215,31 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   const currentRound = clampRound(summary?.current_round as number | undefined) ?? 1
   const [selectedRound, setSelectedRound] = useState(currentRound)
   const [loading, setLoading] = useState(false)
-  const [pendingInterrupt, setPendingInterrupt] = useState<{
-    interruptId: string
-    hypothesis?: string
-    message?: string
-  } | null>(null)
   const recentEvents = useStudyStore((s) => s.recentEvents)
+  const hitlInterrupt = useStudyStore((s) => s.hitlInterrupt)
   const chatStore = useChatStore()
   // Consume cursor: highest LiveEvent.seq already injected into the
   // chat. Length-diff broke once the store buffer hit its 50-entry cap
   // (length pinned at 50 → newCount ≤ 0 forever).
   const lastSeqRef = useRef(0)
   const prevStudyIdRef = useRef<string | null>(null)
+  // F4 auto-follow guard: tracks the round the auto-sync last picked.
+  // While the user is browsing an older round (selectedRound !==
+  // autoFollowRef) a new round must NOT yank the viewport forward.
+  const autoFollowRef = useRef(currentRound)
   // Round discovery fallback: populated when study_rounds has no rows
   // but chat sessions for the rounds exist (crashed before finalize).
   const [discoveredRounds, setDiscoveredRounds] = useState<number[]>([])
+
+  /** Manual round selection — auto-follow resumes only when the user
+   * lands on the latest round; browsing history keeps the last
+   * auto-set value so the guard in the sync effect stays closed. */
+  const selectRoundManual = (n: number) => {
+    if (n >= currentRound) {
+      autoFollowRef.current = n
+    }
+    setSelectedRound(n)
+  }
 
   const dbRounds: StudyRoundSummary[] = summary?.recent_rounds ?? []
   const rounds: StudyRoundSummary[] = dbRounds.length > 0
@@ -256,6 +263,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
           setSelectedRound((prev) =>
             found.includes(prev) ? prev : found[found.length - 1],
           )
+          autoFollowRef.current = found[found.length - 1]
         }
       })
       .catch(() => {
@@ -264,18 +272,20 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
     return () => { cancelled = true }
   }, [studyId, dbRounds.length])
 
-  // Sync selectedRound with currentRound when it changes
+  // Sync selectedRound with currentRound when it changes — but only
+  // while the user hasn't navigated into history (F4). They rejoin by
+  // selecting the latest round or clicking 回到最新.
   useEffect(() => {
-    if (currentRound > 0) {
+    if (currentRound > 0 && selectedRound === autoFollowRef.current) {
+      autoFollowRef.current = currentRound
       setSelectedRound(currentRound)
     }
-  }, [currentRound])
+  }, [currentRound, selectedRound])
 
   // Load messages for selected round from chat session API (event-sourced)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    setPendingInterrupt(null)  // Clear any stale HITL card on round switch
 
     const sessionId = `study:${studyId}:round:${selectedRound}`
 
@@ -297,14 +307,51 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
   useEffect(() => {
     if (prevStudyIdRef.current !== studyId) {
       chatStore.setMessages([])
-      setPendingInterrupt(null)
       lastSeqRef.current = recentEvents.reduce(
         (m, e) => Math.max(m, e.seq ?? 0), 0,
       )
+      // Reset the F4 auto-follow guard: a study switch always snaps to
+      // the new study's latest round, even if the user was browsing
+      // history of the previous study (autoFollow === selectedRound
+      // re-arms the sync effect for the incoming summary).
+      autoFollowRef.current = currentRound
+      setSelectedRound(currentRound)
       prevStudyIdRef.current = studyId
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- chatStore/recentEvents intentionally read once per study switch
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chatStore/recentEvents/currentRound intentionally read once per study switch
   }, [studyId])
+
+  // F2 reload recovery: after a page refresh the study_paused SSE event
+  // is gone, so rebuild the HITL approval card from the DB. Only fires
+  // when the study looks paused and the SSE path hasn't already opened
+  // the card slot.
+  const executionStatus = summary?.execution_status as string | undefined
+  useEffect(() => {
+    if (!studyId) return
+    if (hitlInterrupt) return // SSE path already opened the card
+    const pausedLike =
+      executionStatus === 'paused' || executionStatus === 'awaiting_approval'
+    if (!pausedLike) return
+    let cancelled = false
+    api.study
+      .pendingInterrupt(studyId)
+      .then((res) => {
+        if (cancelled || !res.interrupt) return
+        useStudyStore.getState().setHitlInterrupt({
+          study_id: studyId,
+          interrupt_id: res.interrupt.interrupt_id,
+          round: res.interrupt.round_num,
+          hypothesis: res.interrupt.hypothesis,
+          message:
+            res.interrupt.message ||
+            `Round ${res.interrupt.round_num ?? '?'}: 请审批 researcher 假设`,
+        })
+      })
+      .catch(() => {
+        /* best-effort — the SSE event will open the card when it arrives */
+      })
+    return () => { cancelled = true }
+  }, [studyId, executionStatus, hitlInterrupt])
 
   // Inject SSE events as system messages + agent-level events (live streaming)
   useEffect(() => {
@@ -318,30 +365,31 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
 
     fresh.forEach((event) => {
       const raw = event.raw
+      // F3: tag the message with the event's TRUE round (from the
+      // payload), not the round the user happens to be viewing —
+      // events streamed while browsing an old round used to land in
+      // the wrong session bucket and vanish on reload.
+      const rawRound = Number(raw?.data?.round ?? raw?.round)
+      const evRound = Number.isFinite(rawRound) && rawRound > 0
+        ? rawRound
+        : currentRound
       if (raw?.type?.startsWith('agent_')) {
-        chatStore.addMessage(
-          buildAgentEventMessage(
-            { ...raw.data, type: raw.type, timestamp: event.timestamp },
-            studyId,
-            selectedRound,
-          ),
+        const msg = buildAgentEventMessage(
+          { ...raw.data, type: raw.type, timestamp: event.timestamp },
+          studyId,
+          evRound,
         )
+        // F1: non-displayable events build to null — never inject them.
+        if (msg) chatStore.addMessage(msg)
         return
       }
 
-      chatStore.addMessage(buildEventMessage(event, studyId, selectedRound))
-
-      if (
-        event.type === 'phase' &&
-        (event.message.includes('等待审批') || event.message.includes('hitl'))
-      ) {
-        setPendingInterrupt({
-          interruptId: `pending:${studyId}:${selectedRound}`,
-          message: event.message,
-        })
-      }
+      chatStore.addMessage(buildEventMessage(event, studyId, evRound))
+      // F2: HITL approval cards are driven by the study_paused SSE
+      // event (studyHandlers), which carries the REAL DB interrupt_id.
+      // The old synthetic `pending:{studyId}:{round}` id always 404'd.
     })
-  }, [recentEvents, studyId, selectedRound])
+  }, [recentEvents, studyId, currentRound])
 
   const scrollKey = `${studyId}:${selectedRound}`
   // Provider sessionId MUST equal the sessionId passed to chatStore.loadMessages
@@ -362,7 +410,7 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
             </span>
             {selectedRound !== currentRound && (
               <button
-                onClick={() => setSelectedRound(currentRound)}
+                onClick={() => selectRoundManual(currentRound)}
                 className="text-[10px] text-primary-400 hover:text-primary-300"
               >
                 (回到最新)
@@ -379,21 +427,22 @@ export function StudyChat({ studyId, summary }: WidgetProps) {
               <RoundNavRail
                 rounds={rounds}
                 selectedRound={selectedRound}
-                onSelectRound={setSelectedRound}
+                onSelectRound={selectRoundManual}
               />
             )}
           </div>
 
-          {/* HITL Approval Card */}
-          {pendingInterrupt && (
+          {/* HITL Approval Card — driven by the study_paused SSE event
+              (real DB interrupt_id; see studyHandlers.studyPaused). */}
+          {hitlInterrupt && hitlInterrupt.study_id === studyId && (
             <div className="flex-shrink-0 border-t border-slate-800 p-3">
               <InterruptApprovalCard
                 studyId={studyId}
-                interruptId={pendingInterrupt.interruptId}
-                hypothesis={pendingInterrupt.hypothesis}
-                message={pendingInterrupt.message}
-                onApproved={() => setPendingInterrupt(null)}
-                onRejected={() => setPendingInterrupt(null)}
+                interruptId={hitlInterrupt.interrupt_id}
+                hypothesis={hitlInterrupt.hypothesis}
+                message={hitlInterrupt.message}
+                onApproved={() => useStudyStore.getState().clearHitlInterrupt(studyId)}
+                onRejected={() => useStudyStore.getState().clearHitlInterrupt(studyId)}
               />
             </div>
           )}
