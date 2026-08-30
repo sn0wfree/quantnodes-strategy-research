@@ -49,11 +49,9 @@ export function StudyAgentPalette({ selected, onChange, required = [] }: Props) 
 
   const selectAll = () => onChange(new Set(agents.map((a) => a.id)))
   const clearOptional = () => {
-    const next = new Set<string>(required)
-    for (const a of agents) {
-      if (a.optional && selected.has(a.id)) next.add(a.id)
-    }
-    onChange(next)
+    // "仅必选": keep only required agents. The old loop re-added every
+    // SELECTED optional agent — the exact opposite of the label.
+    onChange(new Set<string>(required))
   }
 
   if (loading) {

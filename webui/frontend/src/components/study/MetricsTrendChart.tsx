@@ -31,6 +31,14 @@ const METRIC_LABELS: Record<string, string> = {
   sortino: 'Sortino',
 }
 
+const OP_SYMBOLS: Record<string, string> = {
+  '>=': '≥',
+  '<=': '≤',
+  '>': '>',
+  '<': '<',
+  '==': '=',
+}
+
 export function MetricsTrendChart({ rounds, metricTargets }: Props) {
   const chartData = useMemo(() => {
     return rounds.map((r) => ({
@@ -47,7 +55,7 @@ export function MetricsTrendChart({ rounds, metricTargets }: Props) {
         Object.keys(r.metrics).forEach((k) => names.add(k))
       }
     })
-    return Array.from(names).filter((n) => n !== 'max_dd' || rounds.some((r) => r.metrics?.max_dd !== undefined))
+    return Array.from(names)
   }, [rounds])
 
   if (rounds.length === 0) {
@@ -101,7 +109,8 @@ export function MetricsTrendChart({ rounds, metricTargets }: Props) {
                 name={METRIC_LABELS[name] ?? name}
               />
             ))}
-            {/* Target reference lines */}
+            {/* Target reference lines — labeled with the comparison op
+                so the direction (e.g. MaxDD ≤ target) is readable. */}
             {metricTargets?.map((t) => (
               <ReferenceLine
                 key={`${t.name}-${t.value}`}
@@ -109,6 +118,12 @@ export function MetricsTrendChart({ rounds, metricTargets }: Props) {
                 stroke={METRIC_COLORS[t.name] ?? '#64748b'}
                 strokeDasharray="5 5"
                 strokeOpacity={0.4}
+                label={{
+                  value: `${METRIC_LABELS[t.name] ?? t.name} ${OP_SYMBOLS[t.op] ?? t.op} ${t.value}`,
+                  position: t.op === '<=' || t.op === '<' ? 'insideBottomRight' : 'insideTopRight',
+                  fontSize: 9,
+                  fill: METRIC_COLORS[t.name] ?? '#94a3b8',
+                }}
               />
             ))}
           </LineChart>

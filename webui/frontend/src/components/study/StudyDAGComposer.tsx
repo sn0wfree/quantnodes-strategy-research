@@ -31,6 +31,9 @@ export function StudyDAGComposer({ objective, onGraphReady }: Props) {
   const [planning, setPlanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reasoning, setReasoning] = useState('')
+  // Edges produced by the AI planner — manual palette edits keep the
+  // edges between still-selected agents instead of wiping them.
+  const [plannedEdges, setPlannedEdges] = useState<Array<{ source: string; target: string }>>([])
 
   useEffect(() => {
     api.study
@@ -61,6 +64,7 @@ export function StudyDAGComposer({ objective, onGraphReady }: Props) {
         )[node.id] || []
         for (const d of deps) edges.push({ source: d, target: node.id })
       }
+      setPlannedEdges(edges)
       onGraphReady(
         {
           nodes: resp.graph.nodes.map((n) => ({
@@ -90,7 +94,13 @@ export function StudyDAGComposer({ objective, onGraphReady }: Props) {
       config: {},
       enabled: true,
     }))
-    onGraphReady({ nodes, edges: [] }, [...next])
+    // Keep AI-planned edges whose endpoints are both still selected —
+    // the old code passed edges: [], silently discarding the planner's
+    // graph on every checkbox toggle.
+    const keptEdges = plannedEdges.filter(
+      (e) => next.has(e.source) && next.has(e.target),
+    )
+    onGraphReady({ nodes, edges: keptEdges }, [...next])
   }
 
   return (
