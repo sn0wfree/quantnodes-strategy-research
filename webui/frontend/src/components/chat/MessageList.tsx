@@ -307,12 +307,18 @@ export function MessageList({ separatorKey, scrollKey }: MessageListProps = {}) 
           return (
             <>
               {daySeparator}
-              <AssistantMessage
-                message={message}
-                isStreaming={isStreaming}
-                isQueued={isQueued}
-                layout={chatLayout}
-              />
+              {/* Defense-in-depth (F1): a part-less non-streaming
+                  message is a header-only empty card — skip it here
+                  (AssistantMessage can't early-return; it calls hooks
+                  after this point). */}
+              {message.parts.length === 0 && !isStreaming && !isQueued ? null : (
+                <AssistantMessage
+                  message={message}
+                  isStreaming={isStreaming}
+                  isQueued={isQueued}
+                  layout={chatLayout}
+                />
+              )}
             </>
           )
         }}

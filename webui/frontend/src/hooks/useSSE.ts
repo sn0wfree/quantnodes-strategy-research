@@ -6,6 +6,7 @@ import { useGoalStore } from '../stores/goal'
 import { useToastStore } from '../stores/toast'
 import { useSSEStore } from '../stores/sse'
 import { useSessionStore } from '../stores/session'
+import { useAuthStore } from '../stores/auth'
 import { EVENT_TYPES, HANDLERS, type SSEContext, type SSEEventType } from './sse'
 
 /**
@@ -174,11 +175,10 @@ export function useSSE(sessionId: string | null) {
 
     useSSEStore.getState().setStatus('connecting')
 
-    const token = localStorage.getItem('sr-auth')
-    let parsedToken = ''
-    try {
-      parsedToken = token ? JSON.parse(token).state.token : ''
-    } catch {}
+    // Token via the auth store — the old code hand-parsed the
+    // zustand-persist localStorage record ('sr-auth'), coupling the SSE
+    // layer to the persistence internals.
+    const parsedToken = useAuthStore.getState().token ?? ''
 
     const params = new URLSearchParams({ session_id: sessionId })
     if (parsedToken) params.set('token', parsedToken)

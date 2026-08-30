@@ -103,12 +103,22 @@ export const textEnded: SSEHandler = (data, ctx) => {
 export const thinkingStart: SSEHandler = (data, { updateMessage }) => {
   const messageId = data.message_id as string | undefined
   if (!messageId) return
+  // Per-iteration think_id (mirrors the text protocol's text_id).
+  const thinkId = data.think_id as string | undefined
   updateMessage(messageId, (msg) => {
+    // Dedup: SSE replays re-deliver the same thinking_start — a block
+    // with this id already exists, so don't push a duplicate.
+    if (thinkId && msg.parts.some(
+      (p) => p.type === 'thinking' && (p as ThinkingPart).id === thinkId,
+    )) {
+      return
+    }
     msg.parts.push({
       type: 'thinking',
       text: '',
       collapsed: true,
       isStreaming: true,
+      id: thinkId ?? `think-${messageId}-${msg.parts.length}`,
     } as ThinkingPart)
   })
 }
@@ -118,13 +128,20 @@ export const thinkingDelta: SSEHandler = (data, ctx) => {
   const delta = data.delta as string
   const messageId = data.message_id as string | undefined
   if (!delta || !messageId) return
+  // Route to the exact block via think_id; fall back to the last OPEN
+  // (streaming) thinking block — never an already-closed one, which is
+  // what "last thinking part" matched when blocks interleaved.
+  const thinkId = data.think_id as string | undefined
   let partId: string | null = null
   updateMessage(messageId, (msg) => {
     for (let i = msg.parts.length - 1; i >= 0; i--) {
       const p = msg.parts[i]
       if (p && p.type === 'thinking') {
-        ;(p as ThinkingPart).text += delta
-        ;(p as ThinkingPart).isStreaming = true
+        const tp = p as ThinkingPart
+        if (thinkId && tp.id && tp.id !== thinkId) continue
+        if (!thinkId && tp.isStreaming === false) continue
+        tp.text += delta
+        tp.isStreaming = true
         partId = `think-${messageId}-${i}`
         return
       }
@@ -138,13 +155,20 @@ export const thinkingDone: SSEHandler = (data, ctx) => {
   const messageId = data.message_id as string | undefined
   if (!messageId) return
   // Clear streaming flag + preview buffer for the matched thinking part.
+  const thinkId = data.think_id as string | undefined
   let partId: string | null = null
   updateMessage(messageId, (msg) => {
     for (let i = msg.parts.length - 1; i >= 0; i--) {
       const p = msg.parts[i]
       if (p && p.type === 'thinking') {
-        ;(p as ThinkingPart).isStreaming = false
-        ;(p as ThinkingPart).collapsed = true
+        const tp = p as ThinkingPart
+        // With think_id, only close the matching block; without, close
+        // the last still-streaming one (replays may deliver these out
+        // of order relative to interleaved blocks).
+        if (thinkId && tp.id && tp.id !== thinkId) continue
+        if (!thinkId && tp.isStreaming === false) continue
+        tp.isStreaming = false
+        tp.collapsed = true
         partId = `think-${messageId}-${i}`
         return
       }
@@ -157,13 +181,16 @@ export const thinkingEnd: SSEHandler = (data, ctx) => {
   const { updateMessage, clearPartAccum } = ctx
   const messageId = data.message_id as string | undefined
   if (!messageId) return
+  const thinkId = data.think_id as string | undefined
   let partId: string | null = null
   updateMessage(messageId, (msg) => {
     for (let i = msg.parts.length - 1; i >= 0; i--) {
       const p = msg.parts[i]
       if (p && p.type === 'thinking') {
-        ;(p as ThinkingPart).isStreaming = false
-        ;(p as ThinkingPart).collapsed = true
+        const tp = p as ThinkingPart
+        if (thinkId && tp.id && tp.id !== thinkId) continue
+        tp.isStreaming = false
+        tp.collapsed = true
         partId = `think-${messageId}-${i}`
         return
       }

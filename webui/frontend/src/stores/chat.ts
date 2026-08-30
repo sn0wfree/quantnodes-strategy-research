@@ -38,6 +38,10 @@ export interface ThinkingPart {
   collapsed?: boolean
   /** True while the reasoning block is still receiving thinking_delta events. */
   isStreaming?: boolean
+  /** Per-iteration id from the backend's thinking protocol (think_id).
+   * Routes deltas to the exact block and dedupes SSE replays — text
+   * parts have the same via text_id. */
+  id?: string
 }
 
 export interface FileEditPart {
@@ -245,6 +249,46 @@ interface ChatState {
 // (rapid session switching must not let an old response overwrite
 // the currently viewed session's messages).
 let loadMessagesSeq = 0
+
+// ── F6: SSE-synthetic vs DB-message twin dedup ──────────────────────
+// Live study/agent events are injected locally with synthetic ids
+// (sse:/agent:/skip:); the projector also materializes the same events
+// as DB messages. loadMessages replaces the map so twins can't
+// accumulate there, but loadMoreMessages APPENDS the older DB window —
+// without dedup the boundary page coexists with its synthetic twin.
+
+const SYNTHETIC_ID_PREFIXES = ['sse:', 'agent:', 'skip:']
+const TWINS_TIME_TOLERANCE_S = 2
+
+function syntheticSignature(m: Message): string | null {
+  const first = m.parts.find((p) => p.type === 'text') as TextPart | undefined
+  if (!first || !first.text) return null
+  return first.text.slice(0, 40)
+}
+
+function dedupeSyntheticTwins(
+  state: { messages: Map<string, Message> },
+  sessionId: string,
+  loaded: Message[],
+): void {
+  if (loaded.length === 0) return
+  const loadedSigs = loaded.map((m) => ({
+    at: m.created_at,
+    sig: syntheticSignature(m),
+  }))
+  for (const [id, m] of Array.from(state.messages)) {
+    if (m.session_id !== sessionId) continue
+    if (!SYNTHETIC_ID_PREFIXES.some((p) => id.startsWith(p))) continue
+    const sig = syntheticSignature(m)
+    if (sig === null) continue
+    const hasTwin = loadedSigs.some(
+      (l) =>
+        l.sig === sig &&
+        Math.abs(l.at - m.created_at) <= TWINS_TIME_TOLERANCE_S,
+    )
+    if (hasTwin) state.messages.delete(id)
+  }
+}
 
 export const useChatStore = create<ChatState>()(
   immer((set, get) => ({
@@ -505,6 +549,9 @@ export const useChatStore = create<ChatState>()(
         set((state) => {
           data.messages.forEach((m) => state.messages.set(m.id, m))
           state.hasMore.set(sessionId, !!data.has_more)
+          // Drop synthetic live messages that this older DB page now
+          // covers (same event injected twice would render twice).
+          dedupeSyntheticTwins(state, sessionId, data.messages)
         })
       } catch (err) {
         console.error('loadMoreMessages error:', err)
