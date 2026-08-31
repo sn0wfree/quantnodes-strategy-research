@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 vi.mock('../api/client', async () => {
   return {
@@ -171,6 +171,48 @@ vi.mock('lucide-react', async () => {
   return out
 })
 
+vi.mock('../../hooks/useSSE', () => ({ useSSE: () => {} }))
+vi.mock('../components/study/dashboard/widgets/StudyChat', () => ({
+  StudyChat: ({ studyId }: { studyId: string }) => (
+    <div data-testid="study-chat">CHAT:{studyId}</div>
+  ),
+}))
+vi.mock('../components/study/MetricsCompare', () => ({ MetricsCompare: () => <div /> }))
+vi.mock('../components/study/MetricsTrendChart', () => ({
+  MetricsTrendChart: () => <div />,
+}))
+vi.mock('../components/study/RoundHistory', () => ({
+  RoundHistory: ({
+    rounds, currentRound, studyId,
+  }: {
+    rounds: Array<{ round_num: number }>
+    currentRound?: number
+    studyId: string
+  }) => (
+    <div data-testid="round-history">
+      RH:{rounds.length}:{currentRound}:{studyId}
+    </div>
+  ),
+}))
+vi.mock('../components/study/EditObjectiveDialog', () => ({
+  EditObjectiveDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="edit-objective-dialog">EDIT_OPEN</div> : null,
+}))
+vi.mock('../components/study/ContinueDialog', () => ({
+  ContinueDialog: ({
+    open, onContinue,
+  }: {
+    open: boolean
+    onContinue: (mode: 'resume' | 'restart', fromRound?: number) => void
+  }) =>
+    open ? (
+      <button onClick={() => onContinue('resume')}>DIALOG_CONTINUE</button>
+    ) : null,
+}))
+vi.mock('../components/study/AgentApprovalDialog', () => ({
+  AgentApprovalDialog: () => <div />,
+}))
+
 import { api } from '../api/client'
 import { StudyDetailPage } from '../components/study/StudyDetailPage'
 
@@ -207,6 +249,9 @@ function summaryFixture(overrides: Record<string, unknown> = {}) {
     ],
     scoreboard: [
       { lever: 'momentum', precision_mean: 0.5, attempts: 2, accepted: 1, reverted: 0 },
+    ],
+    metric_targets: [
+      { name: 'calmar_ratio', op: '>=', value: 1.0 },
     ],
     goal_snapshot: {
       goal_id: 'g-1',
@@ -251,30 +296,35 @@ describe('StudyDetailPage', () => {
     } as never)
   })
 
-  it.skip('renders summary data: objective, status, rounds, scoreboard', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
+  it('renders summary KPIs: objective, status, rounds, best calmar', async () => {
     renderPage()
     expect(await screen.findByText(/mom_20d/)).toBeInTheDocument()
     expect(screen.getAllByText('找到 alpha 因子').length).toBeGreaterThan(0)
     expect(screen.getByText('运行中')).toBeInTheDocument()
-    expect(screen.getByText(/2\/5/)).toBeInTheDocument()
-    expect(screen.getByText('run_0002')).toBeInTheDocument()
-    expect(screen.getByText('momentum')).toBeInTheDocument()
-    expect(mockSummary).toHaveBeenCalledWith('st-1')
+    expect(screen.getByText('2/5')).toBeInTheDocument()
+    // best calmar across recent_rounds = 0.8
+    expect(screen.getAllByText('0.80').length).toBeGreaterThan(0)
+    expect(screen.getByText('CHAT:st-1')).toBeInTheDocument()
+    // conditional ETag polling passes the stored etag on first load = undefined
+    expect(mockSummary).toHaveBeenCalledWith('st-1', undefined)
   })
 
-  it.skip('shows the pending directive with its content', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
+  it('renders goal progress and evidence count from goal_snapshot', async () => {
     renderPage()
-    expect(await screen.findByText(/改成动量因子/)).toBeInTheDocument()
-    expect(screen.getByText('待消费')).toBeInTheDocument()
-    expect(mockDirectives).toHaveBeenCalledWith('st-1')
+    expect(await screen.findByText('40%')).toBeInTheDocument()
+    expect(screen.getByText('目标进度 · 2 证据')).toBeInTheDocument()
+    // acceptance-line chips from metric_targets
+    expect(screen.getByText('验收线:')).toBeInTheDocument()
+    expect(screen.getByText(/calmar_ratio >= 1/)).toBeInTheDocument()
   })
 
-  it.skip('renders pause + cancel for a running study, not resume', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
+  it('renders pause + cancel for a running study per availableActions', async () => {
     renderPage()
     await screen.findByText(/mom_20d/)
     expect(screen.getByRole('button', { name: /暂停/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /取消/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /恢复/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /中止/ })).toBeInTheDocument()
+    // actions list has no continue → no 继续 button
+    expect(screen.queryByRole('button', { name: /继续/ })).not.toBeInTheDocument()
   })
 
   it('calls the pause API and surfaces errors', async () => {
@@ -287,20 +337,21 @@ describe('StudyDetailPage', () => {
     expect(await screen.findByText(/pause failed/)).toBeInTheDocument()
   })
 
-  it.skip('shows resume button for a paused study', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
+  it('shows the continue button for a paused study', async () => {
     mockSummary.mockResolvedValue(
       { data: summaryFixture({ execution_status: 'paused' }), etag: null } as never
     )
     vi.mocked(api.study.availableActions).mockResolvedValue({
       status: 'ok', study_id: 'st-1', execution_status: 'paused',
       actions: [
-        { name: 'resume', label: '恢复', destructive: false },
+        { name: 'continue', label: '继续', destructive: false },
         { name: 'cancel', label: '取消', destructive: true },
       ],
     } as never)
     renderPage()
     await screen.findByText(/mom_20d/)
-    expect(screen.getByRole('button', { name: /恢复/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /继续/ })).toBeInTheDocument()
+    expect(screen.getByText('已暂停')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /暂停/ })).not.toBeInTheDocument()
   })
 
@@ -326,105 +377,81 @@ describe('StudyDetailPage interactions', () => {
     } as never)
   })
 
-  it.skip('calls resume for a paused study', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
-    mockSummary.mockResolvedValue(
-      { data: summaryFixture({ execution_status: 'paused' }), etag: null } as never
-    )
+  it('continue flow: button opens dialog, dialog dispatches continue/append', async () => {
     vi.mocked(api.study.availableActions).mockResolvedValue({
       status: 'ok', study_id: 'st-1', execution_status: 'paused',
       actions: [
-        { name: 'resume', label: '恢复', destructive: false },
+        { name: 'continue', label: '继续', destructive: false },
+      ],
+    } as never)
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /继续/ }))
+    // ContinueDialog stub exposes the callback as a button
+    fireEvent.click(screen.getByRole('button', { name: 'DIALOG_CONTINUE' }))
+    await waitFor(() =>
+      expect(api.study.dispatchAction).toHaveBeenCalledWith('st-1', 'continue', {
+        mode: 'append',
+      })
+    )
+  })
+
+  it('archives a study after window.confirm is accepted', async () => {
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'complete',
+      actions: [{ name: 'archive', label: '归档', destructive: false }],
+    } as never)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /归档/ }))
+    await waitFor(() =>
+      expect(api.study.dispatchAction).toHaveBeenCalledWith('st-1', 'archive', undefined)
+    )
+    confirmSpy.mockRestore()
+  })
+
+  it('cancel is a no-op when window.confirm is declined', async () => {
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'running',
+      actions: [
+        { name: 'pause', label: '暂停', destructive: false },
         { name: 'cancel', label: '取消', destructive: true },
       ],
     } as never)
-    vi.mocked(api.study.dispatchAction).mockResolvedValue({
-      status: 'ok', study_id: 'st-1', action: 'resumed',
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /中止/ }))
+    expect(api.study.dispatchAction).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
+
+  it('renders the collapsible round history with round count', async () => {
+    renderPage()
+    const toggle = await screen.findByRole('button', { name: /轮次历史/ })
+    expect(toggle).toHaveTextContent('2 轮')
+    // collapsed by default → RoundHistory not mounted yet
+    expect(screen.queryByTestId('round-history')).not.toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(screen.getByTestId('round-history')).toHaveTextContent(
+      'RH:2:2:st-1'
+    )
+  })
+
+  it('opens the edit-objective dialog only when the action is available', async () => {
+    vi.mocked(api.study.availableActions).mockResolvedValue({
+      status: 'ok', study_id: 'st-1', execution_status: 'running',
+      actions: [{ name: 'replace_objective', label: '修改目标', destructive: false }],
     } as never)
     renderPage()
-    fireEvent.click(await screen.findByRole('button', { name: /恢复/ }))
-    await waitFor(() =>
-      expect(api.study.dispatchAction).toHaveBeenCalledWith('st-1', 'resume')
-    )
+    fireEvent.click(await screen.findByRole('button', { name: /修改目标/ }))
+    expect(screen.getByTestId('edit-objective-dialog')).toBeInTheDocument()
   })
 
-  it.skip('submits a directive and refreshes the list', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
-    vi.mocked(api.study.directive).mockResolvedValue({
-      status: 'ok', study_id: 'st-1', directive_id: 'd-new',
-      created_at: '2026-08-01T12:00:00',
-    } as never)
-    mockDirectives
-      .mockResolvedValueOnce({
-        status: 'ok', study_id: 'st-1', directives: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'ok', study_id: 'st-1',
-        directives: [
-          {
-            directive_id: 'd-new', content: '试试反转因子',
-            issued_by: 'webui', created_at: '2026-08-01T12:00:00',
-            consumed_at: null,
-          },
-        ],
-      } as never)
-
+  it('renders the StudyChat bound to the study id and actions header', async () => {
     renderPage()
-    const input = await screen.findByPlaceholderText(/改成动量因子/)
-    fireEvent.change(input, { target: { value: '  试试反转因子  ' } })
-    fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
-
-    await waitFor(() =>
-      expect(api.study.directive).toHaveBeenCalledWith('st-1', '试试反转因子', 'webui')
-    )
-    // Trimmed content + refreshed list appear; input is cleared.
-    expect(await screen.findByText('试试反转因子')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/改成动量因子/)).toHaveValue('')
-  })
-
-  it.skip('surfaces directive submission errors', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
-    vi.mocked(api.study.directive).mockRejectedValueOnce(
-      new Error('directive rejected') as never
-    )
-    renderPage()
-    const input = await screen.findByPlaceholderText(/改成动量因子/)
-    fireEvent.change(input, { target: { value: 'x' } })
-    fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
-    expect(await screen.findByText(/directive rejected/)).toBeInTheDocument()
-  })
-
-  it.skip('renders the task-info card in the sidebar', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
-    renderPage()
-    expect(await screen.findByText('任务信息')).toBeInTheDocument()
-    expect(screen.getByText('/tmp/ws')).toBeInTheDocument()
-    expect(screen.getByText('2026-08-01 10:00')).toBeInTheDocument()
-  })
-
-  it.skip('does not submit an empty directive', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
-    renderPage()
-    await screen.findByText(/mom_20d/)
-    fireEvent.click(screen.getByRole('button', { name: /提交指令/ }))
-    expect(api.study.directive).not.toHaveBeenCalled()
-  })
-
-  it.skip('navigates to the run detail page when opening a round', async () => {  // TODO(pr-d2): UI rewrite drift — restore after re-deriving contracts
-    function RunStub() {
-      const { strategyName, runName } = useParams<{
-        strategyName: string
-        runName: string
-      }>()
-      return <div>RUN:{strategyName}:{runName}</div>
-    }
-    render(
-      <MemoryRouter initialEntries={['/study/st-1']}>
-        <Routes>
-          <Route path="/study/:studyId" element={<StudyDetailPage />} />
-          <Route path="/run/:strategyName/:runName" element={<RunStub />} />
-        </Routes>
-      </MemoryRouter>
-    )
-    const linkBtn = await waitFor(() =>
-      screen.getAllByTitle('查看回测产物')[0]
-    )
-    fireEvent.click(linkBtn)
-    expect(await screen.findByText('RUN:mom_20d:run_0002')).toBeInTheDocument()
+    expect(await screen.findByText('CHAT:st-1')).toBeInTheDocument()
+    // subtitle shows strategy + created date
+    expect(screen.getByText(/策略 mom_20d/)).toBeInTheDocument()
+    // back-navigation button exists
+    expect(screen.getByRole('button', { name: /返回/ })).toBeInTheDocument()
   })
 })
