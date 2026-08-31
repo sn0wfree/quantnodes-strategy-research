@@ -17,7 +17,6 @@
 | ③ | legacy Temporal 五件套（1837 行死代码） | 无 | 无 | 无（import 时） | 5 | 0 |
 | ④ | summary ETag 下发缺失（作者自承认） | summary 轮询开销大 | 无 | 全量返回 | ~15 | 3 |
 | ⑤ | plan-dag 同步 LLM 阻塞事件循环 | 全站冻结 N 秒 | 无 | N 秒事件循环停摆 | **2** | 1 |
-
 | ⑥ | test_workflow_segment_loop 并行 flaky | CI 偶挂（手动重跑过） | 无 | CI 耗时重复跑 | ~5 | 0 |
 
 **建议优先级**:
@@ -306,49 +305,6 @@ plan = await asyncio.to_thread(planner.plan, objective, constraints)
 
 ---
 
-## ⑥ test_workflow_segment_loop 并行 flaky
-
-### 是什么
-`tests/test_workflow_segment_loop.py`（295 行，20 个测试）在 xdist `-n 8` 并行跑 53 文件时**非确定性失败**：每次 1-3 个失败且用例每次不同；单独跑 `pytest test_workflow_segment_loop.py` **20/20 全过**。这是典型的 xdist worker 资源竞态问题。
-
-### 在哪里
-- `tests/test_workflow_segment_loop.py:1-10`：import `load_definition`（`strategy_research.core.workflow.builtin`）+ `WorkflowRunner`（`workflow.executor`）+ `WorkflowStore`（`workflow.store`）
-- `tests/test_workflow_segment_loop.py:40-42` `make_runner`：调 `load_definition` 读取 `templates/workflows/*.json`（`_BUILTIN_DIR = Path(__file__).resolve().parent.parent.parent / "templates" / "workflows"`）
-- 测试本身每个用例独立 `tmp_path`（隔离 DB），`FakeLoop`/`make_runner` 无全局 mutation
-
-### 根因分析（待确认）
-代码审计：`WorkflowStore`/`WorkflowRunner`/`FakeLoop`/`load_definition` 均无 singleton/global/mutation。可能根因：
-1. xdist worker 进程内多文件并发 import 同一模块路径解析 + JSON 读取竞态
-2. worker 间共享模块级副作用（`from __future__ import annotations` + 类型标注延迟解析路径）
-3. SQLite 文件系统锁在 tmp_path 不同目录但同 inode 族（不太可能）
-4. 或与同 worker 内其他文件的 import chain 冲突（需 xdist resource profiling 确认）
-
-### 影响
-- **用户感知**：无（仅 CI 偶发）
-- **数据正确性**：无
-- **性能**：CI 浪费 1-2 分钟重跑
-- **可维护性**：CI 偶挂降低开发者信心；不稳定的测试比缺失的测试更差
-
-### 建议修法
-加 `@pytest.mark.xdist_group("workflow")` 标记，`pyproject.toml`/`pytest.ini` 配置 `dist = loadgroup` → workflow 测试独占一个 worker，与其他文件资源隔离。
-
-```python
-# tests/test_workflow_segment_loop.py 顶部
-import pytest
-pytestmark = [pytest.mark.xdist_group("workflow")]
-```
-
-或在 `pyproject.toml` 加：
-```toml
-[tool.pytest.ini_options]
-dist = "loadgroup"
-```
-
-### 工作量
-**~5 行**（1 行标记 + 4 行配置），**0 个新测试**。
-
----
-
 ## 修复决策记录（待用户后续填写）
 
 | 决策项 | 选项 | 选定 |
@@ -358,7 +314,6 @@ dist = "loadgroup"
 | ③ legacy 五件套 | 方案 A 直接删 / 方案 B 保守清理 / 保留 | _ |
 | ④ summary ETag | 修（15 行）/ 保留 | _ |
 | ⑤ plan-dag 异步化 | 2 行 to_thread / 重写 async / 保留 | _ |
-| ⑥ workflow 测试 flaky | 加 xdist_group 独占 worker / 调查根因 / 保留 | _ |
 
 ## 关联文档
 - `docs/legacy-sessiondb-tech-debt.md` — 同类技术债文档先例

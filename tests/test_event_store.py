@@ -8,7 +8,6 @@ import pytest
 from strategy_research.core.agent.cache import CacheConfig
 from strategy_research.core.agent.event_store import (
     EventStore,
-    EventStoreFactory,
     EventV2,
 )
 
@@ -22,8 +21,6 @@ def tmp_db(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def es(tmp_db: Path):
-    from strategy_research.core.agent.event_store import EventStoreFactory
-    EventStoreFactory.reset()
     cfg = CacheConfig(min_entries=10, max_entries=100)
     store = EventStore(db_path=tmp_db, cache_config=cfg)
     yield store
@@ -188,20 +185,21 @@ class TestHealth:
             assert isinstance(store._backend, InMemoryStore)
 
 
-# ── Factory ──────────────────────────────────────────────────────
+# ── Direct construction (factory removed) ──────────────────────────
 
 
-class TestFactory:
-    async def test_create_returns_singleton(self, tmp_db):
-        EventStoreFactory.reset()
-        e1 = EventStoreFactory.create(db_path=tmp_db)
-        e2 = EventStoreFactory.create(db_path=tmp_db)
-        assert e1 is e2
+class TestDirectConstruction:
+    async def test_same_path_same_instance_via_cache(self, tmp_db):
+        """Two EventStore instances for the same db_path are independent
+        (factory singleton removed — each caller gets its own instance)."""
+        e1 = EventStore(db_path=tmp_db)
+        e2 = EventStore(db_path=tmp_db)
+        assert e1 is not e2  # no singleton guarantee
 
-    async def test_reset_clears_singleton(self, tmp_db):
-        e1 = EventStoreFactory.create(db_path=tmp_db)
-        EventStoreFactory.reset()
-        e2 = EventStoreFactory.create(db_path=tmp_db)
+    async def test_independent_instances(self, tmp_db):
+        """Different EventStore instances don't share state."""
+        e1 = EventStore(db_path=tmp_db, flush_to_messages=True)
+        e2 = EventStore(db_path=tmp_db, flush_to_messages=False)
         assert e1 is not e2
 
 

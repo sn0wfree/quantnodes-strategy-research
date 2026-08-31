@@ -638,9 +638,6 @@ class _noop_cm:
         return False
 
 
-# ── EventStoreFactory ──────────────────────────────────────────────
-
-
 # Channel naming: round sessions are ``study:{study_id}:round:{n}``.
 # The StudyDetailPage subscribes to the bare study channel via
 # /api/chat/events — round-scoped agent events must be fanned out to
@@ -656,58 +653,12 @@ def parent_study_channel(session_id: str) -> str | None:
 
 
 class EventStoreFactory:
-    """Process-wide factory for EventStore — one instance per db_path.
-
-    Thread-safe, and keyed by the RESOLVED db path: a caller passing an
-    explicit workspace-local db_path always gets a store bound to that
-    file. The previous single-slot singleton silently returned whichever
-    store was created first, so a later explicit db_path was ignored —
-    langgraph's "the singleton is bound to the right file" guarantee
-    did not actually hold (and concurrent first creation raced).
-
-    Non-path options (cache_config / sse_pusher / flush_to_messages)
-    remain first-caller-wins per path: they configure the shared
-    instance and later callers cannot re-configure it.
-    """
-
-    _instances: dict[str | None, EventStore] = {}
-    _lock = threading.Lock()
-
-    @classmethod
-    def create(
-        cls,
-        db_path: Path | None = None,
-        cache_config: CacheConfig | None = None,
-        sse_pusher: Callable[[str, EventV2], None] | None = None,
-        flush_to_messages: bool = False,
-    ) -> EventStore:
-        key = str(Path(db_path).resolve()) if db_path is not None else None
-        with cls._lock:
-            store = cls._instances.get(key)
-            if store is None:
-                store = EventStore(
-                    db_path=db_path,
-                    cache_config=cache_config,
-                    sse_pusher=sse_pusher,
-                    flush_to_messages=flush_to_messages,
-                )
-                cls._instances[key] = store
-            return store
-
-    @classmethod
-    def reset(cls) -> None:
-        with cls._lock:
-            cls._instances.clear()
-
-
-def get_default_event_store() -> EventStore:
-    """Module-level accessor."""
-    return EventStoreFactory.create()
+    """DEPRECATED: use EventStore directly. Kept for backward compat in tests only."""
+    pass
 
 
 __all__ = [
     "EventStore",
-    "EventStoreFactory",
     "EventV2",
-    "get_default_event_store",
+    "parent_study_channel",
 ]

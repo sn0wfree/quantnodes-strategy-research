@@ -11,13 +11,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from strategy_research.core.agent.event_store import EventStore, EventStoreFactory
+from strategy_research.core.agent.event_store import EventStore
 from strategy_research.core.agent.cache import CacheConfig
 
 
 @pytest.fixture
 def store(tmp_path):
-    EventStoreFactory.reset()
+    # EventStoreFactory removed — direct construction used instead
     s = EventStore(
         db_path=tmp_path / "bridge_test.db",
         cache_config=CacheConfig(min_entries=10, max_entries=100),

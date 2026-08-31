@@ -29,7 +29,7 @@ from .engine_common import (
     get_study_session_db_path,
     ensure_study_session,
 )
-from ..agent.event_store import EventStoreFactory
+from ..agent.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
@@ -319,12 +319,11 @@ def build_langgraph(
     reg = registry or get_default_registry()
     node_map = {n.id: n for n in graph.nodes}
 
-    # Create EventStore and study session for this round.
-    # Explicit db_path (workspace-local) so the singleton can never bind
-    # to the wrong file via cwd. flush_to_messages=True materializes
-    # messages + message_parts live so the session API serves the
-    # round's agent messages without a manual projector flush.
-    event_store = EventStoreFactory.create(
+    # Construct directly (consistent with container / dependencies).
+    # flush_to_messages=True materializes messages + message_parts live
+    # so the session API serves the round's agent messages without a
+    # manual projector flush.
+    event_store = EventStore(
         db_path=get_study_session_db_path(workspace),
         flush_to_messages=True,
     )

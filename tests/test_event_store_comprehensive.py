@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from strategy_research.core.agent.event_store import EventStore, EventStoreFactory
+from strategy_research.core.agent.event_store import EventStore
 from strategy_research.core.agent.cache import CacheConfig
 from strategy_research.core.events.event_v2 import EventV2
 
@@ -21,7 +21,7 @@ from strategy_research.core.events.event_v2 import EventV2
 @pytest.fixture
 def store(tmp_path):
     """Create a fresh EventStore for each test."""
-    EventStoreFactory.reset()
+    # EventStoreFactory removed — direct construction used instead
     s = EventStore(
         db_path=tmp_path / "test_events.db",
         cache_config=CacheConfig(min_entries=10, max_entries=100),

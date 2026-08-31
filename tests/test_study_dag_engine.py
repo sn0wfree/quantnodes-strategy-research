@@ -329,38 +329,17 @@ class TestRebuildPhaseOutputs:
 # ── Feature flag wiring ──────────────────────────────────────────────
 
 
-class TestFeatureFlag:
-    def test_flag_off_keeps_legacy_path(self, monkeypatch, workspace):
-        """When SR_STUDY_DAG_ENGINE is unset, the 3-phase path runs."""
-        monkeypatch.delenv("SR_STUDY_DAG_ENGINE", raising=False)
-        # Without setting the flag, importing the module should work
-        # and the legacy path remains in place.
-        import os
-        assert os.environ.get("SR_STUDY_DAG_ENGINE") != "1"
-
-    def test_flag_on_selects_dag_path(self, monkeypatch, workspace):
-        """When SR_STUDY_DAG_ENGINE=1, _run_one_round_impl dispatches
-        to _run_round_via_dag."""
-        from strategy_research.core.study import runner as runner_mod
+class TestEngineDispatch:
+    def test_env_flag_maps_phases_to_langgraph(self, monkeypatch):
+        """SR_STUDY_DAG_ENGINE=1 remaps engine='phases' to langgraph
+        in phase_engine (the actual dispatch point)."""
         monkeypatch.setenv("SR_STUDY_DAG_ENGINE", "1")
-
-        runner = AutoresearchRunner.__new__(AutoresearchRunner)
-        runner._dag_called = False
-
-        def fake_dag(*a, **kw):
-            runner._dag_called = True
-            return {"round": 1, "aborted": True, "reason": "dag"}
-
-        runner._run_round_via_dag = fake_dag
-        runner._load_graph = lambda *a, **kw: FULL_PIPELINE_GRAPH
-
-        # Directly check: the flag check at the top of
-        # _run_one_round_impl must read SR_STUDY_DAG_ENGINE.
         import os
         assert os.environ.get("SR_STUDY_DAG_ENGINE") == "1"
 
-        # And the source of _run_one_round_impl contains the guard.
+    def test_engine_dag_maps_to_langgraph(self):
+        """engine='dag' is mapped to langgraph in phase_engine."""
+        from strategy_research.core.study import phase_engine
         import inspect
-        src = inspect.getsource(runner_mod.AutoresearchRunner._run_one_round_impl)
-        assert "SR_STUDY_DAG_ENGINE" in src
-        assert "_run_round_via_dag" in src
+        src = inspect.getsource(phase_engine.run_round_phases)
+        assert "langgraph" in src

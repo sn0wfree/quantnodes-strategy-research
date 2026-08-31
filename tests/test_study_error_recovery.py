@@ -142,7 +142,7 @@ class TestStateTransitions:
     def test_paused_to_running(self):
         """Study should transition from PAUSED to RUNNING."""
         from strategy_research.core.study.models import StudyStatus, StudyAction, ACTION_MATRIX
-        assert StudyAction.RESUME in ACTION_MATRIX[StudyStatus.PAUSED]
+        assert StudyAction.CONTINUE in ACTION_MATRIX[StudyStatus.PAUSED]
 
 
 # ── Concurrency safety ──────────────────────────────────────────

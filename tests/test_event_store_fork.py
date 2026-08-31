@@ -21,24 +21,12 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.fixture
 def store(tmp_path):
-    EventStoreFactory_reset()
     s = EventStore(
         db_path=tmp_path / "events.db",
         cache_config=CacheConfig(max_entries=8),
     )
     yield s
     s._cache.clear()
-
-
-def EventStoreFactory_reset():
-    """Force a fresh process-wide EventStore on next construction.
-
-    In some test runs the EventStore singleton is reused across tests
-    which would leak the previous backend. We reset between forks.
-    """
-    from strategy_research.core.agent.event_store import EventStoreFactory
-
-    EventStoreFactory.reset()
 
 
 def _emit(s, sid, etype, data=None):
