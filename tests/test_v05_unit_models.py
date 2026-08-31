@@ -151,24 +151,6 @@ class TestGoalEvidenceCollector:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.skip(reason="P8 cleanup: _AgentConfigExecutor removed from goal.workflow")
-class TestAgentConfigExecutor:
-    def test_name_returns_agent_id(self):
-        assert _AgentConfigExecutor("researcher").name == "researcher"
-
-    def test_name_with_tools(self):
-        assert _AgentConfigExecutor("a", ["t1"]).name == "a"
-
-    def test_run_returns_stub_dict(self):
-        result = _AgentConfigExecutor("researcher").run("prompt")
-        assert isinstance(result, dict)
-        assert "answer" in result
-        assert result["agent_id"] == "researcher"
-
-    def test_run_with_context(self):
-        result = _AgentConfigExecutor("a").run("p", context={"k": "v"})
-        assert "[stub]" in result["answer"]
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # GoalWorkflowConfig.to_swarm_preset()

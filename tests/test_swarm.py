@@ -112,25 +112,6 @@ class TestSwarmRuntime:
         assert result.success
         assert len(result.agent_results) == 3
 
-    @pytest.mark.skip(reason="WorkflowController no longer used by _execute_agent (P4)")
-    def test_execute_with_failure(self, tmp_path):
-        preset = SwarmPreset(
-            name="failing",
-            agents=[
-                AgentCall(agent_name="a1", prompt=""),
-            ],
-            dag={"a1": []},
-        )
-
-        mock_controller = MagicMock()
-        mock_controller.execute_agent.side_effect = RuntimeError("agent failed")
-
-        runtime = SwarmRuntime(controller=mock_controller)
-        result = runtime.execute(preset, tmp_path, "test task")
-
-        assert not result.success
-        assert result.agent_results["a1"].status == AgentStatus.ERROR
-
     def test_cancel(self, tmp_path):
         runtime = SwarmRuntime()
         runtime._active_runs["test_run"] = True

@@ -221,3 +221,9 @@ def _close_session_services():
                 except Exception:
                     pass
             conns.clear()
+
+
+# Archived dead tests (tests/attic/) must never be collected — they
+# reference modules removed in the P4/P8/Phase-A cleanups. See
+# tests/attic/README.md.
+collect_ignore_glob = ["attic/*"]
