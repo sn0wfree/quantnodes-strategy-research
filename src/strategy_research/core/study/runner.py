@@ -553,6 +553,19 @@ class AutoresearchRunner:
                         "reason": "hitl_repause",
                     })
                     continue
+                if result.get("error") == "no_checkpointer":
+                    # Resume failed because no checkpointer was available.
+                    # Expire the interrupt and let the user know.
+                    self._expire_interrupt(sid, round_num)
+                    if self.control.cancelled:
+                        continue
+                    self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+                    self._emit(session, "study_round_rejected", {
+                        "study_id": sid, "round": round_num,
+                        "reason": "no_checkpointer",
+                        "detail": "Resume unavailable: checkpoint store not configured for this engine.",
+                    })
+                    continue
                 if result.get("aborted"):
                     self._account_round_budget(result)
                     continue

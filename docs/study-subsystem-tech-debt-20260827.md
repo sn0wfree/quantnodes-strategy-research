@@ -15,8 +15,8 @@
 | ① | v2 身份重构后 chat 互斥代码死等 | 无 | 无 | 无 | ~30 | 0 |
 | ② | EventStoreFactory 粘路径 + 双库分叉 | 多 workspace 丢 SSE | sessions 行两库分裂 | 隐性 | ~35 | 2-3 |
 | ③ | legacy Temporal 五件套（1837 行死代码） | 无 | 无 | 无（import 时） | 5 | 0 |
-| ④ | summary ETag 下发缺失（作者自承认） | summary 轮询开销大 | 无 | 全量返回 | ~15 | 3 |
-| ⑤ | plan-dag 同步 LLM 阻塞事件循环 | 全站冻结 N 秒 | 无 | N 秒事件循环停摆 | **2** | 1 |
+| ~~④~~ | ~~summary ETag 下发缺失~~ | ~~summary 轮询开销大~~ | ~~无~~ | ~~全量返回~~ | ~~已修~~ | ~~已修~~ |
+| ~~⑤~~ | ~~plan-dag 同步 LLM 阻塞事件循环~~ | ~~全站冻结 N 秒~~ | ~~无~~ | ~~N 秒事件循环停摆~~ | ~~已修~~ | ~~已修~~ |
 | ⑥ | test_workflow_segment_loop 并行 flaky | CI 偶挂（手动重跑过） | 无 | CI 耗时重复跑 | ~5 | 0 |
 
 **建议优先级**:
@@ -312,8 +312,8 @@ plan = await asyncio.to_thread(planner.plan, objective, constraints)
 | ① 是否清理 v2 互斥死代码 | 删除 / 保留 v1 兼容注释 | _ |
 | ② 双库方向 | 全部统一到 server 库 / 保留双库双写 + 不一致保护 / 先调研哪边"错" | _ |
 | ③ legacy 五件套 | 方案 A 直接删 / 方案 B 保守清理 / 保留 | _ |
-| ④ summary ETag | 修（15 行）/ 保留 | _ |
-| ⑤ plan-dag 异步化 | 2 行 to_thread / 重写 async / 保留 | _ |
+| ④ summary ETag | 修（15 行）/ 保留 | ✅ 已修（commit d43169a） |
+| ⑤ plan-dag 异步化 | 2 行 to_thread / 重写 async / 保留 | ✅ 已修（asyncio.to_thread） |
 
 ## 关联文档
 - `docs/legacy-sessiondb-tech-debt.md` — 同类技术债文档先例

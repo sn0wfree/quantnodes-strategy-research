@@ -343,3 +343,14 @@ class TestEngineDispatch:
         import inspect
         src = inspect.getsource(phase_engine.run_round_phases)
         assert "langgraph" in src
+
+
+class TestPlanDagAsync:
+    def test_plan_dag_uses_to_thread(self):
+        """study_plan_dag must use asyncio.to_thread to avoid blocking
+        the event loop during the synchronous LLM call."""
+        import inspect
+        from strategy_research.api.routers.study import study_plan_dag
+        src = inspect.getsource(study_plan_dag)
+        assert "asyncio.to_thread" in src
+        assert "planner.plan" in src

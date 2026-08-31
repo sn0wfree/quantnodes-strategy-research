@@ -688,12 +688,14 @@ def resume_round_langgraph(
     checkpointer = _get_checkpointer(sid, study_root, conn=checkpoint_conn)
 
     if checkpointer is None:
-        logger.warning("No checkpointer available; falling back to fresh run")
-        return run_round_langgraph(
-            runner, path, strategy, current_state, run_dir, graph,
-            session=session, sid=sid, round_num=round_num,
-            directive_text=directive_text, profile=profile,
-        )
+        logger.warning("No checkpointer available; cannot resume round %d — "
+                        "returning error to runner", round_num)
+        return {
+            "round": round_num,
+            "run_name": f"round_{round_num}",
+            "error": "no_checkpointer",
+            "study_id": sid,
+        }
 
     # Build and compile the graph — profile must match the original run
     # so the checkpointed gate node exists in the rebuilt topology.

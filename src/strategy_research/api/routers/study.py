@@ -11,6 +11,7 @@ out of the box.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -1769,7 +1770,7 @@ async def study_plan_dag(body: dict):
         force_agents=list(body.get("force_agents") or []),
     )
     planner = DAGPlanner()
-    plan = planner.plan(objective, constraints)
+    plan = await asyncio.to_thread(planner.plan, objective, constraints)
     return {
         "status": "ok",
         "selected_agents": plan.selected_agents,

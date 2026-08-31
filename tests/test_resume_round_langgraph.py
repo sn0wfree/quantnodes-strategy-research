@@ -260,19 +260,16 @@ def test_resume_calls_compiler_with_correct_thread_id(mock_build, env):
 
 
 @patch("strategy_research.core.study.langgraph_engine.build_langgraph")
-def test_resume_falls_back_to_fresh_run_when_no_checkpointer(mock_build, env):
+def test_resume_returns_error_when_no_checkpointer(mock_build, env):
     """When _get_checkpointer returns None, resume_round_langgraph
-    falls back to calling run_round_langgraph for a fresh run."""
+    returns an error signal instead of falling back to a fresh run."""
     runner, compiled, sid, run_dir = _make_resume_env(env)
     mock_build.return_value = compiled
 
     with patch(
         "strategy_research.core.study.langgraph_engine._get_checkpointer",
         return_value=None,
-    ), patch(
-        "strategy_research.core.study.langgraph_engine.run_round_langgraph",
-    ) as mock_run_fresh:
-        mock_run_fresh.return_value = {"verdict": "keep", "agent_outputs": {}}
+    ):
         result = resume_round_langgraph(
             runner=runner, path=env, strategy="demo",
             current_state={}, run_dir=run_dir,
@@ -280,6 +277,7 @@ def test_resume_falls_back_to_fresh_run_when_no_checkpointer(mock_build, env):
             round_num=1, directive_text=None,
         )
 
-    # Must have fallen back to run_round_langgraph
-    mock_run_fresh.assert_called_once()
-    assert result["verdict"] == "keep"
+    # Must NOT have called build_langgraph (no graph built without checkpointer)
+    mock_build.assert_not_called()
+    assert result["error"] == "no_checkpointer"
+    assert result["round"] == 1
