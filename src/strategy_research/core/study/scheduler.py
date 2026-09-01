@@ -66,10 +66,9 @@ class StudyScheduler:
     """Per-session serial scheduler for study executors.
 
     Holds one asyncio task per study, plus one consumer per session that
-    drains the session's study queue. Markup on SessionService:
-    ``is_session_processing`` is consulted before launching an executor;
-    when None (chat idle) the scheduler claims the slot via
-    ``mark_session_processing`` so concurrent chat attempts block.
+    drains the session's study queue. Note: chat/study mutex was removed
+    in v2 (single-identity ``session_id == study_id``); see
+    ``_archived/chat_mutex_legacy.py`` for the removed v1 code.
     """
 
     def __init__(
@@ -801,22 +800,6 @@ class StudyScheduler:
             _dlog("sched", "_run_one_study: drop terminal %s (%s)",
                   study_id, study.execution_status.value)
             return
-        # Cooperative mutex with chat: if chat is mid-loop, wait for it.
-        if self.session_service is not None:
-            logger.info(
-                "study waiting-for-chat session=%s processing=%s",
-                study.session_id,
-                self.session_service.is_session_processing(study.session_id),
-            )
-        while self.session_service is not None and \
-                self.session_service.is_session_processing(study.session_id):
-            await asyncio.sleep(0.25)
-            # recheck in case the chat queue is paused — continue waiting
-        # Claim the slot for the study.
-        if self.session_service is not None:
-            self.session_service.mark_session_processing(
-                study.session_id, processing=True,
-            )
 
         control = ControlToken()
         self._control_tokens[study_id] = control
@@ -848,10 +831,6 @@ class StudyScheduler:
             self._active_executors.pop(study_id, None)
             self._control_tokens.pop(study_id, None)
             self._active_tasks.pop(study_id, None)
-            if self.session_service is not None:
-                self.session_service.mark_session_processing(
-                    study.session_id, processing=False,
-                )
 
     # ── watchdog: task health + heartbeat staleness ────────────────
 

@@ -12,7 +12,7 @@
 
 | # | 债 | 用户感知 | 数据 | 性能 | 修代码量 | 新测试 |
 |---|----|---------|-----|------|--------|--------|
-| ① | v2 身份重构后 chat 互斥代码死等 | 无 | 无 | 无 | ~30 | 0 |
+| ~~①~~ | ~~v2 身份重构后 chat 互斥代码死等~~ | ~~无~~ | ~~无~~ | ~~无~~ | ~~已归档~~ | ~~已归档~~ |
 | ~~②~~ | ~~EventStoreFactory 粘路径 + 双库分叉~~ | ~~多 workspace 丢 SSE~~ | ~~sessions 行两库分裂~~ | ~~隐性~~ | ~~已修~~ | ~~已修~~ |
 | ~~③~~ | ~~legacy Temporal 五件套（1837 行死代码）~~ | ~~无~~ | ~~无~~ | ~~无（import 时）~~ | ~~已归档~~ | ~~已归档~~ |
 | ~~④~~ | ~~summary ETag 下发缺失~~ | ~~summary 轮询开销大~~ | ~~无~~ | ~~全量返回~~ | ~~已修~~ | ~~已修~~ |
@@ -311,7 +311,7 @@ plan = await asyncio.to_thread(planner.plan, objective, constraints)
 
 | 决策项 | 选项 | 选定 |
 |--------|------|------|
-| ① 是否清理 v2 互斥死代码 | 删除 / 保留 v1 兼容注释 | _ |
+| ① 是否清理 v2 互斥死代码 | 删除 / 保留 v1 兼容注释 | ✅ 已归档（2026-09，scheduler.py:_run_one_study_locked 内 ~16 行 + test_same_study_key_blocks_until_released skip，service.py:651-690 方法保留给 goal workflow） |
 | ② 双库方向 | 全部统一到 server 库 / 保留双库双写 + 不一致保护 / 先调研哪边"错" | ✅ 已修（commit dee6d32，统一到直接 EventStore 构造） |
 | ③ legacy 五件套 | 方案 A 直接删 / 方案 B 保守清理 / 保留 | ✅ 已归档（2026-09，git mv 到 _archived/，3246 行） |
 | ④ summary ETag | 修（15 行）/ 保留 | ✅ 已修（commit d43169a） |

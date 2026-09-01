@@ -4,9 +4,8 @@ Exposes the study task system: create a study (which creates a goal
 ledger row + queues the autoresearch executor), inspect status, and
 pause / resume / cancel. See ``docs/study-longhorizon-plan.md``.
 
-The scheduler is lazily wired to ``SessionService`` so the chat/study
-mutex (``is_session_processing`` / ``mark_session_processing``) works
-out of the box.
+The scheduler is lazily wired to ``SessionService``; chat/study are
+decoupled by v2 single-identity (``session_id == study_id``).
 """
 
 from __future__ import annotations

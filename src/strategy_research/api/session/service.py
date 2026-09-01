@@ -651,10 +651,11 @@ class SessionService:
     def is_session_processing(self, session_id: str) -> bool:
         """Return True while a chat attempt is in flight for the session.
 
-        Phase 1 study scheduler uses this to avoid running a study in the
-        same session an AgentLoop is already driving (they share the
-        session's LLM/agent slot). See docs/study-longhorizon-plan.md
-        §11 — the mutex between chat and study is cooperative.
+        Used by the goal workflow (``core/goal/workflow.py``) to avoid
+        running a goal workflow in the same session an AgentLoop is
+        already driving. The previous v1 study scheduler also consulted
+        this, but the v2 refactor decoupled chat/study sessions — see
+        ``core/study/_archived/chat_mutex_legacy.py``.
         """
         return session_id in self._processing_sessions
 
@@ -680,9 +681,10 @@ class SessionService:
     ) -> None:
         """Cooperatively add/remove the session from the processing set.
 
-        Study with a long-running executor needs to claim the session's
-        processing slot to block concurrent chat attempts. Phase 1 wraps
-        this by setting True before executor.run() and False after.
+        Goal workflow uses this to claim the session's processing slot
+        and block concurrent chat attempts. The v1 study scheduler did
+        the same, but the v2 refactor decoupled chat/study sessions —
+        see ``core/study/_archived/chat_mutex_legacy.py``.
         """
         if processing:
             self._processing_sessions.add(session_id)

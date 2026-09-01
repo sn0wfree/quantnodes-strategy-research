@@ -163,7 +163,14 @@ def test_submit_completes_store_updates(store, goal_store, monkeypatch):
 def test_same_study_key_blocks_until_released(store, goal_store, monkeypatch):
     """v2 single identity: the mutex key is the study's own session_id
     (== study_id). Holding that key blocks re-entry of the same study;
-    chat sessions (different keys) are never blocked."""
+    chat sessions (different keys) are never blocked.
+
+    Archived: the v1 chat/study mutex was removed in 2026-09 because
+    v2 single-identity made it a no-op (study.session_id == study_id,
+    so ``is_session_processing(study.session_id)`` is always False).
+    See src/strategy_research/core/study/_archived/chat_mutex_legacy.py.
+    """
+    pytest.skip("v1 chat/study mutex removed in v2; see _archived/chat_mutex_legacy.py")
     _patch_round(monkeypatch)
     goal, study = _setup(store, goal_store)
     svc = FakeSessionService()
