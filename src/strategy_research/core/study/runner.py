@@ -22,7 +22,7 @@ from typing import Any, Protocol
 from ..observability import new_trace_id
 from .models import StudyRecord, StudyStatus
 from .store import StudyStore
-from .runner_context import RunnerContext
+
 
 logger = logging.getLogger(__name__)
 
@@ -197,27 +197,6 @@ class AutoresearchRunner:
         except Exception:  # noqa: BLE001
             return None
         return fresh.execution_status if fresh else None
-
-    def _to_context(self) -> RunnerContext:
-        """Create a RunnerContext for passing to extracted modules."""
-        study = self._get_study()
-        return RunnerContext(
-            study_id=self.study_id,
-            session=study.session_id,
-            study=study,
-            study_store=self.study_store,
-            control=self.control,
-            emit_fn=self._emit,
-            goal_store=self._goal_store,
-            prev_passed=self._prev_passed,
-            best_score=self._best_score,
-            idle_rounds=self._idle_rounds,
-            total_used_time=self._total_used_time,
-            total_used_turns=self._total_used_turns,
-            trace_id=self._trace_id,
-            plugin_registry=getattr(self, "_plugin_registry", None),
-            loop_strategy=self._loop_strategy,
-        )
 
     # ── public entrypoint ───────────────────────────────────────────
 
@@ -795,29 +774,6 @@ class AutoresearchRunner:
             )
             graph = DEFAULT_STANDARD_GRAPH
         return graph
-
-    # ── DAG-driven round execution (P5 unified engine) ────────
-
-    def _run_round_via_dag(
-        self,
-        path: Path,
-        strategy: str,
-        current_state: dict,
-        run_dir: Path,
-        graph: "StudyGraph",
-        *,
-        session: str,
-        sid: str,
-        round_num: int,
-        directive_text: str | None,
-    ) -> dict:
-        """Execute one round via DAG engine (delegated to dag_engine.py)."""
-        from .dag_engine import run_round_dag
-        return run_round_dag(
-            self, path, strategy, current_state, run_dir, graph,
-            session=session, sid=sid, round_num=round_num,
-            directive_text=directive_text,
-        )
 
     def _run_round_via_langgraph(
         self,

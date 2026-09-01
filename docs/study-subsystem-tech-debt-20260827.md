@@ -307,6 +307,49 @@ plan = await asyncio.to_thread(planner.plan, objective, constraints)
 
 ---
 
+## ⑦ dag_engine + runner_context（2026-09 归档）
+
+### 是什么
+两个未被生产代码使用的模块，加上 `runner.py` 上的对应协调方法。
+
+### 在哪里
+- `src/strategy_research/core/study/dag_engine.py`（89 行，`run_round_dag` 单函数）
+- `src/strategy_research/core/study/runner_context.py`（38 行，`RunnerContext` dataclass）
+- `src/strategy_research/core/study/runner.py:801-820` `_run_round_via_dag` 方法
+- `src/strategy_research/core/study/runner.py:201-220` `_to_context` 方法
+- `src/strategy_research/core/study/runner.py:25` `from .runner_context import RunnerContext`
+- 测试：`tests/test_study_dag_engine.py`（356 行，3 个 `TestRebuildPhaseOutputs` 测试断言已移除方法）
+
+### 根因
+1. **dag_engine**：`phase_engine.py:139-143` 有显式安全网——`engine='dag'` 被强制重映射到 `'langgraph'`（包括 API 接受的值、DB 恢复值、`SR_STUDY_DAG_ENGINE=1` env var）。注释明确："dag_engine has no production callers"。`_run_round_via_dag` 因此在生产中 0 调用方。
+2. **runner_context**：`_to_context()` 在整个代码库（生产 + 测试）0 调用方。`docs/runner-context-and-utils-extraction.md` 描述的计划**从未实现**——`aegis.py` 直接接收 `goal_store`，`phase_engine.py` 接收 runner 实例。
+
+### ⚠️ 不要混淆
+**`LangGraphProfile.dag()`**（`langgraph_engine.py:58-60`）是**活跃的 LangGraph 配置预设**（StudyGraph + serial + no checkpoint + no HITL），通过 `get_profile()` 在 `runner.py:858,937` 查找。**DO NOT TOUCH**——它与本归档的 `dag_engine.py` 是完全不同的概念。
+
+### 影响
+- **用户感知**：无
+- **数据正确性**：无（`engine='dag'` 在 phase_engine 已被安全重映射）
+- **性能**：无
+- **可维护性**：移除 41 行 runner.py 死代码 + 127 行 `core/study/` 死文件
+
+### 已做归档（2026-09）
+- `git mv` 到 `core/study/_archived/`
+- `runner.py`：删除 `RunnerContext` import、`_to_context()`、`_run_round_via_dag()`（-41 行）
+- `tests/test_study_dag_engine.py` → `tests/attic/attic_test_study_dag_engine.py`（pytest 自动忽略）
+- 保留 3 个不依赖被移除方法的测试 → 新文件 `tests/test_study_engine_dispatch.py`（`TestEngineDispatch` × 2 + `TestPlanDagAsync` × 1）
+- `_archived/README.md` 更新表项
+
+### 未做（用户决定保留）
+- `langgraph_engine.py:493` docstring 中的 `_run_round_via_dag` 引用
+- `docs/langgraph-dual-engine-design.md:23` 过期架构图
+- `docs/runner-refactoring-plan.md:30,36,65` 过期设计文档
+
+### 工作量
+**41 行生产代码净减少** + 356 行测试移到 attic + 127 行归档到 `_archived/`。
+
+---
+
 ## 修复决策记录（待用户后续填写）
 
 | 决策项 | 选项 | 选定 |
@@ -317,6 +360,7 @@ plan = await asyncio.to_thread(planner.plan, objective, constraints)
 | ④ summary ETag | 修（15 行）/ 保留 | ✅ 已修（commit d43169a） |
 | ⑤ plan-dag 异步化 | 2 行 to_thread / 重写 async / 保留 | ✅ 已修（asyncio.to_thread） |
 | ⑥ workflow 测试 flaky | 加 xdist_group 独占 worker / 调查根因 / 保留 | ✅ 已修（xdist_group('workflow') + dist=loadgroup，3 连测 883/883） |
+| ⑦ dag_engine + runner_context | 协调删除 / 归档 / 保留 | ✅ 已归档（2026-09，git mv 2 文件 + runner.py -41 行 + 测试拆分到 attic） |
 
 ## 关联文档
 - `docs/legacy-sessiondb-tech-debt.md` — 同类技术债文档先例

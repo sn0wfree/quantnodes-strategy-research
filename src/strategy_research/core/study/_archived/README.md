@@ -28,8 +28,11 @@ Rather than delete, the code is archived here for:
 | `event_store.py` | 492 | Study-side EventStore | **DIFFERENT** from `core/agent/event_store.py` (which is production) |
 | `knowledge.py` | 106 | Knowledge extraction helpers | Runner has own `_collect_knowledge` |
 | `study_io.py` | 147 | I/O helpers | Duplicates `engine_common.py` |
+| `dag_engine.py` | 89 | Legacy DAG engine entry | Phase engine maps `engine='dag'` → `langgraph`; see `phase_engine.py:139-143` |
+| `runner_context.py` | 38 | RunnerContext DI dataclass | `_to_context()` was never called; extracted in 2026-09 from `runner.py:201-220` |
+| `chat_mutex_legacy.py` | ~30 | v1 chat/study cooperative mutex | Replaced by v2 single-identity; see class docstring in file |
 
-**Total: 3,246 lines** archived.
+**Total: 3,373 lines** archived.
 
 ## Important
 
