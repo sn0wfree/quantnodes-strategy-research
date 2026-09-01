@@ -5,9 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from strategy_research.core.workflow.builtin import load_definition
 from strategy_research.core.workflow.executor import WorkflowRunner
 from strategy_research.core.workflow.store import WorkflowStore
+
+# Pin all tests in this file to the same xdist worker.
+# The workflow module's import path + JSON template reads cause
+# non-deterministic failures when run in parallel alongside other test
+# files (see docs/study-subsystem-tech-debt-20260827.md ⑥).
+pytestmark = pytest.mark.xdist_group("workflow")
 
 
 class FakeLoop:

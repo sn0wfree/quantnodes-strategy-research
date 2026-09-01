@@ -81,6 +81,11 @@ strategy_research = ["templates/**/*", "templates/.prompts/**/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Honor @pytest.mark.xdist_group markers via loadgroup distribution so
+# same-group tests land on the same worker (avoids parallel pollution
+# e.g. test_workflow_segment_loop — see tech-debt ⑥).
+addopts = ["-ra"]
+xfail_strict = true
 
 [tool.ruff]
 target-version = "py310"
