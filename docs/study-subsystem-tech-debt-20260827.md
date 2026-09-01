@@ -17,7 +17,7 @@
 | ~~③~~ | ~~legacy Temporal 五件套（1837 行死代码）~~ | ~~无~~ | ~~无~~ | ~~无（import 时）~~ | ~~已归档~~ | ~~已归档~~ |
 | ~~④~~ | ~~summary ETag 下发缺失~~ | ~~summary 轮询开销大~~ | ~~无~~ | ~~全量返回~~ | ~~已修~~ | ~~已修~~ |
 | ~~⑤~~ | ~~plan-dag 同步 LLM 阻塞事件循环~~ | ~~全站冻结 N 秒~~ | ~~无~~ | ~~N 秒事件循环停摆~~ | ~~已修~~ | ~~已修~~ |
-| ⑥ | test_workflow_segment_loop 并行 flaky | CI 偶挂（手动重跑过） | 无 | CI 耗时重复跑 | ~5 | 0 |
+| ~~⑥~~ | ~~test_workflow_segment_loop 并行 flaky~~ | ~~CI 偶挂（手动重跑过）~~ | ~~无~~ | ~~CI 耗时重复跑~~ | ~~已修~~ | ~~已修~~ |
 
 **建议优先级**:
 1. ~~⑤（2 行，最高价值：消除 N 秒全站冻结）~~ ✅ 已修
@@ -316,6 +316,7 @@ plan = await asyncio.to_thread(planner.plan, objective, constraints)
 | ③ legacy 五件套 | 方案 A 直接删 / 方案 B 保守清理 / 保留 | ✅ 已归档（2026-09，git mv 到 _archived/，3246 行） |
 | ④ summary ETag | 修（15 行）/ 保留 | ✅ 已修（commit d43169a） |
 | ⑤ plan-dag 异步化 | 2 行 to_thread / 重写 async / 保留 | ✅ 已修（asyncio.to_thread） |
+| ⑥ workflow 测试 flaky | 加 xdist_group 独占 worker / 调查根因 / 保留 | ✅ 已修（xdist_group('workflow') + dist=loadgroup，3 连测 883/883） |
 
 ## 关联文档
 - `docs/legacy-sessiondb-tech-debt.md` — 同类技术债文档先例
