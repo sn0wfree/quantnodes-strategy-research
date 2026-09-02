@@ -397,6 +397,10 @@ class AgentLoop:
         # ``AgentLoop(max_iterations=2)`` tests working while letting
         # an explicit profile/strategy override the cap.
         self._strategy_explicit = strategy is not None
+        if self._strategy_explicit:
+            cfg = self._strategy.config
+            self.no_progress_window = getattr(cfg, "no_progress_window", self.no_progress_window)
+            self._wrap_up_ratio = getattr(cfg, "wrap_up_ratio", WRAP_UP_RATIO)
         # L7: inject self into every Default*Step so steps that opt
         # in (currently DefaultPreRunStep + DefaultLLMCallStep) can
         # call AgentLoop methods. Custom steps ignore the binding.
@@ -1400,11 +1404,11 @@ class AgentLoop:
             result.iterations = iteration
             hook_ctx = self._build_hook_context(iteration, messages)
 
-            # SwarmWorker parity: one-shot wrap-up nudge at 0.8×max_iter
-            # to push the model toward a final text answer.
+            # SwarmWorker parity: one-shot wrap-up nudge at configurable
+            # ratio (default 0.8) to push the model toward a final text answer.
             if (
                 self._wrap_up_nudge
-                and iteration == max(1, int(max_iter * WRAP_UP_RATIO))
+                and iteration == max(1, int(max_iter * getattr(self, "_wrap_up_ratio", WRAP_UP_RATIO)))
             ):
                 messages.append({
                     "role": "system",

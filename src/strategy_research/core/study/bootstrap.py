@@ -328,6 +328,7 @@ def create_study_record(
     graph_override: "StudyGraph | None" = None,
     engine: str = "phases",
     auto_route: bool = True,
+    loop_config: dict | None = None,
 ) -> "StudyRecord":
     """Create a study (validation + ledger + autonomous dir), not queued.
 
@@ -346,12 +347,25 @@ def create_study_record(
     Callers running inside an asyncio event loop should invoke this
     function via ``asyncio.to_thread`` (scenario routing may call the
     LLM synchronously).
+
+    Parameter evolution: if ``loop_config`` is not provided, the system
+    checks the global ``loop_config_kv`` table for an evolved config
+    from previous studies and uses it as the default.
     """
     from .models import default_metric_targets
     from .store import StudyStore
 
     ws = validate_workspace_strategy(workspace_path, strategy_name)
     targets = metric_targets if metric_targets is not None else default_metric_targets()
+
+    # Parameter evolution: if no explicit config, read from global evolved config.
+    if loop_config is None:
+        try:
+            from .loop_evolution import _read_current_config
+            with StudyStore() as _store:
+                loop_config = _read_current_config(_store)
+        except Exception:
+            pass
 
     # Resolve which agent subset this study runs (None -> standard graph).
     resolved_selection: list[str] | None = None
@@ -411,6 +425,7 @@ def create_study_record(
             lazy_detection_interval=lazy_detection_interval,
             keep_recent=keep_recent,
             engine=engine,
+            loop_config=loop_config,
         )
         # Goal ledger under the study's own identity: parallel studies
         # never supersede each other's goals (supersede=False).

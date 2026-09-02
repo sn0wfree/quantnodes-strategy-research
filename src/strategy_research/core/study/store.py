@@ -328,8 +328,54 @@ class StudyStore:
                 self._conn.execute(
                     "ALTER TABLE studies ADD COLUMN engine TEXT NOT NULL DEFAULT 'phases'"
                 )
+            # v4: loop_config_json for parameter evolution
+            if "loop_config_json" not in study_cols:
+                self._conn.execute(
+                    "ALTER TABLE studies ADD COLUMN loop_config_json TEXT DEFAULT NULL"
+                )
             # Release any implicit transaction (migration UPDATE above)
             # so other connections (GoalStore, same DB file) can write.
+            self._conn.commit()
+
+        # v4: parameter evolution table
+        self._create_evolution_table()
+
+    def _create_evolution_table(self) -> None:
+        """Create the ``loop_config_evolution`` table for parameter self-evolution.
+
+        Schema: each row is a fitness observation (config + outcome). The
+        GA reads the top-K configs by fitness; the ``current_config_json``
+        KV row stores the latest best.
+        """
+        with self._lock:
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS loop_config_evolution (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope       TEXT NOT NULL DEFAULT 'global',
+                    generation  INTEGER NOT NULL DEFAULT 0,
+                    config_json TEXT NOT NULL,
+                    fitness     REAL NOT NULL DEFAULT 0.0,
+                    study_id    TEXT,
+                    outcome     TEXT,
+                    created_at  TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_lce_scope_fitness "
+                "ON loop_config_evolution(scope, fitness DESC)"
+            )
+            # current_config KV row — one per scope (e.g. 'global' or owner_session_id)
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS loop_config_kv (
+                    scope        TEXT PRIMARY KEY,
+                    config_json  TEXT NOT NULL,
+                    updated_at   TEXT NOT NULL
+                )
+                """
+            )
             self._conn.commit()
 
     # ── writes ───────────────────────────────────────────────────────
@@ -358,6 +404,7 @@ class StudyStore:
         keep_recent: int = 10,
         behavior: str | None = None,
         monitor_interval_seconds: int | None = None,
+        loop_config: dict | None = None,
     ) -> StudyRecord:
         """Insert a new study row (status=queued).
 
@@ -408,6 +455,7 @@ class StudyStore:
         study_id = new_id("study")
         now = now_iso()
         targets_json = json_dumps(metric_targets or [])
+        config_json = json_dumps(loop_config) if loop_config else None
         owner = owner_session_id
 
         _dlog("store", "create_study id=%s session=%s goal=%s strategy=%s executor=%s",
@@ -426,36 +474,21 @@ class StudyStore:
                     execution_status, current_round,
                     heartbeat, created_at, updated_at,
                     monitor_interval_seconds, last_monitor_check_at,
-                    monitor_drift_count
+                    monitor_drift_count, loop_config_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0, ?)
                 """,
                 (
-                    study_id,
-                    study_id,
-                    owner,
-                    goal_id,
-                    objective,
-                    executor_type,
-                    engine,
-                    workspace_path,
-                    strategy_name,
+                    study_id, study_id, owner, goal_id, objective,
+                    executor_type, engine, workspace_path, strategy_name,
                     targets_json,
-                    budget_token,
-                    budget_turn,
-                    budget_time_seconds,
-                    cooldown_base,
-                    cooldown_jitter,
-                    min_cooldown,
-                    max_rounds,
-                    early_stop_patience,
-                    lazy_detection_interval,
-                    keep_recent,
+                    budget_token, budget_turn, budget_time_seconds,
+                    cooldown_base, cooldown_jitter, min_cooldown,
+                    max_rounds, early_stop_patience, lazy_detection_interval, keep_recent,
                     behavior,
-                    now,
-                    now,
-                    now,
+                    now, now, now,
                     monitor_interval_seconds,
+                    config_json,
                 ),
             )
         row = self._conn.execute(
@@ -1577,4 +1610,5 @@ class StudyStore:
             monitor_drift_count=row["monitor_drift_count"] or 0,
             archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
             archived_by=row["archived_by"] if "archived_by" in row.keys() else None,
+            loop_config=json_loads(row["loop_config_json"], None) if "loop_config_json" in row.keys() else None,
         )

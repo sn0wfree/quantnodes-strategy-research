@@ -145,15 +145,20 @@ class AutoresearchRunner:
         self._prev_passed: set[str] = set()
         self._best_score: float = 0.0
         self._idle_rounds: int = 0
-        # Agent resilience: ExplorerStrategy (max_iter=50, no_progress_window=5)
-        # replaces the hardcoded defaults of 10/3 to give complex agents
-        # (strategist, factor_analyst) more headroom before the no_progress
-        # approval gate fires.
+        # Agent resilience: resolve loop strategy from study's evolved config
+        # or default to ExplorerStrategy (max_iter=50, no_progress_window=5).
         try:
-            from ..agent.strategy.explorer import ExplorerStrategyFactory
-            self._loop_strategy = ExplorerStrategyFactory.create()
+            from ..agent.strategy.profile_resolver import resolve_loop_strategy
+            loop_cfg = getattr(study, "loop_config", None)
+            if loop_cfg:
+                self._loop_strategy = resolve_loop_strategy(
+                    {"name": "explorer", "config": loop_cfg}
+                )
+            else:
+                from ..agent.strategy.explorer import ExplorerStrategyFactory
+                self._loop_strategy = ExplorerStrategyFactory.create()
         except Exception as exc:  # noqa: BLE001
-            logger.debug("ExplorerStrategy unavailable, falling back to default: %s", exc)
+            logger.debug("strategy resolution failed, falling back to default: %s", exc)
             self._loop_strategy = None
         # Budget accumulators
         self._round_start_clock: float | None = None
@@ -224,6 +229,8 @@ class AutoresearchRunner:
                 reason = await self._monitor_phase()
                 return reason
             reason = await self._run_loop()
+            # Parameter evolution: record fitness observation + maybe evolve.
+            self._record_evolution_observation()
             # v2 §15.2: on E2 completion with monitoring enabled, enter the
             # post-completion monitor phase (rounds stop; periodic re-checks).
             # Runs in-sequence so the scheduler's control token and semaphore
@@ -1320,6 +1327,20 @@ class AutoresearchRunner:
     @staticmethod
     def _format_directives(directives) -> str:
         return _state_utils.format_directives(directives)
+
+    def _record_evolution_observation(self) -> None:
+        """Record fitness for this study + trigger GA evolution if due.
+
+        Called once per study completion (from _run_lifecycle).  Failures
+        are silently swallowed — evolution is best-effort observability.
+        """
+        try:
+            from .loop_evolution import record_observation, maybe_evolve
+            study = self._get_study()
+            record_observation(self.study_store, study)
+            maybe_evolve(self.study_store)
+        except Exception:  # noqa: BLE001 — evolution must never break runs
+            logger.debug("evolution observation failed", exc_info=True)
 
     def _run_monitor_check(self) -> dict:
         """Re-backtest the last keep run and check if metrics still meet targets.

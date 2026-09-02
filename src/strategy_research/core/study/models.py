@@ -202,6 +202,8 @@ class StudyRecord:
     # ── Soft-delete (archive): metadata only, all data retained ────
     archived_at: str | None = None
     archived_by: str | None = None
+    # ── Parameter evolution: agent loop config override ───────────
+    loop_config: dict | None = None  # e.g. {"max_iterations": 15, "no_progress_window": 5}
 
 
 @dataclass(frozen=True)
