@@ -305,6 +305,22 @@ class GoalStore:
         # from the unified session DB (D1).
         self._migrate_user_id()
 
+        # Claims tracking: predictions + outcome columns on goal_journal.
+        self._migrate_claims()
+
+    def _migrate_claims(self) -> None:
+        """Add predictions_json / prediction_outcome_json to goal_journal."""
+        cols = table_columns(self._conn, "goal_journal")
+        if "predictions_json" not in cols:
+            self._conn.execute(
+                "ALTER TABLE goal_journal ADD COLUMN predictions_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "prediction_outcome_json" not in cols:
+            self._conn.execute(
+                "ALTER TABLE goal_journal ADD COLUMN prediction_outcome_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        self._conn.commit()
+
     def _migrate_p3b(self) -> None:
         """Add progress_percent and parent_goal_id columns to existing goals table."""
         cols = table_columns(self._conn, "goals")
@@ -1447,8 +1463,14 @@ class GoalStore:
         predicted_affected: list[str] | None = None,
         changeset: dict | None = None,
         retry_rationale: str | None = None,
+        predictions: dict | None = None,
     ) -> "JournalEntry":
-        """Append a journal entry for a round's hypothesis."""
+        """Append a journal entry for a round's hypothesis.
+
+        ``predictions`` carries the falsifiable claims captured BEFORE the
+        backtest runs (at the novelty gate). Missing/empty predictions are
+        stored as ``{}`` — claims tracking is optional by design.
+        """
         from .models import JournalEntry
         now = now_iso()
         entry_id = new_id("journal")
@@ -1461,21 +1483,25 @@ class GoalStore:
                     predicted_affected_json, gating_outcome,
                     gating_attribution_json, changeset_json,
                     retry_rationale, archived_reason,
+                    predictions_json, prediction_outcome_json,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', '{}', ?, ?, NULL, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', '{}', ?, ?, NULL, ?, '{}', ?, ?)
                 """,
                 (
                     entry_id, goal_id, session_id, round_num,
                     hypothesis_id, label, json_dumps(levers or []),
                     json_dumps(predicted_affected or []),
                     json_dumps(changeset) if changeset else None,
-                    retry_rationale, now, now,
+                    retry_rationale,
+                    json_dumps(predictions or {}),
+                    now, now,
                 ),
             )
         return JournalEntry(
             entry_id=entry_id, goal_id=goal_id, session_id=session_id,
             round_num=round_num, hypothesis_id=hypothesis_id, label=label,
             levers=levers or [], predicted_affected=predicted_affected or [],
+            predictions=dict(predictions or {}),
             gating_outcome="pending", changeset=changeset,
             retry_rationale=retry_rationale, created_at=now, updated_at=now,
         )
@@ -1488,19 +1514,58 @@ class GoalStore:
         round_num: int,
         outcome: str,
         attribution: dict,
+        levers: list[str] | None = None,
+        changeset: dict | None = None,
     ) -> bool:
-        """Update the latest journal entry for a round with attribution result."""
+        """Update the latest journal entry for a round with attribution result.
+
+        ``levers`` / ``changeset`` optionally backfill fields left empty by
+        the pre-backtest claims capture (two-phase write pattern).
+        """
         now = now_iso()
         with write_transaction(self._conn):
             cur = self._conn.execute(
                 """
                 UPDATE goal_journal
-                SET gating_outcome = ?, gating_attribution_json = ?, updated_at = ?
+                SET gating_outcome = ?, gating_attribution_json = ?,
+                    levers_json = COALESCE(?, levers_json),
+                    changeset_json = COALESCE(?, changeset_json),
+                    updated_at = ?
                 WHERE goal_id = ? AND session_id = ? AND round_num = ?
                   AND gating_outcome = 'pending'
                 """,
-                (outcome, json_dumps(attribution), now,
-                 goal_id, session_id, round_num),
+                (outcome, json_dumps(attribution),
+                 json_dumps(levers) if levers is not None else None,
+                 json_dumps(changeset) if changeset else None,
+                 now, goal_id, session_id, round_num),
+            )
+        return cur.rowcount > 0
+
+    @synchronized
+    def fill_journal_prediction_outcome(
+        self,
+        goal_id: str,
+        session_id: str,
+        round_num: int,
+        outcome: dict,
+    ) -> bool:
+        """Backfill the prediction outcome on a round's journal entry.
+
+        Called post-backtest with ``validate_predictions`` output, e.g.
+        ``{"sharpe": {"actual": 0.55, "abs_error": 0.25,
+        "direction_correct": true, "within_tolerance": true}}``.
+        Returns False when the round has no pending journal entry.
+        """
+        now = now_iso()
+        with write_transaction(self._conn):
+            cur = self._conn.execute(
+                """
+                UPDATE goal_journal
+                SET prediction_outcome_json = ?, updated_at = ?
+                WHERE goal_id = ? AND session_id = ? AND round_num = ?
+                  AND prediction_outcome_json = '{}'
+                """,
+                (json_dumps(outcome), now, goal_id, session_id, round_num),
             )
         return cur.rowcount > 0
 
@@ -1630,6 +1695,19 @@ class GoalStore:
                 f"tasks: {','.join(e.predicted_affected)}"
                 f"{regressed_tag}"
             )
+        # Claims calibration (F: falsifiable-prediction self-calibration)
+        from ..study.claims import summarize_prediction_accuracy
+        stats = summarize_prediction_accuracy(entries)
+        if stats["n_predictions"]:
+            hit = stats["direction_hit_rate"]
+            err = stats["mean_abs_error"]
+            lines.append(
+                f"  <claims-calibration n={stats['n_predictions']}"
+                f" validated={stats['n_validated']}"
+                f" direction_hit_rate={hit}"
+                f" mean_abs_error={err}>"
+                "你过去的预测命中率如上——据此校准本轮 predictions 的方向与幅度。"
+            )
         lines.append("</journal-history>")
         return "\n".join(lines)
 
@@ -1644,6 +1722,8 @@ class GoalStore:
             label=row["label"],
             levers=list(json_loads(row["levers_json"], [])),
             predicted_affected=list(json_loads(row["predicted_affected_json"], [])),
+            predictions=dict(json_loads(row["predictions_json"], {})),
+            prediction_outcome=dict(json_loads(row["prediction_outcome_json"], {})),
             gating_outcome=row["gating_outcome"],
             gating_attribution=dict(json_loads(row["gating_attribution_json"], {})),
             changeset=json_loads(row["changeset_json"], None),

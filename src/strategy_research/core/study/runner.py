@@ -603,7 +603,16 @@ class AutoresearchRunner:
                 },
             })
 
-            # ── SSE: study_scoreboard (lever precision) ──────────
+            # ── SSE: study_scoreboard (lever precision + claims calibration) ──
+            sb_extra: dict = {}
+            try:
+                if self._goal_store is not None and self._get_study().goal_id:
+                    from .claims import summarize_prediction_accuracy
+                    _entries = self._goal_store.list_journal_entries(
+                        self._get_study().goal_id, limit=10)
+                    sb_extra = summarize_prediction_accuracy(_entries)
+            except Exception:  # noqa: BLE001 — claims stats are best-effort
+                sb_extra = {}
             if hasattr(self, "_scoreboard"):
                 sb = self._scoreboard.get_scoreboard()
                 sb_data = [
@@ -611,11 +620,12 @@ class AutoresearchRunner:
                      "accepted": s.accepted, "reverted": s.reverted}
                     for s in sb if s.attempts > 0
                 ]
-                if sb_data:
+                if sb_data or sb_extra.get("n_predictions"):
                     self._emit(session, "study_scoreboard", {
                         "study_id": sid,
                         "round": round_num,
                         "scoreboard": sb_data,
+                        "claims": sb_extra,
                     })
 
             # ── shutdown conditions (targets/budget/stagnation/review/discard) ──

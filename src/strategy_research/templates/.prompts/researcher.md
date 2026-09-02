@@ -59,6 +59,11 @@
   "reason": "决策依据",
   # @label: 预期影响指标 @core: true @type: array
   "predicted_affected": ["calmar", "sharpe"],
+  # @label: 可证伪预测 @type: object
+  "predictions": {
+    # @label: 夏普预测 @type: object
+    "sharpe": {"direction": "up | down", "expected": 0.0, "tolerance": 0.0}
+  },
   # @label: 避免的操作 @type: array
   "avoid_actions": ["已失败的 action 列表"],
   # @label: 因子方向
@@ -85,5 +90,13 @@
 - 记录推理过程到 reason 字段
 - 每个结论至少引用一个反对证据
 - predicted_affected: 声明本轮假设预期会改善的指标 (calmar/sharpe/max_dd 等)
+- predictions (可选但强烈建议): 对 predicted_affected 中每个指标给出可证伪预测
+  - direction: 你预期该指标上升("up")还是下降("down"); max_dd 的"改善"是 "down"
+  - expected: 你预期的数值 (基于 <journal-history> 历史数据估计)
+  - tolerance: 可接受的误差范围
+  - ⚠️ 你的 prediction 会在回测后验证并追踪准确率——诚实的"不确定"优于自信的编造。
+    无把握的指标可以省略;省略不会导致任何惩罚。
+  - ⚠️ 预测 (prediction) 是回测前的前瞻判断,允许并鼓励填写;
+    但绝不可把预测当成回测结果 (结果类数字仍然禁止编造)。
 - 参考 <journal-history> 中的跨轮次记忆,避免重复已失败的假设
 - 参考 <lever-scoreboard> 中的杠杆评分,优先使用 posterior 较高的杠杆类型

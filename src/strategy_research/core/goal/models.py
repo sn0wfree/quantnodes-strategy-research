@@ -184,6 +184,13 @@ class JournalEntry:
     label: str
     levers: list[str] = field(default_factory=list)
     predicted_affected: list[str] = field(default_factory=list)
+    # Falsifiable claims (captured pre-backtest at the novelty gate):
+    # {"sharpe": {"direction": "up", "expected": 0.8, "tolerance": 0.3}}
+    predictions: dict = field(default_factory=dict)
+    # Backfilled post-backtest by fill_journal_prediction_outcome:
+    # {"sharpe": {"actual": 0.55, "abs_error": 0.25,
+    #             "direction_correct": True, "within_tolerance": True}}
+    prediction_outcome: dict = field(default_factory=dict)
     gating_outcome: str = "pending"  # accepted | reverted | noop | pending
     gating_attribution: dict = field(default_factory=dict)
     changeset: dict | None = None

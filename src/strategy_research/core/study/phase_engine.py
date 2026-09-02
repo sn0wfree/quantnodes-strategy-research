@@ -186,6 +186,12 @@ def run_round_phases(
             researcher_output.get("predicted_affected")
             or [t["name"] for t in metric_targets]
         )
+        # Claims capture: predictions come from the researcher's own
+        # reasoning (they never see the backtest result), so they stay
+        # falsifiable even though this engine runs the backtest in-graph.
+        captured_predictions = _capture_round_claims(
+            runner, round_num, researcher_output, predicted_affected, metric_targets,
+        )
 
         # Novelty dedup on this branch is handled in-graph by the
         # novelty_gate node (built when profile.hitl is enabled — the
@@ -198,6 +204,7 @@ def run_round_phases(
         # resolve without AttributeError.
         eval_result = {"decision": decision, "aoa_llm_verdict": lg_result.get("aoa_llm_verdict")}
         exec_result = {"backtest_error": backtest_error}
+        captured_predictions = {}
 
     else:
         # Phase 1: researcher
@@ -228,6 +235,11 @@ def run_round_phases(
         if not _novelty_gate(runner, round_num, hypothesis, predicted_affected):
             return {"round": round_num, "run_name": run_name, "aborted": True,
                     "reason": "novelty_rejected"}
+
+        # Claims capture: BEFORE the backtest so predictions are credible.
+        captured_predictions = _capture_round_claims(
+            runner, round_num, researcher_output, predicted_affected, metric_targets,
+        )
 
         # Phase 2: execution
         runner._emit(session, "study_phase", {
@@ -307,6 +319,7 @@ def run_round_phases(
     _record_journal_and_regression(
         runner, round_num, hypothesis, predicted_affected, lever,
         strategist_output, gating_outcome, attribution,
+        predictions=captured_predictions, metrics=metrics,
     )
 
     # AEGIS: Scoreboard
@@ -435,6 +448,49 @@ def _novelty_gate(
     return False
 
 
+def _capture_round_claims(
+    runner: Any,
+    round_num: int,
+    researcher_output: Any,
+    predicted_affected: list,
+    metric_targets: list,
+) -> dict:
+    """Capture falsifiable predictions BEFORE the backtest runs.
+
+    Two-phase journal write (phase A): append the entry now with the
+    researcher's ``predictions`` object; attribution/levers/prediction
+    outcomes are backfilled later (phase B, ``_record_journal_and_regression``).
+
+    Claims are optional by design (graceful degradation): missing or
+    malformed predictions simply store ``{}`` — never fails the round.
+    """
+    from .claims import normalize_predictions
+    if not isinstance(researcher_output, dict):
+        return {}
+    study = runner._get_study()
+    known = [t["name"] for t in metric_targets]
+    predictions = normalize_predictions(
+        researcher_output.get("predictions"), known_metrics=known,
+    )
+    hypothesis = researcher_output.get("hypothesis", "") or ""
+    try:
+        runner._goal_store.append_journal_entry(
+            study.goal_id, study.session_id, round_num,
+            hypothesis, hypothesis[:60],
+            levers=[], predicted_affected=predicted_affected,
+            predictions=predictions,
+        )
+    except Exception:  # noqa: BLE001 — claims tracking must not break rounds
+        logger.warning("claims capture failed for round %d", round_num, exc_info=True)
+        return {}
+    if predictions:
+        runner._emit(study.session_id, "study_claims_captured", {
+            "study_id": study.study_id, "round": round_num,
+            "predictions": predictions,
+        })
+    return predictions
+
+
 def _record_journal_and_regression(
     runner: Any,
     round_num: int,
@@ -444,18 +500,48 @@ def _record_journal_and_regression(
     strategist_output: Any,
     gating_outcome: str,
     attribution: Any,
+    predictions: dict | None = None,
+    metrics: dict | None = None,
 ) -> None:
-    """AEGIS: append journal entry + run the regression gate."""
+    """AEGIS: backfill journal entry (phase B) + run the regression gate.
+
+    The entry was appended pre-backtest by ``_capture_round_claims`` with
+    the researcher's predictions. Here we fill attribution/levers/changeset
+    and validate predictions against the actual metrics. When no captured
+    entry exists (e.g. HITL resume path), fall back to append+fill so the
+    AEGIS journal never loses the round.
+    """
+    from .claims import validate_predictions
     study = runner._get_study()
     session = study.session_id
-    runner._goal_store.append_journal_entry(
-        study.goal_id, session, round_num, hypothesis, hypothesis[:60],
-        levers=[lever], predicted_affected=predicted_affected,
-        changeset=strategist_output.get("changes") if isinstance(strategist_output, dict) else None,
-    )
-    runner._goal_store.fill_journal_attribution(
+    changeset = strategist_output.get("changes") if isinstance(strategist_output, dict) else None
+    filled = runner._goal_store.fill_journal_attribution(
         study.goal_id, session, round_num, gating_outcome, attribution,
+        levers=[lever], changeset=changeset,
     )
+    if not filled:
+        # No pre-backtest capture for this round — append now.
+        runner._goal_store.append_journal_entry(
+            study.goal_id, session, round_num, hypothesis, hypothesis[:60],
+            levers=[lever], predicted_affected=predicted_affected,
+            changeset=changeset,
+        )
+        runner._goal_store.fill_journal_attribution(
+            study.goal_id, session, round_num, gating_outcome, attribution,
+        )
+    if predictions:
+        try:
+            outcome = validate_predictions(predictions, metrics)
+            if outcome:
+                runner._goal_store.fill_journal_prediction_outcome(
+                    study.goal_id, session, round_num, outcome,
+                )
+                runner._emit(session, "study_claims_validated", {
+                    "study_id": study.study_id, "round": round_num,
+                    "outcome": outcome,
+                })
+        except Exception:  # noqa: BLE001 — claims tracking must not break rounds
+            logger.warning("claims validation failed for round %d", round_num, exc_info=True)
     passes, regressed = runner._check_regression(attribution)
     if not passes:
         runner._archive_rejected(round_num, hypothesis, "regression", str(regressed))
