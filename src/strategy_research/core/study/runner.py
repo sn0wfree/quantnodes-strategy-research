@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ..observability import new_trace_id
+from . import aegis as _aegis
+from . import budget as _budget
+from . import state_utils as _state_utils
 from .models import StudyRecord, StudyStatus
 from .store import StudyStore
 
@@ -137,7 +140,7 @@ class AutoresearchRunner:
         self.control = control or ControlToken()
         self.emitter = emitter or NullEmitter()
         self._own_goal_store = goal_store is None
-        self._goal_store = goal_store or self._open_goal_store()
+        self._goal_store = goal_store or _state_utils.open_goal_store()
         # AEGIS state
         self._prev_passed: set[str] = set()
         self._best_score: float = 0.0
@@ -917,11 +920,6 @@ class AutoresearchRunner:
             profile=profile,
         )
 
-    def _layered_topological_layers(self, graph) -> list[list[str]]:
-        """Fallback topological layer computation if AgentDAGConfig
-        doesn't expose one (kept for forward compat)."""
-        return graph.topological_layers()
-
     @staticmethod
     def _try_parse_json(text: str) -> Any:
         """Parse agent output JSON; return the raw string on failure."""
@@ -1202,102 +1200,57 @@ class AutoresearchRunner:
 
     def _verdict_reason(self, eval_result: dict, strategist_output: Any) -> str:
         """Extract the verdict reason from decision/attribution output."""
-        decision = eval_result.get("decision")
-        if decision is not None:
-            reason = getattr(decision, "reason", None) or \
-                (decision.get("reason", "") if isinstance(decision, dict) else "")
-            if reason:
-                return str(reason)
-        aoa = eval_result.get("aoa_llm_verdict")
-        if isinstance(aoa, dict) and aoa.get("decision") == "discard":
-            return str(aoa.get("reason", "anti-overfit rejection"))
-        return ""
+        return _aegis.verdict_reason(eval_result, strategist_output)
 
-    # ── AEGIS helpers ──────────────────────────────────────────────
+    # ── AEGIS helpers (delegating to aegis.py module functions) ────
 
     def _check_novelty(self, hypothesis: str, predicted_affected: list[str]) -> tuple[bool, str | None]:
-        if not self._get_study().goal_id:
-            return True, None
-        return self._goal_store.check_novelty(
-            self._get_study().goal_id, hypothesis, [], predicted_affected,
+        return _aegis.check_novelty(
+            self._goal_store, self._get_study().goal_id, hypothesis, predicted_affected,
         )
 
     def _check_regression(self, attribution: dict[str, str]) -> tuple[bool, list[str]]:
-        if not self._get_study().goal_id:
-            return True, []
-        return self._goal_store.check_regression(self._get_study().goal_id, attribution)
+        return _aegis.check_regression(
+            self._goal_store, self._get_study().goal_id, attribution,
+        )
 
     def _archive_rejected(self, round_num: int, hypothesis: str, reason: str, detail: str) -> None:
-        if not self._get_study().goal_id:
-            return
-        self._goal_store.archive_rejected_edit(
-            self._get_study().goal_id, round_num, hypothesis, reason, detail,
+        _aegis.archive_rejected(
+            self._goal_store, self._get_study().goal_id,
+            round_num, hypothesis, reason, detail,
         )
 
     def _build_journal_context(self) -> str:
-        if not self._get_study().goal_id:
-            return ""
-        return self._goal_store.build_journal_context(self._get_study().goal_id, self._get_study().current_round)
+        s = self._get_study()
+        return _aegis.build_journal_context(self._goal_store, s.goal_id, s.current_round)
 
     def _build_scoreboard_context(self) -> str:
         if not hasattr(self, "_scoreboard"):
             return ""
         return self._scoreboard.build_scoreboard_context()
 
-    # ── budget ─────────────────────────────────────────────────────
+    # ── budget (delegating to budget.py module functions) ──────────
 
     def _account_round_budget(self, exec_result: dict) -> None:
-        if self._round_start_clock is not None:
-            self._total_used_time += time.perf_counter() - self._round_start_clock
-        outs = exec_result.get("agent_outputs") or {}
-        self._total_used_turns += sum(1 for v in outs.values() if v and not (isinstance(v, dict) and v.get("error")))
+        self._total_used_time, self._total_used_turns = _budget.account_round_budget(
+            self._total_used_time, self._total_used_turns,
+            self._round_start_clock, exec_result,
+        )
 
     def _budget_exceeded(self) -> bool:
-        # Read the fresh study record (5s-cached), not the constructor
-        # snapshot — budget limits can be changed mid-run via
-        # replace_objective / API updates.
-        s = self._get_study()
-        if s.budget_time_seconds is not None and self._total_used_time >= s.budget_time_seconds:
-            return True
-        if s.budget_turn is not None and self._total_used_turns >= s.budget_turn:
-            return True
-        return False
+        # Fresh study record (5s-cached), not the constructor snapshot —
+        # budget limits can change mid-run via replace_objective / API.
+        return _budget.budget_exceeded(
+            self._get_study(), self._total_used_time, self._total_used_turns,
+        )
 
     def _budget_summary(self) -> str:
-        return f"turns_used={self._total_used_turns}, time_used={self._total_used_time:.1f}s"
+        return _budget.budget_summary(self._total_used_turns, self._total_used_time)
 
-    # ── goal completion ────────────────────────────────────────────
+    # ── goal completion (delegating to budget.complete_goal) ───────
 
     def _complete_goal(self, exec_result: dict) -> None:
-        if not self._get_study().goal_id:
-            return
-        try:
-            from strategy_research.core.goal import EvidenceInput
-            metrics = exec_result.get("metrics", {})
-            run_name = exec_result.get("run_name", "")
-            existing = self._goal_store.list_evidence(self._get_study().goal_id)
-            seen = {ev.criterion_id for ev in existing if ev.criterion_id}
-            criteria = self._goal_store.list_criteria(self._get_study().goal_id)
-            for c in criteria:
-                if not c.required or c.criterion_id in seen:
-                    continue
-                self._goal_store.append_evidence(
-                    session_id=self._get_study().session_id,
-                    goal_id=self._get_study().goal_id,
-                    expected_goal_id=self._get_study().goal_id,
-                    evidence=EvidenceInput(
-                        text=f"Study 达标自动覆盖 — {run_name}: Calmar={metrics.get('calmar')} Sharpe={metrics.get('sharpe')} MaxDD={metrics.get('max_dd')}",
-                        criterion_id=c.criterion_id, evidence_type="acceptance",
-                        run_id=run_name, source_provider="study", source_type="metric_targets_met",
-                    ),
-                )
-            self._goal_store.complete_lite(
-                session_id=self._get_study().session_id, goal_id=self._get_study().goal_id,
-                expected_goal_id=self._get_study().goal_id,
-                recap=f"研究达标 — Calmar={metrics.get('calmar')}, Sharpe={metrics.get('sharpe')}, MaxDD={metrics.get('max_dd')}",
-            )
-        except Exception as exc:
-            logger.exception("study %s goal completion failed: %s", self._get_study().study_id, exc)
+        _budget.complete_goal(self._goal_store, self._get_study(), exec_result)
 
     # ── results.tsv ────────────────────────────────────────────────
 
@@ -1337,87 +1290,36 @@ class AutoresearchRunner:
             break
         results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    # ── misc ───────────────────────────────────────────────────────
+    # ── misc (delegating to budget.py / state_utils.py) ────────────
 
     def _round_cooldown(self) -> float:
-        from strategy_research.core.autoresearch import get_cooldown_seconds
-        return get_cooldown_seconds(
-            self._get_study().cooldown_base * 2, self._get_study().cooldown_jitter * 2, self._get_study().min_cooldown * 2,
-        )
+        return _budget.round_cooldown(self._get_study())
 
     def _maybe_load_previous_summary(self, study: StudyRecord) -> dict | None:
-        try:
-            runs_dir = Path(study.workspace_path) / "strategies" / study.strategy_name / "runs"
-            if not runs_dir.exists():
-                return None
-            from strategy_research.core.autoresearch import load_run_summary
-            nums: list[int] = []
-            for d in runs_dir.iterdir():
-                if d.is_dir() and d.name.startswith("run_"):
-                    try:
-                        nums.append(int(d.name.split("_")[1]))
-                    except (ValueError, IndexError):
-                        pass
-            if not nums:
-                return None
-            return load_run_summary(runs_dir / f"run_{max(nums):04d}")
-        except Exception:
-            return None
+        return _budget.maybe_load_previous_summary(study)
 
     def _mark_terminal(self, status: StudyStatus, *, last_metrics=None, last_error=None, reason=None):
-        """Persist a terminal status to the DB (best-effort, H2).
-
-        A transient DB failure must not crash the whole run — the caller
-        still emits the SSE notification and the poll loop reconciles
-        the UI from the DB on the next tick. Logged loudly for ops.
-        """
-        err = last_error if reason is None else f"{reason}:{last_error or ''}"
-        try:
-            self.study_store.update_execution_status(
-                self._get_study().study_id, status,
-                last_error=err, last_metrics=last_metrics,
-            )
-        except Exception as exc:  # noqa: BLE001 — best-effort persistence
-            logger.warning(
-                "mark_terminal failed to persist %s for study %s: %s",
-                status.value, self.study_id, exc,
-            )
+        """Persist a terminal status to the DB (best-effort, H2)."""
+        _state_utils.mark_terminal(
+            self.study_store, self._get_study().study_id, status,
+            last_metrics=last_metrics, last_error=last_error, reason=reason,
+        )
 
     async def _wait_until_resumed(self):
-        while self.control.paused and not self.control.cancelled:
-            await asyncio.sleep(0.5)
+        await _state_utils.wait_until_resumed(self.control)
 
     def _emit(self, session_id: str, event: str, data: dict) -> None:
-        # v4 observability: attach the live trace context (trace_id /
-        # study_id / round_num) to every SSE event so the UI can show a
-        # copyable trace_id for log correlation.
-        try:
-            from ..observability import get_trace_context
-            ctx = get_trace_context()
-            data = {
-                "trace_id": ctx.get("trace_id"),
-                "study_id": ctx.get("study_id") or data.get("study_id"),
-                "round_num": ctx.get("round_num") or data.get("round"),
-                **data,
-            }
-        except Exception:  # noqa: BLE001 — best-effort decoration
-            pass
-        try:
-            self.emitter.emit(session_id, event, data)
-        except Exception as exc:
-            logger.debug("runner emit %s failed: %s", event, exc)
+        # v4 observability: state_utils.emit_with_trace attaches the live
+        # trace context (trace_id / study_id / round_num) to every SSE
+        # event so the UI can show a copyable trace_id for log correlation.
+        _state_utils.emit_with_trace(self.emitter, session_id, event, data)
 
     def _open_goal_store(self):
-        from strategy_research.core.goal import GoalStore
-        return GoalStore()
+        return _state_utils.open_goal_store()
 
     @staticmethod
     def _format_directives(directives) -> str:
-        lines = ["<user-directives>", "Honour them in this round's research plan:"]
-        for d in directives:
-            lines.append(f"- [{d.created_at}] {d.content.replace(chr(10), ' ').strip()}")
-        lines.append("</user-directives>")
-        return "\n".join(lines)
+        return _state_utils.format_directives(directives)
 
     def _run_monitor_check(self) -> dict:
         """Re-backtest the last keep run and check if metrics still meet targets.
