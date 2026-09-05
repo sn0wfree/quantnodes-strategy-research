@@ -3,15 +3,15 @@ description: 衍生品策略台 — 波动率分析师 → 策略设计 → Gree
 agents:
   - id: vol_analyst
     prompt_file: .prompts/researcher.md
-    tools: [read_file, options_pricing]
+    tools: [read, options_pricing]
   - id: strategy_designer
     prompt_file: .prompts/strategist.md
     input_from: [vol_analyst]
-    tools: [read_file, write_file, run_backtest, options_pricing]
+    tools: [read, write, run_backtest, options_pricing]
   - id: greeks_risk_manager
     prompt_file: .prompts/risk_controller.md
     input_from: [strategy_designer]
-    tools: [read_file, options_pricing, list_history]
+    tools: [read, options_pricing, list_history]
 dag:
   vol_analyst: []
   strategy_designer: [vol_analyst]

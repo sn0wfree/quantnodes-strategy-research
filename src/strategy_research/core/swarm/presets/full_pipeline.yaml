@@ -3,11 +3,11 @@ description: 完整 10-agent 研究流水线
 agents:
   - id: researcher
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: data_quality
     prompt_file: .prompts/data_quality.md
     input_from: [researcher]
-    tools: [read_file]
+    tools: [read]
   - id: factor_analyst
     prompt_file: .prompts/factor_analyst.md
     input_from: [researcher, data_quality]
@@ -15,7 +15,7 @@ agents:
   - id: strategist
     prompt_file: .prompts/strategist.md
     input_from: [factor_analyst]
-    tools: [write_file, run_backtest]
+    tools: [write, run_backtest]
   - id: portfolio_construction
     prompt_file: .prompts/portfolio_construction.md
     input_from: [strategist]
@@ -39,7 +39,7 @@ agents:
   - id: orchestrator
     prompt_file: .prompts/orchestrator.md
     input_from: [backtest_diagnostics]
-    tools: [read_file]
+    tools: [read]
 dag:
   researcher: []
   data_quality: [researcher]

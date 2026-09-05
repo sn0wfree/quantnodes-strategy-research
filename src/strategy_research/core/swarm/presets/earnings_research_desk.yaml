@@ -3,17 +3,17 @@ description: 财报研究台 — 基本面/财报修正/期权三路并行 → �
 agents:
   - id: fundamental_analyst
     prompt_file: .prompts/researcher.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: earnings_revision
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, compute_factor]
+    tools: [read, compute_factor]
   - id: options_event
     prompt_file: .prompts/strategist.md
-    tools: [read_file, options_pricing]
+    tools: [read, options_pricing]
   - id: earnings_strategist
     prompt_file: .prompts/portfolio_construction.md
     input_from: [fundamental_analyst, earnings_revision, options_event]
-    tools: [read_file, write_file, run_backtest]
+    tools: [read, write, run_backtest]
 dag:
   fundamental_analyst: []
   earnings_revision: []

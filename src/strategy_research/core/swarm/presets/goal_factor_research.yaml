@@ -13,7 +13,7 @@ goal:
 agents:
   - id: researcher
     prompt_file: .prompts/researcher.md
-    tools: [read_file, search_web]
+    tools: [read, websearch]
     input_from: []
     evidence_criterion: 0
     timeout: 120
@@ -21,7 +21,7 @@ agents:
 
   - id: data_quality
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
     input_from: [researcher]
     evidence_criterion: 1
     timeout: 120

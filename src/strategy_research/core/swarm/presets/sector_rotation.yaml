@@ -3,7 +3,7 @@ description: 行业轮动研究 — 行业因子 + 动量 + 风格切换
 agents:
   - id: researcher
     prompt_file: .prompts/researcher.md
-    tools: [read_file, compute_factor]
+    tools: [read, compute_factor]
   - id: factor_analyst
     prompt_file: .prompts/factor_analyst.md
     input_from: [researcher]
@@ -11,7 +11,7 @@ agents:
   - id: strategist
     prompt_file: .prompts/strategist.md
     input_from: [factor_analyst]
-    tools: [write_file, run_backtest]
+    tools: [write, run_backtest]
   - id: portfolio_construction
     prompt_file: .prompts/portfolio_construction.md
     input_from: [strategist]
@@ -23,7 +23,7 @@ agents:
   - id: orchestrator
     prompt_file: .prompts/orchestrator.md
     input_from: [attribution_analyst]
-    tools: [read_file]
+    tools: [read]
 dag:
   researcher: []
   factor_analyst: [researcher]

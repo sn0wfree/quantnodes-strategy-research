@@ -17,7 +17,7 @@ agents:
   # ── Layer 0: 研究假设 ──
   - id: researcher
     prompt_file: .prompts/researcher.md
-    tools: [read_file, list_history, factor_analysis, web_search, read_url, get_market_data, search_symbol]
+    tools: [read, list_history, factor_analysis, websearch, webfetch, get_market_data, search_symbol]
     input_from: []
     evidence_criterion: 0
     timeout: 180
@@ -26,7 +26,7 @@ agents:
   # ── Layer 1: 数据质量 ──
   - id: data_quality
     prompt_file: .prompts/data_quality.md
-    tools: [read_file, web_search, read_url, get_market_data, list_data_sources]
+    tools: [read, websearch, webfetch, get_market_data, list_data_sources]
     input_from: [researcher]
     evidence_criterion: 1
     timeout: 120
@@ -35,7 +35,7 @@ agents:
   # ── Layer 2: 因子分析 ──
   - id: factor_analyst
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, compute_factor, factor_analysis, get_market_data]
+    tools: [read, compute_factor, factor_analysis, get_market_data]
     input_from: [researcher, data_quality]
     evidence_criterion: 1
     timeout: 180
@@ -44,7 +44,7 @@ agents:
   # ── Layer 3: 策略集成 ──
   - id: strategist
     prompt_file: .prompts/strategist.md
-    tools: [read_file, write_file, run_backtest, git_diff, web_search, read_url, get_market_data]
+    tools: [read, write, run_backtest, git_diff, websearch, webfetch, get_market_data]
     input_from: [researcher, data_quality, factor_analyst]
     evidence_criterion: 2
     timeout: 240
@@ -53,7 +53,7 @@ agents:
   # ── Layer 4: 投资组合构建 ──
   - id: portfolio_construction
     prompt_file: .prompts/portfolio_construction.md
-    tools: [read_file, get_market_data]
+    tools: [read, get_market_data]
     input_from: [strategist]
     evidence_criterion: 2
     timeout: 120
@@ -73,7 +73,7 @@ agents:
   # ── Layer 6: 风险控制 ──
   - id: risk_controller
     prompt_file: .prompts/risk_controller.md
-    tools: [read_file, factor_analysis, get_market_data]
+    tools: [read, factor_analysis, get_market_data]
     input_from: [backtest]
     evidence_criterion: 3
     timeout: 180
@@ -82,7 +82,7 @@ agents:
   # ── Layer 7: 归因分析 ──
   - id: attribution_analyst
     prompt_file: .prompts/attribution_analyst.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
     input_from: [backtest, risk_controller]
     evidence_criterion: 3
     timeout: 180
@@ -91,7 +91,7 @@ agents:
   # ── Layer 8: 过拟合检测 ──
   - id: anti_overfit_analyst
     prompt_file: .prompts/anti_overfit_analyst.md
-    tools: [read_file, list_history, factor_analysis]
+    tools: [read, list_history, factor_analysis]
     input_from: [backtest, risk_controller, attribution_analyst]
     evidence_criterion: 4
     timeout: 180
@@ -100,7 +100,7 @@ agents:
   # ── Layer 9: 回测诊断 ──
   - id: backtest_diagnostics
     prompt_file: .prompts/backtest_diagnostics.md
-    tools: [read_file, run_backtest, git_diff]
+    tools: [read, run_backtest, git_diff]
     input_from: [anti_overfit_analyst]
     evidence_criterion: 4
     timeout: 120

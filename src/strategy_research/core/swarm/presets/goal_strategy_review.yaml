@@ -14,7 +14,7 @@ goal:
 agents:
   - id: pnl_attribution
     prompt_file: .prompts/attribution_analyst.md
-    tools: [analysis, run_backtest]
+    tools: [factor_analysis, run_backtest]
     input_from: []
     evidence_criterion: 0
     timeout: 180
@@ -22,7 +22,7 @@ agents:
 
   - id: icarus_review
     prompt_file: .prompts/icarus_review.md
-    tools: [analysis]
+    tools: [factor_analysis]
     input_from: [pnl_attribution]
     evidence_criterion: 1
     timeout: 120
@@ -38,7 +38,7 @@ agents:
 
   - id: benchmark_compare
     prompt_file: .prompts/benchmark_compare.md
-    tools: [analysis, run_backtest]
+    tools: [factor_analysis, run_backtest]
     input_from: [pnl_attribution, factor_decay]
     evidence_criterion: 3
     timeout: 180
@@ -46,7 +46,7 @@ agents:
 
   - id: summary_writer
     prompt_file: .prompts/report_writer.md
-    tools: [markdown]
+    tools: [write]
     input_from: [icarus_review, factor_decay, benchmark_compare]
     evidence_criterion: 4
     timeout: 120

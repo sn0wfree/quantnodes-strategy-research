@@ -13,7 +13,7 @@ goal:
 agents:
   - id: portfolio_construction
     prompt_file: .prompts/portfolio_construction.md
-    tools: [analysis, run_backtest]
+    tools: [factor_analysis, run_backtest]
     input_from: []
     evidence_criterion: 0
     timeout: 300
@@ -21,7 +21,7 @@ agents:
 
   - id: concentration_check
     prompt_file: .prompts/concentration_check.md
-    tools: [analysis]
+    tools: [factor_analysis]
     input_from: [portfolio_construction]
     evidence_criterion: 1
     timeout: 120
@@ -29,7 +29,7 @@ agents:
 
   - id: risk_metrics
     prompt_file: .prompts/risk_controller.md
-    tools: [analysis, run_backtest]
+    tools: [factor_analysis, run_backtest]
     input_from: [portfolio_construction, concentration_check]
     evidence_criterion: 2
     timeout: 180
@@ -37,7 +37,7 @@ agents:
 
   - id: report_writer
     prompt_file: .prompts/report_writer.md
-    tools: [markdown]
+    tools: [write]
     input_from: [concentration_check, risk_metrics]
     evidence_criterion: 3
     timeout: 120

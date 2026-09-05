@@ -13,7 +13,7 @@ goal:
 agents:
   - id: position_auditor
     prompt_file: .prompts/position_auditor.md
-    tools: [read_file, analysis]
+    tools: [read, factor_analysis]
     input_from: []
     evidence_criterion: 0
     timeout: 120
@@ -21,7 +21,7 @@ agents:
 
   - id: risk_controller
     prompt_file: .prompts/risk_controller.md
-    tools: [analysis, run_backtest]
+    tools: [factor_analysis, run_backtest]
     input_from: [position_auditor]
     evidence_criterion: 1
     timeout: 180
@@ -29,7 +29,7 @@ agents:
 
   - id: stress_tester
     prompt_file: .prompts/stress_tester.md
-    tools: [analysis, run_backtest]
+    tools: [factor_analysis, run_backtest]
     input_from: [position_auditor, risk_controller]
     evidence_criterion: 2
     timeout: 300
@@ -37,7 +37,7 @@ agents:
 
   - id: report_writer
     prompt_file: .prompts/report_writer.md
-    tools: [markdown]
+    tools: [write]
     input_from: [risk_controller, stress_tester]
     evidence_criterion: 3
     timeout: 120

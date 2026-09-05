@@ -307,40 +307,69 @@ class SwarmRuntime:
         - "python_executor": registered Python function
         - "evaluator": decide() function for keep/discard
         """
+        from ..agent.dag_config import AgentNodeConfig
         from ..agent.executor import AgentExecutor
         from ..agent.plugin import AgentPlugin
-        from ..agent.dag_config import AgentNodeConfig
         from ..agent.registry import get_default_registry
 
         t0 = time.perf_counter()
         ctx = agent_call.context if hasattr(agent_call, "context") else {}
         executor_type = ctx.get("executor_type", "llm")
         plugin_id = ctx.get("agent_name", agent_call.agent_name)
+        prompt_file = (getattr(agent_call, "prompt", "") or "").strip()
 
-        # Build plugin from the global registry (or fall back to a
-        # minimal stub for unknown agent names).
+        # Build plugin from the global registry. Preset agents commonly
+        # carry a custom id with a role prompt_file (e.g. id="allocator",
+        # prompt=".prompts/portfolio_construction.md"), so fall back to
+        # resolving by the prompt-file stem before giving up.
         reg = get_default_registry()
         plugin = reg.get(plugin_id)
+        if plugin is None and prompt_file:
+            stem = Path(prompt_file).stem
+            plugin = reg.get(stem)
+            if plugin is not None:
+                plugin_id = stem
+
         if plugin is None:
+            if ctx.get("allow_stub"):
+                # Explicit opt-in for structural tests: a successful
+                # no-op with no LLM call. Production presets never set
+                # this — an unresolvable agent must fail the run instead
+                # of faking SUCCESS (the old unconditional stub let a
+                # typo'd agent id "complete" silently, and goal hooks
+                # collected "[stub] ..." text as real evidence).
+                return AgentResult(
+                    agent_id=agent_call.agent_name,
+                    status=AgentStatus.SUCCESS,
+                    output=f"[stub] {agent_call.agent_name}: completed",
+                    elapsed_s=round(time.perf_counter() - t0, 2),
+                )
+            if not prompt_file:
+                return AgentResult(
+                    agent_id=agent_call.agent_name,
+                    status=AgentStatus.ERROR,
+                    error=(
+                        f"agent {agent_call.agent_name!r} is not registered "
+                        f"and has no prompt_file; register it in the agent "
+                        f"registry or set prompt_file in the preset"
+                    ),
+                    elapsed_s=round(time.perf_counter() - t0, 2),
+                )
+            # Unregistered but carries a prompt file: execute via an
+            # ad-hoc plugin keyed by the prompt stem — the executor's
+            # PromptBuilderFactory auto-discovers templates/.prompts/
+            # <stem>.md, so custom roles run real agents. A missing
+            # prompt file surfaces as an honest executor error.
+            stem = Path(prompt_file).stem or agent_call.agent_name
+            plugin_id = stem
             plugin = AgentPlugin(
-                id=plugin_id, name=plugin_id, category="execution",
-                description=plugin_id,
-                prompt_file=f".prompts/{plugin_id}.md",
+                id=stem, name=stem, category="execution",
+                description=stem,
+                prompt_file=prompt_file,
                 tools=tuple(ctx.get("tools") or []),
                 executor_type=executor_type,
                 python_function=ctx.get("python_function"),
                 default_timeout=ctx.get("timeout", 180),
-            )
-
-        # Unknown agents without a valid prompt → stub result
-        # (preserves pre-unification SwarmRuntime behaviour for
-        # tests and ad-hoc agent names).
-        if not plugin.prompt_file or plugin_id not in reg:
-            return AgentResult(
-                agent_id=agent_call.agent_name,
-                status=AgentStatus.SUCCESS,
-                output=f"[stub] {agent_call.agent_name}: completed",
-                elapsed_s=round(time.perf_counter() - t0, 2),
             )
 
         node = AgentNodeConfig(
@@ -522,9 +551,12 @@ class SwarmRuntime:
                     )
 
                 except Exception as exc:  # noqa: BLE001
+                    # AgentStatus has no FAILED member — an exception in
+                    # the handler used to crash with AttributeError
+                    # instead of recording the agent failure.
                     result.agent_results[agent_id] = AgentResult(
                         agent_id=agent_id,
-                        status=AgentStatus.FAILED,
+                        status=AgentStatus.ERROR,
                         error=str(exc),
                     )
                     self._emit(

@@ -3,19 +3,19 @@ description: 股权研究团队 — 宏观→行业→个股→编辑 顺序研�
 agents:
   - id: macro_analyst
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: sector_analyst
     prompt_file: .prompts/strategist.md
     input_from: [macro_analyst]
-    tools: [read_file, compute_factor]
+    tools: [read, compute_factor]
   - id: stock_analyst
     prompt_file: .prompts/factor_analyst.md
     input_from: [macro_analyst, sector_analyst]
-    tools: [read_file, compute_factor, factor_analysis]
+    tools: [read, compute_factor, factor_analysis]
   - id: research_editor
     prompt_file: .prompts/portfolio_construction.md
     input_from: [stock_analyst]
-    tools: [read_file]
+    tools: [read]
 dag:
   macro_analyst: []
   sector_analyst: [macro_analyst]

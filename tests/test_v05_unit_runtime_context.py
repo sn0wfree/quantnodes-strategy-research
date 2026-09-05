@@ -249,7 +249,7 @@ class TestSwarmRuntimeExecute:
         rt = SwarmRuntime()
         preset = SwarmPreset(
             name="test",
-            agents=[AgentCall(agent_name="a", prompt=".prompts/researcher.md")],
+            agents=[AgentCall(agent_name="a", prompt=".prompts/researcher.md", context={"allow_stub": True})],
             dag={"a": []},
         )
         result = rt.execute(preset, tmp_path, "test task")
@@ -263,7 +263,7 @@ class TestSwarmRuntimeExecute:
         hook.should_stop.return_value = False
         preset = SwarmPreset(
             name="test",
-            agents=[AgentCall(agent_name="a", prompt=".prompts/researcher.md")],
+            agents=[AgentCall(agent_name="a", prompt=".prompts/researcher.md", context={"allow_stub": True})],
             dag={"a": []},
         )
         rt.execute(preset, tmp_path, 'task', hooks=[hook])
@@ -278,8 +278,8 @@ class TestSwarmRuntimeExecute:
         preset = SwarmPreset(
             name="test",
             agents=[
-                AgentCall(agent_name="a", prompt=".prompts/researcher.md"),
-                AgentCall(agent_name="b", prompt=".prompts/researcher.md"),
+                AgentCall(agent_name="a", prompt=".prompts/researcher.md", context={"allow_stub": True}),
+                AgentCall(agent_name="b", prompt=".prompts/researcher.md", context={"allow_stub": True}),
             ],
             dag={"a": [], "b": ["a"]},
         )
@@ -292,8 +292,8 @@ class TestSwarmRuntimeExecute:
         preset = SwarmPreset(
             name="test",
             agents=[
-                AgentCall(agent_name="a", prompt=".prompts/researcher.md"),
-                AgentCall(agent_name="b", prompt=".prompts/researcher.md"),
+                AgentCall(agent_name="a", prompt=".prompts/researcher.md", context={"allow_stub": True}),
+                AgentCall(agent_name="b", prompt=".prompts/researcher.md", context={"allow_stub": True}),
             ],
             dag={"a": [], "b": ["a"]},
         )

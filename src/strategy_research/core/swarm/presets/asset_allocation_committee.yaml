@@ -3,17 +3,17 @@ description: 资产配置委员会 — 股票/债券/商品三路并行 → 配�
 agents:
   - id: equity_specialist
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: bond_specialist
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: commodity_specialist
     prompt_file: .prompts/strategist.md
-    tools: [read_file]
+    tools: [read]
   - id: allocator
     prompt_file: .prompts/portfolio_construction.md
     input_from: [equity_specialist, bond_specialist, commodity_specialist]
-    tools: [read_file, write_file, run_backtest]
+    tools: [read, write, run_backtest]
 dag:
   equity_specialist: []
   bond_specialist: []

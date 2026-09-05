@@ -3,17 +3,17 @@ description: 基本面研究团队 — 财务/估值/质量三路并行 → 编�
 agents:
   - id: financial_analyst
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: valuation_analyst
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: quality_analyst
     prompt_file: .prompts/strategist.md
-    tools: [read_file]
+    tools: [read]
   - id: editor
     prompt_file: .prompts/portfolio_construction.md
     input_from: [financial_analyst, valuation_analyst, quality_analyst]
-    tools: [read_file]
+    tools: [read]
 dag:
   financial_analyst: []
   valuation_analyst: []

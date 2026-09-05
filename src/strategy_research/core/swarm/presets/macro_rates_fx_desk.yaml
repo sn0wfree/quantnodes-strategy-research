@@ -3,17 +3,17 @@ description: 宏观利率外汇台 — 利率/外汇/商品三路并行 → 宏�
 agents:
   - id: rates_analyst
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: fx_analyst
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: commodity_analyst
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
   - id: macro_pm
     prompt_file: .prompts/portfolio_construction.md
     input_from: [rates_analyst, fx_analyst, commodity_analyst]
-    tools: [read_file, write_file, run_backtest]
+    tools: [read, write, run_backtest]
 dag:
   rates_analyst: []
   fx_analyst: []

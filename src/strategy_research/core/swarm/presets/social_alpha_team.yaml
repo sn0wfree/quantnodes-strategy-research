@@ -3,17 +3,17 @@ description: 社交阿尔法团队 — Twitter/Telegram/Reddit 三路并行 → 
 agents:
   - id: twitter_scanner
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: telegram_scanner
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
   - id: reddit_scanner
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file]
+    tools: [read]
   - id: alpha_synthesizer
     prompt_file: .prompts/strategist.md
     input_from: [twitter_scanner, telegram_scanner, reddit_scanner]
-    tools: [read_file, write_file]
+    tools: [read, write]
 dag:
   twitter_scanner: []
   telegram_scanner: []

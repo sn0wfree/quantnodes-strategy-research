@@ -3,17 +3,17 @@ description: 宏观战略论坛 — 全球/国内/政策三路并行 → 首席�
 agents:
   - id: global_macro
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: domestic_macro
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: policy_analyst
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
   - id: chief_strategist
     prompt_file: .prompts/portfolio_construction.md
     input_from: [global_macro, domestic_macro, policy_analyst]
-    tools: [read_file]
+    tools: [read]
 dag:
   global_macro: []
   domestic_macro: []

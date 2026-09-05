@@ -3,17 +3,17 @@ description: 可转债团队 — 债底/股票期权性/嵌入期权价值 三�
 agents:
   - id: bond_floor
     prompt_file: .prompts/researcher.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: equity_option
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, options_pricing]
+    tools: [read, options_pricing]
   - id: embedded_option
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
   - id: strategist
     prompt_file: .prompts/strategist.md
     input_from: [bond_floor, equity_option, embedded_option]
-    tools: [read_file, write_file, run_backtest, options_pricing]
+    tools: [read, write, run_backtest, options_pricing]
 dag:
   bond_floor: []
   equity_option: []

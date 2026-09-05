@@ -3,7 +3,7 @@ description: 加密货币研究实验室 — 链上数据 + 技术分析 + 风�
 agents:
   - id: researcher
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: factor_analyst
     prompt_file: .prompts/factor_analyst.md
     input_from: [researcher]
@@ -11,7 +11,7 @@ agents:
   - id: strategist
     prompt_file: .prompts/strategist.md
     input_from: [factor_analyst]
-    tools: [write_file, run_backtest]
+    tools: [write, run_backtest]
   - id: risk_controller
     prompt_file: .prompts/risk_controller.md
     input_from: [strategist]

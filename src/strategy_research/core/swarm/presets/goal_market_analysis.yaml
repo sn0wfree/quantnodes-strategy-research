@@ -12,7 +12,7 @@ goal:
 agents:
   - id: market_scanner
     prompt_file: .prompts/market_scanner.md
-    tools: [read_file, search_web]
+    tools: [read, websearch]
     input_from: []
     evidence_criterion: 0
     timeout: 180
@@ -20,7 +20,7 @@ agents:
 
   - id: regime_classifier
     prompt_file: .prompts/regime_classifier.md
-    tools: [analysis]
+    tools: [factor_analysis]
     input_from: [market_scanner]
     evidence_criterion: 1
     timeout: 120
@@ -28,7 +28,7 @@ agents:
 
   - id: report_writer
     prompt_file: .prompts/report_writer.md
-    tools: [markdown]
+    tools: [write]
     input_from: [market_scanner, regime_classifier]
     evidence_criterion: 2
     timeout: 120

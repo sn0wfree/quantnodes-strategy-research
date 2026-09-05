@@ -3,18 +3,18 @@ description: 统计套利台 — 配对扫描/微观结构并行 → 套利策�
 agents:
   - id: pair_scan
     prompt_file: .prompts/researcher.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: microstructure
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
   - id: arbitrage_strategist
     prompt_file: .prompts/strategist.md
     input_from: [pair_scan, microstructure]
-    tools: [read_file, write_file, run_backtest]
+    tools: [read, write, run_backtest]
   - id: risk_reviewer
     prompt_file: .prompts/risk_controller.md
     input_from: [arbitrage_strategist]
-    tools: [read_file, list_history]
+    tools: [read, list_history]
 dag:
   pair_scan: []
   microstructure: []

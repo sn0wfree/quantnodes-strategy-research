@@ -3,23 +3,23 @@ description: 技术分析面板 — 五方法(经典/一目/谐波/波浪/SMC)�
 agents:
   - id: classic_ta
     prompt_file: .prompts/researcher.md
-    tools: [read_file, pattern_recognition]
+    tools: [read, pattern_recognition]
   - id: ichimoku
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file]
+    tools: [read]
   - id: harmonic
     prompt_file: .prompts/strategist.md
-    tools: [read_file]
+    tools: [read]
   - id: wave
     prompt_file: .prompts/data_quality.md
-    tools: [read_file]
+    tools: [read]
   - id: smc
     prompt_file: .prompts/portfolio_construction.md
-    tools: [read_file]
+    tools: [read]
   - id: signal_aggregator
     prompt_file: .prompts/strategist.md
     input_from: [classic_ta, ichimoku, harmonic, wave, smc]
-    tools: [read_file, write_file, run_backtest]
+    tools: [read, write, run_backtest]
 dag:
   classic_ta: []
   ichimoku: []

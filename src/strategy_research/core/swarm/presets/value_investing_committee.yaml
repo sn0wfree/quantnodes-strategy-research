@@ -3,20 +3,20 @@ description: 价值投资委员会 — Buffett/Munger/Duan/LiLu 四主并行 →
 agents:
   - id: buffett
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: munger
     prompt_file: .prompts/researcher.md
-    tools: [read_file]
+    tools: [read]
   - id: duan_yongping
     prompt_file: .prompts/strategist.md
-    tools: [read_file]
+    tools: [read]
   - id: li_lu
     prompt_file: .prompts/factor_analyst.md
-    tools: [read_file, factor_analysis]
+    tools: [read, factor_analysis]
   - id: chair
     prompt_file: .prompts/portfolio_construction.md
     input_from: [buffett, munger, duan_yongping, li_lu]
-    tools: [read_file]
+    tools: [read]
 dag:
   buffett: []
   munger: []
