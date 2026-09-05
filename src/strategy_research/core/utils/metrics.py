@@ -26,14 +26,20 @@ def _ann_vol(nav: pd.Series, freq: int = 252) -> float:
     return float(rets.std() * np.sqrt(freq)) if not rets.empty else 0.0
 
 
-def _sharpe(nav: pd.Series, freq: int = 252) -> float:
+def _sharpe(nav: pd.Series, freq: int = 252, risk_free_rate: float = 0.0) -> float:
+    """年化 Sharpe = (ann_return − rf) / ann_vol。
+
+    ``risk_free_rate`` 为年化无风险利率(0.05 = 5%)。默认 0.0 保持
+    向后兼容,但显式传入才避免把无风险收益错记为策略超额收益。
+    """
     vol = _ann_vol(nav, freq)
     if vol == 0:
         return 0.0
-    return _ann_return(nav, freq) / vol
+    return (_ann_return(nav, freq) - risk_free_rate) / vol
 
 
-def _sortino(nav: pd.Series, freq: int = 252) -> float:
+def _sortino(nav: pd.Series, freq: int = 252, risk_free_rate: float = 0.0) -> float:
+    """年化 Sortino = (ann_return − rf) / 下行波动。"""
     if nav.empty:
         return 0.0
     rets = nav.pct_change(fill_method=None).dropna()
@@ -43,7 +49,7 @@ def _sortino(nav: pd.Series, freq: int = 252) -> float:
     dd = float(downside.std() * np.sqrt(freq)) if not downside.empty else 0.0
     if dd == 0:
         return 0.0
-    return _ann_return(nav, freq) / dd
+    return (_ann_return(nav, freq) - risk_free_rate) / dd
 
 
 def _max_drawdown(nav: pd.Series) -> tuple[float, int]:
@@ -132,11 +138,19 @@ def _profit_loss_ratio(nav: pd.Series) -> float:
     return float(wins.mean() / abs(losses.mean()))
 
 
+def _resample_monthly(nav: pd.Series) -> pd.Series:
+    """按月取最后值。pandas ≥2.2 用 'ME',旧版用 'M'(别名已被移除)。"""
+    try:
+        return nav.resample("ME").last()
+    except ValueError:
+        return nav.resample("M").last()
+
+
 def _max_monthly_loss(nav: pd.Series) -> float:
     """最大月度损失 (worst negative monthly return)."""
     if nav.empty:
         return 0.0
-    monthly = nav.resample("M").last().pct_change(fill_method=None).dropna()
+    monthly = _resample_monthly(nav).pct_change(fill_method=None).dropna()
     if monthly.empty:
         return 0.0
     losses = monthly[monthly < 0]
@@ -148,7 +162,7 @@ def _max_monthly_loss(nav: pd.Series) -> float:
 def _profit_months_ratio(nav: pd.Series) -> float:
     if nav.empty:
         return 0.0
-    monthly = nav.resample("M").last().pct_change(fill_method=None).dropna()
+    monthly = _resample_monthly(nav).pct_change(fill_method=None).dropna()
     if monthly.empty:
         return 0.0
     return float((monthly > 0).mean())
@@ -184,8 +198,13 @@ def extended_metrics(
     benchmark_nav: pd.Series | None = None,
     rebalance_dates: list | None = None,
     freq: int = 252,
+    risk_free_rate: float = 0.0,
 ) -> dict:
-    """17 个业绩指标."""
+    """17 个业绩指标。
+
+    ``risk_free_rate``: 年化无风险利率,进入 sharpe/sortino 的超额收益
+    分子(默认 0.0 = 与历史行为一致)。
+    """
     if nav.empty or len(nav) < 2:
         return {}
 
@@ -200,10 +219,10 @@ def extended_metrics(
     return {
         "ann_return": _ann_return(nav, freq),
         "ann_vol": _ann_vol(nav, freq),
-        "sharpe": _sharpe(nav, freq),
+        "sharpe": _sharpe(nav, freq, risk_free_rate),
         "max_drawdown": md,
         "calmar": _calmar(nav, freq),
-        "sortino": _sortino(nav, freq),
+        "sortino": _sortino(nav, freq, risk_free_rate),
         "downside_dev": _downside_dev(nav, freq),
         "info_ratio": _info_ratio(nav, benchmark_nav, freq),
         "win_rate": _win_rate(nav),
@@ -215,6 +234,7 @@ def extended_metrics(
         "ann_turnover": 0.0,  # 由引擎根据 weights_history 覆盖填充
         "max_monthly_loss": _max_monthly_loss(nav),
         "profit_months_ratio": _profit_months_ratio(nav),
+        "risk_free_rate": float(risk_free_rate),
     }
 
 

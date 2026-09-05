@@ -85,6 +85,7 @@ class YFinanceLoader:
             end=end_date,
             interval=yf_interval,
             progress=False,
+            auto_adjust=True,  # 显式前复权: 不同版本 yfinance 默认值相反
         )
 
         if df is None or df.empty:

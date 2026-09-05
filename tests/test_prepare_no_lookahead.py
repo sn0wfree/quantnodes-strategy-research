@@ -65,7 +65,8 @@ def test_spike_on_rebalance_day_is_not_earned() -> None:
         "调仓日收益被计入新权重:1 根 K 线前视偏差回归"
     )
     assert metrics["calmar"] == 0.0
-    assert metrics["trades"] == 3  # 调仓事件 i=20/40/60(仅首次非零换手)
+    # trades = 实际变动持仓数(仅首次建仓 1 笔),不是调仓事件数(i=20/40/60)
+    assert metrics["trades"] == 1
 
 
 def test_spike_after_rebalance_day_is_earned() -> None:

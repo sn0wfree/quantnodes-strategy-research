@@ -117,11 +117,19 @@ class TestDecide(unittest.TestCase):
         self.assertFalse(result.llm_passed)
 
     def test_stagnation_override(self) -> None:
+        """stagnation = 停机信号,不是质量放行。
+
+        回归:旧逻辑强制 accept=True "打破循环",把不合格策略盖 keep 章。
+        循环退出由 stagnation_triggered 驱动(runner/CLI 都只看这个标志),
+        验收结论本身保持诚实:连续 N 次拒绝 → 拒绝。
+        """
         metrics = {"calmar": 0.0, "sharpe": 0.0, "max_dd": -0.5, "trades": 1}
         cfg = AcceptanceConfig(stagnation_patience=5)
         result = decide(metrics, stagnation_count=5, cfg=cfg)
-        self.assertTrue(result.accept)
+        self.assertFalse(result.accept)
+        self.assertFalse(result.hard_passed)
         self.assertTrue(result.stagnation_triggered)
+        self.assertIn("WITHOUT acceptance", result.reason)
 
     def test_stagnation_below_patience(self) -> None:
         metrics = {"calmar": 0.0, "sharpe": 0.0, "max_dd": -0.5, "trades": 1}

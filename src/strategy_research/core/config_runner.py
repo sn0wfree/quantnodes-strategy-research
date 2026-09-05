@@ -86,7 +86,12 @@ def create_engine(cfg: dict) -> StrategyEngine:
             cooldown_weeks=sl_cfg.get("cooldown_weeks", 5),
         )
 
-    return StrategyEngine(vol_targeting=vt, trend_filter=tf, stop_loss=sl)
+    # backtest.risk_free_rate: 年化无风险利率,进 sharpe/sortino 超额分子
+    bt_cfg = cfg.get("backtest", {})
+    return StrategyEngine(
+        vol_targeting=vt, trend_filter=tf, stop_loss=sl,
+        risk_free_rate=float(bt_cfg.get("risk_free_rate", 0.0) or 0.0),
+    )
 
 
 def create_backtest_config(cfg: dict) -> BacktestConfig:

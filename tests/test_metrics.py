@@ -330,7 +330,7 @@ def test_avg_dd_monotonic_up_zero():
 # ============================================================
 
 def test_extended_metrics_returns_dict(nav):
-    """返回 dict 应有所有 17 个键 (含 ann_turnover 占位)."""
+    """返回 dict 应有所有指标键 (含 ann_turnover 占位 + risk_free_rate 回传)."""
     result = metrics.extended_metrics(nav)
     assert isinstance(result, dict)
     expected_keys = {
@@ -339,6 +339,7 @@ def test_extended_metrics_returns_dict(nav):
         "win_rate", "profit_loss_ratio", "max_dd_duration",
         "calmar_avg_dd", "var_95", "cvar_95", "ann_turnover",
         "max_monthly_loss", "profit_months_ratio",
+        "risk_free_rate",
     }
     assert set(result.keys()) == expected_keys
 

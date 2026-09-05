@@ -184,8 +184,10 @@ def decide(
             Pass ``None`` to skip LLM layer entirely.
         cfg: AcceptanceConfig; defaults to built-in.
         stagnation_count: How many consecutive rejects preceded this one.
-            When ``>= cfg.stagnation_patience``, accept=True is forced and
-            ``stagnation_triggered=True`` so autoresearch knows to stop.
+            When ``>= cfg.stagnation_patience``, ``stagnation_triggered=True``
+            is returned (driving autoresearch to stop) and the verdict is
+            reject — stagnation breaks the loop, it never blesses the
+            strategy.
 
     Returns:
         ``AcceptanceDecision`` with full breakdown. The pipeline can log
@@ -200,12 +202,22 @@ def decide(
     hard_passed = result.passed
     hard_detail = dict(result.detail)
 
-    # Stagnation override (always wins)
+    # Stagnation override (always wins — but as a STOP, not a pass).
+    # Historical behaviour forced accept=True here "to break the loop",
+    # which blessed an unqualified strategy with a keep verdict. The
+    # loop-breaking signal is ``stagnation_triggered`` (both the study
+    # runner and the CLI autoresearch loop check it directly); the
+    # acceptance verdict itself stays honest: N consecutive rejects is
+    # evidence the strategy is NOT good enough, never a quality pass.
     if stagnation_count >= cfg.stagnation_patience and stagnation_count > 0:
         return AcceptanceDecision(
-            accept=True,
-            reason=f"stagnation: {stagnation_count} consecutive rejects >= "
-                   f"patience={cfg.stagnation_patience}; forced accept to break loop",
+            accept=False,
+            reason=(
+                f"stagnation: {stagnation_count} consecutive rejects >= "
+                f"patience={cfg.stagnation_patience}; autoresearch stops "
+                f"WITHOUT acceptance (stagnation is a stop signal, not a "
+                f"quality pass)"
+            ),
             hard_passed=hard_passed,
             llm_passed=None,
             hard_detail=hard_detail,

@@ -74,10 +74,13 @@ class StrategyEngine:
         vol_targeting: VolTargetingConfig | None = None,
         trend_filter: TrendFilterConfig | None = None,
         stop_loss: StopLossConfig | None = None,
+        risk_free_rate: float = 0.0,
     ):
         self.vol_targeting = vol_targeting
         self.trend_filter = trend_filter
         self.stop_loss = stop_loss
+        # 年化无风险利率: sharpe/sortino 超额收益分子 (0.05 = 5%)
+        self.risk_free_rate = float(risk_free_rate)
         self._has_risk_callback = None
 
     def run(
@@ -144,7 +147,9 @@ class StrategyEngine:
                     nav[i] = 1.0 if i == 0 else nav[i - 1]
 
         nav_s = pd.Series(nav, index=dates, name="nav")
-        metrics = extended_metrics(nav_s)
+        metrics = extended_metrics(
+            nav_s, risk_free_rate=self.risk_free_rate,
+        )
         metrics["ann_turnover"] = annual_turnover_from_weights(w_hist, dates)
 
         return BacktestResult(

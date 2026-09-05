@@ -86,7 +86,11 @@ class TushareLoader:
         if interval != "1D":
             return self._fetch_minute(api, code, start, end, interval)
 
-        # 日线: 根据代码类型选择 API
+        # 日线: 根据代码类型选择 API。个股用 pro_bar 前复权(qfq):
+        # api.daily 返回不复权价,除权除息日会出现 -10% 级假跳空,直接
+        # 毒化动量/反转类因子。fund/index/hk 接口无复权参数(指数本身
+        # 不复权),保持原样。pro_bar 失败(积分不足等)→ 回退不复权,
+        # 与历史行为一致但打日志留痕。
         if is_etf(code):
             df = api.fund_daily(ts_code=code, start_date=start, end_date=end)
         elif is_index(code):
@@ -94,7 +98,16 @@ class TushareLoader:
         elif is_hk(code):
             df = api.hk_daily(ts_code=code, start_date=start, end_date=end)
         else:
-            df = api.daily(ts_code=code, start_date=start, end_date=end)
+            df = None
+            try:
+                df = api.pro_bar(
+                    ts_code=code, adj="qfq",
+                    start_date=start, end_date=end,
+                )
+            except Exception as exc:
+                logger.warning("tushare pro_bar(qfq) 失败 %s: %s; 回退不复权 daily", code, exc)
+            if df is None or df.empty:
+                df = api.daily(ts_code=code, start_date=start, end_date=end)
 
         if df is None or df.empty:
             return None
