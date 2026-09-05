@@ -103,6 +103,80 @@ def parse_run_log(log_path: Path) -> dict:
 
 
 # ============================================================
+# 结构化指标契约
+# ============================================================
+#
+# 信任模型:LLM 生成的 strategy.py 可以打印任意数字,自由文本(run.log)
+# 不能作为验收指标的唯一来源。契约线 = 框架拥有的 templates/prepare.py
+# (Agent 不应修改此文件)在子进程内把 evaluate() 结果写到
+# <SR_RUN_DIR>/metrics_raw.json;框架以该文件为第一来源,run.log 正则
+# 仅用于旧策略降级 + 同源一致性交叉校验。残余风险(策略代码绕过
+# prepare 自写契约文件)由"修改 prepare.py 即违规"的约定与代码审计兜底,
+# 与旧纯正则方案相比至少消除了格式漂移和打印即真相两个失效模式。
+
+def _reject_json_constant(name: str) -> float:
+    """json parse_constant 钩子:Infinity/NaN 一律拒绝。"""
+    raise ValueError(f"non-finite JSON constant: {name}")
+
+
+def read_metrics_contract(path: Path) -> Optional[dict]:
+    """读取策略子进程写出的结构化指标契约文件。
+
+    协议: ``{"protocol": 1, "metrics": {name: number}}``。
+    文件不存在(旧策略/手工运行)→ None。协议不符、非数值键、非有限值
+    → None 并告警(调用方走 run.log 降级路径,同时留痕)。
+    """
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_reject_json_constant,
+        )
+        if not isinstance(data, dict) or data.get("protocol") != 1:
+            logger.warning("metrics contract %s: unknown protocol", path)
+            return None
+        raw = data.get("metrics")
+        if not isinstance(raw, dict):
+            logger.warning("metrics contract %s: missing metrics dict", path)
+            return None
+        out: dict[str, float] = {}
+        for k, v in raw.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                logger.warning("metrics contract %s: non-numeric key %r", path, k)
+                return None
+            out[str(k)] = float(v)
+        return out
+    except (ValueError, OSError) as exc:
+        logger.warning("metrics contract %s unreadable: %s", path, exc)
+        return None
+
+
+# run.log 指标打印精度为 %.6f → 相对容差 5e-6(同源数据应精确一致)
+_CONTRACT_LOG_TOLERANCE = 5e-6
+
+
+def _cross_check_contract(contract: dict, scraped: dict) -> list[str]:
+    """契约值 vs run.log 打印值交叉校验(两者同源,应一致)。
+
+    Returns:
+        不一致项列表(空 = 通过)。
+    """
+    problems: list[str] = []
+    for key, log_v in scraped.items():
+        if key not in contract:
+            continue
+        try:
+            cv, lv = float(contract[key]), float(log_v)
+        except (TypeError, ValueError):
+            continue
+        tol = _CONTRACT_LOG_TOLERANCE * max(1.0, abs(cv), abs(lv))
+        if abs(cv - lv) > tol:
+            problems.append(f"{key}: contract={cv:.6g} run.log={lv:.6g}")
+    return problems
+
+
+# ============================================================
 # Run 目录管理
 # ============================================================
 
@@ -246,6 +320,7 @@ def run_strategy(
     strategy_dir: Path,
     timeout: int = 300,
     log_path: Path | None = None,
+    env_overrides: Optional[dict] = None,
 ) -> tuple[bool, str]:
     """运行策略脚本（后台化：日志停滞判定，无墙钟超时）。
 
@@ -253,6 +328,9 @@ def run_strategy(
     ``log_path`` 输出（run.log 流式追加），就跑多久都行；进程存活但日志
     停滞超过 timeout → 判定卡死 → 整组 kill。``log_path`` 缺省时落到
     ``strategy_dir/run.log``。
+
+    ``env_overrides`` 在受限环境白名单之上追加键（如 SR_RUN_DIR 指标
+    契约路径——框架控制的值，非机密）。
     """
     strategy_file = strategy_dir / "strategy.py"
     if not strategy_file.exists():
@@ -265,11 +343,14 @@ def run_strategy(
 
     try:
         import sys
+        env = _build_restricted_env()
+        if env_overrides:
+            env.update(env_overrides)
         proc = run_bg(
             [sys.executable, str(strategy_file)],
             log_path,
             cwd=str(strategy_dir),
-            env=_build_restricted_env(),
+            env=env,
         )
         success, output = wait_bg(proc, log_path, stall_timeout=float(timeout))
         if not success:
@@ -328,7 +409,13 @@ def run_backtest_script(
 
     # Backgrounded: strategy stdout/stderr streams straight into
     # run.log (log-progress liveness, no wall-clock ceiling).
-    success, output = run_strategy(strategy_dir, timeout, log_path=run_dir / "run.log")
+    # SR_RUN_DIR 注入指标契约路径:框架拥有的 prepare.py 在子进程内
+    # 把 evaluate() 结果写到 <run_dir>/metrics_raw.json。
+    success, output = run_strategy(
+        strategy_dir, timeout,
+        log_path=run_dir / "run.log",
+        env_overrides={"SR_RUN_DIR": str(run_dir)},
+    )
 
     # 读取因子失败信息
     factor_failures = []
@@ -349,7 +436,29 @@ def run_backtest_script(
         except Exception:
             pass
 
-    metrics = parse_run_log(run_dir / "run.log")
+    # 指标来源:结构化契约优先;run.log 正则仅用于旧策略降级 + 一致性
+    # 交叉校验(见上方信任模型注释)。契约与日志不一致 = 疑似指标伪造
+    # 或双写源错乱 → fail-closed,不落任何结果。
+    contract = read_metrics_contract(run_dir / "metrics_raw.json")
+    scraped = parse_run_log(run_dir / "run.log")
+    if contract is not None:
+        problems = _cross_check_contract(contract, scraped)
+        if problems:
+            return {
+                "success": False,
+                "run": run_name,
+                "metrics": {},
+                "error": (
+                    "指标完整性校验失败(契约与 run.log 不一致, 疑似指标伪造): "
+                    + "; ".join(problems)
+                ),
+                "factor_failures": factor_failures,
+            }
+        metrics = dict(contract)
+        metrics["metrics_source"] = "contract"
+    else:
+        metrics = dict(scraped)
+        metrics["metrics_source"] = "run.log" if scraped else "none"
 
     commit_hash = git_get_hash(workspace_path)
 

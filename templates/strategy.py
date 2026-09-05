@@ -41,6 +41,9 @@ if __name__ == "__main__":
     import prepare
     data = prepare.load_data()
     metrics = prepare.evaluate(PARAMS, FACTOR_EXPRS, FACTOR_WEIGHT_METHOD, data)
+    # 结构化指标契约:框架优先读取 metrics_raw.json(run.log 正则解析
+    # 仅作降级与一致性校验)。评估出 NaN/Inf 会在此抛错使本次回测失败。
+    prepare.save_metrics(metrics)
     print("---")
     for k, v in metrics.items():
         if isinstance(v, bool):

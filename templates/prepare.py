@@ -299,6 +299,50 @@ def evaluate(params: dict, factor_exprs: list[dict],
     }
 
 
+# ============================================================
+# 指标契约落盘 (框架读取的第一来源;run.log 正则仅作降级)
+# ============================================================
+def save_metrics(metrics: dict) -> bool:
+    """把 evaluate() 结果写入结构化指标契约文件。
+
+    运行目录由框架通过环境变量 ``SR_RUN_DIR`` 注入(见 core/backtest.py
+    的 run_strategy)。写入 ``<SR_RUN_DIR>/metrics_raw.json`` 后,框架以该
+    文件作为回测指标的第一来源;未设置 SR_RUN_DIR(如手工运行 strategy.py)
+    时不写文件,框架回退到 run.log 解析。
+
+    仅接受数值型指标(非数值键静默跳过);遇到 NaN/Inf 直接抛 ValueError
+    ——脏数据宁可让本次回测失败,也不允许进入验收链。策略子进程与框架
+    同进程信任级,但本函数属于框架拥有的 prepare.py(Agent 不应修改),
+    这条契约线把"指标数字"固定在框架代码里产出。
+
+    Returns:
+        是否写入了契约文件。
+    """
+    import json
+    import math
+    import os
+
+    run_dir = os.environ.get("SR_RUN_DIR", "").strip()
+    if not run_dir:
+        return False
+
+    clean: dict[str, float] = {}
+    for k, v in metrics.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        if not math.isfinite(v):
+            raise ValueError(f"metric {k!r} 非有限值: {v!r}")
+        clean[k] = float(v)
+
+    out = Path(run_dir) / "metrics_raw.json"
+    out.write_text(
+        json.dumps({"protocol": 1, "metrics": clean},
+                   ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return True
+
+
 def _empty_metrics() -> dict:
     """返回空指标"""
     return {
