@@ -173,7 +173,12 @@ def decide(
 
     Args:
         metrics: Strategy run metrics (calmar, sharpe, max_dd, ann_return,
-                 trades, win_rate, …). Missing keys are treated as 0.
+                 trades, win_rate, …). Missing keys coerce to 0.0 — which
+                 fails every hard gate except ``ann_return`` when disabled —
+                 except ``max_dd``: an absent/unparsable drawdown fails
+                 closed (−inf) instead of reading as "no drawdown".
+                 ``max_drawdown``/``mdd`` are accepted as aliases of
+                 ``max_dd`` (engine-path key names).
         llm_verdict: Pre-computed LLM verdict dict (skip LLM call). Schema:
             ``{"passed": bool, "score": float, "reason": str, ...}``.
             Pass ``None`` to skip LLM layer entirely.
@@ -309,15 +314,51 @@ def load_config(
     return DEFAULT_CONFIG.with_overrides(**merged)
 
 
+# Key aliases: producers disagree on spelling — the script path
+# (templates/prepare.py) prints ``max_dd``/``turnover``, while the engine
+# path (core.utils.metrics.extended_metrics) emits ``max_drawdown`` and
+# ``ann_turnover``. Without these aliases an engine-path metrics dict
+# silently coerced max_dd to the missing-value default below, and the
+# drawdown gate never fired.
+_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "max_dd": ("max_drawdown", "mdd"),
+    "turnover": ("ann_turnover",),
+}
+
+# Missing-value defaults per coerced key. 0.0 is safe (fails the gate)
+# for every hard-gated metric except max_dd: drawdown is negative, so a
+# 0.0 default reads as "no drawdown" and PASSES hard_max_dd_min. An
+# absent/unparsable drawdown therefore fails closed.
+_MISSING_DEFAULTS: dict[str, float] = {
+    "calmar": 0.0,
+    "sharpe": 0.0,
+    "max_dd": float("-inf"),
+    "ann_return": 0.0,
+    "ann_vol": 0.0,
+    "sortino": 0.0,
+    "turnover": 0.0,
+    "win_rate": 0.0,
+}
+
+
 def _coerce_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
-    """Cast metrics values to float/int with safe defaults (0)."""
+    """Cast metrics values to float/int with per-key missing defaults.
+
+    Falls back to the alias keys in ``_KEY_ALIASES`` before applying the
+    default, so engine- and script-path metrics dicts are treated alike.
+    """
     out: dict[str, float] = {}
     for key in ("calmar", "sharpe", "max_dd", "ann_return", "ann_vol",
                 "sortino", "turnover", "win_rate"):
         v = metrics.get(key)
+        if v is None:
+            for alias in _KEY_ALIASES.get(key, ()):
+                v = metrics.get(alias)
+                if v is not None:
+                    break
         try:
-            out[key] = float(v) if v is not None else 0.0
+            out[key] = float(v) if v is not None else _MISSING_DEFAULTS[key]
         except (TypeError, ValueError):
-            out[key] = 0.0
+            out[key] = _MISSING_DEFAULTS[key]
     out["trades"] = int(metrics.get("trades", 0) or 0)
     return out

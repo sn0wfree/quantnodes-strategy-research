@@ -214,14 +214,18 @@ def evaluate(params: dict, factor_exprs: list[dict],
     returns = prices.pct_change(fill_method=None)
 
     # 模拟回测
+    # 调仓于收盘执行:调仓日用当日收盘数据(因子分数/已实现波动率)生成
+    # 目标权重,但当日损益仍归旧权重,新权重自下一根 K 线开始生效。
+    # 若新权重当即生效,用 close[i] 选出的组合会赚到 close[i]/close[i-1]-1
+    # 这段收益 —— 1 根 K 线前视偏差,且与引擎路径 (strategy_engine) 不可比。
     nav = [1.0]
-    prev_weights = {}
+    prev_weights: dict[str, float] = {}
     weight_changes = []
 
     for i in range(rebalance_freq, len(prices)):
-        prices.index[i]
+        pending_weights: dict[str, float] | None = None
 
-        # 调仓日: 选股 + 计算权重
+        # 调仓日: 选股 + 计算权重(生效于下一交易日)
         if (i - rebalance_freq) % rebalance_freq == 0:
             day_scores = scores.iloc[i].dropna()
             if len(day_scores) < top_n:
@@ -247,14 +251,14 @@ def evaluate(params: dict, factor_exprs: list[dict],
             if total > 0:
                 new_weights = {a: w / total for a, w in new_weights.items()}
 
-            # 记录换手
+            # 记录换手(相对旧持仓)
             all_assets = set(list(prev_weights.keys()) + list(new_weights.keys()))
             change = sum(abs(new_weights.get(a, 0) - prev_weights.get(a, 0)) for a in all_assets) / 2
             weight_changes.append(change)
 
-            prev_weights = new_weights
+            pending_weights = new_weights
 
-        # 计算日收益
+        # 计算日收益:调仓日收益归旧权重(首个调仓日无持仓 → 当日 0)
         daily_ret = 0.0
         for asset, w in prev_weights.items():
             if asset in returns.columns:
@@ -263,6 +267,10 @@ def evaluate(params: dict, factor_exprs: list[dict],
                     daily_ret += w * r
 
         nav.append(nav[-1] * (1 + daily_ret))
+
+        # 收盘结算完成后再换仓
+        if pending_weights is not None:
+            prev_weights = pending_weights
 
     # 构造 NAV 序列
     nav_series = pd.Series(nav, index=prices.index[rebalance_freq - 1:rebalance_freq - 1 + len(nav)])

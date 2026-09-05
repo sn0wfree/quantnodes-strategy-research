@@ -134,6 +134,36 @@ class TestDecide(unittest.TestCase):
         result = decide({}, llm_verdict=None)
         self.assertFalse(result.accept)
 
+    def test_engine_max_drawdown_key_is_evaluated(self) -> None:
+        """Engine path emits ``max_drawdown`` — it must gate, not vanish.
+
+        Regression: before the alias fix, an engine-shaped dict coerced
+        max_dd to 0.0, so a −50% drawdown passed the −15% gate.
+        """
+        metrics = {
+            "calmar": 1.2, "sharpe": 0.8,
+            "max_drawdown": -0.50,   # engine key (utils/metrics.extended_metrics)
+            "trades": 50,
+        }
+        result = decide(metrics, llm_verdict=None)
+        self.assertFalse(result.hard_passed)
+        self.assertFalse(result.accept)
+        self.assertIn("max_dd", result.reason)
+
+    def test_missing_max_dd_fails_closed(self) -> None:
+        """A metrics dict with no drawdown key must not read as "no drawdown"."""
+        metrics = {"calmar": 1.0, "sharpe": 0.8, "trades": 50}
+        result = decide(metrics, llm_verdict=None)
+        self.assertFalse(result.hard_passed)
+        self.assertFalse(result.accept)
+        self.assertIn("max_dd", result.reason)
+
+    def test_non_numeric_max_dd_fails_closed(self) -> None:
+        metrics = {"calmar": 1.0, "sharpe": 0.8, "max_dd": "bad", "trades": 50}
+        result = decide(metrics, llm_verdict=None)
+        self.assertFalse(result.hard_passed)
+        self.assertIn("max_dd", result.reason)
+
     def test_require_any_mode(self) -> None:
         metrics = {"calmar": 0.0, "sharpe": 0.8, "max_dd": -0.5, "trades": 1}
         cfg = AcceptanceConfig(require_all_hard=False)
@@ -206,6 +236,17 @@ class TestCoerceMetrics(unittest.TestCase):
         result = _coerce_metrics({"calmar": None, "trades": None})
         self.assertEqual(result["calmar"], 0.0)
         self.assertEqual(result["trades"], 0)
+
+    def test_max_drawdown_alias(self) -> None:
+        from strategy_research.core.strategy_acceptance import _coerce_metrics
+        result = _coerce_metrics({"max_drawdown": -0.25, "ann_turnover": 3.5})
+        self.assertEqual(result["max_dd"], -0.25)
+        self.assertEqual(result["turnover"], 3.5)
+
+    def test_missing_max_dd_is_negative_inf(self) -> None:
+        from strategy_research.core.strategy_acceptance import _coerce_metrics
+        result = _coerce_metrics({})
+        self.assertEqual(result["max_dd"], float("-inf"))
 
 
 if __name__ == "__main__":
