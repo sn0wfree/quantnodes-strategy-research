@@ -1,6 +1,6 @@
 """因子验证工具。
 
-实现 IC/IR 验证、6 维评分、Mutual IC 去重、IC 衰减检查。
+实现 IC/IR 验证、6 维评分、Mutual IC 去重 (时序口径)、IC 衰减检查。
 """
 from __future__ import annotations
 
@@ -310,10 +310,19 @@ def compute_overall_score(scores: dict) -> float:
 def compute_mutual_ic(
     factor_values_1: pd.Series,
     factor_values_2: pd.Series,
+    min_dates: int = 5,
+    min_assets: int = 5,
 ) -> float:
-    """计算两个因子的 Mutual IC。
+    """计算两个因子的 Mutual IC (时序口径)。
 
-    使用 Spearman rank correlation。
+    MultiIndex (date, asset) 面板: 逐日计算截面 Spearman 秩相关, 取有效日期
+    均值——单一截面可能恰好同向, 时序均值才是冗余判据 (QuantaAlpha 式因子值
+    相关性)。验证期准入去重应传入验证期窗口的因子值。
+
+    非面板序列 (date 单索引): 对齐后整段 Spearman 秩相关。
+
+    有效截面不足 ( < min_dates 个日期或截面资产 < min_assets) 时返回 0.0:
+    视为"无法判定冗余", 调用方 fail-open 保留双方。
     """
     df = pd.DataFrame({
         "factor1": factor_values_1,
@@ -323,10 +332,19 @@ def compute_mutual_ic(
     if len(df) < 10:
         return 0.0
 
-    # 如果是 MultiIndex，取第一个日期的截面
     if isinstance(df.index, pd.MultiIndex):
-        first_date = df.index.get_level_values(0)[0]
-        df = df.loc[first_date]
+        corrs = (
+            df.groupby(level=0)
+            .apply(
+                lambda g: g["factor1"].rank().corr(g["factor2"].rank())
+                if len(g) >= min_assets
+                else np.nan
+            )
+            .dropna()
+        )
+        if len(corrs) < min_dates:
+            return 0.0
+        return float(corrs.mean())
 
     corr = df["factor1"].rank().corr(df["factor2"].rank())
     return float(corr) if not np.isnan(corr) else 0.0
@@ -336,10 +354,11 @@ def deduplicate_factors(
     factors: list[dict],
     threshold: float = MUTUAL_IC_THRESHOLD,
 ) -> list[dict]:
-    """Mutual IC 去重。
+    """Mutual IC 去重 (时序口径)。
 
     Args:
         factors: [{"factor_name": str, "factor_values": pd.Series, ...}]
+            factor_values 应为验证期窗口的因子值 (date, asset) 面板
         threshold: 相关系数阈值
 
     Returns:

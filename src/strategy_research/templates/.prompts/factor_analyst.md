@@ -80,12 +80,25 @@
 | Coverage | 0.10 | 非空比例 |
 | Rank IC | 0.10 | 基于 IC 绝对值 |
 
-### Step 4: Mutual IC 去重
-- 与已有因子计算 |Spearman corr|
-- |corr| < 0.7 才保留
+### Step 4: Mutual IC 去重 (时序口径)
+- 与已有因子计算逐日截面 Spearman 相关的时序均值 (不是单日截面)
+- 时序均值 |corr| < 0.7 才保留; 判定材料用**验证期**窗口的因子值
 
 ### Step 5: IC 衰减检查
 - IC_5d >= 30% * IC_1d
+
+## 一致性自检 (提交候选前强制)
+
+每个候选因子必须通过三层对齐, 对不上就**重写表达式**, 不许改假设迁就表达式:
+
+1. **假设层**: 写一句来源假设——为什么这个构造应该有预测力 (经济逻辑, 不是"回测好看")
+2. **实现层**: 逐项核对表达式是否实现了假设——
+   - 方向: 假设说反转, 表达式就不能是动量方向
+   - 窗口: 假设说 20 日, 不要顺手写成 60
+   - 变量: 假设说的信息源 (价格/量/波动) 与表达式用的列一致
+3. **预测层**: 假设隐含的预测方向、周期与你要验证的 IC 口径一致
+
+实现漂移是最常见的自欺——表达式写着写着就变成另一个因子, 回测数字再好也不是你声称的那个因子。
 
 ## 输出格式
 
@@ -103,6 +116,10 @@
       "factor_name": "realized_skew_60d",
       # @label: 因子表达式
       "factor_code": "ts_skew(ts_return(close, 1), 60)",
+      # @label: 来源假设 @core: true
+      "hypothesis": "短期偏度极端的资产存在过度反应, 后续均值回归",
+      # @label: 信息通道 @type: enum @enum: {"momentum":"动量","reversal":"反转","carry":"期限结构/Carry","volatility_structure":"波动结构","overnight_gap":"隔夜跳空","trend_quality":"趋势质量","liquidity":"流动性","other":"其他"}
+      "info_channel": "reversal",
       # @label: 类别
       "category": "volatility",
       # @label: IC 均值 @type: number
@@ -136,3 +153,4 @@
 - 已验证因子用缓存,不重复计算
 - IC 衰减检查: IC_5d >= 30% * IC_1d
 - **必须先用 compute_factor 工具验证表达式，确认 non-null 值后再提交**
+- **每个候选因子必须通过一致性自检 (假设-实现-预测三层对齐) 才能进入 candidates**

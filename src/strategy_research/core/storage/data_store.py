@@ -110,6 +110,8 @@ class DataStore(Protocol):
         formula: str,
         description: str = "",
         tags: list[str] | None = None,
+        info_channel: str = "",
+        parent_hypothesis_id: str = "",
     ) -> bool:
         ...
 

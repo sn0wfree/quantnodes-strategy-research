@@ -130,6 +130,8 @@ class DuckDBDataStore:
         formula: str,
         description: str = "",
         tags: list[str] | None = None,
+        info_channel: str = "",
+        parent_hypothesis_id: str = "",
     ) -> bool:
         # Legacy signature has ``factor_code`` (the formula body) plus
         # ``source``; ``description`` and ``tags`` are not in the legacy
@@ -144,6 +146,8 @@ class DuckDBDataStore:
             factor_name=factor_name,
             factor_code=formula,
             source=legacy_source,
+            info_channel=info_channel,
+            parent_hypothesis_id=parent_hypothesis_id,
         )
 
     def list_factors(

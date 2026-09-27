@@ -87,6 +87,12 @@ CREATE TABLE IF NOT EXISTS factor_registry (
     source VARCHAR,
     lookback_window INTEGER,
     strategy_name VARCHAR NOT NULL,
+    operator_count INTEGER,
+    param_count INTEGER,
+    feature_count INTEGER,
+    complexity_score DOUBLE,
+    info_channel VARCHAR,
+    parent_hypothesis_id VARCHAR,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     added_by VARCHAR,
     PRIMARY KEY (strategy_name, factor_name)
@@ -191,6 +197,7 @@ def init_db(workspace_path: Path) -> bool:
     try:
         # Execute table creation first
         conn.execute(DUCKDB_INIT_SQL)
+        _ensure_factor_registry_columns(conn)
         conn.close()
         return True
     except Exception as e:
@@ -736,6 +743,34 @@ def load_nav_history(
 # 因子注册表操作
 # ============================================================
 
+# 复杂度约束门 + 血统登记的新列 (旧库通过 _ensure_factor_registry_columns 补齐)
+_FACTOR_REGISTRY_NEW_COLUMNS: list[tuple[str, str]] = [
+    ("operator_count", "INTEGER"),
+    ("param_count", "INTEGER"),
+    ("feature_count", "INTEGER"),
+    ("complexity_score", "DOUBLE"),
+    ("info_channel", "VARCHAR"),
+    ("parent_hypothesis_id", "VARCHAR"),
+]
+
+
+def _factor_registry_columns(conn) -> set[str]:
+    """读取 factor_registry 现有列名 (read-only 安全)。"""
+    rows = conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'factor_registry'"
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def _ensure_factor_registry_columns(conn) -> None:
+    """为旧库的 factor_registry 补齐新列 (需要写连接)。"""
+    existing = _factor_registry_columns(conn)
+    for name, col_type in _FACTOR_REGISTRY_NEW_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE factor_registry ADD COLUMN {name} {col_type}")
+
+
 def register_factor(
     workspace_path: Path,
     strategy_name: str,
@@ -745,24 +780,67 @@ def register_factor(
     category: str = "",
     source: str = "",
     lookback_window: int = 20,
+    info_channel: str = "",
+    parent_hypothesis_id: str = "",
+    complexity: Optional[dict] = None,
 ) -> bool:
-    """注册因子到因子注册表。"""
+    """注册因子到因子注册表。
+
+    登记复杂度约束门与血统信息:
+    - complexity 为 None 时从 factor_code 自动静态分析 (算子数/自由参数/特征数);
+      表达式无法分词则注册失败 (fail-closed)
+    - info_channel: 信息通道标签 (如 momentum / carry / volatility_structure)
+    - parent_hypothesis_id: 来源假设 id (血统追溯, 关联 hypothesis registry)
+    """
     conn = get_connection(workspace_path)
     if conn is None:
         return False
 
+    if complexity is None:
+        try:
+            from .compute_factor import analyze_complexity
+
+            complexity = analyze_complexity(factor_code)
+        except Exception as e:
+            print(f"❌ 注册因子失败: 复杂度分析不通过 ({e})")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return False
+
     try:
+        _ensure_factor_registry_columns(conn)
         conn.execute("""
             INSERT OR REPLACE INTO factor_registry
-            (factor_name, factor_code, factor_type, category, source, lookback_window, strategy_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, [factor_name, factor_code, factor_type, category, source, lookback_window, strategy_name])
+            (factor_name, factor_code, factor_type, category, source, lookback_window,
+             strategy_name, operator_count, param_count, feature_count,
+             complexity_score, info_channel, parent_hypothesis_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            factor_name, factor_code, factor_type, category, source, lookback_window,
+            strategy_name,
+            complexity.get("operator_count"),
+            complexity.get("param_count"),
+            complexity.get("feature_count"),
+            complexity.get("complexity_score"),
+            info_channel,
+            parent_hypothesis_id,
+        ])
         conn.close()
         return True
     except Exception as e:
         print(f"❌ 注册因子失败: {e}")
         conn.close()
         return False
+
+
+# get_factors 返回的字段顺序 (新列缺失时补 None, 兼容未迁移的旧库)
+_FACTOR_REGISTRY_FIELDS = [
+    "factor_name", "factor_code", "factor_type", "category", "source",
+    "lookback_window", "operator_count", "param_count", "feature_count",
+    "complexity_score", "info_channel", "parent_hypothesis_id",
+]
 
 
 def get_factors(workspace_path: Path, strategy_name: str) -> list[dict]:
@@ -772,23 +850,20 @@ def get_factors(workspace_path: Path, strategy_name: str) -> list[dict]:
         return []
 
     try:
-        result = conn.execute("""
-            SELECT factor_name, factor_code, factor_type, category, source, lookback_window
+        existing = _factor_registry_columns(conn)
+        select_cols = [c for c in _FACTOR_REGISTRY_FIELDS if c in existing]
+        result = conn.execute(f"""
+            SELECT {", ".join(select_cols)}
             FROM factor_registry
             WHERE strategy_name = ?
             ORDER BY added_at
         """, [strategy_name]).fetchall()
         conn.close()
 
+        col_index = {c: i for i, c in enumerate(select_cols)}
         return [
-            {
-                "factor_name": row[0],
-                "factor_code": row[1],
-                "factor_type": row[2],
-                "category": row[3],
-                "source": row[4],
-                "lookback_window": row[5],
-            }
+            {field: (row[col_index[field]] if field in col_index else None)
+             for field in _FACTOR_REGISTRY_FIELDS}
             for row in result
         ]
     except Exception as e:

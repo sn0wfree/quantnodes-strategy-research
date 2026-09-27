@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 import re
 
 import numpy as np
@@ -938,6 +939,86 @@ def _tokenize_operator(expr: str, i: int) -> tuple[Token, int] | None:
         tok_type, value = single_map[ch]
         return Token(tok_type, value), 1
     return None
+
+
+# ============================================================
+# 表达式复杂度分析 (复杂度约束门)
+# ============================================================
+
+# 复杂度惩罚 C(f) = w_op·算子数 + w_param·自由参数数 + w_feat·log2(1+特征数)
+# 权重可调; 分数是入库审查的排序启发式, 不是硬门槛。
+COMPLEXITY_WEIGHTS = {
+    "operator": 1.0,
+    "param": 2.0,
+    "feature": 3.0,
+}
+
+# 出现在这些 token 之后 (或表达式开头) 的 +/- 视为一元正负
+_UNARY_CONTEXT = {
+    TOKEN_LPAREN,
+    TOKEN_COMMA,
+    TOKEN_PLUS,
+    TOKEN_MINUS,
+    TOKEN_STAR,
+    TOKEN_SLASH,
+    TOKEN_POWER,
+}
+
+
+def analyze_complexity(expr: str) -> dict:
+    """静态分析因子表达式的复杂度 (不需要数据)。
+
+    统计口径:
+    - operator_count: 算子调用数 + 二元算术运算数 (一元正负不计)
+    - param_count: 数字字面量个数 (自由参数: 窗口、阈值、幂次等)
+    - feature_count: 引用的不同列数 (裸标识符)
+    - expr_length: 表达式字符长度
+    - complexity_score: 加权复杂度分 (COMPLEXITY_WEIGHTS)
+
+    容忍 pandas 风格标点 (``.``/``[]``/引号)——DataStore 层的 formula 字段
+    允许 ``close.pct_change(20)`` 这类写法, 统计前归一化为空白。归一化后
+    仍无法分词则抛 ValueError, 调用方 (因子登记) 应 fail-closed。
+    """
+    # 数字字面量内部的小数点 (1.5 / .5) 保留, 其余标点归一化为空白
+    normalized = re.sub(r"\.(?!\d)", " ", expr)
+    normalized = re.sub(r"[\[\]'\"]", " ", normalized)
+    tokens = _tokenize(normalized)
+    operator_count = 0
+    param_count = 0
+    features: set[str] = set()
+
+    for i, tok in enumerate(tokens):
+        if tok.type == TOKEN_EOF:
+            break
+        if tok.type == TOKEN_NUMBER:
+            param_count += 1
+        elif tok.type == TOKEN_IDENT:
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            if nxt is not None and nxt.type == TOKEN_LPAREN:
+                operator_count += 1
+            else:
+                features.add(tok.value)
+        elif tok.type in (TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH, TOKEN_POWER):
+            prev = tokens[i - 1] if i > 0 else None
+            is_unary = tok.type in (TOKEN_PLUS, TOKEN_MINUS) and (
+                prev is None or prev.type in _UNARY_CONTEXT
+            )
+            if not is_unary:
+                operator_count += 1
+
+    score = (
+        COMPLEXITY_WEIGHTS["operator"] * operator_count
+        + COMPLEXITY_WEIGHTS["param"] * param_count
+        + COMPLEXITY_WEIGHTS["feature"] * math.log2(1.0 + len(features))
+    )
+    return {
+        "operator_count": operator_count,
+        "param_count": param_count,
+        "feature_count": len(features),
+        "expr_length": len(expr),
+        "complexity_score": round(float(score), 4),
+        "features": sorted(features),
+    }
 
 
 class _Parser:

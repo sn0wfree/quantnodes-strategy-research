@@ -170,6 +170,96 @@ def test_mutual_ic_range(factor_series):
 
 
 # ============================================================
+# compute_mutual_ic 时序口径 (MultiIndex 面板)
+# ============================================================
+
+def _make_panel(dates, n_assets, arrays) -> pd.Series | list[pd.Series]:
+    """arrays: list of (n_dates, n_assets) ndarray, 每个是一个因子的面板值。
+
+    返回 (date, asset) MultiIndex Series (单个) 或列表。
+    """
+    out = []
+    for arr in arrays:
+        s = {
+            (dt, f"A{k}"): arr[i, k]
+            for i, dt in enumerate(dates)
+            for k in range(n_assets)
+        }
+        out.append(pd.Series(s))
+    return out[0] if len(out) == 1 else out
+
+
+def test_mutual_ic_panel_time_series_not_first_date():
+    """首日截面完全同向、其余日期不相关 → 时序均值应低。
+
+    旧实现只取第一个日期截面, 会误判为高度冗余 (≈1.0)。
+    """
+    rng = np.random.default_rng(SEED)
+    n_dates, n_assets = 30, 10
+    dates = pd.bdate_range("2024-01-01", periods=n_dates)
+
+    f1 = rng.standard_normal((n_dates, n_assets))
+    f2 = rng.standard_normal((n_dates, n_assets))
+    f2[0] = f1[0]  # 只有第一天同向
+
+    s1, s2 = _make_panel(dates, n_assets, [f1, f2])
+    mic = compute_mutual_ic(s1, s2)
+    # 时序均值 ≈ 1/30 的同向 + 29/30 噪声
+    assert abs(mic) < 0.3, f"time-series mic should be low, got {mic}"
+
+
+def test_mutual_ic_panel_persistently_correlated():
+    """逐日持续同向 → 时序均值接近 1, 判定冗余。"""
+    rng = np.random.default_rng(SEED)
+    n_dates, n_assets = 30, 10
+    dates = pd.bdate_range("2024-01-01", periods=n_dates)
+
+    f1 = rng.standard_normal((n_dates, n_assets))
+    f2 = f1 + rng.standard_normal((n_dates, n_assets)) * 0.1
+
+    s1, s2 = _make_panel(dates, n_assets, [f1, f2])
+    mic = compute_mutual_ic(s1, s2)
+    assert mic > 0.7, f"persistent corr should be caught, got {mic}"
+
+
+def test_mutual_ic_panel_self_correlation():
+    rng = np.random.default_rng(SEED)
+    n_dates, n_assets = 20, 8
+    dates = pd.bdate_range("2024-01-01", periods=n_dates)
+    f1 = rng.standard_normal((n_dates, n_assets))
+    s1 = _make_panel(dates, n_assets, [f1])
+    assert abs(compute_mutual_ic(s1, s1) - 1.0) < 1e-9
+
+
+def test_mutual_ic_panel_insufficient_dates_returns_zero():
+    """有效日期不足 min_dates → 0.0 (无法判定冗余, fail-open 保留)。"""
+    rng = np.random.default_rng(SEED)
+    n_dates, n_assets = 3, 10
+    dates = pd.bdate_range("2024-01-01", periods=n_dates)
+    f1 = rng.standard_normal((n_dates, n_assets))
+    f2 = f1.copy()
+    s1, s2 = _make_panel(dates, n_assets, [f1, f2])
+    assert compute_mutual_ic(s1, s2) == 0.0
+
+
+def test_mutual_ic_panel_thin_cross_sections_skipped():
+    """截面资产数 < min_assets 的日期被跳过; 全部太薄 → 0.0。"""
+    rng = np.random.default_rng(SEED)
+    n_dates, n_assets = 20, 3  # 每天只有 3 个资产 < min_assets=5
+    dates = pd.bdate_range("2024-01-01", periods=n_dates)
+    f1 = rng.standard_normal((n_dates, n_assets))
+    f2 = f1.copy()
+    s1, s2 = _make_panel(dates, n_assets, [f1, f2])
+    assert compute_mutual_ic(s1, s2) == 0.0
+
+
+def test_mutual_ic_plain_series_still_rank_corr(factor_series):
+    """非面板序列 (date 单索引) 保持整段 Spearman 口径。"""
+    mic = compute_mutual_ic(factor_series, factor_series * 2.0 + 1.0)
+    assert abs(mic - 1.0) < 1e-9
+
+
+# ============================================================
 # score_coverage
 # ============================================================
 
