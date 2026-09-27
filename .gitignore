@@ -75,3 +75,9 @@ memory/
 # P0-1: trace-blobs runtime directory (per-event-DB sidecar files)
 trace-blobs/
 .checkpoints
+
+# Local tooling / scratch (not project source)
+.zcodeignore
+UNUSED
+analysis/
+docs/*.pdf
