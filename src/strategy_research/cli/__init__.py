@@ -40,7 +40,7 @@ from .commands.swarm import (
     cmd_swarm_list,
     cmd_swarm_run,
 )
-from .llm_config import _LLM_PARENT, _cmd_llm_list_profiles
+from .llm_config import _cmd_llm_list_profiles
 from .llm_config import _cli_overrides_from_args as _cli_overrides_from_args
 from .llm_config import build_llm_config as build_llm_config
 
@@ -648,105 +648,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
-    # init
-    init_parser = subparsers.add_parser(
-        "init",
-        help="5-step TTY wizard: provider → model → API key → timeout → (Tushare)",
-        description=(
-            "Run the credentials wizard that writes "
-            "~/.quantnodes/strategy_research/.env. Mirrors "
-            "vibe-trading's init UX (single-responsibility: no workspace "
-            "scaffolding, no auto backtest, no auto git init). Use `--force` "
-            "to overwrite an existing .env."
-        ),
-    )
-    init_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite an existing ~/.quantnodes/strategy_research/.env",
-    )
-
-    # status
-    status_parser = subparsers.add_parser("status", help="查看工作区状态")
-    status_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-
-    # reproduce
-    reproduce_parser = subparsers.add_parser("reproduce", help="复现实验")
-    reproduce_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    reproduce_parser.add_argument("run", nargs="?", help="Run 名称 (例如: run_0001)")
-    reproduce_parser.add_argument("--strategy", "-s", help="策略名称")
-
-    # run
-    run_parser = subparsers.add_parser("run", parents=[_LLM_PARENT],
-                                       help="运行回测")
-    run_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    run_parser.add_argument("--strategy", "-s", help="策略名称")
-    run_parser.add_argument("--action", "-a", help="行动类型")
-    run_parser.add_argument("--description", "-d", help="描述")
-    run_parser.add_argument("--timeout", "-t", type=int, default=300, help="超时时间 (秒)")
-
-    # evaluate
-    evaluate_parser = subparsers.add_parser("evaluate", parents=[_LLM_PARENT],
-                                             help="复跑当前 strategy.py")
-    evaluate_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    evaluate_parser.add_argument("--strategy", "-s", help="策略名称")
-    evaluate_parser.add_argument("--description", "-d", default="", help="描述")
-    evaluate_parser.add_argument("--timeout", "-t", type=int, default=300, help="超时时间 (秒)")
-
-    # preflight
-    preflight_parser = subparsers.add_parser("preflight", help="启动前环境检查")
-    preflight_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-
-    # validate
-    validate_parser = subparsers.add_parser("validate", help="验证因子")
-    validate_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    validate_parser.add_argument("--strategy", "-s", help="策略名称")
-    validate_parser.add_argument("--factor", "-f", help="因子表达式")
-    validate_parser.add_argument("--source", help="因子来源")
-
-    # list
-    list_parser = subparsers.add_parser("list", help="列出实验")
-    list_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    list_parser.add_argument("--strategy", "-s", help="策略名称")
-    list_parser.add_argument("--limit", "-l", type=int, default=20, help="显示数量")
-
-    # import
-    import_parser = subparsers.add_parser("import", help="导入价格数据")
-    import_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    import_parser.add_argument("--strategy", "-s", required=True, help="策略名称")
-    import_parser.add_argument("--source", required=True,
-                               choices=["csv", "parquet", "sample", "tushare", "ifind", "fred", "akshare", "auto"],
-                               help="数据源")
-    import_parser.add_argument("--file", "-f", help="数据文件路径 (csv/parquet)")
-    import_parser.add_argument("--codes", "-c", help="资产代码列表，逗号分隔 (API 数据源)")
-    import_parser.add_argument("--start-date", default="2020-01-01", help="开始日期 (API 数据源)")
-    import_parser.add_argument("--end-date", default="2025-12-31", help="结束日期 (API 数据源)")
-    import_parser.add_argument("--incremental", action="store_true", default=True, help="增量更新 (默认开启)")
-    import_parser.add_argument("--no-incremental", dest="incremental", action="store_false", help="全量替换")
-    import_parser.add_argument("--date-column", default="date", help="日期列名 (csv)")
-    import_parser.add_argument("--price-column", default="close", help="价格列名 (csv)")
-    import_parser.add_argument("--asset-column", help="资产代码列名 (csv, 宽格式不需要)")
-    import_parser.add_argument("--n-assets", type=int, default=10, help="示例资产数量 (sample)")
-    import_parser.add_argument("--n-days", type=int, default=504, help="示例天数 (sample)")
-
-    # autoresearch
-    autoresearch_parser = subparsers.add_parser("autoresearch", parents=[_LLM_PARENT],
-                                                 help="运行自动化研究循环")
-    autoresearch_parser.add_argument("path", nargs="?", default=".", help="工作区路径")
-    autoresearch_parser.add_argument("--strategy", "-s", help="策略名称")
-    autoresearch_parser.add_argument("--cooldown", "-c", type=float, default=30.0, help="基础 cooldown (秒)")
-    autoresearch_parser.add_argument("--jitter", "-j", type=float, default=10.0, help="随机抖动范围 (±秒)")
-    autoresearch_parser.add_argument("--min-cooldown", type=float, default=1.0, help="最小 cooldown (秒)")
-    autoresearch_parser.add_argument("--max-retries", type=int, default=3, help="最大重试次数")
-    autoresearch_parser.add_argument("--max-rounds", type=int, help="最大轮数 (不指定则无限循环)")
-    autoresearch_parser.add_argument(
-        "--lazy-detection-interval", type=int, default=10,
-        help="懒惰检测间隔 (轮数, 默认 10)",
-    )
-    autoresearch_parser.add_argument(
-        "--keep-recent", type=int, default=10,
-        help="读取时保留最近 N 轮详细数据 (其他轮次读取 summary.json, 默认 10)",
-    )
+    # init/status/reproduce/run/evaluate/preflight/validate/list/import/
+    # autoresearch/llm — registered once via @cli_command in
+    # commands/core_commands.py + commands/llm.py; wired below by _wire().
 
     # session
     session_parser = subparsers.add_parser("session", help="会话管理")
@@ -878,7 +782,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # serve (top-level alias) — 一键启动 Web UI + 后端
     serve_parser = subparsers.add_parser("serve", help="一键启动 Web UI 服务器（最简命令）")
     serve_parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
-    serve_parser.add_argument("--port", type=int, default=87183, help="监听端口 (默认 87183)")
+    serve_parser.add_argument("--port", type=int, default=8766, help="监听端口 (默认 8766)")
     serve_parser.add_argument("--reload", action="store_true", help="热重载 (开发模式)")
     serve_parser.add_argument("--workspace", "-w", default=".", help="工作区路径")
     serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")

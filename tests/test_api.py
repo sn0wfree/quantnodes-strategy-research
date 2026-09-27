@@ -266,9 +266,10 @@ class TestRunRouter:
 class TestAPIServeCLI:
     def test_api_serve_help(self):
         import subprocess
+        import sys
         result = subprocess.run(
-            ["python3", "-m", "strategy_research.cli", "api", "serve", "--help"],
-            capture_output=True, text=True,
+            [sys.executable, "-m", "strategy_research.cli", "api", "serve", "--help"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         assert result.returncode == 0
         assert "--host" in result.stdout

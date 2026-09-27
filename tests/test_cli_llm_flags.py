@@ -13,12 +13,12 @@ from unittest.mock import patch
 import pytest
 
 from strategy_research.cli import (
-    _LLM_PARENT,
     _cli_overrides_from_args,
     _cmd_llm_list_profiles,
     build_llm_config,
     main,
 )
+from strategy_research.cli.llm_config import _LLM_PARENT
 
 # ── Parent parser has all expected flags ─────────────────────────────
 
