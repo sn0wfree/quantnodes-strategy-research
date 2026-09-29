@@ -25,9 +25,10 @@ def _cfg(**kw):
 
 
 class TestAutoWhenUnset:
-    def test_generic_provider_default(self):
+    def test_generic_provider_uses_full_ceiling(self):
+        # Unset → model's full output budget (most reasonable default).
         v = resolve_max_tokens(_cfg(), None, adapter=OpenAIAdapter())
-        assert v == _DEFAULT_MAX_TOKENS  # 8192
+        assert v == 16384
 
     def test_thinking_provider_gets_full_ceiling(self):
         v = resolve_max_tokens(_cfg(), None, adapter=MiniMaxAdapter())
@@ -42,10 +43,17 @@ class TestAutoWhenUnset:
         v = resolve_max_tokens(cfg, None, adapter=OpenAIAdapter())
         assert v == 4096
 
-    def test_thinking_with_small_ceiling(self):
-        cfg = _cfg(model_max_output_tokens=6000)
-        v = resolve_max_tokens(cfg, None, adapter=MiniMaxAdapter())
-        assert v == 6000  # ceiling, still >= floor 4096
+    def test_zero_treated_as_unset(self):
+        v = resolve_max_tokens(_cfg(), 0, adapter=MiniMaxAdapter())
+        assert v == 32000
+
+    def test_negative_treated_as_unset(self):
+        v = resolve_max_tokens(_cfg(), -5, adapter=OpenAIAdapter())
+        assert v == 16384
+
+    def test_non_int_treated_as_unset(self):
+        v = resolve_max_tokens(_cfg(), "auto", adapter=MiniMaxAdapter())
+        assert v == 32000
 
 
 class TestExplicitRequested:
@@ -70,9 +78,9 @@ class TestExplicitRequested:
         v = resolve_max_tokens(_cfg(), 999999, adapter=MiniMaxAdapter())
         assert v == 32000
 
-    def test_non_int_requested_falls_back(self):
+    def test_non_int_requested_is_auto(self):
         v = resolve_max_tokens(_cfg(), "oops", adapter=OpenAIAdapter())
-        assert v == _DEFAULT_MAX_TOKENS
+        assert v == 16384
 
 
 class TestFallbacks:

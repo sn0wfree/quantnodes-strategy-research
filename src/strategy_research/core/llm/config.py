@@ -623,21 +623,21 @@ def resolve_max_tokens(
     *,
     adapter: Any | None = None,
 ) -> int:
-    """Pick a safe, model-aware ``max_tokens``.
+    """Pick the optimal ``max_tokens`` — full model budget unless explicit.
 
-    Rules (auto is the default when ``requested`` is None):
+    Policy:
 
-    1. Ceiling = ``model_max_output_tokens`` → adapter ``default_max_tokens``
-       → ``_DEFAULT_MAX_TOKENS``.
-    2. Floor = adapter ``min_output_tokens`` (thinking models need CoT room)
-       → ``_MIN_OUTPUT_TOKENS``.
-    3. Auto: thinking models (floor ≥ 4096) get the full ceiling so
-       reasoning + answer both fit; others get ``_DEFAULT_MAX_TOKENS``
-       clamped into the ceiling.
-    4. Explicit ``requested`` is honoured but clamped into ``[floor, ceiling]``.
+    - **Unset** (``None`` / non-positive / non-int): use the model's full
+      output ceiling. This is the most reasonable default — never truncates,
+      and providers bill on actual usage, not the cap.
+    - **Explicit** (positive int): honour it, but clamp into
+      ``[floor, ceiling]`` so tiny budgets cannot starve thinking models
+      and oversized values cannot exceed the model's output window.
 
-    This prevents the "empty content" failure mode where a tiny budget
-    (e.g. 16) is fully consumed by thinking tokens.
+    Ceiling: ``model_max_output_tokens`` → adapter ``default_max_tokens``
+    → ``_DEFAULT_MAX_TOKENS``.
+    Floor: adapter ``min_output_tokens`` (thinking models need CoT room)
+    → ``_MIN_OUTPUT_TOKENS``.
     """
     if adapter is None:
         try:
@@ -660,15 +660,17 @@ def resolve_max_tokens(
     if ceiling < floor:
         ceiling = floor
 
+    # Unset / invalid → optimal default (full output budget).
     if requested is None:
-        if floor >= _THINKING_MIN_OUTPUT_TOKENS:
-            return ceiling
-        return min(_DEFAULT_MAX_TOKENS, ceiling)
-
+        return ceiling
     try:
         value = int(requested)
     except (TypeError, ValueError):
-        value = _DEFAULT_MAX_TOKENS
+        return ceiling
+    if value <= 0:
+        return ceiling
+
+    # Explicit: clamp into the model's safe range.
     return max(floor, min(value, ceiling))
 
 
