@@ -328,6 +328,7 @@ class AgentLoop:
         write_roots: tuple[str, ...] | None = None,
         read_roots: tuple[str, ...] | None = None,
         enable_goal_injection: bool = True,
+        enable_memory_injection: bool = True,
         enable_hypothesis_auto_create: bool = True,
         hooks: CompositeHook | None = None,
         session_manager: Any | None = None,
@@ -383,6 +384,7 @@ class AgentLoop:
         self.write_roots = write_roots
         self.read_roots = read_roots
         self.enable_goal_injection = enable_goal_injection
+        self.enable_memory_injection = enable_memory_injection
         self.enable_hypothesis_auto_create = enable_hypothesis_auto_create
         self._hooks = hooks
         self._session_manager = session_manager

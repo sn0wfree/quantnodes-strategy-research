@@ -259,13 +259,139 @@ def _get_goal_snapshot(loop: AgentLoop) -> dict[str, Any] | None:
         return None
 
 
+# ── Concrete: Memory Retrieval (A4) ───────────────────────────────
+
+
+class MemoryRetrieverInjector:
+    """Prepends <relevant-memory> block from PersistentMemory (A4).
+
+    Retrieval is best-effort: empty hits inject nothing; exceptions are
+    swallowed so a broken memory store never blocks a research run.
+    """
+
+    def __init__(
+        self,
+        memory: Any | None = None,
+        *,
+        max_results: int = 5,
+        max_chars: int = 2000,
+        body_chars: int = 200,
+        include_hypotheses: bool = False,
+    ) -> None:
+        self._memory = memory
+        self._max_results = max(0, int(max_results))
+        self._max_chars = max(0, int(max_chars))
+        self._body_chars = max(0, int(body_chars))
+        self._include_hypotheses = include_hypotheses
+
+    @property
+    def name(self) -> str:
+        return "memory_retriever"
+
+    @property
+    def order(self) -> int:
+        # After goal context (-100), still pre-run.
+        return -90
+
+    def inject_pre_run(
+        self, loop: AgentLoop, task: str, messages: list[dict[str, Any]],
+    ) -> str:
+        if not getattr(loop, "enable_memory_injection", True):
+            return task
+        if not task or not task.strip():
+            return task
+        try:
+            block = self._build_block(loop, task)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("MemoryRetrieverInjector failed: %s", exc)
+            return task
+        if not block:
+            return task
+        return f"{block}\n\n{task}"
+
+    # ── internals ────────────────────────────────────────────────
+
+    def _build_block(self, loop: AgentLoop, task: str) -> str:
+        lines: list[str] = []
+        for entry in self._retrieve(loop, task):
+            line = self._format_entry(entry)
+            if line:
+                lines.append(line)
+        if not lines:
+            return ""
+        body = "<relevant-memory>\n" + "\n".join(lines) + "\n</relevant-memory>"
+        if self._max_chars and len(body) > self._max_chars:
+            body = body[: self._max_chars] + "\n[relevant-memory truncated]"
+        return body
+
+    def _retrieve(self, loop: AgentLoop, task: str) -> list[Any]:
+        hits: list[Any] = []
+        mem = self._memory
+        if mem is None:
+            mem = self._load_memory()
+        if mem is not None and self._max_results:
+            hits.extend(list(mem.find_relevant(task, max_results=self._max_results) or []))
+        if self._include_hypotheses:
+            hits.extend(self._retrieve_hypotheses(loop, task)[: self._max_results])
+        return hits[: self._max_results] if self._max_results else hits
+
+    def _load_memory(self) -> Any | None:
+        try:
+            from ..memory.persistent import PersistentMemory
+
+            return PersistentMemory()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _retrieve_hypotheses(self, loop: AgentLoop, task: str) -> list[Any]:
+        try:
+            from ..hypothesis.registry import HypothesisRegistry
+
+            reg = HypothesisRegistry()
+            items = getattr(reg, "list_hypotheses", None) or getattr(reg, "list", None)
+            if not callable(items):
+                return []
+            rows = list(items() or [])
+            # Lightweight keyword filter against task tokens.
+            tokens = {t for t in task.lower().split() if len(t) > 2}
+            scored = []
+            for row in rows:
+                text = " ".join(str(row.get(k, "")) for k in ("title", "statement", "description", "name"))
+                score = sum(1 for t in tokens if t in text.lower())
+                if score:
+                    scored.append((score, row))
+            scored.sort(key=lambda x: -x[0])
+            return [r for _, r in scored]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _format_entry(self, entry: Any) -> str:
+        if isinstance(entry, dict):
+            title = entry.get("title") or entry.get("name") or entry.get("id") or "note"
+            typ = entry.get("memory_type") or entry.get("type") or "memory"
+            body = str(entry.get("body") or entry.get("description") or entry.get("statement") or "")
+        else:
+            title = getattr(entry, "title", None) or getattr(entry, "name", None) or "note"
+            typ = getattr(entry, "memory_type", None) or "memory"
+            body = str(getattr(entry, "body", None) or getattr(entry, "description", None) or "")
+        body = " ".join(body.split())
+        if self._body_chars and len(body) > self._body_chars:
+            body = body[: self._body_chars] + "…"
+        return f"- [{typ}/{title}] {body}".rstrip()
+
+
 # ── Factory ──────────────────────────────────────────────────────
 
 
 def build_default_injectors() -> list[ContextInjector]:
     """Return the default injector chain (sorted by order)."""
     return sorted(
-        [GoalContextInjector(), TodosInjector(), GoalContinuationInjector()],
+        [
+            GoalContextInjector(),
+            MemoryRetrieverInjector(),
+            TodosInjector(),
+            GoalContinuationInjector(),
+        ],
         key=lambda inj: inj.order,
     )
 
@@ -273,6 +399,7 @@ def build_default_injectors() -> list[ContextInjector]:
 __all__ = [
     "ContextInjector",
     "GoalContextInjector",
+    "MemoryRetrieverInjector",
     "TodosInjector",
     "GoalContinuationInjector",
     "build_default_injectors",

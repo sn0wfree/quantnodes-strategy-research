@@ -7,18 +7,15 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.agent.context_injector import (
     ContextInjector,
-    GoalContinuationInjector,
     GoalContextInjector,
+    GoalContinuationInjector,
     TodosInjector,
     build_default_injectors,
 )
-
 
 # ── Protocol conformance ──────────────────────────────────────────
 
@@ -55,15 +52,21 @@ class TestBuildDefaultInjectors:
         orders = [i.order for i in injectors]
         assert orders == sorted(orders)
 
-    def test_contains_three_injectors(self):
+    def test_contains_default_injectors(self):
         injectors = build_default_injectors()
         names = {i.name for i in injectors}
-        assert names == {"goal_context", "todos_snapshot", "goal_continuation"}
+        assert names == {
+            "goal_context",
+            "memory_retriever",
+            "todos_snapshot",
+            "goal_continuation",
+        }
 
     def test_order_values(self):
         injectors = build_default_injectors()
         by_name = {i.name: i.order for i in injectors}
         assert by_name["goal_context"] == -100
+        assert by_name["memory_retriever"] == -90
         assert by_name["todos_snapshot"] == 0
         assert by_name["goal_continuation"] == 100
 

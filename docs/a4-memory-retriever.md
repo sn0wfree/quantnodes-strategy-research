@@ -1,7 +1,7 @@
 # A4 — Memory Retriever → pre_run 注入设计
 
 > 2026-09-29 · Agent Runtime 记忆面  
-> 状态: Design → Implementation
+> 状态: **Implemented**
 
 ---
 
