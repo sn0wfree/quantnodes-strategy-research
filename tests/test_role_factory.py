@@ -72,9 +72,10 @@ class TestToolWhitelist:
         assert "read" in wl
 
     def test_unknown_role_minimal_default(self):
-        """未知 role 退到 read_file 默认最小集."""
+        """未知 role 退到 minimal 最小集 (fail-safe)."""
         from strategy_research.core.agent.role_factory import _get_tool_whitelist
-        assert _get_tool_whitelist("foo_bar_baz") == ["read"]
+        from strategy_research.core.agent.toolsets import TOOLSETS
+        assert _get_tool_whitelist("foo_bar_baz") == TOOLSETS["minimal"]
 
 
 class TestShouldUseRealLlm:

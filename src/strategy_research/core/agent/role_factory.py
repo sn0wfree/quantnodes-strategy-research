@@ -36,28 +36,15 @@ _ROLE_PROMPT_FILES = {
     "study_collector": "study_collector.md",
 }
 
-# 角色对应的工具白名单 (用 build_default_registry() 注册的 9 个工具名)
-_ROLE_TOOL_WHITELIST = {
-    "researcher":            ["read", "list_history", "factor_analysis", "websearch", "webfetch", "get_market_data", "search_symbol", "show_chart"],
-    "data_quality":          ["read", "websearch", "webfetch", "get_market_data", "list_data_sources", "check_data", "clean_data", "run_bg_command"],
-    "factor_analyst":        ["read", "compute_factor", "factor_analysis", "get_market_data", "run_bg_command"],
-    "strategist":            ["read", "write", "run_backtest", "git_diff", "websearch", "webfetch", "get_market_data", "show_chart", "show_report", "run_bg_command"],
-    "portfolio_construction":["read", "get_market_data"],
-    "risk_controller":       ["read", "factor_analysis", "get_market_data"],
-    "attribution_analyst":   ["read", "factor_analysis"],
-    "anti_overfit_analyst":  ["read", "list_history", "factor_analysis"],
-    "backtest_diagnostics":  ["read", "run_backtest", "git_diff", "show_chart", "show_report", "run_bg_command"],
-    "critic":                ["read", "list_history"],
-    "planner":               ["read", "websearch", "webfetch", "list_goals", "get_market_data"],
-    "evaluator":             ["read", "list_history", "factor_analysis"],
-    "study_reviewer":        ["read"],
-    "study_collector":       ["read", "websearch", "webfetch", "list_history"],
-}
+# Role → tool whitelist now lives in core.agent.toolsets (A2).
+# Kept as a thin alias for backwards compatibility.
+from .toolsets import TOOLSETS as _ROLE_TOOL_WHITELIST
+from .toolsets import resolve_toolset as _resolve_toolset
 
 
 def _get_tool_whitelist(role: str) -> list[str]:
     """返回 role 专属工具白名单. 未知角色返回最小集 (只读)."""
-    return _ROLE_TOOL_WHITELIST.get(role, ["read"])
+    return _resolve_toolset(role) or list(_ROLE_TOOL_WHITELIST["minimal"])
 
 
 def should_use_real_llm() -> bool:
