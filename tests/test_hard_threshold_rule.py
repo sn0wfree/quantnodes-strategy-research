@@ -32,6 +32,21 @@ def _metrics(**overrides):
 
 
 class TestRuleResultContract:
+    def test_defaults(self):
+        r = RuleResult(passed=True)
+        assert r.passed is True
+        assert r.detail == {}
+        assert r.notes == ""
+
+    def test_with_detail(self):
+        r = RuleResult(passed=False, detail={"sharpe": False}, notes="failed")
+        assert r.passed is False
+        assert r.detail == {"sharpe": False}
+        assert r.notes == "failed"
+
+    def test_rule_name(self):
+        assert HardThresholdRule.name == "hard_threshold"
+
     def test_returns_rule_result(self):
         res = HardThresholdRule().check(_metrics(), _cfg())
         assert isinstance(res, RuleResult)
