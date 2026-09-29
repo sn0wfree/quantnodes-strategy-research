@@ -96,6 +96,13 @@ PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = _build_provider_defaults()
 # without being so low that long answers get truncated.
 _DEFAULT_MAX_TOKENS = 8192
 
+# Floor for max_tokens when a caller asks for something absurdly small.
+# Generic non-thinking adapters may go lower via ``ProviderAdapter.min_output_tokens``.
+_MIN_OUTPUT_TOKENS = 256
+
+# Thinking providers override ``min_output_tokens`` to at least this.
+_THINKING_MIN_OUTPUT_TOKENS = 4096
+
 
 # ── LLMConfig dataclass ─────────────────────────────────────────────
 
@@ -250,9 +257,9 @@ class LLMConfig:
         if not cfg.api_key:
             cfg = cfg.with_config(api_key=load_api_key_from_env(env_map))
 
-        # Global fallback for max_tokens when no layer supplied it.
+        # Auto max_tokens when no layer supplied it (model-aware).
         if cfg.max_tokens is None:
-            cfg = cfg.with_config(max_tokens=_DEFAULT_MAX_TOKENS)
+            cfg = cfg.with_config(max_tokens=resolve_max_tokens(cfg))
 
         return cfg
 
@@ -608,6 +615,61 @@ def _cli_to_overrides(cli: Mapping[str, Any]) -> dict[str, Any]:
             # Pass through unknown llm_* keys (forward compat)
             overrides[field] = value
     return overrides
+
+
+def resolve_max_tokens(
+    config: LLMConfig,
+    requested: int | None = None,
+    *,
+    adapter: Any | None = None,
+) -> int:
+    """Pick a safe, model-aware ``max_tokens``.
+
+    Rules (auto is the default when ``requested`` is None):
+
+    1. Ceiling = ``model_max_output_tokens`` → adapter ``default_max_tokens``
+       → ``_DEFAULT_MAX_TOKENS``.
+    2. Floor = adapter ``min_output_tokens`` (thinking models need CoT room)
+       → ``_MIN_OUTPUT_TOKENS``.
+    3. Auto: thinking models (floor ≥ 4096) get the full ceiling so
+       reasoning + answer both fit; others get ``_DEFAULT_MAX_TOKENS``
+       clamped into the ceiling.
+    4. Explicit ``requested`` is honoured but clamped into ``[floor, ceiling]``.
+
+    This prevents the "empty content" failure mode where a tiny budget
+    (e.g. 16) is fully consumed by thinking tokens.
+    """
+    if adapter is None:
+        try:
+            from .provider import get_provider  # noqa: PLC2701
+
+            adapter = get_provider(config.provider)
+        except Exception:
+            adapter = None
+
+    floor = getattr(adapter, "min_output_tokens", None)
+    if not isinstance(floor, int) or floor <= 0:
+        floor = _MIN_OUTPUT_TOKENS
+
+    ceiling = config.model_max_output_tokens
+    if not isinstance(ceiling, int) or ceiling <= 0:
+        ceiling = getattr(adapter, "default_max_tokens", None)
+    if not isinstance(ceiling, int) or ceiling <= 0:
+        ceiling = _DEFAULT_MAX_TOKENS
+
+    if ceiling < floor:
+        ceiling = floor
+
+    if requested is None:
+        if floor >= _THINKING_MIN_OUTPUT_TOKENS:
+            return ceiling
+        return min(_DEFAULT_MAX_TOKENS, ceiling)
+
+    try:
+        value = int(requested)
+    except (TypeError, ValueError):
+        value = _DEFAULT_MAX_TOKENS
+    return max(floor, min(value, ceiling))
 
 
 def load_api_key_from_env(env: Mapping[str, str] | None = None) -> str:

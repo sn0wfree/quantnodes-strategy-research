@@ -36,6 +36,11 @@ class MiniMaxAdapter(ProviderAdapter):
     def default_max_tokens(self) -> int:
         return 32000
 
+    @property
+    def min_output_tokens(self) -> int:
+        # MiniMax-M3 emits <think>…</think> before the answer; tiny budgets yield empty content.
+        return 4096
+
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         content = delta.get("content", "")
         match = self.THINK_PATTERN.search(content)

@@ -45,6 +45,11 @@ class SiliconFlowAdapter(OpenAIReasoningFieldAdapter):
         return 16384
 
     @property
+    def min_output_tokens(self) -> int:
+        # DeepSeek-V4-Flash reasons via reasoning_content first.
+        return 4096
+
+    @property
     def default_context_tokens(self) -> int:
         # DeepSeek-V4-Flash serves a 128K context window (DeepSeek
         # lineage). Without this override the conservative 8192 base

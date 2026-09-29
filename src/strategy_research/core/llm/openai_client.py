@@ -159,11 +159,14 @@ def _build_payload(
         payload["temperature"] = overrides.get("temperature", config.temperature)
     if "top_p" in overrides or config.top_p != 1.0:
         payload["top_p"] = overrides.get("top_p", config.top_p)
-    # ``max_tokens`` may be ``None`` if neither user nor provider set it.
-    # Skip the field entirely in that case so the provider uses its own default.
-    _max_tokens = overrides.get("max_tokens", config.max_tokens)
-    if _max_tokens is not None:
-        payload["max_tokens"] = _max_tokens
+    # ``max_tokens`` is resolved to a model-aware safe value:
+    # auto-sized when unset, floored/clamped when the request is too
+    # small or larger than the model's output cap (thinking models
+    # otherwise return empty content under tiny budgets).
+    from .config import resolve_max_tokens
+
+    _requested = overrides.get("max_tokens", config.max_tokens)
+    payload["max_tokens"] = resolve_max_tokens(config, _requested, adapter=adapter)
     if config.frequency_penalty:
         payload["frequency_penalty"] = config.frequency_penalty
     if config.presence_penalty:

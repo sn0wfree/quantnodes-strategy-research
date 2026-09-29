@@ -357,6 +357,7 @@ class TestDotenvLoading:
         (tmp_path / ".env").write_text("SR_DOTENV_CWD_ONLY=1\n")
         # Isolate from the host's ~/.quantnodes/.env (real API keys).
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("SR_DOTENV_CWD_ONLY", raising=False)
         self._restore_dotenv(monkeypatch)
@@ -368,6 +369,7 @@ class TestDotenvLoading:
         (tmp_path / ".env").write_text("SR_DOTENV_CWD_ONLY=from-file\n")
         monkeypatch.setenv("SR_DOTENV_CWD_ONLY", "from-process-env")
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._restore_dotenv(monkeypatch)
         _ORIGINAL_TRY_LOAD_DOTENV()
@@ -379,6 +381,7 @@ class TestDotenvLoading:
         qdir.mkdir()
         (qdir / ".env").write_text("SR_DOTENV_QUANTNODES=1\n")
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.chdir(tmp_path)  # cwd has no .env — only quantnodes has it
         self._restore_dotenv(monkeypatch)
         _ORIGINAL_TRY_LOAD_DOTENV()
@@ -392,6 +395,7 @@ class TestDotenvLoading:
         qdir.mkdir()
         (qdir / ".env").write_text("SR_DOTENV_BOTH=quantnodes\n")
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._restore_dotenv(monkeypatch)
         _ORIGINAL_TRY_LOAD_DOTENV()

@@ -34,6 +34,11 @@ class DeepSeekAdapter(OpenAIReasoningFieldAdapter):
     def default_model(self) -> str:
         return "deepseek-chat"
 
+    @property
+    def min_output_tokens(self) -> int:
+        # reasoning_content precedes the answer; keep room for both.
+        return 4096
+
     # ── DSML filter (DeepSeek reasoning_content leakage) ──
 
     def fix_delta(self, delta):

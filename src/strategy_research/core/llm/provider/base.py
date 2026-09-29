@@ -49,6 +49,17 @@ class ProviderAdapter(ABC):
         return 8192
 
     @property
+    def min_output_tokens(self) -> int:
+        """Floor for ``max_tokens`` so thinking + answer aren't starved.
+
+        Thinking models (DeepSeek-R1 / MiniMax-M3 / …) burn a large share
+        of the output budget on reasoning before any user-visible tokens.
+        A tiny ``max_tokens`` (e.g. 16) yields empty content. Override on
+        those adapters with a safer floor.
+        """
+        return 256
+
+    @property
     def default_context_tokens(self) -> int:
         """Default context window size (input + output).
 

@@ -7,6 +7,7 @@ import email.utils
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -22,7 +23,7 @@ from strategy_research.core.llm.errors import (
 
 # Minimal provider adapter so the new ``adapter`` parameters of
 # _build_headers / _build_payload get exercised (see openai_client.py).
-_FAKE_ADAPTER = unittest.mock.Mock()
+_FAKE_ADAPTER = mock.Mock()
 _FAKE_ADAPTER.custom_headers.return_value = {}
 _FAKE_ADAPTER.custom_payload.side_effect = lambda payload, config: payload
 _FAKE_ADAPTER.custom_stream_options.return_value = None
@@ -230,15 +231,21 @@ class TestBuildPayload(unittest.TestCase):
         payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertNotIn("top_p", payload)
 
-    def test_max_tokens_none_excluded(self) -> None:
+    def test_max_tokens_none_auto_fills(self) -> None:
         cfg = LLMConfig(api_key="sk-test", max_tokens=None)
         payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
-        self.assertNotIn("max_tokens", payload)
+        self.assertIn("max_tokens", payload)
+        self.assertGreaterEqual(payload["max_tokens"], 256)
 
     def test_max_tokens_set(self) -> None:
         cfg = LLMConfig(api_key="sk-test", max_tokens=4096)
         payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
         self.assertEqual(payload["max_tokens"], 4096)
+
+    def test_max_tokens_tiny_raised_to_floor(self) -> None:
+        cfg = LLMConfig(api_key="sk-test", max_tokens=16)
+        payload = oc_mod._build_payload(cfg, [{"role": "user", "content": "hi"}], None, None, {}, _FAKE_ADAPTER)
+        self.assertGreaterEqual(payload["max_tokens"], 256)
 
     def test_overrides_model(self) -> None:
         cfg = LLMConfig(api_key="sk-test", model="gpt-4o-mini")
