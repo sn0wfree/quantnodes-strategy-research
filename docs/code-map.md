@@ -141,7 +141,7 @@ flowchart TB
 
 | 优先级 | 项 | 位置 |
 |---|---|---|
-| P0 Bug | `registry.keys()` 返回 `(k,v)` 元组而非键名 | `data_source/registry.py:50` |
+| ~~P0 Bug~~ | ~~`registry.keys()` 返回 `(k,v)` 元组~~ **已修** | `core/registry.py` |
 | P0 | 版本号三处不一致（pyproject 0.6.0 / `__init__` 0.3.0 / tag v0.5.0） | |
 | P1 | 根 `templates/` 是漂移副本（缺 `.prompts/`，若干文件哈希不同），代码只用 `src/.../templates/` | 建议删除或同步 |
 | P1 | 三套 backtest 模型并存 | `core/backtest_models.py`、`utils/backtest_models.py`、`engine/models.py` |

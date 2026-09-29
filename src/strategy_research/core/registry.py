@@ -15,8 +15,7 @@ Usage::
 
 from __future__ import annotations
 
-import copy
-from typing import Any, Callable, Generic, Iterator, Optional, TypeVar
+from typing import Callable, Generic, Iterator, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -49,7 +48,7 @@ class Registry(Generic[T]):
 
     def keys(self) -> list[str]:
         """All registered keys (stable order)."""
-        return list(self._items.items())
+        return list(self._items.keys())
 
     def items(self) -> Iterator[tuple[str, T]]:
         """Iterate over (key, item) pairs."""

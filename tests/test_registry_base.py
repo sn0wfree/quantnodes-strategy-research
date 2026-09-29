@@ -5,8 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.registry import Registry
@@ -45,7 +43,7 @@ class TestRegistryBase:
         r = Registry[int]()
         r.register("a", 1)
         r.register("b", 2)
-        assert r.keys() == [("a", 1), ("b", 2)]
+        assert r.keys() == ["a", "b"]
 
     def test_items_iterator(self):
         r = Registry[int]()
