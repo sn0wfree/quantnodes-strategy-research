@@ -223,13 +223,13 @@ class RunBgCommandTool(BaseTool):
                     "error": f"command blocked for safety: contains '{blocked}'",
                 }, ensure_ascii=False)
 
-        from ...utils.bg_proc import run_bg
+        from ...utils.bg_proc import run_bg, shell_command
 
         ws = Path(str(ctx.workspace)).resolve()
         workdir = Path(cwd).resolve() if cwd else ws
         log_path = Path(log).resolve() if log else \
             ws / "bg_tasks" / f"{uuid.uuid4().hex[:8]}.log"
-        proc = run_bg(["bash", "-lc", command], log_path, cwd=workdir)
+        proc = run_bg(shell_command(command), log_path, cwd=workdir)
         task_id = register_task(proc, log_path, command)
         return json.dumps({
             "status": "running", "task_id": task_id,

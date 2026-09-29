@@ -65,7 +65,6 @@ TOOLSETS: dict[str, list[str]] = {
         "factor_ic_decay",
         "factor_turnover",
         "get_market_data",
-        "run_bg_command",
         "tool_help",
     ],
     "strategist": [
@@ -112,7 +111,6 @@ TOOLSETS: dict[str, list[str]] = {
         "benchmark_comparison",
         "show_chart",
         "show_report",
-        "run_bg_command",
         "tool_help",
     ],
     "critic": [

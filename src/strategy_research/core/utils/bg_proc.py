@@ -157,6 +157,20 @@ def harvest_by_owner(owner: str) -> int:
     return killed
 
 
+def shell_command(command: str) -> list[str]:
+    """Wrap a shell string as a process argv for the current platform.
+
+    - POSIX: ``bash -lc command``
+    - Windows: ``cmd /c command`` (bash is often unavailable; the
+      previous hard-coded ``bash -lc`` raised FileNotFoundError).
+    """
+    import sys
+
+    if sys.platform.startswith("win"):
+        return ["cmd", "/c", command]
+    return ["bash", "-lc", command]
+
+
 def run_bg(
     command: Sequence[str],
     log_path: Path | str,
@@ -214,9 +228,27 @@ def kill_bg(proc: subprocess.Popen) -> None:
     """Kill the whole process group (children included)."""
     if proc.poll() is not None:
         return
+    import sys
+
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # noqa: S606
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    elif sys.platform.startswith("win"):
+        # No process-group kill on Windows — take the tree down via taskkill.
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:  # noqa: BLE001
+            pass
     try:
-        os.killpg(proc.pid, signal.SIGKILL)  # noqa: S606
-    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    except Exception:  # noqa: BLE001
         pass
     try:
         proc.wait(timeout=5)
