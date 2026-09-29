@@ -16,7 +16,19 @@ import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Protocol, Union, get_args, get_origin, get_type_hints, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+    runtime_checkable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -579,10 +591,11 @@ class BaseTool(ABC):
         - 容错失败 (ToolError) → 确定性错误 JSON (不重试)
         - transient 异常 → re-raise (loop 负责重试)
         - 其他意外异常 → 结构化 err JSON (带 tool 名, 消灭无结构输出)
+        - ``ToolResult`` → A3 wire envelope (data + views)
         """
         try:
             cleaned = self._coerce_params(kwargs)
-            return self._dispatch(cleaned)
+            raw = self._dispatch(cleaned)
         except ToolError as exc:
             return exc.to_json()
         except TRANSIENT_TOOL_ERRORS:
@@ -594,6 +607,13 @@ class BaseTool(ABC):
                 "error": f"{type(exc).__name__}: {exc}",
                 "tool": self.name,
             }, ensure_ascii=False)
+
+        # A3: structured ToolResult → wire envelope; legacy str/dict pass through.
+        from .tool_result import ToolResult, to_json
+
+        if isinstance(raw, ToolResult):
+            return to_json(raw)
+        return raw
 
     def _dispatch(self, cleaned: Dict[str, Any]) -> str:
         """Call ``execute`` with the right signature. v2 tools take

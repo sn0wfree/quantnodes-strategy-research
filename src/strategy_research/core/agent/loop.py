@@ -1927,19 +1927,29 @@ class AgentLoop:
             "output_preview": output_preview,
         })
 
-        # Truncate tool output for LLM history (keep head + tail, mark middle)
+        # A3: smart LLM view (table-aware / head+tail with counts).
+        # Falls back to legacy head/tail cut if render_for_llm fails.
         history_output = output
-        if (
-            _TOOL_RESULT_HISTORY_MAX > 0
-            and isinstance(output, str)
-            and len(output) > _TOOL_RESULT_HISTORY_MAX
-        ):
-            half = _TOOL_RESULT_HISTORY_MAX // 2
-            history_output = (
-                output[:half]
-                + f"\n\n[truncated {len(output) - _TOOL_RESULT_HISTORY_MAX} chars]\n\n"
-                + output[-half:]
+        try:
+            from .tool_result import from_any, render_for_llm
+
+            history_output = render_for_llm(
+                from_any(output),
+                max_chars=_TOOL_RESULT_HISTORY_MAX or 0,
             )
+        except Exception:  # noqa: BLE001
+            history_output = output
+            if (
+                _TOOL_RESULT_HISTORY_MAX > 0
+                and isinstance(output, str)
+                and len(output) > _TOOL_RESULT_HISTORY_MAX
+            ):
+                half = _TOOL_RESULT_HISTORY_MAX // 2
+                history_output = (
+                    output[:half]
+                    + f"\n\n[truncated {len(output) - _TOOL_RESULT_HISTORY_MAX} chars]\n\n"
+                    + output[-half:]
+                )
 
         return {
             "role": "tool",
