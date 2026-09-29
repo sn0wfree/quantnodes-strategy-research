@@ -916,27 +916,22 @@ class AgentLoop:
         self._budget_cost_usd = cost
 
     def _check_budget(self, t0: float) -> tuple[bool, str | None]:
-        """Return (exceeded, reason) against LoopConfig budget limits."""
-        from .strategy.budget import BudgetLimits, BudgetUsage, evaluate_budget
+        """Return (exceeded, reason) against LoopConfig budget limits (A5)."""
+        from .runtime.policy import StopPolicy, limits_from_config
 
         cfg = getattr(self._strategy, "config", None)
         if cfg is None:
             return False, None
-        limits = BudgetLimits(
-            max_tokens=getattr(cfg, "budget_max_tokens", None),
-            max_cost_usd=getattr(cfg, "budget_max_cost_usd", None),
-            max_seconds=getattr(cfg, "budget_max_seconds", None),
-            price_per_mtok_input=getattr(cfg, "price_per_mtok_input", None),
-            price_per_mtok_output=getattr(cfg, "price_per_mtok_output", None),
-        )
-        usage = BudgetUsage(
+        policy = getattr(self, "_stop_policy", None)
+        if policy is None or policy.limits != limits_from_config(cfg):
+            policy = StopPolicy(limits_from_config(cfg))
+            self._stop_policy = policy
+        decision = policy.decide(
             tokens=getattr(self, "_budget_tokens", 0),
-            prompt_tokens=getattr(self, "_budget_prompt_tokens", 0),
-            completion_tokens=getattr(self, "_budget_completion_tokens", 0),
             cost_usd=getattr(self, "_budget_cost_usd", 0.0),
             started_at=t0,
         )
-        return evaluate_budget(usage, limits)
+        return decision.should_stop, decision.reason
 
     def _emit_compaction(
         self, applied: list[str], iteration: int, result: LoopResult,
