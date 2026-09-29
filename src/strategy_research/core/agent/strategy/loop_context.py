@@ -51,6 +51,11 @@ class LoopContext:
     should_stop: bool = False
     stop_reason: Optional[str] = None
 
+    # ── A1 budget accounting (written by AgentLoop / BudgetStopStep) ──
+    tokens_used: int = 0
+    cost_usd: float = 0.0
+    elapsed_seconds: float = 0.0
+
     # L7: carry the in-flight AgentLoop result so steps can mutate
     # it without round-tripping through metadata. Optional so v0.1
     # callers that only build a transient LoopContext (e.g.

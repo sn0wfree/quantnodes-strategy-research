@@ -48,7 +48,7 @@ from ..hooks.context import AgentHookContext
 from ..llm import LLMConfig, LLMResponse, OpenAICompatClient, ToolCall
 from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
-from ..utils.ids import SessionId, AttemptId
+from ..utils.ids import SessionId
 from .circuit_breaker import RetryPolicy, ToolLoopCircuitBreaker
 from .compact import CompactConfig, compact_messages
 from .context import ContextBuilder, estimate_tokens
@@ -222,6 +222,9 @@ def _make_strategy_ctx(
         response_content=getattr(response, "content", "") or "",
         result=result,
         hook_ctx=hook_ctx,
+        tokens_used=getattr(loop, "_budget_tokens", 0) or 0,
+        cost_usd=getattr(loop, "_budget_cost_usd", 0.0) or 0.0,
+        t0=getattr(result, "started_at", 0.0) or 0.0,
     )
 
 
@@ -255,7 +258,9 @@ class LoopResult:
     answer: str = ""
     iterations: int = 0
     tool_calls_made: int = 0
-    finished_reason: str = "stop"     # stop | max_iter | no_progress | error | timeout
+    finished_reason: str = "stop"     # stop | max_iter | no_progress | error | timeout | budget
+    stop_reason: str | None = None
+    started_at: float = 0.0
     error: str | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
@@ -873,12 +878,63 @@ class AgentLoop:
         messages = self.context_builder.build_initial_messages(full_task, history=history)
         result.messages = list(messages)
         t0 = time.perf_counter()
+        result.started_at = t0
+        # A1 budget accounting — reset per run.
+        self._budget_tokens = 0
+        self._budget_prompt_tokens = 0
+        self._budget_completion_tokens = 0
+        self._budget_cost_usd = 0.0
         self._trace_and_emit("loop_start", {
             "task": task,
             "max_iterations": self.max_iterations,
             "tokens": estimate_tokens(messages),
         })
         return full_task, result, messages, t0
+
+    # ── A1: three-dimensional run budget ────────────────────────────
+
+    def _record_budget_usage(self, response: Any, t0: float) -> None:
+        """Accumulate one LLM response's usage into the run budget."""
+        from .strategy.budget import usage_from_response
+
+        usage = getattr(response, "usage", None) or {}
+        total, prompt, completion = usage_from_response(usage)
+        self._budget_tokens = getattr(self, "_budget_tokens", 0) + total
+        self._budget_prompt_tokens = getattr(self, "_budget_prompt_tokens", 0) + prompt
+        self._budget_completion_tokens = getattr(self, "_budget_completion_tokens", 0) + completion
+
+        cfg = getattr(self._strategy, "config", None)
+        price_in = getattr(cfg, "price_per_mtok_input", None) if cfg else None
+        price_out = getattr(cfg, "price_per_mtok_output", None) if cfg else None
+        cost = getattr(self, "_budget_cost_usd", 0.0)
+        if price_in:
+            cost += (prompt / 1_000_000.0) * float(price_in)
+        if price_out:
+            cost += (completion / 1_000_000.0) * float(price_out)
+        self._budget_cost_usd = cost
+
+    def _check_budget(self, t0: float) -> tuple[bool, str | None]:
+        """Return (exceeded, reason) against LoopConfig budget limits."""
+        from .strategy.budget import BudgetLimits, BudgetUsage, evaluate_budget
+
+        cfg = getattr(self._strategy, "config", None)
+        if cfg is None:
+            return False, None
+        limits = BudgetLimits(
+            max_tokens=getattr(cfg, "budget_max_tokens", None),
+            max_cost_usd=getattr(cfg, "budget_max_cost_usd", None),
+            max_seconds=getattr(cfg, "budget_max_seconds", None),
+            price_per_mtok_input=getattr(cfg, "price_per_mtok_input", None),
+            price_per_mtok_output=getattr(cfg, "price_per_mtok_output", None),
+        )
+        usage = BudgetUsage(
+            tokens=getattr(self, "_budget_tokens", 0),
+            prompt_tokens=getattr(self, "_budget_prompt_tokens", 0),
+            completion_tokens=getattr(self, "_budget_completion_tokens", 0),
+            cost_usd=getattr(self, "_budget_cost_usd", 0.0),
+            started_at=t0,
+        )
+        return evaluate_budget(usage, limits)
 
     def _emit_compaction(
         self, applied: list[str], iteration: int, result: LoopResult,
@@ -1453,6 +1509,22 @@ class AgentLoop:
             if response is None:
                 break
             messages = llm_ctx.messages
+
+            # A1: accumulate LLM usage into the run budget, then stop
+            # if tokens/cost/time are exhausted before doing more work.
+            self._record_budget_usage(response, t0)
+            budget_stop, budget_reason = self._check_budget(t0)
+            if budget_stop:
+                result.finished_reason = "budget"
+                result.stop_reason = budget_reason
+                self._trace_and_emit("budget_exhausted", {
+                    "reason": budget_reason,
+                    "tokens_used": self._budget_tokens,
+                    "cost_usd": round(self._budget_cost_usd, 6),
+                    "elapsed": round(time.perf_counter() - t0, 3),
+                })
+                await _fire("after_iteration", hook_ctx)
+                break
 
             if not response.has_tool_calls():
                 # L7: consult the strategy's ContinuationStep before

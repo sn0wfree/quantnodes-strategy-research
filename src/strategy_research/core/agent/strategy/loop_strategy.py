@@ -42,6 +42,14 @@ class LoopConfig:
     wrap_up_ratio: float = 0.8
     snapshot_interval: int = 0  # 0 = disabled; future-proofing
 
+    # ── A1: three-dimensional run budget (None / <=0 = unlimited) ──
+    budget_max_tokens: int | None = None
+    budget_max_cost_usd: float | None = None
+    budget_max_seconds: float | None = None
+    # USD per 1M tokens for cost accounting (optional).
+    price_per_mtok_input: float | None = None
+    price_per_mtok_output: float | None = None
+
 
 @dataclass
 class LoopStrategy:
