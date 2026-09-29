@@ -1,7 +1,7 @@
 # A5–A7 — Loop 拆分 / Swarm 收敛 / 评测网
 
 > 2026-09-29 · Agent Runtime 控制面收口  
-> 状态: A5 Implemented · A6 / A7 next
+> 状态: **Implemented** (A5 seams · A6 toolset/budget · A7 golden evals)
 
 ---
 

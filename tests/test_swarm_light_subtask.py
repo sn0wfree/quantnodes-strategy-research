@@ -43,7 +43,7 @@ class TestSubAgentToolParams:
 
     def test_toolset_resolves_named_allowlist(self):
         # resolve via toolsets then apply whitelist
-        tool = SubAgentTool()
+        SubAgentTool()
         from strategy_research.core.agent.toolsets import resolve_toolset
 
         wl = resolve_toolset("minimal")
