@@ -25,6 +25,9 @@ class AgentNodeConfig:
     max_iterations: int | None = None
     max_retries: int | None = None
     tools_override: list[str] | None = None
+    toolset: str | None = None                 # A6: named toolset (see agent.toolsets)
+    budget_max_tokens: int | None = None       # A6: inherit/limit run budget
+    budget_max_seconds: float | None = None
     context: dict[str, Any] | None = None   # extra context injection
 
     def to_dict(self) -> dict[str, Any]:
@@ -37,6 +40,12 @@ class AgentNodeConfig:
                 out[k] = v
         if self.tools_override is not None:
             out["tools_override"] = list(self.tools_override)
+        if self.toolset is not None:
+            out["toolset"] = self.toolset
+        if self.budget_max_tokens is not None:
+            out["budget_max_tokens"] = self.budget_max_tokens
+        if self.budget_max_seconds is not None:
+            out["budget_max_seconds"] = self.budget_max_seconds
         if self.context is not None:
             out["context"] = dict(self.context)
         return out
@@ -54,6 +63,9 @@ class AgentNodeConfig:
                 list(d["tools_override"])
                 if d.get("tools_override") is not None else None
             ),
+            toolset=d.get("toolset"),
+            budget_max_tokens=d.get("budget_max_tokens"),
+            budget_max_seconds=d.get("budget_max_seconds"),
             context=dict(d["context"]) if d.get("context") else None,
         )
 

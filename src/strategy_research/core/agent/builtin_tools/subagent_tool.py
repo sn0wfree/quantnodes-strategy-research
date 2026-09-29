@@ -113,10 +113,25 @@ class SubAgentTool(BaseTool):
                     "不指定则使用全部可用工具（不含 delegate_to_agent）。"
                 ),
             },
+            "toolset": {
+                "type": "string",
+                "description": (
+                    "命名工具集（A6）：minimal/chat/researcher/factor_analyst/"
+                    "strategist/critic 等。与 tools 二选一，tools 优先。"
+                ),
+            },
             "max_iterations": {
                 "type": "integer",
                 "description": "子 agent 最大推理轮次（默认 10，最大 20）。",
                 "default": 10,
+            },
+            "budget_max_tokens": {
+                "type": "integer",
+                "description": "子任务 token 预算（继承/限制父运行，默认不限）。",
+            },
+            "budget_max_seconds": {
+                "type": "number",
+                "description": "子任务时间预算（秒）。",
             },
         },
         "required": ["task"],
@@ -159,7 +174,14 @@ class SubAgentTool(BaseTool):
             )
 
         tools_whitelist: list[str] | None = kwargs.get("tools")
+        toolset_name: str | None = kwargs.get("toolset")
+        if tools_whitelist is None and toolset_name:
+            from ..toolsets import resolve_toolset
+
+            tools_whitelist = resolve_toolset(toolset_name)
         max_iterations = min(kwargs.get("max_iterations", 10), 20)
+        budget_max_tokens = kwargs.get("budget_max_tokens")
+        budget_max_seconds = kwargs.get("budget_max_seconds")
 
         # Emit event helpers
         emit_event = kwargs.get("emit_event")
@@ -212,7 +234,14 @@ class SubAgentTool(BaseTool):
             )
             node = AgentNodeConfig(
                 id=agent_id, tools_override=tools_whitelist,
+                toolset=toolset_name,
                 max_iterations=max_iterations,
+                budget_max_tokens=(
+                    int(budget_max_tokens) if budget_max_tokens else None
+                ),
+                budget_max_seconds=(
+                    float(budget_max_seconds) if budget_max_seconds else None
+                ),
             )
 
             # Build the user-message: sub-agent role prefix + task.
