@@ -1,129 +1,126 @@
-"""Tests for rules.py — HardThresholdRule for strategy acceptance."""
-
+"""Unit tests for strategy_acceptance.rules.HardThresholdRule boundaries."""
 from __future__ import annotations
 
-import sys
-import unittest
-from dataclasses import dataclass
-from pathlib import Path
+from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from strategy_research.core.strategy_acceptance.rules import (
-    HardThresholdRule,
-    RuleResult,
-)
+from strategy_research.core.strategy_acceptance.rules import HardThresholdRule, RuleResult
 
 
-@dataclass(frozen=True)
-class FakeConfig:
-    hard_calmar_min: float = 0.5
-    hard_sharpe_min: float = 0.5
-    hard_max_dd_min: float = -0.3
-    hard_ann_return_min: float = 0.0
-    hard_trades_min: int = 10
-    require_all_hard: bool = True
+def _cfg(**overrides):
+    base = dict(
+        hard_calmar_min=0.5,
+        hard_sharpe_min=0.3,
+        hard_max_dd_min=-0.15,
+        hard_ann_return_min=0.0,
+        hard_trades_min=30,
+        require_all_hard=True,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
 
 
-class TestRuleResult(unittest.TestCase):
-
-    def test_defaults(self) -> None:
-        r = RuleResult(passed=True)
-        self.assertTrue(r.passed)
-        self.assertEqual(r.detail, {})
-        self.assertEqual(r.notes, "")
-
-    def test_with_detail(self) -> None:
-        r = RuleResult(passed=False, detail={"sharpe": False}, notes="failed")
-        self.assertFalse(r.passed)
-        self.assertEqual(r.detail, {"sharpe": False})
-        self.assertEqual(r.notes, "failed")
+def _metrics(**overrides):
+    base = dict(
+        calmar=1.0,
+        sharpe=1.0,
+        max_dd=-0.10,
+        ann_return=0.20,
+        trades=50,
+    )
+    base.update(overrides)
+    return base
 
 
-class TestHardThresholdRule(unittest.TestCase):
-
-    def setUp(self) -> None:
-        self.rule = HardThresholdRule()
-
-    def test_all_pass(self) -> None:
-        metrics = {"calmar": 1.0, "sharpe": 1.0, "max_dd": -0.1, "ann_return": 0.2, "trades": 50}
-        cfg = FakeConfig()
-        result = self.rule.check(metrics, cfg)
-        self.assertTrue(result.passed)
-        self.assertTrue(all(result.detail.values()))
-
-    def test_all_fail(self) -> None:
-        metrics = {"calmar": 0.1, "sharpe": 0.1, "max_dd": -0.5, "ann_return": 0.0, "trades": 1}
-        cfg = FakeConfig(hard_ann_return_min=0.1)
-        result = self.rule.check(metrics, cfg)
-        self.assertFalse(result.passed)
-        self.assertFalse(result.detail["calmar"])
-        self.assertFalse(result.detail["sharpe"])
-        self.assertFalse(result.detail["max_dd"])
-        self.assertFalse(result.detail["ann_return"])
-        self.assertFalse(result.detail["trades"])
-
-    def test_sharpe_fails(self) -> None:
-        metrics = {"calmar": 1.0, "sharpe": 0.1, "max_dd": -0.1, "ann_return": 0.2, "trades": 50}
-        cfg = FakeConfig()
-        result = self.rule.check(metrics, cfg)
-        self.assertFalse(result.passed)
-        self.assertFalse(result.detail["sharpe"])
-        self.assertTrue(result.detail["calmar"])
-
-    def test_require_any_mode(self) -> None:
-        metrics = {"calmar": 0.1, "sharpe": 0.1, "max_dd": -0.5, "ann_return": 0.0, "trades": 50}
-        cfg = FakeConfig(require_all_hard=False)
-        result = self.rule.check(metrics, cfg)
-        self.assertTrue(result.passed)
-        self.assertTrue(result.detail["trades"])
-
-    def test_require_any_all_fail(self) -> None:
-        metrics = {"calmar": 0.1, "sharpe": 0.1, "max_dd": -0.5, "ann_return": 0.0, "trades": 1}
-        cfg = FakeConfig(require_all_hard=False, hard_ann_return_min=0.1)
-        result = self.rule.check(metrics, cfg)
-        self.assertFalse(result.passed)
-
-    def test_ann_return_disabled(self) -> None:
-        metrics = {"calmar": 1.0, "sharpe": 1.0, "max_dd": -0.1, "ann_return": -0.5, "trades": 50}
-        cfg = FakeConfig(hard_ann_return_min=0.0)
-        result = self.rule.check(metrics, cfg)
-        # ann_return threshold is 0.0 → disabled → always passes
-        self.assertTrue(result.detail["ann_return"])
-
-    def test_ann_return_enabled(self) -> None:
-        metrics = {"calmar": 1.0, "sharpe": 1.0, "max_dd": -0.1, "ann_return": -0.5, "trades": 50}
-        cfg = FakeConfig(hard_ann_return_min=0.1)
-        result = self.rule.check(metrics, cfg)
-        self.assertFalse(result.detail["ann_return"])
-
-    def test_max_dd_negative_comparison(self) -> None:
-        metrics = {"calmar": 1.0, "sharpe": 1.0, "max_dd": -0.5, "ann_return": 0.2, "trades": 50}
-        cfg = FakeConfig(hard_max_dd_min=-0.3)
-        result = self.rule.check(metrics, cfg)
-        # -0.5 < -0.3 → fails
-        self.assertFalse(result.detail["max_dd"])
-
-    def test_missing_metrics_default_to_zero(self) -> None:
-        cfg = FakeConfig()
-        result = self.rule.check({}, cfg)
-        self.assertFalse(result.passed)
-
-    def test_notes_format_all_mode(self) -> None:
-        metrics = {"calmar": 0.1, "sharpe": 1.0, "max_dd": -0.1, "ann_return": 0.2, "trades": 50}
-        cfg = FakeConfig()
-        result = self.rule.check(metrics, cfg)
-        self.assertIn("calmar", result.notes)
-
-    def test_notes_format_any_mode(self) -> None:
-        metrics = {"calmar": 0.1, "sharpe": 0.1, "max_dd": -0.5, "ann_return": 0.0, "trades": 50}
-        cfg = FakeConfig(require_all_hard=False)
-        result = self.rule.check(metrics, cfg)
-        self.assertIn("trades", result.notes)
-
-    def test_name_is_hard_threshold(self) -> None:
-        self.assertEqual(self.rule.name, "hard_threshold")
+class TestRuleResultContract:
+    def test_returns_rule_result(self):
+        res = HardThresholdRule().check(_metrics(), _cfg())
+        assert isinstance(res, RuleResult)
+        assert res.passed is True
+        assert set(res.detail) == {"calmar", "sharpe", "max_dd", "ann_return", "trades"}
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestBoundaryEquality:
+    def test_calmar_exact_threshold_passes(self):
+        res = HardThresholdRule().check(_metrics(calmar=0.5), _cfg())
+        assert res.detail["calmar"] is True
+
+    def test_sharpe_exact_threshold_passes(self):
+        res = HardThresholdRule().check(_metrics(sharpe=0.3), _cfg())
+        assert res.detail["sharpe"] is True
+
+    def test_max_dd_exact_threshold_passes(self):
+        res = HardThresholdRule().check(_metrics(max_dd=-0.15), _cfg())
+        assert res.detail["max_dd"] is True
+
+    def test_trades_exact_threshold_passes(self):
+        res = HardThresholdRule().check(_metrics(trades=30), _cfg())
+        assert res.detail["trades"] is True
+
+    def test_just_below_threshold_fails(self):
+        res = HardThresholdRule().check(_metrics(sharpe=0.2999), _cfg())
+        assert res.detail["sharpe"] is False
+
+
+class TestMaxDrawdownSign:
+    def test_less_negative_passes(self):
+        # -0.05 is better than -0.15
+        res = HardThresholdRule().check(_metrics(max_dd=-0.05), _cfg())
+        assert res.detail["max_dd"] is True
+
+    def test_more_negative_fails(self):
+        res = HardThresholdRule().check(_metrics(max_dd=-0.20), _cfg())
+        assert res.detail["max_dd"] is False
+
+    def test_positive_dd_passes(self):
+        res = HardThresholdRule().check(_metrics(max_dd=0.0), _cfg())
+        assert res.detail["max_dd"] is True
+
+
+class TestAnnReturnDisabled:
+    def test_zero_threshold_disables_check(self):
+        res = HardThresholdRule().check(
+            _metrics(ann_return=-99.0), _cfg(hard_ann_return_min=0.0)
+        )
+        assert res.detail["ann_return"] is True
+
+    def test_nonzero_threshold_enforced(self):
+        res = HardThresholdRule().check(
+            _metrics(ann_return=0.05), _cfg(hard_ann_return_min=0.10)
+        )
+        assert res.detail["ann_return"] is False
+
+
+class TestMissingMetricsDefaultZero:
+    def test_missing_fields_fail_closed_under_all_mode(self):
+        res = HardThresholdRule().check({}, _cfg())
+        assert res.passed is False
+        assert res.detail["trades"] is False  # 0 < 30
+        assert res.detail["sharpe"] is False
+
+
+class TestRequireAllVsAny:
+    def test_all_mode_requires_every_check(self):
+        res = HardThresholdRule().check(_metrics(sharpe=-1.0), _cfg(require_all_hard=True))
+        assert res.passed is False
+
+    def test_any_mode_passes_if_one_ok(self):
+        res = HardThresholdRule().check(
+            _metrics(calmar=10.0, sharpe=-1.0, max_dd=-0.99, trades=0),
+            _cfg(require_all_hard=False),
+        )
+        assert res.passed is True
+        assert res.detail["calmar"] is True
+        assert res.detail["sharpe"] is False
+
+    def test_any_mode_fails_if_all_bad(self):
+        res = HardThresholdRule().check(
+            _metrics(calmar=-1.0, sharpe=-1.0, max_dd=-0.99, trades=0, ann_return=-1.0),
+            _cfg(require_all_hard=False, hard_ann_return_min=0.5),
+        )
+        assert res.passed is False
+
+    def test_notes_mention_mode(self):
+        r_all = HardThresholdRule().check(_metrics(), _cfg(require_all_hard=True))
+        r_any = HardThresholdRule().check(_metrics(), _cfg(require_all_hard=False))
+        assert "all" in r_all.notes
+        assert "any" in r_any.notes
