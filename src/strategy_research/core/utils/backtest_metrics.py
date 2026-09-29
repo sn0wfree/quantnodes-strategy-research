@@ -254,7 +254,7 @@ def calc_metrics(
     port_ret = equity_curve.pct_change().fillna(0.0)
 
     final_value = float(equity_curve.iloc[-1])
-    total_ret = float(final_value / initial_cash - 1)
+    total_ret = float(final_value / initial_cash - 1) if initial_cash else 0.0
     ann_ret = float((1 + total_ret) ** (bpy / max(n, 1)) - 1)
     vol = float(port_ret.std())
     sharpe = float(port_ret.mean() / (vol + 1e-10) * np.sqrt(bpy))
