@@ -137,7 +137,9 @@ class TestHistoryCompactionFilter:
             _make_message("compaction", "s3", message_type="compaction"),
             _make_message("user", "current"),
         ]
-        with caplog.at_level(logging.DEBUG, logger="strategy_research.api.session.service"):
+        with caplog.at_level(
+            logging.DEBUG, logger="strategy_research.api.session.history_convert"
+        ):
             SessionService._convert_messages_to_history(messages)
         # Check that the hidden count log was emitted
         hidden_logs = [r for r in caplog.records
