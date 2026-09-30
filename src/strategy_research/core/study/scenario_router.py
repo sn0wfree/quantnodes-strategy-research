@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,6 @@ def detect_asset_universe(strategy_name: str | None,
     False 'single' is the safe default: it only disables
     portfolio_construction, which is meaningless for a single asset anyway.
     """
-    import os
     if strategy_name is None or workspace_path is None:
         return "single"
     strat_dir = Path(workspace_path) / "strategies" / strategy_name

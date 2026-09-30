@@ -171,7 +171,6 @@ class SessionStore:
         """
         logger.debug("[STORE] get_messages (event_log) session=%s limit=%d", session_id, limit)
         try:
-            from .projector import Projector
             proj = self._get_projector()
             msgs = proj.project_to_messages(session_id, limit=limit)
             logger.debug("[STORE] loaded %d messages (event_log)", len(msgs))

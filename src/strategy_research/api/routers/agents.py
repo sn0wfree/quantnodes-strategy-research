@@ -7,7 +7,6 @@ a prompt file's mtime changes (no server restart required).
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Any
 

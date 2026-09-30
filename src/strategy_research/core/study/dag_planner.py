@@ -49,6 +49,7 @@ class PlanResult:
     selected_agents: list[str]
     reasoning: str = ""
     presets_referenced: list[str] = field(default_factory=list)
+    graph: Any = None  # StudyGraph ready for graph.json persistence
 
 
 class DAGPlanner:
@@ -109,6 +110,7 @@ class DAGPlanner:
             selected_agents=sorted(selected),
             reasoning=f"selected {len(selected)} plugins",
             presets_referenced=[],
+            graph=graph,
         )
 
     # ── LLM path ──────────────────────────────────────────────

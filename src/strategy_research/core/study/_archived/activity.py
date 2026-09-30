@@ -15,12 +15,11 @@ the non-deterministic activities.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)

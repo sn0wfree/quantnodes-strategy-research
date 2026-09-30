@@ -342,6 +342,7 @@ async def study_start(req: StudyStartRequest, request: Request):
     )
 
     import asyncio
+
     from ...core.study.bootstrap import create_study_record
 
     try:
@@ -1587,6 +1588,7 @@ async def study_graph(request: Request, study_id: str):
     script) — the response sets ``persisted=False`` in that case.
     """
     from pathlib import Path as _Path
+
     from ...core.study.graph import StudyGraph
     from ...core.study.graph_templates import DEFAULT_STANDARD_GRAPH
     study = _owned_study(request, study_id)
@@ -1618,7 +1620,6 @@ async def study_update_graph(
     """
     from ...core.study.graph import StudyGraph
     from ...core.study.models import StudyStatus
-    from ...core.study import StudyStore
     study = _owned_study(request, study_id)
     if study.execution_status not in (StudyStatus.PAUSED, StudyStatus.INTERRUPTED):
         raise HTTPException(
@@ -1628,7 +1629,7 @@ async def study_update_graph(
                 f"current={study.execution_status.value}"
             ),
         )
-    from ...core.study.graph import GraphNode, GraphEdge
+    from ...core.study.graph import GraphEdge, GraphNode
     nodes = tuple(
         GraphNode(id=n.id, type=n.type, label=n.label,
                   config=dict(n.config), enabled=n.enabled)
@@ -1730,7 +1731,6 @@ async def study_round_redo(
 @router.get("/agents")
 async def study_agents():
     """Return the unified agent catalog available for study DAGs."""
-    from ...core.agent.plugin import AgentPlugin
     from ...core.agent.registry import get_default_registry
 
     registry = get_default_registry()

@@ -15,14 +15,13 @@ account rather than only a shared static token.
 from __future__ import annotations
 
 import hmac
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from .auth import _get_user_db, _hash_password, _user_public
 from .admin import _get_admin_token, _record_audit
+from .auth import _get_user_db, _hash_password, _user_public
 
 router = APIRouter()
 
@@ -140,7 +139,7 @@ async def update_user(
     Self-protection: an admin cannot disable or de-role their own account.
     """
     db = _get_user_db()
-    target = _target_user(user_id, admin)
+    _target_user(user_id, admin)  # validates existence / not self
 
     # Self-protection: never allow disabling or demoting the acting admin.
     if user_id == admin and admin != "__token__":
@@ -208,8 +207,8 @@ async def user_data(user_id: str, admin: str = Depends(require_admin)):
     _target_user(user_id, admin)
     import sqlite3
 
-    from .web_session import _get_db_path
     from ...core.study.store import _default_db_path as _study_db_path
+    from .web_session import _get_db_path
 
     data: dict[str, Any] = {"user_id": user_id}
     try:

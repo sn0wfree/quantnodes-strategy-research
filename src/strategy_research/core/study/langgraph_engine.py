@@ -18,18 +18,18 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, Annotated
+from typing import Annotated, Any, TypedDict
 
-from .engine_common import (
-    safe_json_loads,
-    build_agent_ctx,
-    save_agent_outputs,
-    get_study_session_db_path,
-    ensure_study_session,
-)
 from ..agent.event_store import EventStore
+from .engine_common import (
+    build_agent_ctx,
+    ensure_study_session,
+    get_study_session_db_path,
+    safe_json_loads,
+    save_agent_outputs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +309,7 @@ def build_langgraph(
     if profile is None:
         profile = LangGraphProfile()
 
-    from langgraph.graph import StateGraph, START, END
+    from langgraph.graph import END, START, StateGraph
 
     g = StateGraph(StudyRoundState)
 
@@ -517,7 +517,7 @@ def run_round_langgraph(
 
     logger.info("langgraph: starting round %d, profile=%s", round_num, profile)
 
-    dag_config = AgentDAGConfig.from_study_graph(
+    _dag_config = AgentDAGConfig.from_study_graph(
         graph, name=f"study_{sid}_r{round_num}",
         description=runner._get_study().objective,
     )
@@ -670,7 +670,7 @@ def resume_round_langgraph(
     from ..agent.executor import AgentExecutor
     from ..agent.registry import get_default_registry
 
-    dag_config = AgentDAGConfig.from_study_graph(
+    _dag_config = AgentDAGConfig.from_study_graph(
         graph, name=f"study_{sid}_r{round_num}",
         description=runner._get_study().objective,
     )

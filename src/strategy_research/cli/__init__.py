@@ -40,8 +40,8 @@ from .commands.swarm import (
     cmd_swarm_list,
     cmd_swarm_run,
 )
-from .llm_config import _cmd_llm_list_profiles
 from .llm_config import _cli_overrides_from_args as _cli_overrides_from_args
+from .llm_config import _cmd_llm_list_profiles
 from .llm_config import build_llm_config as build_llm_config
 
 # ============================================================

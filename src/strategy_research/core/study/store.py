@@ -14,7 +14,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..storage.sqlite import (
     connect,
@@ -26,6 +26,10 @@ from ..storage.sqlite import (
     synchronized,
     write_transaction,
 )
+
+if TYPE_CHECKING:
+    from .models import ObjectiveHistoryEntry, StudyInterrupt
+
 from .models import (
     ACTIVE_EXECUTION_STATUSES,
     MetricTarget,

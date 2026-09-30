@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from .engine_common import build_agent_ctx, safe_json_loads, phase_emitter, save_agent_outputs
+from .engine_common import build_agent_ctx, phase_emitter, safe_json_loads
 
 logger = logging.getLogger(__name__)
 

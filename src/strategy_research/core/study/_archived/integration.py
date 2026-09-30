@@ -103,10 +103,10 @@ def create_enhanced_runner(
     Returns:
         Enhanced AutoresearchRunner instance
     """
-    from .event_store import EventStore, EventType, get_event_store
-    from .checkpoint import CheckpointManager, CheckpointConfig
-    from .streaming import StreamingEmitter, StreamEventType
-    from .dag import DAGScheduler, DAGDefinition
+    from .checkpoint import CheckpointConfig, CheckpointManager
+    from .dag import DAGScheduler
+    from .event_store import get_event_store
+    from .streaming import StreamingEmitter
 
     # Create or use provided event store
     if event_store is None:
@@ -166,7 +166,6 @@ def _patch_runner_with_events(
     """Patch runner methods to record events and checkpoints."""
 
     from .event_store import EventType
-    from .streaming import StreamEventType
 
     # Store original methods
     original_run_loop = runner._run_loop
@@ -272,9 +271,9 @@ def create_enhanced_scheduler(
     Returns:
         Enhanced StudyScheduler instance
     """
+    from .checkpoint import CheckpointConfig, CheckpointManager
     from .scheduler import StudyScheduler
-    from .signals import SignalManager, get_signal_manager
-    from .checkpoint import CheckpointManager, CheckpointConfig
+    from .signals import get_signal_manager
 
     # Create scheduler
     scheduler = StudyScheduler(

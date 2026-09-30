@@ -15,12 +15,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import scenario_router
 from .models import StudyStatus
 from .state_store import init as init_state
-from . import scenario_router
 
 if TYPE_CHECKING:
-    from .models import StudyRecord
+    from .models import StudyGraph, StudyRecord
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,6 @@ def init_study_dir(
 
     # Execution graph (multi-entry/exit). Persisted so the runner can
     # topologically schedule agents each round.
-    from .graph import StudyGraph
     from .graph_templates import DEFAULT_STANDARD_GRAPH
 
     graph_path = root / "graph.json"

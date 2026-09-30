@@ -12,20 +12,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ..observability import new_trace_id
 from . import aegis as _aegis
 from . import budget as _budget
 from . import state_utils as _state_utils
+from .metric_targets import metric_pass_set as _metric_pass_set  # noqa: F401  (re-export for tests)
 from .models import StudyRecord, StudyStatus
-from .store import StudyStore
 
+if TYPE_CHECKING:
+    from .models import StudyGraph
+
+
+from .store import StudyStore
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +93,7 @@ class ShutdownReason:
 
 
 # ── metric target comparison (reused from executor.py) ──────────────
-from .metric_targets import meets_metric_targets, metric_pass_set as _metric_pass_set, acceptance_config_from_targets  # noqa: F401
-
+from .metric_targets import acceptance_config_from_targets, meets_metric_targets  # noqa: F401
 
 # ── event emitter protocol ──────────────────────────────────────────
 
@@ -567,6 +570,8 @@ class AutoresearchRunner:
                 if _study_now.metric_targets:
                     from .metric_targets import (
                         meets_metric_targets as _meets,
+                    )
+                    from .metric_targets import (
                         metric_pass_set as _pass_set,
                     )
                     _m = result.get("metrics", {})
@@ -941,7 +946,6 @@ class AutoresearchRunner:
         self, current_state: dict, directive_text: str | None,
     ) -> str:
         """Compose the base task text for every agent in the round."""
-        from ..autoresearch import read_current_state
         parts: list[str] = ["根据研究目标与历史结果完成当前轮次的工作。"]
         if current_state:
             parts.append("## 当前状态\n" + json.dumps(
@@ -1335,7 +1339,7 @@ class AutoresearchRunner:
         are silently swallowed — evolution is best-effort observability.
         """
         try:
-            from .loop_evolution import record_observation, maybe_evolve
+            from .loop_evolution import maybe_evolve, record_observation
             study = self._get_study()
             record_observation(self.study_store, study)
             maybe_evolve(self.study_store)
@@ -1359,8 +1363,9 @@ class AutoresearchRunner:
         itself can never detect drift.
         """
         from datetime import datetime, timezone
-        from strategy_research.core.study import state_store as ss
+
         from strategy_research.core.backtest import run_backtest_script
+        from strategy_research.core.study import state_store as ss
 
         study = self._get_study()
         sid = study.study_id

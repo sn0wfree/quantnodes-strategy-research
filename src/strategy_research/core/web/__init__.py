@@ -9,8 +9,8 @@ from .minimax_search import (
 from .search import web_search
 
 __all__ = [
-    "webfetch",
-    "websearch",
+    "read_url",
+    "web_search",
     "minimax_search",
     "has_minimax_credentials",
     "ENV_KEYS",

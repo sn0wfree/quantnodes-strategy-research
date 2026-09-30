@@ -11,10 +11,7 @@ from __future__ import annotations
 
 import logging
 import random
-from dataclasses import asdict, fields
 from typing import Any
-
-from ..agent.strategy.loop_strategy import LoopConfig
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +86,6 @@ def record_observation(
     fit = fitness(study, study_store)
     config = config or getattr(study, "loop_config", None) or {}
     study_id = study.study_id
-    from ..storage.sqlite import new_id
-    import time as _time
     now_iso = __import__("datetime").datetime.now(
         __import__("datetime").timezone.utc).isoformat()
     with study_store._lock:
@@ -121,7 +116,6 @@ def maybe_evolve(
     the current config (new_mean > current_mean * improvement_threshold AND
     at least min_new_samples observations for the new config).
     """
-    import json as _json
     current = _read_current_config(study_store)
     obs = _fetch_observations(study_store, limit=50)
     if len(obs) < min_observations:

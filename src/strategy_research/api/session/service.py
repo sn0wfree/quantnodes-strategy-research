@@ -1515,8 +1515,8 @@ class SessionService:
         Acquires per-session compact lock to prevent concurrent compaction
         (auto from agent loop + manual /compact) on the same session.
         """
-        from ..routers.chat import _build_llm_config
         from ...core.agent.compact import _compact_locks
+        from ..routers.chat import _build_llm_config
 
         async with await _compact_locks.get(session_id):
             messages = self.store.get_messages(session_id, limit=10000)

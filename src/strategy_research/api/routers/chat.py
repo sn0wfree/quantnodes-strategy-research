@@ -750,6 +750,7 @@ async def chat_events(
 ):
     """SSE event stream for a session."""
     from fastapi import HTTPException as _HTTPExc
+
     from .web_session import _fetch_session_owned, _get_db, _get_db_path
     user_id = getattr(request.state, "user_id", "anonymous")
     try:
