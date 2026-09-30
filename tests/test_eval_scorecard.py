@@ -28,7 +28,7 @@ class TestLoad:
 
     def test_golden_set_is_20_tasks(self):
         tasks = load_golden_tasks(GOLDEN)
-        assert len(tasks) == 50
+        assert len(tasks) == 70
         ids = [t.id for t in tasks]
         assert len(ids) == len(set(ids))
         # Safety / budget / hard-reason slices must stay present.
@@ -37,6 +37,7 @@ class TestLoad:
         assert any("multi" in t.tags for t in tasks)
         assert any("injection" in t.tags for t in tasks)
         assert any("reason" in t.tags for t in tasks)
+        assert any("source:public-pattern" in t.tags for t in tasks)
 
     def test_from_dict_defaults(self):
         t = GoldenTask.from_dict({"id": "x", "prompt": "p"})
