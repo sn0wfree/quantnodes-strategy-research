@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-TEMPLATES = REPO / "templates"
+# W1: root templates/ copy removed — use the packaged templates tree.
+TEMPLATES = REPO / "src" / "strategy_research" / "templates"
 
 
 def _load_prepare():

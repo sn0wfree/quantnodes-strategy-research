@@ -356,6 +356,39 @@ def _simulate_backtest(
     return nav, weight_changes
 
 
+def save_metrics(metrics: dict) -> bool:
+    """把 evaluate() 结果写入结构化指标契约文件。
+
+    运行目录由框架通过环境变量 ``SR_RUN_DIR`` 注入。写入
+    ``<SR_RUN_DIR>/metrics_raw.json`` 后，框架以该文件作为回测指标的第一
+    来源；未设置 SR_RUN_DIR 时不写文件，框架回退到 run.log 解析。
+
+    仅接受数值型指标（非数值键静默跳过）；NaN/Inf 直接抛 ValueError。
+    """
+    import json
+    import math
+    import os
+
+    run_dir = os.environ.get("SR_RUN_DIR", "").strip()
+    if not run_dir:
+        return False
+
+    clean: dict[str, float] = {}
+    for k, v in metrics.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        if not math.isfinite(v):
+            raise ValueError(f"metric {k!r} 非有限值: {v!r}")
+        clean[k] = float(v)
+
+    out = Path(run_dir) / "metrics_raw.json"
+    out.write_text(
+        json.dumps({"protocol": 1, "metrics": clean}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return True
+
+
 def _empty_metrics() -> dict:
     """返回空指标"""
     return {

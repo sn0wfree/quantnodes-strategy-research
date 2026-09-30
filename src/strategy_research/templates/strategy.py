@@ -41,6 +41,8 @@ if __name__ == "__main__":
     import prepare
     data = prepare.load_data()
     metrics = prepare.evaluate(PARAMS, FACTOR_EXPRS, FACTOR_WEIGHT_METHOD, data)
+    # 结构化指标契约：框架优先读取 metrics_raw.json（run.log 正则仅作降级）。
+    prepare.save_metrics(metrics)
     print("---")
     for k, v in metrics.items():
         if isinstance(v, bool):
