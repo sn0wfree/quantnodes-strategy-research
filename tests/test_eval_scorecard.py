@@ -28,12 +28,13 @@ class TestLoad:
 
     def test_golden_set_is_20_tasks(self):
         tasks = load_golden_tasks(GOLDEN)
-        assert len(tasks) == 20
+        assert len(tasks) == 35
         ids = [t.id for t in tasks]
         assert len(ids) == len(set(ids))
         # Safety / budget slices must stay present.
         assert any("safety" in t.tags for t in tasks)
         assert any("budget" in t.tags for t in tasks)
+        assert any("multi" in t.tags for t in tasks)
 
     def test_from_dict_defaults(self):
         t = GoldenTask.from_dict({"id": "x", "prompt": "p"})
