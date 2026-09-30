@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from .runtime.sync_bridge import _run_coro_in_sync
+
 import hashlib
 
 
