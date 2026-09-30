@@ -24,9 +24,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from strategy_research.api.session.event_bus_v2 import EventBusV2
+from tests._fixtures.legacy_event_bus_v2 import EventBusV2
 from strategy_research.core.events.event_v2 import EventType, EventV2
-from strategy_research.api.session.events import EventBus
+from tests._fixtures.legacy_events import EventBus
 from strategy_research.api.session.projector import (
     ProjectedMessage,
     ProjectedPart,
@@ -375,7 +375,10 @@ class TestProjectorIntegration(unittest.TestCase):
         self.projector = Projector(self.db_path)
 
     def tearDown(self) -> None:
-        self.db_path.unlink(missing_ok=True)
+        try:
+            self.db_path.unlink(missing_ok=True)
+        except OSError:
+            pass  # Windows may still hold sqlite handles
 
     def test_project_empty_session(self) -> None:
         state = self.projector.project("s1")

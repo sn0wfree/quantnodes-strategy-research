@@ -1,7 +1,7 @@
 # 结构债清理（W 系列）
 
 > 2026-09-29 · 对应 issues-recheck H3/H5/M1/M2/H4  
-> 状态: **W1 · W2 · W3a done** · W3b/W4/W5 待做
+> 状态: **W1 · W2 · W3a · W3b done** · W4/W5 待做
 
 ## W1 — 删除根 `templates/` 副本
 

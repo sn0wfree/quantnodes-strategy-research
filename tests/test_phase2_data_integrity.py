@@ -17,9 +17,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from strategy_research.api.session.event_bus_v2 import EventBusV2
+from tests._fixtures.legacy_event_bus_v2 import EventBusV2
 from strategy_research.core.events.event_v2 import EventV2
-from strategy_research.api.session.events import EventBus
+from tests._fixtures.legacy_events import EventBus
 
 
 def _setup_db(db_path: Path, n_sessions: int = 1) -> None:
@@ -52,7 +52,7 @@ class TestConcurrentEmit(unittest.TestCase):
         parallel emit() calls got the same seq; the loser's INSERT hit
         UNIQUE(aggregate_id, seq) and the event was silently dropped.
         """
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             db = Path(tmp) / "test.db"
             _setup_db(db)
             legacy = EventBus()
@@ -89,7 +89,7 @@ class TestConcurrentEmit(unittest.TestCase):
 
     def test_emit_seq_unique_under_concurrency(self) -> None:
         """Direct emit() (which auto-assigns seq) stays unique too."""
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             db = Path(tmp) / "test.db"
             _setup_db(db)
             legacy = EventBus()
@@ -163,7 +163,7 @@ class TestFlushPreservesMetadata(unittest.TestCase):
 
         from strategy_research.api.session.projector import Projector
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             db = self._db_with_messages(Path(tmp))
             state = MagicMock()
             state.session_id = "s0"
@@ -238,7 +238,7 @@ class TestGetMessagesMostRecent(unittest.TestCase):
 
         from strategy_research.api.session.store import SessionStore
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             db = self._db_with_messages(Path(tmp), 120)
             store = SessionStore(db_path=str(db))
             store._use_event_log_read = False

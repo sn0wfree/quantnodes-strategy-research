@@ -87,7 +87,7 @@ def _setup_full_db(db_path: Path) -> None:
 
 @pytest.fixture
 def service(tmp_path, monkeypatch):
-    from strategy_research.api.session.events import EventBus
+    from tests._fixtures.legacy_events import EventBus
     from strategy_research.api.session.service import SessionService
     from strategy_research.api.session.store import SessionStore
 

@@ -15,9 +15,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from strategy_research.api.session.event_bus_v2 import EventBusV2
+from tests._fixtures.legacy_event_bus_v2 import EventBusV2
 from strategy_research.core.events.event_v2 import EventV2
-from strategy_research.api.session.events import EventBus
+from tests._fixtures.legacy_events import EventBus
 from strategy_research.api.session.projector import Projector
 
 
@@ -90,7 +90,10 @@ class IncrementalProjectorTest(unittest.TestCase):
         self.v2 = EventBusV2(self.bus, self.db_path, flush_to_messages=True)
 
     def tearDown(self) -> None:
-        self.db_path.unlink(missing_ok=True)
+        try:
+            self.db_path.unlink(missing_ok=True)
+        except OSError:
+            pass  # Windows may still hold sqlite handles
 
     def _publish_turn(self, sid: str, seq: int, msg_id: str, text: str) -> None:
         self.v2.publish(_event(sid, seq, "message_received", {

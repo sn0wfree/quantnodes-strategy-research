@@ -1,33 +1,8 @@
-"""EventBusV2 — event publisher with 3 sinks (Level 3, B4 commit 1).
+"""EventBusV2 — **test harness only** (moved from api/session, W3b).
 
-.. deprecated::
-    Use ``EventStore`` (``strategy_research.core.agent.event_store``) instead.
-    EventBusV2 is kept for backward compatibility but no longer imported
-    by service.py or chat.py. Will be removed in a future release.
-
-This module sits between the producers (AgentLoop, service.py) and
-three sinks:
-   1. event_log table (persistence — the source of truth)
-   2. Legacy EventBus (live SSE delivery to connected clients)
-   3. Projector.flush() — materializes events to messages + message_parts
-      tables (B4: the only write path for those tables)
-
-In B4, service.py stops writing directly to messages/message_parts.
-Instead, it emits events via EventBusV2. EventBusV2 persists to
-event_log, then calls Projector.flush() to update messages +
-message_parts tables (which become materialized views).
-
-Why three sinks:
-- event_log: append-only source of truth, replayable, auditable
-- Legacy EventBus: live SSE delivery to connected clients (kept for
-  backward compat with existing SSE endpoint)
-- Projector.flush: materialized view in messages + message_parts,
-  readable by existing code paths that haven't switched to projector
-
-In B4, EventBusV2 is a drop-in replacement for EventBus in the
-service.py constructor. It implements emit() with the same
-signature, auto-assigns seq numbers per session, and writes to
-all three sinks.
+Production uses ``EventStore`` (``strategy_research.core.agent.event_store``).
+This module remains so projector / dual-write regression tests can drive
+the historical publish path without keeping a deprecated API surface.
 """
 from __future__ import annotations
 
@@ -40,8 +15,9 @@ import warnings
 from pathlib import Path
 from typing import List, Optional
 
-from ...core.events.event_v2 import EventV2, is_known_event_type
-from .events import EventBus, SSEEvent
+from strategy_research.core.events.event_v2 import EventV2, is_known_event_type
+
+from .legacy_events import EventBus, SSEEvent
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +63,7 @@ class EventBusV2:
     def _get_projector(self):
         """Lazy-get the projector instance."""
         if self._projector is None:
-            from .projector import Projector
+            from strategy_research.api.session.projector import Projector
             self._projector = Projector(self.db_path)
         return self._projector
 

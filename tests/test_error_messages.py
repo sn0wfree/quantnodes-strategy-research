@@ -129,7 +129,7 @@ class TestAssistantMessageSSEEvent:
         import sqlite3
         import time
 
-        from strategy_research.api.session.events import EventBus
+        from tests._fixtures.legacy_events import EventBus
         from strategy_research.api.session.models import Attempt
         from strategy_research.api.session.service import SessionService
         from strategy_research.api.session.store import SessionStore
@@ -258,10 +258,10 @@ class TestRunWithAgentCfgParam:
         import time
 
         from strategy_research.api.routers.web_session import _ensure_schema
-        from strategy_research.api.session.events import EventBus
+        from tests._fixtures.legacy_events import EventBus
         from strategy_research.api.session.models import Attempt
         from strategy_research.api.session.store import SessionStore
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = f"{tmpdir}/test.db"
             conn = sqlite3.connect(db_path)
             _ensure_schema(conn)

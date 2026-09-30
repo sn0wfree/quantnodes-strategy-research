@@ -25,7 +25,7 @@ def temp_db(monkeypatch, tmp_path):
 
 @pytest.fixture
 def event_bus():
-    from strategy_research.api.session.events import EventBus
+    from tests._fixtures.legacy_events import EventBus
 
     bus = EventBus()
     try:

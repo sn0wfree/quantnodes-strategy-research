@@ -21,7 +21,7 @@ EXPECTED_LABELS: list[tuple[str, str]] = [
     ("src/strategy_research/core/agent/compact.py", "0 production callers"),
     ("src/strategy_research/api/routers/strategy.py", "0 callers for the two endpoints"),
     ("src/strategy_research/api/routers/memory.py", "legacy, test-only"),
-    ("src/strategy_research/api/session/events.py", "ring buffer not consumed"),
+    # events.py / event_bus_v2.py moved to tests/_fixtures (W3b)
     # ── webui (B17) ──
     ("webui/frontend/src/components/common/Skeleton.tsx", "never imported"),
 ]
