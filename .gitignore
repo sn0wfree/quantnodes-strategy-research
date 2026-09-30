@@ -81,3 +81,6 @@ trace-blobs/
 UNUSED
 analysis/
 docs/*.pdf
+
+# Golden-eval runtime workspace (run_evals_llm.py)
+evals/_ws/
