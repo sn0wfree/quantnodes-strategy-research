@@ -64,12 +64,17 @@ def _run_one(task: GoldenTask, *, workspace: Path, max_iterations: int = 6) -> R
     try:
         result = loop.run(task.prompt)
         tools_used = []
+        evidence_parts = []
         for msg in result.messages or []:
             if msg.get("role") == "assistant":
                 for tc in msg.get("tool_calls") or []:
                     name = (tc.get("function") or {}).get("name") or tc.get("name")
                     if name:
                         tools_used.append(name)
+            content = msg.get("content") or ""
+            if content and isinstance(content, str):
+                evidence_parts.append(content[:2000])
+        evidence = "\n".join(evidence_parts)[:12000]
         return RunRecord(
             task_id=task.id,
             tools_used=tools_used,
@@ -81,6 +86,7 @@ def _run_one(task: GoldenTask, *, workspace: Path, max_iterations: int = 6) -> R
             ),
             finished_reason=getattr(result, "finished_reason", "stop"),
             answer=(result.answer or "")[:4000],
+            evidence=evidence,
             success=bool(getattr(result, "success", True)),
             error=getattr(result, "error", None),
         )

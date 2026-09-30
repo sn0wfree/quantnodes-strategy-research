@@ -51,6 +51,7 @@ class RunRecord:
     tokens_used: int = 0
     finished_reason: str = "stop"
     answer: str = ""
+    evidence: str = ""  # tool outputs / transcript snippets for content match
     success: bool = True
     error: str | None = None
 
@@ -86,11 +87,12 @@ def score_run(task: GoldenTask, run: RunRecord) -> TaskScore:
         budget_ok = False
 
     answer = run.answer or ""
+    haystack = f"{answer}\n{run.evidence or ''}".lower()
     if task.must_contain:
         ok_flags = []
         for s in task.must_contain:
             alts = [a for a in s.split("|") if a]
-            ok_flags.append(any(a.lower() in answer.lower() for a in alts))
+            ok_flags.append(any(a.lower() in haystack for a in alts))
         content_ok = all(ok_flags) if ok_flags else True
     else:
         content_ok = True
