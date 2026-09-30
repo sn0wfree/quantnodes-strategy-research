@@ -1280,11 +1280,15 @@ class AgentLoop:
         elapsed = time.perf_counter() - t0
         result.metrics["elapsed_s"] = round(elapsed, 2)
         result.metrics["tokens"] = estimate_tokens(messages)
+        # A1: real billed tokens (from LLM usage), not estimate.
+        result.metrics["usage_tokens"] = int(getattr(self, "_budget_tokens", 0) or 0)
+        result.metrics["usage_cost_usd"] = float(getattr(self, "_budget_cost_usd", 0.0) or 0.0)
         self._trace_and_emit("loop_final", {
             "reason": result.finished_reason,
             "iterations": result.iterations,
             "tool_calls_made": result.tool_calls_made,
             "elapsed_s": round(elapsed, 2),
+            "usage_tokens": result.metrics["usage_tokens"],
             "compression": result.compression_applied,
         })
 

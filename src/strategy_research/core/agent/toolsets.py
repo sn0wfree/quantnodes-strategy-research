@@ -77,7 +77,6 @@ TOOLSETS: dict[str, list[str]] = {
         "get_market_data",
         "show_chart",
         "show_report",
-        "run_bg_command",
         "tool_help",
     ],
     "portfolio_construction": [

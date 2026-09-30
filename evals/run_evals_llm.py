@@ -73,7 +73,11 @@ def _run_one(task: GoldenTask, *, workspace: Path, max_iterations: int = 6) -> R
         return RunRecord(
             task_id=task.id,
             tools_used=tools_used,
-            tokens_used=getattr(loop, "_budget_tokens", 0) or 0,
+            tokens_used=int(
+                getattr(result, "metrics", {}).get("usage_tokens")
+                or getattr(loop, "_budget_tokens", 0)
+                or 0
+            ),
             finished_reason=getattr(result, "finished_reason", "stop"),
             answer=(result.answer or "")[:4000],
             success=bool(getattr(result, "success", True)),

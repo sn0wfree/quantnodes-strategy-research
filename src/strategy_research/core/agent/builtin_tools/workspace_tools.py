@@ -121,7 +121,7 @@ class GitDiffTool(BaseTool):
                 tool="git_diff",
             )
 
-        diff = result.stdout
+        diff = result.stdout or ""
         lines = diff.splitlines()
         truncated = len(lines) > max_lines
         if truncated:
