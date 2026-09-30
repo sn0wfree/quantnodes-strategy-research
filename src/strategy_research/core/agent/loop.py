@@ -1727,98 +1727,18 @@ class AgentLoop:
             ]
         return msg
 
-    async def _execute_tool_call_core(
-        self, tc: ToolCall, result: LoopResult, *, async_mode: bool
-    ) -> dict[str, Any]:
-        """Shared tool-call core (single source for both modes).
 
-        ``async_mode`` selects ``tool.ainvoke`` (permission-gated, awaited
-        on the loop) vs ``tool.invoke`` (direct sync call) and
-        ``asyncio.sleep`` vs ``time.sleep`` for the transient-retry delay.
-        The sync entry runs this core via ``_run_coro_in_sync`` (from a
-        pool thread there is no running loop, so no nested thread).
-        """
-        tool = self.registry.get(tc.name)
-        if tool is None:
-            logger.warning("tool '%s' not in registry", tc.name)
-            self._trace_and_emit("tool_error", {"tool": tc.name, "error": "not in registry"})
-            self._emit("tool_result", {
-                "tool": tc.name,
-                "id": tc.id,
-                "call_id": tc.id,
-                "status": "error",
-                "ok": False,  # backward compat
-                "result": "tool not in registry",
-                "preview": "tool not in registry",
-                "elapsed_ms": 0,
-            })
-            return {
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(
-                    {"status": "error", "error": f"tool '{tc.name}' not found"},
-                    ensure_ascii=False,
-                ),
-            }
+    def _build_tool_kwargs(self, tc: ToolCall) -> dict[str, Any]:
+        """W5: assemble ToolContext + injected kwargs for one tool call."""
+        def _progress_callback(steps: list[str]) -> None:
+            self._emit("tool_progress", {"id": tc.id, "steps": steps})
 
-        # DSH-inspired: check monotonic deny guards before execution
-        guard_reason = self.registry.check_guards(tc.name, tc.arguments)
-        if guard_reason:
-            logger.info("tool '%s' denied by guard: %s", tc.name, guard_reason)
-            self._trace_and_emit("tool_error", {"tool": tc.name, "error": f"guard: {guard_reason}"})
-            self._emit("tool_result", {
-                "tool": tc.name,
-                "id": tc.id,
-                "call_id": tc.id,
-                "status": "denied",
-                "ok": False,
-                "result": guard_reason,
-                "preview": guard_reason[:100],
-                "elapsed_ms": 0,
-            })
-            return {
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(
-                    {"status": "denied", "error": guard_reason},
-                    ensure_ascii=False,
-                ),
-            }
-
-        # Emit tool_call event
-        self._emit("tool_call", {
-            "tool": tc.name,
-            "name": tc.name,            # frontend reads data.name
-            "id": tc.id,                # frontend reads data.id
-            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-            if not isinstance(tc.arguments, str)
-            else tc.arguments,
-            "call_id": tc.id,           # backward compat
-            "iter": getattr(self, "_current_iter", 0),
-        })
-
-        # Inject workspace + session_id kwargs if not present
-        kwargs = dict(tc.arguments)
+        kwargs = dict(tc.arguments) if isinstance(tc.arguments, dict) else {}
         if "workspace" not in kwargs and self.workspace is not None:
             kwargs["workspace"] = self.workspace
         if "session_id" not in kwargs and self.session_id is not None:
             kwargs["session_id"] = self.session_id
-
-        # Inject progress callback so tools can report progress steps
-        def _progress_callback(steps: list[str]) -> None:
-            self._emit("tool_progress", {
-                "id": tc.id,
-                "steps": steps,
-            })
         kwargs["_progress_callback"] = _progress_callback
-
-        # v2: explicit ToolContext (workspace/session_id kwargs stay for
-        # legacy tools until P3 migration removes them). The
-        # permission_evaluator / permission_gateway / tool_call_id
-        # fields wire the Tier 1 A1 permission gate into ainvoke().
-        # P0-2 D: data_store + sandbox are auto-injected as the default
-        # capability seams. Tools consume them via tools_capability
-        # helpers; existing tools that don't use them are unaffected.
         kwargs["ctx"] = ToolContext(
             workspace=self.workspace,
             session_id=self.session_id,
@@ -1836,17 +1756,61 @@ class AgentLoop:
             data_store=self._build_data_store(),
             sandbox=self._build_sandbox(),
         )
-
-        # SubAgentTool injection: emit_event, message_id, count ref, parent registry
         if tc.name == "task":
             kwargs["emit_event"] = self._emit
             kwargs["message_id"] = getattr(self, "_current_message_id", None)
             kwargs["_subagent_count_ref"] = self._subagent_count
             kwargs["_parent_registry"] = self.registry
-
-        # TodoWriteTool injection: emit_event (session_id already injected)
         if tc.name == "todowrite":
             kwargs["emit_event"] = self._emit
+        return kwargs
+
+    async def _execute_tool_call_core(
+        self, tc: ToolCall, result: LoopResult, *, async_mode: bool
+    ) -> dict[str, Any]:
+        """Shared tool-call core (single source for both modes).
+
+        ``async_mode`` selects ``tool.ainvoke`` (permission-gated, awaited
+        on the loop) vs ``tool.invoke`` (direct sync call) and
+        ``asyncio.sleep`` vs ``time.sleep`` for the transient-retry delay.
+        The sync entry runs this core via ``_run_coro_in_sync`` (from a
+        pool thread there is no running loop, so no nested thread).
+        """
+        from .runtime.tool_exec import (
+            guard_denied_payload,
+            missing_tool_payload,
+        )
+
+        tool = self.registry.get(tc.name)
+        if tool is None:
+            logger.warning("tool '%s' not in registry", tc.name)
+            self._trace_and_emit("tool_error", {"tool": tc.name, "error": "not in registry"})
+            event, msg = missing_tool_payload(tc)
+            self._emit("tool_result", event)
+            return msg
+
+        # DSH-inspired: check monotonic deny guards before execution
+        guard_reason = self.registry.check_guards(tc.name, tc.arguments)
+        if guard_reason:
+            logger.info("tool '%s' denied by guard: %s", tc.name, guard_reason)
+            self._trace_and_emit("tool_error", {"tool": tc.name, "error": f"guard: {guard_reason}"})
+            event, msg = guard_denied_payload(tc, guard_reason)
+            self._emit("tool_result", event)
+            return msg
+
+        # Emit tool_call event
+        self._emit("tool_call", {
+            "tool": tc.name,
+            "name": tc.name,            # frontend reads data.name
+            "id": tc.id,                # frontend reads data.id
+            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+            if not isinstance(tc.arguments, str)
+            else tc.arguments,
+            "call_id": tc.id,           # backward compat
+            "iter": getattr(self, "_current_iter", 0),
+        })
+
+        kwargs = self._build_tool_kwargs(tc)
 
         t0 = time.perf_counter()
         # Count only calls that actually reached execution — the old
@@ -1890,34 +1854,31 @@ class AgentLoop:
             )
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-        # Emit tool_result event
-        is_error = isinstance(output, str) and output.startswith('{"status": "error"')
-        status_str = "error" if is_error else "done"
+        # Emit tool_result event + circuit breaker + A3 history view.
+        from .runtime.tool_exec import (
+            classify_tool_output,
+            render_history_output,
+        )
 
-        # Update circuit breaker
+        classified = classify_tool_output(output)
+        is_error = classified["is_error"]
+        status_str = "error" if is_error else "done"
         if self._circuit_breaker is not None:
             if is_error:
                 self._circuit_breaker.record_failure(tc.name)
             else:
                 self._circuit_breaker.record_success(tc.name)
-        output_preview = (output[:200] if isinstance(output, str) else str(output))[:200]
-        # result 字段发完整 output（上限保护防大文件撑爆 SSE/DB）:
-        # 前端 ToolCallBlock / 右侧面板 (extractLatestBacktestMetrics) 需要
-        # 解析完整 JSON（如 run_backtest 的 metrics）；preview 保持 200 截断
-        # 兼容旧消费方。projector 持久化 event.data.result → DB 同样完整。
-        output_full = (output if isinstance(output, str) else str(output))[:_TOOL_RESULT_MAX]
+
         self._emit("tool_result", {
             "tool": tc.name,
-            "id": tc.id,                # frontend reads data.id
-            "call_id": tc.id,           # backward compat
+            "id": tc.id,
+            "call_id": tc.id,
             "status": status_str,
-            "ok": not is_error,          # backward compat
-            "result": output_full,       # frontend reads data.result (完整)
-            "preview": output_preview,   # backward compat (截断)
+            "ok": not is_error,
+            "result": classified["full"],
+            "preview": classified["preview"],
             "elapsed_ms": elapsed_ms,
         })
-
-        # Trace tool result
         self._trace({
             "type": "tool_result",
             "tool": tc.name,
@@ -1925,33 +1886,11 @@ class AgentLoop:
             "status": status_str,
             "iteration": getattr(self, "_current_iter", 0),
             "elapsed_ms": elapsed_ms,
-            "output_preview": output_preview,
+            "output_preview": classified["preview"],
         })
-
-        # A3: smart LLM view (table-aware / head+tail with counts).
-        # Falls back to legacy head/tail cut if render_for_llm fails.
-        history_output = output
-        try:
-            from .tool_result import from_any, render_for_llm
-
-            history_output = render_for_llm(
-                from_any(output),
-                max_chars=_TOOL_RESULT_HISTORY_MAX or 0,
-            )
-        except Exception:  # noqa: BLE001
-            history_output = output
-            if (
-                _TOOL_RESULT_HISTORY_MAX > 0
-                and isinstance(output, str)
-                and len(output) > _TOOL_RESULT_HISTORY_MAX
-            ):
-                half = _TOOL_RESULT_HISTORY_MAX // 2
-                history_output = (
-                    output[:half]
-                    + f"\n\n[truncated {len(output) - _TOOL_RESULT_HISTORY_MAX} chars]\n\n"
-                    + output[-half:]
-                )
-
+        history_output = render_history_output(
+            output, max_chars=_TOOL_RESULT_HISTORY_MAX or 0
+        )
         return {
             "role": "tool",
             "tool_call_id": tc.id,
