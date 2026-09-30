@@ -77,7 +77,7 @@ class RunBacktestTool(BaseTool):
     def execute(
         self,
         ctx: ToolContext,
-        strategy_name: str,
+        strategy_name: str = "",
         action: str = "agent",
         description: str = "",
         yaml_path: str | None = None,

@@ -336,9 +336,12 @@ class TestStreamOptions:
         adapter = OpenAIAdapter()
         assert adapter.custom_stream_options() == {"include_usage": True}
 
+    def test_usage_requesting_providers(self):
+        # A1 budget accounting: stream must ask for the usage snapshot.
+        assert DeepSeekAdapter().custom_stream_options() == {"include_usage": True}
+        assert MiniMaxAdapter().custom_stream_options() == {"include_usage": True}
+
     def test_other_providers_no_stream_options(self):
-        assert DeepSeekAdapter().custom_stream_options() is None
-        assert MiniMaxAdapter().custom_stream_options() is None
         assert QwenAdapter().custom_stream_options() is None
         assert KimiAdapter().custom_stream_options() is None
         assert FallbackAdapter().custom_stream_options() is None

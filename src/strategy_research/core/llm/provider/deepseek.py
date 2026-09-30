@@ -39,6 +39,9 @@ class DeepSeekAdapter(OpenAIReasoningFieldAdapter):
         # reasoning_content precedes the answer; keep room for both.
         return 4096
 
+    def custom_stream_options(self) -> dict[str, Any] | None:
+        return {"include_usage": True}
+
     # ── DSML filter (DeepSeek reasoning_content leakage) ──
 
     def fix_delta(self, delta):

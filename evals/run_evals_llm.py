@@ -76,6 +76,7 @@ def _run_one(task: GoldenTask, *, workspace: Path, max_iterations: int = 6) -> R
             tokens_used=int(
                 getattr(result, "metrics", {}).get("usage_tokens")
                 or getattr(loop, "_budget_tokens", 0)
+                or getattr(result, "metrics", {}).get("tokens")
                 or 0
             ),
             finished_reason=getattr(result, "finished_reason", "stop"),

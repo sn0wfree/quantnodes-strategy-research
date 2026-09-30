@@ -41,6 +41,10 @@ class MiniMaxAdapter(ProviderAdapter):
         # MiniMax-M3 emits <think>…</think> before the answer; tiny budgets yield empty content.
         return 4096
 
+    def custom_stream_options(self) -> dict[str, Any] | None:
+        # Ask the server for the final usage snapshot (A1 budget accounting).
+        return {"include_usage": True}
+
     def extract_thinking_from_delta(self, delta: dict[str, Any]) -> str | None:
         content = delta.get("content", "")
         match = self.THINK_PATTERN.search(content)
