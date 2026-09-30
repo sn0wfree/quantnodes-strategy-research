@@ -122,7 +122,8 @@ class TestListFilesTool:
         by_name = {e["name"]: e for e in result["entries"]}
         assert by_name["strategies"]["type"] == "dir"
         assert by_name["README.md"]["type"] == "file"
-        assert by_name["README.md"]["size"] == len("# test workspace\n")
+        expected = (workspace / "README.md").stat().st_size
+        assert by_name["README.md"]["size"] == expected
 
     def test_path_not_found(self, workspace):
         tool = ListFilesTool()

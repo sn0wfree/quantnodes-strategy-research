@@ -931,7 +931,7 @@ class StudyStore:
         row = self._conn.execute(
             f"SELECT * FROM studies WHERE owner_session_id = ? "
             f"AND execution_status IN ({placeholders}) "
-            f"ORDER BY created_at DESC LIMIT 1",
+            f"ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (session_id, *statuses),
         ).fetchone()
         return self._study_from_row(row) if row else None

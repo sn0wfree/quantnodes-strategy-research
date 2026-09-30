@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import tempfile
+_TEST_WS = Path(tempfile.gettempdir()) / "qn-test-ws"
+_TEST_WS.mkdir(parents=True, exist_ok=True)
 
 import pytest
 
@@ -124,7 +127,7 @@ def _make_study(store, goal_store, **overrides):
     )
     kw = dict(
         owner_session_id="sess-comp", goal_id=goal.goal_id, objective="comprehensive test",
-        workspace_path="/tmp/ws", strategy_name="test_strat",
+        workspace_path=str(_TEST_WS), strategy_name="test_strat",
         behavior="improving",
         metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
         cooldown_base=0.01, cooldown_jitter=0.01, min_cooldown=0.01,
@@ -456,7 +459,7 @@ class TestStudyStoreEdgeCases:
     def test_create_study_workflow_executor(self, store):
         study = store.create_study(
             owner_session_id="s1", goal_id=None, objective="test",
-            workspace_path="/tmp/ws", strategy_name="strat",
+            workspace_path=str(_TEST_WS), strategy_name="strat",
             executor_type="workflow",
         )
         assert study.executor_type == "workflow"
@@ -464,7 +467,7 @@ class TestStudyStoreEdgeCases:
     def test_create_study_manual_executor(self, store):
         study = store.create_study(
             owner_session_id="s1", goal_id=None, objective="test",
-            workspace_path="/tmp/ws", strategy_name="strat",
+            workspace_path=str(_TEST_WS), strategy_name="strat",
             executor_type="manual",
         )
         assert study.executor_type == "manual"
@@ -474,11 +477,11 @@ class TestStudyStoreEdgeCases:
         cancellation); newest wins "active study" lookups."""
         s1 = store.create_study(
             owner_session_id="sess-concurrent", goal_id=None, objective="first",
-            workspace_path="/tmp/ws", strategy_name="strat1",
+            workspace_path=str(_TEST_WS), strategy_name="strat1",
         )
         s2 = store.create_study(
             owner_session_id="sess-concurrent", goal_id=None, objective="second",
-            workspace_path="/tmp/ws", strategy_name="strat2",
+            workspace_path=str(_TEST_WS), strategy_name="strat2",
         )
         # Both stay active (parallel studies)
         updated = store.get_study(s1.study_id)
@@ -517,7 +520,7 @@ class TestStudyStoreEdgeCases:
         for i in range(5):
             store.create_study(
                 owner_session_id=f"s{i}", goal_id=None, objective=f"obj{i}",
-                workspace_path="/tmp/ws", strategy_name=f"strat{i}",
+                workspace_path=str(_TEST_WS), strategy_name=f"strat{i}",
             )
         result = store.list_studies(limit=3)
         assert len(result) == 3
@@ -899,7 +902,7 @@ class TestSchedulerControl:
         def _round(self, r, prev, directives_text=None):
             round_states.append(r)
             return {
-                "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
+                "round": r, "run_name": f"run_{r:04d}", "run_dir": _TEST_WS / "fake",
                 "metrics": {"calmar": 0.1 + r * 0.1},  # improving to avoid early stop
                 "verdict": "discard",
                 "decision": {"stagnation_triggered": False, "reason": "",
@@ -956,7 +959,7 @@ class TestSchedulerEmitter:
 
         def _round(self, r, prev, directives_text=None):
             return {
-                "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
+                "round": r, "run_name": f"run_{r:04d}", "run_dir": _TEST_WS / "fake",
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
                 "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
@@ -1020,12 +1023,12 @@ class TestSchedulerEmitEvent:
 
 
 class TestSchedulerRecover:
-    def test_recover_queued_resubmitted(self, store, goal_store, monkeypatch):
+    def test_recover_queued_resubmitted(self, store, goal_store, monkeypatch, tmp_path):
         from strategy_research.core.study import runner as runner_mod
 
         def _round(self, r, prev, directives_text=None):
             return {
-                "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
+                "round": r, "run_name": f"run_{r:04d}", "run_dir": _TEST_WS / "fake",
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
                 "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
@@ -1069,12 +1072,12 @@ class TestSchedulerRecover:
 
         asyncio.run(main())
 
-    def test_recover_multiple_sessions(self, store, goal_store, monkeypatch):
+    def test_recover_multiple_sessions(self, store, goal_store, monkeypatch, tmp_path):
         from strategy_research.core.study import runner as runner_mod
 
         def _round(self, r, prev, directives_text=None):
             return {
-                "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
+                "round": r, "run_name": f"run_{r:04d}", "run_dir": _TEST_WS / "fake",
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
                 "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
@@ -1097,12 +1100,12 @@ class TestSchedulerRecover:
         goal1 = goal_store.replace_goal(session_id="s1", objective="obj1", criteria=["c1"])
         s1 = store.create_study(
             owner_session_id="s1", goal_id=goal1.goal_id, objective="obj1",
-            workspace_path="/tmp/ws", strategy_name="strat1",
+            workspace_path=str(_TEST_WS), strategy_name="strat1",
         )
         goal2 = goal_store.replace_goal(session_id="s2", objective="obj2", criteria=["c2"])
         s2 = store.create_study(
             owner_session_id="s2", goal_id=goal2.goal_id, objective="obj2",
-            workspace_path="/tmp/ws", strategy_name="strat2",
+            workspace_path=str(_TEST_WS), strategy_name="strat2",
         )
         store.update_execution_status(s1.study_id, StudyStatus.RUNNING)
         store.update_execution_status(s2.study_id, StudyStatus.RUNNING)
@@ -1358,7 +1361,7 @@ class TestRunnerGoalStoreClose:
 
         def _round(self, r, prev, directives_text=None):
             return {
-                "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
+                "round": r, "run_name": f"run_{r:04d}", "run_dir": _TEST_WS / "fake",
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
                 "e2_passed": True,
                 "decision": {"stagnation_triggered": False, "reason": "",
@@ -1408,7 +1411,7 @@ class TestSchedulerShutdown:
 
         def _round(self, r, prev, directives_text=None):
             return {
-                "round": r, "run_name": f"run_{r:04d}", "run_dir": Path("/tmp/fake"),
+                "round": r, "run_name": f"run_{r:04d}", "run_dir": _TEST_WS / "fake",
                 "metrics": {"calmar": 0.6}, "verdict": "keep",
                 "e2_passed": False,
                 "decision": {"stagnation_triggered": False, "reason": "",
