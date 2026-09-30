@@ -133,33 +133,35 @@ def _scaffold_entry(
         return None, None, None
 
     dst_path = ws_templates / rel
+    # Stable, cross-platform report keys (always POSIX-style).
+    rel_key = rel.as_posix()
 
     if src_path.is_dir():
         try:
             dst_path.mkdir(parents=True, exist_ok=True)
             if verbose:
-                logger.debug("dir ensured: %s", rel)
+                logger.debug("dir ensured: %s", rel_key)
             return None, None, None
         except Exception as exc:
-            msg = f"mkdir {rel}: {exc}"
-            logger.warning("failed to mkdir %s: %s", rel, exc)
+            msg = f"mkdir {rel_key}: {exc}"
+            logger.warning("failed to mkdir %s: %s", rel_key, exc)
             return None, None, msg
 
     # It's a file. Check if workspace already has it.
     if dst_path.exists():
         if verbose:
-            logger.debug("skipped (exists): %s", rel)
-        return None, str(rel), None
+            logger.debug("skipped (exists): %s", rel_key)
+        return None, rel_key, None
 
     try:
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_path, dst_path)
         if verbose:
-            logger.info("scaffolded: %s", rel)
-        return str(rel), None, None
+            logger.info("scaffolded: %s", rel_key)
+        return rel_key, None, None
     except Exception as exc:
-        msg = f"copy {rel}: {exc}"
-        logger.warning("failed to copy %s: %s", rel, exc)
+        msg = f"copy {rel_key}: {exc}"
+        logger.warning("failed to copy %s: %s", rel_key, exc)
         return None, None, msg
 
 
