@@ -136,7 +136,9 @@ class TestProfileResolution:
         }))
         monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-sf-test")
         cfg = LLMConfig.load()
-        assert cfg.model_context_tokens == 131_072
+        # Catalog may refresh; DeepSeek-V4-Flash window is at least 128k.
+        assert cfg.model_context_tokens is not None
+        assert cfg.model_context_tokens >= 131_072
 
     def test_context_window_explicit_profile_value_wins(
         self, clear_env, fake_llm_json, monkeypatch

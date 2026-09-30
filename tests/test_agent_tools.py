@@ -384,10 +384,11 @@ class TestRunBacktestTool:
         assert "配置文件不存在" in result["error"] or "not found" in result["error"].lower()
 
     def test_missing_strategy_name(self, workspace: Path):
-        """缺必填参数由框架拦截 (TypeError → loop 重试/兜底)。"""
+        """缺必填参数返回结构化 error JSON（不再抛 TypeError）。"""
         tool = RunBacktestTool()
-        with pytest.raises(TypeError):
-            tool.execute(ctx=ToolContext(workspace=workspace))
+        result = parse_result(tool.execute(ctx=ToolContext(workspace=workspace)))
+        assert result["status"] == "error"
+        assert "strategy_name" in result["error"]
 
     def test_existing_strategy(self, workspace: Path):
         # Create a minimal strategy
