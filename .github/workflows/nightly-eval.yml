@@ -1,0 +1,107 @@
+name: Nightly LLM Evals
+
+on:
+  schedule:
+    # 18:00 UTC ≈ 02:00 CST
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "comma-separated golden task ids (optional)"
+        required: false
+        default: ""
+
+concurrency:
+  group: nightly-eval
+  cancel-in-progress: false
+
+jobs:
+  llm-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,api,llm]"
+
+      - name: Configure LLM secrets
+        env:
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: |
+          mkdir -p ~/.quantnodes
+          if [ -n "$MINIMAX_API_KEY" ]; then
+            cat > ~/.quantnodes/llm.json <<'JSON'
+          {
+            "llm": {
+              "active_profile": "minimax",
+              "timeout": 300,
+              "max_retries": 2,
+              "profiles": {
+                "minimax": {
+                  "provider": "minimax",
+                  "model": "minimax-M3",
+                  "api_key": "env:MINIMAX_API_KEY",
+                  "base_url": "https://api.minimaxi.com/v1",
+                  "model_max_output_tokens": 32000
+                }
+              }
+            }
+          }
+          JSON
+            echo "LLM=minimax" >> "$GITHUB_ENV"
+          elif [ -n "$DEEPSEEK_API_KEY" ]; then
+            cat > ~/.quantnodes/llm.json <<'JSON'
+          {
+            "llm": {
+              "active_profile": "deepseek",
+              "profiles": {
+                "deepseek": {
+                  "provider": "deepseek",
+                  "model": "deepseek-chat",
+                  "api_key": "env:DEEPSEEK_API_KEY",
+                  "base_url": "https://api.deepseek.com/v1"
+                }
+              }
+            }
+          }
+          JSON
+            echo "LLM=deepseek" >> "$GITHUB_ENV"
+          else
+            echo "No LLM API key in secrets; skip nightly LLM eval."
+            echo "LLM=none" >> "$GITHUB_ENV"
+          fi
+
+      - name: Golden eval (simulated always)
+        run: python evals/run_evals.py
+
+      - name: Golden eval (real LLM)
+        if: env.LLM != 'none'
+        env:
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          ONLY='${{ github.event.inputs.only }}'
+          if [ -n "$ONLY" ]; then
+            python evals/run_evals_llm.py --only "$ONLY" --max-iterations 5 --json
+          else
+            python evals/run_evals_llm.py --max-iterations 5 --json
+          fi
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-eval-report
+          path: |
+            evals/golden_tasks.jsonl
+          retention-days: 30

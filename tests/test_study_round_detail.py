@@ -122,8 +122,8 @@ async def test_round_artifacts_lists_files(_study_tree):
         paths = [a["path"] for a in body["artifacts"]]
         assert "manifest.json" in paths
         assert "summary.md" in paths
-        assert "run_0001/strategy.py" in paths
-        assert "run_0001/config.yaml" in paths
+        assert any(x.replace("\\", "/").endswith("run_0001/strategy.py") for x in paths)
+        assert any(x.replace("\\", "/").endswith("run_0001/config.yaml") for x in paths)
         assert all(a["size"] > 0 for a in body["artifacts"])
 
 
