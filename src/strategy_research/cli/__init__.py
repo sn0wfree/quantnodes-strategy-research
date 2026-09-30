@@ -779,8 +779,11 @@ def _build_parser() -> argparse.ArgumentParser:
     webui_serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")
     webui_serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
 
-    # serve (top-level alias) — 一键启动 Web UI + 后端
-    serve_parser = subparsers.add_parser("serve", help="一键启动 Web UI 服务器（最简命令）")
+    # serve (merged W2) — Web UI + API; --api-only for API server only
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="启动服务（默认 Web UI+API；--api-only 仅 API）",
+    )
     serve_parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
     serve_parser.add_argument("--port", type=int, default=8766, help="监听端口 (默认 8766)")
     serve_parser.add_argument("--reload", action="store_true", help="热重载 (开发模式)")
@@ -788,6 +791,17 @@ def _build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--goal-db", help="Goal DB 路径 (可选)")
     serve_parser.add_argument("--hypotheses-path", help="Hypotheses JSON 路径 (可选)")
     serve_parser.add_argument("--static-dir", help="前端静态文件目录 (默认 webui/static)")
+    serve_parser.add_argument(
+        "--api-only",
+        action="store_true",
+        help="只启动 HTTP API（不挂 SPA）",
+    )
+
+    # W2 merged task commands
+    from .commands.merged import add_backtest_parser, add_check_parser
+
+    add_backtest_parser(subparsers)
+    add_check_parser(subparsers)
 
     # ── compact show (opencode-aligned config inspector) ─────────
     compact_parser = subparsers.add_parser(
@@ -854,6 +868,8 @@ def main() -> int:
         "webui": _dispatch_webui,
         "compact": _dispatch_compact,
         "serve": _dispatch_serve,
+        "backtest": _dispatch_backtest,
+        "check": _dispatch_check,
     }
     handler_fn = dispatcher.get(args.command)
     if handler_fn is not None:
@@ -1072,9 +1088,22 @@ def _dispatch_compact(args, parsers) -> int:
 
 
 def _dispatch_serve(args, parsers) -> int:
-    """Dispatch the serve subcommand."""
-    # Top-level alias — same as `webui serve`
-    return cmd_webui_serve(args)
+    """Dispatch the serve subcommand (W2: --api-only supported)."""
+    from .commands.merged import dispatch_serve
+
+    return dispatch_serve(args)
+
+
+def _dispatch_backtest(args, parsers) -> int:
+    from .commands.merged import dispatch_backtest
+
+    return dispatch_backtest(args)
+
+
+def _dispatch_check(args, parsers) -> int:
+    from .commands.merged import dispatch_check
+
+    return dispatch_check(args)
 
 
 if __name__ == "__main__":
