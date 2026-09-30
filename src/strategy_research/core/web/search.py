@@ -56,7 +56,20 @@ def web_search(
     try:
         from .minimax_search import has_minimax_credentials, minimax_search
         if has_minimax_credentials():
-            return minimax_search(query, count=max_results)
+            payload = minimax_search(query, count=max_results)
+            # Chat API key ≠ Coding Plan search key — 400/invalid params
+            # must fall through to DuckDuckGo instead of failing the tool.
+            try:
+                parsed = json.loads(payload) if isinstance(payload, str) else payload
+            except Exception:  # noqa: BLE001
+                parsed = None
+            if isinstance(parsed, dict) and parsed.get("status") == "error":
+                logger.warning(
+                    "minimax_search error for %r: %s; falling back to DuckDuckGo",
+                    query, parsed.get("error"),
+                )
+            else:
+                return payload
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "minimax_search dispatch failed for %r: %s; "

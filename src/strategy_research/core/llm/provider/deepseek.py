@@ -12,6 +12,8 @@ through the structured ``delta.tool_calls`` path.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ._dsml_patterns import StreamDsmlFixer, strip_dsml_text
 from ._reasoning_field import OpenAIReasoningFieldAdapter
 

@@ -223,7 +223,7 @@ class SubAgentTool(BaseTool):
             from ..plugin import AgentPlugin
             from ..registry import get_default_registry
 
-            # Filtered registry (exclude delegate_to_agent)
+            # Filtered registry (exclude delegate_to_agent + toolset whitelist)
             parent_registry: ToolRegistry | None = kwargs.get("_parent_registry")
             filtered = self._build_child_registry(parent_registry, tools_whitelist)
 
@@ -254,7 +254,7 @@ class SubAgentTool(BaseTool):
             )
 
             executor = AgentExecutor(
-                registry=get_default_registry(),
+                registry=filtered or get_default_registry(),
                 llm_config=LLMConfig.load(),
             )
 
