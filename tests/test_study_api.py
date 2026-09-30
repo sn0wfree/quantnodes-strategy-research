@@ -113,7 +113,7 @@ async def test_start_auto_creates_strategy(_app_env):
     strat_dir.mkdir(parents=True)
     _create_minimal_strategy(strat_dir, "auto_created_strat")
     assert (strat_dir / "strategy.py").exists()
-    content = (strat_dir / "strategy.py").read_text()
+    content = (strat_dir / "strategy.py").read_text(encoding="utf-8")
     assert "auto_created_strat" in content
 
 

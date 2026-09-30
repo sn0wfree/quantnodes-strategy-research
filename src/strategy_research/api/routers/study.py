@@ -1460,7 +1460,7 @@ async def study_dispatch_action(
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
 
-    from ...core.study.models import StudyAction, allowed_actions
+    from ...core.study.models import StudyAction, StudyStatus, allowed_actions
     # Backward-compat: map deprecated action names to CONTINUE
     _DEPRECATED_TO_CONTINUE = {"resume", "resume_interrupted", "retry"}
     try:
