@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -58,3 +58,29 @@ class EquitySnapshot:
     unrealized: float  # 总浮动盈亏
     equity: float  # 总权益（含未实现）
     positions: int = 0
+
+
+@dataclass
+class BacktestResult:
+    """Canonical backtest result (P0-2 Phase F, moved here in W4).
+
+    All engines — callback-based, strategy-based, bar-by-bar — produce
+    this shape. `factor_failures` is populated by `run_from_yaml`
+    after the run ends; it carries `{factor, asset, error, occurrences}`
+    entries for downstream dashboards and gates.
+    """
+    nav_daily: pd.Series
+    weights_history: list[tuple[pd.Timestamp, dict[str, float]]] = field(
+        default_factory=list,
+    )
+    rebalance_dates: list[pd.Timestamp] = field(default_factory=list)
+    metrics: dict = field(default_factory=dict)
+    factor_failures: list = field(default_factory=list)
+
+
+__all__ = [
+    "BacktestResult",
+    "EquitySnapshot",
+    "Position",
+    "TradeRecord",
+]
