@@ -12,7 +12,6 @@ handled by the ``ContextInjector`` chain in ``AgentLoop._injectors``.
 from __future__ import annotations
 
 from ..loop_context import LoopContext
-from ..protocol import CompactionStep
 
 
 class DefaultCompactionStep:

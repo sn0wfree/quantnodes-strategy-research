@@ -155,7 +155,12 @@ class EventStore:
         merged = dict(data or {})
         try:
             from ...core.observability.trace import (
-                _round_num, _session_id as _ctx_session, _study_id, _trace_id,
+                _round_num,
+                _study_id,
+                _trace_id,
+            )
+            from ...core.observability.trace import (
+                _session_id as _ctx_session,
             )
             if "trace_id" not in merged:
                 tid = _trace_id.get()
@@ -239,7 +244,12 @@ class EventStore:
         # C3: inject trace context
         try:
             from ...core.observability.trace import (
-                _round_num, _session_id as _ctx_session, _study_id, _trace_id,
+                _round_num,
+                _study_id,
+                _trace_id,
+            )
+            from ...core.observability.trace import (
+                _session_id as _ctx_session,
             )
             if "trace_id" not in event.data:
                 tid = _trace_id.get()

@@ -8,7 +8,7 @@ orchestration system consume plugins from the same registry
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

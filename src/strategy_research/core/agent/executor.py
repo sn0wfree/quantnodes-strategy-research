@@ -286,10 +286,10 @@ class AgentExecutor:
         on_event: Callable[[str, dict[str, Any]], None] | None,
         t0: float,
     ) -> AgentExecutionResult:
+        from ..llm import LLMConfig
         from .builtin_tools import build_default_registry
         from .loop import AgentLoop
         from .prompt_builder import PromptBuilderFactory
-        from ..llm import LLMConfig
 
         if not plugin.prompt_file:
             return AgentExecutionResult(
