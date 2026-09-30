@@ -243,9 +243,8 @@ def create_app(
     async def health():
         return {"status": "ok"}
 
-    # WebUI routes (mounted inside factory so they survive --reload)
-    from ..webui.routes import router as webui_router
-    app.include_router(webui_router, tags=["webui"])
+    # Legacy HTMX /webui routes removed (structure-debt W3) — use the
+    # React SPA under webui/static (mounted below) + /api/* REST.
 
     # Serve static files if available
     static_path = Path(static_dir) if static_dir else Path(__file__).parent.parent.parent.parent / "webui" / "static"

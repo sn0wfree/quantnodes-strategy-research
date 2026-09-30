@@ -1,7 +1,7 @@
 # 结构债清理（W 系列）
 
 > 2026-09-29 · 对应 issues-recheck H3/H5/M1/M2/H4  
-> 状态: W1 templates done · 顺序按风险从低到高
+> 状态: **W1 templates done · W3a HTMX removed** · 顺序按风险从低到高
 
 ## W1 — 删除根 `templates/` 副本
 
