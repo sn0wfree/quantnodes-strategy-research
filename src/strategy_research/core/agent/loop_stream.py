@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:

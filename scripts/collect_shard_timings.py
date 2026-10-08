@@ -32,7 +32,9 @@ def collect(root: Path, extra_args: list[str]) -> dict[str, float]:
         "--durations=0",
         "-q",
         "--no-header",
-        "-x",  # bail on first failure so timings are honest
+        # Don't bail on first failure: a single broken test would otherwise
+        # leave 99% of files without timing data, defeating the whole point
+        # of the collector.
         *extra_args,
     ]
     print(f"$ {' '.join(cmd)}", file=sys.stderr)
