@@ -2,16 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
 import uuid
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..llm.errors import LLMError
-    from ..llm.parser import LLMResponse, ToolCall
-    from .loop import LoopResult
+    pass
 
 logger = logging.getLogger(__name__)
 
