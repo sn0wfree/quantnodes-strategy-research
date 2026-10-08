@@ -57,7 +57,7 @@ jobs:
             exit 0
           fi
           python -m pytest $(tr '\n' ' ' < /tmp/shard_files.txt) \
-            -q --tb=short
+            -q --tb=short --reruns=2 --reruns-delay=1 --durations=20
 
       - name: Upload TUI screenshots
         if: always()
@@ -66,6 +66,17 @@ jobs:
           name: tui-screenshots-py${{ matrix.python-version }}-s${{ matrix.shard }}
           path: tui-captures/
           retention-days: 14
+
+      - name: Upload pytest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report-py${{ matrix.python-version }}-s${{ matrix.shard }}
+          path: |
+            .pytest_cache/v/cache/lastfailed
+            .pytest_cache/v/cache/nodeids
+          retention-days: 7
+          if-no-files-found: ignore
 
   eval-sim:
     runs-on: ubuntu-latest

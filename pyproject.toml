@@ -40,6 +40,8 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-rerunfailures>=12.0",  # CI: retry flaky tests so偶发不阻塞门禁
+    "pytest-split>=0.9",           # CI: 时间感知分片（读取 .shard-timings.json）
     "ruff>=0.4",
 ]
 llm = [
