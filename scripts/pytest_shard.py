@@ -37,24 +37,27 @@ def _shard_time_aware(
     shard: int,
     shards: int,
     timings: dict[str, float],
-    root: Path,
+    anchor: Path,
 ) -> list[Path]:
     """LPT bin-packing: sort by duration desc, drop into the lightest bucket.
 
     Missing entries are treated as 1.0s (the median lightweight test) so a
     brand-new test file still gets a sensible slot instead of zero cost.
     """
+    def _rel(p: Path) -> str:
+        # Normalize to forward-slash POSIX-style relative to anchor; matches
+        # the format produced by collect_shard_timings*.py
+        return str(p.relative_to(anchor)).replace("\\", "/")
+
     def _cost(p: Path) -> float:
-        rel = str(p.relative_to(root))
-        return timings.get(rel, 1.0)
+        return timings.get(_rel(p), 1.0)
 
     items = sorted(files, key=_cost, reverse=True)
     buckets: list[list[Path]] = [[] for _ in range(shards)]
     loads = [0.0] * shards
     fallback = 0
     for p in items:
-        rel = str(p.relative_to(root))
-        cost = timings.get(rel)
+        cost = timings.get(_rel(p))
         if cost is None:
             cost = 1.0
             fallback += 1
@@ -70,10 +73,10 @@ def _shard_time_aware(
 
 
 def _print_summary(
-    files: list[Path], shard: int, shards: int, timings: dict[str, float], root: Path
+    files: list[Path], shard: int, shards: int, timings: dict[str, float], anchor: Path
 ) -> None:
     def _cost(p: Path) -> float:
-        rel = str(p.relative_to(root))
+        rel = str(p.relative_to(anchor)).replace("\\", "/")
         return timings.get(rel, 1.0)
 
     total_time = sum(_cost(p) for p in files)
@@ -106,10 +109,13 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    root = Path(args.root).resolve()
     files = _collect_files(Path(args.root))
     if not files:
         return 0
+
+    # Anchor for relative-to: matches the keys in .shard-timings.json
+    # (collect_shard_timings*.py writes "tests/<file>.py" relative to cwd).
+    anchor = Path.cwd()
 
     timings: dict[str, float] = {}
     if args.mode == "time-aware":
@@ -118,7 +124,9 @@ def main() -> int:
                 raw = json.loads(args.timings.read_text(encoding="utf-8"))
                 # accept either {file: sec} or pytest-split's {file: [durs]}
                 timings = {
-                    k: (sum(v) / len(v) if isinstance(v, list) else float(v))
+                    k.replace("\\", "/"): (
+                        sum(v) / len(v) if isinstance(v, list) else float(v)
+                    )
                     for k, v in raw.items()
                 }
             except (OSError, ValueError) as exc:
@@ -130,7 +138,7 @@ def main() -> int:
             )
             selected = _shard_round_robin(files, args.shard, args.shards)
         else:
-            selected = _shard_time_aware(files, args.shard, args.shards, timings, root)
+            selected = _shard_time_aware(files, args.shard, args.shards, timings, anchor)
     else:
         selected = _shard_round_robin(files, args.shard, args.shards)
 
@@ -140,7 +148,7 @@ def main() -> int:
             args.shard,
             args.shards,
             timings,
-            root,
+            anchor,
         )
 
     print("\n".join(str(p) for p in selected))

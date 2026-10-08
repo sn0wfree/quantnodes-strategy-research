@@ -45,7 +45,10 @@ jobs:
       - name: Resolve shard ${{ matrix.shard }}
         id: shard
         run: |
-          FILES=$(python scripts/pytest_shard.py --shard ${{ matrix.shard }} --shards 4)
+          # time-aware mode: LPT pack by .shard-timings.json, falls back to
+          # round-robin if the file is missing or empty.
+          FILES=$(python scripts/pytest_shard.py \
+            --mode time-aware --shard ${{ matrix.shard }} --shards 4)
           echo "count=$(echo "$FILES" | grep -c . || true)" >> "$GITHUB_OUTPUT"
           echo "$FILES" > /tmp/shard_files.txt
           head -5 /tmp/shard_files.txt

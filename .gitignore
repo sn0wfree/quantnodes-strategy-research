@@ -84,3 +84,8 @@ docs/*.pdf
 
 # Golden-eval runtime workspace (run_evals_llm.py)
 evals/_ws/
+
+# Root-level templates/ — W1 dropped the drifted copy; the canonical
+# templates live in src/strategy_research/templates/ as package data.
+# Local pytest invocations can re-create this dir; keep it untracked.
+/templates/

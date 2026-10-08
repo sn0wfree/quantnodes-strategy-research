@@ -32,6 +32,9 @@ def collect(root: Path, extra_args: list[str]) -> dict[str, float]:
         "--durations=0",
         "-q",
         "--no-header",
+        # test_session_triggers.py is excluded by pytest_shard.py too —
+        # known slow / flaky magnet, runs in its own nightly job instead.
+        "--ignore=tests/test_session_triggers.py",
         # Don't bail on first failure: a single broken test would otherwise
         # leave 99% of files without timing data, defeating the whole point
         # of the collector.
