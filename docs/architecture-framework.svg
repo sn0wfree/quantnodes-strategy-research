@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 560" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8" fill="none" stroke="#9ca3af" stroke-width="1"/>
+    </marker>
+    <marker id="arrO" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8" fill="none" stroke="#f97316" stroke-width="1.2"/>
+    </marker>
+  </defs>
+
+  <rect width="680" height="560" fill="#fafafa"/>
+
+  <!-- Title -->
+  <text x="40" y="26" font-size="14" font-weight="500" fill="#111827">quantnodes-strategy-research · 项目框架</text>
+  <text x="40" y="44" font-size="11" fill="#6b7280">107,117 行 / 466 py / v0.6.0 · 分层 + 双引擎</text>
+
+  <!-- Layer 1: 接入层 -->
+  <rect x="40" y="58" width="600" height="56" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="52" y="76" font-size="11" font-weight="500" fill="#6b7280">接入层</text>
+  <text x="52" y="96" font-size="11" fill="#9ca3af">Entry</text>
+  <rect x="130" y="68" width="112" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="186" y="91" font-size="12" text-anchor="middle" fill="#1f2937">CLI + TUI</text>
+  <rect x="250" y="68" width="130" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="315" y="91" font-size="12" text-anchor="middle" fill="#1f2937">FastAPI 22 routers</text>
+  <rect x="388" y="68" width="90" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="433" y="91" font-size="12" text-anchor="middle" fill="#1f2937">WebUI</text>
+  <rect x="486" y="68" width="90" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="531" y="91" font-size="12" text-anchor="middle" fill="#1f2937">MCP</text>
+
+  <!-- Arrow 1→2 -->
+  <line x1="340" y1="114" x2="340" y2="136" stroke="#9ca3af" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- Layer 2: 编排层 -->
+  <rect x="40" y="138" width="600" height="56" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="52" y="156" font-size="11" font-weight="500" fill="#6b7280">编排层</text>
+  <text x="52" y="176" font-size="11" fill="#9ca3af">Orchestration</text>
+  <rect x="130" y="148" width="140" height="36" rx="6" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="200" y="171" font-size="12" text-anchor="middle" fill="#1f2937">SessionService</text>
+  <rect x="278" y="148" width="130" height="36" rx="6" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="343" y="171" font-size="12" text-anchor="middle" fill="#1f2937">StudyRunner</text>
+  <rect x="416" y="148" width="130" height="36" rx="6" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="481" y="171" font-size="12" text-anchor="middle" fill="#1f2937">AgentLoop</text>
+
+  <!-- Arrow 2→3 -->
+  <line x1="340" y1="194" x2="340" y2="216" stroke="#9ca3af" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- Layer 3: 引擎层 -->
+  <rect x="40" y="218" width="600" height="56" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="52" y="236" font-size="11" font-weight="500" fill="#6b7280">引擎层</text>
+  <text x="52" y="256" font-size="11" fill="#9ca3af">Engine</text>
+  <rect x="130" y="228" width="158" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="209" y="244" font-size="11" text-anchor="middle" fill="#1f2937">phase_engine</text>
+  <text x="209" y="258" font-size="10" text-anchor="middle" fill="#6b7280">⇄ langgraph_engine</text>
+  <rect x="296" y="228" width="96" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="344" y="251" font-size="12" text-anchor="middle" fill="#1f2937">goal</text>
+  <rect x="400" y="228" width="96" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="448" y="251" font-size="12" text-anchor="middle" fill="#1f2937">workflow</text>
+  <rect x="504" y="228" width="96" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="552" y="251" font-size="12" text-anchor="middle" fill="#1f2937">swarm</text>
+
+  <!-- Arrow 3→4 -->
+  <line x1="340" y1="274" x2="340" y2="296" stroke="#9ca3af" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- Layer 4: 能力层 -->
+  <rect x="40" y="298" width="600" height="56" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="52" y="316" font-size="11" font-weight="500" fill="#6b7280">能力层</text>
+  <text x="52" y="336" font-size="11" fill="#9ca3af">Capabilities</text>
+  <rect x="130" y="308" width="150" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="205" y="331" font-size="12" text-anchor="middle" fill="#1f2937">LLM 8 providers</text>
+  <rect x="288" y="308" width="140" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="358" y="331" font-size="12" text-anchor="middle" fill="#1f2937">16 toolsets</text>
+  <rect x="436" y="308" width="90" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="481" y="331" font-size="12" text-anchor="middle" fill="#1f2937">memory</text>
+  <rect x="534" y="308" width="90" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="579" y="331" font-size="12" text-anchor="middle" fill="#1f2937">hooks</text>
+
+  <!-- Arrow 4→5 -->
+  <line x1="340" y1="354" x2="340" y2="376" stroke="#9ca3af" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- Layer 5: 数据层 -->
+  <rect x="40" y="378" width="600" height="56" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="52" y="396" font-size="11" font-weight="500" fill="#6b7280">数据层</text>
+  <text x="52" y="416" font-size="11" fill="#9ca3af">Data</text>
+  <rect x="130" y="388" width="118" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="189" y="411" font-size="12" text-anchor="middle" fill="#1f2937">DuckDB</text>
+  <rect x="256" y="388" width="140" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="326" y="411" font-size="12" text-anchor="middle" fill="#1f2937">workspace FS</text>
+  <rect x="404" y="388" width="120" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="464" y="411" font-size="12" text-anchor="middle" fill="#1f2937">event_store</text>
+  <rect x="532" y="388" width="92" height="36" rx="6" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="578" y="411" font-size="12" text-anchor="middle" fill="#1f2937">checkpoint</text>
+
+  <!-- Layer 6: 横切 -->
+  <rect x="40" y="452" width="600" height="56" rx="8" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="52" y="470" font-size="11" font-weight="500" fill="#92400e">横切</text>
+  <text x="52" y="490" font-size="11" fill="#b45309">Cross-cutting</text>
+  <rect x="130" y="462" width="150" height="36" rx="6" fill="#ffffff" stroke="#fcd34d"/>
+  <text x="205" y="485" font-size="12" text-anchor="middle" fill="#1f2937">evals 70 tasks</text>
+  <rect x="288" y="462" width="140" height="36" rx="6" fill="#ffffff" stroke="#fcd34d"/>
+  <text x="358" y="485" font-size="12" text-anchor="middle" fill="#1f2937">observability</text>
+  <rect x="436" y="462" width="140" height="36" rx="6" fill="#ffffff" stroke="#fcd34d"/>
+  <text x="506" y="485" font-size="12" text-anchor="middle" fill="#1f2937">tests 12,366</text>
+
+  <!-- Side note: engine split -->
+  <line x1="640" y1="246" x2="660" y2="246" stroke="#f97316" stroke-width="1.2" marker-end="url(#arrO)"/>
+  <text x="600" y="524" font-size="11" fill="#6b7280">橙 = 迭代中的核心编排 · 蓝 = 稳定模块 · 黄 = 质量门禁</text>
+</svg>
