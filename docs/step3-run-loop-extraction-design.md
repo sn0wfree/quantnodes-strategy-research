@@ -119,3 +119,28 @@ while True:
 ## 6. 与 plan 原文的差异记录
 
 plan 写「抽 `StudyLifecycle`」，本文档 §1 论证改为「方法抽取 + 返回值状态语义」。状态类的引入推迟到有真实需求时（多状态持久化 / 跨 runner 复用），届时本次抽取正是它的基础。
+
+## 7. 验收记录（2026-10-08，实施完成）
+
+| # | 项 | 预期 | 实际 | 结果 |
+|---|---|---|---|---|
+| 1 | C901 `_run_loop` | ≤15 | **12**（32 → 12） | ✅ |
+| 2 | `_run_loop` 行数 | <130 | **114**（329 → 114） | ✅ |
+| 3 | 定向测试（hitl/resume/runner/monitor 家族） | 全绿 | **107 passed** | ✅ |
+| 4 | 69 文件回归 | 0 failed | **1279 passed / 0 failed** | ✅ |
+| 5 | ruff | 无新增 | F821/F811/E9 清；1 个 pre-existing F401（`_aegis` import，非本次引入） | ✅ |
+
+### 抽取结果
+
+| 方法 | 覆盖块 | 行数 |
+|---|---|---|
+| `_top_control_check` | A：cancel/pause（ARCHIVED 保留、H3） | ~40 |
+| `_handle_hitl_pause` | D：HITL 全路径（M2 bank、M1 expire、H2、H1 e2 重算） | 142 |
+| `_finalize_round` | E+F：budget/heartbeat/harvest/3×SSE/stop/max/early-stop/prev_passed | ~95 |
+| `_run_loop` 主体 | 循环 + 轮准备 + aborted + 调用 + cooldown | **114** |
+
+语义红线（§3.3 六条）逐条随块搬移，测试绿（hitl/resume/runner 107 + 全量 1279）证明等价。
+
+### 实施波折（记录备查）
+
+块 D 首次用脚本机械转换（dedent + continue 改写 + 变量改名）失败：缩进破坏 + 7 处 continue 残留，文件语法损坏。回滚后改为**手工按语义重写方法体**（参照原文逐段转换），一次通过。与 Step 1 的教训一致：**机械改写适合纯搬运（块 E+F 的单一 dedent），含语义变换的搬移必须手工**。

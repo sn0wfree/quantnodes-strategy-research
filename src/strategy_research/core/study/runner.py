@@ -359,6 +359,295 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
 
         return None
 
+    # ── Step 3: loop-control helpers (docs/step3-run-loop-extraction-design.md) ──
+
+    async def _top_control_check(self, round_num: int, session: str, sid: str) -> str:
+        """Loop-top control state check.
+
+        Returns ``"cancelled"`` (loop must return CANCELLED), ``"continue"``
+        (cancelled while paused — H3; re-check at loop top), or ``"resumed"``
+        (paused and resumed cleanly, or no pause — proceed to round prep).
+        """
+        if self.control.cancelled:
+            # Honour any status another actor (e.g. scheduler.archive)
+            # may have persisted while this iteration was in flight —
+            # never overwrite an ARCHIVED row with CANCELLED.
+            live_status = self._current_db_status()
+            if live_status == StudyStatus.ARCHIVED:
+                self._emit(session, "study_cancelled", {
+                    "study_id": sid,
+                    "note": f"preserved live status={live_status.value}",
+                })
+                return "cancelled"
+            self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
+            self._emit(session, "study_cancelled", {"study_id": sid})
+            return "cancelled"
+
+        if self.control.paused:
+            self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
+            self._emit(session, "study_paused", {"study_id": sid, "round": round_num})
+            await self._wait_until_resumed()
+            if self.control.cancelled:
+                # Cancelled while paused: let the loop top finalize
+                # CANCELLED instead of flipping back to RUNNING and
+                # burning a full LLM round (H3).
+                return "continue"
+            self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+            self._emit(session, "study_resumed", {"study_id": sid, "round": round_num})
+
+        return "resumed"
+
+    async def _handle_hitl_pause(
+        self,
+        result: dict,
+        round_num: int,
+        session: str,
+        sid: str,
+        directive_text: str | None,
+    ) -> tuple[dict | None, str]:
+        """Wait for HITL approval, then resume the round or skip it.
+
+        Returns ``(resumed_result, "advance")`` on the approved path, or
+        ``(None, "continue")`` for every skip path: rejection/timeout,
+        cancelled-while-waiting, re-pause, missing checkpointer, and
+        resume-abort.
+
+        Semantics carried over verbatim from the inline block (M2 bank
+        the approval-wait time, M1 expire the interrupt, H2 never write
+        a ghost empty-metrics round, H1 recompute e2/passed_now after
+        resume) — see docs/step3-run-loop-extraction-design.md §3.3.
+        """
+        _dlog("loop", "round %d paused for HITL approval", round_num)
+        self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
+        self._emit(session, "study_paused", {
+            "study_id": sid, "round": round_num,
+            "reason": "hitl_approval",
+            "interrupt_id": result.get("interrupt_id"),
+            "hypothesis": result.get("hypothesis"),
+        })
+        # The approval wait must not count against the time
+        # budget (M2): bank the pre-wait elapsed time and stop
+        # the round clock; it restarts after the resume.
+        self._total_used_time += time.perf_counter() - self._round_start_clock
+        self._round_start_clock = None
+        # Poll for approval (max 10 minutes, check every 5 seconds)
+        decision = await self._wait_for_approval(sid, round_num, timeout_s=600)
+        if decision != "approved":
+            # Timeout or rejection — skip this round and keep the
+            # study loop alive (status must leave PAUSED).
+            self._account_round_budget(result)
+            self._expire_interrupt(sid, round_num)  # M1: no zombie pending interrupt
+            if self.control.cancelled:
+                return None, "continue"  # loop top finalizes CANCELLED
+            self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+            self._emit(session, "study_round_rejected", {
+                "study_id": sid, "round": round_num,
+                "reason": f"hitl_{decision}",
+            })
+            return None, "continue"
+        if self.control.cancelled:
+            # Approved, but the study was cancelled while we
+            # waited — same handling as the H3 pause path.
+            return None, "continue"
+        # Resume the round from checkpoint
+        self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+        # Reconstruct context from study object (same as _run_one_round):
+        # read state against the run's own strategy copy so langgraph
+        # agents see exactly what the interrupted round was seeing.
+        study = self._get_study()
+        _path = Path(study.workspace_path).resolve()
+        _strategy = study.strategy_name
+        _graph = self._load_graph(_path, sid)
+        from strategy_research.core.autoresearch import read_current_state
+        from strategy_research.core.study import round_manifest as rm
+        _round_dir = rm.round_dir(_path, sid, round_num)
+        _run_dirs = sorted(
+            d for d in _round_dir.iterdir()
+            if d.is_dir() and d.name.startswith("run_")
+        ) if _round_dir.exists() else []
+        if _run_dirs:
+            _run_dir = _run_dirs[-1]
+        else:
+            logger.warning(
+                "HITL resume: no run_* dirs under %s, falling back to run_0001",
+                _round_dir,
+            )
+            _run_dir = _round_dir / "run_0001"
+        _current_state = read_current_state(
+            _path, _strategy,
+            strategy_file=_run_dir / "strategy.py",
+        )
+        _current_state["study_strategy_path"] = str(
+            _run_dir.relative_to(_path) / "strategy.py"
+        )
+        self._round_start_clock = time.perf_counter()
+        resumed = await asyncio.to_thread(
+            self._resume_round_langgraph, _path, _strategy,
+            _current_state, _run_dir, _graph,
+            session=session, sid=sid, round_num=round_num,
+            directive_text=directive_text,
+        )
+        if resumed.get("paused_for_approval"):
+            # The resume hit the gate again (typically: no
+            # checkpointer → the fallback re-ran the round and
+            # interrupted afresh). There is no safe way to
+            # finalize this round here — skip it instead of
+            # recording a ghost empty-metrics round (H2).
+            self._expire_interrupt(sid, round_num)
+            if self.control.cancelled:
+                return None, "continue"
+            self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+            self._emit(session, "study_round_rejected", {
+                "study_id": sid, "round": round_num,
+                "reason": "hitl_repause",
+            })
+            return None, "continue"
+        if resumed.get("error") == "no_checkpointer":
+            # Resume failed because no checkpointer was available.
+            # Expire the interrupt and let the user know.
+            self._expire_interrupt(sid, round_num)
+            if self.control.cancelled:
+                return None, "continue"
+            self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
+            self._emit(session, "study_round_rejected", {
+                "study_id": sid, "round": round_num,
+                "reason": "no_checkpointer",
+                "detail": "Resume unavailable: checkpoint store not configured for this engine.",
+            })
+            return None, "continue"
+        if resumed.get("aborted"):
+            self._account_round_budget(resumed)
+            return None, "continue"
+        # H1 (partial): the resume path bypasses phase_engine's
+        # finalization, so e2_passed/passed_now would be missing
+        # and a targets-met round could never COMPLETE. Recompute
+        # them from the resumed metrics (the eval gate check is
+        # folded into verdict=="keep", same as the phases branch).
+        _study_now = self._get_study()
+        if _study_now.metric_targets:
+            from .metric_targets import (
+                meets_metric_targets as _meets,
+            )
+            from .metric_targets import (
+                metric_pass_set as _pass_set,
+            )
+            _m = resumed.get("metrics", {})
+            resumed["passed_now"] = _pass_set(_m, _study_now.metric_targets)
+            resumed["e2_passed"] = bool(
+                _m and _meets(_m, _study_now.metric_targets)
+                and resumed.get("verdict", "discard") == "keep"
+            )
+        return resumed, "advance"
+
+    def _finalize_round(
+        self,
+        result: dict,
+        metrics: dict,
+        verdict: str,
+        round_num: int,
+        session: str,
+        sid: str,
+    ) -> ShutdownReason | None:
+        """Post-round finalize: budget, heartbeat, SSE, terminal checks.
+
+        Returns ``None`` to continue looping, or the terminal
+        ShutdownReason. Covers blocks E+F of the design doc (budget
+        accounting, bg harvest, three SSE emits, stop_conditions,
+        max_rounds, AEGIS early-stop). ``_prev_passed`` is updated on
+        the way out.
+        """
+        # ── budget ─────────────────────────────────────────────
+        self._account_round_budget(result)
+        self.study_store.update_round_heartbeat(sid, round_num)
+        self.study_store.update_last_metrics(sid, metrics, verdict)
+
+        # ── round end: harvest this study's background tasks ──
+        # A backgrounded agent tool (run_backtest background=True /
+        # run_bg_command) abandoned mid-poll must not linger into the
+        # next round (kill live ones, drop finished ones).
+        from strategy_research.core.utils.bg_proc import harvest_by_owner
+        killed = harvest_by_owner(sid)
+        if killed:
+            _dlog("loop", "round %d: harvested %d stale bg tasks", round_num, killed)
+
+        # ── SSE: study_round ───────────────────────────────────
+        self._emit(session, "study_round", {
+            "study_id": sid, "round": round_num,
+            "run": result.get("run_name", ""),
+            "metrics": metrics, "verdict": verdict,
+        })
+
+        # ── SSE: study_budget (per-round accounting) ─────────
+        self._emit(session, "study_budget", {
+            "study_id": sid,
+            "budget": {
+                "budget_used_turns": self._total_used_turns,
+                "budget_used_time_s": round(self._total_used_time, 1),
+                "budget_turn": self._get_study().budget_turn,
+                "budget_time_seconds": self._get_study().budget_time_seconds,
+            },
+        })
+
+        # ── SSE: study_scoreboard (lever precision + claims calibration) ──
+        sb_extra: dict = {}
+        try:
+            if self._goal_store is not None and self._get_study().goal_id:
+                from .claims import summarize_prediction_accuracy
+                _entries = self._goal_store.list_journal_entries(
+                    self._get_study().goal_id, limit=10)
+                sb_extra = summarize_prediction_accuracy(_entries)
+        except Exception:  # noqa: BLE001 — claims stats are best-effort
+            sb_extra = {}
+        if hasattr(self, "_scoreboard"):
+            sb = self._scoreboard.get_scoreboard()
+            sb_data = [
+                {"lever": s.lever, "attempts": s.attempts,
+                 "accepted": s.accepted, "reverted": s.reverted}
+                for s in sb if s.attempts > 0
+            ]
+            if sb_data or sb_extra.get("n_predictions"):
+                self._emit(session, "study_scoreboard", {
+                    "study_id": sid,
+                    "round": round_num,
+                    "scoreboard": sb_data,
+                    "claims": sb_extra,
+                })
+
+        # ── shutdown conditions (targets/budget/stagnation/review/discard) ──
+        stop_reason = self._check_stop_conditions(
+            result, metrics, verdict, round_num, session, sid
+        )
+        if stop_reason is not None:
+            return stop_reason
+
+        # ── shutdown: max_rounds ───────────────────────────────
+        if self._get_study().max_rounds is not None and round_num >= self._get_study().max_rounds:
+            self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
+                                last_error=f"max_rounds={self._get_study().max_rounds}", reason=ShutdownReason.MAX_ROUNDS)
+            return ShutdownReason.MAX_ROUNDS
+
+        # ── AEGIS: Early-stop (only when max_rounds is configured) ──
+        if self._get_study().max_rounds is not None:
+            current_score = metrics.get("calmar", 0.0) or 0.0
+            if current_score > self._best_score:
+                self._best_score = current_score
+                self._idle_rounds = 0
+            else:
+                self._idle_rounds += 1
+            if self._idle_rounds >= self._get_study().early_stop_patience:
+                self._mark_terminal(StudyStatus.EARLY_STOPPED, last_metrics=metrics,
+                                    last_error=f"idle={self._idle_rounds} rounds, best={self._best_score}",
+                                    reason=ShutdownReason.EARLY_STOPPED)
+                self._emit(session, "study_early_stopped", {
+                    "study_id": sid, "round": round_num,
+                    "idle_rounds": self._idle_rounds, "best_score": self._best_score,
+                })
+                return ShutdownReason.EARLY_STOPPED
+
+        self._prev_passed = result.get("passed_now", set())
+
+        return None
+
     async def _run_loop(self) -> str:
         sid = self._get_study().study_id
         session = self._get_study().session_id
@@ -388,32 +677,12 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         round_num = self._get_study().current_round
 
         while True:
-            if self.control.cancelled:
-                # Honour any status another actor (e.g. scheduler.archive)
-                # may have persisted while this iteration was in flight —
-                # never overwrite an ARCHIVED row with CANCELLED.
-                live_status = self._current_db_status()
-                if live_status == StudyStatus.ARCHIVED:
-                    self._emit(session, "study_cancelled", {
-                        "study_id": sid,
-                        "note": f"preserved live status={live_status.value}",
-                    })
-                    return ShutdownReason.CANCELLED
-                self._mark_terminal(StudyStatus.CANCELLED, reason=ShutdownReason.CANCELLED)
-                self._emit(session, "study_cancelled", {"study_id": sid})
+            control = await self._top_control_check(round_num, session, sid)
+            if control == "cancelled":
                 return ShutdownReason.CANCELLED
-
-            if self.control.paused:
-                self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
-                self._emit(session, "study_paused", {"study_id": sid, "round": round_num})
-                await self._wait_until_resumed()
-                if self.control.cancelled:
-                    # Cancelled while paused: let the loop top finalize
-                    # CANCELLED instead of flipping back to RUNNING and
-                    # burning a full LLM round (H3).
-                    continue
-                self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
-                self._emit(session, "study_resumed", {"study_id": sid, "round": round_num})
+            if control == "continue":
+                continue
+            # control == "resumed" (or no-op) falls through to round prep
 
             round_num += 1
             self._round_start_clock = time.perf_counter()
@@ -465,221 +734,26 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
 
             # P4: Handle HITL approval pause
             if result.get("paused_for_approval"):
-                _dlog("loop", "round %d paused for HITL approval", round_num)
-                self.study_store.update_execution_status(sid, StudyStatus.PAUSED)
-                self._emit(session, "study_paused", {
-                    "study_id": sid, "round": round_num,
-                    "reason": "hitl_approval",
-                    "interrupt_id": result.get("interrupt_id"),
-                    "hypothesis": result.get("hypothesis"),
-                })
-                # The approval wait must not count against the time
-                # budget (M2): bank the pre-wait elapsed time and stop
-                # the round clock; it restarts after the resume.
-                self._total_used_time += time.perf_counter() - self._round_start_clock
-                self._round_start_clock = None
-                # Poll for approval (max 10 minutes, check every 5 seconds)
-                decision = await self._wait_for_approval(sid, round_num, timeout_s=600)
-                if decision != "approved":
-                    # Timeout or rejection — skip this round and keep the
-                    # study loop alive (status must leave PAUSED).
-                    self._account_round_budget(result)
-                    self._expire_interrupt(sid, round_num)  # M1: no zombie pending interrupt
-                    if self.control.cancelled:
-                        continue  # loop top finalizes CANCELLED
-                    self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
-                    self._emit(session, "study_round_rejected", {
-                        "study_id": sid, "round": round_num,
-                        "reason": f"hitl_{decision}",
-                    })
-                    continue
-                if self.control.cancelled:
-                    # Approved, but the study was cancelled while we
-                    # waited — same handling as the H3 pause path.
-                    continue
-                # Resume the round from checkpoint
-                self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
-                # Reconstruct context from study object (same as _run_one_round):
-                # read state against the run's own strategy copy so langgraph
-                # agents see exactly what the interrupted round was seeing.
-                study = self._get_study()
-                _path = Path(study.workspace_path).resolve()
-                _strategy = study.strategy_name
-                _graph = self._load_graph(_path, sid)
-                from strategy_research.core.autoresearch import read_current_state
-                from strategy_research.core.study import round_manifest as rm
-                _round_dir = rm.round_dir(_path, sid, round_num)
-                _run_dirs = sorted(
-                    d for d in _round_dir.iterdir()
-                    if d.is_dir() and d.name.startswith("run_")
-                ) if _round_dir.exists() else []
-                if _run_dirs:
-                    _run_dir = _run_dirs[-1]
-                else:
-                    logger.warning(
-                        "HITL resume: no run_* dirs under %s, falling back to run_0001",
-                        _round_dir,
-                    )
-                    _run_dir = _round_dir / "run_0001"
-                _current_state = read_current_state(
-                    _path, _strategy,
-                    strategy_file=_run_dir / "strategy.py",
+                resumed, hitl = await self._handle_hitl_pause(
+                    result, round_num, session, sid, directive_text,
                 )
-                _current_state["study_strategy_path"] = str(
-                    _run_dir.relative_to(_path) / "strategy.py"
-                )
-                self._round_start_clock = time.perf_counter()
-                result = await asyncio.to_thread(
-                    self._resume_round_langgraph, _path, _strategy,
-                    _current_state, _run_dir, _graph,
-                    session=session, sid=sid, round_num=round_num,
-                    directive_text=directive_text,
-                )
-                if result.get("paused_for_approval"):
-                    # The resume hit the gate again (typically: no
-                    # checkpointer → the fallback re-ran the round and
-                    # interrupted afresh). There is no safe way to
-                    # finalize this round here — skip it instead of
-                    # recording a ghost empty-metrics round (H2).
-                    self._expire_interrupt(sid, round_num)
-                    if self.control.cancelled:
-                        continue
-                    self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
-                    self._emit(session, "study_round_rejected", {
-                        "study_id": sid, "round": round_num,
-                        "reason": "hitl_repause",
-                    })
+                if hitl == "continue":
                     continue
-                if result.get("error") == "no_checkpointer":
-                    # Resume failed because no checkpointer was available.
-                    # Expire the interrupt and let the user know.
-                    self._expire_interrupt(sid, round_num)
-                    if self.control.cancelled:
-                        continue
-                    self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
-                    self._emit(session, "study_round_rejected", {
-                        "study_id": sid, "round": round_num,
-                        "reason": "no_checkpointer",
-                        "detail": "Resume unavailable: checkpoint store not configured for this engine.",
-                    })
-                    continue
-                if result.get("aborted"):
-                    self._account_round_budget(result)
-                    continue
-                # H1 (partial): the resume path bypasses phase_engine's
-                # finalization, so e2_passed/passed_now would be missing
-                # and a targets-met round could never COMPLETE. Recompute
-                # them from the resumed metrics (the eval gate check is
-                # folded into verdict=="keep", same as the phases branch).
-                _study_now = self._get_study()
-                if _study_now.metric_targets:
-                    from .metric_targets import (
-                        meets_metric_targets as _meets,
-                    )
-                    from .metric_targets import (
-                        metric_pass_set as _pass_set,
-                    )
-                    _m = result.get("metrics", {})
-                    result["passed_now"] = _pass_set(_m, _study_now.metric_targets)
-                    result["e2_passed"] = bool(
-                        _m and _meets(_m, _study_now.metric_targets)
-                        and result.get("verdict", "discard") == "keep"
-                    )
+                result = resumed
+
 
             metrics = result.get("metrics", {})
             verdict = result.get("verdict", "discard")
             summary = result.get("summary")
             previous_summary = summary or previous_summary
 
-            # ── budget ─────────────────────────────────────────────
-            self._account_round_budget(result)
-            self.study_store.update_round_heartbeat(sid, round_num)
-            self.study_store.update_last_metrics(sid, metrics, verdict)
-
-            # ── round end: harvest this study's background tasks ──
-            # A backgrounded agent tool (run_backtest background=True /
-            # run_bg_command) abandoned mid-poll must not linger into the
-            # next round (kill live ones, drop finished ones).
-            from strategy_research.core.utils.bg_proc import harvest_by_owner
-            killed = harvest_by_owner(sid)
-            if killed:
-                _dlog("loop", "round %d: harvested %d stale bg tasks", round_num, killed)
-
-            # ── SSE: study_round ───────────────────────────────────
-            self._emit(session, "study_round", {
-                "study_id": sid, "round": round_num,
-                "run": result.get("run_name", ""),
-                "metrics": metrics, "verdict": verdict,
-            })
-
-            # ── SSE: study_budget (per-round accounting) ─────────
-            self._emit(session, "study_budget", {
-                "study_id": sid,
-                "budget": {
-                    "budget_used_turns": self._total_used_turns,
-                    "budget_used_time_s": round(self._total_used_time, 1),
-                    "budget_turn": self._get_study().budget_turn,
-                    "budget_time_seconds": self._get_study().budget_time_seconds,
-                },
-            })
-
-            # ── SSE: study_scoreboard (lever precision + claims calibration) ──
-            sb_extra: dict = {}
-            try:
-                if self._goal_store is not None and self._get_study().goal_id:
-                    from .claims import summarize_prediction_accuracy
-                    _entries = self._goal_store.list_journal_entries(
-                        self._get_study().goal_id, limit=10)
-                    sb_extra = summarize_prediction_accuracy(_entries)
-            except Exception:  # noqa: BLE001 — claims stats are best-effort
-                sb_extra = {}
-            if hasattr(self, "_scoreboard"):
-                sb = self._scoreboard.get_scoreboard()
-                sb_data = [
-                    {"lever": s.lever, "attempts": s.attempts,
-                     "accepted": s.accepted, "reverted": s.reverted}
-                    for s in sb if s.attempts > 0
-                ]
-                if sb_data or sb_extra.get("n_predictions"):
-                    self._emit(session, "study_scoreboard", {
-                        "study_id": sid,
-                        "round": round_num,
-                        "scoreboard": sb_data,
-                        "claims": sb_extra,
-                    })
-
-            # ── shutdown conditions (targets/budget/stagnation/review/discard) ──
-            stop_reason = self._check_stop_conditions(
-                result, metrics, verdict, round_num, session, sid
+            # ── finalize: budget / SSE / terminal checks (Step 3) ──
+            stop = self._finalize_round(
+                result, metrics, verdict, round_num, session, sid,
             )
-            if stop_reason is not None:
-                return stop_reason
+            if stop is not None:
+                return stop
 
-            # ── shutdown: max_rounds ───────────────────────────────
-            if self._get_study().max_rounds is not None and round_num >= self._get_study().max_rounds:
-                self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
-                                    last_error=f"max_rounds={self._get_study().max_rounds}", reason=ShutdownReason.MAX_ROUNDS)
-                return ShutdownReason.MAX_ROUNDS
-
-            # ── AEGIS: Early-stop (only when max_rounds is configured) ──
-            if self._get_study().max_rounds is not None:
-                current_score = metrics.get("calmar", 0.0) or 0.0
-                if current_score > self._best_score:
-                    self._best_score = current_score
-                    self._idle_rounds = 0
-                else:
-                    self._idle_rounds += 1
-                if self._idle_rounds >= self._get_study().early_stop_patience:
-                    self._mark_terminal(StudyStatus.EARLY_STOPPED, last_metrics=metrics,
-                                        last_error=f"idle={self._idle_rounds} rounds, best={self._best_score}",
-                                        reason=ShutdownReason.EARLY_STOPPED)
-                    self._emit(session, "study_early_stopped", {
-                        "study_id": sid, "round": round_num,
-                        "idle_rounds": self._idle_rounds, "best_score": self._best_score,
-                    })
-                    return ShutdownReason.EARLY_STOPPED
-
-            self._prev_passed = result.get("passed_now", set())
 
             # ── cooldown ───────────────────────────────────────────
             cooldown = self._round_cooldown()
