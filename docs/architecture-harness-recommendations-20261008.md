@@ -68,6 +68,8 @@
 
 ### 1.3 `_run_loop` 复杂度 32 是症状，双引擎是病因
 
+> ⚠️ **勘误（2026-10-08 同日）**：本节的 `EngineProtocol` 接口草案与「runner 认识双引擎」前提读码后不成立（分派实际在 `phase_engine.py:128-141`；`_run_loop` 的 32 来自生命周期控制流）。以 `docs/phase-engine-refactor-plan-20261008.md` 为准；本节的优先级判断（study 心脏、先低风险后高风险）仍成立。
+
 `core/study/runner.py::_run_loop` 复杂度 **32**（阈值 15 的 2 倍，全库最高）。它同时承担：
 
 - 双引擎分派（`phase_engine` ⇄ `langgraph_engine`）
