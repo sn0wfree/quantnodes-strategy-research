@@ -199,10 +199,12 @@ def run_round_phases(
 
         # Shim dicts so finalization references like
         # eval_result["decision"] and exec_result.get("backtest_error")
-        # resolve without AttributeError.
+        # resolve without AttributeError. captured_predictions is NOT
+        # shimmed: line 190 already captured the real claims, and
+        # resetting it here would starve the phase-B journal backfill
+        # (line 317) on this branch only.
         eval_result = {"decision": decision, "aoa_llm_verdict": lg_result.get("aoa_llm_verdict")}
         exec_result = {"backtest_error": backtest_error}
-        captured_predictions = {}
 
     else:
         # Phase 1: researcher
