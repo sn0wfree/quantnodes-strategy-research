@@ -227,3 +227,62 @@ def _close_session_services():
 # reference modules removed in the P4/P8/Phase-A cleanups. See
 # tests/attic/README.md.
 collect_ignore_glob = ["attic/*"]
+
+
+# ── Lane markers (docs/test-marker-lanes-design.md) ──────────────
+# Centralized file-name whitelist: every test NOT listed here stays in
+# the PR gate (default-safe — missing an entry only makes PRs slower;
+# a wrong entry silently drops coverage, so review whitelist changes).
+# Markers are registered in pyproject.toml [tool.pytest.ini_options].
+
+_LANE_LLM_FILES = frozenset({
+    # real LLM / real network (see doc §3)
+    "test_chat_real_llm.py",
+    "test_web_search.py",           # live DDGS queries (skipif HAS_NETWORK)
+})
+
+_LANE_E2E_FILES = frozenset({
+    # cross-process / browser / full-stack; only the heavy ones —
+    # fast e2e-named files (0.01–0.5s, mock-backed) stay in the PR gate
+    # because excluding them buys no time and costs coverage.
+    "test_chat_e2e_playwright.py",  # browser-driven
+    "test_goal_e2e.py",
+    "test_study_e2e_api.py",
+    "test_study_e2e_integration.py",
+    "test_integration.py",
+    "test_p3_integration.py",
+})
+
+_LANE_SLOW_FILES = frozenset({
+    # >=5s wall time in .shard-timings.json (measured 2026-10-08)
+    "test_dead_code_no_imports.py",   # 75.2s — repo-wide AST scan
+    "test_bg_proc.py",                # 19.3s
+    "test_backtest.py",               # 16.9s
+    "test_decide_wired.py",           # 16.3s
+    "test_cli_init.py",               # 9.4s
+    "test_llm_retry.py",              # 8.4s
+    "test_study_api.py",              # 8.4s
+    "test_mcp_data_tools.py",         # 7.2s
+    "test_api.py",                    # 6.2s
+    "test_backtest_metrics_contract.py",  # 6.2s
+    "test_config_runner_import.py",   # 6.0s
+    "test_data_readiness.py",         # 5.8s
+    "test_security_hardening.py",     # 5.8s
+    "test_load_ohlcv.py",             # 5.7s
+    "test_study_actions.py",          # 5.3s
+    "test_hypothesis_ops.py",         # 5.2s
+})
+
+
+def pytest_collection_modifyitems(items):
+    """Tag collected tests with their lane (llm / e2e / slow)."""
+    from pathlib import Path
+
+    for item in items:
+        fname = Path(str(item.fspath)).name
+        if fname in _LANE_LLM_FILES:
+            item.add_marker(pytest.mark.llm)
+        if fname in _LANE_E2E_FILES:
+            item.add_marker(pytest.mark.e2e)
+        if fname in _LANE_SLOW_FILES:
+            item.add_marker(pytest.mark.slow)

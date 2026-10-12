@@ -88,6 +88,13 @@ asyncio_mode = "auto"
 # e.g. test_workflow_segment_loop — see tech-debt ⑥).
 addopts = ["-ra"]
 xfail_strict = true
+# Lane markers (docs/test-marker-lanes-design.md §2); applied by
+# tests/conftest.py pytest_collection_modifyitems via a file whitelist.
+markers = [
+    "llm: needs a real LLM or live network (excluded from PR gate)",
+    "e2e: end-to-end across process/browser boundaries (excluded from PR gate)",
+    "slow: >=~5s wall time per .shard-timings.json (excluded from PR gate)",
+]
 
 [tool.ruff]
 target-version = "py310"

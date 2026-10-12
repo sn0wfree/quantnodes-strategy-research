@@ -117,3 +117,28 @@ python -m pytest $(...) -q --tb=short --reruns=2 --reruns-delay=1 --durations=20
 - push main 的无过滤全量 job（§4 follow-up）
 - 函数级打标（§2 限制）
 - `slow` 与 `pytest_split`/sharding 的联动（替代 `DEFAULT_SKIP` 硬编码）
+
+## 7. 验收记录（2026-10-08，实施完成）
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | marker 注册 | `pytest --markers` 列出 llm/e2e/slow ✅ |
+| 2 | 打标 collect | llm=24 / e2e=69 / slow=376（test 数；白名单文件展开） ✅ |
+| 3 | PR 过滤数量 | **11904 / 12373**（排除 469 tests） ✅ |
+| 4 | 过滤实跑 | 69 回归核心集 + 过滤 → **1162 passed / 0 failed / 117 deselected / 64s**（无过滤 143s——**时长减半**） ✅ |
+| 5 | session_triggers | shard 脚本未动，行为不变 ✅ |
+
+### 对设计的两处实测修正（以数据为准）
+
+1. `test_minimax_search.py` **移出 llm 白名单**——实测全 monkeypatch（0.3s），不是真网络；doc §3 初稿有它，按「宁窄勿宽」剔除。
+2. `e2e` 白名单**只收重的**——13 个 `*_e2e*` 文件实测 0.01–3.2s（mock 实现），排除它们买不到时长还丢覆盖。最终只收 6 个真跨边界/重集成文件。
+
+### 白名单最终版
+
+- llm（2）：`test_chat_real_llm` · `test_web_search`（live DDGS + skipif HAS_NETWORK）
+- e2e（6）：playwright · goal_e2e · study_e2e_api/integration · integration · p3_integration
+- slow（16）：实测 ≥5s（头名 `test_dead_code_no_imports` 75.2s）
+
+### 后续（§6 不变）
+
+push main 无过滤全量 job、函数级打标、sharding 的 `DEFAULT_SKIP` 迁移。

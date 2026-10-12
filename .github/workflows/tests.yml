@@ -59,8 +59,10 @@ jobs:
             echo "empty shard, skip"
             exit 0
           fi
+          # PR lane: llm/e2e/slow excluded (docs/test-marker-lanes-design.md)
           python -m pytest $(tr '\n' ' ' < /tmp/shard_files.txt) \
-            -q --tb=short --reruns=2 --reruns-delay=1 --durations=20
+            -q --tb=short --reruns=2 --reruns-delay=1 --durations=20 \
+            -m "not llm and not e2e and not slow"
 
       - name: Upload TUI screenshots
         if: always()
