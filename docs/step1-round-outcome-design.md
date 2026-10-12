@@ -116,3 +116,32 @@ class RoundOutcome:
 
 - Step 1 **不抽函数**、**不改分派逻辑**、**不碰 `engine='dag'` / env 归一化**（line 128-141 原样）
 - Step 2 在契约之上做查表分派——届时分支体已有 `RoundOutcome` 返回类型，查表只需 `Callable[..., RoundOutcome]`
+
+
+## 8. 验收记录（2026-10-08，实施完成）
+
+| # | 项 | 预期 | 实际 | 结果 |
+|---|---|---|---|---|
+| 1 | 定向测试（phase/langgraph/claims/defense/dispatch） | 全绿 | 36 passed | ✅ |
+| 2 | 69 文件回归 | 0 failed | **1277 passed / 0 failed**（基线 1273 + 4 新契约测试） | ✅ |
+| 3 | C901 | ≤18 | **24 → 24（预期错误）** | ⚠️ 见下 |
+| 4 | 契约测试 | 新文件 | 	ests/test_phase_engine_round_outcome.py 4 passed（字段集 / 无默认 / 缺字段 TypeError / verdict 可变）+ Step 0 claims 测试作回归锚 | ✅ |
+| 5 | ruff | 无新增 | F821 清零；仅剩 C901（pre-existing 数字） | ✅ |
+
+### C901 预期错误的说明
+
+设计时预期「分支体缩短 + shim 删除 → 24→≤18」。实际：契约化只改**值的传递方式**（局部变量 → dataclass 字段），分支结构与条件数完全不变——cyclomatic complexity 数的是分支不是变量传递，因此 24 不动是正确结果。
+
+**降复杂度必须抽分支函数**（把 langgraph / phases 分支体移出 
+un_round_phases），这正是 plan §7 划给 Step 2 的边界（查表分派天然需要 Callable[..., RoundOutcome]）。C901 ≤15 的目标**顺延至 Step 2 验收**。
+
+### 实施中的波折（记录备查）
+
+批量替换脚本首轮误伤 5 处：erdict_reason 函数名被部分匹配、return dict 的 key 被加前缀、gate 赋值被 lookahead 排除。已全部修复并经 F821 + 全量回归验证。教训：**shared 段的标识符替换必须排除 dict key 与 kwargs 名**，脚本用后需逐行审计 diff。
+
+### Step 1 达成的实质
+
+- 分支产出从「约定同名」变「构造必填」——漏字段在构造处 TypeError，而不是 shared 段运行到一半 NameError
+- exec_result shim 已删（shared 零消费证实）
+- captured_predictions 的生命周期由 dataclass 字段承载，Step 0 那类「中间重置」在结构上不可表达
+- Step 2 的前置就位：两个分支已产出统一类型，查表分派只差 Callable[..., RoundOutcome] 签名

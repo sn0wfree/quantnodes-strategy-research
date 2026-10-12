@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,35 @@ from .metric_targets import meets_metric_targets, metric_pass_set
 from .runner import SR_AGENT_MAX_ITER
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RoundOutcome:
+    """What each engine branch must hand to the shared finalization.
+
+    Replaces the implicit same-local-name convention between the
+    langgraph / phases branches and the shared finalization. All fields
+    are required — construction fails if a branch omits one — so a
+    branch can no longer shadow or reset a value between capture and
+    consumption (the ``phase_engine:205`` defect fixed in ``261a88f``).
+
+    ``eval_result`` is kept as a dict (phases: full ``run_evaluation_phase``
+    result; langgraph: the minimal ``{decision, aoa_llm_verdict}`` face)
+    because ``aegis.verdict_reason`` reads exactly those two keys.
+    ``exec_result`` is deliberately absent: only the phases branch uses it
+    internally; shared finalization never reads it.
+    """
+
+    metrics: dict
+    verdict: str                       # mutable: guidance gate may set "discard"
+    eval_result: dict
+    agent_outputs: dict
+    strategist_output: dict
+    hypothesis: str
+    predicted_affected: list
+    captured_predictions: dict
+    backtest_error: str | None
+
 
 
 def run_round_phases(
@@ -197,14 +227,26 @@ def run_round_phases(
         # The graph aborts before any downstream agent runs, and
         # _run_round_via_langgraph re-attaches ``aborted`` to its result.
 
-        # Shim dicts so finalization references like
-        # eval_result["decision"] and exec_result.get("backtest_error")
-        # resolve without AttributeError. captured_predictions is NOT
-        # shimmed: line 190 already captured the real claims, and
-        # resetting it here would starve the phase-B journal backfill
-        # (line 317) on this branch only.
-        eval_result = {"decision": decision, "aoa_llm_verdict": lg_result.get("aoa_llm_verdict")}
-        exec_result = {"backtest_error": backtest_error}
+        # Hand the shared finalization a typed outcome. eval_result keeps
+        # the minimal face aegis.verdict_reason reads (decision +
+        # aoa_llm_verdict); exec_result has no shared consumers, so no
+        # shim is needed. captured_predictions carries the real phase-A
+        # claims — resetting it here would starve the phase-B backfill
+        # (the defect fixed in 261a88f).
+        outcome = RoundOutcome(
+            metrics=metrics,
+            verdict=verdict,
+            eval_result={
+                "decision": decision,
+                "aoa_llm_verdict": lg_result.get("aoa_llm_verdict"),
+            },
+            agent_outputs=agent_outputs,
+            strategist_output=strategist_output,
+            hypothesis=hypothesis,
+            predicted_affected=predicted_affected,
+            captured_predictions=captured_predictions,
+            backtest_error=backtest_error,
+        )
 
     else:
         # Phase 1: researcher
@@ -284,42 +326,54 @@ def run_round_phases(
         }
         backtest_error = exec_result.get("backtest_error")
 
+        outcome = RoundOutcome(
+            metrics=metrics,
+            verdict=verdict,
+            eval_result=eval_result,
+            agent_outputs=agent_outputs,
+            strategist_output=strategist_output,
+            hypothesis=hypothesis,
+            predicted_affected=predicted_affected,
+            captured_predictions=captured_predictions,
+            backtest_error=backtest_error,
+        )
+
     # ── guidance gates hard check (shared) ────────────────────
-    gate_violations = _check_guidance_gates(guidance, metrics)
+    gate_violations = _check_guidance_gates(guidance, outcome.metrics)
     if gate_violations:
-        verdict = "discard"
+        outcome.verdict = "discard"
 
     # E2 completion semantics (shared)
     e2_passed = bool(
         study.metric_targets
-        and meets_metric_targets(metrics, study.metric_targets)
-        and verdict == "keep"
+        and meets_metric_targets(outcome.metrics, study.metric_targets)
+        and outcome.verdict == "keep"
         and not gate_violations
     )
 
     # disk: results.tsv + summary
     runner._update_results_tsv(
-        runs_dir, run_name, verdict,
+        runs_dir, run_name, outcome.verdict,
         round_num=round_num, results_tsv=results_tsv,
     )
-    summary = generate_run_summary(agent_outputs, metrics, verdict, round_num, previous_summary)
-    summary["acceptance_decision"] = eval_result["decision"].to_dict()
+    summary = generate_run_summary(outcome.agent_outputs, outcome.metrics, outcome.verdict, round_num, previous_summary)
+    summary["acceptance_decision"] = outcome.eval_result["decision"].to_dict()
     save_run_summary(run_dir, summary)
 
     # Emit final graph topology
-    runner._emit_topology(session, sid, round_num, graph, agent_outputs)
+    runner._emit_topology(session, sid, round_num, graph, outcome.agent_outputs)
 
     # AEGIS: Attribution + Journal + Regression Gate
-    passed_now = metric_pass_set(metrics, metric_targets)
+    passed_now = metric_pass_set(outcome.metrics, metric_targets)
     from .attribution import classify_attribution
-    attribution = classify_attribution(predicted_affected, runner._prev_passed, passed_now)
+    attribution = classify_attribution(outcome.predicted_affected, runner._prev_passed, passed_now)
 
-    lever = strategist_output.get("action", "unknown") if isinstance(strategist_output, dict) else "unknown"
-    gating_outcome = "accepted" if verdict == "keep" else "reverted"
+    lever = outcome.strategist_output.get("action", "unknown") if isinstance(outcome.strategist_output, dict) else "unknown"
+    gating_outcome = "accepted" if outcome.verdict == "keep" else "reverted"
     _record_journal_and_regression(
-        runner, round_num, hypothesis, predicted_affected, lever,
-        strategist_output, gating_outcome, attribution,
-        predictions=captured_predictions, metrics=metrics,
+        runner, round_num, outcome.hypothesis, outcome.predicted_affected, lever,
+        outcome.strategist_output, gating_outcome, attribution,
+        predictions=outcome.captured_predictions, metrics=outcome.metrics,
     )
 
     # AEGIS: Scoreboard
@@ -330,27 +384,27 @@ def run_round_phases(
 
     # ── v2 artifacts: manifest + summary.md + journal.md ──
     from .aegis import verdict_reason as _verdict_reason
-    vreason = _verdict_reason(eval_result, strategist_output)
+    vreason = _verdict_reason(outcome.eval_result, outcome.strategist_output)
     if gate_violations:
         gate_reason = "guidance gates: " + ",".join(v["id"] for v in gate_violations)
         vreason = f"{vreason} | {gate_reason}" if vreason else gate_reason
     strategy_changes = (
-        strategist_output.get("changes")
-        if isinstance(strategist_output, dict) else None
+        outcome.strategist_output.get("changes")
+        if isinstance(outcome.strategist_output, dict) else None
     )
     manifest = rm.build_manifest(
         round_num=round_num,
         inherited_from=inherited_from,
         adopted_run=state.last_keep_run_dir,
         run_name=run_name,
-        hypothesis=hypothesis,
+        hypothesis=outcome.hypothesis,
         levers=[lever],
-        predicted_affected=predicted_affected,
+        predicted_affected=outcome.predicted_affected,
         strategy_changes=strategy_changes,
-        metrics=metrics,
+        metrics=outcome.metrics,
         prev_metrics=summary.get("performance_change") or None,
         baseline_metrics=state.baseline_best or None,
-        verdict=verdict,
+        verdict=outcome.verdict,
         verdict_reason=vreason,
         gates=gate_violations or None,
         budget={
@@ -371,19 +425,19 @@ def run_round_phases(
 
     # ── state.json update ────────────────────────────────────
     _update_round_state(
-        runner, path, sid, round_num, run_name, verdict, metrics, state, strategy_changes,
+        runner, path, sid, round_num, run_name, outcome.verdict, outcome.metrics, state, strategy_changes,
     )
 
     # ── goal ledger: keep-round evidence ─────────────────────
-    if verdict == "keep" and study.goal_id:
-        runner._record_keep_evidence(round_num, run_name, metrics)
+    if outcome.verdict == "keep" and study.goal_id:
+        runner._record_keep_evidence(round_num, run_name, outcome.metrics)
 
     # ── v2 review cycle ──────────────────────────────────────
     # §4b short-circuit: if upstream agents produced max_iterations
     # placeholders instead of structured output, skip the reviewer LLM —
     # reviewing garbage wastes calls and feeds the failure cascade.
     from .scenario_router import detect_max_iter_placeholders
-    short_circuited = detect_max_iter_placeholders(agent_outputs)
+    short_circuited = detect_max_iter_placeholders(outcome.agent_outputs)
     if short_circuited:
         logger.warning(
             "round %d short-circuit review: max_iter placeholders in %s",
@@ -398,15 +452,15 @@ def run_round_phases(
         review_stop = None
     else:
         review_stop = _run_review_cycle(
-            runner, round_num, manifest, state, verdict, hypothesis,
+            runner, round_num, manifest, state, outcome.verdict, outcome.hypothesis,
         )
 
     return {
         "round": round_num, "run_name": run_name, "run_dir": run_dir,
-        "metrics": metrics, "verdict": verdict,
-        "decision": eval_result["decision"].to_dict(),
-        "agent_outputs": agent_outputs, "summary": summary,
-        "backtest_error": backtest_error,
+        "metrics": outcome.metrics, "verdict": outcome.verdict,
+        "decision": outcome.eval_result["decision"].to_dict(),
+        "agent_outputs": outcome.agent_outputs, "summary": summary,
+        "backtest_error": outcome.backtest_error,
         "passed_now": passed_now,
         "manifest": manifest,
         "state": state,
