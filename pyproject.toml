@@ -110,6 +110,8 @@ max-complexity = 15
 [tool.ruff.lint.per-file-ignores]
 "src/strategy_research/core/alpha_zoo/**" = ["F401"]
 "src/strategy_research/core/data_source/**" = ["F401"]
+# Archived study code kept for reference only — never fix its lint.
+"src/strategy_research/core/study/_archived/**" = ["C901", "F401", "E9"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["strategy_research"]

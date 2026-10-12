@@ -758,12 +758,6 @@ def _run_lazy_detection(
     run_dir: Path,
 ) -> None:
     """Run laziness detection for the round (pure sink, no steering)."""
-    from strategy_research.core.autoresearch import (
-        detect_lazy_behavior,
-        read_agent_history,
-        save_laziness_report,
-        should_run_lazy_detection,
-    )
 
     if not should_run_lazy_detection(round_num, lazy_detection_interval):
         return
@@ -862,13 +856,6 @@ def run_research_round(
     """
     # Local imports keep the module import graph light for callers that
     # only need the helpers above.
-    from strategy_research.core.autoresearch import (
-        generate_run_summary,
-        read_current_state,
-        retry_agent_spawn,
-        save_agent_record,
-        save_run_summary,
-    )
     from strategy_research.core.backtest import run_backtest_script
     from strategy_research.core.strategy_acceptance import (
         decide as make_decision,
@@ -1202,13 +1189,6 @@ def run_researcher_phase(
     Returns::
         {"researcher_output": dict}
     """
-    from strategy_research.core.autoresearch import (
-        detect_lazy_behavior,
-        read_agent_history,
-        save_agent_record,
-        save_laziness_report,
-        should_run_lazy_detection,
-    )
 
     path = Path(workspace_path).resolve()
     if runs_dir is None:
