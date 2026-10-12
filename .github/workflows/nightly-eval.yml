@@ -10,6 +10,11 @@ on:
         description: "comma-separated golden task ids (optional)"
         required: false
         default: ""
+      update_baseline:
+        description: "refresh evals/nightly-baseline.json from this run (explicit)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: nightly-eval
@@ -92,9 +97,19 @@ jobs:
         run: |
           ONLY='${{ github.event.inputs.only }}'
           if [ -n "$ONLY" ]; then
-            python evals/run_evals_llm.py --only "$ONLY" --max-iterations 5 --json
+            python evals/run_evals_llm.py --only "$ONLY" --max-iterations 5 --json > scorecard.json
           else
-            python evals/run_evals_llm.py --max-iterations 5 --json
+            python evals/run_evals_llm.py --max-iterations 5 --json > scorecard.json
+          fi
+          echo "scorecard written: $(wc -c < scorecard.json) bytes"
+
+      - name: Check scorecard regression
+        if: env.LLM != 'none'
+        run: |
+          if [ '${{ github.event.inputs.update_baseline }}' = 'true' ]; then
+            python scripts/check_eval_regression.py --scorecard scorecard.json --update-baseline
+          else
+            python scripts/check_eval_regression.py --scorecard scorecard.json
           fi
 
       - name: Upload scorecard
@@ -104,4 +119,7 @@ jobs:
           name: golden-eval-report
           path: |
             evals/golden_tasks.jsonl
+            scorecard.json
+            evals/nightly-baseline.json
           retention-days: 30
+          if-no-files-found: ignore

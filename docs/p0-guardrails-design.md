@@ -147,3 +147,31 @@ Nightly：真 LLM eval + 跌幅门禁（exit 1 → run failure 通知）     ←
 ```
 
 三层各管一段：钩子拦**致命语法/未定义名**，CI 拦**测试回归**，nightly 拦**智能退化**。
+
+## 6. 验收记录（2026-10-08，实施完成）
+
+### P0-1 pre-commit（commit `2b652f2`）
+
+| # | 场景 | 结果 |
+|---|---|---|
+| 1 | staged NameError → commit | **拒绝**（F821 检出 + hook exit 1） ✅ |
+| 2 | clean commit | exit 0 ✅ |
+| 3 | 无 .py 改动 commit（纯 hook/doc 文件） | 秒过 ✅ |
+
+环境备注：本机 git 为 MinGit，hook 由 `D:\tools\MinGit\usr\bin\sh.exe` 执行；`ruff` 在 PATH（3.12 Scripts），hook 直调成功。`scripts/install-hooks.sh` 供 git-bash/Linux 启用；本机已用 `git config core.hooksPath scripts/git-hooks` 直接启用。
+
+### P0-2 eval 跟幅门禁
+
+| # | 场景 | 结果 |
+|---|---|---|
+| 1 | 无 baseline | 建立 + exit 0 ✅ |
+| 2 | mean -0.047 / pass -0.09 | 双 REGRESSION + **baseline 未被改写** + exit 1 ✅ |
+| 3 | `--update-baseline` | 写入 + exit 0 ✅ |
+| 4 | 阈值内波动（且为提升） | exit 0 + 刷新提示 ✅ |
+| 5 | YAML 解析 / ruff / py_compile | 全过 ✅ |
+
+实施中修正：`load()` 改 `utf-8-sig` 读取（PowerShell 写 JSON 带 BOM 会 exit 2——本地跑 `--update-baseline` 也会遇到）。
+
+### 基线状态
+
+`evals/nightly-baseline.json` **尚未建立**——按设计由首次成功 nightly 自动创建（case 1 路径已验证）。如需立即基线：本地跑一次真 eval 后 `python scripts/check_eval_regression.py --update-baseline`。
