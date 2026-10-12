@@ -968,7 +968,7 @@ class StudyStore:
         if before_created_at:
             query += " AND created_at < ?"
             params.append(before_created_at)
-        query += " ORDER BY created_at DESC LIMIT ?"
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
         params.append(limit)
 
         rows = self._conn.execute(query, params).fetchall()
@@ -1003,7 +1003,7 @@ class StudyStore:
         if before_created_at:
             query += " AND created_at < ?"
             params.append(before_created_at)
-        query += " ORDER BY created_at DESC LIMIT ?"
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
         params.append(limit)
 
         rows = self._conn.execute(query, params).fetchall()

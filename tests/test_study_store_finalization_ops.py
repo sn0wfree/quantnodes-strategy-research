@@ -113,8 +113,11 @@ def test_update_round_heartbeat_updates_timestamp(store):
     import datetime
     hb = datetime.datetime.fromisoformat(row["heartbeat"])
     ua = datetime.datetime.fromisoformat(row["updated_at"])
-    assert hb.timestamp() >= before
-    assert ua.timestamp() >= before
+    # datetime carries only microsecond precision while time.time() is
+    # a full float — a heartbeat written in the same microsecond can
+    # compare 1e-6 smaller. Tolerate that quantization.
+    assert hb.timestamp() >= before - 1e-6
+    assert ua.timestamp() >= before - 1e-6
 
 
 # ── get_checkpoint_conn ──────────────────────────────────────

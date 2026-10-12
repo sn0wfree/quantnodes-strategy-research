@@ -81,7 +81,7 @@ def _setup(store, goal_store, **overrides):
     )
     kw = dict(
         owner_session_id="sess-st", goal_id=goal.goal_id, objective="研究动量",
-        workspace_path="/tmp/ws", strategy_name="rot_alpha",
+        workspace_path=str(Path.cwd()), strategy_name="rot_alpha",
         behavior="improving",
         metric_targets=[{"name": "calmar", "op": ">=", "value": 0.5}],
         cooldown_base=0.01, cooldown_jitter=0.01, min_cooldown=0.01,
@@ -305,6 +305,13 @@ def test_submit_duplicate_rejected_while_running(store, goal_store, monkeypatch)
         # Duplicate submit while active → rejected, and the study must
         # only ever run once.
         assert await sched.submit(study) is False
+        # Let the study exhaust max_rounds=2 (target 99 unreachable →
+        # ERROR) before shutdown — shutting down at RUNNING would cut
+        # the executor before any round ran and rounds would stay 0.
+        cur = await _await_status(
+            store, study.study_id, StudyStatus.ERROR, timeout_steps=600,
+        )
+        assert cur is not None and cur.execution_status == StudyStatus.ERROR
         await sched.shutdown()
 
     asyncio.run(main())

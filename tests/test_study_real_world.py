@@ -172,7 +172,7 @@ class TestMetricEvaluation:
     def test_improving_behavior_reaches_targets(self):
         """With 'improving' behavior, metrics should improve over rounds."""
         # Simulate the improving stub behavior
-        from strategy_research.core.autoresearch import _stub_researcher
+        from strategy_research.core.study.stub_agents import _stub_researcher
 
         # Round 1: baseline
         output1 = json.loads(_stub_researcher(1, [], "improving"))
@@ -184,7 +184,7 @@ class TestMetricEvaluation:
 
     def test_static_behavior_never_improves(self):
         """With 'static' behavior, metrics should stay constant."""
-        from strategy_research.core.autoresearch import _stub_researcher
+        from strategy_research.core.study.stub_agents import _stub_researcher
 
         output1 = json.loads(_stub_researcher(1, [], "static"))
         output2 = json.loads(_stub_researcher(2, [], "static"))
@@ -194,7 +194,7 @@ class TestMetricEvaluation:
 
     def test_varying_behavior_varies(self):
         """With 'varying' behavior, metrics should vary."""
-        from strategy_research.core.autoresearch import _stub_researcher
+        from strategy_research.core.study.stub_agents import _stub_researcher
 
         outputs = []
         for i in range(5):

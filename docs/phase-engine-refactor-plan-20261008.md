@@ -140,7 +140,42 @@ parity 测试覆盖 schema、不覆盖 side-effect——Step 0 的 bug 正从这
 - `test_langgraph_parity` 的 HITL 边路由失败可能反映**图构建真问题**（novelty_gate 直连 `__end__` 而非 strategist）——值得单独立项，与 Step 1 的契约工作无关但同属 study 引擎
 - `runner_langgraph.py:106` 的 `control` 属性缺失——测试 stub 与实现漂移
 
-## 6. 执行约束
+## 6. Pre-existing 失败修复记录（2026-10-08，Step 0 后授权批次）
+
+§5.3 列出的 14 个 pre-existing 失败 + 1 flaky + 2 遗留观察，经授权后全部修复。
+
+### 6.1 根因与修法
+
+| # | 测试 | 根因 | 修法 | 类别 |
+|---|---|---|---|---|
+| 1-3 | `hitl_resume_rebuild` ×3 | `_bare_runner` 用 `__new__` 跳过 `__init__`，未提供 `control` 属性（`runner.py:148` 正式属性） | `_bare_runner` 补 `runner.control = ControlToken()` | 测试 |
+| 4 | `researcher_defense::type_guarded` | `PHASE_ENGINE.read_text()` 无 encoding，Windows 默认 GBK 读 UTF-8 炸 | `read_text(encoding="utf-8")` ×2 | 测试 |
+| 5 | `goal_events::flush_persists_metadata` | `Projector` 的 sqlite 连接**无关闭入口**，tearDown 删临时目录时 WinError 32 | **产品**：`Projector.close()`（幂等，持 flush_lock）；测试 tearDown 调用 | 产品+测试 |
+| 6 | `study_dump` flaky | 同 #5 类 db 锁（大跑 fail / 单跑 pass） | #5 的 `Projector.close()` 间接覆盖；69 文件大跑验证通过 | 由 #5 覆盖 |
+| 7 | `study_store::test_list_newest_first` | `list_studies` 的 `ORDER BY created_at DESC` **无 tiebreak**，同微秒内创建顺序不定 | **产品**：加 `, rowid DESC`（与 line 934 同模式） | 产品 |
+| 8 | `store_finalization_ops::heartbeat` | `time.time()` 浮点精度 > datetime 微秒截断，同微秒内 `hb < before` | 断言加 `1e-6` 容差 + 注释 | 测试 |
+| 9-11 | `study_real_world` ×3 | `_stub_researcher` 已迁至 `core/study/stub_agents.py`，测试仍从 `core.autoresearch` import | 改 import 路径 ×3 | 测试 |
+| 12-14 | `study_scheduler` ×3 | ① `_setup` 硬编码 `workspace_path="/tmp/ws"`（POSIX，Windows 不存在 → recover 标 error）② duplicate 测试等 RUNNING 后立即 shutdown，round 未跑 | ① 改 `str(Path.cwd())` ② 等 `StudyStatus.ERROR` 终态再 shutdown | 测试 |
+| 15 | `langgraph_parity::HITL 边` | **测试方法错**：`get_graph().edges` 静态视图不渲染条件边 targets（`ends=None` 无 path_map），且裁剪条件分支下游静态边；产品逻辑（`_gate_route` 条件路由）本身正确 | 重写断言：静态边读 `builder._all_edges`，条件路由**直接调用** `branches['novelty_gate']['_gate_route'].path.func` 验证运行时行为（normal→`[risk, strategist]`，aborted→`[END]`） | 测试（增强） |
+
+### 6.2 产品改动汇总（2 处）
+
+1. `api/session/projector.py` — 新增 `close()`（连接生命周期此前无公共出口）
+2. `core/study/store.py` — `list_studies` 两处 `ORDER BY created_at DESC` 加 `rowid DESC` tiebreak
+
+### 6.3 验证
+
+| 批次 | 结果 |
+|---|---|
+| 修复目标测试（10 文件） | **67 passed, 1 skipped, 0 failed** |
+| 69 文件全量回归（同 §5.2 口径） | **1273 passed, 1 skipped, 0 failed**（此前 1258 passed + 15 failed；+15 正好对应修复数） |
+
+### 6.4 遗留（未处理，规模外）
+
+- `ruff check tests/` 存在 34 个 pre-existing lint 问题（F401/F811/I001，集中在 `test_study_real_world.py`）——此前 lint job 只扫 `src`，未暴露；autofix 有语义风险（F811 redefinition），另立任务处理
+- HITL 边测试依赖 langgraph 私有 `builder._all_edges` / `branches`——升级 langgraph 版本时需复查
+
+## 7. 执行约束
 
 - **他人代码最小触碰**：Step 0 只新增测试 + 最多一行生产代码改动；Step 1-3 每步单独评审后再动
 - 每步独立 commit，可单独回滚

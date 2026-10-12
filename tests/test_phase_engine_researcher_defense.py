@@ -25,7 +25,7 @@ class TestResearcherOutputDefenseSource(unittest.TestCase):
     def test_get_calls_are_type_guarded(self):
         """Find every `researcher_output.get(...)` call and verify a
         preceding isinstance guard assigns researcher_output to a dict."""
-        tree = ast.parse(PHASE_ENGINE.read_text())
+        tree = ast.parse(PHASE_ENGINE.read_text(encoding="utf-8"))
         guards = 0
         get_sites = 0
         for node in ast.walk(tree):
@@ -36,7 +36,7 @@ class TestResearcherOutputDefenseSource(unittest.TestCase):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == "researcher_output":
                         guards += 1
-        src = PHASE_ENGINE.read_text()
+        src = PHASE_ENGINE.read_text(encoding="utf-8")
         get_sites = src.count("researcher_output.get(")
         # 2 guarded assignments cover all get sites (langgraph + phases branch)
         self.assertGreaterEqual(guards, 2, msg=f"expected >=2 guards, found {guards}")

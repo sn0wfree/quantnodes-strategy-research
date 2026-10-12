@@ -135,6 +135,10 @@ class TestProjectorGoalMessage(unittest.TestCase):
         self.state = ProjectedSession(session_id="s1")
 
     def tearDown(self) -> None:
+        # Close the sqlite connection before deleting the temp dir —
+        # otherwise Windows keeps goal_test.db locked (WinError 32)
+        # and cleanup raises PermissionError.
+        self.proj.close()
         self._tmpdir.cleanup()
 
     def _payload(self, **kw):

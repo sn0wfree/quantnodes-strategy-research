@@ -62,6 +62,8 @@ class TestHitlEdgeRouting:
         )
 
     def test_no_duplicate_incoming_edges_under_hitl(self, tmp_path):
+        from langgraph.graph import END
+
         from strategy_research.core.study.langgraph_engine import (
             LangGraphProfile,
             build_langgraph,
@@ -74,18 +76,33 @@ class TestHitlEdgeRouting:
         )
         edges = {(e.source, e.target) for e in compiled.get_graph().edges}
 
+        # researcher's only successor is the gate
         assert ("researcher", "novelty_gate") in edges
-        assert ("novelty_gate", "strategist") in edges
-        assert ("novelty_gate", "risk") in edges
-        # direct researcher→target edges must be gone
+        # P4 invariant: direct researcher→target edges must be gone —
+        # a target receiving both researcher and novelty_gate edges
+        # would execute twice per round.
         assert ("researcher", "strategist") not in edges
         assert ("researcher", "risk") not in edges
+
+        # The gate fans out via a CONDITIONAL edge whose targets are
+        # computed at runtime (_gate_route returns routed_targets or
+        # [END] on abort). get_graph() renders it only as novelty_gate
+        # → END and prunes static edges below the branch from that view,
+        # so read static edges off the builder and exercise the route
+        # function directly.
+        branches = compiled.builder.branches
+        assert "novelty_gate" in branches
+        route_fn = branches["novelty_gate"]["_gate_route"].path.func
+        assert sorted(route_fn({"aborted": False})) == ["risk", "strategist"]
+        assert route_fn({"aborted": True}) == [END]
+
+        static = set(compiled.builder._all_edges)
         # untouched edge preserved
-        assert ("strategist", "risk") in edges
-        # risk's predecessors: gate (replacing researcher) + strategist
-        # (legitimate direct edge) — researcher itself must be gone.
-        sources_of_risk = {s for (s, t) in edges if t == "risk"}
-        assert sources_of_risk == {"novelty_gate", "strategist"}
+        assert ("strategist", "risk") in static
+        # exit wiring intact
+        assert ("risk", "__end__") in static
+        # researcher's static successors: gate only
+        assert {t for (s, t) in static if s == "researcher"} == {"novelty_gate"}
 
     def test_no_hitl_keeps_direct_edges(self, tmp_path):
         from strategy_research.core.study.langgraph_engine import (

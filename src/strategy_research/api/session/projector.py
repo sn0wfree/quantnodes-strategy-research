@@ -347,6 +347,19 @@ class Projector:
             )
         return self._conn
 
+    def close(self) -> None:
+        """Close the cached connection (idempotent).
+
+        Owners with a finite lifetime (test fixtures, server shutdown)
+        must call this before deleting the db file — sqlite keeps the
+        file locked until the connection is closed, which fails temp
+        cleanup on Windows with WinError 32.
+        """
+        with self._flush_lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
     # ── Snapshot support (P0-1 B2) ─────────────────────────────────
 
     _SNAPSHOT_SCHEMA_DDL = (

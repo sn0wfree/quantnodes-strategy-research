@@ -17,9 +17,12 @@ import pytest
 
 def _bare_runner(**attrs):
     """Build an AutoresearchRunner without running its heavy __init__."""
-    from strategy_research.core.study.runner import AutoresearchRunner
+    from strategy_research.core.study.runner import AutoresearchRunner, ControlToken
 
     runner = AutoresearchRunner.__new__(AutoresearchRunner)
+    # __init__ is skipped, so provide the attributes methods read:
+    # _wait_for_approval polls runner.control.cancelled/paused.
+    runner.control = ControlToken()
     for key, value in attrs.items():
         setattr(runner, key, value)
     return runner
