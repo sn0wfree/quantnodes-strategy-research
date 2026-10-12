@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
 
@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-from collections import OrderedDict
 import time
+from collections import OrderedDict
 
 _SUMMARY_CACHE: OrderedDict = OrderedDict()  # sid -> (monotonic, data, etag)
 _SUMMARY_CACHE_TTL = 3.0

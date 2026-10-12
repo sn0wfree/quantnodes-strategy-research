@@ -36,7 +36,6 @@ import os
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,10 +49,9 @@ from ..llm.errors import LLMError
 from ..memory.persistent import PersistentMemory
 from ..utils.ids import SessionId
 from .circuit_breaker import RetryPolicy, ToolLoopCircuitBreaker
-from .compact import CompactConfig, compact_messages
+from .compact import CompactConfig
 from .context import ContextBuilder, estimate_tokens
-from .progress import HeartbeatTimer
-from .tools import TRANSIENT_TOOL_ERRORS, ToolContext, ToolRegistry
+from .tools import ToolRegistry
 from .trace import TraceWriter
 
 logger = logging.getLogger(__name__)

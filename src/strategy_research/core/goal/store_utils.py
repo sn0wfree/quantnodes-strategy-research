@@ -1,12 +1,9 @@
 """W-split: GoalStore pure helpers."""
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from ..storage.sqlite import resolve_db_path
 

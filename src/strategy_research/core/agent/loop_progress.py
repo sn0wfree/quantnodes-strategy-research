@@ -1,11 +1,9 @@
 """W-split: llm error + no-progress/approval (from AgentLoop)."""
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..llm.errors import LLMError
@@ -13,8 +11,6 @@ if TYPE_CHECKING:
     from .loop import LoopResult
 
 logger = logging.getLogger(__name__)
-
-from .runtime.sync_bridge import _run_coro_in_sync
 
 import hashlib
 

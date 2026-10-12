@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..observability import new_trace_id
-from . import aegis as _aegis
 from . import budget as _budget
 from . import state_utils as _state_utils
 from .metric_targets import metric_pass_set as _metric_pass_set  # noqa: F401  (re-export for tests)

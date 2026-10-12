@@ -6,8 +6,6 @@ import hashlib
 import logging
 import sqlite3
 import threading
-from dataclasses import asdict
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +15,6 @@ from ..storage.sqlite import (
     json_loads,
     new_id,
     now_iso,
-    resolve_db_path,
     set_user_version,
     synchronized,
     table_columns,

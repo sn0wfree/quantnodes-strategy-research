@@ -11,11 +11,8 @@ decoupled by v2 single-identity (``session_id == study_id``).
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
-import time
-from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -53,7 +50,7 @@ from ..schemas.study import (
 from ._task_utils import log_task_exception
 
 if TYPE_CHECKING:
-    from ...core.study.scheduler import StudyScheduler
+    pass
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1369,7 +1366,7 @@ async def study_dispatch_action(
         if study is None:
             raise HTTPException(status_code=404, detail="study not found")
 
-    from ...core.study.models import StudyAction, StudyStatus, allowed_actions
+    from ...core.study.models import StudyAction, allowed_actions
     # Backward-compat: map deprecated action names to CONTINUE
     _DEPRECATED_TO_CONTINUE = {"resume", "resume_interrupted", "retry"}
     try:

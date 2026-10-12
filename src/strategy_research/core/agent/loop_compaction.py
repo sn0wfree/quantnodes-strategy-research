@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +12,7 @@ from .compact import compact_messages
 from .loop import _compaction_persister
 
 if TYPE_CHECKING:
-    from ..llm.errors import LLMError
-    from ..llm.parser import LLMResponse, ToolCall
-    from .loop import LoopResult
+    pass
 
 class LoopCompactionMixin:
     def _maybe_compact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:

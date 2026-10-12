@@ -1,19 +1,16 @@
 """W-split: run endings + claim validation (from AgentLoop)."""
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
 from ..utils.token_utils import estimate_tokens
 
 if TYPE_CHECKING:
-    from ..llm.errors import LLMError
-    from ..llm.parser import LLMResponse, ToolCall
+    from ..llm.parser import LLMResponse
     from .loop import LoopResult
 
 class LoopLifecycleMixin:

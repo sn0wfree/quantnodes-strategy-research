@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import os
 import random
-from typing import Any
+
+
 def _stub_agent_output(
     agent_name: str,
     current_state: dict,

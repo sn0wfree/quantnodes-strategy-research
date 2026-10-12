@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,7 @@ _TOOL_RESULT_HISTORY_MAX = 30000
 from .runtime.sync_bridge import _run_coro_in_sync
 
 if TYPE_CHECKING:
-    from ..llm.errors import LLMError
-    from ..llm.parser import LLMResponse, ToolCall
+    from ..llm.parser import ToolCall
     from .loop import LoopResult
 
 class LoopToolsMixin:
