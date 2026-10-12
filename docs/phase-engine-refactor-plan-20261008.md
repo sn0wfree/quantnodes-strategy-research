@@ -96,7 +96,51 @@ parity 测试覆盖 schema、不覆盖 side-effect——Step 0 的 bug 正从这
 
 `docs/architecture-harness-recommendations-20261008.md` §1.3 的「`EngineProtocol`（`start_round`/`resume`/`snapshot`）」接口草案与「runner 认识双引擎」的前提**均已作废**，以本文档 §1-§3 为准；该条的优先级判断（study 心脏、先低风险后高风险、当前有护栏）仍然成立。
 
-## 5. 执行约束
+## 5. Step 0 验收记录（2026-10-08，commit `261a88f`）
+
+### 5.1 执行
+
+1. 新增 `tests/test_phase_engine_langgraph_claims.py`（仅新增，stub pattern 镜像自现有测试，不 import 测试模块）
+2. 首跑 **红**（证据）：`phase A produced {'calmar': 0.6, 'sharpe': 0.35}, phase B received {}`
+3. 修复：删 `phase_engine.py:205` 的 `captured_predictions = {}` **一行**；相邻 shim 注释扩两句说明为何 captured_predictions 不得 shim
+4. 复跑 **绿**；ruff 干净（仅剩 pre-existing C901=24）
+
+### 5.2 回归测试面
+
+| 批次 | 范围 | 结果 |
+|---|---|---|
+| 核心 | `test_phase_engine_*` + `test_langgraph*` + `test_study_engine_dispatch` | 35 passed + 2 已知失败 |
+| 扩面 | study / phase / langgraph / claims / attribution / goal / autoresearch / hitl / resume 共 **69 文件** | **1258 passed · 15 failed · 1 skipped**（118.5s） |
+
+排除项：`test_engine_*`（26 文件）为回测引擎测试，与 study 引擎无关。
+
+### 5.3 失败归因（before/after 精确 diff）
+
+方法：`git checkout 261a88f~1 -- phase_engine.py` 还原修复前，跑同一 15 个失败测试，与修复后对比 FAILED 集合。
+
+**结果：before 14 failed = after 14 failed，集合完全一致 → 修复零回归。**
+
+14 个 pre-existing 失败（按约束未动，仅记录）：
+
+| 类别 | 测试 | 现象 |
+|---|---|---|
+| 研究指标 | `test_study_real_world` ×3 | MetricEvaluation 断言失败 |
+| 调度器 | `test_study_scheduler` ×3 | recover/duplicate 场景 |
+| 存储 | `test_study_store::test_list_newest_first` | 排序 |
+| 存储 | `test_study_store_finalization_ops::heartbeat` | 浮点时间戳 `>=` 精度 |
+| 类型防御 | `test_phase_engine_researcher_defense::type_guarded` | `test_get_calls_are_type_guarded` |
+| 图路由 | `test_langgraph_parity::test_no_duplicate_incoming_edges_under_hitl` | 期望 `novelty_gate→strategist`，实际 `novelty_gate→__end__` |
+| goal | `test_goal_events::test_flush_persists_metadata` | 元数据 flush |
+| HITL 重建 | `test_hitl_resume_rebuild` ×3 | `AutoresearchRunner has no attribute 'control'`（`runner_langgraph.py:106`，stub 不完整） |
+
+另有 **1 个 flaky**：`test_study_dump::test_dump_with_studies` — 69 文件大跑 fail、单跑 pass（测试间污染，`goal_test.db` WinError 32 权限残留）。
+
+### 5.4 遗留观察（不属于 Step 0 范围）
+
+- `test_langgraph_parity` 的 HITL 边路由失败可能反映**图构建真问题**（novelty_gate 直连 `__end__` 而非 strategist）——值得单独立项，与 Step 1 的契约工作无关但同属 study 引擎
+- `runner_langgraph.py:106` 的 `control` 属性缺失——测试 stub 与实现漂移
+
+## 6. 执行约束
 
 - **他人代码最小触碰**：Step 0 只新增测试 + 最多一行生产代码改动；Step 1-3 每步单独评审后再动
 - 每步独立 commit，可单独回滚
