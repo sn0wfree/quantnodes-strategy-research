@@ -48,6 +48,36 @@ class RoundOutcome:
     backtest_error: str | None
 
 
+@dataclass
+class BranchContext:
+    """Everything a branch function needs from the shared preamble.
+
+    Input-side symmetric to ``RoundOutcome`` (the output contract):
+    preamble -> BranchContext -> branch fn -> RoundOutcome -> shared
+    finalization. Built once by ``run_round_phases`` after the
+    workspace/state/graph setup, then handed to the dispatch table.
+    """
+
+    runner: Any
+    study: Any
+    round_num: int
+    previous_summary: dict | None
+    directive_text: str | None
+    path: Path
+    strategy: str
+    current_state: dict
+    run_dir: Path
+    runs_dir: Path
+    run_name: str
+    results_tsv: Path
+    graph: Any
+    session: str
+    sid: str
+    metric_targets: list
+    guidance: Any
+
+
+
 
 def run_round_phases(
     runner: Any,
@@ -61,282 +91,46 @@ def run_round_phases(
     runner._run_one_round_impl.
     """
     from strategy_research.core.autoresearch import (
-        _create_run_dir,
         generate_run_summary,
-        read_current_state,
-        run_evaluation_phase,
-        run_researcher_phase,
         save_run_summary,
     )
-    from strategy_research.core.study import review_loop as rl
     from strategy_research.core.study import round_manifest as rm
-    from strategy_research.core.study import state_store as ss
 
-    study = runner._get_study()
-    sid = study.study_id
-    session = study.session_id
-    path = Path(study.workspace_path).resolve()
-    strategy = study.strategy_name
-    metric_targets = study.metric_targets
-    root = ss.study_root(path, sid)
-    state = ss.load(path, sid)
-
-    # ── v2 round-start knowledge gap check (design §11.1) ─────
-    knowledge_path = root / "knowledge.md"
-    knowledge_text = (
-        knowledge_path.read_text(encoding="utf-8")
-        if knowledge_path.exists() else ""
+    ctx, state, inherited_from = _prepare_round_preamble(
+        runner, round_num, previous_summary, directive_text,
     )
-    next_focus = ""
-    if state.last_review:
-        next_focus = str(state.last_review.get("next_focus") or "")
-    gap_topics = rl.gap_check(study.objective, next_focus, knowledge_text)
-    if gap_topics:
-        runner._collect_knowledge(gap_topics)
-    runner._emit(session, "study_knowledge_check", {
-        "study_id": sid, "round": round_num,
-        "gap_topics": gap_topics, "collected": bool(gap_topics),
-    })
-
-    # ── round dir + inherited strategy copy ─────────────────────
-    round_dir = rm.round_dir(path, sid, round_num)
-    round_dir.mkdir(parents=True, exist_ok=True)
-
-    runs_dir, run_name, run_dir = _create_run_dir(
-        path, strategy, runs_dir=round_dir,
-    )
-    adopted = rm.resolve_adopted_run_for_start(state.last_keep_run_dir)
-    inherited_from = adopted
-    src_strategy = (root / adopted / "strategy.py") if adopted != "baseline" \
-        else root / "baseline" / "strategy.py"
-    dst_strategy = run_dir / "strategy.py"
-    if src_strategy.exists():
-        dst_strategy.write_text(
-            src_strategy.read_text(encoding="utf-8"), encoding="utf-8",
-        )
-    src_cfg = root / adopted / "config.yaml" if adopted != "baseline" \
-        else root / "baseline" / "config.yaml"
-    if src_cfg.exists():
-        (run_dir / "config.yaml").write_text(
-            src_cfg.read_text(encoding="utf-8"), encoding="utf-8",
-        )
-
-    results_tsv = root / "results.tsv"
-
-    # ── Load the execution graph (topology-aware scheduling) ────
-    graph = runner._load_graph(path, sid)
-
-    # read state
-    current_state = read_current_state(
-        path, strategy,
-        strategy_file=dst_strategy,
-        results_tsv=results_tsv,
-    )
-    current_state["study_strategy_path"] = str(
-        round_dir.relative_to(path) / run_name / "strategy.py"
-    )
-
-    # AEGIS: inject journal + scoreboard context
-    journal_ctx = runner._build_journal_context()
-    scoreboard_ctx = runner._build_scoreboard_context()
-    if journal_ctx:
-        current_state["journal_context"] = journal_ctx
-    if scoreboard_ctx:
-        current_state["lever_scoreboard"] = scoreboard_ctx
-
-    # v2 guidance: human decision points injected every round
-    from strategy_research.core.study import guidance as gd
-    guidance = gd.load_guidance(path, sid)
-    guidance_section = gd.render_guidance_section(guidance)
-    if guidance_section:
-        current_state["human_guidance"] = guidance_section
-
-    # Inject factor failures from previous round
-    if previous_summary and previous_summary.get("factor_failures"):
-        current_state["factor_failures"] = previous_summary["factor_failures"]
+    # One-shot unpack: the shared finalization reads these by name.
+    study = ctx.study
+    sid = ctx.sid
+    session = ctx.session
+    path = ctx.path
+    metric_targets = ctx.metric_targets
+    graph = ctx.graph
+    run_name = ctx.run_name
+    run_dir = ctx.run_dir
+    runs_dir = ctx.runs_dir
+    results_tsv = ctx.results_tsv
+    guidance = ctx.guidance
 
     # ── Engine dispatch ──────────────────────────────────────
-    engine = getattr(study, "engine", None) or "phases"
-    logger.info("phase_engine: round %d, engine=%s, study.engine=%s", round_num, engine, getattr(study, "engine", "NOT_SET"))
-    if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
-        # Backward compat: the legacy env var opts into the graph-based
-        # engine. It maps to "langgraph" — the only graph dispatch the
-        # engine switch below understands ("dag_engine" has no
-        # production callers; see phase_engine dispatch).
-        engine = "langgraph"
-    if engine == "dag":
-        # store/API still accept engine='dag' (M12), but no dag executor
-        # exists in production — map to langgraph instead of silently
-        # running the phases engine.
-        engine = "langgraph"
-
-    if engine == "langgraph":
-        lg_result = runner._run_round_via_langgraph(
-            path, strategy, current_state, run_dir, graph,
-            session=session, sid=sid, round_num=round_num,
-            directive_text=directive_text,
+    engine = _resolve_engine(study, round_num)
+    branch_fn = _ENGINE_BRANCHES.get(engine)
+    if branch_fn is None:
+        # Preserve the historical fallback: any unknown engine value
+        # (dirty DB row, future removal of 'dag') runs phases instead
+        # of raising mid-round.
+        logger.warning(
+            "phase_engine: unknown engine %r (study.engine=%r); "
+            "falling back to phases",
+            engine, getattr(study, "engine", "NOT_SET"),
         )
-        # HITL approval pause — return early, runner will re-enter on resume
-        if lg_result.get("paused_for_approval"):
-            return lg_result
-        # Novelty gate rejected (graph routed to END before any
-        # downstream agent ran) — return before finalization; the runner
-        # loop sees ``aborted`` and skips the round, mirroring the
-        # phases branch below.
-        if lg_result.get("aborted"):
-            return lg_result
-
-        # Map langgraph result to the variables expected by the
-        # shared finalization pipeline below.
-        researcher_output = lg_result.get("researcher_output", {})
-        # Defense: researcher may return a plain string on max_iter —
-        # never let a non-dict reach the .get() calls below.
-        if not isinstance(researcher_output, dict):
-            researcher_output = {}
-        strategist_output = lg_result.get("strategist_output", {})
-        metrics = lg_result.get("metrics", {})
-        verdict = lg_result.get("verdict", "discard")
-        decision = lg_result.get("decision")
-        backtest_error = lg_result.get("backtest_error")
-
-        agent_outputs = {"researcher": researcher_output}
-        for _k in (
-            "data_quality_output", "factor_analyst_output",
-            "strategist_output", "portfolio_construction_output",
-            "risk_controller_output", "attribution_analyst_output",
-            "anti_overfit_analyst_output", "backtest_diagnostics_output",
-        ):
-            if _k in lg_result:
-                agent_outputs[_k] = lg_result[_k]
-
-        hypothesis = researcher_output.get("hypothesis", "")
-        predicted_affected = (
-            researcher_output.get("predicted_affected")
-            or [t["name"] for t in metric_targets]
-        )
-        # Claims capture: predictions come from the researcher's own
-        # reasoning (they never see the backtest result), so they stay
-        # falsifiable even though this engine runs the backtest in-graph.
-        captured_predictions = _capture_round_claims(
-            runner, round_num, researcher_output, predicted_affected, metric_targets,
-        )
-
-        # Novelty dedup on this branch is handled in-graph by the
-        # novelty_gate node (built when profile.hitl is enabled — the
-        # "langgraph" profile always is, see langgraph_engine profiles).
-        # The graph aborts before any downstream agent runs, and
-        # _run_round_via_langgraph re-attaches ``aborted`` to its result.
-
-        # Hand the shared finalization a typed outcome. eval_result keeps
-        # the minimal face aegis.verdict_reason reads (decision +
-        # aoa_llm_verdict); exec_result has no shared consumers, so no
-        # shim is needed. captured_predictions carries the real phase-A
-        # claims — resetting it here would starve the phase-B backfill
-        # (the defect fixed in 261a88f).
-        outcome = RoundOutcome(
-            metrics=metrics,
-            verdict=verdict,
-            eval_result={
-                "decision": decision,
-                "aoa_llm_verdict": lg_result.get("aoa_llm_verdict"),
-            },
-            agent_outputs=agent_outputs,
-            strategist_output=strategist_output,
-            hypothesis=hypothesis,
-            predicted_affected=predicted_affected,
-            captured_predictions=captured_predictions,
-            backtest_error=backtest_error,
-        )
-
-    else:
-        # Phase 1: researcher
-        runner._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "researcher", "status": "started",
-        })
-        researcher_result = run_researcher_phase(
-            path, strategy, current_state, run_dir,
-            session_id=session, run_name=run_name,
-            behavior=study.behavior, max_retries=3,
-            max_iterations=SR_AGENT_MAX_ITER,
-            directives=directive_text,
-            lazy_detection_interval=study.lazy_detection_interval,
-            keep_recent=study.keep_recent, round_num=round_num,
-            runs_dir=runs_dir,
-            loop_strategy=runner._loop_strategy,
-        )
-        runner._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "researcher", "status": "done",
-        })
-        researcher_output = researcher_result["researcher_output"]
-        # Defense: same non-dict guard as the langgraph branch above.
-        if not isinstance(researcher_output, dict):
-            researcher_output = {}
-
-        hypothesis = researcher_output.get("hypothesis", "")
-        predicted_affected = researcher_output.get("predicted_affected") or [t["name"] for t in metric_targets]
-        if not _novelty_gate(runner, round_num, hypothesis, predicted_affected):
-            return {"round": round_num, "run_name": run_name, "aborted": True,
-                    "reason": "novelty_rejected"}
-
-        # Claims capture: BEFORE the backtest so predictions are credible.
-        captured_predictions = _capture_round_claims(
-            runner, round_num, researcher_output, predicted_affected, metric_targets,
-        )
-
-        # Phase 2: execution
-        runner._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "execution", "status": "started",
-        })
-        exec_result = _run_execution_with_parse_retry(
-            runner, path, strategy, current_state, researcher_output, run_dir,
-            session=session, run_name=run_name,
-            results_tsv=results_tsv, round_num=round_num,
-        )
-        runner._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "execution", "status": "done",
-        })
-        metrics = exec_result["metrics"]
-        strategist_output = exec_result["strategist_output"]
-
-        # Phase 3: evaluation
-        runner._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "evaluation", "status": "started",
-        })
-        eval_result = run_evaluation_phase(
-            path, strategy, exec_result["backtest_result"], metrics, run_dir,
-            behavior=study.behavior, max_retries=3,
-            max_iterations=SR_AGENT_MAX_ITER,
-            loop_strategy=runner._loop_strategy,
-        )
-        runner._emit(session, "study_phase", {
-            "study_id": sid, "round": round_num, "phase": "evaluation", "status": "done",
-        })
-        verdict = eval_result["verdict"]
-
-        agent_outputs = {
-            "researcher": researcher_output,
-            **{k: exec_result.get(k) for k in (
-                "data_quality_output", "factor_analyst_output",
-                "strategist_output", "portfolio_construction_output",
-            )},
-            **{k: eval_result.get(k) for k in (
-                "risk_controller_output", "attribution_analyst_output",
-                "anti_overfit_analyst_output", "backtest_diagnostics_output",
-            )},
-        }
-        backtest_error = exec_result.get("backtest_error")
-
-        outcome = RoundOutcome(
-            metrics=metrics,
-            verdict=verdict,
-            eval_result=eval_result,
-            agent_outputs=agent_outputs,
-            strategist_output=strategist_output,
-            hypothesis=hypothesis,
-            predicted_affected=predicted_affected,
-            captured_predictions=captured_predictions,
-            backtest_error=backtest_error,
-        )
+        branch_fn = _ENGINE_BRANCHES["phases"]
+    branch_result = branch_fn(ctx)
+    if isinstance(branch_result, dict):
+        # Early path: HITL pause / graph abort / novelty rejection —
+        # payload shape unchanged; the runner loop interprets it.
+        return branch_result
+    outcome = branch_result
 
     # ── guidance gates hard check (shared) ────────────────────
     gate_violations = _check_guidance_gates(guidance, outcome.metrics)
@@ -467,6 +261,369 @@ def run_round_phases(
         "review_stop": review_stop,
         "e2_passed": e2_passed,
     }
+
+
+def _prepare_round_preamble(
+    runner: Any,
+    round_num: int,
+    previous_summary: dict | None,
+    directive_text: str | None,
+) -> tuple[BranchContext, Any, Any]:
+    """Build the shared preamble: workspace dirs, state, graph, guidance.
+
+    Returns ``(ctx, state, inherited_from)`` — ctx feeds the dispatch
+    table, the other two are consumed only by the shared finalization
+    (manifest / state.json update). Extracted from run_round_phases in
+    Step 2; all conditional setup (gap check, file copies, context
+    injection) lives here so the main function's complexity budget goes
+    to dispatch + finalization.
+    """
+    from strategy_research.core.autoresearch import (
+        _create_run_dir,
+        read_current_state,
+    )
+    from strategy_research.core.study import guidance as gd
+    from strategy_research.core.study import review_loop as rl
+    from strategy_research.core.study import round_manifest as rm
+    from strategy_research.core.study import state_store as ss
+
+    study = runner._get_study()
+    sid = study.study_id
+    session = study.session_id
+    path = Path(study.workspace_path).resolve()
+    strategy = study.strategy_name
+    metric_targets = study.metric_targets
+    root = ss.study_root(path, sid)
+    state = ss.load(path, sid)
+
+    # ── v2 round-start knowledge gap check (design §11.1) ─────
+    knowledge_path = root / "knowledge.md"
+    knowledge_text = (
+        knowledge_path.read_text(encoding="utf-8")
+        if knowledge_path.exists() else ""
+    )
+    next_focus = ""
+    if state.last_review:
+        next_focus = str(state.last_review.get("next_focus") or "")
+    gap_topics = rl.gap_check(study.objective, next_focus, knowledge_text)
+    if gap_topics:
+        runner._collect_knowledge(gap_topics)
+    runner._emit(session, "study_knowledge_check", {
+        "study_id": sid, "round": round_num,
+        "gap_topics": gap_topics, "collected": bool(gap_topics),
+    })
+
+    # ── round dir + inherited strategy copy ─────────────────────
+    round_dir = rm.round_dir(path, sid, round_num)
+    round_dir.mkdir(parents=True, exist_ok=True)
+
+    runs_dir, run_name, run_dir = _create_run_dir(
+        path, strategy, runs_dir=round_dir,
+    )
+    adopted = rm.resolve_adopted_run_for_start(state.last_keep_run_dir)
+    inherited_from = adopted
+    src_strategy = (root / adopted / "strategy.py") if adopted != "baseline" \
+        else root / "baseline" / "strategy.py"
+    dst_strategy = run_dir / "strategy.py"
+    if src_strategy.exists():
+        dst_strategy.write_text(
+            src_strategy.read_text(encoding="utf-8"), encoding="utf-8",
+        )
+    src_cfg = root / adopted / "config.yaml" if adopted != "baseline" \
+        else root / "baseline" / "config.yaml"
+    if src_cfg.exists():
+        (run_dir / "config.yaml").write_text(
+            src_cfg.read_text(encoding="utf-8"), encoding="utf-8",
+        )
+
+    results_tsv = root / "results.tsv"
+
+    # ── Load the execution graph (topology-aware scheduling) ────
+    graph = runner._load_graph(path, sid)
+
+    # read state
+    current_state = read_current_state(
+        path, strategy,
+        strategy_file=dst_strategy,
+        results_tsv=results_tsv,
+    )
+    current_state["study_strategy_path"] = str(
+        round_dir.relative_to(path) / run_name / "strategy.py"
+    )
+
+    # AEGIS: inject journal + scoreboard context
+    journal_ctx = runner._build_journal_context()
+    scoreboard_ctx = runner._build_scoreboard_context()
+    if journal_ctx:
+        current_state["journal_context"] = journal_ctx
+    if scoreboard_ctx:
+        current_state["lever_scoreboard"] = scoreboard_ctx
+
+    # v2 guidance: human decision points injected every round
+    guidance = gd.load_guidance(path, sid)
+    guidance_section = gd.render_guidance_section(guidance)
+    if guidance_section:
+        current_state["human_guidance"] = guidance_section
+
+    # Inject factor failures from previous round
+    if previous_summary and previous_summary.get("factor_failures"):
+        current_state["factor_failures"] = previous_summary["factor_failures"]
+
+
+    ctx = BranchContext(
+        runner=runner, study=study, round_num=round_num,
+        previous_summary=previous_summary, directive_text=directive_text,
+        path=path, strategy=strategy, current_state=current_state,
+        run_dir=run_dir, runs_dir=runs_dir, run_name=run_name,
+        results_tsv=results_tsv, graph=graph, session=session, sid=sid,
+        metric_targets=metric_targets, guidance=guidance,
+    )
+    return ctx, state, inherited_from
+
+
+def _resolve_engine(study: Any, round_num: int) -> str:
+    """Normalize the study's engine to a dispatch-table key.
+
+    Behavior-preserving extraction of the inline remaps:
+
+    - ``SR_STUDY_DAG_ENGINE=1`` — legacy env switch into the graph engine
+    - ``engine='dag'`` — fake option: store/API still accept it (M12) but
+      no dag executor exists, so it maps to langgraph instead of silently
+      running phases
+
+    Both remaps log a warning so the eventual removal (API/schema/models
+    must stop accepting 'dag' first — see docs/step2-dispatch-table-design.md
+    §2) can be data-driven.
+    """
+    engine = getattr(study, "engine", None) or "phases"
+    logger.info(
+        "phase_engine: round %d, engine=%s, study.engine=%s",
+        round_num, engine, getattr(study, "engine", "NOT_SET"),
+    )
+    if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
+        logger.warning(
+            "phase_engine: SR_STUDY_DAG_ENGINE=1 remapped phases -> langgraph "
+            "(legacy env switch, deprecated); round=%d",
+            round_num,
+        )
+        engine = "langgraph"
+    if engine == "dag":
+        logger.warning(
+            "phase_engine: engine='dag' remapped -> langgraph (no dag executor "
+            "exists; value accepted by store/API only, deprecated); round=%d",
+            round_num,
+        )
+        engine = "langgraph"
+    return engine
+
+
+def _run_langgraph_branch(ctx: BranchContext) -> RoundOutcome | dict:
+    """Run the round through the langgraph graph engine.
+
+    Returns ``RoundOutcome`` for the shared finalization, or the raw
+    ``lg_result`` dict on the early paths (HITL pause / graph abort) —
+    ``run_round_phases`` detects those via ``isinstance(..., dict)``.
+    """
+    from strategy_research.core.study import state_store as ss  # noqa: F401
+
+    lg_result = ctx.runner._run_round_via_langgraph(
+        ctx.path, ctx.strategy, ctx.current_state, ctx.run_dir, ctx.graph,
+        session=ctx.session, sid=ctx.sid, round_num=ctx.round_num,
+        directive_text=ctx.directive_text,
+    )
+    # HITL approval pause — return early, runner will re-enter on resume
+    if lg_result.get("paused_for_approval"):
+        return lg_result
+    # Novelty gate rejected (graph routed to END before any downstream
+    # agent ran) — return before finalization; the runner loop sees
+    # ``aborted`` and skips the round, mirroring the phases branch.
+    if lg_result.get("aborted"):
+        return lg_result
+
+    # Map langgraph result to the RoundOutcome contract.
+    researcher_output = lg_result.get("researcher_output", {})
+    # Defense: researcher may return a plain string on max_iter —
+    # never let a non-dict reach the .get() calls below.
+    if not isinstance(researcher_output, dict):
+        researcher_output = {}
+    strategist_output = lg_result.get("strategist_output", {})
+    metrics = lg_result.get("metrics", {})
+    verdict = lg_result.get("verdict", "discard")
+    decision = lg_result.get("decision")
+    backtest_error = lg_result.get("backtest_error")
+
+    agent_outputs = {"researcher": researcher_output}
+    for _k in (
+        "data_quality_output", "factor_analyst_output",
+        "strategist_output", "portfolio_construction_output",
+        "risk_controller_output", "attribution_analyst_output",
+        "anti_overfit_analyst_output", "backtest_diagnostics_output",
+    ):
+        if _k in lg_result:
+            agent_outputs[_k] = lg_result[_k]
+
+    hypothesis = researcher_output.get("hypothesis", "")
+    predicted_affected = (
+        researcher_output.get("predicted_affected")
+        or [t["name"] for t in ctx.metric_targets]
+    )
+    # Claims capture: predictions come from the researcher's own
+    # reasoning (they never see the backtest result), so they stay
+    # falsifiable even though this engine runs the backtest in-graph.
+    captured_predictions = _capture_round_claims(
+        ctx.runner, ctx.round_num, researcher_output, predicted_affected,
+        ctx.metric_targets,
+    )
+
+    # Novelty dedup on this branch is handled in-graph by the
+    # novelty_gate node (built when profile.hitl is enabled — the
+    # "langgraph" profile always is, see langgraph_engine profiles).
+    # The graph aborts before any downstream agent runs, and
+    # _run_round_via_langgraph re-attaches ``aborted`` to its result.
+
+    # eval_result keeps the minimal face aegis.verdict_reason reads
+    # (decision + aoa_llm_verdict); exec_result has no shared consumers
+    # so no shim exists. captured_predictions carries the real phase-A
+    # claims — resetting it would starve phase-B backfill (261a88f).
+    return RoundOutcome(
+        metrics=metrics,
+        verdict=verdict,
+        eval_result={
+            "decision": decision,
+            "aoa_llm_verdict": lg_result.get("aoa_llm_verdict"),
+        },
+        agent_outputs=agent_outputs,
+        strategist_output=strategist_output,
+        hypothesis=hypothesis,
+        predicted_affected=predicted_affected,
+        captured_predictions=captured_predictions,
+        backtest_error=backtest_error,
+    )
+
+
+def _run_phases_branch(ctx: BranchContext) -> RoundOutcome | dict:
+    """Run the round through the phase-split functions (researcher /
+    execution / evaluation).
+
+    Returns ``RoundOutcome`` for the shared finalization, or the abort
+    payload dict when the novelty gate rejects the hypothesis.
+    """
+    from strategy_research.core.autoresearch import (
+        run_evaluation_phase,
+        run_researcher_phase,
+    )
+
+    runner = ctx.runner
+    study = ctx.study
+    session = ctx.session
+
+    # Phase 1: researcher
+    runner._emit(session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "researcher", "status": "started",
+    })
+    researcher_result = run_researcher_phase(
+        ctx.path, ctx.strategy, ctx.current_state, ctx.run_dir,
+        session_id=session, run_name=ctx.run_name,
+        behavior=study.behavior, max_retries=3,
+        max_iterations=SR_AGENT_MAX_ITER,
+        directives=ctx.directive_text,
+        lazy_detection_interval=study.lazy_detection_interval,
+        keep_recent=study.keep_recent, round_num=ctx.round_num,
+        runs_dir=ctx.runs_dir,
+        loop_strategy=runner._loop_strategy,
+    )
+    runner._emit(session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "researcher", "status": "done",
+    })
+    researcher_output = researcher_result["researcher_output"]
+    # Defense: same non-dict guard as the langgraph branch.
+    if not isinstance(researcher_output, dict):
+        researcher_output = {}
+
+    hypothesis = researcher_output.get("hypothesis", "")
+    predicted_affected = researcher_output.get("predicted_affected") or [
+        t["name"] for t in ctx.metric_targets
+    ]
+    if not _novelty_gate(
+        runner, ctx.round_num, hypothesis, predicted_affected,
+    ):
+        return {"round": ctx.round_num, "run_name": ctx.run_name,
+                "aborted": True, "reason": "novelty_rejected"}
+
+    # Claims capture: BEFORE the backtest so predictions are credible.
+    captured_predictions = _capture_round_claims(
+        runner, ctx.round_num, researcher_output, predicted_affected,
+        ctx.metric_targets,
+    )
+
+    # Phase 2: execution
+    runner._emit(session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "execution", "status": "started",
+    })
+    exec_result = _run_execution_with_parse_retry(
+        runner, ctx.path, ctx.strategy, ctx.current_state,
+        researcher_output, ctx.run_dir,
+        session=session, run_name=ctx.run_name,
+        results_tsv=ctx.results_tsv, round_num=ctx.round_num,
+    )
+    runner._emit(session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "execution", "status": "done",
+    })
+    metrics = exec_result["metrics"]
+    strategist_output = exec_result["strategist_output"]
+
+    # Phase 3: evaluation
+    runner._emit(session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "evaluation", "status": "started",
+    })
+    eval_result = run_evaluation_phase(
+        ctx.path, ctx.strategy, exec_result["backtest_result"], metrics,
+        ctx.run_dir,
+        behavior=study.behavior, max_retries=3,
+        max_iterations=SR_AGENT_MAX_ITER,
+        loop_strategy=runner._loop_strategy,
+    )
+    runner._emit(session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "evaluation", "status": "done",
+    })
+    verdict = eval_result["verdict"]
+
+    agent_outputs = {
+        "researcher": researcher_output,
+        **{k: exec_result.get(k) for k in (
+            "data_quality_output", "factor_analyst_output",
+            "strategist_output", "portfolio_construction_output",
+        )},
+        **{k: eval_result.get(k) for k in (
+            "risk_controller_output", "attribution_analyst_output",
+            "anti_overfit_analyst_output", "backtest_diagnostics_output",
+        )},
+    }
+    backtest_error = exec_result.get("backtest_error")
+
+    return RoundOutcome(
+        metrics=metrics,
+        verdict=verdict,
+        eval_result=eval_result,
+        agent_outputs=agent_outputs,
+        strategist_output=strategist_output,
+        hypothesis=hypothesis,
+        predicted_affected=predicted_affected,
+        captured_predictions=captured_predictions,
+        backtest_error=backtest_error,
+    )
+
+
+_ENGINE_BRANCHES: dict[str, Any] = {
+    "phases": _run_phases_branch,
+    "langgraph": _run_langgraph_branch,
+}
 
 
 # ── Helper functions ──────────────────────────────────────────────

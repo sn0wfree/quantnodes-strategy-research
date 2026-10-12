@@ -7,23 +7,37 @@ contract (engine='dag' → langgraph, asyncio.to_thread planner wiring).
 """
 from __future__ import annotations
 
-import pytest
-
 
 class TestEngineDispatch:
     def test_env_flag_maps_phases_to_langgraph(self, monkeypatch):
-        """SR_STUDY_DAG_ENGINE=1 remaps engine='phases' to langgraph
-        in phase_engine (the actual dispatch point)."""
+        """SR_STUDY_DAG_ENGINE=1 remaps engine='phases' to langgraph.
+
+        Behavior assertion on _resolve_engine (Step 2 moved the inline
+        remap out of run_round_phases; the previous version only
+        checked that setenv round-tripped and never touched phase_engine).
+        """
+        from types import SimpleNamespace
+
+        from strategy_research.core.study.phase_engine import _resolve_engine
+
         monkeypatch.setenv("SR_STUDY_DAG_ENGINE", "1")
-        import os
-        assert os.environ.get("SR_STUDY_DAG_ENGINE") == "1"
+        study = SimpleNamespace(engine="phases")
+        assert _resolve_engine(study, round_num=1) == "langgraph"
 
     def test_engine_dag_maps_to_langgraph(self):
-        """engine='dag' is mapped to langgraph in phase_engine."""
-        from strategy_research.core.study import phase_engine
-        import inspect
-        src = inspect.getsource(phase_engine.run_round_phases)
-        assert "langgraph" in src
+        """engine='dag' is mapped to langgraph (no dag executor exists).
+
+        Behavior assertion on _resolve_engine — the earlier version was
+        a source-string check ('langgraph' in inspect.getsource of
+        run_round_phases) that pinned WHERE the remap lived rather than
+        that it works.
+        """
+        from types import SimpleNamespace
+
+        from strategy_research.core.study.phase_engine import _resolve_engine
+
+        study = SimpleNamespace(engine="dag")
+        assert _resolve_engine(study, round_num=1) == "langgraph"
 
 
 class TestPlanDagAsync:
@@ -31,6 +45,7 @@ class TestPlanDagAsync:
         """study_plan_dag must use asyncio.to_thread to avoid blocking
         the event loop during the synchronous LLM call."""
         import inspect
+
         from strategy_research.api.routers.study import study_plan_dag
         src = inspect.getsource(study_plan_dag)
         assert "asyncio.to_thread" in src

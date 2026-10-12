@@ -144,3 +144,33 @@ def _resolve_engine(study: Any) -> str:
 
 - Step 3 是 `runner._run_loop` 生命周期状态机（另一个文件），本轮不碰 `runner.py`
 - 本轮产出的 `BranchContext` / 查表是纯 phase_engine 内部结构，不向 runner 泄漏
+
+## 8. 验收记录（2026-10-08，实施完成）
+
+| # | 项 | 预期 | 实际 | 结果 |
+|---|---|---|---|---|
+| 1 | C901 `run_round_phases` | ≤15 | **8**（24 → 8） | ✅ 超额 |
+| 2 | 定向测试 | 全绿（含 dag/env 锁定） | **42 passed** | ✅ |
+| 3 | 69 文件回归 | 0 failed | **1279 passed / 0 failed**（基线 1277 + 2 新） | ✅ |
+| 4 | ruff | 无新增 | 改动文件全绿（F821/F811/C901 清） | ✅ |
+| 5 | 行为等价 | dag/env 仍 remap | `_resolve_engine` 行为测试 ×2 绿 | ✅ |
+
+### 结构变化
+
+| 指标 | 前 | 后 |
+|---|---|---|
+| `run_round_phases` 行数 | 421 | **184** |
+| C901 | 24 | **8** |
+| 文件总行数 | 862 | 1019（+ 新函数定义） |
+
+新成员：`BranchContext`（输入契约）、`_prepare_round_preamble`、`_resolve_engine`、`_run_langgraph_branch`、`_run_phases_branch`、`_ENGINE_BRANCHES`。
+
+### 测试适配（1 个文件，有意为之）
+
+`tests/test_study_engine_dispatch.py` 的两个测试**锁的是源码位置而非行为**（`inspect.getsource(run_round_phases)` 断言含 "langgraph" 字符串；env 测试只 setenv 再读回、从未触碰 phase_engine）。Step 2 把 remap 搬进 `_resolve_engine` 后前者必红。已改为对 `_resolve_engine` 的**行为断言**——比字符串断言更强，且 env 测试从空测试变成真测试。行为等价由它们 + 69 回归共同保证。
+
+### 未做（按 §2 收口策略留给后续）
+
+- 删除 `engine='dag'` 映射：需 API/schema/models 三处同步 + 更新测试 + DB 存量值检查
+- 删除 `SR_STUDY_DAG_ENGINE`：同上
+- 本轮两者**保留但 warning 可观测**，为数据驱动删除铺路

@@ -71,3 +71,31 @@ def test_verdict_is_mutable_for_guidance_gate():
     outcome = RoundOutcome(**_full_kwargs())
     outcome.verdict = "discard"
     assert outcome.verdict == "discard"
+
+
+def test_dispatch_table_shape_is_phases_and_langgraph():
+    """Exactly two dispatch keys — unknown values are handled by
+    run_round_phases's fallback (warning -> phases), preserving the
+    pre-Step-2 if/else semantics where only 'langgraph' took the
+    graph branch."""
+    from strategy_research.core.study import phase_engine
+
+    assert set(phase_engine._ENGINE_BRANCHES) == {"phases", "langgraph"}
+    assert phase_engine._ENGINE_BRANCHES["phases"] is phase_engine._run_phases_branch
+    assert (
+        phase_engine._ENGINE_BRANCHES["langgraph"]
+        is phase_engine._run_langgraph_branch
+    )
+
+
+def test_resolve_engine_passes_unknown_values_through(monkeypatch):
+    """Dirty DB engine values survive resolution untouched so the
+    dispatch table can apply the phases fallback (and warn) instead of
+    the resolution layer silently rewriting them."""
+    from types import SimpleNamespace
+
+    from strategy_research.core.study.phase_engine import _resolve_engine
+
+    monkeypatch.delenv("SR_STUDY_DAG_ENGINE", raising=False)
+    study = SimpleNamespace(engine="not_a_real_engine")
+    assert _resolve_engine(study, round_num=1) == "not_a_real_engine"
