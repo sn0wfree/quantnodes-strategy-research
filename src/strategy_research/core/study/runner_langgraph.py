@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from .graph import StudyGraph
 
 logger = logging.getLogger(__name__)
 

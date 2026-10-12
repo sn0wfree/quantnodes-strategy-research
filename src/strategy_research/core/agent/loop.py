@@ -295,11 +295,6 @@ def _tool_call_hash(tc: ToolCall) -> str:
 # ── AgentLoop ────────────────────────────────────────────────────────
 
 
-from .loop_progress import LoopProgressMixin
-from .loop_stream import LoopStreamMixin
-from .loop_telemetry import LoopTelemetryMixin
-
-
 from .loop_compaction import LoopCompactionMixin
 from .loop_lifecycle import LoopLifecycleMixin
 from .loop_progress import LoopProgressMixin

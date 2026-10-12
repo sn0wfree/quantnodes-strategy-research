@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from pathlib import Path
@@ -13,6 +14,9 @@ if TYPE_CHECKING:
 
 from ...core.llm.config import LLMConfig
 from .part_accumulate import _accumulate_part
+
+logger = logging.getLogger(__name__)
+
 def _build_attempt_metrics(usage_state: dict[str, int], loop_result: Any) -> dict:
     """Build the attempt metrics payload from usage counters and loop result."""
     metrics = {

@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request
+
+if TYPE_CHECKING:
+    from ...core.study.scheduler import StudyScheduler
 
 logger = logging.getLogger(__name__)
 

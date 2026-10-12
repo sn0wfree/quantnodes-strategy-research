@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from ..llm.parser import LLMResponse, ToolCall
     from .loop import LoopResult
 
+from .runtime.sync_bridge import _get_hook_loop
+
 logger = logging.getLogger(__name__)
 
 class LoopTelemetryMixin:
