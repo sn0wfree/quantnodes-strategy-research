@@ -1256,6 +1256,101 @@ async def study_available_actions(request: Request, study_id: str):
     }
 
 
+# ── study_dispatch_action handlers (docs/p1-study-engine-tail-design.md) ──
+# Each returns the response dict or raises HTTPException. Signatures are
+# uniform so study_dispatch_action can dispatch through a StudyAction ->
+# handler table; the StudyAction keys are bound in the endpoint after its
+# local model import (handlers themselves never reference the enum).
+
+
+async def _act_pause(sched, study_id: str, body, study, reason) -> dict:
+    if not sched.pause(study_id):
+        raise HTTPException(status_code=409, detail="study not pausable")
+    return {"status": "ok", "study_id": study_id, "action": "paused"}
+
+
+async def _act_cancel(sched, study_id: str, body, study, reason) -> dict:
+    if not sched.cancel(study_id, reason=reason):
+        raise HTTPException(status_code=409, detail="study not cancellable")
+    return {"status": "ok", "study_id": study_id, "action": "cancelled"}
+
+
+async def _act_archive(sched, study_id: str, body, study, reason) -> dict:
+    archived_by = body.archived_by if body else None
+    if not sched.archive(study_id, archived_by=archived_by, reason=reason):
+        raise HTTPException(
+            status_code=409,
+            detail="study not archivable (already archived?)",
+        )
+    _invalidate_summary_cache(study_id)
+    return {"status": "ok", "study_id": study_id, "action": "archived"}
+
+
+async def _act_unarchive(sched, study_id: str, body, study, reason) -> dict:
+    if not sched.unarchive(study_id):
+        raise HTTPException(status_code=409, detail="study not archived")
+    _invalidate_summary_cache(study_id)
+    return {"status": "ok", "study_id": study_id, "action": "unarchived"}
+
+
+async def _act_redo(sched, study_id: str, body, study, reason) -> dict:
+    from ...core.study.models import StudyStatus
+
+    round_num = body.round_num if body and body.round_num else study.current_round
+    if study.execution_status == StudyStatus.RUNNING:
+        raise HTTPException(
+            status_code=409,
+            detail="study is running; pause or cancel first",
+        )
+    ok = await sched.redo(study_id, round_num, workspace_path=study.workspace_path)
+    if not ok:
+        raise HTTPException(status_code=409, detail="redo failed")
+    return {"status": "ok", "study_id": study_id, "action": f"redo_round_{round_num}"}
+
+
+async def _act_replace_objective(sched, study_id: str, body, study, reason) -> dict:
+    new_obj = body.new_objective if body else None
+    expected_gid = body.expected_goal_id if body else None
+    if not new_obj or not expected_gid:
+        raise HTTPException(
+            status_code=400,
+            detail="replace_objective requires 'new_objective' and 'expected_goal_id'",
+        )
+    try:
+        res = sched.replace_objective(
+            study_id,
+            new_objective=new_obj,
+            expected_goal_id=expected_gid,
+            replaced_by=(body.archived_by if body else None) or "user",
+            reason=reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if res is None:
+        raise HTTPException(status_code=404, detail="study not found")
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "action": f"replaced_objective_history_{res['history_id']}",
+    }
+
+
+async def _act_continue(sched, study_id: str, body, study, reason) -> dict:
+    from_round = body.from_round if body else None
+    mode = body.mode if body else "append"
+    if not await sched.continue_study(study_id, from_round=from_round, mode=mode):
+        raise HTTPException(
+            status_code=409,
+            detail="study not continueable in current state",
+        )
+    _invalidate_summary_cache(study_id)
+    return {
+        "status": "ok",
+        "study_id": study_id,
+        "action": "continue",
+    }
+
+
 @router.post("/{study_id}/actions/{action_name}", response_model=StudyActionResponse)
 async def study_dispatch_action(
     request: Request, study_id: str, action_name: str,
@@ -1293,73 +1388,19 @@ async def study_dispatch_action(
     sched = _get_study_scheduler()
     reason = body.reason if body else None
 
-    if act == StudyAction.PAUSE:
-        if not sched.pause(study_id):
-            raise HTTPException(status_code=409, detail="study not pausable")
-        return {"status": "ok", "study_id": study_id, "action": "paused"}
-    if act == StudyAction.CANCEL:
-        if not sched.cancel(study_id, reason=reason):
-            raise HTTPException(status_code=409, detail="study not cancellable")
-        return {"status": "ok", "study_id": study_id, "action": "cancelled"}
-    if act == StudyAction.ARCHIVE:
-        archived_by = body.archived_by if body else None
-        if not sched.archive(study_id, archived_by=archived_by, reason=reason):
-            raise HTTPException(status_code=409, detail="study not archivable (already archived?)")
-        _invalidate_summary_cache(study_id)
-        return {"status": "ok", "study_id": study_id, "action": "archived"}
-    if act == StudyAction.UNARCHIVE:
-        if not sched.unarchive(study_id):
-            raise HTTPException(status_code=409, detail="study not archived")
-        _invalidate_summary_cache(study_id)
-        return {"status": "ok", "study_id": study_id, "action": "unarchived"}
-    if act == StudyAction.REDO:
-        round_num = body.round_num if body and body.round_num else study.current_round
-        if study.execution_status == StudyStatus.RUNNING:
-            raise HTTPException(status_code=409, detail="study is running; pause or cancel first")
-        ok = await sched.redo(study_id, round_num, workspace_path=study.workspace_path)
-        if not ok:
-            raise HTTPException(status_code=409, detail="redo failed")
-        return {"status": "ok", "study_id": study_id, "action": f"redo_round_{round_num}"}
-    if act == StudyAction.REPLACE_OBJECTIVE:
-        new_obj = body.new_objective if body else None
-        expected_gid = body.expected_goal_id if body else None
-        if not new_obj or not expected_gid:
-            raise HTTPException(
-                status_code=400,
-                detail="replace_objective requires 'new_objective' and 'expected_goal_id'",
-            )
-        try:
-            res = sched.replace_objective(
-                study_id,
-                new_objective=new_obj,
-                expected_goal_id=expected_gid,
-                replaced_by=(body.archived_by if body else None) or "user",
-                reason=reason,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        if res is None:
-            raise HTTPException(status_code=404, detail="study not found")
-        return {
-            "status": "ok",
-            "study_id": study_id,
-            "action": f"replaced_objective_history_{res['history_id']}",
-        }
-    if act == StudyAction.CONTINUE:
-        from_round = body.from_round if body else None
-        mode = body.mode if body else "append"
-        if not await sched.continue_study(study_id, from_round=from_round, mode=mode):
-            raise HTTPException(
-                status_code=409,
-                detail="study not continueable in current state",
-            )
-        _invalidate_summary_cache(study_id)
-        return {
-            "status": "ok",
-            "study_id": study_id,
-            "action": "continue",
-        }
-    raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
+    handlers = {
+        StudyAction.PAUSE: _act_pause,
+        StudyAction.CANCEL: _act_cancel,
+        StudyAction.ARCHIVE: _act_archive,
+        StudyAction.UNARCHIVE: _act_unarchive,
+        StudyAction.REDO: _act_redo,
+        StudyAction.REPLACE_OBJECTIVE: _act_replace_objective,
+        StudyAction.CONTINUE: _act_continue,
+    }
+    handler = handlers.get(act)
+    if handler is None:
+        raise HTTPException(status_code=404, detail=f"action '{action_name}' not implemented")
+    return await handler(sched, study_id, body, study, reason)
 
 
 @router.get("/{study_id}/objective_history",

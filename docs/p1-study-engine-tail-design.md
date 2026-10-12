@@ -102,3 +102,31 @@ _ACTION_HANDLERS: dict[StudyAction, Callable[..., Awaitable[dict]]] = {
 - `study.py` 是 router（API 面）——handler 纯搬移，状态码与响应 shape 不变由 API 测试兜底
 - `_gate_route` 闭包结构被 parity 测试的 `path.func` 断言锁定——搬移后跑该测试即验证
 - 单 commit 可 revert
+
+## 6. 验收记录（2026-10-08，实施完成）
+
+| # | 项 | 预期 | 实际 | 结果 |
+|---|---|---|---|---|
+| 1 | C901 | build_langgraph ≤10、dispatch ≤8 | **4**（21→4）/ **6**（22→6） | ✅ 超额 |
+| 2 | 全库 C901 | 6 → 4 | **4**（剩 event_store emit 16、prompt_schema 16、_archived 16、migrate 20） | ✅ |
+| 3 | 定向：langgraph 家族 | 全绿 | 31 passed（parity 17 含 HITL path.func 断言） | ✅ |
+| 4 | 定向：action API | 全绿 | 106 passed（archive/unarchive/redo/replace_objective/409/404） | ✅ |
+| 5 | 69 文件回归 | 0 failed | 1278 passed + **1 flaky**（见下） | ⚠️ 见 flaky 判定 |
+| 6 | ruff F821/E9 | 清 | 两文件全清 | ✅ |
+
+### Flaky 判定（test_study_concurrency::test_concurrent_runner_creation）
+
+`
+带改动 单跑 ×3  → 3/3 pass     无改动 单跑 ×3 → 1 pass / 2 fail
+带改动 69 序列  → concurrency 炸（database is locked）
+无改动 69 序列  → 另一个测试炸（test_study_dump，同锁家族）
+`
+
+双侧 69 序列**各 1 failed 且是不同测试**；失败均为 SQLite database is locked 竞态。判定：**pre-existing order-dependent flaky 家族，与本次纯函数搬移无因果**。这类时序 flaky 正是 CI --reruns=2（tests.yml 已配）的兜底对象。
+
+### 实施波折（第三次记录，与前两次同源）
+
+1. _act_redo 搬出后 StudyStatus 变 F821（局部 import 不跟随函数搬移）——函数内补局部 import
+2. **handler 块首次插到了 decorator 与函数之间** → @router.post 错绑 _act_pause → 422；修复脚本又把块**复制两份**。最终 git checkout 恢复原始、单次 edit 正确放置（handlers 在 decorator 之前、decorator 紧贴 endpoint）
+
+教训统一版：**结构性插入必须锚定 decorator/签名的相对顺序**，二次修补脚本宁可回滚重做。

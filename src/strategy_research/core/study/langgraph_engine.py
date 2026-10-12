@@ -285,35 +285,16 @@ def _make_novelty_gate_node(
     return novelty_gate_node
 
 
-def build_langgraph(
-    graph,
-    executor,
-    task_text: str,
-    workspace: Path,
-    agent_ctx: dict[str, Any],
-    emit_fn,
-    study_id: str,
-    round_num: int,
-    checkpointer=None,
-    profile: LangGraphProfile | None = None,
-    agent_histories: dict[str, list] | None = None,
-):
-    """Convert StudyGraph → compiled LangGraph StateGraph.
+def _assemble_study_nodes(
+    g, graph, executor, task_text, workspace, agent_ctx, emit_fn,
+    study_id: str, round_num: int, profile: "LangGraphProfile",
+    agent_histories,
+) -> None:
+    """Attach event store, agent nodes (cached), and the HITL gate node.
 
-    P1: Serial (topological sort, one node at a time).
-    P2: Parallel fan-out via LangGraph super-steps.
-    P3: Checkpointing via SqliteSaver.
-    P4: HITL via interrupt().
-    P6: Profile system (serial, checkpoint, hitl params).
+    Extracted from build_langgraph (P1 tail cleanup) — see
+    docs/p1-study-engine-tail-design.md §2.
     """
-    if profile is None:
-        profile = LangGraphProfile()
-
-    from langgraph.graph import END, START, StateGraph
-
-    g = StateGraph(StudyRoundState)
-
-    # Build plugin map
     registry = getattr(executor, "_registry", None)
     from ..agent.registry import get_default_registry
     reg = registry or get_default_registry()
@@ -378,19 +359,51 @@ def build_langgraph(
     if profile.hitl:
         g.add_node("novelty_gate", _make_novelty_gate_node(study_id, round_num, emit_fn))
 
-    # P4: Route researcher → novelty_gate → ALL researcher targets.
-    # Every outgoing edge of researcher is re-routed through the gate.
-    # (Routing only *entry* targets, or keeping direct edges alongside
-    # gate edges, would give a target two incoming edges — researcher
-    # AND novelty_gate — so it could execute twice per round.)
-    routed_targets: list[str] = []
-    if profile.hitl:
-        routed_targets = sorted({
-            e.target for e in graph.edges if e.source == "researcher"
-        })
-        if routed_targets:
-            g.add_edge("researcher", "novelty_gate")
 
+def _apply_hitl_routing(g, graph, profile: "LangGraphProfile") -> list[str]:
+    """HITL novelty-gate routing: researcher -> gate -> all researcher targets.
+
+    Every outgoing edge of researcher is re-routed through the gate
+    (keeping direct edges alongside gate edges would give a target two
+    incoming edges — researcher AND novelty_gate — so it could execute
+    twice per round). The gate fans out conditionally so an abort routes
+    to END instead of burning the round's LLM budget.
+
+    Returns the routed target list (empty when HITL is off or the
+    researcher has no outgoing edges).
+    """
+    if not profile.hitl:
+        return []
+
+    from langgraph.graph import END
+
+    routed_targets: list[str] = sorted({
+        e.target for e in graph.edges if e.source == "researcher"
+    })
+    if not routed_targets:
+        return []
+
+    g.add_edge("researcher", "novelty_gate")
+
+    def _gate_route(state: StudyRoundState):
+        if state.get("aborted"):
+            return [END]
+        return list(routed_targets)
+
+    g.add_conditional_edges("novelty_gate", _gate_route)
+    return routed_targets
+
+
+def _apply_graph_edges(
+    g, graph, profile: "LangGraphProfile", routed_targets: list[str],
+    start, end,
+) -> None:
+    """Static edges + entry (START) + exit (END) wiring.
+
+    Researcher's outgoing edges are skipped when HITL routing replaced
+    them (see _apply_hitl_routing); routed targets are reached via the
+    gate instead of START.
+    """
     # Add edges
     for edge in graph.edges:
         source = edge.source
@@ -401,28 +414,54 @@ def build_langgraph(
             continue
         g.add_edge(source, target)
 
-    # P4: novelty_gate fans out to the routed targets — conditional so a
-    # gate abort (human_rejected / no_hypothesis) routes to END instead
-    # of running every downstream agent (unconditional edges used to
-    # burn the full round's LLM budget after a rejection).
-    if profile.hitl and routed_targets:
-        def _gate_route(state: StudyRoundState):
-            if state.get("aborted"):
-                return [END]
-            return list(routed_targets)
-
-        g.add_conditional_edges("novelty_gate", _gate_route)
-
     # Entry points (START → nodes with no incoming edges)
     for nid in _find_entry_nodes(graph):
         if profile.hitl and nid in routed_targets:
             continue  # reached via researcher → novelty_gate
-        g.add_edge(START, nid)
+        g.add_edge(start, nid)
 
     # Exit points (nodes with no outgoing edges → END)
-    exit_nodes = _find_exit_nodes(graph)
-    for nid in exit_nodes:
-        g.add_edge(nid, END)
+    for nid in _find_exit_nodes(graph):
+        g.add_edge(nid, end)
+
+
+def build_langgraph(
+    graph,
+    executor,
+    task_text: str,
+    workspace: Path,
+    agent_ctx: dict[str, Any],
+    emit_fn,
+    study_id: str,
+    round_num: int,
+    checkpointer=None,
+    profile: LangGraphProfile | None = None,
+    agent_histories: dict[str, list] | None = None,
+):
+    """Convert StudyGraph → compiled LangGraph StateGraph.
+
+    P1: Serial (topological sort, one node at a time).
+    P2: Parallel fan-out via LangGraph super-steps.
+    P3: Checkpointing via SqliteSaver.
+    P4: HITL via interrupt().
+    P6: Profile system (serial, checkpoint, hitl params).
+
+    Orchestration only — node assembly, HITL routing, and edge wiring
+    live in _assemble_study_nodes / _apply_hitl_routing /
+    _apply_graph_edges (docs/p1-study-engine-tail-design.md).
+    """
+    if profile is None:
+        profile = LangGraphProfile()
+
+    from langgraph.graph import END, START, StateGraph
+
+    g = StateGraph(StudyRoundState)
+    _assemble_study_nodes(
+        g, graph, executor, task_text, workspace, agent_ctx, emit_fn,
+        study_id, round_num, profile, agent_histories,
+    )
+    routed_targets = _apply_hitl_routing(g, graph, profile)
+    _apply_graph_edges(g, graph, profile, routed_targets, START, END)
 
     compile_kwargs = {}
     if checkpointer is not None:
