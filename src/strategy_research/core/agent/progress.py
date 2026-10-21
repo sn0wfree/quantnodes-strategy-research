@@ -1,133 +1,21 @@
 """Progress emission channel for long-running tools.
 
-# DELETE-CANDIDATE v0.6: 0 production callers; loop uses inline callback.
-TODO(architecture): the structured-progress half of this module
-(``emit_progress`` / ``_set_emitter`` / ``ProgressEvent``) is currently
-UNUSED — the agent loop injects progress via
-``loop.py._progress_callback`` instead (worker threads → callback, no
-thread-local emitter). Keep for the planned unified progress channel:
-one emitter abstraction shared by AgentLoop (ReAct loop), TUI workers
-and the web SSE stream so tools report stage/current/total uniformly.
-Tests: test_progress.py.
-
-Two mechanisms:
-  * Tool-level heartbeat: a background timer fires keepalive events every N
-    seconds while a tool runs, so the UI never looks frozen. Driven by the
-    agent loop, opaque to the tool.
-  * Structured progress: tools can opt in via ``emit_progress()`` to publish
-    quantified state (stage, current/total, message). Routed back to the
-    agent loop's event channel via a thread-local emitter set before the
-    tool executes.
-
-Thread model: tools run synchronously inside ``ToolRegistry.execute`` from
-worker threads (read batches) or the main loop thread (writes). A
-``threading.local`` slot holds the per-thread emitter so structured
-progress flows back to the correct AgentLoop instance even when multiple
-read-only tools run in parallel.
+The structured-progress half (``emit_progress`` / ``_set_emitter`` /
+``ProgressEvent``) was removed in P1.5-c (DELETE-CANDIDATE B3 executed):
+the agent loop injects progress via ``loop.py._progress_callback`` and
+nothing consumed the thread-local emitter. What remains is the
+tool-level heartbeat: a background timer that fires keepalive events
+every N seconds while a tool runs, so the UI never looks frozen.
+Driven by the agent loop, opaque to the tool. Tests: test_progress.py.
 """
-
 from __future__ import annotations
 
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ProgressEvent:
-    """Structured progress event emitted by a tool mid-execution.
-
-    Attributes:
-        tool: Tool name (filled by the loop, tools don't supply this).
-        stage: Short stage label, e.g. ``loading_data`` or ``simulating``.
-        current: Current unit count (e.g. page 23 of 100). Optional.
-        total: Total unit count. Optional.
-        message: Free-form human-readable detail.
-        elapsed_s: Seconds since the tool started.
-        ts: Wall-clock timestamp.
-    """
-
-    tool: str = ""
-    stage: str = ""
-    current: Optional[int] = None
-    total: Optional[int] = None
-    message: str = ""
-    elapsed_s: float = 0.0
-    ts: float = field(default_factory=time.time)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serializable dict for SSE payloads."""
-        return {
-            "tool": self.tool,
-            "stage": self.stage,
-            "current": self.current,
-            "total": self.total,
-            "message": self.message,
-            "elapsed_s": round(self.elapsed_s, 2),
-            "ts": self.ts,
-        }
-
-
-# Thread-local emitter slot. The agent loop sets ``_local.emit`` to a callable
-# before invoking the tool and clears it after, so tools running on the same
-# thread can publish structured progress without a circular import.
-_local = threading.local()
-
-
-def _set_emitter(emit: Optional[Callable[[ProgressEvent], None]]) -> None:
-    """Install the active progress emitter for the current thread.
-
-    Args:
-        emit: Callable that consumes a ``ProgressEvent``. Pass ``None`` to clear.
-    """
-    if emit is None:
-        if hasattr(_local, "emit"):
-            del _local.emit
-        return
-    _local.emit = emit
-
-
-def _get_emitter() -> Optional[Callable[[ProgressEvent], None]]:
-    """Return the active emitter on the current thread, if any."""
-    return getattr(_local, "emit", None)
-
-
-def emit_progress(
-    stage: str = "",
-    *,
-    current: Optional[int] = None,
-    total: Optional[int] = None,
-    message: str = "",
-) -> None:
-    """Publish a structured progress event from a tool.
-
-    Silently no-ops when called outside an active tool context (e.g. during
-    unit tests that invoke tools directly). Never raises.
-
-    Args:
-        stage: Short stage label.
-        current: Current unit count.
-        total: Total unit count.
-        message: Free-form human-readable detail.
-    """
-    emit = _get_emitter()
-    if emit is None:
-        return
-    try:
-        event = ProgressEvent(
-            stage=stage,
-            current=current,
-            total=total,
-            message=message,
-        )
-        emit(event)
-    except Exception:
-        # Progress emission must never break a tool.
-        pass
 
 
 class HeartbeatTimer:

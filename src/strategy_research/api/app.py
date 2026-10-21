@@ -226,10 +226,6 @@ def create_app(
     # same base path as the rest of the chat surface.
     app.include_router(permission.router, prefix="/api/chat/permission", tags=["permission"])
 
-    # Strategy listing/checking
-    from .routers import strategy
-    app.include_router(strategy.router, prefix="/api/strategies", tags=["strategies"])
-
     # System info (settings modal)
     from .routers import system
     app.include_router(system.router, prefix="/api/system", tags=["system"])

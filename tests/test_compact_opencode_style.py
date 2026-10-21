@@ -63,10 +63,6 @@ def _make_turn_msgs(n_turns: int = 5, content_len: int = 300) -> list[dict]:
 class TestConfigurableParameters:
     """All thresholds are exposed via CompactConfig fields."""
 
-    def test_simplified_to_l4_only_default_true(self):
-        cfg = CompactConfig()
-        assert cfg.simplified_to_l4_only is True
-
     def test_l4_min_messages_default(self):
         cfg = CompactConfig()
         assert cfg.l4_min_messages == 2
