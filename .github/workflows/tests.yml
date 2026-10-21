@@ -59,10 +59,16 @@ jobs:
             echo "empty shard, skip"
             exit 0
           fi
-          # PR lane: llm/e2e/slow excluded (docs/test-marker-lanes-design.md)
-          python -m pytest $(tr '\n' ' ' < /tmp/shard_files.txt) \
-            -q --tb=short --reruns=2 --reruns-delay=1 --durations=20 \
-            -m "not llm and not e2e and not slow"
+          # PR lane: llm/e2e/slow excluded (docs/test-marker-lanes-design.md).
+          # push to main runs the FULL suite — merge has no feedback SLA.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python -m pytest $(tr '\n' ' ' < /tmp/shard_files.txt) \
+              -q --tb=short --reruns=2 --reruns-delay=1 --durations=20 \
+              -m "not llm and not e2e and not slow"
+          else
+            python -m pytest $(tr '\n' ' ' < /tmp/shard_files.txt) \
+              -q --tb=short --reruns=2 --reruns-delay=1 --durations=20
+          fi
 
       - name: Upload TUI screenshots
         if: always()

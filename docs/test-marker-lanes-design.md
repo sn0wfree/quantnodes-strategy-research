@@ -142,3 +142,12 @@ python -m pytest $(...) -q --tb=short --reruns=2 --reruns-delay=1 --durations=20
 ### 后续（§6 不变）
 
 push main 无过滤全量 job、函数级打标、sharding 的 `DEFAULT_SKIP` 迁移。
+
+## 8. Follow-up 落地（2026-10-08）：push main 全量 job
+
+§4 的 follow-up 已实现——同一 unit job 按 event 分流：
+
+- **pull_request**：`-m "not llm and not e2e and not slow"`（快车道，12 分片）
+- **push to main**：无过滤（含 llm/e2e/slow 全量；`test_alpha_zoo` 418s 归 LPT 后的最重 shard，merge 后无反馈时限故可接受）
+
+实现：`Run tests` step 内按 `github.event_name` 组装 FILTER 变量，12 分片矩阵不变（无额外 job、无 yaml 分叉）。nightly 仍独立负责真 LLM eval（llm lane 的 pytest 面也在此全量里跑）。
