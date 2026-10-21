@@ -271,6 +271,15 @@ _LANE_SLOW_FILES = frozenset({
     "test_load_ohlcv.py",             # 5.7s
     "test_study_actions.py",          # 5.3s
     "test_hypothesis_ops.py",         # 5.2s
+    # added after the first incremental timings fill (2026-10-08):
+    "test_alpha_zoo.py",              # 418.3s - repo slowest by far
+    "test_swarm_presets_30.py",       # 22.9s
+    "test_tools_integration.py",      # 16.5s
+    "test_tool_retry.py",             # 8.1s
+    "test_system_api.py",             # 7.3s
+    "test_all_tools.py",              # 5.4s
+    # not listed (covered by other lanes): test_chat_real_llm (llm),
+    # test_integration + test_goal_e2e (e2e)
 })
 
 
