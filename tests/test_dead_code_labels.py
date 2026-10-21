@@ -6,14 +6,11 @@ import re
 from pathlib import Path
 
 # Each entry: (path-relative-to-repo-root, substring-of-existing-context).
+# B1/B4/B5/B6 executed and removed in P1.5-c (docs/p1.5-cleanup-batch-design.md).
 EXPECTED_LABELS: list[tuple[str, str]] = [
-    # ── core (B1..B7) ──
-    ("src/strategy_research/core/llm/builder.py", "fluent layering contract"),
+    # ── core (B2, B3, B7) ──
     ("src/strategy_research/core/llm/config.py", "legacy CLI flag"),
     ("src/strategy_research/core/agent/progress.py", "inline callback"),
-    ("src/strategy_research/core/agent/to_llm_message.py", "inline projection"),
-    ("src/strategy_research/core/hooks/unified.py", "composite.AgentHook"),
-    ("src/strategy_research/core/hooks/adapter.py", "composite.AgentHook"),
     ("src/strategy_research/core/swarm/runtime.py", "GroundingProvider never read"),
     # ── api (B8..B16) ──
     ("src/strategy_research/api/routers/goal.py", "silently dropped by handler"),

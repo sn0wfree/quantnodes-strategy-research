@@ -10,39 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from strategy_research.core.hooks import (
     AgentHook,
-    AgentHookAdapter,
     AgentHookContext,
     CompositeHook,
     NoOpHook,
-    UnifiedHook,
     maybe_await,
 )
-from strategy_research.core.hooks.unified import UnifiedContext
-
-
-class TestUnifiedHook(unittest.TestCase):
-
-    def test_wants_streaming_default(self) -> None:
-        self.assertFalse(UnifiedHook().wants_streaming())
-
-    def test_all_hooks_noop(self) -> None:
-        hook = UnifiedHook()
-        ctx = UnifiedContext(session_id="test")
-        self.assertIsNone(hook.before_iteration(ctx))
-        self.assertIsNone(hook.on_reason_start(ctx))
-        self.assertIsNone(hook.on_reason_end(ctx, "resp"))
-        self.assertIsNone(hook.on_stream(ctx, "delta"))
-        self.assertIsNone(hook.emit_reasoning(ctx, "content"))
-        self.assertIsNone(hook.emit_reasoning_end(ctx))
-        self.assertIsNone(hook.on_act_start(ctx))
-        self.assertIsNone(hook.on_act_end(ctx, "result"))
-        self.assertIsNone(hook.after_tool_executed(ctx, "tc", "result"))
-        self.assertIsNone(hook.on_tool_error(ctx, "tc", RuntimeError()))
-        self.assertIsNone(hook.on_confirmation(ctx, "tc"))
-        self.assertIsNone(hook.on_observe(ctx))
-        self.assertIsNone(hook.on_error(ctx, RuntimeError()))
-        self.assertIsNone(hook.after_iteration(ctx))
-        self.assertEqual(hook.finalize(ctx, "content"), "content")
 
 
 class TestAgentHookContext(unittest.TestCase):
@@ -156,52 +128,6 @@ class TestNoOpHook(unittest.TestCase):
 
     def test_wants_streaming(self) -> None:
         self.assertFalse(NoOpHook().wants_streaming())
-
-
-class TestAgentHookAdapter(unittest.TestCase):
-
-    def test_wraps_noop_by_default(self) -> None:
-        adapter = AgentHookAdapter(None)
-        self.assertFalse(adapter.wants_streaming())
-
-    def test_delegates_to_hook(self) -> None:
-        spy = SpyHook()
-        adapter = AgentHookAdapter(spy)
-        ctx = UnifiedContext(session_id="s1")
-        adapter.before_iteration(ctx)
-        self.assertIn("before_iteration", spy.events)
-
-    def test_finalize_delegates(self) -> None:
-        class ModHook(AgentHook):
-            name = "mod"
-            def finalize_content(self, ctx, content):
-                return content + "!!"
-        adapter = AgentHookAdapter(ModHook())
-        result = adapter.finalize(UnifiedContext(), "hello")
-        self.assertEqual(result, "hello!!")
-
-    def test_on_reason_end_maps_to_stream_end(self) -> None:
-        spy = SpyHook()
-        adapter = AgentHookAdapter(spy)
-        adapter.on_reason_end(UnifiedContext(), "resp")
-        # No direct event on spy since on_stream_end is not overridden
-        # Just verifying it doesn't crash
-
-    def test_on_act_start_maps_to_before_execute_tools(self) -> None:
-        spy = SpyHook()
-        adapter = AgentHookAdapter(spy)
-        adapter.on_act_start(UnifiedContext())
-        # before_execute_tools is not logged by SpyHook, just verify no crash
-
-    def test_on_act_end_is_noop(self) -> None:
-        adapter = AgentHookAdapter(SpyHook())
-        result = adapter.on_act_end(UnifiedContext(), "result")
-        self.assertIsNone(result)
-
-    def test_on_observe_is_noop(self) -> None:
-        adapter = AgentHookAdapter(SpyHook())
-        result = adapter.on_observe(UnifiedContext())
-        self.assertIsNone(result)
 
 
 class TestMaybeAwait(unittest.TestCase):
