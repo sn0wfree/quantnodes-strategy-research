@@ -50,8 +50,11 @@ def _make_runner(study_id: str = "test-study", **kwargs):
     store = MagicMock()
     store.get_study.return_value = study
     store.list_pending_directives.return_value = []
-    runner = AutoresearchRunner(study=study, store=store)
-    runner._goal_store = MagicMock()
+    # Pass goal_store at construction — __init__ otherwise opens a REAL
+    # goal DB connection per runner (own_goal_store=True) that nothing
+    # closes. 10 concurrent runners = 10 leaked SQLite connections and
+    # the classic 'database is locked' flake in the suite after this one.
+    runner = AutoresearchRunner(study=study, store=store, goal_store=MagicMock())
     runner.emitter = MagicMock()
     runner._archive_rejected = MagicMock()
     return runner

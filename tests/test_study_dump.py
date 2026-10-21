@@ -121,7 +121,7 @@ class TestStudyDumpEndpoint:
                     store._conn.execute(
                         "UPDATE studies SET execution_status = ? WHERE owner_session_id = ? "
                         "AND study_id = (SELECT study_id FROM studies WHERE "
-                        "owner_session_id = ? ORDER BY created_at DESC LIMIT 1)",
+                        "owner_session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1)",
                         (StudyStatus.RUNNING.value, sid, sid),
                     )
 
@@ -156,7 +156,7 @@ class TestStudyDumpEndpoint:
                 with store._conn:
                     row = store._conn.execute(
                         "SELECT study_id FROM studies WHERE owner_session_id='sess-A' "
-                        "ORDER BY created_at DESC LIMIT 1"
+                        "ORDER BY created_at DESC, rowid DESC LIMIT 1"
                     ).fetchone()
                     sids.append(row[0])
         target = sids[1]
@@ -208,7 +208,8 @@ class TestStudyDumpEndpoint:
 class TestSchedulerDumpHelpers:
     def test_dump_concurrency_no_active(self, admin_env):
         from strategy_research.core.study.scheduler import StudyScheduler, StudyStore
-        sched = StudyScheduler(StudyStore())
+        with StudyStore() as store:  # close the connection — leaks cause lock flakes
+            sched = StudyScheduler(store)
         snap = sched.dump_concurrency()
         assert snap["queued_count"] == 0
         assert snap["active_count"] == 0
@@ -218,7 +219,8 @@ class TestSchedulerDumpHelpers:
 
     def test_dump_watchdog_alive_is_false_before_ensure(self, admin_env):
         from strategy_research.core.study.scheduler import StudyScheduler, StudyStore
-        sched = StudyScheduler(StudyStore())
+        with StudyStore() as store:  # close the connection — leaks cause lock flakes
+            sched = StudyScheduler(store)
         snap = sched.dump_watchdog()
         # No submit() happened, so the watchdog task was never created.
         assert snap["alive"] is False
@@ -227,5 +229,6 @@ class TestSchedulerDumpHelpers:
 
     def test_dump_session_queues_empty(self, admin_env):
         from strategy_research.core.study.scheduler import StudyScheduler, StudyStore
-        sched = StudyScheduler(StudyStore())
+        with StudyStore() as store:  # close the connection — leaks cause lock flakes
+            sched = StudyScheduler(store)
         assert sched.dump_session_queues() == {}
