@@ -6,14 +6,12 @@ import re
 from pathlib import Path
 
 # Each entry: (path-relative-to-repo-root, substring-of-existing-context).
-# B1/B3/B4/B5/B6/B9/B11 executed and removed in P1.5-c (docs/p1.5-cleanup-batch-design.md).
+# B1/B3/B4/B5/B6/B9/B11 executed (c1/c2); B2/B7/B10 executed in P1.5-c3.
+# Remaining labels track work not yet executed (B8 conservative, B12
+# safety-valve skip, B17 frontend).
 EXPECTED_LABELS: list[tuple[str, str]] = [
-    # ── core (B2, B7) ──
-    ("src/strategy_research/core/llm/config.py", "legacy CLI flag"),
-    ("src/strategy_research/core/swarm/runtime.py", "GroundingProvider never read"),
-    # ── api (B8, B10, B12, B13..B16) ──
+    # ── api ──
     ("src/strategy_research/api/routers/goal.py", "silently dropped by handler"),
-    ("src/strategy_research/core/agent/compact.py", "0 production callers"),
     ("src/strategy_research/api/routers/memory.py", "legacy, test-only"),
     # events.py / event_bus_v2.py moved to tests/_fixtures (W3b)
     # ── webui (B17) ──

@@ -197,18 +197,3 @@ class TestCompactMessagesEdgeCases:
         msgs = [{"role": "system", "content": "prompt"}]
         result, applied, summary, recent = compact_messages(msgs, config=cfg)
         assert result == msgs
-
-    # Phase A: unblocked by A4.
-    def test_on_compaction_callback_accepted(self):
-        """on_compaction parameter is accepted without error."""
-        callback = MagicMock()
-        llm = FakeLLM(responses=["Summary"])
-        cfg = CompactConfig(threshold_tokens=100, tail_turns=1, preserve_recent_tokens=500)
-        msgs = _make_msgs(10, content_len=300)
-        # Should not raise — on_compaction is accepted as a parameter
-        result, applied, summary, recent = compact_messages(
-            msgs, config=cfg, threshold_tokens=0, llm_client=llm,
-            on_compaction=callback,
-        )
-        # Callback may or may not be invoked depending on implementation
-        assert isinstance(applied, list)

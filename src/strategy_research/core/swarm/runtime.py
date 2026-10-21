@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from ..workflow.dag import topological_layers
-from ..workflow.grounding import GroundingProvider
 from .types import AgentCall, AgentStatus, SwarmHook
 
 logger = logging.getLogger(__name__)
@@ -102,15 +101,8 @@ class SwarmRuntime:
 
     def __init__(
         self,
-        grounding: GroundingProvider | None = None,
         max_workers: int = 4,
     ) -> None:
-        # DELETE-CANDIDATE v0.6: GroundingProvider never read.
-        # TODO(architecture): grounding is stored but never read —
-        # future feature: ground agent outputs against a knowledge
-        # source (docs/validation-design / research grounding) before
-        # accepting them into the run result.
-        self._grounding = grounding
         self._max_workers = max_workers
         self._active_runs: dict[str, bool] = {}
 

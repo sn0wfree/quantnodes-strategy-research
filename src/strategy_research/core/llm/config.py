@@ -71,7 +71,6 @@ ENV_LLM_API_KEY = "LLM_API_KEY"
 # ~/.quantnodes/llm.json. These names are preserved so existing callers
 # (and tests) don't have to change simultaneously with the migration.
 ENV_PROFILE: str = "STRATEGY_RESEARCH_LLM_PROFILE"     # no longer read
-LEGACY_DEFAULT_PROFILE: str = "default"                  # always returns "default"
 
 # Provider defaults are now sourced from the provider adapter registry
 # (provider/*.py). This dict is kept for backward compatibility — it is
@@ -705,37 +704,3 @@ def find_llm_config_path() -> Path:
     return _resolve_bridge_path(os.environ)
 
 
-# ── Back-compat stubs (yaml/profile API removed in v0.5.0) ───────────
-#
-# DELETE-CANDIDATE v0.6: legacy CLI flag, no profile concept anymore.
-# TODO(architecture): retire these stubs once no external importers
-# remain. The profile system was re-added in v0.7 as llm.json
-# "profiles"/"active_profile" (see cli/commands/llm.py + config
-# profile resolution); these yaml-era helpers are unrelated no-ops.
-#
-# The wizard now writes ~/.quantnodes/llm.json (QuantNodes canonical
-# location). The legacy ~/.quantnodes-research/llm.yaml format is no
-# longer consumed. These helpers are kept as no-ops so that any third-
-# party code that still imports them won't AttributeError; they always
-# indicate "no yaml profile system exists".
-
-def _yaml_default_profile(path: Path) -> str:
-    """Legacy no-op; returns LEGACY_DEFAULT_PROFILE.
-
-    The yaml-profile system was retired in favor of the bridge layer.
-    This stub is kept so existing imports keep working.
-    """
-    return LEGACY_DEFAULT_PROFILE
-
-
-def list_profiles(yaml_path: Path | None = None) -> list[str]:
-    """Legacy no-op; returns empty list.
-
-    The yaml-profile system was retired. No profiles are defined.
-    """
-    return []
-
-
-def get_default_profile(yaml_path: Path | None = None) -> str:
-    """Legacy no-op; returns LEGACY_DEFAULT_PROFILE."""
-    return LEGACY_DEFAULT_PROFILE

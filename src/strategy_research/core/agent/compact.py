@@ -23,7 +23,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +149,6 @@ _LEGACY_L1_TOOL_LIMITS_DOC: dict[str, int] = {
     "list": 1000,
     "_default": 2000,
 }
-
-
-# Legacy callback signature kept for API compatibility (see
-# ``test_compact_full_pipeline.py::test_on_compaction_callback_accepted``).
-CompactionCallback = Callable[[str, Any], None]
 
 
 @dataclass(frozen=True)
@@ -752,7 +747,7 @@ def compact_messages(
     llm_client: Any | None = None,
     previous_summary: str | None = None,
     session_id: str | None = None,
-    on_compaction: "CompactionCallback | None" = None,) -> tuple[list[dict[str, Any]], list[str], str | None, str | None]:
+) -> tuple[list[dict[str, Any]], list[str], str | None, str | None]:
     """Apply context compression if over threshold (opencode-aligned L4-only).
 
     opencode-aligned (Phase A):
@@ -780,12 +775,6 @@ def compact_messages(
         llm_client: LLM client for L4 summarization (sync .chat()).
         previous_summary: Previous summary text for incremental update.
         session_id: Session id (required for L4 to persist event).
-        on_compaction: Optional callback invoked with the
-            CompactionMessage after L4 generates it.
-            DELETE-CANDIDATE v0.6: 0 production callers.
-            TODO(architecture): no callers pass this today — planned
-            hook point for streaming/persisting the generated
-            CompactionMessage to the caller's event channel.
 
     Returns:
         (compressed_messages, applied_layers, l4_summary_text, l4_recent_text)
