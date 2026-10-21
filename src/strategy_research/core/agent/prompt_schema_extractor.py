@@ -344,38 +344,31 @@ def _infer_type(value: Any) -> str:
 
 # ── Main API ───────────────────────────────────────────────────────────
 
-def extract_agent_schema(role: str, prompt_dir: Path | None = None) -> AgentSchema | None:
-    """Extract JSON output schema from an agent's prompt file.
-
-    Args:
-        role: Agent role identifier (e.g. ``"researcher"``)
-        prompt_dir: Path to ``templates/.prompts/`` directory.
-            If None, uses the default relative to this file.
-
-    Returns:
-        AgentSchema with field metadata, or None if the prompt has no
-        parseable JSON output section.
-    """
+def _read_prompt_text(role: str, prompt_dir: Path | None) -> str | None:
+    """Load the role's prompt markdown; None when missing or unreadable."""
     if prompt_dir is None:
         prompt_dir = (
             Path(__file__).parent.parent.parent / "templates" / ".prompts"
         )
-
     prompt_path = prompt_dir / f"{role}.md"
     if not prompt_path.exists():
         logger.debug("No prompt file for role=%s at %s", role, prompt_path)
         return None
-
     try:
-        text = prompt_path.read_text(encoding="utf-8")
+        return prompt_path.read_text(encoding="utf-8")
     except Exception as exc:
         logger.warning("Failed to read prompt for role=%s: %s", role, exc)
         return None
 
-    # Find the output/schema section. A prompt may declare SEVERAL output
-    # sections (e.g. "## 输出格式（严格 JSON）" with rules only, then a
-    # later "## 输出" carrying the actual JSON example) — iterate all
-    # matches and use the first section that yields a JSON block.
+
+def _find_output_json_blocks(text: str, role: str) -> tuple[list[str], str]:
+    """First output section that yields JSON blocks → (blocks, section_text).
+
+    A prompt may declare SEVERAL output sections (e.g. "## 输出格式（严格
+    JSON）" with rules only, then a later "## 输出" carrying the actual
+    JSON example) — iterate all matches and use the first section that
+    yields a JSON block.
+    """
     blocks: List[str] = []
     section = ""
     for m in _OUTPUT_SECTION_RE.finditer(text):
@@ -387,30 +380,18 @@ def extract_agent_schema(role: str, prompt_dir: Path | None = None) -> AgentSche
             blocks = found
             section = candidate
             break
-
     if not blocks:
         logger.debug("No JSON blocks found in any output section for role=%s", role)
-        return None
+    return blocks, section
 
-    # Parse the first (main) JSON block
-    main_block = blocks[0]
-    try:
-        main_obj = json.loads(main_block)
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse JSON block for role=%s", role)
-        return None
 
-    if not isinstance(main_obj, dict):
-        return None
-
-    # Collect hints from the section lines above each JSON key.
-    # We walk the section and look for # @hint lines followed by a JSON field.
+def _build_field_map(
+    main_obj: dict, section: str,
+) -> tuple[List[str], Dict[str, FieldHints]]:
+    """Field order + per-field hints, with type/enum/core inference."""
     hints_by_key = _collect_hints(section, main_obj)
-
-    # Build field metadata
     fields: List[str] = []
     field_hints: Dict[str, FieldHints] = {}
-
     for key in main_obj.keys():
         fields.append(key)
         raw = hints_by_key.get(key, {})
@@ -430,20 +411,51 @@ def extract_agent_schema(role: str, prompt_dir: Path | None = None) -> AgentSche
                 if parts:
                     hints.enum_values = {p: p for p in parts}
 
-        # Infer core status
         hints.core = _is_core_field(key, hints)
-
         field_hints[key] = hints
+    return fields, field_hints
 
-    # Detect action-type output
-    action_field = None
-    action_enum = None
-    if "action" in main_obj:
-        action_field = "action"
-        val = main_obj["action"]
-        if isinstance(val, str) and "|" in val:
-            action_enum = [v.strip() for v in val.split("|")]
 
+def _detect_action(main_obj: dict) -> tuple[str | None, List[str] | None]:
+    """Action field name + parsed enum labels, if the sample has one."""
+    if "action" not in main_obj:
+        return None, None
+    val = main_obj["action"]
+    if isinstance(val, str) and "|" in val:
+        return "action", [v.strip() for v in val.split("|")]
+    return "action", None
+
+
+def extract_agent_schema(role: str, prompt_dir: Path | None = None) -> AgentSchema | None:
+    """Extract JSON output schema from an agent's prompt file.
+
+    Args:
+        role: Agent role identifier (e.g. ``"researcher"``)
+        prompt_dir: Path to ``templates/.prompts/`` directory.
+            If None, uses the default relative to this file.
+
+    Returns:
+        AgentSchema with field metadata, or None if the prompt has no
+        parseable JSON output section.
+    """
+    text = _read_prompt_text(role, prompt_dir)
+    if text is None:
+        return None
+
+    blocks, section = _find_output_json_blocks(text, role)
+    if not blocks:
+        return None
+
+    try:
+        main_obj = json.loads(blocks[0])
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse JSON block for role=%s", role)
+        return None
+    if not isinstance(main_obj, dict):
+        return None
+
+    fields, field_hints = _build_field_map(main_obj, section)
+    action_field, action_enum = _detect_action(main_obj)
     return AgentSchema(
         role=role,
         fields=fields,

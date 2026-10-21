@@ -129,30 +129,15 @@ class EventStore:
 
     # ── Public API ────────────────────────────────────────────────
 
-    def emit(
-        self,
-        session_id: str,
-        event_type: str,
-        data: dict[str, Any] | None = None,
-        *,
-        parent_event_id: str | None = None,
-        branch_id: str = "main",
-    ) -> EventV2:
-        """Emit event: SQLite → cache → SSE push + live subscribers.
+    # ── emit helpers (P2-2 extraction, docs/p2-c901-final-design.md) ──
 
-        Same signature as legacy EventBus.emit(). Auto-assigns monotonic
-        seq per session. When ``flush_to_messages=True``, also calls
-        Projector.flush() to update messages + message_parts tables
-        (best-effort — failures are logged and ignored).
+    def _inject_trace_context(self, data: dict[str, Any]) -> dict[str, Any]:
+        """C3: merge trace_id/session_id/study_id/round_num from ContextVars.
 
-        C3: automatically injects ``trace_id`` / ``session_id`` /
-        ``study_id`` / ``round_num`` from the current trace ContextVar
-        into every event's data dict (if not already present), so SSE
-        clients can correlate events without explicit binding at each
-        emit site.
+        Keys already present in ``data`` win. Best-effort: any error
+        leaves the data untouched.
         """
-        # C3: inject trace context into event data
-        merged = dict(data or {})
+        merged = dict(data)
         try:
             from ...core.observability.trace import (
                 _round_num,
@@ -180,14 +165,28 @@ class EventStore:
                     merged["round_num"] = rn
         except Exception:  # noqa: BLE001 — best-effort
             pass
+        return merged
 
+    def _create_and_persist(
+        self,
+        session_id: str,
+        event_type: str,
+        data: dict[str, Any],
+        parent_event_id: str | None,
+        branch_id: str,
+    ) -> EventV2:
+        """Assign the next seq, build the EventV2, persist under the backend lock.
+
+        Persist failures are logged and swallowed — live subscribers
+        must still receive the event.
+        """
         with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
             seq = self._next_seq(session_id)
             event = EventV2.create(
                 aggregate_id=session_id,
                 seq=seq,
                 type=event_type,
-                data=merged,
+                data=data,
                 parent_event_id=parent_event_id,
                 branch_id=branch_id,
             )
@@ -197,6 +196,51 @@ class EventStore:
                 logger.exception("event_log persist failed: %s", exc)
                 # Continue — at least push to live subscribers
                 pass
+        return event
+
+    def _flush_projector(self, session_id: str, event_type: str) -> None:
+        """Best-effort Projector.flush() when flush_to_messages is on."""
+        if not (self._flush_to_messages and self._should_flush(event_type)):
+            return
+        try:
+            proj = self._get_projector()
+            if proj is not None:
+                state, touched = proj.project_incremental(
+                    session_id, collect_touched=True,
+                )
+                proj.flush(state, touched=touched)
+        except Exception as exc:
+            logger.warning(
+                "Projector flush failed for session %s: %s",
+                session_id, exc,
+            )
+
+    def emit(
+        self,
+        session_id: str,
+        event_type: str,
+        data: dict[str, Any] | None = None,
+        *,
+        parent_event_id: str | None = None,
+        branch_id: str = "main",
+    ) -> EventV2:
+        """Emit event: SQLite → cache → SSE push + live subscribers.
+
+        Same signature as legacy EventBus.emit(). Auto-assigns monotonic
+        seq per session. When ``flush_to_messages=True``, also calls
+        Projector.flush() to update messages + message_parts tables
+        (best-effort — failures are logged and ignored).
+
+        C3: automatically injects ``trace_id`` / ``session_id`` /
+        ``study_id`` / ``round_num`` from the current trace ContextVar
+        into every event's data dict (if not already present), so SSE
+        clients can correlate events without explicit binding at each
+        emit site.
+        """
+        merged = self._inject_trace_context(dict(data or {}))
+        event = self._create_and_persist(
+            session_id, event_type, merged, parent_event_id, branch_id,
+        )
 
         # Cache update
         self._cache.append(session_id, event)
@@ -215,20 +259,7 @@ class EventStore:
         # SSE + live mirroring, no event_log/cache/projector writes.
         self._fan_out_parent(session_id, event)
 
-        # Projector flush (best-effort: event_log is the source of truth)
-        if self._flush_to_messages and self._should_flush(event_type):
-            try:
-                proj = self._get_projector()
-                if proj is not None:
-                    state, touched = proj.project_incremental(
-                        session_id, collect_touched=True,
-                    )
-                    proj.flush(state, touched=touched)
-            except Exception as exc:
-                logger.warning(
-                    "Projector flush failed for session %s: %s",
-                    session_id, exc,
-                )
+        self._flush_projector(session_id, event_type)
 
         return event
 
