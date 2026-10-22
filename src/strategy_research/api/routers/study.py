@@ -219,7 +219,7 @@ class StudyStartRequest(BaseModel):
     workspace_path: str
     strategy_name: str
     executor_type: str = "autoresearch"  # "autoresearch" (default, round-based) or "workflow" (DAG)
-    engine: str = "phases"  # "phases" | "dag" | "langgraph"
+    engine: str = "phases"  # "phases" | "langgraph" ("dag" removed: no executor)
     metric_targets: Optional[list[MetricTargetModel]] = Field(
         None, max_length=16,
     )

@@ -9,12 +9,11 @@ from __future__ import annotations
 
 
 class TestEngineDispatch:
-    def test_env_flag_maps_phases_to_langgraph(self, monkeypatch):
-        """SR_STUDY_DAG_ENGINE=1 remaps engine='phases' to langgraph.
+    def test_env_flag_is_deprecated_and_ignored(self, monkeypatch):
+        """SR_STUDY_DAG_ENGINE no longer remaps engines (final cleanup).
 
-        Behavior assertion on _resolve_engine (Step 2 moved the inline
-        remap out of run_round_phases; the previous version only
-        checked that setenv round-tripped and never touched phase_engine).
+        Behavior assertion on _resolve_engine: the legacy switch logs a
+        deprecation warning but the resolved value is unchanged.
         """
         from types import SimpleNamespace
 
@@ -22,22 +21,24 @@ class TestEngineDispatch:
 
         monkeypatch.setenv("SR_STUDY_DAG_ENGINE", "1")
         study = SimpleNamespace(engine="phases")
-        assert _resolve_engine(study, round_num=1) == "langgraph"
+        assert _resolve_engine(study, round_num=1) == "phases"
 
-    def test_engine_dag_maps_to_langgraph(self):
-        """engine='dag' is mapped to langgraph (no dag executor exists).
+    def test_engine_dag_passes_through_to_dispatcher_fallback(self):
+        """engine='dag' is deprecated: no remap, no dag executor.
 
-        Behavior assertion on _resolve_engine — the earlier version was
-        a source-string check ('langgraph' in inspect.getsource of
-        run_round_phases) that pinned WHERE the remap lived rather than
-        that it works.
+        _resolve_engine returns the value unchanged; the dispatcher
+        falls back to phases with a warning (pre-Step-2 if/else
+        semantics). Previously this test asserted the dag->langgraph
+        remap — that fake option was removed in the final cleanup.
         """
         from types import SimpleNamespace
 
-        from strategy_research.core.study.phase_engine import _resolve_engine
+        from strategy_research.core.study import phase_engine
 
         study = SimpleNamespace(engine="dag")
-        assert _resolve_engine(study, round_num=1) == "langgraph"
+        assert phase_engine._resolve_engine(study, round_num=1) == "dag"
+        # dispatcher has no 'dag' key -> run_round_phases falls back to phases
+        assert "dag" not in phase_engine._ENGINE_BRANCHES
 
 
 class TestPlanDagAsync:

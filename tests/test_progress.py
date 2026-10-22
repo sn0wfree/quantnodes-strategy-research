@@ -1,5 +1,5 @@
 """Tests for progress.py — HeartbeatTimer (structured-progress half was
-removed in P1.5-c / DELETE-CANDIDATE B3)."""
+removed in P1.5-c (B3))."""
 from __future__ import annotations
 
 import sys

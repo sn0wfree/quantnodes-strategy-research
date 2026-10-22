@@ -63,9 +63,8 @@ class SessionStore:
     # EventBusV2 emission + projector flush (and messages are read via
     # the projector). get_session_metadata would crash if called — it
     # imports the ASYNC router endpoint get_session and calls it
-    # DELETE-CANDIDATE v0.6: 0 production callers; keep list_attempts_by_status.
-    # synchronously. Remove when the transition window (docs/
-    # compaction-summary-fix.md B4) closes.
+    # Label retracted (2026-10-08): live callers at cli/tui/app.py and
+    # session/service.py — the old '0 production callers' claim was stale.
 
     def get_messages(
         self,
@@ -191,7 +190,7 @@ class SessionStore:
             self._projector = Projector(self.db_path)
         return self._projector
 
-    # DELETE-CANDIDATE v0.6: 0 production callers.
+    # Label retracted (2026-10-08): live caller at session/service.py:215.
     def create_attempt(self, attempt: Attempt) -> Attempt:
         """Persist a new Attempt in pending status."""
         created_at = attempt.created_at or _utc_now_iso()
@@ -278,7 +277,8 @@ class SessionStore:
                 return None
             return _row_to_attempt(row)
 
-    # DELETE-CANDIDATE v0.6: 0 production callers; use list_attempts_by_status.
+    # Label retracted (2026-10-08): live caller at session/service.py:407
+    # (reload-recovery path) — the label was self-referential and stale.
     def list_attempts_by_status(
         self,
         session_id: str,

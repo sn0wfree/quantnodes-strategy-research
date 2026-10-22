@@ -192,7 +192,6 @@ def create_app(
         chat,
         goal,
         hypothesis,
-        memory,
         permission,
         run,
         study,
@@ -215,7 +214,6 @@ def create_app(
     app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
     app.include_router(hypothesis.router, prefix="/api/hypothesis", tags=["hypothesis"])
     app.include_router(validation.router, prefix="/api/validate", tags=["validation"])
-    app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(run.router, prefix="/api/run", tags=["run"])
     # MiniMax / DuckDuckGo web search (front-end direct invocation)
     from .routers import search as search_router

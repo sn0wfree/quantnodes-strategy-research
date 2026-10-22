@@ -233,14 +233,6 @@ class TestValidationRouter:
 # ============================================================
 
 
-class TestMemoryRouter:
-    def test_memory_search(self, client):
-        resp = client.get("/api/memory/search?q=test")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-
-
 # ============================================================
 # run router
 # ============================================================

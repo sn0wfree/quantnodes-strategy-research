@@ -1,7 +1,7 @@
 """Progress emission channel for long-running tools.
 
 The structured-progress half (``emit_progress`` / ``_set_emitter`` /
-``ProgressEvent``) was removed in P1.5-c (DELETE-CANDIDATE B3 executed):
+``ProgressEvent``) was removed in P1.5-c (B3):
 the agent loop injects progress via ``loop.py._progress_callback`` and
 nothing consumed the thread-local emitter. What remains is the
 tool-level heartbeat: a background timer that fires keepalive events

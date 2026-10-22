@@ -384,36 +384,30 @@ def _prepare_round_preamble(
 def _resolve_engine(study: Any, round_num: int) -> str:
     """Normalize the study's engine to a dispatch-table key.
 
-    Behavior-preserving extraction of the inline remaps:
-
-    - ``SR_STUDY_DAG_ENGINE=1`` — legacy env switch into the graph engine
-    - ``engine='dag'`` — fake option: store/API still accept it (M12) but
-      no dag executor exists, so it maps to langgraph instead of silently
-      running phases
-
-    Both remaps log a warning so the eventual removal (API/schema/models
-    must stop accepting 'dag' first — see docs/step2-dispatch-table-design.md
-    §2) can be data-driven.
+    The historical remaps are gone (docs/final-cleanup-batch-design.md §2):
+    ``SR_STUDY_DAG_ENGINE=1`` and ``engine='dag'`` used to rewrite to
+    langgraph. Both are deprecated — 'dag' has no executor and the env
+    switch is ignored. The value passes through unchanged; the dispatcher
+    falls back to phases with a warning for anything not in the table
+    (the pre-Step-2 if/else fallback semantics).
     """
     engine = getattr(study, "engine", None) or "phases"
     logger.info(
         "phase_engine: round %d, engine=%s, study.engine=%s",
         round_num, engine, getattr(study, "engine", "NOT_SET"),
     )
-    if os.environ.get("SR_STUDY_DAG_ENGINE") == "1" and engine == "phases":
+    if os.environ.get("SR_STUDY_DAG_ENGINE") == "1":
         logger.warning(
-            "phase_engine: SR_STUDY_DAG_ENGINE=1 remapped phases -> langgraph "
-            "(legacy env switch, deprecated); round=%d",
+            "phase_engine: SR_STUDY_DAG_ENGINE is deprecated and ignored "
+            "(no longer remaps engines); round=%d",
             round_num,
         )
-        engine = "langgraph"
     if engine == "dag":
         logger.warning(
-            "phase_engine: engine='dag' remapped -> langgraph (no dag executor "
-            "exists; value accepted by store/API only, deprecated); round=%d",
+            "phase_engine: engine='dag' is deprecated and has no executor; "
+            "the dispatcher will fall back to phases; round=%d",
             round_num,
         )
-        engine = "langgraph"
     return engine
 
 

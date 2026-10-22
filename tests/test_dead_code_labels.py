@@ -6,17 +6,12 @@ import re
 from pathlib import Path
 
 # Each entry: (path-relative-to-repo-root, substring-of-existing-context).
-# B1/B3/B4/B5/B6/B9/B11 executed (c1/c2); B2/B7/B10 executed in P1.5-c3.
-# Remaining labels track work not yet executed (B8 conservative, B12
-# safety-valve skip, B17 frontend).
-EXPECTED_LABELS: list[tuple[str, str]] = [
-    # ── api ──
-    ("src/strategy_research/api/routers/goal.py", "silently dropped by handler"),
-    ("src/strategy_research/api/routers/memory.py", "legacy, test-only"),
-    # events.py / event_bus_v2.py moved to tests/_fixtures (W3b)
-    # ── webui (B17) ──
-    ("webui/frontend/src/components/common/Skeleton.tsx", "never imported"),
-]
+# All B1-B17 entries have been executed (deletions) or retracted (stale
+# labels with live callers — see docs/final-cleanup-batch-design.md §1).
+# The list is intentionally empty; the reverse check below
+# (test_no_unlabelled_todo_delete_suggestion) is now the only active rule:
+# any NEW 'unused/dormant/0 callers' TODO must still carry a label.
+EXPECTED_LABELS: list[tuple[str, str]] = []
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
