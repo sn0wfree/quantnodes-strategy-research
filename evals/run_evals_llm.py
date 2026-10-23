@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +59,6 @@ def _run_one(task: GoldenTask, *, workspace: Path, max_iterations: int = 6) -> R
     except Exception:  # noqa: BLE001
         pass
 
-    t0 = time.perf_counter()
     try:
         result = loop.run(task.prompt)
         tools_used = []
@@ -89,6 +87,9 @@ def _run_one(task: GoldenTask, *, workspace: Path, max_iterations: int = 6) -> R
             evidence=evidence,
             success=bool(getattr(result, "success", True)),
             error=getattr(result, "error", None),
+            iterations=int(getattr(result, "iterations", 0) or 0),
+            tool_calls_made=int(getattr(result, "tool_calls_made", 0) or 0),
+            tool_sequence=list(tools_used),
         )
     except Exception as exc:  # noqa: BLE001
         return RunRecord(

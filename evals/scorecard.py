@@ -54,6 +54,10 @@ class RunRecord:
     evidence: str = ""  # tool outputs / transcript snippets for content match
     success: bool = True
     error: str | None = None
+    # Trajectory (observation only — never scored; docs/phase0-trajectory-eval-design.md)
+    iterations: int = 0
+    tool_calls_made: int = 0
+    tool_sequence: list[str] = field(default_factory=list)  # ordered, repeats kept
 
 
 @dataclass
@@ -66,6 +70,11 @@ class TaskScore:
     completed: bool
     total: float
     notes: list[str] = field(default_factory=list)
+    # Trajectory passthrough (observation only)
+    iterations: int = 0
+    tool_calls_made: int = 0
+    tool_sequence: list[str] = field(default_factory=list)
+    finished_reason: str = "stop"
 
 
 def score_run(task: GoldenTask, run: RunRecord) -> TaskScore:
@@ -127,6 +136,10 @@ def score_run(task: GoldenTask, run: RunRecord) -> TaskScore:
         completed=completed,
         total=round(total, 4),
         notes=notes,
+        iterations=run.iterations,
+        tool_calls_made=run.tool_calls_made,
+        tool_sequence=list(run.tool_sequence),
+        finished_reason=run.finished_reason,
     )
 
 
@@ -144,10 +157,21 @@ class Scorecard:
         return round(sum(1 for s in self.scores if s.total >= threshold) / len(self.scores), 4)
 
     def to_dict(self) -> dict[str, Any]:
+        steps = [s.iterations for s in self.scores]
+        tool_calls = [s.tool_calls_made for s in self.scores]
+        terminals: dict[str, int] = {}
+        for s in self.scores:
+            terminals[s.finished_reason] = terminals.get(s.finished_reason, 0) + 1
         return {
             "n": len(self.scores),
             "mean": self.mean,
             "pass_rate@0.7": self.pass_rate(0.7),
+            "trajectory": {
+                "steps_mean": round(sum(steps) / len(steps), 3) if steps else 0.0,
+                "steps_p90": sorted(steps)[int(len(steps) * 0.9)] if steps else 0,
+                "tool_calls_mean": round(sum(tool_calls) / len(tool_calls), 3) if tool_calls else 0.0,
+                "terminal": terminals,
+            },
             "tasks": [
                 {
                     "id": s.task_id,
@@ -156,6 +180,10 @@ class Scorecard:
                     "violations": s.tool_violations,
                     "budget_ok": s.budget_ok,
                     "notes": s.notes,
+                    "iterations": s.iterations,
+                    "tool_calls_made": s.tool_calls_made,
+                    "tool_sequence": s.tool_sequence,
+                    "finished_reason": s.finished_reason,
                 }
                 for s in self.scores
             ],
