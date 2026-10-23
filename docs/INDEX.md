@@ -8,13 +8,14 @@
 | 场景 | 入口 |
 |---|---|
 | 想 10 分钟了解项目 | `code-map.md` · `architecture-framework.svg` |
-| 想知道现在干净吗 | `structure-debt-resurvey-20261008.md`（第二轮）· `structure-debt-survey-20261008.md`（第一轮对比用） |
+| **想看重构后的架构细节** | **`architecture-current-20261008.md`**（契约/连接/与旧架构差异） |
+| 想知道现在干净吗 | `structure-debt-third-pass-20261008.md` · `structure-debt-fourth-pass-20261008.md`（spec 同步面） |
 | 想知道扩展点放哪 | **`extension-points.md`**（7 机制分工 + 决策树） |
-| 想知道接下来做什么 | `architecture-harness-recommendations-20261008.md` §3-4 + 各 `-design.md` 验收记录 |
+| 想知道接下来做什么 | `session-wrapup-20261008.md` §4 · `architecture-harness-recommendations-20261008.md` |
 
 ## 1. 架构总览
 
-`code-map.md` · `architecture-framework.svg` · `architecture-review.md` · `agent-architecture-review.md` · `autoresearch-design.md` · `backtest-engine-design.md` · `engine-comparison.md`
+`architecture-current-20261008.md`（**细节与契约**） · `architecture-framework.svg`（分层视图） · `code-map.md` · `architecture-review.md` · `agent-architecture-review.md` · `autoresearch-design.md` · `backtest-engine-design.md` · `engine-comparison.md`
 
 ## 2. Study / Goal 子系统（产品主链）
 
