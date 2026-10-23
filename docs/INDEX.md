@@ -37,6 +37,8 @@
 
 ## 6. 调研报告（外部学习）
 
+**industry-research-20261008.md**（2026-10 业界进展 + 重构借鉴清单）
+
 `agentic-design-application.md` · `Agentic 设计框架与 Prime Agent 调研报告.md` · `AI因子挖掘Agent研报梳理与QuantaAlpha深研.md` · `deepseek-harness-research.md` · `agentquant-research-20260902.md`
 
 ## 7. 专题修复记录（备查）
