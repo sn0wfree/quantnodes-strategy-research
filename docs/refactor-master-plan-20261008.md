@@ -60,13 +60,15 @@ flowchart LR
 | **0.2** | **SSE 双轨收敛**：`/api/chat/events` 改读 `event_store.subscribe()`；删 `sse_buffer.py` / `bridge_v2.py` / `_sse_pusher` | 对外事件通道 = 1；`langgraph_engine` 反向 import 消失；SSE 测试绿 | 恢复旧端点读法（1 个 commit） | 0.1 | **1.5–2d** |
 | **0.3** | `event_store` 去除对 `Projector` 的认识（改为订阅/回调） | `core→api` 反向 import = **0** | 恢复 lazy import | 0.2 | **0.5d** |
 | **0.4** | **持久化契约成文 + 一致性测试**：明确 4 类（session 消息流 / study 账本 / goal 账本 / 研究资产+hypothesis / memory）—— 各自的真源、写入者、生命周期 | 一份契约文档 + 5 条一致性测试；**不改实现** | 纯文档 | — | **1d** |
-| **0.5** | **CI 门禁**：① `core/**` 禁 import `api/**`/`cli/**` ② 单文件路由数 ≤ 12 ③ 新增文件 > 800 行告警 | 门禁在 CI 生效并拦下违规 PR | 移除门禁 | 0.1–0.3 | **0.5d** |
+| **0.5** | **CI 门禁**：① `core/**` 禁 import `api/**`/`cli/**` ② 单文件路由数 ≤ 12 ③ 新增文件 > 800 行告警 ④ **协议版本化 + 不匹配即拒绝**（不降级；`PROTOCOL_VERSION` 现为 0 处） | 门禁在 CI 生效并拦下违规 PR | 移除门禁 | 0.1 | **1d** |
 | **0.6** | **统一注册**：**扩展既有 `core/registry.py`**（加能力标签/依赖闭包/`validate`/`describe`），**不新建平行注册表**；先包住 provider / data_source | 新部件 1 行注册；对外 API 不变 | 移除扩展 | — | **0.5d** |
 | **0.7** | **一致性套件起步**：`tests/conformance/` 先 2 个（provider / data_loader） | 新实现进 CI 自动被验 | 删套件 | — | **1d** |
 | **0.9** | **不变量注册层**（DSH §9.7）：`core/invariants/`——先收 2 个静态不变量（core→api 方向 / 路由数）+ 1 个运行时不变量（tool call↔result 配对）；**独立于任何插件** | 失败带 `code: 'INVARIANT'`；护栏从散落变一层 | 移除层 | 0.1 | **1d** |
 | **0.8** | **上下文中枢试点**：`ContextItem` + `ContextProvider` 协议 + `ContextHub` 骨架（**只收 1 个 provider**：goal）；**G1 的 ContextPlan 作为其「仲裁阶段」内嵌，不写两遍** | 1 个 provider 走通 provider→bundle→render | 移除 provider | — | **1.5d** |
+| **0.11** | **AgentLoop 移入能力层并成为 runtime**（问题 ⑦ 已决 + 业界对标）：物理归位 + 定义 `AgentRuntime` 协议（prepare/run/settle）+ 选择器（model-scoped > provider-scoped > auto > 内置回退）；`role_factory` / `chat_loop` 收成两个 runtime 实现（**不合并成一套**） | 六层依赖方向 0 反向；可声明式换 runtime | 回退移动 | — | **2d** |
+| **0.12** | **write fence**：run 级 `activeRunId` + 提交事务校验（被取代的 run 不能提交陈旧数据）—— 对标 OpenClaw 的 writer claim；我们目前**完全没有**这条并发不变量 | 取代的 run 提交被拒 | 移除 fence | — | **1d** |
 
-**W0 退出标准**：`core→api` 反向 = 0 · 对外事件通道 = 1 · 持久化契约文档 + 测试就位 · CI 门禁生效。
+**W0 退出标准**：`core→api` 反向 = 0 · **编排↔引擎↔能力 无反向（⑦ 已决）** · 对外事件通道 = 1 · 持久化契约文档 + 测试就位 · CI 门禁生效。
 
 ### W1 · 自主达成（对齐「自行处理各种问题」）
 
@@ -79,6 +81,7 @@ flowchart LR
 | **1.5** | **失败降级阶梯**（D3）：数据不可用 → 换源/放宽/降频；因子失败 → 记失败因子→派生变体→跳过 | 失败场景下自动尝试次数 > 0；无人工介入完成降级 | 退回只提示 | 1.3 | **2–3d** |
 | **1.6** | **`EventSource` 协议**（接缝规范）：`EventStore` 实现它，事件源从此可替换 | core/agent 侧不再依赖具体 EventStore 类 | 保留具体类实现 | 0.2 | **0.5d** |
 | **1.7** | **injector → provider 适配**（goal/todo/memory 三类）+ **记忆注入三改**（位置 task串→messages · 每条带出处 · 假设默认纳入） | 注入落在 messages 且带 `[来源·日期·类型]` | 回旧注入路径 | 0.8 | **1.5d** |
+| **1.9** | **编排层收敛为「1 控制面 + N runtime」**（业界对标 OpenClaw）：SessionController 状态机（idle/admitting/preparing/running/finishing/settling/mutating）+ 队列模式（steer/followup/collect/interrupt）+ Director 策略；StudyLoop 降为「Director 策略 + research runtime」 | 编排层从多套控制面收敛为 1；队列模式覆盖 directive/HITL | 保留旧控制面 | 0.11 | **3–4d** |
 
 **W1 退出标准**：`propose_next` 调用率 > 0 · 降级自动尝试 > 0 · 记忆新增/轮 > 0 且下轮命中 · 人仍持有 objective 与预算。
 
@@ -86,7 +89,7 @@ flowchart LR
 
 | 刀 | 动作 | 验收 | 回滚 | 依赖 | 估工 |
 |---|---|---|---|---|---|
-| **2.1** | **统一 token 估算**（G1-1）：3 套 → 1 套（`utils/token_utils`） | 同一消息集三处值一致 | 单点回退 | — | **0.5d** |
+| **2.1** | **统一 token 估算**（G1-1）：3 套 → 1 套（`utils/token_utils`）；并加 **prompt 缓存边界**（稳定段在上、目录在下，刷新不改变前缀字节）+ **分层预算**（per-attempt / provider / idle / 总；谁产出谁拥有） | 同一消息集三处值一致；前缀字节稳定 | 单点回退 | — | **2d** |
 | **2.2** | **ContextPlan 影子模式**（G1-2）：只算不裁，`explain()` 进 trace | 1 周数据：多少轮会超、超多少、谁被裁 | 关闭 | 2.1 | **1d + 观察** |
 | **2.3** | **ContextPlan 开启裁剪**（G1-3）：裁剪顺序固定；压缩降级为兜底；**实现落在中枢的仲裁阶段，不另起模块** | eval 跟幅不降；PR lane 绿 | 一行开关 | 2.2 | **2d** |
 | **2.4** | **巨文件按切口拆**（每项独立）：study 路由切面（33→≤12 路由/模块）· session service 拆 3 协作者 · goal/study store 读写分仓 · autoresearch 消包 | >800 行文件 25 → ≤ 10 | 单项回退 | W0 完成 | 每项 1–2d |
