@@ -94,6 +94,10 @@
 | 触发频率 | 每轮固定槽位 | 11 个生命周期点 | 每轮 / 每次响应后 | 按调用 |
 | 失败影响 | 影响本轮成败 | 必须自吞（best-effort） | 必须幂等 | 按工具语义 |
 
+## 3.5 评分单源红线（2026-10-08 补）
+
+因子质检评分（IC/IR/6 维/overall）**只出自** `core/factor_validate.py`——不内联复制公式、需要分数就调用 `compute_overall_score`。排除：组合构造评分（`config_runner._compute_scores`）。详见 `docs/phase1-research-discipline.md`。
+
 ## 4. 止血规则（自 2026-10-08 生效）
 
 1. **不新增第 5 种编排级机制**。需求落在上表之外 → 先开 issue，评审是否扩展本表。

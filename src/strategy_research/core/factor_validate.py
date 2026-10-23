@@ -1,6 +1,18 @@
 """因子验证工具。
 
 实现 IC/IR 验证、6 维评分、Mutual IC 去重 (时序口径)、IC 衰减检查。
+
+**单源评分铁律**（docs/phase1-research-discipline.md §2）：
+
+    因子质检评分（IC/IR/stability/…/overall）的唯一真源是本模块。
+    任何模块不得内联复制评分公式；需要分数 → 调用
+    ``compute_overall_score`` 及其 6 维打分函数。升级评分公式
+    （如 quantskills B1 primary_score v2）时只改 ``compute_overall_score``
+    单点——历史评分因此可比。
+
+**排除**：``config_runner._compute_scores`` 是组合权重构造（横截面
+混合），语义不同，不适用本铁律。``templates/prepare.py::
+_compute_factor_scores`` 是模板内历史公式副本（豁免待迁移）。
 """
 from __future__ import annotations
 

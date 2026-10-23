@@ -560,6 +560,21 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         self.study_store.update_round_heartbeat(sid, round_num)
         self.study_store.update_last_metrics(sid, metrics, verdict)
 
+        # ── research discipline: B2 health scan (observation-first,
+        # docs/phase1-research-discipline.md §3) ──
+        try:
+            from .strategy_acceptance.health import health_check
+
+            findings = health_check(metrics)
+            if findings:
+                self._emit(session, "study_health_check", {
+                    "study_id": sid,
+                    "round": round_num,
+                    "findings": [f.to_dict() for f in findings],
+                })
+        except Exception:  # noqa: BLE001 — health scan must never break a round
+            _dlog("loop", "health_check failed for round %d", round_num)
+
         # ── round end: harvest this study's background tasks ──
         # A backgrounded agent tool (run_backtest background=True /
         # run_bg_command) abandoned mid-poll must not linger into the

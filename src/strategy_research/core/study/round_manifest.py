@@ -41,6 +41,46 @@ def journal_path(workspace_path: Path, study_id: str) -> Path:
 
 # ── manifest body (phase 1) ────────────────────────────────────────────
 
+# B3 conclusion labels — the research-strength axis, orthogonal to the
+# keep/discard verdict (docs/phase1-research-discipline.md §4).
+CONCLUSION_LABELS = frozenset({
+    "effective",
+    "weakly",
+    "ineffective",
+    "regime-dependent",
+    "inconclusive",
+})
+
+REQUIRED_MANIFEST_FIELDS = (
+    "hypothesis",
+    "metrics",
+    "verdict",
+)
+
+
+def validate_manifest(manifest: dict[str, Any]) -> list[str]:
+    """Missing-field warnings for a manifest body (never raises).
+
+    Gradual enforcement: callers log the returned lines; nothing
+    fails a round for a missing contract field yet. Field paths match
+    the actual manifest shape (hypothesis.levers etc. live nested).
+    """
+    problems: list[str] = []
+    hyp = manifest.get("hypothesis") or {}
+    if not isinstance(hyp, dict) or not hyp.get("text"):
+        problems.append("missing required field: hypothesis.text")
+    if not hyp.get("predicted_affected"):
+        problems.append("missing required field: hypothesis.predicted_affected")
+    if not manifest.get("metrics"):
+        problems.append("missing required field: metrics")
+    verdict = manifest.get("verdict") or {}
+    if not isinstance(verdict, dict) or not verdict.get("decision"):
+        problems.append("missing required field: verdict.decision")
+    conclusion = manifest.get("conclusion") or "inconclusive"
+    if conclusion not in CONCLUSION_LABELS:
+        problems.append(f"conclusion {conclusion!r} not in CONCLUSION_LABELS")
+    return problems
+
 
 def build_manifest(
     *,
@@ -59,9 +99,12 @@ def build_manifest(
     verdict_reason: str,
     gates: list[dict] | None,
     budget: dict,
+    conclusion: str = "inconclusive",
+    findings: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Phase-1 manifest body (round/继承/假设/改动/metrics/verdict/gates/
-    next/budget). The ``review`` section is filled in phase 2."""
+    next/budget/conclusion/findings). The ``review`` section is filled in
+    phase 2."""
     vs = _vs(metrics, prev_metrics)
     vs_base = _vs(metrics, baseline_metrics)
     return {
@@ -87,6 +130,8 @@ def build_manifest(
         "next": {"suggested_focus": "", "open_questions": [], "blockers": []},
         "review": None,  # phase 2
         "budget": budget,
+        "conclusion": conclusion,
+        "findings": findings or [],
     }
 
 

@@ -282,7 +282,14 @@ def _compute_factor_scores(
     factors: dict,
     factor_exprs: list[dict],
 ) -> pd.DataFrame:
-    """Blend per-factor values into a combined score DataFrame."""
+    """Blend per-factor values into a combined score DataFrame.
+
+    NOTE (single-source scoring iron rule, docs/phase1-research-discipline.md):
+    this is a PORTFOLIO BLEND (weights applied to factor values), not
+    factor quality scoring — factor quality must come from
+    ``core.factor_validate.compute_overall_score``. If this blend
+    formula ever gains a quality component, delegate instead of copying.
+    """
     scores = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
     for name, factor_df in factors.items():
         weight = 1.0
