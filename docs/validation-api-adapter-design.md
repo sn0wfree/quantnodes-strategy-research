@@ -53,7 +53,9 @@ ValidateRunRequest
 
 ## 4. 验收
 
-- [ ] pyright `reportCallIssue` 中 validation 相关清零
-- [ ] 单测：mock `run_validation`，断言收到 `config`/`equity_curve`/`trades`/`market`
-- [ ] 单测：路径逃逸仍 400；run_dir 不存在 404；无 equity 404
-- [ ] 既有 validation CLI/MCP 测试不回归
+- [x] pyright `validation.py` / `validation/cli.py` → **0 errors**（调用签名 + loader `Series` 注解）
+- [x] 单测：mock `run_validation` 断言 `config`/`equity_curve`/`trades`/`market`（此前 MagicMock 吞错误 kwargs）
+- [x] 路径逃逸 400 / run_dir 不存在 404 保持
+- [x] CLI / MCP / security 测试 42 passed
+
+**落地**（2026-10-08）：API 适配层复用 `validation/cli.py` loaders，请求字段 → `config["validation"]`；`MarketType(req.market)` 校验。

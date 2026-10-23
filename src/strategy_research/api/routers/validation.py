@@ -28,6 +28,13 @@ class ValidateRunRequest(BaseModel):
 async def validate_run(req: ValidateRunRequest, request: Request):
     """执行 validation。"""
     try:
+        from ...core.validation.cli import (
+            _build_synthetic_trades,
+            _load_nav_from_duckdb,
+            _load_nav_synthetic,
+            _load_trades_from_artifacts,
+        )
+        from ...core.validation.market import MarketType
         from ...core.validation.runner import run_validation
 
         # Security: resolve run_dir and require it to live under the
@@ -47,18 +54,38 @@ async def validate_run(req: ValidateRunRequest, request: Request):
         if not run_dir.exists():
             raise HTTPException(status_code=404, detail=f"Run dir not found: {run_dir}")
 
+        equity_curve = _load_nav_from_duckdb(run_dir)
+        if equity_curve is None or len(equity_curve) < 5:
+            equity_curve = _load_nav_synthetic(run_dir)
+        if equity_curve is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no equity curve under {run_dir} (need DuckDB NAV or metrics.json)",
+            )
+        trades = _load_trades_from_artifacts(run_dir) or _build_synthetic_trades(run_dir)
+
+        try:
+            market = MarketType(req.market)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"unknown market: {req.market}")
+
+        v_cfg: dict = {}
+        if req.monte_carlo:
+            v_cfg["monte_carlo"] = {"n_simulations": req.n_simulations}
+        if req.bootstrap:
+            v_cfg["bootstrap"] = {"n_bootstrap": req.n_bootstrap}
+        if req.walk_forward:
+            v_cfg["walk_forward"] = {"n_windows": req.n_windows}
+
         result = run_validation(
-            run_dir=run_dir,
-            market=req.market,
-            run_monte_carlo=req.monte_carlo,
-            n_simulations=req.n_simulations,
-            run_bootstrap=req.bootstrap,
-            n_bootstrap=req.n_bootstrap,
-            run_walk_forward=req.walk_forward,
-            n_windows=req.n_windows,
+            config={"validation": v_cfg},
+            equity_curve=equity_curve,
+            trades=trades,
+            market=market,
         )
         return {"status": "ok", "validation": result}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

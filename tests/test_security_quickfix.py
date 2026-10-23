@@ -53,12 +53,16 @@ async def test_validate_run_accepts_contained_run_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("STRATEGY_RESEARCH_VALIDATE_ROOT", str(tmp_path))
     run_dir = tmp_path / "strategies" / "mom" / "runs" / "r1"
     run_dir.mkdir(parents=True)
+    # A.4 adapter needs an equity source — synthetic NAV from metrics.json
+    (run_dir / "metrics.json").write_text(
+        '{"ann_return": 0.12, "sharpe": 1.5}', encoding="utf-8"
+    )
 
     fake_result = {"monte_carlo": {}, "walk_forward": {}}
     with patch(
         "strategy_research.core.validation.runner.run_validation",
         return_value=fake_result,
-    ):
+    ) as mock_rv:
         app = _build_app()
         async with _client(app) as c:
             r = await c.post(
@@ -67,6 +71,13 @@ async def test_validate_run_accepts_contained_run_dir(tmp_path, monkeypatch):
             )
             assert r.status_code == 200, r.text
             assert r.json()["status"] == "ok"
+        # A.4: caller must speak the real signature (config/equity_curve/…),
+        # not the imagined (run_dir=/run_monte_carlo=) one.
+        assert mock_rv.call_count == 1
+        kwargs = mock_rv.call_args.kwargs
+        assert set(kwargs) >= {"config", "equity_curve", "trades", "market"}
+        assert kwargs["config"]["validation"]["monte_carlo"]["n_simulations"] == 10
+        assert kwargs["market"].value == "a_share"
 
 
 # ────────────────────────── A4: SQL parameter binding ──────────────────────────

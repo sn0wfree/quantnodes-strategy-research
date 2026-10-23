@@ -12,13 +12,17 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .market import MarketType
 from .runner import run_validation
 from .trade_input import TradeInput
 
+if TYPE_CHECKING:
+    import pandas as pd
 
-def _load_nav_from_duckdb(run_dir: Path) -> "object | None":
+
+def _load_nav_from_duckdb(run_dir: Path) -> "pd.Series | None":
     """Attempt to load the NAV history from DuckDB for this run.
 
     Returns a pandas Series (indexed by date) or None if unavailable.
@@ -81,7 +85,7 @@ def _load_trades_from_artifacts(run_dir: Path) -> list[TradeInput]:
         return []
 
 
-def _load_nav_synthetic(run_dir: Path) -> "object | None":
+def _load_nav_synthetic(run_dir: Path) -> "pd.Series | None":
     """Build a deterministic synthetic NAV from metrics.json (last-resort fallback)."""
     import pandas as pd
     metrics_path = run_dir / "metrics.json"
