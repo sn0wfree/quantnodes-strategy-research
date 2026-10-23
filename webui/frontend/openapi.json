@@ -4197,58 +4197,6 @@
         }
       }
     },
-    "/api/memory/search": {
-      "get": {
-        "tags": [
-          "memory"
-        ],
-        "summary": "Memory Search",
-        "description": "搜索记忆。",
-        "operationId": "memory_search_api_memory_search_get",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Q"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 10,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/run/start": {
       "post": {
         "tags": [
@@ -4859,50 +4807,6 @@
               "text/html": {
                 "schema": {
                   "type": "string"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/webui/memory/search": {
-      "get": {
-        "tags": [
-          "webui"
-        ],
-        "summary": "Memory Search Htmx",
-        "description": "HTMX endpoint for memory search.",
-        "operationId": "memory_search_htmx_webui_memory_search_get",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Q"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -5628,11 +5532,6 @@
             "type": "string",
             "title": "Risk Tier",
             "default": "research_general"
-          },
-          "market": {
-            "type": "string",
-            "title": "Market",
-            "default": "a_share"
           },
           "criteria": {
             "anyOf": [

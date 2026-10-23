@@ -1818,27 +1818,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/memory/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Memory Search
-         * @description 搜索记忆。
-         */
-        get: operations["memory_search_api_memory_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/run/start": {
+        "/api/run/start": {
         parameters: {
             query?: never;
             header?: never;
@@ -2185,27 +2165,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/webui/memory/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Memory Search Htmx
-         * @description HTMX endpoint for memory search.
-         */
-        get: operations["memory_search_htmx_webui_memory_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/webui/workflows": {
+        "/webui/workflows": {
         parameters: {
             query?: never;
             header?: never;
@@ -2476,11 +2436,6 @@ export interface components {
              * @default research_general
              */
             risk_tier: string;
-            /**
-             * Market
-             * @default a_share
-             */
-            market: string;
             /** Criteria */
             criteria?: string[] | null;
         };
