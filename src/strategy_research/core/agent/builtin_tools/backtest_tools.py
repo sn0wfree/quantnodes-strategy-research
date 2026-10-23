@@ -121,10 +121,10 @@ class RunBacktestTool(BaseTool):
     ) -> str:
         # ── 步骤 1: 配置加载 ────────────────────────────────────
         cfg_step = ConfigLoadStep()
-        out = json.loads(cfg_step.execute(
+        out = cfg_step.execute(
             ctx=ctx, workspace=workspace, strategy_name=strategy_name,
             yaml_path=yaml_path,
-        ))
+        )
         if out.get("status") == "error":
             return json.dumps(out, ensure_ascii=False)
         cfg = out["cfg"]
@@ -135,28 +135,28 @@ class RunBacktestTool(BaseTool):
         # 数据准备先执行（写 DB），门禁随后检查的才是「最终将用于回测
         # 的数据」（docs/run-backtest-data-gate.md）。
         prepare_step = DataPrepareStep()
-        out = json.loads(prepare_step.execute(
+        out = prepare_step.execute(
             ctx=ctx, workspace=workspace, cfg=cfg,
-        ))
+        )
         if out.get("status") == "error":
             return json.dumps(out, ensure_ascii=False)
 
         # ── 步骤 3: 数据就绪性门禁 (C1~C6, 轻量) ────────────────
         gate_step = DataReadinessStep()
-        out = json.loads(gate_step.execute(
+        out = gate_step.execute(
             ctx=ctx, workspace=workspace, strategy_name=strategy_name, cfg=cfg,
-        ))
+        )
         if out.get("status") == "error":
             return json.dumps(out, ensure_ascii=False)
         readiness_summary = out.get("report", {})
 
         # ── 步骤 4: 引擎执行 + 产物落盘 ─────────────────────────
         engine_step = EngineRunStep()
-        out = json.loads(engine_step.execute(
+        out = engine_step.execute(
             ctx=ctx, workspace=workspace, strategy_name=strategy_name,
             cfg=cfg, yaml_path=resolved_yaml, action=action,
             description=description,
-        ))
+        )
         if out.get("status") == "error":
             return json.dumps(out, ensure_ascii=False)
 
@@ -218,10 +218,10 @@ class RunBacktestTool(BaseTool):
             try:
                 log_progress(log_path, "[backtest] step: config load")
                 cfg_step = ConfigLoadStep()
-                out = json.loads(cfg_step.execute(
+                out = cfg_step.execute(
                     ctx=ctx, workspace=workspace, strategy_name=strategy_name,
                     yaml_path=yaml_path,
-                ))
+                )
                 if out.get("status") == "error":
                     set_task_result(task_id, {"status": "error", **out})
                     return
@@ -230,19 +230,19 @@ class RunBacktestTool(BaseTool):
 
                 log_progress(log_path, "[backtest] step: data prepare")
                 prepare_step = DataPrepareStep()
-                out = json.loads(prepare_step.execute(
+                out = prepare_step.execute(
                     ctx=ctx, workspace=workspace, cfg=cfg,
-                ))
+                )
                 if out.get("status") == "error":
                     set_task_result(task_id, {"status": "error", **out})
                     return
 
                 log_progress(log_path, "[backtest] step: data readiness gate")
                 gate_step = DataReadinessStep()
-                out = json.loads(gate_step.execute(
+                out = gate_step.execute(
                     ctx=ctx, workspace=workspace, strategy_name=strategy_name,
                     cfg=cfg,
-                ))
+                )
                 if out.get("status") == "error":
                     set_task_result(task_id, {"status": "error", **out})
                     return
@@ -250,11 +250,11 @@ class RunBacktestTool(BaseTool):
 
                 log_progress(log_path, "[backtest] step: engine running")
                 engine_step = EngineRunStep()
-                out = json.loads(engine_step.execute(
+                out = engine_step.execute(
                     ctx=ctx, workspace=workspace, strategy_name=strategy_name,
                     cfg=cfg, yaml_path=resolved_yaml, action=action,
                     description=description,
-                ))
+                )
                 if out.get("status") == "error":
                     set_task_result(task_id, {"status": "error", **out})
                     return

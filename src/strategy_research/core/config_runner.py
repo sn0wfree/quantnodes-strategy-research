@@ -286,7 +286,7 @@ class FactorStrategy:
         # 聚合摘要进 metrics.json 与工具返回（docs/run-backtest-data-gate.md）。
         self.factor_failures: list[dict] = []
 
-    def _record_factor_failure(self, factor: str, asset: str, error: str) -> None:
+    def _record_factor_failure(self, factor: str, asset: str, error: str | BaseException) -> None:
         for rec in self.factor_failures:
             if rec["factor"] == factor and rec["asset"] == asset:
                 rec["occurrences"] += 1

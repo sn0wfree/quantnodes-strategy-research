@@ -189,6 +189,7 @@ class TodoWriteTool(BaseTool):
         todos, error = _normalize_todos(raw)
         if error:
             return err_actionable(error, received=raw, tool=self.name)
+        todos = todos or []
 
         TodoStore.set(session_id, todos)
 

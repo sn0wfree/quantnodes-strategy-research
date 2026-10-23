@@ -95,13 +95,16 @@ def evaluate_budget(
 
     Order: tokens → cost → time. Reason format: ``budget:<dimension>``.
     """
-    if BudgetLimits._active(limits.max_tokens) and tracker.tokens >= int(limits.max_tokens):
+    max_tokens = limits.max_tokens
+    if max_tokens is not None and BudgetLimits._active(max_tokens) and tracker.tokens >= int(max_tokens):
         return True, "budget:tokens"
-    if BudgetLimits._active(limits.max_cost_usd) and tracker.cost_usd >= float(limits.max_cost_usd):
+    max_cost = limits.max_cost_usd
+    if max_cost is not None and BudgetLimits._active(max_cost) and tracker.cost_usd >= float(max_cost):
         return True, "budget:cost"
-    if BudgetLimits._active(limits.max_seconds):
+    max_seconds = limits.max_seconds
+    if max_seconds is not None and BudgetLimits._active(max_seconds):
         elapsed = tracker.elapsed(now)
-        if elapsed >= float(limits.max_seconds):
+        if elapsed >= float(max_seconds):
             return True, "budget:time"
     return False, None
 

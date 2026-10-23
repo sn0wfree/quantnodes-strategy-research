@@ -21,7 +21,7 @@ to every step so composition stays uniform.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Awaitable, Protocol, runtime_checkable
 
 from .loop_context import LoopContext
 
@@ -37,7 +37,7 @@ class Step(Protocol):
     def should_run(self, ctx: LoopContext) -> bool:
         ...
 
-    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
+    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext | Awaitable[LoopContext]:
         ...
 
 
@@ -48,7 +48,7 @@ class Step(Protocol):
 class PreRunStep(Protocol):
     """Run once before the iteration loop starts."""
 
-    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
+    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext | Awaitable[LoopContext]:
         ...
 
 
@@ -61,7 +61,7 @@ class LLMCallStep(Protocol):
     the loop to break (e.g. fatal LLM error).
     """
 
-    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
+    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext | Awaitable[LoopContext]:
         ...
 
 
@@ -69,7 +69,7 @@ class LLMCallStep(Protocol):
 class CompactionStep(Protocol):
     """Compress context when over threshold. No-op by default."""
 
-    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
+    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext | Awaitable[LoopContext]:
         ...
 
 
@@ -127,7 +127,7 @@ class ResilienceStep(Protocol):
 class ToolExecutionStep(Protocol):
     """Run the assistant's tool calls; update ctx.messages."""
 
-    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
+    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext | Awaitable[LoopContext]:
         ...
 
 
@@ -135,7 +135,7 @@ class ToolExecutionStep(Protocol):
 class FinalizationStep(Protocol):
     """Run after the loop exits — metrics, claim validation, git."""
 
-    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext:
+    def execute(self, ctx: LoopContext, *, async_mode: bool) -> LoopContext | Awaitable[LoopContext]:
         ...
 
 

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def cli_command(
     help: str,
     description: str | None = None,
     parents: list[argparse.ArgumentParser] | None = None,
-    add: Callable[[argparse.ArgumentParser], None] | None = None,
+    add: Callable[[argparse.ArgumentParser], Any] | None = None,
 ) -> Callable[[Callable[[argparse.Namespace], int]], Callable[[argparse.Namespace], int]]:
     """Decorator that registers a command handler.
 

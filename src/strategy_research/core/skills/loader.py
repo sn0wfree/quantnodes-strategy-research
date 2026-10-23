@@ -44,10 +44,21 @@ def parse_skill_file(path: Path) -> Skill | None:
     if not meta.get("name"):
         meta["name"] = path.stem
 
+    name_val = meta["name"]
+    category_val = meta.get("category", "general")
+    description_val = meta.get("description", "")
+
+    def _as_str(v: object) -> str:
+        if isinstance(v, str):
+            return v
+        if isinstance(v, list):
+            return ", ".join(str(x) for x in v)
+        return str(v)
+
     return Skill(
-        name=meta["name"],
-        category=meta.get("category", "general"),
-        description=meta.get("description", ""),
+        name=_as_str(name_val),
+        category=_as_str(category_val),
+        description=_as_str(description_val),
         tags=_parse_tags(meta.get("tags", [])),
         content=body,
         path=path,

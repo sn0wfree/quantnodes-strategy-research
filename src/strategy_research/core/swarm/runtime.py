@@ -315,7 +315,7 @@ class SwarmRuntime:
         # prompt=".prompts/portfolio_construction.md"), so fall back to
         # resolving by the prompt-file stem before giving up.
         reg = get_default_registry()
-        plugin = reg.get(plugin_id)
+        plugin = reg.get(str(plugin_id))
         if plugin is None and prompt_file:
             stem = Path(prompt_file).stem
             plugin = reg.get(stem)
@@ -352,20 +352,22 @@ class SwarmRuntime:
             # PromptBuilderFactory auto-discovers templates/.prompts/
             # <stem>.md, so custom roles run real agents. A missing
             # prompt file surfaces as an honest executor error.
-            stem = Path(prompt_file).stem or agent_call.agent_name
+            stem = Path(prompt_file).stem or str(agent_call.agent_name)
             plugin_id = stem
+            timeout = ctx.get("timeout", 180)
+            py_fn = ctx.get("python_function")
             plugin = AgentPlugin(
                 id=stem, name=stem, category="execution",
                 description=stem,
                 prompt_file=prompt_file,
-                tools=tuple(ctx.get("tools") or []),
-                executor_type=executor_type,
-                python_function=ctx.get("python_function"),
-                default_timeout=ctx.get("timeout", 180),
+                tools=tuple(str(t) for t in (ctx.get("tools") or [])),
+                executor_type=str(executor_type),
+                python_function=str(py_fn) if py_fn is not None else None,
+                default_timeout=int(timeout) if timeout is not None else 180,
             )
 
         node = AgentNodeConfig(
-            id=plugin_id,
+            id=str(plugin_id),
             timeout=ctx.get("timeout"),
             max_iterations=ctx.get("max_iterations"),
             tools_override=list(ctx["tools"]) if "tools" in ctx else None,

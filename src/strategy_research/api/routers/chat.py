@@ -26,6 +26,7 @@ from ..schemas.chat import (
 from ..schemas.chat import (
     ChatMessageRequest as ChatMessage,
 )
+from ..session.models import AttemptId, SessionId
 from ..session.service import SessionService
 from ..sse_buffer import sse_buffer
 from .slash_commands import (
@@ -669,12 +670,12 @@ async def cancel_attempt(body: CancelRequest, request: Request):
     # Prefer the session-scoped cancel (cancels the per-attempt task; the
     # consumer loop catches CancelledError and pauses the queue).
     if body.attempt_id:
-        ok = service.cancel(body.attempt_id)
+        ok = service.cancel(AttemptId(body.attempt_id))
         if ok:
             return {"status": "cancelled", "attempt_id": body.attempt_id}
 
     # Fallback: cancel by session_id only
-    ok = service.cancel_session(body.session_id)
+    ok = service.cancel_session(SessionId(body.session_id))
     if ok:
         return {"status": "cancelled", "session_id": body.session_id}
 

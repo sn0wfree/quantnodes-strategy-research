@@ -24,7 +24,7 @@ from strategy_research.core.agent.compact import CompactConfig, compact_messages
 from strategy_research.core.agent.event_store import EventStore
 from strategy_research.core.llm import LLMConfig
 
-from .models import Attempt, AttemptId, AttemptStatus, Message, SessionId
+from .models import Attempt, AttemptId, AttemptStatus, Message, MessageId, SessionId
 from .store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -202,9 +202,9 @@ class SessionService:
 
         # ── 4. Create Attempt ─────────────────────────────────────────
         attempt = Attempt(
-            session_id=session_id,
+            session_id=SessionId(session_id),
             prompt=content,
-            message_id=str(uuid.uuid4()),
+            message_id=MessageId(str(uuid.uuid4())),
             status=AttemptStatus.PENDING,
             created_at=_utc_now_iso(),
             persona=persona,
@@ -604,6 +604,14 @@ class SessionService:
                      cfg.model if cfg else "N/A",
                      cfg.provider if cfg else "N/A",
                      cfg.max_tokens if cfg else "N/A")
+        if cfg is None:
+            attempt.mark_failed(error="LLM config unavailable")
+            self.store.update_attempt(attempt)
+            self.event_bus.emit(
+                session_id, "attempt.failed",
+                {"attempt_id": attempt.attempt_id, "error": "LLM config unavailable"},
+            )
+            return
         self.store.update_attempt(attempt)
         # attempt.started carries message_id so the frontend can switch its
         # streamingMessageId from queued placeholder to actual stream.

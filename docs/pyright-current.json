@@ -1,6 +1,6 @@
 {
     "version": "1.1.414",
-    "time": "1792743682709",
+    "time": "1792744423164",
     "generalDiagnostics": [
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\admin_users.py",
@@ -14,38 +14,6 @@
                 "end": {
                     "line": 161,
                     "character": 31
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\chat.py",
-            "severity": "error",
-            "message": "Argument of type \"str\" cannot be assigned to parameter \"attempt_id\" of type \"AttemptId\" in function \"cancel\"\n  \"str\" is not assignable to \"AttemptId\"",
-            "range": {
-                "start": {
-                    "line": 671,
-                    "character": 28
-                },
-                "end": {
-                    "line": 671,
-                    "character": 43
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\chat.py",
-            "severity": "error",
-            "message": "Argument of type \"str\" cannot be assigned to parameter \"session_id\" of type \"SessionId\" in function \"cancel_session\"\n  \"str\" is not assignable to \"SessionId\"",
-            "range": {
-                "start": {
-                    "line": 676,
-                    "character": 32
-                },
-                "end": {
-                    "line": 676,
-                    "character": 47
                 }
             },
             "rule": "reportArgumentType"
@@ -133,78 +101,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
             "severity": "error",
-            "message": "Argument of type \"str\" cannot be assigned to parameter \"session_id\" of type \"SessionId\" in function \"__init__\"\n  \"str\" is not assignable to \"SessionId\"",
-            "range": {
-                "start": {
-                    "line": 204,
-                    "character": 23
-                },
-                "end": {
-                    "line": 204,
-                    "character": 33
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
-            "severity": "error",
-            "message": "Argument of type \"str\" cannot be assigned to parameter \"message_id\" of type \"MessageId | None\" in function \"__init__\"\n  Type \"str\" is not assignable to type \"MessageId | None\"\n    \"str\" is not assignable to \"MessageId\"\n    \"str\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 206,
-                    "character": 23
-                },
-                "end": {
-                    "line": 206,
-                    "character": 40
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
-            "severity": "error",
-            "message": "Argument of type \"LLMConfig | None\" cannot be assigned to parameter \"cfg\" of type \"LLMConfig\" in function \"_run_with_agent\"\n  Type \"LLMConfig | None\" is not assignable to type \"LLMConfig\"\n    \"None\" is not assignable to \"LLMConfig\"",
-            "range": {
-                "start": {
-                    "line": 658,
-                    "character": 32
-                },
-                "end": {
-                    "line": 658,
-                    "character": 35
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
-            "severity": "error",
-            "message": "Argument of type \"LLMConfig | None\" cannot be assigned to parameter \"cfg\" of type \"LLMConfig\" in function \"_run_with_agent\"\n  Type \"LLMConfig | None\" is not assignable to type \"LLMConfig\"\n    \"None\" is not assignable to \"LLMConfig\"",
-            "range": {
-                "start": {
-                    "line": 707,
-                    "character": 24
-                },
-                "end": {
-                    "line": 707,
-                    "character": 27
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
-            "severity": "error",
             "message": "Cannot assign to attribute \"model\" for class \"LLMConfig\"\n  Attribute \"model\" is read-only",
             "range": {
                 "start": {
-                    "line": 890,
+                    "line": 898,
                     "character": 16
                 },
                 "end": {
-                    "line": 890,
+                    "line": 898,
                     "character": 21
                 }
             },
@@ -216,11 +120,11 @@
             "message": "Argument of type \"list[Any | None]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[SupportsRichComparisonT@min]\" in function \"min\"\n  \"list[Any | None]\" is not assignable to \"Iterable[SupportsRichComparisonT@min]\"\n    Type parameter \"_T_co@Iterable\" is covariant, but \"Any | None\" is not a subtype of \"SupportsRichComparisonT@min\"\n      Type \"Any | None\" is not assignable to type \"SupportsRichComparison\"\n        Type \"Any | None\" is not assignable to type \"SupportsRichComparison\"\n          Type \"None\" is not assignable to type \"SupportsRichComparison\"",
             "range": {
                 "start": {
-                    "line": 1284,
+                    "line": 1292,
                     "character": 50
                 },
                 "end": {
-                    "line": 1284,
+                    "line": 1292,
                     "character": 61
                 }
             },
@@ -273,182 +177,6 @@
                 }
             },
             "rule": "reportAttributeAccessIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> Action\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> Action\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> Action\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"Action\" is incompatible with type \"None\"\n        \"Action\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 41,
-                    "character": 8
-                },
-                "end": {
-                    "line": 44,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> Action\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> Action\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> Action\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"Action\" is incompatible with type \"None\"\n        \"Action\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 58,
-                    "character": 8
-                },
-                "end": {
-                    "line": 58,
-                    "character": 78
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 72,
-                    "character": 8
-                },
-                "end": {
-                    "line": 76,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 91,
-                    "character": 8
-                },
-                "end": {
-                    "line": 97,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 112,
-                    "character": 8
-                },
-                "end": {
-                    "line": 117,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> Action\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> Action\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> Action\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"Action\" is incompatible with type \"None\"\n        \"Action\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 131,
-                    "character": 8
-                },
-                "end": {
-                    "line": 131,
-                    "character": 78
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 145,
-                    "character": 8
-                },
-                "end": {
-                    "line": 150,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 164,
-                    "character": 8
-                },
-                "end": {
-                    "line": 168,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 182,
-                    "character": 8
-                },
-                "end": {
-                    "line": 201,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\core_commands.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action, Action, Action, Action, Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 216,
-                    "character": 8
-                },
-                "end": {
-                    "line": 232,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\llm.py",
-            "severity": "error",
-            "message": "Argument of type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" cannot be assigned to parameter \"add\" of type \"((ArgumentParser) -> None) | None\" in function \"cli_command\"\n  Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" is not assignable to type \"((ArgumentParser) -> None) | None\"\n    Type \"(p: ArgumentParser) -> tuple[Action, Action, Action, Action]\" is not assignable to type \"(ArgumentParser) -> None\"\n      Function return type \"tuple[Action, Action, Action, Action]\" is incompatible with type \"None\"\n        \"tuple[Action, Action, Action, Action]\" is not assignable to \"None\"\n    \"FunctionType\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 255,
-                    "character": 8
-                },
-                "end": {
-                    "line": 264,
-                    "character": 5
-                }
-            },
-            "rule": "reportArgumentType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\session.py",
@@ -718,134 +446,6 @@
                 "end": {
                     "line": 220,
                     "character": 28
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 123,
-                    "character": 25
-                },
-                "end": {
-                    "line": 126,
-                    "character": 9
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 137,
-                    "character": 25
-                },
-                "end": {
-                    "line": 139,
-                    "character": 9
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 145,
-                    "character": 25
-                },
-                "end": {
-                    "line": 147,
-                    "character": 9
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 154,
-                    "character": 25
-                },
-                "end": {
-                    "line": 158,
-                    "character": 9
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 220,
-                    "character": 33
-                },
-                "end": {
-                    "line": 223,
-                    "character": 17
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 232,
-                    "character": 33
-                },
-                "end": {
-                    "line": 234,
-                    "character": 17
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 241,
-                    "character": 33
-                },
-                "end": {
-                    "line": 244,
-                    "character": 17
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[Unknown, Unknown]\" cannot be assigned to parameter \"s\" of type \"str | bytes | bytearray\" in function \"loads\"\n  Type \"dict[Unknown, Unknown]\" is not assignable to type \"str | bytes | bytearray\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"str\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytes\"\n    \"dict[Unknown, Unknown]\" is not assignable to \"bytearray\"",
-            "range": {
-                "start": {
-                    "line": 252,
-                    "character": 33
-                },
-                "end": {
-                    "line": 256,
-                    "character": 17
                 }
             },
             "rule": "reportArgumentType"
@@ -1134,38 +734,6 @@
                 "end": {
                     "line": 114,
                     "character": 32
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\todo_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"list[dict[str, Any]] | None\" cannot be assigned to parameter \"todos\" of type \"list[dict[str, Any]]\" in function \"set\"\n  Type \"list[dict[str, Any]] | None\" is not assignable to type \"list[dict[str, Any]]\"\n    \"None\" is not assignable to \"list[dict[str, Any]]\"",
-            "range": {
-                "start": {
-                    "line": 192,
-                    "character": 34
-                },
-                "end": {
-                    "line": 192,
-                    "character": 39
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\todo_tools.py",
-            "severity": "error",
-            "message": "Argument of type \"list[dict[str, Any]] | None\" cannot be assigned to parameter \"obj\" of type \"Sized\" in function \"len\"\n  Type \"list[dict[str, Any]] | None\" is not assignable to type \"Sized\"\n    \"None\" is incompatible with protocol \"Sized\"\n      \"__len__\" is not present",
-            "range": {
-                "start": {
-                    "line": 204,
-                    "character": 29
-                },
-                "end": {
-                    "line": 204,
-                    "character": 34
                 }
             },
             "rule": "reportArgumentType"
@@ -3571,166 +3139,6 @@
             "rule": "reportArgumentType"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
-            "severity": "error",
-            "message": "Argument of type \"int | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\"\n  Type \"int | None\" is not assignable to type \"ConvertibleToInt\"\n    Type \"None\" is not assignable to type \"ConvertibleToInt\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsInt\"\n        \"__int__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"\n  ...",
-            "range": {
-                "start": {
-                    "line": 97,
-                    "character": 73
-                },
-                "end": {
-                    "line": 97,
-                    "character": 90
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
-            "severity": "error",
-            "message": "Argument of type \"int | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\"\n  Type \"int | None\" is not assignable to type \"ConvertibleToInt\"\n    Type \"None\" is not assignable to type \"ConvertibleToInt\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsInt\"\n        \"__int__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"",
-            "range": {
-                "start": {
-                    "line": 97,
-                    "character": 73
-                },
-                "end": {
-                    "line": 97,
-                    "character": 90
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
-            "severity": "error",
-            "message": "Argument of type \"float | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"float | None\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"None\" is not assignable to type \"ConvertibleToFloat\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"\n  ...",
-            "range": {
-                "start": {
-                    "line": 99,
-                    "character": 79
-                },
-                "end": {
-                    "line": 99,
-                    "character": 98
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
-            "severity": "error",
-            "message": "Argument of type \"float | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"float | None\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"None\" is not assignable to type \"ConvertibleToFloat\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"",
-            "range": {
-                "start": {
-                    "line": 99,
-                    "character": 79
-                },
-                "end": {
-                    "line": 99,
-                    "character": 98
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
-            "severity": "error",
-            "message": "Argument of type \"float | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"float | None\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"None\" is not assignable to type \"ConvertibleToFloat\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"\n  ...",
-            "range": {
-                "start": {
-                    "line": 103,
-                    "character": 28
-                },
-                "end": {
-                    "line": 103,
-                    "character": 46
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
-            "severity": "error",
-            "message": "Argument of type \"float | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"float | None\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"None\" is not assignable to type \"ConvertibleToFloat\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"",
-            "range": {
-                "start": {
-                    "line": 103,
-                    "character": 28
-                },
-                "end": {
-                    "line": 103,
-                    "character": 46
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\factory.py",
-            "severity": "error",
-            "message": "Argument of type \"DefaultLLMCallStep\" cannot be assigned to parameter \"llm_call\" of type \"LLMCallStep\" in function \"__init__\"\n  \"DefaultLLMCallStep\" is incompatible with protocol \"LLMCallStep\"\n    \"execute\" is an incompatible type\n      Type \"(ctx: LoopContext, *, async_mode: bool) -> CoroutineType[Any, Any, LoopContext]\" is not assignable to type \"(ctx: LoopContext, *, async_mode: bool) -> LoopContext\"\n        Function return type \"CoroutineType[Any, Any, LoopContext]\" is incompatible with type \"LoopContext\"\n          \"CoroutineType[Any, Any, LoopContext]\" is not assignable to \"LoopContext\"",
-            "range": {
-                "start": {
-                    "line": 92,
-                    "character": 21
-                },
-                "end": {
-                    "line": 92,
-                    "character": 41
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\factory.py",
-            "severity": "error",
-            "message": "Argument of type \"DefaultCompactionStep\" cannot be assigned to parameter \"compaction\" of type \"CompactionStep\" in function \"__init__\"\n  \"DefaultCompactionStep\" is incompatible with protocol \"CompactionStep\"\n    \"execute\" is an incompatible type\n      Type \"(ctx: LoopContext, *, async_mode: bool) -> CoroutineType[Any, Any, LoopContext]\" is not assignable to type \"(ctx: LoopContext, *, async_mode: bool) -> LoopContext\"\n        Function return type \"CoroutineType[Any, Any, LoopContext]\" is incompatible with type \"LoopContext\"\n          \"CoroutineType[Any, Any, LoopContext]\" is not assignable to \"LoopContext\"",
-            "range": {
-                "start": {
-                    "line": 93,
-                    "character": 23
-                },
-                "end": {
-                    "line": 93,
-                    "character": 46
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\factory.py",
-            "severity": "error",
-            "message": "Argument of type \"DefaultToolExecutionStep\" cannot be assigned to parameter \"tool_execution\" of type \"ToolExecutionStep\" in function \"__init__\"\n  \"DefaultToolExecutionStep\" is incompatible with protocol \"ToolExecutionStep\"\n    \"execute\" is an incompatible type\n      Type \"(ctx: LoopContext, *, async_mode: bool) -> CoroutineType[Any, Any, LoopContext]\" is not assignable to type \"(ctx: LoopContext, *, async_mode: bool) -> LoopContext\"\n        Function return type \"CoroutineType[Any, Any, LoopContext]\" is incompatible with type \"LoopContext\"\n          \"CoroutineType[Any, Any, LoopContext]\" is not assignable to \"LoopContext\"",
-            "range": {
-                "start": {
-                    "line": 98,
-                    "character": 27
-                },
-                "end": {
-                    "line": 98,
-                    "character": 53
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\factory.py",
-            "severity": "error",
-            "message": "Argument of type \"DefaultFinalizationStep\" cannot be assigned to parameter \"finalization\" of type \"FinalizationStep\" in function \"__init__\"\n  \"DefaultFinalizationStep\" is incompatible with protocol \"FinalizationStep\"\n    \"execute\" is an incompatible type\n      Type \"(ctx: LoopContext, *, async_mode: bool) -> CoroutineType[Any, Any, LoopContext]\" is not assignable to type \"(ctx: LoopContext, *, async_mode: bool) -> LoopContext\"\n        Function return type \"CoroutineType[Any, Any, LoopContext]\" is incompatible with type \"LoopContext\"\n          \"CoroutineType[Any, Any, LoopContext]\" is not assignable to \"LoopContext\"",
-            "range": {
-                "start": {
-                    "line": 99,
-                    "character": 25
-                },
-                "end": {
-                    "line": 99,
-                    "character": 50
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\steps\\compaction.py",
             "severity": "error",
             "message": "Cannot access attribute \"_amaybe_compact\" for class \"object\"\n  Attribute \"_amaybe_compact\" is unknown",
@@ -4302,70 +3710,6 @@
                 "end": {
                     "line": 369,
                     "character": 77
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\config_runner.py",
-            "severity": "error",
-            "message": "Argument of type \"Exception\" cannot be assigned to parameter \"error\" of type \"str\" in function \"_record_factor_failure\"\n  \"Exception\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 430,
-                    "character": 64
-                },
-                "end": {
-                    "line": 430,
-                    "character": 65
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\config_runner.py",
-            "severity": "error",
-            "message": "Argument of type \"Exception\" cannot be assigned to parameter \"error\" of type \"str\" in function \"_record_factor_failure\"\n  \"Exception\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 451,
-                    "character": 80
-                },
-                "end": {
-                    "line": 451,
-                    "character": 81
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\config_runner.py",
-            "severity": "error",
-            "message": "Argument of type \"FactorComputeError\" cannot be assigned to parameter \"error\" of type \"str\" in function \"_record_factor_failure\"\n  \"FactorComputeError\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 489,
-                    "character": 57
-                },
-                "end": {
-                    "line": 489,
-                    "character": 58
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\config_runner.py",
-            "severity": "error",
-            "message": "Argument of type \"Exception\" cannot be assigned to parameter \"error\" of type \"str\" in function \"_record_factor_failure\"\n  \"Exception\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 492,
-                    "character": 57
-                },
-                "end": {
-                    "line": 492,
-                    "character": 58
                 }
             },
             "rule": "reportArgumentType"
@@ -4949,46 +4293,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\factor_validate.py",
             "severity": "error",
-            "message": "Argument of type \"str\" cannot be assigned to parameter \"method\" of type \"CorrelationMethod\" in function \"corr\"\n  Type \"str\" is not assignable to type \"CorrelationMethod\"\n    Type \"str\" is not assignable to type \"(ndarray[_AnyShape, dtype[Any]], ndarray[_AnyShape, dtype[Any]]) -> float\"\n    \"str\" is not assignable to type \"Literal['pearson']\"\n    \"str\" is not assignable to type \"Literal['kendall']\"\n    \"str\" is not assignable to type \"Literal['spearman']\"",
-            "range": {
-                "start": {
-                    "line": 86,
-                    "character": 53
-                },
-                "end": {
-                    "line": 86,
-                    "character": 59
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\factor_validate.py",
-            "severity": "error",
-            "message": "Argument of type \"str\" cannot be assigned to parameter \"method\" of type \"CorrelationMethod\" in function \"corr\"\n  Type \"str\" is not assignable to type \"CorrelationMethod\"\n    Type \"str\" is not assignable to type \"(ndarray[_AnyShape, dtype[Any]], ndarray[_AnyShape, dtype[Any]]) -> float\"\n    \"str\" is not assignable to type \"Literal['pearson']\"\n    \"str\" is not assignable to type \"Literal['kendall']\"\n    \"str\" is not assignable to type \"Literal['spearman']\"",
-            "range": {
-                "start": {
-                    "line": 94,
-                    "character": 54
-                },
-                "end": {
-                    "line": 94,
-                    "character": 60
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\factor_validate.py",
-            "severity": "error",
             "message": "Argument of type \"Series | Any\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | Any\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 102,
+                    "line": 103,
                     "character": 20
                 },
                 "end": {
-                    "line": 102,
+                    "line": 103,
                     "character": 36
                 }
             },
@@ -5000,11 +4312,11 @@
             "message": "Argument of type \"Series | Any\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | Any\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 102,
+                    "line": 103,
                     "character": 20
                 },
                 "end": {
-                    "line": 102,
+                    "line": 103,
                     "character": 36
                 }
             },
@@ -5016,11 +4328,11 @@
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 103,
+                    "line": 104,
                     "character": 19
                 },
                 "end": {
-                    "line": 103,
+                    "line": 104,
                     "character": 34
                 }
             },
@@ -5032,11 +4344,11 @@
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 103,
+                    "line": 104,
                     "character": 19
                 },
                 "end": {
-                    "line": 103,
+                    "line": 104,
                     "character": 34
                 }
             },
@@ -5048,11 +4360,11 @@
             "message": "Cannot access attribute \"rank\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 205,
+                    "line": 206,
                     "character": 45
                 },
                 "end": {
-                    "line": 205,
+                    "line": 206,
                     "character": 49
                 }
             },
@@ -5064,11 +4376,11 @@
             "message": "Cannot access attribute \"rank\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 205,
+                    "line": 206,
                     "character": 75
                 },
                 "end": {
-                    "line": 205,
+                    "line": 206,
                     "character": 79
                 }
             },
@@ -5080,11 +4392,11 @@
             "message": "Argument of type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" cannot be assigned to parameter \"obj\" of type \"Sized\" in function \"len\"\n  Type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" is not assignable to type \"Sized\"\n    \"complex\" is incompatible with protocol \"Sized\"\n      \"__len__\" is not present",
             "range": {
                 "start": {
-                    "line": 245,
+                    "line": 246,
                     "character": 11
                 },
                 "end": {
-                    "line": 245,
+                    "line": 246,
                     "character": 24
                 }
             },
@@ -5096,11 +4408,11 @@
             "message": "Argument of type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" cannot be assigned to parameter \"obj\" of type \"Sized\" in function \"len\"\n  Type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" is not assignable to type \"Sized\"\n    \"complex\" is incompatible with protocol \"Sized\"\n      \"__len__\" is not present",
             "range": {
                 "start": {
-                    "line": 249,
+                    "line": 250,
                     "character": 26
                 },
                 "end": {
-                    "line": 249,
+                    "line": 250,
                     "character": 39
                 }
             },
@@ -5112,11 +4424,11 @@
             "message": "Cannot access attribute \"rank\" for class \"str\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5128,11 +4440,11 @@
             "message": "Cannot access attribute \"rank\" for class \"bytes\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5144,11 +4456,11 @@
             "message": "Cannot access attribute \"rank\" for class \"date\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5160,11 +4472,11 @@
             "message": "Cannot access attribute \"rank\" for class \"datetime\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5176,11 +4488,11 @@
             "message": "Cannot access attribute \"rank\" for class \"timedelta\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5192,11 +4504,11 @@
             "message": "Cannot access attribute \"rank\" for class \"datetime64[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5208,11 +4520,11 @@
             "message": "Cannot access attribute \"rank\" for class \"timedelta64[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5224,11 +4536,11 @@
             "message": "Cannot access attribute \"rank\" for class \"bool\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5240,11 +4552,11 @@
             "message": "Cannot access attribute \"rank\" for class \"int\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5256,11 +4568,11 @@
             "message": "Cannot access attribute \"rank\" for class \"float\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5272,11 +4584,11 @@
             "message": "Cannot access attribute \"rank\" for class \"Timestamp\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5288,11 +4600,11 @@
             "message": "Cannot access attribute \"rank\" for class \"Timedelta\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5304,11 +4616,11 @@
             "message": "Cannot access attribute \"rank\" for class \"Interval[Unknown]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5320,11 +4632,11 @@
             "message": "Cannot access attribute \"rank\" for class \"complex\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5336,11 +4648,11 @@
             "message": "Cannot access attribute \"rank\" for class \"integer[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5352,11 +4664,11 @@
             "message": "Cannot access attribute \"rank\" for class \"floating[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5368,11 +4680,11 @@
             "message": "Cannot access attribute \"rank\" for class \"complexfloating[Any, Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 250,
+                    "line": 251,
                     "character": 32
                 },
                 "end": {
-                    "line": 250,
+                    "line": 251,
                     "character": 36
                 }
             },
@@ -5384,11 +4696,11 @@
             "message": "No overloads for \"corrcoef\" match the provided arguments",
             "range": {
                 "start": {
-                    "line": 255,
+                    "line": 256,
                     "character": 19
                 },
                 "end": {
-                    "line": 255,
+                    "line": 256,
                     "character": 50
                 }
             },
@@ -5400,11 +4712,11 @@
             "message": "Argument of type \"ArrayLike | Any | Unknown\" cannot be assigned to parameter \"y\" of type \"_ArrayLikeComplex_co | None\" in function \"corrcoef\"\n  Type \"ArrayLike | Any | Unknown\" is not assignable to type \"_ArrayLikeComplex_co | None\"\n    Type \"ExtensionArray\" is not assignable to type \"_ArrayLikeComplex_co | None\"\n      \"ExtensionArray\" is incompatible with protocol \"_SupportsArray[dtype[numpy.bool[builtins.bool] | number[Any, Any]]]\"\n        \"__array__\" is not present\n      \"ExtensionArray\" is incompatible with protocol \"_NestedSequence[_SupportsArray[dtype[numpy.bool[builtins.bool] | number[Any, Any]]]]\"\n        \"__reversed__\" is not present\n        \"count\" is not present\n        \"index\" is not present\n  ...",
             "range": {
                 "start": {
-                    "line": 255,
+                    "line": 256,
                     "character": 38
                 },
                 "end": {
-                    "line": 255,
+                    "line": 256,
                     "character": 49
                 }
             },
@@ -5416,11 +4728,11 @@
             "message": "Argument of type \"Series\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n    \"Series\" is not assignable to \"str\"\n    \"Series\" is incompatible with protocol \"Buffer\"\n      \"__buffer__\" is not present\n    \"Series\" is incompatible with protocol \"SupportsFloat\"\n      \"__float__\" is not present\n    \"Series\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present",
             "range": {
                 "start": {
-                    "line": 364,
+                    "line": 365,
                     "character": 21
                 },
                 "end": {
-                    "line": 364,
+                    "line": 365,
                     "character": 33
                 }
             },
@@ -5432,11 +4744,11 @@
             "message": "Argument of type \"Self@DataFrame | Series | Unknown\" cannot be assigned to parameter \"method\" of type \"CorrelationMethod\" in function \"corr\"\n  Type \"Self@DataFrame | Series | Unknown\" is not assignable to type \"CorrelationMethod\"\n    Type \"Self@DataFrame\" is not assignable to type \"CorrelationMethod\"\n      Type \"Self@DataFrame\" is not assignable to type \"(ndarray[_AnyShape, dtype[Any]], ndarray[_AnyShape, dtype[Any]]) -> float\"\n      \"DataFrame*\" is not assignable to \"Literal['pearson']\"\n      \"DataFrame*\" is not assignable to \"Literal['kendall']\"\n      \"DataFrame*\" is not assignable to \"Literal['spearman']\"",
             "range": {
                 "start": {
-                    "line": 366,
+                    "line": 367,
                     "character": 37
                 },
                 "end": {
-                    "line": 366,
+                    "line": 367,
                     "character": 57
                 }
             },
@@ -5448,11 +4760,11 @@
             "message": "Argument of type \"Self@DataFrame | Series | Unknown\" cannot be assigned to parameter \"other\" of type \"Series\" in function \"corr\"\n  Type \"DataFrame* | Series | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame*\" is not assignable to \"Series\"",
             "range": {
                 "start": {
-                    "line": 366,
+                    "line": 367,
                     "character": 37
                 },
                 "end": {
-                    "line": 366,
+                    "line": 367,
                     "character": 57
                 }
             },
@@ -5464,11 +4776,11 @@
             "message": "Argument of type \"DataFrame | float | Unknown\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"DataFrame | float | Unknown\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"DataFrame\" is not assignable to type \"ConvertibleToFloat\"\n      \"DataFrame\" is not assignable to \"str\"\n      \"DataFrame\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 367,
+                    "line": 368,
                     "character": 17
                 },
                 "end": {
-                    "line": 367,
+                    "line": 368,
                     "character": 21
                 }
             },
@@ -5480,44 +4792,12 @@
             "message": "Argument of type \"DataFrame | float | Unknown\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"DataFrame | float | Unknown\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"DataFrame\" is not assignable to type \"ConvertibleToFloat\"\n      \"DataFrame\" is not assignable to \"str\"\n      \"DataFrame\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 367,
+                    "line": 368,
                     "character": 17
                 },
                 "end": {
-                    "line": 367,
+                    "line": 368,
                     "character": 21
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1672,
-                    "character": 24
-                },
-                "end": {
-                    "line": 1672,
-                    "character": 58
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1673,
-                    "character": 36
-                },
-                "end": {
-                    "line": 1673,
-                    "character": 82
                 }
             },
             "rule": "reportArgumentType"
@@ -5534,54 +4814,6 @@
                 "end": {
                     "line": 1678,
                     "character": 61
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1756,
-                    "character": 33
-                },
-                "end": {
-                    "line": 1756,
-                    "character": 76
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1757,
-                    "character": 27
-                },
-                "end": {
-                    "line": 1757,
-                    "character": 64
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1769,
-                    "character": 39
-                },
-                "end": {
-                    "line": 1769,
-                    "character": 88
                 }
             },
             "rule": "reportArgumentType"
@@ -5822,54 +5054,6 @@
                 "end": {
                     "line": 106,
                     "character": 36
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\skills\\loader.py",
-            "severity": "error",
-            "message": "Argument of type \"str | list[str]\" cannot be assigned to parameter \"name\" of type \"str\" in function \"__init__\"\n  Type \"str | list[str]\" is not assignable to type \"str\"\n    \"list[str]\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 47,
-                    "character": 13
-                },
-                "end": {
-                    "line": 47,
-                    "character": 25
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\skills\\loader.py",
-            "severity": "error",
-            "message": "Argument of type \"str | list[str]\" cannot be assigned to parameter \"category\" of type \"str\" in function \"__init__\"\n  Type \"str | list[str]\" is not assignable to type \"str\"\n    \"list[str]\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 48,
-                    "character": 17
-                },
-                "end": {
-                    "line": 48,
-                    "character": 48
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\skills\\loader.py",
-            "severity": "error",
-            "message": "Argument of type \"str | list[str]\" cannot be assigned to parameter \"description\" of type \"str\" in function \"__init__\"\n  Type \"str | list[str]\" is not assignable to type \"str\"\n    \"list[str]\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 49,
-                    "character": 20
-                },
-                "end": {
-                    "line": 49,
-                    "character": 47
                 }
             },
             "rule": "reportArgumentType"
@@ -6933,46 +6117,30 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\swarm\\runtime.py",
             "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"plugin_id\" of type \"str\" in function \"get\"\n  \"object\" is not assignable to \"str\"",
+            "message": "\"object\" is not iterable\n  \"__iter__\" method not defined",
             "range": {
                 "start": {
-                    "line": 317,
-                    "character": 25
+                    "line": 362,
+                    "character": 44
                 },
                 "end": {
-                    "line": 317,
-                    "character": 34
+                    "line": 362,
+                    "character": 68
                 }
             },
-            "rule": "reportArgumentType"
+            "rule": "reportGeneralTypeIssues"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\swarm\\runtime.py",
             "severity": "error",
-            "message": "Argument of type \"object | list[_T_co@tuple]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T_co@tuple]\" in function \"__new__\"\n  Type \"object | list[_T_co@tuple]\" is not assignable to type \"Iterable[_T_co@tuple]\"\n    \"object\" is incompatible with protocol \"Iterable[_T_co@tuple]\"\n      \"__iter__\" is not present",
+            "message": "Argument of type \"object\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\"\n  Type \"object\" is not assignable to type \"ConvertibleToInt\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is incompatible with protocol \"Buffer\"\n      \"__buffer__\" is not present\n    \"object\" is incompatible with protocol \"SupportsInt\"\n      \"__int__\" is not present\n    \"object\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n  ...",
             "range": {
                 "start": {
-                    "line": 360,
-                    "character": 28
+                    "line": 365,
+                    "character": 36
                 },
                 "end": {
-                    "line": 360,
-                    "character": 50
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\swarm\\runtime.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"executor_type\" of type \"str\" in function \"__init__\"\n  \"object\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 361,
-                    "character": 30
-                },
-                "end": {
-                    "line": 361,
+                    "line": 365,
                     "character": 43
                 }
             },
@@ -6981,47 +6149,15 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\swarm\\runtime.py",
             "severity": "error",
-            "message": "Argument of type \"object | None\" cannot be assigned to parameter \"python_function\" of type \"str | None\" in function \"__init__\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+            "message": "Argument of type \"object\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\"\n  Type \"object\" is not assignable to type \"ConvertibleToInt\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is incompatible with protocol \"Buffer\"\n      \"__buffer__\" is not present\n    \"object\" is incompatible with protocol \"SupportsInt\"\n      \"__int__\" is not present\n    \"object\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present",
             "range": {
                 "start": {
-                    "line": 362,
-                    "character": 32
+                    "line": 365,
+                    "character": 36
                 },
                 "end": {
-                    "line": 362,
-                    "character": 58
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\swarm\\runtime.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"default_timeout\" of type \"int\" in function \"__init__\"\n  \"object\" is not assignable to \"int\"",
-            "range": {
-                "start": {
-                    "line": 363,
-                    "character": 32
-                },
-                "end": {
-                    "line": 363,
-                    "character": 55
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\swarm\\runtime.py",
-            "severity": "error",
-            "message": "Argument of type \"str | object\" cannot be assigned to parameter \"id\" of type \"str\" in function \"__init__\"\n  Type \"str | object\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 367,
-                    "character": 15
-                },
-                "end": {
-                    "line": 367,
-                    "character": 24
+                    "line": 365,
+                    "character": 43
                 }
             },
             "rule": "reportArgumentType"
@@ -7032,11 +6168,11 @@
             "message": "Argument of type \"object | None\" cannot be assigned to parameter \"timeout\" of type \"int | None\" in function \"__init__\"\n  Type \"object | None\" is not assignable to type \"int | None\"\n    Type \"object\" is not assignable to type \"int | None\"\n      \"object\" is not assignable to \"int\"\n      \"object\" is not assignable to \"None\"",
             "range": {
                 "start": {
-                    "line": 368,
+                    "line": 370,
                     "character": 20
                 },
                 "end": {
-                    "line": 368,
+                    "line": 370,
                     "character": 38
                 }
             },
@@ -7048,11 +6184,11 @@
             "message": "Argument of type \"object | None\" cannot be assigned to parameter \"max_iterations\" of type \"int | None\" in function \"__init__\"\n  Type \"object | None\" is not assignable to type \"int | None\"\n    Type \"object\" is not assignable to type \"int | None\"\n      \"object\" is not assignable to \"int\"\n      \"object\" is not assignable to \"None\"",
             "range": {
                 "start": {
-                    "line": 369,
+                    "line": 371,
                     "character": 27
                 },
                 "end": {
-                    "line": 369,
+                    "line": 371,
                     "character": 52
                 }
             },
@@ -7064,11 +6200,11 @@
             "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
             "range": {
                 "start": {
-                    "line": 370,
+                    "line": 372,
                     "character": 32
                 },
                 "end": {
-                    "line": 370,
+                    "line": 372,
                     "character": 44
                 }
             },
@@ -7080,11 +6216,11 @@
             "message": "Argument of type \"list[SwarmHook] | None\" cannot be assigned to parameter \"hooks\" of type \"list[SwarmHook]\" in function \"_emit\"\n  Type \"list[SwarmHook] | None\" is not assignable to type \"list[SwarmHook]\"\n    \"None\" is not assignable to \"list[SwarmHook]\"",
             "range": {
                 "start": {
-                    "line": 540,
+                    "line": 542,
                     "character": 24
                 },
                 "end": {
-                    "line": 540,
+                    "line": 542,
                     "character": 29
                 }
             },
@@ -7096,11 +6232,11 @@
             "message": "Argument of type \"list[SwarmHook] | None\" cannot be assigned to parameter \"hooks\" of type \"list[SwarmHook]\" in function \"_emit\"\n  Type \"list[SwarmHook] | None\" is not assignable to type \"list[SwarmHook]\"\n    \"None\" is not assignable to \"list[SwarmHook]\"",
             "range": {
                 "start": {
-                    "line": 554,
+                    "line": 556,
                     "character": 24
                 },
                 "end": {
-                    "line": 554,
+                    "line": 556,
                     "character": 29
                 }
             },
@@ -8165,10 +7301,10 @@
     ],
     "summary": {
         "filesAnalyzed": 457,
-        "errorCount": 510,
+        "errorCount": 456,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 18.204
+        "timeInSec": 22.154
     }
 }
 
