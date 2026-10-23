@@ -61,6 +61,8 @@ flowchart LR
 | **0.3** | `event_store` 去除对 `Projector` 的认识（改为订阅/回调） | `core→api` 反向 import = **0** | 恢复 lazy import | 0.2 | **0.5d** |
 | **0.4** | **持久化契约成文 + 一致性测试**：明确 4 类（session 消息流 / study 账本 / goal 账本 / 研究资产+hypothesis / memory）—— 各自的真源、写入者、生命周期 | 一份契约文档 + 5 条一致性测试；**不改实现** | 纯文档 | — | **1d** |
 | **0.5** | **CI 门禁**：① `core/**` 禁 import `api/**`/`cli/**` ② 单文件路由数 ≤ 12 ③ 新增文件 > 800 行告警 | 门禁在 CI 生效并拦下违规 PR | 移除门禁 | 0.1–0.3 | **0.5d** |
+| **0.6** | **统一注册（薄包装）**：建 `core/capability/`（`CapabilitySpec` + `CapabilityRegistry`），先只包住 provider / data_source 两个已有注册表 | 新部件 1 行注册；对外 API 不变 | 移除包装层 | — | **1d** |
+| **0.7** | **一致性套件起步**：`tests/conformance/` 先 2 个（provider / data_loader） | 新实现进 CI 自动被验 | 删套件 | — | **1d** |
 
 **W0 退出标准**：`core→api` 反向 = 0 · 对外事件通道 = 1 · 持久化契约文档 + 测试就位 · CI 门禁生效。
 
@@ -73,6 +75,7 @@ flowchart LR
 | **1.3** | **agent 写回记忆**（G2-c）：finalization 提炼「结论 / 失败因子 / 假设修正」落 `PersistentMemory` | 跑一轮 → 记忆库新增 ≥1 条 → 下一轮检索命中 | 停写（保留读） | 1.2 | **2d** |
 | **1.4** | **`propose_next` 决策面**（D2）：停因映射为动作；`STAGNATION/DISCARD_STREAK/novelty拒绝` → 派生新假设继续；`TARGETS_MET/BUDGET` → 收尾 | 自主研究中出现 ≥1 次 propose；假设树非空 | 关掉该分支 | 1.1 + 1.3 | **2–3d** |
 | **1.5** | **失败降级阶梯**（D3）：数据不可用 → 换源/放宽/降频；因子失败 → 记失败因子→派生变体→跳过 | 失败场景下自动尝试次数 > 0；无人工介入完成降级 | 退回只提示 | 1.3 | **2–3d** |
+| **1.6** | **`EventSource` 协议**（接缝规范）：`EventStore` 实现它，事件源从此可替换 | core/agent 侧不再依赖具体 EventStore 类 | 保留具体类实现 | 0.2 | **0.5d** |
 
 **W1 退出标准**：`propose_next` 调用率 > 0 · 降级自动尝试 > 0 · 记忆新增/轮 > 0 且下轮命中 · 人仍持有 objective 与预算。
 
@@ -84,6 +87,7 @@ flowchart LR
 | **2.2** | **ContextPlan 影子模式**（G1-2）：只算不裁，`explain()` 进 trace | 1 周数据：多少轮会超、超多少、谁被裁 | 关闭 | 2.1 | **1d + 观察** |
 | **2.3** | **ContextPlan 开启裁剪**（G1-3）：裁剪顺序固定；压缩降级为兜底 | eval 跟幅不降；PR lane 绿 | 一行开关 | 2.2 | **2d** |
 | **2.4** | **巨文件按切口拆**（每项独立）：study 路由切面（33→≤12 路由/模块）· session service 拆 3 协作者 · goal/study store 读写分仓 · autoresearch 消包 | >800 行文件 25 → ≤ 10 | 单项回退 | W0 完成 | 每项 1–2d |
+| **2.5** | **接缝规范续**：`ToolsetProvider` 协议 + `PersistenceContract` 一致性测试 | 存储/工具集可替换；契约有测试背书 | 单项回退 | 0.4 / 0.7 | **1d** |
 
 **W2 退出标准**：单文件路由 ≤ 12 · 上帝服务方法 ≤ 12 · >800 行文件 ≤ 10 · 上下文装配恒不超预算且 `validate()` 必过。
 
@@ -97,6 +101,7 @@ flowchart LR
 | 不为 pyright 清零重写 mixin | 收益是数字不是运行时；已注解止血 |
 | **不拆 `alpha_zoo`（468 文件 / 20% 代码）** | 它是数据资产，不是复杂度源；拆了反而增加耦合面 |
 | 不做「一次到位」的大重构 | 违反本计划的可回滚分刀原则 |
+| **不写「统一大协议」**；不合并现有 29 个协议；不重写插件框架 | 见 `plug-in-contract-design.md` §6——统一的是「合格标准 + 注册入口 + 能力清单」，不是协议数量 |
 
 ## 3. 护栏（每刀都适用）
 
@@ -154,6 +159,8 @@ gantt
 | 上帝服务方法数 | 24 | **≤ 12** | W2 |
 | >800 行文件 | 25 | **≤ 10** | W2 |
 | pyright errors | 225 | ≤ 225（不增） | 全程 |
+| 协议一致性套件数 | 0 | ≥ 1 套/协议（先 provider + data_loader） | W0 |
+| 机器可读能力清单 | 无 | `capability-manifest.json`（CI 校验不漂移） | W0 |
 
 ## 6. 每波的「继续/停止」判据
 
