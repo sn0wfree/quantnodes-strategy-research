@@ -79,6 +79,17 @@ class LoopProgressMixin:
         for tool_result_msg in tool_result_msgs:
             messages.append(tool_result_msg)
             result.messages.append(tool_result_msg)
+            # Phase 5-guardrails v1: observe injection/exfil signatures in
+            # tool outputs (docs/phase5-guardrails-design.md §2.2).
+            try:
+                from .guardrails import scan_tool_result
+
+                content = tool_result_msg.get("content") or ""
+                tool_name = tool_result_msg.get("name") or "tool"
+                for finding in scan_tool_result(tool_name, content):
+                    self._emit("guardrail.finding", finding.to_dict())
+            except Exception:  # noqa: BLE001 — guardrails never break the loop
+                pass
 
     def _breaker_open_messages(
         self, tool_calls: list[ToolCall],

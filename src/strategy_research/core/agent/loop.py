@@ -834,6 +834,18 @@ class AgentLoop(
 
         await _fire("before_run", hook_ctx)
 
+        # Phase 5-guardrails v1: observe injection signatures in the user
+        # task (docs/phase5-guardrails-design.md §2.3). Emits only — never
+        # alters the message path; see extension-points.md hooks red line.
+        try:
+            from .guardrails import scan_user_input
+
+            for finding in scan_user_input(task, source_id=self.session_id or ""):
+                self._emit("guardrail.finding", finding.to_dict())
+                await _fire("on_guardrail_finding", hook_ctx, finding)
+        except Exception:  # noqa: BLE001 — guardrails never break the loop
+            logger.debug("guardrail scan failed (user input)", exc_info=True)
+
         # L7 v0.2: iteration cap — an explicit strategy config drives
         # it (a profile said max_iterations=N); otherwise fall back to
         # the constructor ``self.max_iterations`` so existing tests /

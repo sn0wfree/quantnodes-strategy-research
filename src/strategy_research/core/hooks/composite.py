@@ -72,6 +72,16 @@ class AgentHook:
     def on_error(self, ctx: AgentHookContext, error: BaseException) -> None:
         pass
 
+    def on_guardrail_finding(self, ctx: AgentHookContext, finding: Any) -> None:
+        """Observation-only: log/emit a GuardrailFinding.
+
+        Phase 5-guardrails v1 (docs/phase5-guardrails-design.md §2.3):
+        never raises, never alters the message path. Guardrails are
+        additive monitoring — the red line in extension-points.md
+        (hooks observe, they do not control).
+        """
+        pass
+
 
 class NoOpHook(AgentHook):
     name = "noop"
@@ -172,3 +182,6 @@ class CompositeHook(AgentHook):
 
     async def on_error(self, ctx: AgentHookContext, error: BaseException) -> None:
         await self._fire("on_error", ctx, error)
+
+    async def on_guardrail_finding(self, ctx: AgentHookContext, finding: Any) -> None:
+        await self._fire("on_guardrail_finding", ctx, finding)
