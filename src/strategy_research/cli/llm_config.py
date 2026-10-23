@@ -11,6 +11,10 @@ from __future__ import annotations
 
 import argparse
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..core.llm.config import LLMConfig
 
 _LLM_PARENT = argparse.ArgumentParser(
     add_help=False,

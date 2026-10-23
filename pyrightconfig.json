@@ -1,0 +1,20 @@
+{
+  "include": ["src"],
+  "exclude": [
+    "**/__pycache__",
+    "src/strategy_research/core/alpha_zoo",
+    "src/strategy_research/core/study/_archived",
+    "src/strategy_research/templates"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownLambdaType": false,
+  "reportUntypedFunctionDecorator": false,
+  "reportUntypedClassDecorator": false,
+  "reportPrivateUsage": false,
+  "reportMissingTypeStubs": false
+}

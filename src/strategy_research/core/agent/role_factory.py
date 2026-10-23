@@ -10,6 +10,11 @@ Falls back to the deterministic stub when:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .loop import AgentLoop
+
 import json
 import os
 from pathlib import Path
@@ -91,7 +96,7 @@ def build_agent_loop(
     # P1-5+: accept a LoopStrategy spec (str / dict / LoopStrategy instance
     # / None). Resolved via resolve_loop_strategy(); None defaults to "react".
     loop_strategy: Any | None = None,
-) -> "AgentLoop | None":  # noqa: F821
+) -> "AgentLoop | None":
     """为 role 构造 AgentLoop.
 
     Args:
