@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 520" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#64748b" stroke-width="1"/>
+    </marker>
+  </defs>
+  <!-- title -->
+  <text x="40" y="28" font-size="14" font-weight="500" fill="#0f172a">quantnodes-strategy-research · 六层架构（重构讨论基线）</text>
+
+  <!-- layers -->
+  <rect x="40" y="48" width="600" height="56" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="56" y="70" font-size="11" font-weight="500" fill="#334155">接入</text>
+  <text x="100" y="70" font-size="13" fill="#0f172a">CLI / TUI · FastAPI 20 routers · WebUI · MCP</text>
+  <text x="100" y="90" font-size="11" fill="#64748b">契约：HTTP/CLI 入参 → Service / Runner</text>
+
+  <rect x="40" y="116" width="600" height="72" rx="8" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="56" y="138" font-size="11" font-weight="500" fill="#0c4a6e">编排</text>
+  <text x="100" y="138" font-size="13" fill="#0f172a">SessionService · StudyRunner · AgentLoop（6 mixin）</text>
+  <text x="100" y="158" font-size="11" fill="#0369a1">对称契约：BranchContext 入 → RoundOutcome 出</text>
+  <text x="100" y="176" font-size="11" fill="#64748b">债：mixin self.* 已注解止血 · web_session/projector 巨文件待拆</text>
+
+  <rect x="40" y="200" width="600" height="56" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="56" y="222" font-size="11" font-weight="500" fill="#334155">引擎</text>
+  <text x="100" y="222" font-size="13" fill="#0f172a">phases / langgraph 查表分派 · goal · workflow · swarm</text>
+  <text x="100" y="242" font-size="11" fill="#64748b">ENGINE_BRANCHES 表驱动；未知值 fallback phases</text>
+
+  <rect x="40" y="268" width="600" height="72" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="56" y="290" font-size="11" font-weight="500" fill="#334155">能力</text>
+  <text x="100" y="290" font-size="13" fill="#0f172a">LLM adapters · 16 toolsets · memory · hooks · skills</text>
+  <text x="100" y="310" font-size="11" fill="#64748b">STEP 改控制流 · hook 只读 · injector 只加数据 · toolset 出能力</text>
+  <text x="100" y="328" font-size="11" fill="#64748b">扩展点 7 入口分工见 extension-points.md</text>
+
+  <rect x="40" y="352" width="600" height="56" rx="8" fill="#fef3c7" stroke="#fcd34d" stroke-width="0.5"/>
+  <text x="56" y="374" font-size="11" font-weight="500" fill="#92400e">数据</text>
+  <text x="100" y="374" font-size="13" fill="#0f172a">DuckDB · workspace FS · event_store · goal / checkpoint</text>
+  <text x="100" y="394" font-size="11" fill="#b45309">红线：event_store 真源 · journal capture→backfill · checkpoint 仅 langgraph</text>
+
+  <rect x="40" y="420" width="600" height="56" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="56" y="442" font-size="11" font-weight="500" fill="#334155">横切</text>
+  <text x="100" y="442" font-size="13" fill="#0f172a">evals 70 · observability · tests 12k+ · CI gates</text>
+  <text x="100" y="462" font-size="11" fill="#64748b">pyright 225 · ruff src=0 · PR lane not llm/e2e/slow</text>
+
+  <!-- side note -->
+  <rect x="40" y="488" width="600" height="22" rx="4" fill="#ffffff" stroke="none"/>
+  <text x="40" y="504" font-size="11" fill="#64748b">债不在分层，在层内巨文件与隐式耦合面 — 下一刀建议 web_session ↔ projector（切入点 A）</text>
+</svg>
