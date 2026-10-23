@@ -53,6 +53,8 @@
 
 ## 4. 引擎层与编排层的实际边界（供确认）
 
+### 4.1 职责分布
+
 ```
 编排层（runner）  →  什么时候停 / 要不要继续 / 预算是多少 / HITL 恢复
                     ShutdownReason(9) · max_rounds · early_stop · stagnation · discard
@@ -65,6 +67,23 @@
 ```
 
 **方法论（假设—证伪—AEGIS）现在藏在 `phase_engine.py` 里 = 位置错误**（它既不是「引擎」，也不是「编排」，是研究方法本身）。
+
+### 4.2 发现 ⑦ · 引擎层反向依赖编排层的 AgentLoop
+
+| 文件 | 证据 |
+|---|---|
+| `core/study/phase_engine.py` | `run_agent` ×2 · `executor` ×2 |
+| `core/study/langgraph_engine.py` | `AgentExecutor` ×5 · `AgentLoop` ×1 · `executor` ×13 |
+
+→ **引擎层（层位更低）调用编排层里的 AgentLoop（层位更高）= 依赖方向倒置**，与已知的 `core→api` 反向依赖同族。
+
+**含义**：AgentLoop 实际是**「能力」**（被编排层与引擎层共同调用的执行体），不是「编排」。它放在编排层是归属错误。
+
+**建议**：把 AgentLoop（含 9 steps + mixins）移入**能力层**；编排层只留真正的控制循环（SessionService / AutoresearchRunner）。
+这样六层的依赖方向就一致了：编排→引擎→能力→数据，AgentLoop 不再被下层反向依赖。
+
+> 关联图：`architecture-diagram.html` v2 的红色虚线箭头与 ⑦ 编号。
+
 
 ## 5. 待拍板（两条）
 
