@@ -51,7 +51,10 @@ from .validator_registry import (
     register_default_validators,
 )
 from .workflow import (
+    CompletionConfig,
+    GoalAgentConfig,
     GoalWorkflowConfig,
+    GoalWorkflowGoalConfig,
     GoalWorkflowRunner,
     GoalWorkflowState,
 )

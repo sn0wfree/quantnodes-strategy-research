@@ -99,6 +99,8 @@ class HangingEventsStore:
         failure (observability must not break the main path)."""
         if event_type not in _ALL_EVENT_TYPES:
             return
+        if self._conn is None:
+            return  # closed — best-effort, observability must not raise
         try:
             with self._lock:
                 with self._conn:
@@ -269,6 +271,8 @@ class HangingEventsStore:
 
     def clear(self, *, hours: float | None = None) -> int:
         """Delete events (all or older than ``hours``). Returns rows removed."""
+        if self._conn is None:
+            return 0  # closed — best-effort
         try:
             with self._lock:
                 with self._conn:

@@ -183,12 +183,12 @@ class StrategyCompare(BaseTool):
         strategy_names_str = strategy_names
         if not strategy_names_str:
             return err_actionable("missing 'strategy_names'", tool="strategy_compare")
-        strategy_names = [s.strip() for s in strategy_names_str.split(",")]
+        strategy_names_list = [s.strip() for s in strategy_names_str.split(",")]
         metrics_str = metrics
         metrics_keys = [m.strip() for m in metrics_str.split(",")]
 
         results = []
-        for name in strategy_names:
+        for name in strategy_names_list:
             results_path = workspace / "strategies" / name / "runs" / "results.tsv"
             if not results_path.exists():
                 results.append({"strategy": name, "error": f"results.tsv not found at {results_path}"})

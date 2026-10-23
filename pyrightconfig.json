@@ -16,5 +16,6 @@
   "reportUntypedFunctionDecorator": false,
   "reportUntypedClassDecorator": false,
   "reportPrivateUsage": false,
-  "reportMissingTypeStubs": false
+  "reportMissingTypeStubs": false,
+  "reportMissingModuleSource": false
 }

@@ -35,6 +35,8 @@ class LLMConfigStatus(TypedDict):
     api_key_source: str      # "env" | "llm.json" | "dotenv" | "none"
     model: str               # 解析到的模型名（可能为空）
     provider: str            # 解析到的 provider（可能为空）
+    model_context_tokens: int | None = None     # 用户覆盖（settings modal 用）
+    model_max_output_tokens: int | None = None  # 同上
 
 
 def _read_llm_json(path: Path) -> dict:

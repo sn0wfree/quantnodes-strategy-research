@@ -44,7 +44,6 @@ __all__ = [
     "AutoresearchExecutor",
     "AutoresearchRunner",
     "ControlToken",
-    "EmitterProtocol",
     "EventEmitter",
     "MetricTarget",
     "NullEmitter",

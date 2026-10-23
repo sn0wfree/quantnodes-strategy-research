@@ -973,7 +973,7 @@ class FactorICDecay(BaseTool):
             return err_actionable("missing or invalid 'factor_code'", tool="factor_ic_decay")
         universe_str = universe
         horizons_str = horizons
-        horizons = [int(h.strip()) for h in horizons_str.split(",")]
+        horizons_list = [int(h.strip()) for h in horizons_str.split(",")]
 
         try:
             from ...db import get_connection
@@ -1019,7 +1019,7 @@ class FactorICDecay(BaseTool):
 
         # Compute IC at each horizon
         results = []
-        for h in horizons:
+        for h in horizons_list:
             ret_panel = _build_ret_panel(df, factor_panel, h)
 
             ret_df = pd.DataFrame(ret_panel)
