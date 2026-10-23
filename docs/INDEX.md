@@ -41,6 +41,10 @@
 
 `agentic-design-application.md` · `Agentic 设计框架与 Prime Agent 调研报告.md` · `AI因子挖掘Agent研报梳理与QuantaAlpha深研.md` · `deepseek-harness-research.md` · `agentquant-research-20260902.md`
 
+## 6.5 重构计划（当前主线）
+
+**`refactor-plan-20261008.md`**（Phases 0-5 · 里程碑 · 护栏） · **`refactor-readiness-20261008.md`**（切入点 A-E + 架构/流程/数据流三图） · `industry-research-20261008.md`（借鉴清单）
+
 ## 7. 专题修复记录（备查）
 
 `*-fix.md` 系列（compaction / context-overflow / chat-sse / claim-validation 等） · `api-test-debt-fix.md` · `dag-viz-and-checkpoint-merge.md`
