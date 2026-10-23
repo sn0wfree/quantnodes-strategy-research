@@ -63,6 +63,7 @@ flowchart LR
 | **0.5** | **CI 门禁**：① `core/**` 禁 import `api/**`/`cli/**` ② 单文件路由数 ≤ 12 ③ 新增文件 > 800 行告警 | 门禁在 CI 生效并拦下违规 PR | 移除门禁 | 0.1–0.3 | **0.5d** |
 | **0.6** | **统一注册（薄包装）**：建 `core/capability/`（`CapabilitySpec` + `CapabilityRegistry`），先只包住 provider / data_source 两个已有注册表 | 新部件 1 行注册；对外 API 不变 | 移除包装层 | — | **1d** |
 | **0.7** | **一致性套件起步**：`tests/conformance/` 先 2 个（provider / data_loader） | 新实现进 CI 自动被验 | 删套件 | — | **1d** |
+| **0.8** | **上下文中枢试点**：`ContextItem` + `ContextProvider` 协议 + `ContextHub` 骨架（**只收 1 个 provider**：goal）；**G1 的 ContextPlan 作为其「仲裁阶段」内嵌，不写两遍** | 1 个 provider 走通 provider→bundle→render | 移除 provider | — | **1.5d** |
 
 **W0 退出标准**：`core→api` 反向 = 0 · 对外事件通道 = 1 · 持久化契约文档 + 测试就位 · CI 门禁生效。
 
@@ -76,6 +77,7 @@ flowchart LR
 | **1.4** | **`propose_next` 决策面**（D2）：停因映射为动作；`STAGNATION/DISCARD_STREAK/novelty拒绝` → 派生新假设继续；`TARGETS_MET/BUDGET` → 收尾 | 自主研究中出现 ≥1 次 propose；假设树非空 | 关掉该分支 | 1.1 + 1.3 | **2–3d** |
 | **1.5** | **失败降级阶梯**（D3）：数据不可用 → 换源/放宽/降频；因子失败 → 记失败因子→派生变体→跳过 | 失败场景下自动尝试次数 > 0；无人工介入完成降级 | 退回只提示 | 1.3 | **2–3d** |
 | **1.6** | **`EventSource` 协议**（接缝规范）：`EventStore` 实现它，事件源从此可替换 | core/agent 侧不再依赖具体 EventStore 类 | 保留具体类实现 | 0.2 | **0.5d** |
+| **1.7** | **injector → provider 适配**（goal/todo/memory 三类）+ **记忆注入三改**（位置 task串→messages · 每条带出处 · 假设默认纳入） | 注入落在 messages 且带 `[来源·日期·类型]` | 回旧注入路径 | 0.8 | **1.5d** |
 
 **W1 退出标准**：`propose_next` 调用率 > 0 · 降级自动尝试 > 0 · 记忆新增/轮 > 0 且下轮命中 · 人仍持有 objective 与预算。
 
@@ -85,9 +87,10 @@ flowchart LR
 |---|---|---|---|---|---|
 | **2.1** | **统一 token 估算**（G1-1）：3 套 → 1 套（`utils/token_utils`） | 同一消息集三处值一致 | 单点回退 | — | **0.5d** |
 | **2.2** | **ContextPlan 影子模式**（G1-2）：只算不裁，`explain()` 进 trace | 1 周数据：多少轮会超、超多少、谁被裁 | 关闭 | 2.1 | **1d + 观察** |
-| **2.3** | **ContextPlan 开启裁剪**（G1-3）：裁剪顺序固定；压缩降级为兜底 | eval 跟幅不降；PR lane 绿 | 一行开关 | 2.2 | **2d** |
+| **2.3** | **ContextPlan 开启裁剪**（G1-3）：裁剪顺序固定；压缩降级为兜底；**实现落在中枢的仲裁阶段，不另起模块** | eval 跟幅不降；PR lane 绿 | 一行开关 | 2.2 | **2d** |
 | **2.4** | **巨文件按切口拆**（每项独立）：study 路由切面（33→≤12 路由/模块）· session service 拆 3 协作者 · goal/study store 读写分仓 · autoresearch 消包 | >800 行文件 25 → ≤ 10 | 单项回退 | W0 完成 | 每项 1–2d |
 | **2.5** | **接缝规范续**：`ToolsetProvider` 协议 + `PersistenceContract` 一致性测试 | 存储/工具集可替换；契约有测试背书 | 单项回退 | 0.4 / 0.7 | **1d** |
+| **2.6** | **`ContextSnapshot`**（可回放/可 diff）→ 服务「上下文变化 → 行为变化」归因 | 改 prompt/工具/记忆后能 diff 两次运行上下文 | 关闭 | 0.8 / 2.3 | **1.5d** |
 
 **W2 退出标准**：单文件路由 ≤ 12 · 上帝服务方法 ≤ 12 · >800 行文件 ≤ 10 · 上下文装配恒不超预算且 `validate()` 必过。
 

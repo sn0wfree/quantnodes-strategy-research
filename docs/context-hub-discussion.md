@@ -23,7 +23,44 @@
 
 ---
 
-## 2. 必须避免的失败模式
+## 2.5 与 G1 · ContextPlan 的关系（**不是两个东西，是包含关系**）
+
+你的直觉对：两者高度相似。**结论是必须合并，否则又会变成两套预算系统——那正是我们要治的病。**
+
+| | **ContextPlan（G1）** | **ContextHub（中枢）** |
+|---|---|---|
+| 输入 | parts **已拿到**（system/tools/history/injected） | parts **未知**——要先去问各 provider |
+| 职责 | **怎么裁**（算账 + 有序裁剪 + 审计） | **谁来贡献 + 裁 + 怎么渲染 + 怎么解释** |
+| 状态 | 无状态纯函数 | 有注册表（provider 列表） |
+| 依赖 | 无 | 只依赖协议 |
+| 产出 | 裁好的 parts + `TrimRecord[]` | `ContextBundle`（items + 分区 + 溯源 + 账本） |
+
+**即：ContextPlan 是中枢的「仲裁阶段」**，不是一个兄弟概念。
+
+```mermaid
+flowchart LR
+  Q[ContextQuery] --> COL["① 收集<br/>provider.provide()"]
+  COL --> ARB["② 仲裁 = ContextPlan（G1）<br/>唯一 token 账本 + 有序裁剪 + scope"]
+  ARB --> BUN["③ ContextBundle<br/>items + 分区 + 溯源 + 账本"]
+  BUN --> REND["④ 渲染（PromptBuilder 协议）"]
+  BUN --> EXP["⑤ explain / snapshot"]
+  REND --> LLM[LLM]
+```
+
+### 由此得到一个明确的岔路
+
+| 你的目标只要…… | 做法 | 成本 |
+|---|---|---|
+| **「上下文不超预算」** | **只做 G1 ContextPlan**（G1-1/2/3），**不建中枢** | 2–3 天 |
+| **「上下文成为中枢，其他范式接入这里」** | 建 ContextHub，**ContextPlan 作为其仲裁阶段内嵌**（不再单独存在） | +1.5d（W0 试点）+ W1/W2 铺开 |
+
+**我的建议**：两条路**不冲突**——G1-1（统一估算）与 G1-2（影子模式）**可以立即开始**，它们不依赖中枢；中枢在 W0 之后、作为「收集+溯源+快照」的增量能力加进来，**G1-3 的裁剪实现直接落在中枢的仲裁阶段里**，不写两遍。
+
+> 一句话：**ContextPlan 是「算法」，ContextHub 是「流水线」；流水线里跑的就是那个算法。**
+
+---
+
+## 3. 必须避免的失败模式
 
 中枢最容易变成上帝对象。三条硬约束：
 
