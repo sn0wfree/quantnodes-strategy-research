@@ -333,6 +333,8 @@ class CompleteGoalTool(BaseTool):
         recap: str | None = None,
     ) -> str:
         session_id = ctx.session_id or "default"
+        store = None
+        current = None
 
         try:
             store = _get_store()
@@ -358,7 +360,7 @@ class CompleteGoalTool(BaseTool):
         except Exception as exc:
             logger.exception("complete_goal failed")
             msg = str(exc)
-            if "lacks evidence" in msg:
+            if "lacks evidence" in msg and store is not None and current is not None:
                 missing = _missing_required_criteria(store, current.goal_id)
                 fix = (
                     f"required criteria lack evidence: {missing or 'n/a'}; "

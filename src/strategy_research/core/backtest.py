@@ -549,17 +549,14 @@ def run_backtest_from_yaml(
         strategy_dir = workspace_path / "strategies" / strategy_name
     else:
         strategy_dir = Path(strategy_dir)
-    if yaml_path is None:
-        yaml_path = strategy_dir / "config.yaml"
-    else:
-        yaml_path = Path(yaml_path)
+    resolved_yaml = Path(yaml_path) if yaml_path is not None else strategy_dir / "config.yaml"
 
-    if not yaml_path.exists():
-        return {"success": False, "run": "", "metrics": {}, "error": f"配置文件不存在: {yaml_path}"}
+    if not resolved_yaml.exists():
+        return {"success": False, "run": "", "metrics": {}, "error": f"配置文件不存在: {resolved_yaml}"}
 
     try:
         from .config_runner import run_from_yaml
-        result = run_from_yaml(str(yaml_path), workspace_path)
+        result = run_from_yaml(str(resolved_yaml), workspace_path)
 
         # 保存结果
         if runs_dir is None:

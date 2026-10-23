@@ -69,8 +69,9 @@ class ThinkingSpinner:
 
     def __enter__(self) -> "ThinkingSpinner":
         spinner = Spinner(self._spinner_name, text=self._renderable, style="primary")
-        self._live = Live(spinner, refresh_per_second=12, transient=True)
-        self._live.__enter__()
+        live = Live(spinner, refresh_per_second=12, transient=True)
+        self._live = live
+        live.__enter__()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -89,8 +90,9 @@ class ThinkingSpinner:
             yield
         finally:
             spinner = Spinner(self._spinner_name, text=self._build_renderable(), style="primary")
-            self._live = Live(spinner, refresh_per_second=12, transient=True)
-            self._live.__enter__()
+            live = Live(spinner, refresh_per_second=12, transient=True)
+            self._live = live
+            live.__enter__()
 
 
 __all__ = ["ThinkingSpinner"]

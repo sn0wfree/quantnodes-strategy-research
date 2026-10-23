@@ -65,6 +65,7 @@ class HangingEventsStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         self._conn.row_factory = sqlite3.Row
+        self._closed = False
         self._lock = threading.RLock()
         with self._lock:
             self._conn.executescript(_SCHEMA)
@@ -72,12 +73,12 @@ class HangingEventsStore:
 
     def close(self) -> None:
         with self._lock:
-            if self._conn is not None:
+            if not self._closed:
                 try:
                     self._conn.close()
                 except sqlite3.Error:
                     pass
-                self._conn = None
+                self._closed = True
 
     def __enter__(self) -> "HangingEventsStore":
         return self
@@ -99,7 +100,7 @@ class HangingEventsStore:
         failure (observability must not break the main path)."""
         if event_type not in _ALL_EVENT_TYPES:
             return
-        if self._conn is None:
+        if self._closed:
             return  # closed — best-effort, observability must not raise
         try:
             with self._lock:
@@ -271,7 +272,7 @@ class HangingEventsStore:
 
     def clear(self, *, hours: float | None = None) -> int:
         """Delete events (all or older than ``hours``). Returns rows removed."""
-        if self._conn is None:
+        if self._closed:
             return 0  # closed — best-effort
         try:
             with self._lock:

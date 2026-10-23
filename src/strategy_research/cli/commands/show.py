@@ -21,7 +21,7 @@ from rich.panel import Panel
 from strategy_research.cli.theme import get_console
 
 
-def _resolve_console(console: Optional[Console] = None) -> Console:
+def _resolve_console(console: Any = None) -> Console:
     return console or get_console()
 
 
@@ -49,7 +49,7 @@ def _locate_run(run_id: str) -> Optional[Path]:
     return None
 
 
-def cmd_show(run_id: str, *, console: Optional[Console] = None) -> int:
+def cmd_show(run_id: str, *, console: Any = None) -> int:
     """``/show <run_id>`` — print run summary."""
     console = _resolve_console(console)
     run_dir = _locate_run(run_id)
@@ -68,7 +68,7 @@ def cmd_show(run_id: str, *, console: Optional[Console] = None) -> int:
     return 0
 
 
-def cmd_pine(run_id: str, *, console: Optional[Console] = None) -> int:
+def cmd_pine(run_id: str, *, console: Any = None) -> int:
     """``/pine <run_id>`` — emit a minimal TradingView Pine Script v5 stub."""
     console = _resolve_console(console)
     run_dir = _locate_run(run_id)
@@ -98,7 +98,7 @@ def cmd_pine(run_id: str, *, console: Optional[Console] = None) -> int:
     return 0
 
 
-def cmd_skill(*, console: Optional[Console] = None) -> int:
+def cmd_skill(*, console: Any = None) -> int:
     """``/skill`` — list bundled + user skills via ``SkillsLoader``."""
     console = _resolve_console(console)
     try:

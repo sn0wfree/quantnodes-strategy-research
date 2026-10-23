@@ -516,9 +516,12 @@ class ResearchApp(App):
             if tv._streamer is None:
                 # No active streaming session — start one for this delta
                 tv.begin_streaming()
-            tv._streamer.append_delta(delta)
+            streamer = tv._streamer
+            if streamer is None:
+                return
+            streamer.append_delta(delta)
             tv._truncate_to(tv._stream_baseline)
-            rendered = tv._streamer.render()
+            rendered = streamer.render()
             if rendered:
                 tv.write(rendered)
         except Exception:

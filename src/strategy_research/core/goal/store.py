@@ -78,6 +78,7 @@ class GoalStore:
         self.db_path = Path(db_path) if db_path is not None else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = connect(self.db_path)
+        self._closed = False
         self._lock = threading.RLock()
         self._init_db()
 
@@ -90,12 +91,12 @@ class GoalStore:
         snapshot store) stay open for the process lifetime.
         """
         with self._lock:
-            if self._conn is not None:
+            if not self._closed:
                 try:
                     self._conn.close()
                 except sqlite3.Error:
                     pass
-                self._conn = None
+                self._closed = True
 
     def __enter__(self) -> "GoalStore":
         return self

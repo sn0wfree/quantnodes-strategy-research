@@ -36,7 +36,7 @@ def _resolve_db_path() -> Path:
     return Path.cwd() / "goals.db"
 
 
-def _resolve_console(console: Optional[Console] = None) -> Console:
+def _resolve_console(console: Any = None) -> Console:
     return console or get_console()
 
 
@@ -69,7 +69,7 @@ def _checkpoint_base_dir() -> Path:
     return Path.home() / ".quantnodes-research" / "checkpoints"
 
 
-def cmd_status(*, console: Optional[Console] = None, session_id: str = "cli") -> int:
+def cmd_status(*, console: Any = None, session_id: str = "cli") -> int:
     """``/goal`` — render current goal snapshot."""
     console = _resolve_console(console)
     try:
@@ -106,7 +106,7 @@ def cmd_status(*, console: Optional[Console] = None, session_id: str = "cli") ->
     return 0
 
 
-def cmd_start(objective: str, *, console: Optional[Console] = None,
+def cmd_start(objective: str, *, console: Any = None,
               session_id: str = "cli", template_key: str = "",
               workflow_name: str = "") -> int:
     """``/goal start <objective> [--template <key>] [--workflow <name>]`` — create a new goal.
@@ -234,7 +234,7 @@ def _start_workflow(
 
 
 def cmd_evidence(criterion_ref: str, note: str, *,
-                 console: Optional[Console] = None,
+                 console: Any = None,
                  session_id: str = "cli") -> int:
     """``/goal evidence <idx-or-id> <note>``."""
     console = _resolve_console(console)
@@ -288,7 +288,7 @@ def cmd_evidence(criterion_ref: str, note: str, *,
     return 0
 
 
-def cmd_complete(recap: str = "", *, console: Optional[Console] = None,
+def cmd_complete(recap: str = "", *, console: Any = None,
                  session_id: str = "cli", lite: bool = False) -> int:
     """``/goal complete [recap] [--lite]`` — mark the goal complete.
 
@@ -346,7 +346,7 @@ def cmd_complete(recap: str = "", *, console: Optional[Console] = None,
     return 0
 
 
-def cmd_cancel(recap: str = "", *, console: Optional[Console] = None,
+def cmd_cancel(recap: str = "", *, console: Any = None,
                session_id: str = "cli") -> int:
     """``/goal cancel [recap]``."""
     console = _resolve_console(console)
@@ -373,7 +373,7 @@ def cmd_cancel(recap: str = "", *, console: Optional[Console] = None,
     return 0
 
 
-def cmd_help(*, console: Optional[Console] = None) -> int:
+def cmd_help(*, console: Any = None) -> int:
     """``/goal help`` — usage panel."""
     console = _resolve_console(console)
     body = (
@@ -390,7 +390,7 @@ def cmd_help(*, console: Optional[Console] = None) -> int:
     return 0
 
 
-def cmd_templates(*, console: Optional[Console] = None) -> int:
+def cmd_templates(*, console: Any = None) -> int:
     """``/goal templates`` — list available goal templates."""
     from strategy_research.core.goal.templates import list_templates
     console = _resolve_console(console)
@@ -459,7 +459,7 @@ def _resolve_workflow_path(name_or_path: str) -> Path | None:
     return None
 
 
-def cmd_workflows(*args: str, console: Optional[Console] = None) -> int:
+def cmd_workflows(*args: str, console: Any = None) -> int:
     """``/goal workflows [list|show <name>|path <name>]`` — enumerate presets.
 
     Subcommands:
@@ -551,7 +551,7 @@ def _cmd_workflows_path(name: str, console: Console) -> int:
 # ── Phase 4 v0.5.1 — checkpoint control ──────────────────────────────
 
 
-def cmd_checkpoint(*args, console: Optional[Console] = None,
+def cmd_checkpoint(*args, console: Any = None,
                    session_id: str = "cli") -> int:
     """``/goal checkpoint [save|list|resume|delete] [args]``.
 

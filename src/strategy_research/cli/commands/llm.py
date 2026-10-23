@@ -274,5 +274,5 @@ def cmd_llm(args: argparse.Namespace) -> int:
         return _action_show()
     if args.add_key:
         return _action_add_key(args.add_key)
-    print(__doc__.strip())
+    print((__doc__ or "").strip())
     return 0

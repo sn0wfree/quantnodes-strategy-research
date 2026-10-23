@@ -429,6 +429,7 @@ async def _run_agent_loop_background(
 
         mm = get_default_memory_manager()
 
+        gateway = _get_permission_gateway(None)
         loop = build_chat_agent_loop(
             config=cfg,
             session_id=session_id,
@@ -439,8 +440,8 @@ async def _run_agent_loop_background(
             # Tier 1 A1: wire the permission gate so ASK verdicts
             # trigger an SSE permission_request that the front-end
             # answers via POST /api/chat/permission/respond.
-            permission_evaluator=_get_permission_gateway(None).evaluator,
-            permission_gateway=_get_permission_gateway(None),
+            permission_evaluator=gateway.evaluator if gateway else None,
+            permission_gateway=gateway,
         )
 
         result = await loop.arun(task)

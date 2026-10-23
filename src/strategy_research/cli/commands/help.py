@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -21,11 +21,11 @@ _SHORTCUTS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _resolve_console(console: Optional[Console] = None) -> Console:
+def _resolve_console(console: Any = None) -> Console:
     return console or get_console()
 
 
-def render_help_table(*, console: Optional[Console] = None) -> int:
+def render_help_table(*, console: Any = None) -> int:
     """Render the help tables. Returns 0 on success."""
     console = _resolve_console(console)
 

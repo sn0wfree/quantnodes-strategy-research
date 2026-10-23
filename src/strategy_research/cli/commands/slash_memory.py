@@ -23,7 +23,7 @@ from rich.table import Table
 from strategy_research.cli.theme import get_console
 
 
-def _resolve_console(console: Optional[Console] = None) -> Console:
+def _resolve_console(console: Any = None) -> Console:
     return console or get_console()
 
 
@@ -42,7 +42,7 @@ def _store():
     return PersistentMemory()
 
 
-def cmd_list(*, console: Optional[Console] = None, limit: int = 50) -> int:
+def cmd_list(*, console: Any = None, limit: int = 50) -> int:
     """``/memory`` (no args) — list memory entries."""
     console = _resolve_console(console)
     try:
@@ -76,7 +76,7 @@ def cmd_list(*, console: Optional[Console] = None, limit: int = 50) -> int:
     return 0
 
 
-def cmd_show(name: str, *, console: Optional[Console] = None) -> int:
+def cmd_show(name: str, *, console: Any = None) -> int:
     """``/memory <name>`` — show one entry."""
     console = _resolve_console(console)
     if not name:
@@ -99,7 +99,7 @@ def cmd_show(name: str, *, console: Optional[Console] = None) -> int:
     return 0
 
 
-def cmd_search(query: str, *, console: Optional[Console] = None) -> int:
+def cmd_search(query: str, *, console: Any = None) -> int:
     """``/memory search <q>`` — find relevant entries."""
     console = _resolve_console(console)
     if not query.strip():
@@ -123,7 +123,7 @@ def cmd_search(query: str, *, console: Optional[Console] = None) -> int:
     return 0
 
 
-def cmd_forget(name: str, *, console: Optional[Console] = None, yes: bool = False) -> int:
+def cmd_forget(name: str, *, console: Any = None, yes: bool = False) -> int:
     """``/memory forget <name>`` — delete an entry."""
     console = _resolve_console(console)
     if not name:

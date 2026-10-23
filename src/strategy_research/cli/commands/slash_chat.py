@@ -13,7 +13,7 @@ interactive REPL.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -22,11 +22,11 @@ from rich.text import Text
 from strategy_research.cli.theme import get_console
 
 
-def _resolve_console(console: Optional[Console] = None) -> Console:
+def _resolve_console(console: Any = None) -> Console:
     return console or get_console()
 
 
-def _coming_soon(command: str, hint: str, console: Optional[Console] = None) -> int:
+def _coming_soon(command: str, hint: str, console: Any = None) -> int:
     """Render the placeholder panel for not-yet-wired commands."""
     console = _resolve_console(console)
     body = Text()

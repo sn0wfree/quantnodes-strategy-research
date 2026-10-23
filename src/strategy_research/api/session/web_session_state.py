@@ -106,10 +106,10 @@ def _shape_workflow_for_frontend(
     """
     config = getattr(runner, "_config", None)
     agent_status_map: dict[str, str] = {}
-    progress: dict | None = None
+    progress_data: dict = {}
     try:
-        progress = runner.get_progress()
-        agent_status_map = progress.get("agent_statuses", {}) or {}
+        progress_data = runner.get_progress() or {}
+        agent_status_map = progress_data.get("agent_statuses", {}) or {}
     except Exception as e:  # noqa: BLE001
         logger.debug("[state] get_progress failed: %s", e)
 
@@ -141,7 +141,7 @@ def _shape_workflow_for_frontend(
         "name": workflow_name,
         "nodes": nodes,
         "edges": edges,
-        "progress": progress,
+        "progress": progress_data,
         "agent_statuses": agent_status_map,
     }
 

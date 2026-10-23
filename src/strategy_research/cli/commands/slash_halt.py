@@ -10,9 +10,8 @@ Mirrors ``vibe-trading/cli/commands/chat.py``'s halt/resume slash commands.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from rich.console import Console
 
 from strategy_research.cli.halt import (
     clear_halt,
@@ -42,14 +41,14 @@ def is_resume_command(input_text: str) -> bool:
     return text in {"resume", "continue", "go"}
 
 
-def cmd_halt(reason: str = "", *, console: Optional[Console] = None) -> int:
+def cmd_halt(reason: str = "", *, console: Any = None) -> int:
     """``/halt`` — trip the kill switch."""
     trip_halt(reason=reason)
     get_console().print("[bold red]⚠ HALT tripped[/bold red] — long-running loops will exit.")
     return 0
 
 
-def cmd_resume(*, console: Optional[Console] = None) -> int:
+def cmd_resume(*, console: Any = None) -> int:
     """``/resume`` — clear the kill switch."""
     clear_halt()
     get_console().print("[bold green]✓ HALT cleared[/bold green] — operations resumed.")

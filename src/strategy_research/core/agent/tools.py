@@ -665,7 +665,10 @@ class BaseTool(ABC):
             PermissionGateway,
         )
 
-        decision = ctx.permission_evaluator.evaluate(self.name, kwargs)
+        evaluator = ctx.permission_evaluator
+        if evaluator is None:
+            return
+        decision = evaluator.evaluate(self.name, kwargs)
         if decision.action == PermissionAction.ALLOW:
             return
         if decision.action == PermissionAction.DENY:

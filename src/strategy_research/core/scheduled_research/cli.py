@@ -237,7 +237,8 @@ async def _run_job_and_wait(job_id: str) -> int:
     await executor.run_once_async(job_id)
     print(f"✓ 已触发任务 {job.id}")
 
-    study_id = store.get(job_id).last_run_id
+    refreshed = store.get(job_id)
+    study_id = refreshed.last_run_id if refreshed else None
     if not study_id:
         print("  任务未产生 study（检查上方错误）")
         return 1

@@ -29,11 +29,11 @@ def _resolve_db_path() -> Optional[str]:
     return os.environ.get(_PATH_ENV) or None
 
 
-def _resolve_console(console: Optional[Console] = None) -> Console:
+def _resolve_console(console: Any = None) -> Console:
     return console or get_console()
 
 
-def cmd_history(*, console: Optional[Console] = None, limit: int = 10) -> int:
+def cmd_history(*, console: Any = None, limit: int = 10) -> int:
     """``/history`` — list the most recent sessions."""
     console = _resolve_console(console)
     db_path = _resolve_db_path()
@@ -65,7 +65,7 @@ def cmd_history(*, console: Optional[Console] = None, limit: int = 10) -> int:
     return 0
 
 
-def cmd_search(query: str, *, console: Optional[Console] = None, limit: int = 10) -> int:
+def cmd_search(query: str, *, console: Any = None, limit: int = 10) -> int:
     """``/search <query>`` — FTS5 search over session messages."""
     console = _resolve_console(console)
     if not query.strip():
@@ -100,7 +100,7 @@ def cmd_search(query: str, *, console: Optional[Console] = None, limit: int = 10
     return 0
 
 
-def cmd_export(*, console: Optional[Console] = None) -> int:
+def cmd_export(*, console: Any = None) -> int:
     """``/export`` — placeholder pointing at the web UI's md/json export."""
     console = _resolve_console(console)
     body = Text()

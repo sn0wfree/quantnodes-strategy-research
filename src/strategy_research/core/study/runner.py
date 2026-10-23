@@ -758,6 +758,8 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
                 result = resumed
 
 
+            if result is None:
+                result = {}
             metrics = result.get("metrics", {})
             verdict = result.get("verdict", "discard")
             summary = result.get("summary")
