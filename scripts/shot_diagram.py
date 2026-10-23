@@ -1,11 +1,15 @@
-"""Screenshot the architecture diagram to verify rendering."""
+"""Screenshot a diagram page to verify rendering.
+
+Usage: python scripts/shot_diagram.py [page.html]   (default: architecture-diagram.html)
+"""
 from pathlib import Path
 import sys
 
 from playwright.sync_api import sync_playwright
 
-URL = "http://127.0.0.1:8765/architecture-diagram.html"
-OUT = Path("docs/architecture-diagram.png")
+PAGE = sys.argv[1] if len(sys.argv) > 1 else "architecture-diagram.html"
+URL = f"http://127.0.0.1:8765/{PAGE}"
+OUT = Path(f"docs/{Path(PAGE).stem}.png")
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 

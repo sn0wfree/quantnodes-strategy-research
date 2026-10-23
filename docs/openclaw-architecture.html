@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenClaw 架构图与对标分析</title>
+<style>
+  body{margin:0;background:#f8fafc;color:#0f172a;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1660px;margin:0 auto;padding:28px 24px 64px}
+  h1{font-size:22px;font-weight:600;margin:0 0 4px}
+  .sub{color:#64748b;font-size:13px;margin:0 0 16px}
+  h2{font-size:16px;font-weight:600;margin:32px 0 10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
+  .scroll{overflow-x:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px;margin-bottom:8px}
+  .cap{color:#64748b;font-size:12.5px;margin:2px 2px 14px}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:#64748b;margin:8px 2px 0}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;font-size:12.5px}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+  th{background:#f1f5f9;font-weight:600;color:#334155}
+  td.k{font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .g{color:#047857;font-weight:600}.y{color:#b45309;font-weight:600}.r{color:#b91c1c;font-weight:600}
+  footer{margin-top:28px;padding-top:12px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>OpenClaw 架构图 与 我们对标</h1>
+<p class="sub">对象：github.com/openclaw/openclaw（MIT · 392k★ · pnpm monorepo · TS）· 资料：README · /concepts/architecture · /concepts/agent-loop · /concepts/agent-runtimes · /concepts/session-controller · /concepts/system-prompt · /plugins · /gateway/security · /start/why-openclaw</p>
+
+<h2>1 · OpenClaw 架构图（原生形态）</h2>
+<div class="scroll">
+<svg viewBox="0 0 1600 1080" width="1600" height="1080" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <style>
+    .lyr{font-size:14px;font-weight:600;fill:#334155}
+    .bt{font-size:15px;font-weight:600;fill:#0f172a}
+    .st{font-size:12.5px;fill:#475569}
+    .sm{font-size:11.5px;fill:#94a3b8}
+    .chip{font-size:12px;fill:#334155}
+    .hub{font-size:15px;font-weight:600;fill:#0c4a6e}
+    .hq{font-size:12.5px;fill:#0369a1}
+    .box{fill:#fff;stroke:#cbd5e1;stroke-width:1}
+    .boxb{fill:#e0f2fe;stroke:#7dd3fc;stroke-width:1.2}
+    .boxa{fill:#fef3c7;stroke:#fcd34d;stroke-width:1.2}
+    .boxd{fill:#f1f5f9;stroke:#334155;stroke-width:1.6;stroke-dasharray:7 4}
+    .boxg{fill:#f1f5f9;stroke:#cbd5e1;stroke-width:1}
+    .ar{stroke:#94a3b8;stroke-width:1.4;fill:none;marker-end:url(#a1)}
+    .arb{stroke:#0ea5e9;stroke-width:1.4;fill:none;marker-end:url(#a2)}
+    .lbl{font-size:11.5px;fill:#64748b}
+  </style>
+  <defs>
+    <marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L7,4 L0,8" fill="none" stroke="#94a3b8" stroke-width="1.4"/></marker>
+    <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L7,4 L0,8" fill="none" stroke="#0ea5e9" stroke-width="1.4"/></marker>
+  </defs>
+
+  <!-- 渠道 -->
+  <text x="40" y="60" class="lyr">渠道</text>
+  <rect x="130" y="20" width="1100" height="76" rx="9" class="box"/>
+  <text x="146" y="44" class="bt">Channels（插件 · 20+）</text>
+  <text x="146" y="66" class="st">WhatsApp(Baileys) · Telegram(grammY) · Slack · Discord · Signal · iMessage · WebChat · Matrix · IRC · Nostr</text>
+  <text x="146" y="86" class="sm">入站消息按 channel 选队列模式（steer / followup / collect / interrupt）</text>
+
+  <rect x="1250" y="20" width="310" height="76" rx="9" class="boxg"/>
+  <text x="1266" y="44" class="bt">开放标准</text>
+  <text x="1266" y="66" class="st">MCP client/server · A2A 1.0</text>
+  <text x="1266" y="86" class="st">ACP · AgentSkills · OpenAI 兼容 API</text>
+
+  <!-- 客户端 / 节点 -->
+  <text x="40" y="170" class="lyr">客户端</text>
+  <rect x="130" y="120" width="540" height="130" rx="9" class="boxb"/>
+  <text x="146" y="146" class="bt">Clients（控制面客户端）</text>
+  <text x="146" y="168" class="st">macOS app · CLI · Web Admin · Automations · WebChat</text>
+  <text x="146" y="188" class="st">每个客户端一条 WebSocket 连接</text>
+  <text x="146" y="210" class="sm">req: health / status / send / agent / system-presence</text>
+  <text x="146" y="230" class="sm">sub: tick / agent / presence / shutdown</text>
+
+  <rect x="690" y="120" width="540" height="130" rx="9" class="boxb"/>
+  <text x="706" y="146" class="bt">Nodes（远端执行面）</text>
+  <text x="706" y="168" class="st">macOS · iOS · Android · headless</text>
+  <text x="706" y="188" class="st">同一 WS 服务，声明 role:node + caps/commands/permissions</text>
+  <text x="706" y="210" class="sm">camera.* · screen.record · location.get · canvas.*</text>
+  <text x="706" y="230" class="sm">配对：设备身份 + 审批（本地环回可自动批准）</text>
+
+  <line x1="400" y1="250" x2="400" y2="292" class="ar"/>
+  <line x1="960" y1="250" x2="960" y2="292" class="ar"/>
+  <text x="410" y="276" class="lbl">WS（typed req/res/event）</text>
+
+  <!-- Gateway -->
+  <text x="40" y="320" class="lyr">控制面</text>
+  <rect x="130" y="292" width="1100" height="470" rx="10" class="boxb"/>
+  <text x="146" y="318" class="hub">Gateway（单进程 · 本地控制面 · 一个信任域）</text>
+  <text x="146" y="338" class="sm">拥有：session · 队列 · 策略 · 状态 · 审计 · 唯一调度器 —— 「一个 owner 对一件事」</text>
+
+  <rect x="150" y="352" width="340" height="180" rx="8" class="box"/>
+  <text x="164" y="374" class="bt">Session Controller</text>
+  <text x="164" y="394" class="st">「谁下一个可以占用这个 session」</text>
+  <text x="164" y="414" class="st">7 阶段：idle/admitting/preparing/</text>
+  <text x="164" y="430" class="st">running/finishing/settling/mutating</text>
+  <text x="164" y="452" class="st">队列模式：steer/followup/collect/interrupt</text>
+  <text x="164" y="472" class="st">6 个正交真值：owned/admissible/active/</text>
+  <text x="164" y="488" class="st">injectable/abortable/settled</text>
+  <text x="164" y="510" class="sm">fencing：捕获后指向，禁按 key 重新发现</text>
+
+  <rect x="510" y="352" width="340" height="180" rx="8" class="box"/>
+  <text x="524" y="374" class="bt">Agent Runtime Selector</text>
+  <text x="524" y="394" class="st">选择序：model-scoped 策略</text>
+  <text x="524" y="412" class="st">→ provider-scoped → auto 认领</text>
+  <text x="524" y="430" class="st">→ 内置 openclaw 回退</text>
+  <text x="524" y="452" class="st">每面（loop/thread state/compaction/</text>
+  <text x="524" y="468" class="st">context engine/delivery）有具名 owner</text>
+  <text x="524" y="490" class="sm">不支持则拒绝，不静默降级</text>
+  <text x="524" y="510" class="sm">一旦开始执行，失败不经另一 runtime 重放</text>
+
+  <rect x="870" y="352" width="340" height="180" rx="8" class="box"/>
+  <text x="884" y="374" class="bt">Prompt Assembly</text>
+  <text x="884" y="394" class="st">平台唯一所有者（无 runtime 默认 prompt）</text>
+  <text x="884" y="414" class="st">三层：纯渲染器 → 配置 → runtime 事实</text>
+  <text x="884" y="434" class="st">provider 只贡献 3 个具名核心段</text>
+  <text x="884" y="452" class="st">或缓存边界上的 stable prefix</text>
+  <text x="884" y="474" class="st">模式：full / minimal(sub-agent) / none</text>
+  <text x="884" y="494" class="st">预算：谁产出谁拥有（skills/limits）</text>
+  <text x="884" y="514" class="sm">稳定段在上 · 目录在下 · 前缀字节不变</text>
+
+  <rect x="150" y="548" width="340" height="180" rx="8" class="box"/>
+  <text x="164" y="570" class="bt">Plugin Host</text>
+  <text x="164" y="590" class="st">api.on(...) 类型化 hook（优先级/合并/block）</text>
+  <text x="164" y="610" class="st">能力版本化：compat.pluginApi / minHostVersion</text>
+  <text x="164" y="630" class="st">排他 slot：memory / contextEngine</text>
+  <text x="164" y="650" class="st">优先级：deny &gt; allow &gt; 逐项启用</text>
+  <text x="164" y="670" class="st">安装策略：operator 自有 policy 命令</text>
+  <text x="164" y="692" class="st">信任 = 记录溯源（provenance-missing 拒绝）</text>
+  <text x="164" y="712" class="sm">边界由 CI import guards 强制，不靠约定</text>
+
+  <rect x="510" y="548" width="340" height="180" rx="8" class="box"/>
+  <text x="524" y="570" class="bt">Command Queue & Lanes</text>
+  <text x="524" y="590" class="st">按物理 session 身份串行 turn</text>
+  <text x="524" y="610" class="st">全局容量组管跨 session 并发</text>
+  <text x="524" y="630" class="st">activeWriterRunId 认领 +</text>
+  <text x="524" y="646" class="st">expectedWriterRunId 提交校验</text>
+  <text x="524" y="668" class="st">副作用方法需幂等键（短时去重）</text>
+  <text x="524" y="692" class="st">审计账本：只投影元数据，</text>
+  <text x="524" y="708" class="st">不复制 prompt/消息/工具结果</text>
+
+  <rect x="870" y="548" width="340" height="180" rx="8" class="box"/>
+  <text x="884" y="570" class="bt">Auth · Pairing · Scheduler</text>
+  <text x="884" y="590" class="st">设备身份 + 配对审批 + 角色上限</text>
+  <text x="884" y="610" class="st">默认 deny-all 角色</text>
+  <text x="884" y="630" class="st">GatewayScheduler：唯一调度器</text>
+  <text x="884" y="650" class="st">插件注册任务，宿主一个定时器</text>
+  <text x="884" y="670" class="st">持久化只存 deadline，</text>
+  <text x="884" y="686" class="st">owner 启动时重建计划</text>
+  <text x="884" y="708" class="sm">插件拿版本化能力 + beginClose/stop</text>
+
+  <rect x="150" y="740" width="1060" height="34" rx="6" class="boxg"/>
+  <text x="166" y="762" class="st">WS API：TypeBox schema → JSON Schema → Swift codegen；首帧必须 connect；事件不重放，缺口靠刷新</text>
+
+  <!-- 执行面 -->
+  <text x="40" y="820" class="lyr">执行面</text>
+  <rect x="130" y="790" width="540" height="110" rx="9" class="boxa"/>
+  <text x="146" y="814" class="bt">Agent Runtimes（harness 插件）</text>
+  <text x="146" y="836" class="st">openclaw 内置 · codex app-server · copilot SDK · claude-cli</text>
+  <text x="146" y="856" class="st">拥有「一次模型循环」；平台保留 channels/sessions/policy/state</text>
+  <text x="146" y="878" class="sm">原生面被 harness 拥有时，平台镜像+投影，不改内部</text>
+
+  <rect x="690" y="790" width="250" height="110" rx="9" class="box"/>
+  <text x="706" y="814" class="bt">Model Providers</text>
+  <text x="706" y="836" class="st">插件 · 托管或本地</text>
+  <text x="706" y="858" class="st">鉴权 · 模型发现 · 引用</text>
+  <text x="706" y="880" class="sm">provider 也可贡献 prompt 段</text>
+
+  <rect x="960" y="790" width="270" height="110" rx="9" class="box"/>
+  <text x="976" y="814" class="bt">Sandbox / Cloud Workers</text>
+  <text x="976" y="836" class="st">执行可搬走，Gateway 权限不跟随</text>
+  <text x="976" y="858" class="st">scoped worker 凭据独立生命周期</text>
+  <text x="976" y="880" class="sm">默认关闭，需显式配置</text>
+
+  <line x1="400" y1="762" x2="400" y2="790" class="arb"/>
+  <line x1="815" y1="762" x2="815" y2="790" class="arb"/>
+
+  <!-- 插件与标准 -->
+  <rect x="130" y="930" width="1100" height="120" rx="9" class="boxg"/>
+  <text x="146" y="956" class="bt">可插拔的全部表面（插件）</text>
+  <text x="146" y="980" class="st">channel · model provider · agent harness · tool · skill · memory · contextEngine(slot) · voice · media · web fetch/search</text>
+  <text x="146" y="1002" class="st">插件 SDK ~150 入口点，shrink-only 预算（增长必须是有意识决定）· plugins.allow 钉住最小面</text>
+  <text x="146" y="1026" class="sm">ClawHub 注册中心：发布审核、每版本信任判定、扫描状态（VirusTotal/ClawScan/静态分析）</text>
+  <text x="146" y="1044" class="sm">受支持的标准：MCP · A2A 1.0 · ACP · AgentSkills · OpenAI 兼容 API · OpenTelemetry + Prometheus · npm provenance</text>
+</svg>
+</div>
+<p class="cap">读法：上＝入口（渠道 / 客户端 / 节点），中＝<b>唯一的 Gateway 控制面</b>（7 个内部模块，每个一个 owner），下＝<b>可换执行面</b>（harness / provider / sandbox），底＝插件与开放标准。</p>
+
+<h2>2 · 同构对照（同一套视觉语法，逐行比）</h2>
+<div class="scroll">
+<svg viewBox="0 0 1600 780" width="1600" height="780" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <style>
+    .hdr{font-size:17px;font-weight:600;fill:#0f172a}
+    .hdr2{font-size:17px;font-weight:600;fill:#0c4a6e}
+    .row{font-size:13px;font-weight:600;fill:#334155}
+    .bt{font-size:13.5px;font-weight:600;fill:#0f172a}
+    .st{font-size:12px;fill:#475569}
+    .sm{font-size:11px;fill:#94a3b8}
+    .box{fill:#fff;stroke:#cbd5e1;stroke-width:1}
+    .boxb{fill:#e0f2fe;stroke:#7dd3fc;stroke-width:1.1}
+    .boxa{fill:#fef3c7;stroke:#fcd34d;stroke-width:1.1}
+    .boxr{fill:#fef2f2;stroke:#fca5a5;stroke-width:1.2}
+    .boxd{fill:#f1f5f9;stroke:#334155;stroke-width:1.4;stroke-dasharray:6 4}
+    .lbl{font-size:11px;fill:#64748b}
+    .ar{stroke:#94a3b8;stroke-width:1.2;fill:none;marker-end:url(#a1)}
+  </style>
+  <defs>
+    <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#94a3b8" stroke-width="1.2"/></marker>
+  </defs>
+
+  <text x="60" y="34" class="hdr2">OpenClaw</text>
+  <text x="860" y="34" class="hdr">我们（quantnodes-strategy-research）</text>
+
+  <!-- 入口 -->
+  <text x="18" y="82" class="row">入口</text>
+  <rect x="60" y="52" width="700" height="60" rx="8" class="box"/>
+  <text x="76" y="74" class="bt">渠道 20+（插件）· 客户端（mac/CLI/web/automation）· Nodes（设备）</text>
+  <text x="76" y="96" class="st">全部经 WS 协议接入 Gateway；入站按 channel 选队列模式</text>
+  <rect x="860" y="52" width="700" height="60" rx="8" class="box"/>
+  <text x="876" y="74" class="bt">CLI/TUI · FastAPI 20 routers · WebUI · MCP</text>
+  <text x="876" y="96" class="st">无统一入口协议：REST / WS / MCP / CLI 各走各的</text>
+
+  <!-- 控制面 -->
+  <text x="18" y="162" class="row">控制</text>
+  <rect x="60" y="122" width="700" height="80" rx="8" class="boxb"/>
+  <text x="76" y="144" class="bt">Gateway（1 个）：Session Controller · Queue · Runtime Selector · Plugin Host · Auth · Scheduler</text>
+  <text x="76" y="166" class="st">一个 owner 对一件事；7 阶段状态机；6 个正交真值；fencing 捕获后指向</text>
+  <text x="76" y="188" class="sm">一个信任域（不做多租户）</text>
+  <rect x="860" y="122" width="700" height="80" rx="8" class="boxr"/>
+  <text x="876" y="144" class="bt">3–4 套并存：SessionService · StudyRunner · SwarmRuntime · (Workflow=工具)</text>
+  <text x="876" y="166" class="st">控制面与执行面混层：SessionService/StudyRunner=控制面，AgentLoop/phase_engine=执行面</text>
+  <text x="876" y="188" class="sm">三处调度（service / runner / scheduler）· 无统一状态机</text>
+
+  <!-- 执行面 -->
+  <text x="18" y="262" class="row">执行</text>
+  <rect x="60" y="222" width="700" height="80" rx="8" class="boxa"/>
+  <text x="76" y="244" class="bt">Agent Runtimes（harness 插件）：openclaw · codex · copilot · claude-cli</text>
+  <text x="76" y="266" class="st">可选 + 声明式回退；每面有具名 owner；不支持则拒绝而非降级</text>
+  <text x="76" y="288" class="sm">一次模型循环 = 一个 runtime</text>
+  <rect x="860" y="222" width="700" height="80" rx="8" class="boxr"/>
+  <text x="876" y="244" class="bt">AgentLoop · phase_engine(phases|langgraph) —— 硬编码，无 runtime 契约</text>
+  <text x="876" y="266" class="st">两套固定工厂（role_factory / chat_loop），既不能换也不能声明回退</text>
+  <text x="876" y="288" class="sm">0.11 只是「搬目录」，终点应是「成为 runtime」</text>
+
+  <!-- 上下文 -->
+  <text x="20" y="362" class="row">上下文</text>
+  <rect x="60" y="322" width="700" height="80" rx="8" class="boxb"/>
+  <text x="76" y="344" class="bt">Prompt Assembly：平台唯一所有者；provider 只贡献 3 个具名段</text>
+  <text x="76" y="366" class="st">缓存边界：稳定段在上 / 目录在下，刷新不改变前缀字节；预算谁产出谁拥有</text>
+  <text x="76" y="388" class="sm">模式：full / minimal(sub-agent) / none</text>
+  <rect x="860" y="322" width="700" height="80" rx="8" class="boxr"/>
+  <text x="876" y="344" class="bt">4 个 PromptBuilder + 5 个 injector 各自拼；validate() 是死契约（0 调用）</text>
+  <text x="876" y="366" class="st">3 套 token 估算；无缓存边界（44 工具每次重算 tool_list）；无预算归属</text>
+  <text x="876" y="388" class="sm">ContextHub 方向对，但缺「缓存边界」与「预算归属」两条</text>
+
+  <!-- 扩展面 -->
+  <text x="20" y="462" class="row">扩展面</text>
+  <rect x="60" y="422" width="700" height="80" rx="8" class="boxb"/>
+  <text x="76" y="444" class="bt">插件：api.on 类型化 hook · 版本化能力 · 排他 slot · deny&gt;allow · 安装策略 · 溯源信任</text>
+  <text x="76" y="466" class="st">hook 语义精确：block:true 终局 / block:false 空操作 / compaction hook 不可否决</text>
+  <text x="76" y="488" class="sm">边界由 CI import guards 强制</text>
+  <rect x="860" y="422" width="700" height="80" rx="8" class="boxr"/>
+  <text x="876" y="444" class="bt">29 个协议 + 5 套注册表；hook 红线已立（一致 ✅）</text>
+  <text x="876" y="466" class="st">无 PROTOCOL_VERSION（0 处）· 无 deny/排他 slot 语义 · 无溯源信任记录</text>
+  <text x="876" y="488" class="sm">CI 门禁尚未建（主线 0.5）</text>
+
+  <!-- 状态与安全 -->
+  <text x="18" y="562" class="row">状态</text>
+  <rect x="60" y="522" width="700" height="80" rx="8" class="boxb"/>
+  <text x="76" y="544" class="bt">状态版本化 + 迁移归属 · 审计账本只投影元数据 · 记忆可归因清除</text>
+  <text x="76" y="566" class="st">write fence：activeWriterRunId + 提交校验（取代的 run 不能提交陈旧数据）</text>
+  <text x="76" y="588" class="sm">风险在代码里执行，不在提示词里请求；身份→范围→模型（最后）</text>
+  <rect x="860" y="522" width="700" height="80" rx="8" class="boxr"/>
+  <text x="876" y="544" class="bt">有 user_version 迁移机制；goal journal 两阶段（capture→backfill）</text>
+  <text x="876" y="566" class="st">无 write fence（fence 命中全在无关文件）· 记忆无 retention/purge 概念</text>
+  <text x="876" y="588" class="sm">不变量层（Tier 0 冻结）比 OpenClaw 更硬：他们 sandbox 默认关</text>
+
+  <!-- 结论 -->
+  <rect x="60" y="630" width="1500" height="120" rx="9" class="boxd"/>
+  <text x="80" y="656" class="bt">对照结论</text>
+  <text x="80" y="680" class="st">① 他们的骨架 = 1 控制面 + N 执行面；我们是 3–4 控制面 + 执行面混层 —— 这是「怪」的根因</text>
+  <text x="80" y="702" class="st">② 值得抄：runtime 选择器（而非合并工厂）· write fence · 缓存边界 · 协议版本+不匹配即拒 · 一个 owner 对一件事</text>
+  <text x="80" y="724" class="st">③ 不抄：单 Gateway 极简（我们多编排域是产品形态）· 20+ 渠道 · 「一次 turn」式 loop</text>
+  <text x="80" y="744" class="sm">④ 我们的护城河（假设—证伪—AEGIS—两阶段 journal · 70 题 golden + nightly 门禁 · 类型债治理）业界无对标物，不要动</text>
+</svg>
+</div>
+<p class="cap">红框 = 我们的差距（结构/纪律）；黄框 = 形态不同但各有道理；蓝框 = 双方都对齐的部分。</p>
+
+<h2>3 · 差异分析（按修的杠杆排序）</h2>
+<table>
+<thead><tr><th style="width:56px">序</th><th style="width:210px">差距</th><th style="width:170px">OpenClaw 怎么做</th><th>我们怎么改</th><th style="width:70px">估工</th></tr></thead>
+<tbody>
+<tr><td class="k">1</td><td>模型循环不可换</td><td>harness 插件 + 选择序 + 声明式回退</td><td>定义 <b>AgentRuntime</b>（prepare/run/settle）+ 选择器；role_factory / chat_loop 收成两个实现（<b>不合并</b>）</td><td>2d</td></tr>
+<tr><td class="k">2</td><td>控制面 3–4 套</td><td>Gateway 一个；Session Controller 一个 owner</td><td>收敛为 <b>1 控制面 + N runtime</b>：SessionController 状态机 + 队列模式 + Director 策略；StudyLoop 降为 research runtime</td><td>3–4d</td></tr>
+<tr><td class="k">3</td><td>无 write fence</td><td>activeWriterRunId + 提交事务校验</td><td>run 级 <b>activeRunId</b> + 提交校验：被取代的 run 不能提交陈旧数据</td><td>1d</td></tr>
+<tr><td class="k">4</td><td>无缓存边界/预算归属</td><td>稳定段在上、目录在下；谁产出谁拥有</td><td>ContextHub 扩两条：<b>缓存前缀稳定</b> + <b>分层预算</b>（per-attempt/provider/idle/总）</td><td>2d</td></tr>
+<tr><td class="k">5</td><td>协议无版本</td><td>compat.pluginApi / minHostVersion；不匹配即拒绝</td><td>给 29 个协议加 <b>PROTOCOL_VERSION</b> + 不匹配拒绝（不降级）；CI 门禁同步</td><td>1d</td></tr>
+<tr><td class="k">6</td><td>状态表达单一</td><td>6 个正交真值（owned/admissible/active/injectable/abortable/settled）</td><td>RunStatus 从单一 state 改为 6 个正交维度</td><td>0.5d</td></tr>
+<tr><td class="k">7</td><td>记忆无清除边界</td><td>可归因清除 + 明示「删除不覆盖什么」</td><td>自主研究会产生大量记忆：补 retention/purge 语义</td><td>1d</td></tr>
+</tbody>
+</table>
+
+<h2>4 · 一句话</h2>
+<p style="font-size:14px;line-height:1.7">
+我们不缺功能，缺的是 OpenClaw 那种<b>「一个 owner 对一件事」</b>的纪律：控制面 3–4 套、执行面混层、协议无版本、run 无栅栏、prompt 无缓存边界。
+补这 5 条，架构会立刻「正」起来；<b>研究方向、claims、AEGIS、两阶段 journal、70 题 golden 门禁</b>——这些我们的护城河，业界无对标物，一点都不用动。
+</p>
+
+<footer>
+  对标全文：<b>docs/industry-benchmark-openclaw-20261008.md</b>（逐维度对照 + 计划修正）·
+  我们的架构图：<b>docs/architecture-diagram.html</b>（v3）· 主线：<b>docs/refactor-master-plan-20261008.md</b>
+</footer>
+</div>
+</body>
+</html>
