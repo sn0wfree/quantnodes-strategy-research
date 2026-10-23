@@ -60,6 +60,7 @@ tui-captures/
 
 # Generated diagram previews (regenerable via scripts/shot_diagram.py; source of truth is the .html/.svg)
 docs/architecture-diagram.png
+docs/openclaw-architecture.png
 
 
 # Local config-audit snapshots (host-specific, may contain sensitive info)
