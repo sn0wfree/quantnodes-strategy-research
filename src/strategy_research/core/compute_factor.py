@@ -10,6 +10,7 @@ import re
 
 import numpy as np
 import pandas as pd
+from typing import cast
 
 # ============================================================
 # 结构化错误
@@ -44,62 +45,62 @@ class FactorComputeError(Exception):
 
 def ts_return(series: pd.Series, window: int) -> pd.Series:
     """N 期收益率。"""
-    return series.pct_change(window, fill_method=None)
+    return cast(pd.Series, series.pct_change(window, fill_method=None))
 
 
 def ts_std(series: pd.Series, window: int) -> pd.Series:
     """N 期标准差。"""
-    return series.rolling(window).std()
+    return cast(pd.Series, series.rolling(window).std())
 
 
 def ts_corr(x: pd.Series, y: pd.Series, window: int) -> pd.Series:
     """N 期相关系数。"""
-    return x.rolling(window).corr(y)
+    return cast(pd.Series, x.rolling(window).corr(y))
 
 
 def ts_rank(series: pd.Series, window: int) -> pd.Series:
     """N 期排名百分比。"""
-    return series.rolling(window).rank(pct=True)
+    return cast(pd.Series, series.rolling(window).rank(pct=True))
 
 
 def delay(series: pd.Series, periods: int) -> pd.Series:
     """滞后 N 期。"""
-    return series.shift(periods)
+    return cast(pd.Series, series.shift(periods))
 
 
 def delta(series: pd.Series, periods: int) -> pd.Series:
     """N 期变化量。"""
-    return series - series.shift(periods)
+    return cast(pd.Series, series - series.shift(periods))
 
 
 def ts_max(series: pd.Series, window: int) -> pd.Series:
     """N 期最大值。"""
-    return series.rolling(window).max()
+    return cast(pd.Series, series.rolling(window).max())
 
 
 def ts_min(series: pd.Series, window: int) -> pd.Series:
     """N 期最小值。"""
-    return series.rolling(window).min()
+    return cast(pd.Series, series.rolling(window).min())
 
 
 def ts_mean(series: pd.Series, window: int) -> pd.Series:
     """N 期均值。"""
-    return series.rolling(window).mean()
+    return cast(pd.Series, series.rolling(window).mean())
 
 
 def ts_sum(series: pd.Series, window: int) -> pd.Series:
     """N 期求和。"""
-    return series.rolling(window).sum()
+    return cast(pd.Series, series.rolling(window).sum())
 
 
 def ts_skew(series: pd.Series, window: int) -> pd.Series:
     """N 期偏度。"""
-    return series.rolling(window).skew()
+    return cast(pd.Series, series.rolling(window).skew())
 
 
 def ts_kurt(series: pd.Series, window: int) -> pd.Series:
     """N 期峰度。"""
-    return series.rolling(window).kurt()
+    return cast(pd.Series, series.rolling(window).kurt())
 
 
 # ============================================================
@@ -108,37 +109,37 @@ def ts_kurt(series: pd.Series, window: int) -> pd.Series:
 
 def ts_median(series: pd.Series, window: int) -> pd.Series:
     """N 期中位数。"""
-    return series.rolling(window).median()
+    return cast(pd.Series, series.rolling(window).median())
 
 
 def ts_var(series: pd.Series, window: int) -> pd.Series:
     """N 期方差。"""
-    return series.rolling(window).var()
+    return cast(pd.Series, series.rolling(window).var())
 
 
 def ts_prod(series: pd.Series, window: int) -> pd.Series:
     """N 期乘积。"""
-    return series.rolling(window).apply(np.prod, raw=True)
+    return cast(pd.Series, series.rolling(window).apply(np.prod, raw=True))
 
 
 def ts_argmax(series: pd.Series, window: int) -> pd.Series:
     """N 期最大值位置。"""
-    return series.rolling(window).apply(np.argmax, raw=True)
+    return cast(pd.Series, series.rolling(window).apply(np.argmax, raw=True))
 
 
 def ts_argmin(series: pd.Series, window: int) -> pd.Series:
     """N 期最小值位置。"""
-    return series.rolling(window).apply(np.argmin, raw=True)
+    return cast(pd.Series, series.rolling(window).apply(np.argmin, raw=True))
 
 
 def ts_cov(x: pd.Series, y: pd.Series, window: int) -> pd.Series:
     """N 期协方差。"""
-    return x.rolling(window).cov(y)
+    return cast(pd.Series, x.rolling(window).cov(y))
 
 
 def ts_pct_change(series: pd.Series, periods: int) -> pd.Series:
     """N 期百分比变化。"""
-    return series.pct_change(periods, fill_method=None)
+    return cast(pd.Series, series.pct_change(periods, fill_method=None))
 
 
 def ts_zscore(series: pd.Series, window: int) -> pd.Series:
@@ -156,12 +157,12 @@ def ts_decay_linear(series: pd.Series, window: int) -> pd.Series:
     def _apply(x):
         return np.dot(x, weights)
 
-    return series.rolling(window).apply(_apply, raw=True)
+    return cast(pd.Series, series.rolling(window).apply(_apply, raw=True))
 
 
 def ts_decay_exp(series: pd.Series, halflife: int) -> pd.Series:
     """指数衰减加权 MA。"""
-    return series.ewm(halflife=halflife).mean()
+    return cast(pd.Series, series.ewm(halflife=halflife).mean())
 
 
 # ============================================================
@@ -170,22 +171,22 @@ def ts_decay_exp(series: pd.Series, halflife: int) -> pd.Series:
 
 def expanding_sum(series: pd.Series) -> pd.Series:
     """扩展窗口求和。"""
-    return series.expanding().sum()
+    return cast(pd.Series, series.expanding().sum())
 
 
 def expanding_mean(series: pd.Series) -> pd.Series:
     """扩展窗口均值。"""
-    return series.expanding().mean()
+    return cast(pd.Series, series.expanding().mean())
 
 
 def expanding_max(series: pd.Series) -> pd.Series:
     """扩展窗口最大值。"""
-    return series.expanding().max()
+    return cast(pd.Series, series.expanding().max())
 
 
 def expanding_min(series: pd.Series) -> pd.Series:
     """扩展窗口最小值。"""
-    return series.expanding().min()
+    return cast(pd.Series, series.expanding().min())
 
 
 # ============================================================
@@ -194,17 +195,17 @@ def expanding_min(series: pd.Series) -> pd.Series:
 
 def ewm_mean(series: pd.Series, span: int = 20) -> pd.Series:
     """EWM 均值。"""
-    return series.ewm(span=span).mean()
+    return cast(pd.Series, series.ewm(span=span).mean())
 
 
 def ewm_std(series: pd.Series, span: int = 20) -> pd.Series:
     """EWM 标准差。"""
-    return series.ewm(span=span).std()
+    return cast(pd.Series, series.ewm(span=span).std())
 
 
 def ewm_corr(x: pd.Series, y: pd.Series, span: int = 20) -> pd.Series:
     """EWM 相关系数。"""
-    return x.ewm(span=span).corr(y)
+    return cast(pd.Series, x.ewm(span=span).corr(y))
 
 
 # ============================================================
@@ -213,7 +214,7 @@ def ewm_corr(x: pd.Series, y: pd.Series, span: int = 20) -> pd.Series:
 
 def rank(series: pd.Series) -> pd.Series:
     """截面排名 (0-1)。"""
-    return series.rank(pct=True)
+    return cast(pd.Series, series.rank(pct=True))
 
 
 def zscore(series: pd.Series) -> pd.Series:
@@ -251,17 +252,17 @@ def winsorize(series: pd.Series, n: float = 3.0) -> pd.Series:
 
 def neutralize(series: pd.Series, group: pd.Series) -> pd.Series:
     """行业中性化 (减去组均值)。"""
-    return series - series.groupby(group).transform('mean')
+    return cast(pd.Series, series - series.groupby(group).transform('mean'))
 
 
 def neutralize_market(series: pd.Series) -> pd.Series:
     """市场中性化 (减去均值)。"""
-    return series - series.mean()
+    return cast(pd.Series, series - series.mean())
 
 
 def group_norm(series: pd.Series, group: pd.Series) -> pd.Series:
     """分组标准化。"""
-    return series.groupby(group).transform(lambda x: (x - x.mean()) / x.std())
+    return cast(pd.Series, series.groupby(group).transform(lambda x: (x - x.mean()) / x.std()))
 
 
 def orthogonalize(series: pd.Series, reference: pd.Series) -> pd.Series:
@@ -290,12 +291,12 @@ def rank_ic(series: pd.Series, target: pd.Series) -> float:
 
 def cross_sectional_mean(series: pd.Series) -> pd.Series:
     """截面均值。"""
-    return pd.Series(series.mean(), index=series.index)
+    return cast(pd.Series, pd.Series(series.mean(), index=series.index))
 
 
 def cross_sectional_std(series: pd.Series) -> pd.Series:
     """截面标准差。"""
-    return pd.Series(series.std(), index=series.index)
+    return cast(pd.Series, pd.Series(series.std(), index=series.index))
 
 
 # ============================================================
@@ -310,12 +311,12 @@ def cs_quantile_clip(df: pd.DataFrame, q_low: float = 0.025, q_high: float = 0.9
         lo = row.quantile(q_low)
         hi = row.quantile(q_high)
         return row.clip(lo, hi)
-    return df.apply(_clip, axis=1)
+    return cast(pd.DataFrame, df.apply(_clip, axis=1))
 
 
 def cs_pct_pos(df: pd.DataFrame) -> pd.DataFrame:
     """截面正值占比: 每行的 (x > 0) 比例。"""
-    return (df > 0).sum(axis=1) / df.notna().sum(axis=1)
+    return cast(pd.DataFrame, (df > 0).sum(axis=1) / df.notna().sum(axis=1))
 
 
 # ============================================================
@@ -324,7 +325,7 @@ def cs_pct_pos(df: pd.DataFrame) -> pd.DataFrame:
 
 def ts_centralization(series: pd.Series, window: int) -> pd.Series:
     """滚动去均值: x - rolling_mean(x, window)。"""
-    return series - series.rolling(window, min_periods=window).mean()
+    return cast(pd.Series, series - series.rolling(window, min_periods=window).mean())
 
 
 def ts_standardization(series: pd.Series, window: int) -> pd.Series:
@@ -350,36 +351,36 @@ def ts_entropy(series: pd.Series, window: int, bins: int = 10) -> pd.Series:
         p = p[p > 0]
         return float(-(p * np.log(p)).sum())
 
-    return series.rolling(window, min_periods=window).apply(_entropy, raw=True)
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(_entropy, raw=True))
 
 
 def ts_pct_pos(series: pd.Series, window: int) -> pd.Series:
     """滚动正值占比: 窗口内 x > 0 的比例。"""
-    return series.rolling(window, min_periods=window).apply(
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(
         lambda x: (x > 0).sum() / len(x) if len(x) > 0 else np.nan,
         raw=True,
-    )
+    ))
 
 
 def ts_count_pos(series: pd.Series, window: int) -> pd.Series:
     """滚动正计数: 窗口内 x > 0 的个数。"""
-    return series.rolling(window, min_periods=window).apply(
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(
         lambda x: int((x > 0).sum()), raw=True,
-    )
+    ))
 
 
 def ts_count_neg(series: pd.Series, window: int) -> pd.Series:
     """滚动负计数: 窗口内 x < 0 的个数。"""
-    return series.rolling(window, min_periods=window).apply(
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(
         lambda x: int((x < 0).sum()), raw=True,
-    )
+    ))
 
 
 def ts_max_min_diff(series: pd.Series, window: int) -> pd.Series:
     """滚动 max-min 范围: rolling_max - rolling_min。"""
     return (
-        series.rolling(window, min_periods=window).max()
-        - series.rolling(window, min_periods=window).min()
+        cast(pd.Series, series.rolling(window, min_periods=window).max()
+        - series.rolling(window, min_periods=window).min())
     )
 
 
@@ -403,7 +404,7 @@ def ts_decay_custom(series: pd.Series, window: int, weights: np.ndarray) -> pd.S
             return np.nan
         return float(np.dot(valid, weights))
 
-    return series.rolling(window, min_periods=window).apply(_apply, raw=True)
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(_apply, raw=True))
 
 
 # ============================================================
@@ -426,7 +427,7 @@ def ts_median_abs_dev(series: pd.Series, window: int) -> pd.Series:
         med = np.median(valid)
         return float(np.median(np.abs(valid - med)))
 
-    return series.rolling(window, min_periods=window).apply(_mad, raw=True)
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(_mad, raw=True))
 
 
 def ts_trim_mean(series: pd.Series, window: int, pct: float = 0.1) -> pd.Series:
@@ -441,7 +442,7 @@ def ts_trim_mean(series: pd.Series, window: int, pct: float = 0.1) -> pd.Series:
             return float(np.mean(sorted_x))
         return float(np.mean(sorted_x[k:len(sorted_x) - k]))
 
-    return series.rolling(window, min_periods=window).apply(_trim, raw=True)
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(_trim, raw=True))
 
 
 def ts_huber_mean(series: pd.Series, window: int, k: float = 1.345) -> pd.Series:
@@ -470,7 +471,7 @@ def ts_huber_mean(series: pd.Series, window: int, k: float = 1.345) -> pd.Series
             mu = mu_new
         return mu
 
-    return series.rolling(window, min_periods=window).apply(_huber, raw=True)
+    return cast(pd.Series, series.rolling(window, min_periods=window).apply(_huber, raw=True))
 
 
 # ============================================================
@@ -526,7 +527,7 @@ def ts_regression_r2(y: pd.Series, x: pd.Series, window: int) -> pd.Series:
 
 def vwap_dev(close: pd.Series, vwap: pd.Series) -> pd.Series:
     """VWAP 偏离度: close - vwap. 正值表示高于 VWAP (强势)."""
-    return close - vwap
+    return cast(pd.Series, close - vwap)
 
 
 def hl_range(high: pd.Series, low: pd.Series, close: pd.Series = None) -> pd.Series:
@@ -571,7 +572,7 @@ def returns_vol_adj(returns: pd.Series, window: int) -> pd.Series:
 
 def dollar_volume_n(close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
     """N 期累计成交额: (close * volume).rolling(window).sum()."""
-    return (close * volume).rolling(window, min_periods=window).sum()
+    return cast(pd.Series, (close * volume).rolling(window, min_periods=window).sum())
 
 
 # ============================================================
@@ -580,57 +581,57 @@ def dollar_volume_n(close: pd.Series, volume: pd.Series, window: int) -> pd.Seri
 
 def abs_op(series: pd.Series) -> pd.Series:
     """绝对值。"""
-    return series.abs()
+    return cast(pd.Series, series.abs())
 
 
 def log(series: pd.Series) -> pd.Series:
     """对数。"""
-    return np.log(series)
+    return cast(pd.Series, np.log(series))
 
 
 def sign(series: pd.Series) -> pd.Series:
     """符号函数。"""
-    return np.sign(series)
+    return cast(pd.Series, np.sign(series))
 
 
 def sqrt(series: pd.Series) -> pd.Series:
     """平方根。"""
-    return np.sqrt(series)
+    return cast(pd.Series, np.sqrt(series))
 
 
 def clip(series: pd.Series, lower: float = -np.inf, upper: float = np.inf) -> pd.Series:
     """截断。"""
-    return series.clip(lower, upper)
+    return cast(pd.Series, series.clip(lower, upper))
 
 
 def fill_null(series: pd.Series, value: float = 0.0) -> pd.Series:
     """填充空值。"""
-    return series.fillna(value)
+    return cast(pd.Series, series.fillna(value))
 
 
 def add(f1: pd.Series, f2: pd.Series) -> pd.Series:
     """加法。"""
-    return f1 + f2
+    return cast(pd.Series, f1 + f2)
 
 
 def sub(f1: pd.Series, f2: pd.Series) -> pd.Series:
     """减法。"""
-    return f1 - f2
+    return cast(pd.Series, f1 - f2)
 
 
 def mul(f1: pd.Series, f2: pd.Series) -> pd.Series:
     """乘法。"""
-    return f1 * f2
+    return cast(pd.Series, f1 * f2)
 
 
 def div(f1: pd.Series, f2: pd.Series) -> pd.Series:
     """除法。"""
-    return f1 / f2
+    return cast(pd.Series, f1 / f2)
 
 
 def where(condition: pd.Series, true_val: pd.Series, false_val: pd.Series) -> pd.Series:
     """条件选择。"""
-    return pd.Series(np.where(condition, true_val, false_val), index=condition.index)
+    return cast(pd.Series, pd.Series(np.where(condition, true_val, false_val), index=condition.index))
 
 
 def weighted_sum(factors: list[pd.Series], weights: list[float]) -> pd.Series:
@@ -661,7 +662,7 @@ def combine(f1: pd.Series, f2: pd.Series, method: str = "add") -> pd.Series:
 
 def signed_power(series: pd.Series, p: float) -> pd.Series:
     """保留符号的幂运算: sign(x) * abs(x)^p。"""
-    return np.sign(series) * np.abs(series) ** p
+    return cast(pd.Series, np.sign(series) * np.abs(series) ** p)
 
 
 def safe_div(a: pd.Series, b: pd.Series, eps: float = 1e-12) -> pd.Series:
@@ -1121,7 +1122,7 @@ class _Parser:
 
             # 列名
             if name in self.data.columns:
-                return self.data[name]
+                return cast(pd.Series, self.data[name])
 
             raise ValueError(f"未知标识符: {name}")
 
@@ -1237,7 +1238,7 @@ def _parse_arg(arg: str, data: pd.DataFrame) -> pd.Series | float | int:
 
     # 尝试解析为列名
     if arg in data.columns:
-        return data[arg]
+        return cast(pd.Series, data[arg])
 
     # 尝试解析为嵌套函数
     if '(' in arg and ')' in arg:

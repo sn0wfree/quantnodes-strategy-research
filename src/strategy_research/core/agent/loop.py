@@ -1016,6 +1016,9 @@ class AgentLoop(
                     hashes_pre_recorded=True,
                 ):
                     await _fire("after_run", hook_ctx, result)
+                    if self._trace_writer is not None:
+                        result.trace_path = str(self._trace_writer.path)
+                        self._trace_writer.close()
                     return result
         else:
             self._handle_max_iter(result)
@@ -1039,6 +1042,7 @@ class AgentLoop(
 
         if self._trace_writer is not None:
             result.trace_path = str(self._trace_writer.path)
+            self._trace_writer.close()
 
         return result
 

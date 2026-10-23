@@ -247,6 +247,7 @@ _LANE_E2E_FILES = frozenset({
     # because excluding them buys no time and costs coverage.
     "test_chat_e2e_playwright.py",  # browser-driven
     "test_goal_e2e.py",
+    "test_sse_e2e.py",
     "test_study_e2e_api.py",
     "test_study_e2e_integration.py",
     "test_integration.py",

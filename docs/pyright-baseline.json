@@ -1,6 +1,6 @@
 {
-  "errorCount": 958,
-  "warningCount": 18,
+  "errorCount": 839,
+  "warningCount": 0,
   "filesAnalyzed": 457,
   "note": "regressions-gate baseline (docs/pyright-gradual-design.md \u00a73)"
 }

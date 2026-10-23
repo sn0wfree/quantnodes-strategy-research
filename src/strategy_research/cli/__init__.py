@@ -194,9 +194,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             for t in tables:
                 table_name = t[0]
                 # Use parameterized query with identifier quoting to prevent SQL injection
-                count = conn.execute(
+                row = conn.execute(
                     f"SELECT COUNT(*) FROM \"{table_name}\""
-                ).fetchone()[0]
+                ).fetchone()
+                count = row[0] if row else 0
                 print(f"  - {table_name}: {count} 行")
             conn.close()
         except Exception as e:
@@ -632,7 +633,7 @@ def _import_fred(args, path: Path, strategy_name: str) -> bool:
 # Main CLI
 # ============================================================
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     """Build the top-level CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="quantnodes-research",

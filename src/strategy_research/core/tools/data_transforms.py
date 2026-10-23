@@ -23,7 +23,7 @@ fallback, no empty defaults.
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Literal, cast
 
 import pandas as pd
 
@@ -107,7 +107,7 @@ def long_to_single_asset_wide(
     sub = sub.drop_duplicates(subset=[date_col], keep="last")
     sub = sub.set_index(date_col)[present]
     sub = sub.sort_index()
-    return sub
+    return cast(pd.DataFrame, sub)
 
 
 def long_to_wide_close(
@@ -194,7 +194,7 @@ def _unique_date_col_name(panel: pd.DataFrame) -> str:
     while candidate in panel.columns:
         candidate = f"{base}_{suffix}"
         suffix += 1
-    return candidate
+    return cast(str, candidate)
 
 
 def wide_close_to_long(panel: pd.DataFrame) -> pd.DataFrame:
@@ -228,7 +228,7 @@ def wide_close_to_long(panel: pd.DataFrame) -> pd.DataFrame:
         reset = reset.rename(columns={actual_col: date_col})
     out = reset.melt(id_vars=date_col, var_name="asset", value_name="close")
     out = out.rename(columns={date_col: "date"})
-    return out[["date", "asset", "close"]]
+    return cast(pd.DataFrame, out[["date", "asset", "close"]])
 
 
 def wide_factor_to_long(panel: pd.DataFrame, factor_name: str) -> pd.DataFrame:
@@ -255,7 +255,7 @@ def wide_factor_to_long(panel: pd.DataFrame, factor_name: str) -> pd.DataFrame:
         reset = reset.rename(columns={actual_col: date_col})
     out = reset.melt(id_vars=date_col, var_name="asset", value_name=factor_name)
     out = out.rename(columns={date_col: "date"})
-    return out[["date", "asset", factor_name]]
+    return cast(pd.DataFrame, out[["date", "asset", factor_name]])
 
 
 def wide_to_long_ohlcv(panels: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -290,7 +290,7 @@ def wide_to_long_ohlcv(panels: dict[str, pd.DataFrame]) -> pd.DataFrame:
         raise ValueError("all panels are empty; nothing to concatenate")
     out = pd.concat(pieces, ignore_index=True, sort=False)
     out = out[["date", "asset"] + [c for c in out.columns if c not in ("date", "asset")]]
-    return out
+    return cast(pd.DataFrame, out)
 
 
 # ============================================================

@@ -21,7 +21,7 @@ since it's already pluggable via the strategy's step system.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, Sequence, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from .loop import AgentLoop, LoopResult
@@ -383,9 +383,9 @@ class MemoryRetrieverInjector:
 # ── Factory ──────────────────────────────────────────────────────
 
 
-def build_default_injectors() -> list[ContextInjector]:
+def build_default_injectors() -> Sequence[ContextInjector]:
     """Return the default injector chain (sorted by order)."""
-    return sorted(
+    return cast(Sequence[ContextInjector], sorted(
         [
             GoalContextInjector(),
             MemoryRetrieverInjector(),
@@ -393,7 +393,7 @@ def build_default_injectors() -> list[ContextInjector]:
             GoalContinuationInjector(),
         ],
         key=lambda inj: inj.order,
-    )
+    ))
 
 
 __all__ = [

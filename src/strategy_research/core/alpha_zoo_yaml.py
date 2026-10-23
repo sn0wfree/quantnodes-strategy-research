@@ -100,7 +100,7 @@ def evaluate_node(
     node: Any,
     env: dict[str, pd.DataFrame],
     data: dict[str, pd.DataFrame],
-) -> pd.DataFrame | float | int:
+) -> Any:
     """递归求值 AST 节点。
 
     Args:

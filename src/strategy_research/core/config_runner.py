@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -169,7 +169,7 @@ def load_data(cfg: dict, workspace_path: Path) -> pd.DataFrame:
                 "filtering panel to %d/%d configured codes "
                 "(orphans dropped)", len(wanted), len(df.columns)
             )
-        return df[wanted]
+        return cast(pd.DataFrame, df[wanted])
 
     # --- Cache mode: auto+duckdb ---
     if source == "auto+duckdb":

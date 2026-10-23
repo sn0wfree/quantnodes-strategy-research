@@ -127,7 +127,7 @@ class SessionService:
         persona: str | None = None,
         mode: str | None = None,
         thinking: str | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Send a user message and enqueue background AgentLoop execution.
 
         Messages are processed FIFO per session via ``_process_session_queue``.

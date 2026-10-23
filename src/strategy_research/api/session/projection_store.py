@@ -213,8 +213,8 @@ class ProjectionStore:
         directly and messages + message_parts can be removed.
         """
         full = touched is None or "*" in touched
-        msg_rows = state.to_message_rows() if full else None
-        part_rows = state.to_part_rows() if full else None
+        msg_rows = state.to_message_rows() if full else []
+        part_rows = state.to_part_rows() if full else []
 
         with self._flush_lock:
             conn = self._get_conn()

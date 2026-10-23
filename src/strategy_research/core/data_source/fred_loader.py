@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Optional, cast
 
 import pandas as pd
 import requests
@@ -193,7 +193,7 @@ class FredLoader:
         df = df[["open", "high", "low", "close", "volume"]]
         df = df.sort_index()
 
-        return df
+        return cast(pd.DataFrame, df)
 
     def list_series(self) -> dict[str, str]:
         """列出所有预置系列"""

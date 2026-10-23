@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -118,7 +118,7 @@ def _apply_call_special(func: str, yaml_args: list) -> tuple[str, object]:
     return func, _NO_EARLY_RETURN
 
 
-def _extract_span(args: list) -> dict:
+def _extract_span(args: list) -> Any:
     """Extract the span/alpha kwarg for an ``ewm`` method call."""
     span = {"value": 20}
     for kw in args:
@@ -133,7 +133,7 @@ def _extract_span(args: list) -> dict:
     return span
 
 
-def _extract_window(args: list) -> dict:
+def _extract_window(args: list) -> Any:
     """Extract the window kwarg for a ``rolling`` method call."""
     window = {"value": 20}
     for kw in args:
@@ -283,7 +283,7 @@ def _convert_method_call(expr: dict, panel_keys: set[str], func_refs: dict, conv
     # 特殊处理 np.xxx() / pd.DataFrame() 前置前缀调用
     prefix_result = _convert_prefixed_call(obj, method, args, convert)
     if prefix_result is not _NO_EARLY_RETURN:
-        return prefix_result
+        return cast(dict | None, prefix_result)
 
     # 特殊处理 rolling 方法
     if method == "rolling":
@@ -301,13 +301,13 @@ def _convert_method_call(expr: dict, panel_keys: set[str], func_refs: dict, conv
     if isinstance(converted_obj, dict):
         result = _handle_rolling_chain(converted_obj, method, args, convert)
         if result is not _NO_EARLY_RETURN:
-            return result
+            return cast(dict | None, result)
 
     # 特殊处理 .where(lambda/complex, val) -> where(obj, condition, val)
     if method == "where":
         result = _handle_where_method(converted_obj, args, convert)
         if result is not _NO_EARLY_RETURN:
-            return result
+            return cast(dict | None, result)
 
     # 其他方法调用
     if converted_obj is None:
@@ -443,7 +443,7 @@ def _convert_call(expr: dict, panel_keys: set[str], func_refs: dict, convert) ->
 
     func, early = _apply_call_special(func, yaml_args)
     if early is not _NO_EARLY_RETURN:
-        return early
+        return cast(dict | None, early)
     func = _apply_call_rename(func) or func
     return {"op": func, "args": yaml_args}
 

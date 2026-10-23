@@ -244,7 +244,8 @@ def calc_metrics(
 
     # Calendar-day annualization for cross-market
     if bars_per_year is None:
-        first, last = equity_curve.index[0], equity_curve.index[-1]
+        first = pd.Timestamp(equity_curve.index[0])
+        last = pd.Timestamp(equity_curve.index[-1])
         calendar_days = (last - first).days
         years = calendar_days / 365.25 if calendar_days > 0 else 1.0
         bpy = int(n / years) if years > 0 else 252

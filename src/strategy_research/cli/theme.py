@@ -20,9 +20,9 @@ from __future__ import annotations
 import contextvars
 import os
 import threading
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Optional
 
 from rich.console import Console
 from rich.theme import Theme as _RichThemeType
@@ -248,7 +248,7 @@ def _make_console(*, force_terminal: bool) -> Console:
     )
 
 
-def captured_console(*, width: int = 120) -> Iterator[Console]:
+def captured_console(*, width: int = 120) -> AbstractContextManager[Console]:
     """Install a recording Console as the singleton override for one turn.
 
     Within the ``with`` block, ``get_console()`` returns a fresh Rich

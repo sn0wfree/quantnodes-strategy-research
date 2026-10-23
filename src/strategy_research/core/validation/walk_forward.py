@@ -58,7 +58,7 @@ def walk_forward_analysis(
 
         win_trades = [
             t for t in (trades or [])
-            if win_start <= t.entry_time <= win_end
+            if pd.Timestamp(win_start) <= t.entry_time <= pd.Timestamp(win_end)
         ]
 
         ret = float(win_eq.iloc[-1] / win_eq.iloc[0] - 1) if win_eq.iloc[0] > 0 else 0.0

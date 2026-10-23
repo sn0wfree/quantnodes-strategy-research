@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from ..tools import (
     BaseTool,
@@ -282,7 +283,7 @@ class DrawdownAnalysis(BaseTool):
         top_n = int(top_n)
         latest_run, equity = _load_latest_run_equity(ctx, "drawdown_analysis", strategy_name)
         if latest_run is None:
-            return equity
+            return cast(str, equity)
 
         # Compute drawdown series
         peak = np.maximum.accumulate(equity)
@@ -403,13 +404,13 @@ class BenchmarkComparison(BaseTool):
             ctx, "benchmark_comparison", strategy_name, use_log_fallback=False
         )
         if latest_run is None:
-            return equity
+            return cast(str, equity)
         strategy_equity = np.asarray(equity, dtype=float)
 
         # Get benchmark prices from DuckDB
         ok, bench_df, err = _load_benchmark_ohlcv(ctx, "benchmark_comparison", benchmark_code, start_date, end_date)
-        if not ok:
-            return err
+        if not ok or bench_df is None:
+            return err or err_actionable("benchmark load failed", tool="benchmark_comparison")
         bench_equity = bench_df["close"].values.astype(float)
 
         # Align lengths

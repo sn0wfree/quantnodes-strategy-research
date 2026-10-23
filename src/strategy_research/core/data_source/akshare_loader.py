@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, cast
 
 import pandas as pd
 
@@ -109,7 +109,7 @@ class AKShareLoader:
         df = df[existing]
         df = df.sort_index()
 
-        return df
+        return cast(pd.DataFrame, df)
 
     def _fetch_a_share(self, code: str, start: str, end: str) -> Optional[pd.DataFrame]:
         """获取 A 股数据"""
@@ -139,7 +139,7 @@ class AKShareLoader:
         df = df[existing]
         df = df.sort_index()
 
-        return df
+        return cast(pd.DataFrame, df)
 
     def _fetch_hk(self, code: str, start: str, end: str) -> Optional[pd.DataFrame]:
         """获取港股数据"""
@@ -167,7 +167,7 @@ class AKShareLoader:
         df = df[existing]
         df = df.sort_index()
 
-        return df
+        return cast(pd.DataFrame, df)
 
     def _fetch_us(self, code: str, start: str, end: str) -> Optional[pd.DataFrame]:
         """获取美股数据"""
@@ -202,7 +202,7 @@ class AKShareLoader:
         df = df[existing]
         df = df.sort_index()
 
-        return df
+        return cast(pd.DataFrame, df)
 
     def _fetch_forex(self, code: str, start: str, end: str) -> Optional[pd.DataFrame]:
         """获取外汇数据"""
@@ -231,4 +231,4 @@ class AKShareLoader:
         df = df[existing]
         df = df.sort_index()
 
-        return df
+        return cast(pd.DataFrame, df)

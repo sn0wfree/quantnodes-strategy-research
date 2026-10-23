@@ -427,7 +427,8 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         # The approval wait must not count against the time
         # budget (M2): bank the pre-wait elapsed time and stop
         # the round clock; it restarts after the resume.
-        self._total_used_time += time.perf_counter() - self._round_start_clock
+        if self._round_start_clock is not None:
+            self._total_used_time += time.perf_counter() - self._round_start_clock
         self._round_start_clock = None
         # Poll for approval (max 10 minutes, check every 5 seconds)
         decision = await self._wait_for_approval(sid, round_num, timeout_s=600)
@@ -546,7 +547,7 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         round_num: int,
         session: str,
         sid: str,
-    ) -> ShutdownReason | None:
+    ) -> str | None:
         """Post-round finalize: budget, heartbeat, SSE, terminal checks.
 
         Returns ``None`` to continue looping, or the terminal
@@ -635,13 +636,14 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
             return stop_reason
 
         # ── shutdown: max_rounds ───────────────────────────────
-        if self._get_study().max_rounds is not None and round_num >= self._get_study().max_rounds:
+        max_rounds = self._get_study().max_rounds
+        if max_rounds is not None and round_num >= max_rounds:
             self._mark_terminal(StudyStatus.ERROR, last_metrics=metrics,
-                                last_error=f"max_rounds={self._get_study().max_rounds}", reason=ShutdownReason.MAX_ROUNDS)
+                                last_error=f"max_rounds={max_rounds}", reason=ShutdownReason.MAX_ROUNDS)
             return ShutdownReason.MAX_ROUNDS
 
         # ── AEGIS: Early-stop (only when max_rounds is configured) ──
-        if self._get_study().max_rounds is not None:
+        if max_rounds is not None:
             current_score = metrics.get("calmar", 0.0) or 0.0
             if current_score > self._best_score:
                 self._best_score = current_score

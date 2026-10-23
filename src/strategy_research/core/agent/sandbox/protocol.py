@@ -34,6 +34,7 @@ class ExecutionSandbox(Protocol):
         ``message`` carries the human-readable reason when ``ok`` is
         False; callers surface this to the LLM so it can self-correct.
         """
+        ...
 
     # ── Path safety (existing capability) ──────────────────
 
@@ -43,9 +44,11 @@ class ExecutionSandbox(Protocol):
         Raises ``PathValidationError`` (or subclass) if the path
         escapes the whitelist (parent traversal, absolute, UNC, etc.).
         """
+        ...
 
     def resolve_read(self, rel_path: str) -> Path:
         """Resolve ``rel_path`` inside the sandbox's readable roots."""
+        ...
 
     # ── Runtime execution (future — v0.1 NotImplementedError) ─
 

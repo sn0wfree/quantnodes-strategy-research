@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from ...compute_factor import FactorComputeError, compute_factor
 from ..tools import (
@@ -178,8 +179,8 @@ def _load_factor_panel_data(
     if not isinstance(factor_code, str) or not factor_code:
         return None, err_actionable("missing or invalid 'factor_code'", tool=tool)
     ok, _conn, prices_df, err = _load_ohlcv(ctx, tool, start_date, end_date)
-    if not ok:
-        return None, err
+    if not ok or prices_df is None:
+        return None, err or err_actionable("ohlcv load failed", tool=tool)
     assets = _resolve_asset_universe(prices_df, universe)
     df = prices_df[prices_df["asset"].isin(assets)].copy()
     factor_panel = _build_factor_panel(df, assets, factor_code)
@@ -1110,7 +1111,7 @@ class FactorTurnover(BaseTool):
             ctx, "factor_turnover", factor_code, universe, start_date, end_date
         )
         if loaded[0] is None:
-            return loaded[1]
+            return cast(str, loaded[1])
         factor_panel, _df = loaded
 
         factor_df = pd.DataFrame(factor_panel)

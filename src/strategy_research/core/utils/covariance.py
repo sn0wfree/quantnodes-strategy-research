@@ -59,7 +59,7 @@ def ewma_covariance(returns: pd.DataFrame, halflife: int = 60) -> np.ndarray:
 
 def diagonal_covariance(returns: pd.DataFrame) -> np.ndarray:
     rets = returns.dropna()
-    return np.diag(rets.var().values * 252)
+    return np.diag(np.asarray(rets.var().to_numpy()) * 252)
 
 
 def estimate_covariance(returns, method: str = "ledoit_wolf", halflife: int = 60):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, cast
 
 import pandas as pd
 
@@ -21,8 +21,8 @@ def _load_equity_curve(run_dir: Path) -> Optional[pd.Series]:
     if equity_path.exists():
         df = pd.read_csv(equity_path, index_col=0, parse_dates=True)
         if "equity" in df.columns:
-            return df["equity"]
-        return df.iloc[:, 0]
+            return cast(pd.Series, df["equity"])
+        return cast(pd.Series, df.iloc[:, 0])
     return None
 
 

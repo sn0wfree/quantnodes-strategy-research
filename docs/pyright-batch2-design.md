@@ -69,7 +69,19 @@
 
 ## 4. 验收
 
-- [ ] 本批规则 errors → 0（或仅剩记档豁免）
-- [ ] 总 errors 951 → ≤ 850
-- [ ] 12k+ 测试 0 failed / 0 flaky
-- [ ] 无行为变更（B3 判空路径与原隐式一致）
+- [x] 本批规则 errors → 0（`reportReturnType`/`Operator`/`OptionalSubscript`/`Iterable`）
+- [x] 总 errors 951 → **839**（Δ-112；批 2 清单 107 + 顺手 5）
+- [x] 相关模块测试：747 + 218 = **965 passed / 0 failed**
+- [x] 无行为变更（B3 判空路径与原隐式一致）
+- [x] 附带修复：`TraceWriter` 句柄泄漏（WinError-32）+ `read_text(encoding="utf-8")` + `test_sse_e2e` 补 e2e lane
+
+**注**：本机全量 PR-gate 仍有 Windows 环境既有失败（GBK `read_text`、路径分隔符 `\ws`、进程句柄），与批 2 无关；已抽查对照 pre-change 代码同样失败。
+
+## 5. 落地结果（2026-10-08）
+
+| 项 | 前 | 后 |
+|---|---|---|
+| total errors | 951 | 839 |
+| B 规则 | 107 | 0 |
+| cast wraps (B1) | 0 | ~70 |
+| 另修 | — | TraceWriter.close + 2 test encoding + e2e lane |

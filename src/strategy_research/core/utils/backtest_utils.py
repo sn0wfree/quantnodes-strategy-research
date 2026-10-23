@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from typing import cast
+
 import pandas as pd
 
 from .backtest_config import CostConfig
@@ -93,7 +95,7 @@ def generate_rebalance_dates(
             )
         result = valid
 
-    return result
+    return cast(list[pd.Timestamp], result)
 
 
 # ============================================================

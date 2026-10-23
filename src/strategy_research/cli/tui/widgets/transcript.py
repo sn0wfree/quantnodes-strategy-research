@@ -408,7 +408,7 @@ class TranscriptView(RichLog):
             return ""
         full_text = self._streamer.full_text
         self._truncate_to(self._stream_baseline)
-        start = self._stream_baseline
+        start = self._stream_baseline or 0
         self._folders.append(self._streamer)
         self._fold_baselines.append(start)
         self._fold_line_counts.append(len(self.lines) - start)

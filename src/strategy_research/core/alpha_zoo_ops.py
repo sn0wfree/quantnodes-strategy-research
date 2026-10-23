@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from typing import cast
 
 
 def _as_float(df: pd.DataFrame) -> pd.DataFrame:
@@ -27,7 +28,7 @@ def _as_float(df: pd.DataFrame) -> pd.DataFrame:
 
 def rank(df: pd.DataFrame) -> pd.DataFrame:
     """截面百分位排名 (axis=1, ties=average, pct=True)。"""
-    return df.rank(axis=1, method="average", pct=True, na_option="keep")
+    return cast(pd.DataFrame, df.rank(axis=1, method="average", pct=True, na_option="keep"))
 
 
 def zscore(df: pd.DataFrame) -> pd.DataFrame:
@@ -85,33 +86,33 @@ def ts_corr(x: pd.DataFrame, y: pd.DataFrame, n: int) -> pd.DataFrame:
     result = x.rolling(window=n, min_periods=n).corr(y)
     # pandas rolling().corr() 在 float64 精度边界可能产出 inf
     # 替换为 NaN 以保持与 ts_cov/ts_std 一致的 NaN 传播行为
-    return result.replace([np.inf, -np.inf], np.nan)
+    return cast(pd.DataFrame, result.replace([np.inf, -np.inf], np.nan))
 
 
 def ts_cov(x: pd.DataFrame, y: pd.DataFrame, n: int) -> pd.DataFrame:
     """滚动样本协方差。零方差窗口输出 NaN（而非 inf）。"""
     result = x.rolling(window=n, min_periods=n).cov(y)
-    return result.replace([np.inf, -np.inf], np.nan)
+    return cast(pd.DataFrame, result.replace([np.inf, -np.inf], np.nan))
 
 
 def ts_mean(df: pd.DataFrame, n: int) -> pd.DataFrame:
     """滚动均值。"""
-    return df.rolling(window=n, min_periods=n).mean()
+    return cast(pd.DataFrame, df.rolling(window=n, min_periods=n).mean())
 
 
 def ts_std(df: pd.DataFrame, n: int) -> pd.DataFrame:
     """滚动样本标准差 (ddof=1)。"""
-    return df.rolling(window=n, min_periods=n).std()
+    return cast(pd.DataFrame, df.rolling(window=n, min_periods=n).std())
 
 
 def ts_max(df: pd.DataFrame, n: int) -> pd.DataFrame:
     """滚动最大值。"""
-    return df.rolling(window=n, min_periods=n).max()
+    return cast(pd.DataFrame, df.rolling(window=n, min_periods=n).max())
 
 
 def ts_min(df: pd.DataFrame, n: int) -> pd.DataFrame:
     """滚动最小值。"""
-    return df.rolling(window=n, min_periods=n).min()
+    return cast(pd.DataFrame, df.rolling(window=n, min_periods=n).min())
 
 
 def _argmax_last(arr: np.ndarray) -> float:
@@ -176,12 +177,12 @@ def decay_linear(df: pd.DataFrame, n: int) -> pd.DataFrame:
             return np.nan
         return float(np.dot(valid, weights))
 
-    return df.rolling(window=n, min_periods=n).apply(_apply, raw=True)
+    return cast(pd.DataFrame, df.rolling(window=n, min_periods=n).apply(_apply, raw=True))
 
 
 def signed_power(df: pd.DataFrame, p: float) -> pd.DataFrame:
     """保留符号的幂运算: sign(df) * |df|^p。"""
-    return np.sign(df) * np.abs(df) ** p
+    return cast(pd.DataFrame, np.sign(df) * np.abs(df) ** p)
 
 
 def safe_div(a: pd.DataFrame, b: pd.DataFrame, eps: float = 1e-12) -> pd.DataFrame:
@@ -209,7 +210,7 @@ def vwap(panel: dict[str, pd.DataFrame], market: str = "equity_cn") -> pd.DataFr
     close = panel.get("close")
     if high is not None and low is not None and close is not None:
         return (high + low + close) / 3.0
-    return close
+    return cast(pd.DataFrame, close)
 
 
 # ============================================================

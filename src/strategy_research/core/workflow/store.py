@@ -23,7 +23,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ class WorkflowStore:
             rows = conn.execute(
                 "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,),
             ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return cast(list[dict[str, Any]], [_row_to_dict(r) for r in rows])
 
     def update_run(
         self,
@@ -246,7 +246,7 @@ class WorkflowStore:
         rows = self._ensure_conn().execute(
             "SELECT * FROM run_segments WHERE run_id = ? ORDER BY segment_idx", (run_id,),
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return cast(list[dict[str, Any]], [_row_to_dict(r) for r in rows])
 
     # ── Node outputs ──────────────────────────────────────────
 
@@ -270,7 +270,7 @@ class WorkflowStore:
         rows = self._ensure_conn().execute(
             "SELECT * FROM node_outputs WHERE run_id = ? ORDER BY segment_idx", (run_id,),
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return cast(list[dict[str, Any]], [_row_to_dict(r) for r in rows])
 
     # ── Approvals ─────────────────────────────────────────────
 
@@ -324,7 +324,7 @@ class WorkflowStore:
         rows = self._ensure_conn().execute(
             "SELECT * FROM run_events WHERE run_id = ? ORDER BY seq DESC LIMIT ?", (run_id, limit),
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return cast(list[dict[str, Any]], [_row_to_dict(r) for r in rows])
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:

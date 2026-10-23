@@ -1,6 +1,6 @@
 {
     "version": "1.1.414",
-    "time": "1792733035292",
+    "time": "1792733803506",
     "generalDiagnostics": [
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\admin_users.py",
@@ -261,70 +261,6 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\projection_store.py",
             "severity": "error",
-            "message": "Object of type \"None\" cannot be used as iterable value",
-            "range": {
-                "start": {
-                    "line": 226,
-                    "character": 52
-                },
-                "end": {
-                    "line": 226,
-                    "character": 60
-                }
-            },
-            "rule": "reportOptionalIterable"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\projection_store.py",
-            "severity": "error",
-            "message": "Object of type \"None\" cannot be used as iterable value",
-            "range": {
-                "start": {
-                    "line": 227,
-                    "character": 31
-                },
-                "end": {
-                    "line": 227,
-                    "character": 39
-                }
-            },
-            "rule": "reportOptionalIterable"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\projection_store.py",
-            "severity": "error",
-            "message": "Object of type \"None\" cannot be used as iterable value",
-            "range": {
-                "start": {
-                    "line": 256,
-                    "character": 31
-                },
-                "end": {
-                    "line": 256,
-                    "character": 40
-                }
-            },
-            "rule": "reportOptionalIterable"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\projection_store.py",
-            "severity": "error",
-            "message": "Object of type \"None\" cannot be used as iterable value",
-            "range": {
-                "start": {
-                    "line": 260,
-                    "character": 49
-                },
-                "end": {
-                    "line": 260,
-                    "character": 58
-                }
-            },
-            "rule": "reportOptionalIterable"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\projection_store.py",
-            "severity": "error",
             "message": "Argument of type \"Set[str] | None\" cannot be assigned to parameter \"iterable\" of type \"Iterable[SupportsRichComparisonT@sorted]\" in function \"sorted\"\n  Type \"Set[str] | None\" is not assignable to type \"Iterable[str]\"\n    \"None\" is incompatible with protocol \"Iterable[str]\"\n      \"__iter__\" is not present",
             "range": {
                 "start": {
@@ -337,22 +273,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
-            "severity": "error",
-            "message": "Type \"dict[str, str | int]\" is not assignable to return type \"dict[str, str]\"\n  \"Literal[10]\" is not assignable to \"str\"\n  \"int\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 195,
-                    "character": 19
-                },
-                "end": {
-                    "line": 200,
-                    "character": 13
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
@@ -385,22 +305,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
-            "severity": "error",
-            "message": "Type \"dict[str, str | MessageId | AttemptId | int | None]\" is not assignable to return type \"dict[str, str]\"\n  Type \"MessageId | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"\n  \"int\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 281,
-                    "character": 15
-                },
-                "end": {
-                    "line": 288,
-                    "character": 9
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\service.py",
@@ -497,54 +401,6 @@
                 }
             },
             "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\__init__.py",
-            "severity": "error",
-            "message": "Object of type \"None\" is not subscriptable",
-            "range": {
-                "start": {
-                    "line": 196,
-                    "character": 24
-                },
-                "end": {
-                    "line": 198,
-                    "character": 28
-                }
-            },
-            "rule": "reportOptionalSubscript"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\__init__.py",
-            "severity": "error",
-            "message": "Type \"tuple[ArgumentParser, dict[str, ArgumentParser]]\" is not assignable to return type \"ArgumentParser\"\n  \"tuple[ArgumentParser, dict[str, ArgumentParser]]\" is not assignable to \"ArgumentParser\"",
-            "range": {
-                "start": {
-                    "line": 823,
-                    "character": 11
-                },
-                "end": {
-                    "line": 831,
-                    "character": 5
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\__init__.py",
-            "severity": "error",
-            "message": "\"ArgumentParser\" is not iterable\n  \"__iter__\" method not defined",
-            "range": {
-                "start": {
-                    "line": 836,
-                    "character": 25
-                },
-                "end": {
-                    "line": 836,
-                    "character": 40
-                }
-            },
-            "rule": "reportGeneralTypeIssues"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\compact_show.py",
@@ -2211,22 +2067,6 @@
             "rule": "reportArgumentType"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\theme.py",
-            "severity": "error",
-            "message": "Type \"_GeneratorContextManager[Unknown, None, None]\" is not assignable to return type \"Iterator[Unknown]\"\n  \"_GeneratorContextManager[Unknown, None, None]\" is incompatible with protocol \"Iterator[Unknown]\"\n    \"__next__\" is not present\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 300,
-                    "character": 11
-                },
-                "end": {
-                    "line": 300,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\tui\\app.py",
             "severity": "error",
             "message": "\"append_delta\" is not a known attribute of \"None\"",
@@ -2259,80 +2099,16 @@
             "rule": "reportOptionalMemberAccess"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\tui\\session.py",
-            "severity": "error",
-            "message": "Object of type \"Iterator[Unknown]\" cannot be used with \"with\" because it does not correctly implement __enter__\n  Attribute \"__enter__\" is unknown",
-            "range": {
-                "start": {
-                    "line": 178,
-                    "character": 13
-                },
-                "end": {
-                    "line": 178,
-                    "character": 58
-                }
-            },
-            "rule": "reportGeneralTypeIssues"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\tui\\session.py",
-            "severity": "error",
-            "message": "Object of type \"Iterator[Unknown]\" cannot be used with \"with\" because it does not correctly implement __exit__\n  Attribute \"__exit__\" is unknown",
-            "range": {
-                "start": {
-                    "line": 178,
-                    "character": 13
-                },
-                "end": {
-                    "line": 178,
-                    "character": 58
-                }
-            },
-            "rule": "reportGeneralTypeIssues"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\tui\\widgets\\transcript.py",
-            "severity": "error",
-            "message": "Argument of type \"int | None\" cannot be assigned to parameter \"object\" of type \"int\" in function \"append\"\n  Type \"int | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
-            "range": {
-                "start": {
-                    "line": 412,
-                    "character": 36
-                },
-                "end": {
-                    "line": 412,
-                    "character": 41
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\tui\\widgets\\transcript.py",
-            "severity": "error",
-            "message": "Operator \"-\" not supported for types \"int\" and \"int | None\"\n  Operator \"-\" not supported for types \"int\" and \"None\" when expected type is \"int\"",
-            "range": {
-                "start": {
-                    "line": 413,
-                    "character": 38
-                },
-                "end": {
-                    "line": 413,
-                    "character": 61
-                }
-            },
-            "rule": "reportOperatorIssue"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_analysis_tools.py",
             "severity": "error",
             "message": "Argument of type \"float\" cannot be assigned to parameter \"value\" of type \"str\" in function \"__setitem__\"\n  \"float\" is not assignable to \"str\"",
             "range": {
                 "start": {
-                    "line": 215,
+                    "line": 216,
                     "character": 24
                 },
                 "end": {
-                    "line": 215,
+                    "line": 216,
                     "character": 32
                 }
             },
@@ -2344,79 +2120,15 @@
             "message": "Argument of type \"None\" cannot be assigned to parameter \"value\" of type \"str\" in function \"__setitem__\"\n  \"None\" is not assignable to \"str\"",
             "range": {
                 "start": {
-                    "line": 219,
+                    "line": 220,
                     "character": 20
                 },
                 "end": {
-                    "line": 219,
+                    "line": 220,
                     "character": 28
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_analysis_tools.py",
-            "severity": "error",
-            "message": "Type \"str | NDArray[Any]\" is not assignable to return type \"str\"\n  Type \"str | NDArray[Any]\" is not assignable to type \"str\"\n    \"ndarray[_AnyShape, dtype[Any]]\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 284,
-                    "character": 19
-                },
-                "end": {
-                    "line": 284,
-                    "character": 25
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_analysis_tools.py",
-            "severity": "error",
-            "message": "Type \"str | NDArray[Any]\" is not assignable to return type \"str\"\n  Type \"str | NDArray[Any]\" is not assignable to type \"str\"\n    \"ndarray[_AnyShape, dtype[Any]]\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 405,
-                    "character": 19
-                },
-                "end": {
-                    "line": 405,
-                    "character": 25
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_analysis_tools.py",
-            "severity": "error",
-            "message": "Type \"str | None\" is not assignable to return type \"str\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 411,
-                    "character": 19
-                },
-                "end": {
-                    "line": 411,
-                    "character": 22
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_analysis_tools.py",
-            "severity": "error",
-            "message": "Object of type \"None\" is not subscriptable",
-            "range": {
-                "start": {
-                    "line": 412,
-                    "character": 23
-                },
-                "end": {
-                    "line": 412,
-                    "character": 31
-                }
-            },
-            "rule": "reportOptionalSubscript"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\backtest_tools.py",
@@ -2549,46 +2261,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\factor_tools.py",
             "severity": "error",
-            "message": "Object of type \"None\" is not subscriptable",
-            "range": {
-                "start": {
-                    "line": 183,
-                    "character": 9
-                },
-                "end": {
-                    "line": 183,
-                    "character": 18
-                }
-            },
-            "rule": "reportOptionalSubscript"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\factor_tools.py",
-            "severity": "error",
-            "message": "Object of type \"None\" is not subscriptable",
-            "range": {
-                "start": {
-                    "line": 183,
-                    "character": 19
-                },
-                "end": {
-                    "line": 183,
-                    "character": 28
-                }
-            },
-            "rule": "reportOptionalSubscript"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\factor_tools.py",
-            "severity": "error",
             "message": "Argument of type \"str | None\" cannot be assigned to parameter \"asset\" of type \"str\" in function \"long_to_single_asset_wide\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
             "range": {
                 "start": {
-                    "line": 328,
+                    "line": 329,
                     "character": 62
                 },
                 "end": {
-                    "line": 328,
+                    "line": 329,
                     "character": 67
                 }
             },
@@ -2600,11 +2280,11 @@
             "message": "No overloads for \"drop_duplicates\" match the provided arguments\n  Argument types: (list[str], Literal['last'])",
             "range": {
                 "start": {
-                    "line": 457,
+                    "line": 458,
                     "character": 19
                 },
                 "end": {
-                    "line": 457,
+                    "line": 458,
                     "character": 73
                 }
             },
@@ -2616,11 +2296,11 @@
             "message": "No overloads for \"drop_duplicates\" match the provided arguments\n  Argument types: (list[Any], Literal['last'])",
             "range": {
                 "start": {
-                    "line": 457,
+                    "line": 458,
                     "character": 19
                 },
                 "end": {
-                    "line": 457,
+                    "line": 458,
                     "character": 73
                 }
             },
@@ -2632,11 +2312,11 @@
             "message": "Argument of type \"Series | DataFrame | Unknown\" cannot be assigned to parameter \"prices\" of type \"DataFrame\" in function \"compute_factor\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
             "range": {
                 "start": {
-                    "line": 462,
+                    "line": 463,
                     "character": 56
                 },
                 "end": {
-                    "line": 462,
+                    "line": 463,
                     "character": 64
                 }
             },
@@ -2648,11 +2328,11 @@
             "message": "Cannot access attribute \"pct_change\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"pct_change\" is unknown",
             "range": {
                 "start": {
-                    "line": 472,
+                    "line": 473,
                     "character": 48
                 },
                 "end": {
-                    "line": 472,
+                    "line": 473,
                     "character": 58
                 }
             },
@@ -2664,11 +2344,11 @@
             "message": "No overloads for \"concat\" match the provided arguments",
             "range": {
                 "start": {
-                    "line": 476,
+                    "line": 477,
                     "character": 18
                 },
                 "end": {
-                    "line": 476,
+                    "line": 477,
                     "character": 73
                 }
             },
@@ -2680,11 +2360,11 @@
             "message": "Argument of type \"list[Series | Self@Series | Unknown | Any | ndarray[_AnyShape, dtype[Any]] | Self@DataFrame]\" cannot be assigned to parameter \"objs\" of type \"Iterable[Series | DataFrame] | Mapping[HashableT@concat, Series | DataFrame]\" in function \"concat\"\n  Type \"Self@Series | Unknown | Any | Series | ndarray[_AnyShape, dtype[Any]] | Self@DataFrame\" is not assignable to type \"Series | DataFrame\"\n    Type \"ndarray[_AnyShape, dtype[Any]]\" is not assignable to type \"Series | DataFrame\"\n      \"ndarray[_AnyShape, dtype[Any]]\" is not assignable to \"Series\"\n      \"ndarray[_AnyShape, dtype[Any]]\" is not assignable to \"DataFrame\"",
             "range": {
                 "start": {
-                    "line": 476,
+                    "line": 477,
                     "character": 44
                 },
                 "end": {
-                    "line": 476,
+                    "line": 477,
                     "character": 63
                 }
             },
@@ -2696,11 +2376,11 @@
             "message": "Cannot access attribute \"values\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"values\" is unknown",
             "range": {
                 "start": {
-                    "line": 572,
+                    "line": 573,
                     "character": 36
                 },
                 "end": {
-                    "line": 572,
+                    "line": 573,
                     "character": 42
                 }
             },
@@ -2712,11 +2392,11 @@
             "message": "Cannot access attribute \"values\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"values\" is unknown",
             "range": {
                 "start": {
-                    "line": 573,
+                    "line": 574,
                     "character": 34
                 },
                 "end": {
-                    "line": 573,
+                    "line": 574,
                     "character": 40
                 }
             },
@@ -2728,11 +2408,11 @@
             "message": "Cannot access attribute \"values\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"values\" is unknown",
             "range": {
                 "start": {
-                    "line": 574,
+                    "line": 575,
                     "character": 32
                 },
                 "end": {
-                    "line": 574,
+                    "line": 575,
                     "character": 38
                 }
             },
@@ -2744,11 +2424,11 @@
             "message": "Cannot access attribute \"mean\" for class \"ExtensionArray\"\n  Attribute \"mean\" is unknown",
             "range": {
                 "start": {
-                    "line": 580,
+                    "line": 581,
                     "character": 32
                 },
                 "end": {
-                    "line": 580,
+                    "line": 581,
                     "character": 36
                 }
             },
@@ -2760,11 +2440,11 @@
             "message": "Cannot access attribute \"mean\" for class \"ExtensionArray\"\n  Attribute \"mean\" is unknown",
             "range": {
                 "start": {
-                    "line": 581,
+                    "line": 582,
                     "character": 30
                 },
                 "end": {
-                    "line": 581,
+                    "line": 582,
                     "character": 34
                 }
             },
@@ -2776,11 +2456,11 @@
             "message": "Cannot access attribute \"max\" for class \"ExtensionArray\"\n  Attribute \"max\" is unknown",
             "range": {
                 "start": {
-                    "line": 588,
+                    "line": 589,
                     "character": 34
                 },
                 "end": {
-                    "line": 588,
+                    "line": 589,
                     "character": 37
                 }
             },
@@ -2792,11 +2472,11 @@
             "message": "Cannot access attribute \"min\" for class \"ExtensionArray\"\n  Attribute \"min\" is unknown",
             "range": {
                 "start": {
-                    "line": 589,
+                    "line": 590,
                     "character": 32
                 },
                 "end": {
-                    "line": 589,
+                    "line": 590,
                     "character": 35
                 }
             },
@@ -2808,11 +2488,11 @@
             "message": "Cannot access attribute \"std\" for class \"ExtensionArray\"\n  Attribute \"std\" is unknown",
             "range": {
                 "start": {
-                    "line": 600,
+                    "line": 601,
                     "character": 39
                 },
                 "end": {
-                    "line": 600,
+                    "line": 601,
                     "character": 42
                 }
             },
@@ -2824,31 +2504,15 @@
             "message": "Cannot access attribute \"std\" for class \"ExtensionArray\"\n  Attribute \"std\" is unknown",
             "range": {
                 "start": {
-                    "line": 601,
+                    "line": 602,
                     "character": 37
                 },
                 "end": {
-                    "line": 601,
+                    "line": 602,
                     "character": 40
                 }
             },
             "rule": "reportAttributeAccessIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\factor_tools.py",
-            "severity": "error",
-            "message": "Type \"str | None\" is not assignable to return type \"str\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 1112,
-                    "character": 19
-                },
-                "end": {
-                    "line": 1112,
-                    "character": 28
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\goal_tools.py",
@@ -3089,22 +2753,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\context_injector.py",
-            "severity": "error",
-            "message": "Type \"list[GoalContextInjector | MemoryRetrieverInjector | TodosInjector | GoalContinuationInjector]\" is not assignable to return type \"list[ContextInjector]\"\n  \"list[GoalContextInjector | MemoryRetrieverInjector | TodosInjector | GoalContinuationInjector]\" is not assignable to \"list[ContextInjector]\"\n    Type parameter \"_T@list\" is invariant, but \"GoalContextInjector | MemoryRetrieverInjector | TodosInjector | GoalContinuationInjector\" is not the same as \"ContextInjector\"\n    Consider switching from \"list\" to \"Sequence\" which is covariant",
-            "range": {
-                "start": {
-                    "line": 387,
-                    "character": 11
-                },
-                "end": {
-                    "line": 395,
-                    "character": 5
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\loop_compaction.py",
@@ -5363,54 +5011,6 @@
             "rule": "reportArgumentType"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\sandbox\\protocol.py",
-            "severity": "error",
-            "message": "Function with declared return type \"tuple[bool, str]\" must return value on all code paths\n  \"None\" is not assignable to \"tuple[bool, str]\"",
-            "range": {
-                "start": {
-                    "line": 30,
-                    "character": 46
-                },
-                "end": {
-                    "line": 30,
-                    "character": 62
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\sandbox\\protocol.py",
-            "severity": "error",
-            "message": "Function with declared return type \"Path\" must return value on all code paths\n  \"None\" is not assignable to \"Path\"",
-            "range": {
-                "start": {
-                    "line": 39,
-                    "character": 46
-                },
-                "end": {
-                    "line": 39,
-                    "character": 50
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\sandbox\\protocol.py",
-            "severity": "error",
-            "message": "Function with declared return type \"Path\" must return value on all code paths\n  \"None\" is not assignable to \"Path\"",
-            "range": {
-                "start": {
-                    "line": 46,
-                    "character": 45
-                },
-                "end": {
-                    "line": 46,
-                    "character": 49
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\strategy\\budget.py",
             "severity": "error",
             "message": "Argument of type \"int | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\"\n  Type \"int | None\" is not assignable to type \"ConvertibleToInt\"\n    Type \"None\" is not assignable to type \"ConvertibleToInt\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsInt\"\n        \"__int__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"\n  ...",
@@ -6021,102 +5621,6 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
             "severity": "error",
-            "message": "Type \"dict[str, int] | Unknown | dict[Unknown, Unknown] | None\" is not assignable to return type \"dict[Unknown, Unknown]\"\n  Type \"dict[str, int] | Unknown | dict[Unknown, Unknown] | None\" is not assignable to type \"dict[Unknown, Unknown]\"\n    \"None\" is not assignable to \"dict[Unknown, Unknown]\"",
-            "range": {
-                "start": {
-                    "line": 132,
-                    "character": 11
-                },
-                "end": {
-                    "line": 132,
-                    "character": 15
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
-            "severity": "error",
-            "message": "Type \"dict[str, int] | Unknown | dict[Unknown, Unknown] | None\" is not assignable to return type \"dict[Unknown, Unknown]\"\n  Type \"dict[str, int] | Unknown | dict[Unknown, Unknown] | None\" is not assignable to type \"dict[Unknown, Unknown]\"\n    \"None\" is not assignable to \"dict[Unknown, Unknown]\"",
-            "range": {
-                "start": {
-                    "line": 144,
-                    "character": 11
-                },
-                "end": {
-                    "line": 144,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
-            "severity": "error",
-            "message": "Type \"object\" is not assignable to return type \"dict[Unknown, Unknown] | None\"\n  Type \"object\" is not assignable to type \"dict[Unknown, Unknown] | None\"\n    \"object\" is not assignable to \"dict[Unknown, Unknown]\"\n    \"object\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 285,
-                    "character": 15
-                },
-                "end": {
-                    "line": 285,
-                    "character": 28
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
-            "severity": "error",
-            "message": "Type \"object\" is not assignable to return type \"dict[Unknown, Unknown] | None\"\n  Type \"object\" is not assignable to type \"dict[Unknown, Unknown] | None\"\n    \"object\" is not assignable to \"dict[Unknown, Unknown]\"\n    \"object\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 303,
-                    "character": 19
-                },
-                "end": {
-                    "line": 303,
-                    "character": 25
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
-            "severity": "error",
-            "message": "Type \"object\" is not assignable to return type \"dict[Unknown, Unknown] | None\"\n  Type \"object\" is not assignable to type \"dict[Unknown, Unknown] | None\"\n    \"object\" is not assignable to \"dict[Unknown, Unknown]\"\n    \"object\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 309,
-                    "character": 19
-                },
-                "end": {
-                    "line": 309,
-                    "character": 25
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
-            "severity": "error",
-            "message": "Type \"object\" is not assignable to return type \"dict[Unknown, Unknown] | None\"\n  Type \"object\" is not assignable to type \"dict[Unknown, Unknown] | None\"\n    \"object\" is not assignable to \"dict[Unknown, Unknown]\"\n    \"object\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 445,
-                    "character": 15
-                },
-                "end": {
-                    "line": 445,
-                    "character": 20
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_convert.py",
-            "severity": "error",
             "message": "Cannot access attribute \"value\" for class \"Index\"\n  Attribute \"value\" is unknown",
             "range": {
                 "start": {
@@ -6177,214 +5681,6 @@
                 }
             },
             "rule": "reportAssignmentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 87,
-                    "character": 11
-                },
-                "end": {
-                    "line": 87,
-                    "character": 52
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 93,
-                    "character": 11
-                },
-                "end": {
-                    "line": 93,
-                    "character": 52
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Self@DataFrame | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Series* | Unknown | DataFrame* | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 98,
-                    "character": 11
-                },
-                "end": {
-                    "line": 98,
-                    "character": 53
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"Any | DataFrame | Series\" is not assignable to return type \"DataFrame\"\n  Type \"Any | DataFrame | Series\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 103,
-                    "character": 11
-                },
-                "end": {
-                    "line": 103,
-                    "character": 52
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 108,
-                    "character": 11
-                },
-                "end": {
-                    "line": 108,
-                    "character": 52
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 113,
-                    "character": 11
-                },
-                "end": {
-                    "line": 113,
-                    "character": 52
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 178,
-                    "character": 11
-                },
-                "end": {
-                    "line": 178,
-                    "character": 70
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"NDArray[float64]\" is not assignable to return type \"DataFrame\"\n  \"ndarray[_AnyShape, dtype[float64]]\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 183,
-                    "character": 11
-                },
-                "end": {
-                    "line": 183,
-                    "character": 40
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_ops.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | None\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | None\" is not assignable to type \"DataFrame\"\n    \"None\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 211,
-                    "character": 11
-                },
-                "end": {
-                    "line": 211,
-                    "character": 16
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_yaml.py",
-            "severity": "error",
-            "message": "Type \"str | Unknown\" is not assignable to return type \"DataFrame | float | int\"\n  Type \"str | Unknown\" is not assignable to type \"DataFrame | float | int\"\n    Type \"str\" is not assignable to type \"DataFrame | float | int\"\n      \"str\" is not assignable to \"DataFrame\"\n      \"str\" is not assignable to \"float\"\n      \"str\" is not assignable to \"int\"",
-            "range": {
-                "start": {
-                    "line": 137,
-                    "character": 15
-                },
-                "end": {
-                    "line": 137,
-                    "character": 18
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_yaml.py",
-            "severity": "error",
-            "message": "Type \"dict[str, DataFrame]\" is not assignable to return type \"DataFrame | float | int\"\n  Type \"dict[str, DataFrame]\" is not assignable to type \"DataFrame | float | int\"\n    \"dict[str, DataFrame]\" is not assignable to \"DataFrame\"\n    \"dict[str, DataFrame]\" is not assignable to \"float\"\n    \"dict[str, DataFrame]\" is not assignable to \"int\"",
-            "range": {
-                "start": {
-                    "line": 150,
-                    "character": 19
-                },
-                "end": {
-                    "line": 150,
-                    "character": 23
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_yaml.py",
-            "severity": "error",
-            "message": "Type \"Module(\"pandas\")\" is not assignable to return type \"DataFrame | float | int\"\n  Type \"Module(\"pandas\")\" is not assignable to type \"DataFrame | float | int\"\n    Type \"Module(\"pandas\")\" is not assignable to type \"DataFrame\"\n    Type \"Module(\"pandas\")\" is not assignable to type \"float\"\n    Type \"Module(\"pandas\")\" is not assignable to type \"int\"",
-            "range": {
-                "start": {
-                    "line": 154,
-                    "character": 19
-                },
-                "end": {
-                    "line": 154,
-                    "character": 22
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\alpha_zoo_yaml.py",
-            "severity": "error",
-            "message": "Argument of type \"DataFrame | float | int\" cannot be assigned to parameter \"value\" of type \"DataFrame\" in function \"__setitem__\"\n  Type \"DataFrame | float | int\" is not assignable to type \"DataFrame\"\n    \"float\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 269,
-                    "character": 8
-                },
-                "end": {
-                    "line": 269,
-                    "character": 17
-                }
-            },
-            "rule": "reportArgumentType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\backtest.py",
@@ -6485,542 +5781,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
             "severity": "error",
-            "message": "Type \"Any | DataFrame | Series\" is not assignable to return type \"Series\"\n  Type \"Any | DataFrame | Series\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 51,
-                    "character": 11
-                },
-                "end": {
-                    "line": 51,
-                    "character": 39
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 56,
-                    "character": 11
-                },
-                "end": {
-                    "line": 56,
-                    "character": 36
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 61,
-                    "character": 11
-                },
-                "end": {
-                    "line": 61,
-                    "character": 48
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame\" is not assignable to return type \"Series\"\n  Type \"Series | DataFrame\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 66,
-                    "character": 11
-                },
-                "end": {
-                    "line": 66,
-                    "character": 32
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 76,
-                    "character": 11
-                },
-                "end": {
-                    "line": 76,
-                    "character": 39
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown | Any\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 81,
-                    "character": 11
-                },
-                "end": {
-                    "line": 81,
-                    "character": 39
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Self@DataFrame | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown | DataFrame* | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 86,
-                    "character": 11
-                },
-                "end": {
-                    "line": 86,
-                    "character": 40
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown | Self@DataFrame | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown | DataFrame* | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 91,
-                    "character": 11
-                },
-                "end": {
-                    "line": 91,
-                    "character": 39
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 96,
-                    "character": 11
-                },
-                "end": {
-                    "line": 96,
-                    "character": 40
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 101,
-                    "character": 11
-                },
-                "end": {
-                    "line": 101,
-                    "character": 40
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 110,
-                    "character": 11
-                },
-                "end": {
-                    "line": 110,
-                    "character": 42
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"Series* | Unknown | DataFrame | Series | Self@DataFrame | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to return type \"Series\"\n  Type \"Series* | Unknown | DataFrame | Series | DataFrame* | Any | ndarray[_AnyShape, dtype[Any]]\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 115,
-                    "character": 11
-                },
-                "end": {
-                    "line": 115,
-                    "character": 39
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 120,
-                    "character": 11
-                },
-                "end": {
-                    "line": 120,
-                    "character": 58
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 125,
-                    "character": 11
-                },
-                "end": {
-                    "line": 125,
-                    "character": 60
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 130,
-                    "character": 11
-                },
-                "end": {
-                    "line": 130,
-                    "character": 60
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 135,
-                    "character": 11
-                },
-                "end": {
-                    "line": 135,
-                    "character": 35
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 158,
-                    "character": 11
-                },
-                "end": {
-                    "line": 158,
-                    "character": 57
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 163,
-                    "character": 11
-                },
-                "end": {
-                    "line": 163,
-                    "character": 47
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 172,
-                    "character": 11
-                },
-                "end": {
-                    "line": 172,
-                    "character": 35
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 177,
-                    "character": 11
-                },
-                "end": {
-                    "line": 177,
-                    "character": 36
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 182,
-                    "character": 11
-                },
-                "end": {
-                    "line": 182,
-                    "character": 35
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Series* | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Series* | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 187,
-                    "character": 11
-                },
-                "end": {
-                    "line": 187,
-                    "character": 35
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 196,
-                    "character": 11
-                },
-                "end": {
-                    "line": 196,
-                    "character": 39
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 206,
-                    "character": 11
-                },
-                "end": {
-                    "line": 206,
-                    "character": 35
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any\" is not assignable to return type \"DataFrame\"\n  Type \"DataFrame | Series | Any\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 312,
-                    "character": 11
-                },
-                "end": {
-                    "line": 312,
-                    "character": 34
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 352,
-                    "character": 11
-                },
-                "end": {
-                    "line": 352,
-                    "character": 79
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 357,
-                    "character": 11
-                },
-                "end": {
-                    "line": 360,
-                    "character": 5
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 365,
-                    "character": 11
-                },
-                "end": {
-                    "line": 367,
-                    "character": 5
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 372,
-                    "character": 11
-                },
-                "end": {
-                    "line": 374,
-                    "character": 5
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 405,
-                    "character": 11
-                },
-                "end": {
-                    "line": 405,
-                    "character": 77
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 428,
-                    "character": 11
-                },
-                "end": {
-                    "line": 428,
-                    "character": 75
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 443,
-                    "character": 11
-                },
-                "end": {
-                    "line": 443,
-                    "character": 76
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"DataFrame | Series | Any | Unknown\" is not assignable to return type \"Series\"\n  Type \"DataFrame | Series | Any | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 472,
-                    "character": 11
-                },
-                "end": {
-                    "line": 472,
-                    "character": 77
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
             "message": "Expression of type \"None\" cannot be assigned to parameter of type \"Series\"\n  \"None\" is not assignable to \"Series\"",
             "range": {
                 "start": {
-                    "line": 531,
+                    "line": 532,
                     "character": 65
                 },
                 "end": {
-                    "line": 531,
+                    "line": 532,
                     "character": 69
                 }
             },
@@ -7029,130 +5797,18 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
             "severity": "error",
-            "message": "Type \"NDArray[Incomplete]\" is not assignable to return type \"Series\"\n  \"ndarray[_AnyShape, dtype[Incomplete]]\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 587,
-                    "character": 11
-                },
-                "end": {
-                    "line": 587,
-                    "character": 25
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"NDArray[Incomplete]\" is not assignable to return type \"Series\"\n  \"ndarray[_AnyShape, dtype[Incomplete]]\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 592,
-                    "character": 11
-                },
-                "end": {
-                    "line": 592,
-                    "character": 26
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"NDArray[Incomplete]\" is not assignable to return type \"Series\"\n  \"ndarray[_AnyShape, dtype[Incomplete]]\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 597,
-                    "character": 11
-                },
-                "end": {
-                    "line": 597,
-                    "character": 26
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"NDArray[float64]\" is not assignable to return type \"Series\"\n  \"ndarray[_AnyShape, dtype[float64]]\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 663,
-                    "character": 11
-                },
-                "end": {
-                    "line": 663,
-                    "character": 48
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"Series\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"Series\"\n    \"DataFrame*\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 1123,
-                    "character": 23
-                },
-                "end": {
-                    "line": 1123,
-                    "character": 38
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"Series | float | int\"\n  Type \"Series | Unknown | Self@DataFrame\" is not assignable to type \"Series | float | int\"\n    Type \"Self@DataFrame\" is not assignable to type \"Series | float | int\"\n      \"DataFrame*\" is not assignable to \"Series\"\n      \"DataFrame*\" is not assignable to \"float\"\n      \"DataFrame*\" is not assignable to \"int\"",
-            "range": {
-                "start": {
-                    "line": 1239,
-                    "character": 15
-                },
-                "end": {
-                    "line": 1239,
-                    "character": 24
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\compute_factor.py",
-            "severity": "error",
             "message": "Cannot access attribute \"all\" for class \"bool\"\n  Attribute \"all\" is unknown",
             "range": {
                 "start": {
-                    "line": 1336,
+                    "line": 1337,
                     "character": 60
                 },
                 "end": {
-                    "line": 1336,
+                    "line": 1337,
                     "character": 63
                 }
             },
             "rule": "reportAttributeAccessIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\config_runner.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"DataFrame\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 171,
-                    "character": 15
-                },
-                "end": {
-                    "line": 171,
-                    "character": 25
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\config_runner.py",
@@ -7427,86 +6083,6 @@
             "rule": "reportAttributeAccessIssue"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\akshare_loader.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame | None\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame | None\"\n    Type \"Series\" is not assignable to type \"DataFrame | None\"\n      \"Series\" is not assignable to \"DataFrame\"\n      \"Series\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 111,
-                    "character": 15
-                },
-                "end": {
-                    "line": 111,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\akshare_loader.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame | None\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame | None\"\n    Type \"Series\" is not assignable to type \"DataFrame | None\"\n      \"Series\" is not assignable to \"DataFrame\"\n      \"Series\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 141,
-                    "character": 15
-                },
-                "end": {
-                    "line": 141,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\akshare_loader.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame | None\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame | None\"\n    Type \"Series\" is not assignable to type \"DataFrame | None\"\n      \"Series\" is not assignable to \"DataFrame\"\n      \"Series\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 169,
-                    "character": 15
-                },
-                "end": {
-                    "line": 169,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\akshare_loader.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame | None\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame | None\"\n    Type \"Series\" is not assignable to type \"DataFrame | None\"\n      \"Series\" is not assignable to \"DataFrame\"\n      \"Series\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 204,
-                    "character": 15
-                },
-                "end": {
-                    "line": 204,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\akshare_loader.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame | None\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame | None\"\n    Type \"Series\" is not assignable to type \"DataFrame | None\"\n      \"Series\" is not assignable to \"DataFrame\"\n      \"Series\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 233,
-                    "character": 15
-                },
-                "end": {
-                    "line": 233,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\base.py",
             "severity": "error",
             "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to declared type \"DataFrame\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
@@ -7553,22 +6129,6 @@
                 }
             },
             "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\fred_loader.py",
-            "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame | None\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame | None\"\n    Type \"Series\" is not assignable to type \"DataFrame | None\"\n      \"Series\" is not assignable to \"DataFrame\"\n      \"Series\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 195,
-                    "character": 15
-                },
-                "end": {
-                    "line": 195,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\data_source\\ifind_loader.py",
@@ -10051,22 +8611,6 @@
             "rule": "reportArgumentType"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\portfolio\\cli.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"Series | None\"\n  Type \"Series | Unknown | Self@DataFrame\" is not assignable to type \"Series | None\"\n    Type \"Self@DataFrame\" is not assignable to type \"Series | None\"\n      \"DataFrame*\" is not assignable to \"Series\"\n      \"DataFrame*\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 23,
-                    "character": 19
-                },
-                "end": {
-                    "line": 23,
-                    "character": 31
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\portfolio\\combiner.py",
             "severity": "error",
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
@@ -10755,70 +9299,6 @@
             "rule": "reportAttributeAccessIssue"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\bootstrap.py",
-            "severity": "error",
-            "message": "\"study_id\" is not a known attribute of \"None\"",
-            "range": {
-                "start": {
-                    "line": 446,
-                    "character": 22
-                },
-                "end": {
-                    "line": 446,
-                    "character": 30
-                }
-            },
-            "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\bootstrap.py",
-            "severity": "error",
-            "message": "\"study_id\" is not a known attribute of \"None\"",
-            "range": {
-                "start": {
-                    "line": 452,
-                    "character": 18
-                },
-                "end": {
-                    "line": 452,
-                    "character": 26
-                }
-            },
-            "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\bootstrap.py",
-            "severity": "error",
-            "message": "\"study_id\" is not a known attribute of \"None\"",
-            "range": {
-                "start": {
-                    "line": 468,
-                    "character": 18
-                },
-                "end": {
-                    "line": 468,
-                    "character": 26
-                }
-            },
-            "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\bootstrap.py",
-            "severity": "error",
-            "message": "Type \"StudyRecord | None\" is not assignable to return type \"StudyRecord\"\n  Type \"StudyRecord | None\" is not assignable to type \"StudyRecord\"\n    \"None\" is not assignable to \"StudyRecord\"",
-            "range": {
-                "start": {
-                    "line": 472,
-                    "character": 11
-                },
-                "end": {
-                    "line": 472,
-                    "character": 16
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\guidance.py",
             "severity": "error",
             "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Unknown | None\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"None\" is not assignable to type \"ConvertibleToFloat\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"None\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"None\" is incompatible with protocol \"SupportsIndex\"\n  ...",
@@ -10981,30 +9461,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
             "severity": "error",
-            "message": "Operator \"-\" not supported for types \"float\" and \"float | None\"\n  Operator \"-\" not supported for types \"float\" and \"None\"",
-            "range": {
-                "start": {
-                    "line": 429,
-                    "character": 33
-                },
-                "end": {
-                    "line": 429,
-                    "character": 78
-                }
-            },
-            "rule": "reportOperatorIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
             "message": "Cannot access attribute \"_scoreboard\" for class \"AutoresearchRunner*\"\n  Attribute \"_scoreboard\" is unknown",
             "range": {
                 "start": {
-                    "line": 615,
+                    "line": 616,
                     "character": 22
                 },
                 "end": {
-                    "line": 615,
+                    "line": 616,
                     "character": 33
                 }
             },
@@ -11013,78 +9477,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
             "severity": "error",
-            "message": "Type \"str\" is not assignable to return type \"ShutdownReason | None\"\n  Type \"str\" is not assignable to type \"ShutdownReason | None\"\n    \"str\" is not assignable to \"ShutdownReason\"\n    \"str\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 634,
-                    "character": 19
-                },
-                "end": {
-                    "line": 634,
-                    "character": 30
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
-            "message": "Operator \">=\" not supported for types \"int\" and \"int | None\"\n  Operator \">=\" not supported for types \"int\" and \"None\"",
-            "range": {
-                "start": {
-                    "line": 637,
-                    "character": 56
-                },
-                "end": {
-                    "line": 637,
-                    "character": 97
-                }
-            },
-            "rule": "reportOperatorIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
-            "message": "Type \"Literal['max_rounds']\" is not assignable to return type \"ShutdownReason | None\"\n  Type \"Literal['max_rounds']\" is not assignable to type \"ShutdownReason | None\"\n    \"Literal['max_rounds']\" is not assignable to \"ShutdownReason\"\n    \"Literal['max_rounds']\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 640,
-                    "character": 19
-                },
-                "end": {
-                    "line": 640,
-                    "character": 44
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
-            "message": "Type \"Literal['early_stopped']\" is not assignable to return type \"ShutdownReason | None\"\n  Type \"Literal['early_stopped']\" is not assignable to type \"ShutdownReason | None\"\n    \"Literal['early_stopped']\" is not assignable to \"ShutdownReason\"\n    \"Literal['early_stopped']\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 658,
-                    "character": 23
-                },
-                "end": {
-                    "line": 658,
-                    "character": 51
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
             "message": "\"get\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 758,
+                    "line": 760,
                     "character": 29
                 },
                 "end": {
-                    "line": 758,
+                    "line": 760,
                     "character": 32
                 }
             },
@@ -11096,11 +9496,11 @@
             "message": "\"get\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 759,
+                    "line": 761,
                     "character": 29
                 },
                 "end": {
-                    "line": 759,
+                    "line": 761,
                     "character": 32
                 }
             },
@@ -11112,11 +9512,11 @@
             "message": "\"get\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 760,
+                    "line": 762,
                     "character": 29
                 },
                 "end": {
-                    "line": 760,
+                    "line": 762,
                     "character": 32
                 }
             },
@@ -11128,11 +9528,11 @@
             "message": "Argument of type \"dict[Unknown, Unknown] | None\" cannot be assigned to parameter \"result\" of type \"dict[Unknown, Unknown]\" in function \"_finalize_round\"\n  Type \"dict[Unknown, Unknown] | None\" is not assignable to type \"dict[Unknown, Unknown]\"\n    \"None\" is not assignable to \"dict[Unknown, Unknown]\"",
             "range": {
                 "start": {
-                    "line": 765,
+                    "line": 767,
                     "character": 16
                 },
                 "end": {
-                    "line": 765,
+                    "line": 767,
                     "character": 22
                 }
             },
@@ -11141,30 +9541,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
             "severity": "error",
-            "message": "Type \"ShutdownReason\" is not assignable to return type \"str\"\n  \"ShutdownReason\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 768,
-                    "character": 23
-                },
-                "end": {
-                    "line": 768,
-                    "character": 27
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
             "message": "Arguments missing for parameters \"accept\", \"hard_passed\"",
             "range": {
                 "start": {
-                    "line": 924,
+                    "line": 926,
                     "character": 27
                 },
                 "end": {
-                    "line": 924,
+                    "line": 926,
                     "character": 73
                 }
             },
@@ -11176,11 +9560,11 @@
             "message": "No parameter named \"verdict\"",
             "range": {
                 "start": {
-                    "line": 924,
+                    "line": 926,
                     "character": 46
                 },
                 "end": {
-                    "line": 924,
+                    "line": 926,
                     "character": 53
                 }
             },
@@ -14053,22 +12437,6 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\tools\\data_transforms.py",
             "severity": "error",
-            "message": "Type \"Series | DataFrame | Unknown\" is not assignable to return type \"DataFrame\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 109,
-                    "character": 11
-                },
-                "end": {
-                    "line": 109,
-                    "character": 14
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\tools\\data_transforms.py",
-            "severity": "error",
             "message": "Argument of type \"Series | DataFrame | Unknown\" cannot be assigned to parameter \"value\" of type \"DataFrame\" in function \"__setitem__\"\n  Type \"Series | DataFrame | Unknown\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
             "range": {
                 "start": {
@@ -14081,70 +12449,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\tools\\data_transforms.py",
-            "severity": "error",
-            "message": "Type \"Hashable | str\" is not assignable to return type \"str\"\n  Type \"Hashable | str\" is not assignable to type \"str\"\n    \"Hashable\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 196,
-                    "character": 11
-                },
-                "end": {
-                    "line": 196,
-                    "character": 20
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\tools\\data_transforms.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"DataFrame\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 230,
-                    "character": 11
-                },
-                "end": {
-                    "line": 230,
-                    "character": 42
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\tools\\data_transforms.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"DataFrame\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 257,
-                    "character": 11
-                },
-                "end": {
-                    "line": 257,
-                    "character": 46
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\tools\\data_transforms.py",
-            "severity": "error",
-            "message": "Type \"Series | Unknown | Self@DataFrame\" is not assignable to return type \"DataFrame\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"DataFrame\"\n    \"Series\" is not assignable to \"DataFrame\"",
-            "range": {
-                "start": {
-                    "line": 292,
-                    "character": 11
-                },
-                "end": {
-                    "line": 292,
-                    "character": 14
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\backtest_engine.py",
@@ -14213,34 +12517,34 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\backtest_metrics.py",
             "severity": "error",
-            "message": "Operator \"-\" not supported for types \"Unknown | tuple[Unknown, ...] | MultiIndex | RangeIndex | int | Index\" and \"Unknown | tuple[Unknown, ...] | MultiIndex | RangeIndex | int | Index\"\n  Operator \"-\" not supported for types \"tuple[Unknown, ...]\" and \"tuple[Unknown, ...]\"\n  Operator \"-\" not supported for types \"tuple[Unknown, ...]\" and \"int\"\n  Operator \"-\" not supported for types \"int\" and \"tuple[Unknown, ...]\"",
+            "message": "Argument of type \"Unknown | tuple[Unknown, ...] | MultiIndex | RangeIndex | int | Index\" cannot be assigned to parameter \"ts_input\" of type \"integer[Any] | float | str | date | datetime | datetime64[Any]\" in function \"__new__\"\n  Type \"Unknown | tuple[Unknown, ...] | MultiIndex | RangeIndex | int | Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n    Type \"Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n      \"Index\" is not assignable to \"integer[Any]\"\n      \"Index\" is not assignable to \"float\"\n      \"Index\" is not assignable to \"str\"\n      \"Index\" is not assignable to \"date\"\n      \"Index\" is not assignable to \"datetime\"\n      \"Index\" is not assignable to \"datetime64[Any]\"",
             "range": {
                 "start": {
-                    "line": 247,
-                    "character": 24
+                    "line": 246,
+                    "character": 29
                 },
                 "end": {
-                    "line": 247,
-                    "character": 38
+                    "line": 246,
+                    "character": 50
                 }
             },
-            "rule": "reportOperatorIssue"
+            "rule": "reportArgumentType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\backtest_metrics.py",
             "severity": "error",
-            "message": "Cannot access attribute \"days\" for class \"int\"\n  Attribute \"days\" is unknown",
+            "message": "Argument of type \"Unknown | tuple[Unknown, ...] | MultiIndex | RangeIndex | int | Index\" cannot be assigned to parameter \"ts_input\" of type \"integer[Any] | float | str | date | datetime | datetime64[Any]\" in function \"__new__\"\n  Type \"Unknown | tuple[Unknown, ...] | MultiIndex | RangeIndex | int | Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n    Type \"Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n      \"Index\" is not assignable to \"integer[Any]\"\n      \"Index\" is not assignable to \"float\"\n      \"Index\" is not assignable to \"str\"\n      \"Index\" is not assignable to \"date\"\n      \"Index\" is not assignable to \"datetime\"\n      \"Index\" is not assignable to \"datetime64[Any]\"",
             "range": {
                 "start": {
                     "line": 247,
-                    "character": 39
+                    "character": 28
                 },
                 "end": {
                     "line": 247,
-                    "character": 43
+                    "character": 50
                 }
             },
-            "rule": "reportAttributeAccessIssue"
+            "rule": "reportArgumentType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\backtest_metrics.py",
@@ -14248,11 +12552,11 @@
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 258,
+                    "line": 259,
                     "character": 16
                 },
                 "end": {
-                    "line": 258,
+                    "line": 259,
                     "character": 30
                 }
             },
@@ -14264,11 +12568,11 @@
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 258,
+                    "line": 259,
                     "character": 16
                 },
                 "end": {
-                    "line": 258,
+                    "line": 259,
                     "character": 30
                 }
             },
@@ -14280,11 +12584,11 @@
             "message": "Argument of type \"float64 | Series | float | Any | Unknown\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"float64 | Series | float | Any | Unknown\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 268,
+                    "line": 269,
                     "character": 25
                 },
                 "end": {
-                    "line": 268,
+                    "line": 269,
                     "character": 39
                 }
             },
@@ -14296,11 +12600,11 @@
             "message": "Argument of type \"float64 | Series | float | Any | Unknown\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"float64 | Series | float | Any | Unknown\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 268,
+                    "line": 269,
                     "character": 25
                 },
                 "end": {
-                    "line": 268,
+                    "line": 269,
                     "character": 39
                 }
             },
@@ -14312,11 +12616,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"str\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14328,11 +12632,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"bytes\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14344,11 +12648,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"date\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14360,11 +12664,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"datetime\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14376,11 +12680,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"timedelta\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14392,11 +12696,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"bool\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14408,11 +12712,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"int\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14424,11 +12728,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"float\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14440,11 +12744,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"Timestamp\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14456,11 +12760,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"Timedelta\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14472,11 +12776,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"Interval[Unknown]\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14488,11 +12792,11 @@
             "message": "Cannot access attribute \"tolist\" for class \"complex\"\n  Attribute \"tolist\" is unknown",
             "range": {
                 "start": {
-                    "line": 75,
+                    "line": 77,
                     "character": 55
                 },
                 "end": {
-                    "line": 75,
+                    "line": 77,
                     "character": 61
                 }
             },
@@ -14504,11 +12808,11 @@
             "message": "\"complex\" is not iterable\n  \"__iter__\" method not defined",
             "range": {
                 "start": {
-                    "line": 84,
+                    "line": 86,
                     "character": 39
                 },
                 "end": {
-                    "line": 84,
+                    "line": 86,
                     "character": 44
                 }
             },
@@ -14520,11 +12824,11 @@
             "message": "\"float\" is not iterable\n  \"__iter__\" method not defined",
             "range": {
                 "start": {
-                    "line": 84,
+                    "line": 86,
                     "character": 39
                 },
                 "end": {
-                    "line": 84,
+                    "line": 86,
                     "character": 44
                 }
             },
@@ -14536,11 +12840,11 @@
             "message": "\"int\" is not iterable\n  \"__iter__\" method not defined",
             "range": {
                 "start": {
-                    "line": 84,
+                    "line": 86,
                     "character": 39
                 },
                 "end": {
-                    "line": 84,
+                    "line": 86,
                     "character": 44
                 }
             },
@@ -14552,11 +12856,11 @@
             "message": "No overloads for \"searchsorted\" match the provided arguments",
             "range": {
                 "start": {
-                    "line": 87,
+                    "line": 89,
                     "character": 38
                 },
                 "end": {
-                    "line": 87,
+                    "line": 89,
                     "character": 59
                 }
             },
@@ -14568,11 +12872,11 @@
             "message": "Argument of type \"Timestamp | NaTType\" cannot be assigned to parameter \"value\" of type \"ArrayLike | ExtensionArray\" in function \"searchsorted\"\n  Type \"Timestamp | NaTType\" is not assignable to type \"ArrayLike | ExtensionArray\"\n    Type \"NaTType\" is not assignable to type \"ArrayLike | ExtensionArray\"\n      \"NaTType\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"NaTType\" is incompatible with protocol \"_SupportsArray[dtype[Any]]\"\n        \"__array__\" is not present\n      \"NaTType\" is incompatible with protocol \"_NestedSequence[_SupportsArray[dtype[Any]]]\"\n        \"__len__\" is not present\n  ...",
             "range": {
                 "start": {
-                    "line": 87,
+                    "line": 89,
                     "character": 57
                 },
                 "end": {
-                    "line": 87,
+                    "line": 89,
                     "character": 58
                 }
             },
@@ -14584,11 +12888,11 @@
             "message": "No overloads for \"searchsorted\" match the provided arguments",
             "range": {
                 "start": {
-                    "line": 91,
+                    "line": 93,
                     "character": 33
                 },
                 "end": {
-                    "line": 91,
+                    "line": 93,
                     "character": 63
                 }
             },
@@ -14600,31 +12904,15 @@
             "message": "Argument of type \"Timestamp | NaTType\" cannot be assigned to parameter \"value\" of type \"ArrayLike | ExtensionArray\" in function \"searchsorted\"\n  Type \"Timestamp | NaTType\" is not assignable to type \"ArrayLike | ExtensionArray\"\n    Type \"NaTType\" is not assignable to type \"ArrayLike | ExtensionArray\"\n      \"NaTType\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"NaTType\" is incompatible with protocol \"_SupportsArray[dtype[Any]]\"\n        \"__array__\" is not present\n      \"NaTType\" is incompatible with protocol \"_NestedSequence[_SupportsArray[dtype[Any]]]\"\n        \"__len__\" is not present\n  ...",
             "range": {
                 "start": {
-                    "line": 91,
+                    "line": 93,
                     "character": 52
                 },
                 "end": {
-                    "line": 91,
+                    "line": 93,
                     "character": 62
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\backtest_utils.py",
-            "severity": "error",
-            "message": "Type \"list[Timestamp | NaTType]\" is not assignable to return type \"list[Timestamp]\"\n  \"list[Timestamp | NaTType]\" is not assignable to \"list[Timestamp]\"\n    Type parameter \"_T@list\" is invariant, but \"Timestamp | NaTType\" is not the same as \"Timestamp\"\n    Consider switching from \"list\" to \"Sequence\" which is covariant",
-            "range": {
-                "start": {
-                    "line": 95,
-                    "character": 11
-                },
-                "end": {
-                    "line": 95,
-                    "character": 17
-                }
-            },
-            "rule": "reportReturnType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\bg_proc.py",
@@ -14657,22 +12945,6 @@
                 }
             },
             "rule": "reportAttributeAccessIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\covariance.py",
-            "severity": "error",
-            "message": "Operator \"*\" not supported for types \"ArrayLike\" and \"Literal[252]\"\n  Operator \"*\" not supported for types \"ExtensionArray\" and \"Literal[252]\" when expected type is \"_ArrayNoD[Any] | Sequence[Sequence[Any]]\"",
-            "range": {
-                "start": {
-                    "line": 61,
-                    "character": 19
-                },
-                "end": {
-                    "line": 61,
-                    "character": 42
-                }
-            },
-            "rule": "reportOperatorIssue"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\utils\\ic_utils.py",
@@ -14869,23 +13141,7 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\walk_forward.py",
             "severity": "error",
-            "message": "Operator \"<=\" not supported for types \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" and \"datetime\"\n  Operator \"<=\" not supported for types \"tuple[Unknown, ...]\" and \"datetime\"\n  Operator \"<=\" not supported for types \"int\" and \"datetime\"",
-            "range": {
-                "start": {
-                    "line": 60,
-                    "character": 15
-                },
-                "end": {
-                    "line": 60,
-                    "character": 51
-                }
-            },
-            "rule": "reportOperatorIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\walk_forward.py",
-            "severity": "error",
-            "message": "Operator \"<=\" not supported for types \"datetime\" and \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\"\n  Operator \"<=\" not supported for types \"datetime\" and \"tuple[Unknown, ...]\"\n  Operator \"<=\" not supported for types \"datetime\" and \"int\"",
+            "message": "Argument of type \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" cannot be assigned to parameter \"ts_input\" of type \"integer[Any] | float | str | date | datetime | datetime64[Any]\" in function \"__new__\"\n  Type \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n    Type \"Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n      \"Index\" is not assignable to \"integer[Any]\"\n      \"Index\" is not assignable to \"float\"\n      \"Index\" is not assignable to \"str\"\n      \"Index\" is not assignable to \"date\"\n      \"Index\" is not assignable to \"datetime\"\n      \"Index\" is not assignable to \"datetime64[Any]\"",
             "range": {
                 "start": {
                     "line": 60,
@@ -14893,10 +13149,26 @@
                 },
                 "end": {
                     "line": 60,
-                    "character": 51
+                    "character": 37
                 }
             },
-            "rule": "reportOperatorIssue"
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\walk_forward.py",
+            "severity": "error",
+            "message": "Argument of type \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" cannot be assigned to parameter \"ts_input\" of type \"integer[Any] | float | str | date | datetime | datetime64[Any]\" in function \"__new__\"\n  Type \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n    Type \"Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n      \"Index\" is not assignable to \"integer[Any]\"\n      \"Index\" is not assignable to \"float\"\n      \"Index\" is not assignable to \"str\"\n      \"Index\" is not assignable to \"date\"\n      \"Index\" is not assignable to \"datetime\"\n      \"Index\" is not assignable to \"datetime64[Any]\"",
+            "range": {
+                "start": {
+                    "line": 60,
+                    "character": 71
+                },
+                "end": {
+                    "line": 60,
+                    "character": 78
+                }
+            },
+            "rule": "reportArgumentType"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\walk_forward.py",
@@ -15141,22 +13413,6 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\workflow\\store.py",
             "severity": "error",
-            "message": "Type \"list[dict[str, Any] | None]\" is not assignable to return type \"list[dict[str, Any]]\"",
-            "range": {
-                "start": {
-                    "line": 189,
-                    "character": 15
-                },
-                "end": {
-                    "line": 189,
-                    "character": 46
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\workflow\\store.py",
-            "severity": "error",
             "message": "Argument of type \"int\" cannot be assigned to parameter \"object\" of type \"str\" in function \"append\"\n  \"int\" is not assignable to \"str\"",
             "range": {
                 "start": {
@@ -15169,62 +13425,14 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\workflow\\store.py",
-            "severity": "error",
-            "message": "Type \"list[dict[str, Any] | None]\" is not assignable to return type \"list[dict[str, Any]]\"",
-            "range": {
-                "start": {
-                    "line": 248,
-                    "character": 15
-                },
-                "end": {
-                    "line": 248,
-                    "character": 46
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\workflow\\store.py",
-            "severity": "error",
-            "message": "Type \"list[dict[str, Any] | None]\" is not assignable to return type \"list[dict[str, Any]]\"",
-            "range": {
-                "start": {
-                    "line": 272,
-                    "character": 15
-                },
-                "end": {
-                    "line": 272,
-                    "character": 46
-                }
-            },
-            "rule": "reportReturnType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\workflow\\store.py",
-            "severity": "error",
-            "message": "Type \"list[dict[str, Any] | None]\" is not assignable to return type \"list[dict[str, Any]]\"",
-            "range": {
-                "start": {
-                    "line": 326,
-                    "character": 15
-                },
-                "end": {
-                    "line": 326,
-                    "character": 46
-                }
-            },
-            "rule": "reportReturnType"
         }
     ],
     "summary": {
         "filesAnalyzed": 457,
-        "errorCount": 951,
+        "errorCount": 839,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 21.772
+        "timeInSec": 28.54
     }
 }
 

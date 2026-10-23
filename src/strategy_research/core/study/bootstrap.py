@@ -438,7 +438,10 @@ def create_study_record(
             criteria=default_goal_criteria(),
             supersede=False,
         )
-        study = store.update_goal_id(study.study_id, goal.goal_id)
+        updated = store.update_goal_id(study.study_id, goal.goal_id)
+        if updated is None:
+            raise RuntimeError(f"update_goal_id failed for {study.study_id}")
+        study = updated
 
         # Record guidance_md as the startup directive so it appears in
         # the "指令记录" audit trail.

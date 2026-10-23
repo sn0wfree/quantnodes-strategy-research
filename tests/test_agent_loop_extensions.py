@@ -7,8 +7,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from strategy_research.core.agent.builtin_tools import build_default_registry
 from strategy_research.core.agent.loop import (
     AgentLoop,
@@ -123,7 +121,7 @@ class TestHeartbeat:
             assert r.finished_reason == "stop"
             # Trace should have heartbeat events
             if r.trace_path:
-                lines = Path(r.trace_path).read_text().splitlines()
+                lines = Path(r.trace_path).read_text(encoding="utf-8").splitlines()
                 heartbeats = [l for l in lines if '"heartbeat"' in l]
                 # At least 1 heartbeat should have been emitted
                 assert len(heartbeats) >= 0  # list_history is fast, may not get heartbeat
@@ -153,7 +151,7 @@ class TestTrace:
             assert r.trace_path is not None
             trace_file = Path(r.trace_path)
             assert trace_file.exists()
-            content = trace_file.read_text()
+            content = trace_file.read_text(encoding="utf-8")
             assert "loop_start" in content
             assert "loop_final" in content
 
@@ -196,7 +194,7 @@ class TestTrace:
             )
             loop.client.chat = mock.chat
             r = loop.run("x")
-            lines = Path(r.trace_path).read_text().splitlines()
+            lines = Path(r.trace_path).read_text(encoding="utf-8").splitlines()
             events = [json.loads(l) for l in lines if l.strip()]
             types = [e["type"] for e in events]
             assert "loop_start" in types

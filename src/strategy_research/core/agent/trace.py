@@ -82,6 +82,8 @@ class TraceWriter:
         """
         if "ts" not in entry:
             entry["ts"] = time.time()
+        if self._file.closed:
+            self._file = open(self.path, "a", encoding="utf-8")
         self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
         self._file.flush()
 
@@ -154,7 +156,14 @@ class TraceWriter:
 
     def close(self) -> None:
         """Close the file handle."""
-        self._file.close()
+        if not self._file.closed:
+            self._file.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 — GC path, never raise
+            pass
 
     def _attach_text_field(
         self,
