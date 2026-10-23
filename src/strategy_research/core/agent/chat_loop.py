@@ -78,7 +78,7 @@ def build_chat_agent_loop(
         sees what tools are available even without a workspace).
     """
     from .builtin_tools import build_default_registry
-    from .prompt_builder import PromptBuilderFactory
+    from .loop_assembly import assemble_loop_parts
 
     # Tool registry (default: all built-in tools)
     if registry is None:
@@ -109,24 +109,18 @@ def build_chat_agent_loop(
         if allowed_tools is None:
             allowed_tools = ["submit_dag_step"]
 
-    # System prompt via PromptBuilderFactory (P3: pass real workspace/tool_list)
-    if system_prompt_override is not None:
-        system_prompt: str | None = system_prompt_override
-    else:
-        ctx = dict(extra_context or {})
-        if workspace is not None:
-            ctx.setdefault("workspace", str(workspace))
-        else:
-            ctx.setdefault("workspace", "")
-        if "tool_list" not in ctx and registry is not None:
-            try:
-                tool_names = sorted(registry._tools.keys())
-                ctx["tool_list"] = "\n".join(f"- {n}" for n in tool_names)
-            except Exception:
-                ctx["tool_list"] = ""
-        system_prompt = PromptBuilderFactory.get(role).build_system_prompt(
-            role, ctx
-        )
+    # System prompt + strategy resolution via the shared assembly core
+    # (phase 3 — the registry/prompt/strategy trio was duplicated with
+    # role_factory; see docs/phase3-dual-factory-design.md).
+    assembly = assemble_loop_parts(
+        role=role,
+        registry=registry,
+        extra_context=extra_context,
+        system_prompt_override=system_prompt_override,
+        workspace=workspace,
+    )
+    registry = assembly.registry
+    system_prompt: str | None = assembly.system_prompt
 
     # Compact config: prefer explicit override, then config.compact_config
     if compact_config is None and config is not None:

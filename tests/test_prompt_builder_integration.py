@@ -79,9 +79,12 @@ class TestPhase5CallSitesUseFactory:
         from strategy_research.core.agent import role_factory
 
         src = open(role_factory.__file__, encoding="utf-8").read()
-        # role_factory uses PromptBuilderFactory directly (not the chat
-        # loop factory, since it's the goal/agent path, not chat).
-        assert "PromptBuilderFactory" in src
+        # role_factory routes prompt rendering through the shared
+        # assembly core (loop_assembly.assemble_loop_parts), which calls
+        # PromptBuilderFactory internally (phase 3 dual-factory
+        # consolidation). The old "directly calls PromptBuilderFactory"
+        # lock is superseded.
+        assert "assemble_loop_parts" in src
         assert "def _load_role_system_prompt" not in src
         assert "def _prompts_dir" not in src
 

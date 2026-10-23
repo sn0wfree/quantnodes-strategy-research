@@ -114,18 +114,27 @@ def build_agent_loop(
     """
     from ...core.agent.builtin_tools import build_default_registry
     from ...core.agent.loop import AgentLoop
+    from ...core.agent.loop_assembly import assemble_loop_parts
     from ...core.agent.strategy.profile_resolver import resolve_loop_strategy
     from ...core.llm import LLMConfig
-    from .prompt_builder import PromptBuilderFactory
 
-    system_prompt = PromptBuilderFactory.get(role).build_system_prompt(role, {})
-    if not system_prompt:
+    # Single-source registry + prompt + strategy (phase 3, shared with
+    # chat_loop — see docs/phase3-dual-factory-design.md).
+    assembly = assemble_loop_parts(
+        role=role,
+        registry=None,
+        extra_context={},
+        workspace=None,
+        loop_strategy=loop_strategy,
+    )
+    if not assembly.system_prompt:
         return None
+    system_prompt = assembly.system_prompt
 
     cfg = llm_config or LLMConfig.load()
     registry = build_default_registry()
     whitelist = tools_override if tools_override is not None else _get_tool_whitelist(role)
-    strategy = resolve_loop_strategy(loop_strategy)
+    strategy = assembly.loop_strategy if assembly.loop_strategy is not None else resolve_loop_strategy(loop_strategy)
 
     return AgentLoop(
         config=cfg,
