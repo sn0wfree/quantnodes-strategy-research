@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 800" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="ar" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
+      <path d="M0,0 L5.5,3 L0,6" fill="none" stroke="#94a3b8" stroke-width="1"/>
+    </marker>
+    <marker id="arb" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
+      <path d="M0,0 L5.5,3 L0,6" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="24" font-size="14" font-weight="500" fill="#0f172a">目标架构 v2 · 汇总（2026-10）</text>
+  <text x="40" y="40" font-size="11" fill="#64748b">六层 + 四中枢 + 三层接缝 + 三层基因组（RSI）</text>
+
+  <!-- ============ 左：六层 ============ -->
+  <text x="40" y="60" font-size="11" font-weight="500" fill="#334155">分层</text>
+
+  <rect x="40" y="68" width="380" height="42" rx="7" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="54" y="84" font-size="11" font-weight="500" fill="#334155">接入</text>
+  <text x="96" y="84" font-size="12" fill="#0f172a">CLI / TUI · FastAPI 20 routers · WebUI · MCP</text>
+  <text x="96" y="100" font-size="10" fill="#64748b">契约：入参 → Service / Runner</text>
+
+  <line x1="230" y1="110" x2="230" y2="120" stroke="#94a3b8" stroke-width="1" marker-end="url(#ar)"/>
+
+  <rect x="40" y="122" width="380" height="66" rx="7" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="54" y="138" font-size="11" font-weight="500" fill="#0c4a6e">编排</text>
+  <text x="96" y="138" font-size="12" fill="#0f172a">SessionService · StudyRunner · AgentLoop（9 steps）</text>
+  <text x="96" y="154" font-size="10" fill="#0369a1">对称契约：BranchContext 入 → RoundOutcome 出</text>
+  <text x="96" y="170" font-size="10" fill="#0369a1">自主性缺口：导演层（propose_next / 假设工具 / 记忆回路）</text>
+  <text x="96" y="183" font-size="10" fill="#64748b">Swarm · Workflow · Goal（三套编排，边界待成文）</text>
+
+  <line x1="230" y1="188" x2="230" y2="198" stroke="#94a3b8" stroke-width="1" marker-end="url(#ar)"/>
+
+  <rect x="40" y="200" width="380" height="42" rx="7" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="54" y="216" font-size="11" font-weight="500" fill="#334155">引擎</text>
+  <text x="96" y="216" font-size="12" fill="#0f172a">phases / langgraph（查表分派）· 9 类 ShutdownReason</text>
+  <text x="96" y="232" font-size="10" fill="#64748b">AEGIS：新颖性门 · 回归门 · 停滞/丢弃门</text>
+
+  <line x1="230" y1="242" x2="230" y2="252" stroke="#94a3b8" stroke-width="1" marker-end="url(#ar)"/>
+
+  <rect x="40" y="254" width="380" height="58" rx="7" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="54" y="270" font-size="11" font-weight="500" fill="#334155">能力</text>
+  <text x="96" y="270" font-size="12" fill="#0f172a">LLM adapters · 44 tools / 16 toolsets · hooks · skills</text>
+  <text x="96" y="286" font-size="10" fill="#64748b">扩展面分工：STEP 改控制流 · hook 只读 · injector 加数据 · toolset 出能力</text>
+  <text x="96" y="301" font-size="10" fill="#64748b">DSH 借鉴 8 成；剩「不变量层」未借</text>
+
+  <line x1="230" y1="312" x2="230" y2="322" stroke="#94a3b8" stroke-width="1" marker-end="url(#ar)"/>
+
+  <rect x="40" y="324" width="380" height="44" rx="7" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="54" y="340" font-size="11" font-weight="500" fill="#334155">数据</text>
+  <text x="96" y="340" font-size="12" fill="#0f172a">DuckDB · workspace FS · event_store · goal/hypothesis</text>
+  <text x="96" y="356" font-size="10" fill="#64748b">红线：event_store 真源 · journal 两阶段 · checkpoint 仅 langgraph</text>
+
+  <line x1="230" y1="368" x2="230" y2="378" stroke="#94a3b8" stroke-width="1" marker-end="url(#ar)"/>
+
+  <rect x="40" y="380" width="380" height="44" rx="7" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="54" y="396" font-size="11" font-weight="500" fill="#334155">横切</text>
+  <text x="96" y="396" font-size="12" fill="#0f172a">evals 70 · nightly 跟幅 · conformance · CI gates</text>
+  <text x="96" y="412" font-size="10" fill="#64748b">缺口：holdout 集（RSI 前置）· 护栏散落 → 不变量层</text>
+
+  <!-- ============ 右：四中枢 ============ -->
+  <text x="450" y="60" font-size="11" font-weight="500" fill="#0c4a6e">中枢</text>
+
+  <rect x="450" y="68" width="190" height="66" rx="7" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="462" y="84" font-size="11" font-weight="500" fill="#0c4a6e">ContextHub</text>
+  <text x="462" y="99" font-size="10" fill="#0369a1">工作集：模型看到什么</text>
+  <text x="462" y="113" font-size="10" fill="#0369a1">收集 · 仲裁 · 渲染 · 归因</text>
+  <text x="462" y="128" font-size="10" fill="#64748b">成员规则：改变模型输入的才接</text>
+
+  <rect x="450" y="146" width="190" height="52" rx="7" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="462" y="162" font-size="11" font-weight="500" fill="#0c4a6e">CapabilityRegistry</text>
+  <text x="462" y="177" font-size="10" fill="#0369a1">供给：有什么可用</text>
+  <text x="462" y="191" font-size="10" fill="#64748b">扩展 core/registry.py（不新建）</text>
+
+  <rect x="450" y="210" width="190" height="52" rx="7" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="462" y="226" font-size="11" font-weight="500" fill="#0c4a6e">EventStore</text>
+  <text x="462" y="241" font-size="10" fill="#0369a1">事实：发生了什么</text>
+  <text x="462" y="255" font-size="10" fill="#64748b">快照从此派生（不建存储）</text>
+
+  <rect x="450" y="274" width="190" height="66" rx="7" fill="#f1f5f9" stroke="#334155" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="462" y="290" font-size="11" font-weight="500" fill="#0f172a">InvariantLayer</text>
+  <text x="462" y="305" font-size="10" fill="#334155">底线：什么不能破</text>
+  <text x="462" y="319" font-size="10" fill="#64748b">独立于插件 · 不可被覆盖</text>
+  <text x="462" y="333" font-size="10" fill="#64748b">DSH §9.7 模式（待建 0.9）</text>
+
+  <!-- 中枢连线 -->
+  <line x1="420" y1="100" x2="448" y2="100" stroke="#0ea5e9" stroke-width="1" marker-end="url(#arb)"/>
+  <text x="424" y="94" font-size="9" fill="#0369a1">每次调用</text>
+  <line x1="450" y1="172" x2="422" y2="172" stroke="#0ea5e9" stroke-width="1" marker-end="url(#arb)"/>
+  <line x1="545" y1="198" x2="545" y2="208" stroke="#0ea5e9" stroke-width="1" marker-end="url(#arb)"/>
+  <line x1="545" y1="262" x2="545" y2="272" stroke="#0ea5e9" stroke-width="1" marker-end="url(#arb)"/>
+  <path d="M450,300 L430,300 L430,420 L424,420" fill="none" stroke="#334155" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#ar)"/>
+  <text x="432" y="316" font-size="9" fill="#334155">守护</text>
+
+  <!-- 统一快照 -->
+  <rect x="450" y="352" width="190" height="72" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.5"/>
+  <text x="462" y="368" font-size="11" font-weight="500" fill="#334155">统一快照</text>
+  <text x="462" y="383" font-size="10" fill="#64748b">items（带来源·时间·置信）</text>
+  <text x="462" y="396" font-size="10" fill="#64748b">dropped（丢了什么·为何）</text>
+  <text x="462" y="409" font-size="10" fill="#64748b">providers_used / capabilities</text>
+  <text x="462" y="419" font-size="10" fill="#64748b">events_ref</text>
+
+  <!-- ============ 接缝三层 ============ -->
+  <text x="40" y="452" font-size="11" font-weight="500" fill="#0c4a6e">接缝规范（统一的是「合格标准」，不是协议数量）</text>
+
+  <rect x="40" y="460" width="600" height="42" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="54" y="476" font-size="11" font-weight="500" fill="#0c4a6e">L1 窄协议</text>
+  <text x="120" y="476" font-size="11" fill="#0f172a">已有 29 个复用 + 只补 3 个</text>
+  <text x="120" y="492" font-size="10" fill="#0369a1">EventSource · ToolsetProvider · PersistenceContract　（不写统一大协议）</text>
+
+  <rect x="40" y="508" width="600" height="42" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="54" y="524" font-size="11" font-weight="500" fill="#0c4a6e">L2 统一注册</text>
+  <text x="120" y="524" font-size="11" fill="#0f172a">扩展 core/registry.py：能力标签 / 依赖闭包 / validate / describe</text>
+  <text x="120" y="540" font-size="10" fill="#0369a1">5 套注册表 → 1 主 + N 薄适配；对外 API 不变</text>
+
+  <rect x="40" y="556" width="600" height="42" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="0.5"/>
+  <text x="54" y="572" font-size="11" font-weight="500" fill="#0c4a6e">L3 一致性套件</text>
+  <text x="120" y="572" font-size="11" fill="#0f172a">每协议一套可运行 pytest：实现 = 写类 + 跑套件</text>
+  <text x="120" y="588" font-size="10" fill="#0369a1">接入成本目标：1 文件 + 1 行 + 1 套件</text>
+
+  <!-- ============ 基因组三层 ============ -->
+  <text x="40" y="624" font-size="11" font-weight="500" fill="#92400e">基因组（RSI）· 只改行为工件，不改不变量</text>
+
+  <rect x="40" y="632" width="600" height="40" rx="6" fill="#f1f5f9" stroke="#334155" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="54" y="648" font-size="11" font-weight="500" fill="#0f172a">Tier 0 冻结</text>
+  <text x="120" y="648" font-size="11" fill="#0f172a">预算 · 停止条件 · 状态机 · scope 隔离</text>
+  <text x="120" y="664" font-size="10" fill="#64748b">由 InvariantLayer 守护，agent 无权触碰 —— 错了就错的东西不做成插件</text>
+
+  <rect x="40" y="678" width="600" height="40" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="0.5"/>
+  <text x="54" y="694" font-size="11" font-weight="500" fill="#92400e">Tier 1 提案制</text>
+  <text x="120" y="694" font-size="11" fill="#0f172a">角色提示 .prompts · 技能 .skills · 工具集组合</text>
+  <text x="120" y="710" font-size="10" fill="#b45309">agent 只提案 → golden + holdout + 不变量 三重门禁 → CI/人审晋级 → git 秒级回滚</text>
+
+  <rect x="40" y="724" width="600" height="40" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="0.5"/>
+  <text x="54" y="740" font-size="11" font-weight="500" fill="#92400e">Tier 2 可自改</text>
+  <text x="120" y="740" font-size="11" fill="#0f172a">strategy.py · config · notes · 因子代码</text>
+  <text x="120" y="756" font-size="10" fill="#b45309">今天已在发生 —— 但这是「研究产出」，不是「自我进化」</text>
+
+  <text x="40" y="784" font-size="10" fill="#64748b">先决条件：holdout 集（现缺）· 不变量层上线 · 评测跟幅稳定 —— 顺序错了，RSI 就是自己给自己发奖状</text>
+</svg>

@@ -8,6 +8,9 @@
 
 # 第一部分 · 目标架构 v2
 
+> **总图**：`docs/architecture-v2-summary.svg`（六层 + 四中枢 + 三层接缝 + 三层基因组，一页看完）
+> 下方 §1 是同内容的分块版（可编辑文本）
+
 ## 1. 一张总图
 
 ```mermaid
@@ -74,7 +77,62 @@ flowchart TB
 > 直接接入仅 4 类：**贡献方 / 渲染器 / 工具区 / 历史区**。
 > 其余（执行/编排/权限/传输/事件/持久化/策略）**不接入**，但其存在会出现在**统一快照**里（`providers_used` / `capabilities_available` / `events_ref`）——**可观测性达成，依赖不倒置**。
 
-## 5. 与总计划的关系
+## 5. 两条主流程（架构图的可执行对照）
+
+**Study 轮**（编排层）：
+
+```mermaid
+flowchart TD
+  U[用户/调度器] --> RL["_run_loop"]
+  RL --> TC{_top_control_check}
+  TC -->|cancelled| Z1[return CANCELLED]
+  TC -->|continue| RL
+  TC -->|resumed| PREP[轮准备]
+  PREP --> R1[_run_one_round → run_round_phases]
+  R1 --> PB[_prepare_round_preamble]
+  PB --> CTX[BranchContext]
+  CTX --> RE[_resolve_engine]
+  RE --> TB{ENGINE_BRANCHES 查表}
+  TB -->|未知| FB[fallback → phases + warn]
+  TB --> LG[langgraph → RoundOutcome]
+  TB --> PH[phases → RoundOutcome]
+  LG -->|HITL pause/abort| HITL[_handle_hitl_pause M2/M1/H2/H1]
+  HITL -->|skip| RL
+  HITL -->|resumed| FIN
+  PH -->|novelty 拒绝| RL
+  LG --> FIN[shared finalization 只读 outcome.*]
+  FB --> PH
+  FIN --> FZ[_finalize_round budget/SSE/stop]
+  FZ -->|stop| Z2[return ShutdownReason]
+  FZ -->|continue| COOL[cooldown] --> RL
+```
+
+**Agent ReAct 轮**（能力层 + 上下文中枢）：
+
+```mermaid
+flowchart TD
+  IN[消息/context/history] --> HUB["ContextHub.build<br/>收集 provider → 仲裁预算 → 渲染"]
+  HUB --> PR[_prepare_run]
+  PR --> IJ[injectors order=0]
+  IJ --> ST[step: llm_call]
+  ST --> SM{stream_mode}
+  SM -->|Y| AS[_astream_chat]
+  SM -->|N| AC[client.achat]
+  AS --> BG{A1 三维预算}
+  AC --> BG
+  BG -->|耗尽| RB[finish_reason=budget]
+  BG -->|ok| TC{tool_calls?}
+  TC -->|Y| TE[step: tool_execution]
+  TE --> IJ
+  TC -->|N| CO{step: continuation}
+  CO -->|继续| IJ
+  CO -->|停| SSO[step: stop]
+  SSO --> CV[claim validation]
+  CV --> RS[LoopResult]
+  HUB -.explain / snapshot.-> TRACE[event log]
+```
+
+## 6. 与总计划的关系
 
 本文**不新增行动项**，只固定架构终态。W0/W1/W2 九刀 + 0.9 不变量层仍是唯一起手顺序（见 `refactor-master-plan-20261008.md`）。
 
@@ -82,7 +140,7 @@ flowchart TB
 
 # 第二部分 · RSI：能不能引入？怎么不失控？
 
-## 6. 先说结论
+## 7. 先说结论
 
 **可以引入，但只能引入「受限 RSI」，且必须满足三个前提：**
 
@@ -92,7 +150,7 @@ flowchart TB
 
 > 强 RSI（系统改写自己的核心逻辑）**不做**：本项目的不变量、事务、状态机是正确性根基，交给「可被改写的代码」= 放弃正确性保证。
 
-## 7. 两种 RSI 的分级（本项目可落地的范围）
+## 8. 两种 RSI 的分级（本项目可落地的范围）
 
 | 形态 | 含义 | 本项目可行性 | 风险 |
 |---|---|---|---|
@@ -100,7 +158,7 @@ flowchart TB
 | **L2 工件级自改写** | 改写自己的角色提示 / 技能 / 工具集组合 | ⚠️ **可做，但需人审晋级** | 中（reward hacking / 退化） |
 | **L3 结构级自改写** | 改写自己的 step / 编排 / 核心逻辑 | ❌ **本阶段不做** | 高（正确性无保障） |
 
-## 8. 三层基因组（什么可被自我改写）
+## 9. 三层基因组（什么可被自我改写）
 
 现状事实（实测）：
 
@@ -120,7 +178,7 @@ Tier 2  可自改研究工件 strategy.py · config · notes · 因子    ——
 
 > **注意**：Tier 2 已经是系统今天在做的事（agent 写策略、写因子）——那叫**产出**，不叫**进化**。真正的 RSI 是 Tier 1：系统改自己的**行为定义**。
 
-## 9. 适应度函数（当前缺 holdout —— 必须先补）
+## 10. 适应度函数（当前缺 holdout —— 必须先补）
 
 现有评测资产：`evals/golden_tasks.jsonl`（70 题）· `evals/nightly-baseline.json`（基线）· `evals/scorecard.py`
 
@@ -133,7 +191,7 @@ Tier 2  可自改研究工件 strategy.py · config · notes · 因子    ——
 | **holdout 集** | ❌ **没有**（全量可见 → reward hacking） | **必须新增**：一批 agent 不可见的任务，仅在晋级时评定 |
 | **不变量参与适应度** | ❌ 未纳入 | 违反任一不变量 → **直接判负**（不参与打分） |
 
-## 10. 突变—晋级—回滚三段式
+## 11. 突变—晋级—回滚三段式
 
 ```mermaid
 flowchart LR
@@ -156,7 +214,7 @@ flowchart LR
 | **Tier 0 永不进入基因组** | 核心正确性不交给可改写的代码 |
 | 晋级记录进 **event log** | 演化史可审计、可回放 |
 
-## 11. 防退化的四道闸（对齐已有资产）
+## 12. 防退化的四道闸（对齐已有资产）
 
 | 闸 | 已有资产 | 作用 |
 |---|---|---|
@@ -167,7 +225,7 @@ flowchart LR
 
 > 已有资产说明：**这个项目本来就是为自我改进设计的**——AEGIS 门禁、claims 可证伪、novelty/regression 检查、70 题 golden + nightly 跟幅，缺的只是「把工件纳入 genome + 加 holdout」两件事。
 
-## 12. 落地方案（不新增主线，只加一条尾线）
+## 13. 落地方案（不新增主线，只加一条尾线）
 
 | 阶段 | 内容 | 估工 | 前置 |
 |---|---|---|---|
@@ -184,7 +242,7 @@ flowchart LR
 2. holdout 集已建（否则无法判断是真进步还是过拟合）
 3. 评测跟幅门禁稳定（否则会自毁）
 
-## 13. 一句话
+## 14. 一句话
 
 > **RSI 可以引入，但这里的正确形态是「受限自我改进」**：系统可以改自己的**行为工件**（提示/技能/组合），
 > 改不了自己的**不变量**；每次改动是**提案**不是**决定**，由 **多维适应度 + holdout + 不变量门**裁决，

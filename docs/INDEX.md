@@ -9,7 +9,7 @@
 |---|---|
 | 想 10 分钟了解项目 | `code-map.md` · `architecture-framework.svg` |
 | **想看重构后的架构细节** | **`architecture-current-20261008.md`**（契约/连接/与旧架构差异） |
-| **想看目标架构（汇总终版）** | **`architecture-v2-and-rsi-20261008.md`**（六层 + 四中枢 + 三层接缝 + RSI 定位） |
+| **想看目标架构（汇总终版）** | **`architecture-v2-and-rsi-20261008.md`**（六层 + 四中枢 + 三层接缝 + RSI 定位）· **`architecture-v2-summary.svg`**（一页总图） |
 | **想知道接下来做什么（总计划）** | **`refactor-master-plan-20261008.md`**（三波九刀 · 唯一主线 · 护栏 · 度量） |
 | 想看架构评估（4 遍论证依据） | `architecture-reeval-20261008.md`（依赖方向）· `architecture-reeval2-20261008.md`（SSE 双轨）· `agent-design-reeval-20261008.md`（上下文仲裁）· `goal-alignment-review-20261008.md`（自主性） |
 | 想知道现在干净吗 | `structure-debt-third-pass-20261008.md` · `structure-debt-fourth-pass-20261008.md`（spec 同步面） |
