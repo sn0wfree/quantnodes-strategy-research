@@ -113,7 +113,7 @@
   <rect x="413" y="150" width="776" height="280" rx="9" class="boxb"/>
   <text x="429" y="176" class="bt">AgentLoop</text>
   <text x="520" y="176" class="sm">迭代循环 · 单位＝ReAct 步 · 驱动＝LLM 响应 · 1307 行 / 40 方法</text>
-  <text x="429" y="196" class="st">内部有<b>两条正交拆解轴</b>，6 组职责一一重叠（step 是薄壳：execute 里就一行调用 loop._xxx）</text>
+  <text x="429" y="196" class="st">内部有<tspan font-weight="600">两条正交拆解轴</tspan>，6 组职责一一重叠（step 是薄壳：execute 里就一行调用 loop._xxx）</text>
 
   <text x="429" y="222" class="sm">mixin（实现层 · W5 拆 loop.py）</text>
   <text x="800" y="222" class="sm">step（策略槽位 · L7 装配方）</text>
@@ -153,8 +153,8 @@
   <text x="429" y="396" class="mono">loop_telemetry 93</text>
   <text x="800" y="396" class="sm">（无对应 step · hooks/trace 基础设施）</text>
   <line x1="700" y1="392" x2="790" y2="392" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 3"/>
-  <text x="429" y="418" class="sm">→ 方案：不合并，但写死命名（mixin＝实现层 / step＝策略槽位），随 1.1/1.7 触达式合并</text>
-  <text x="800" y="418" class="sm">step 另有 continuation / stop 两槽（无 mixin 对应）</text>
+  <text x="429" y="418" class="sm">→ 不合并：写死命名（mixin＝实现层 / step＝槽位），随 1.1/1.7 触达式合并</text>
+  <text x="900" y="418" class="sm">step 另有 continuation / stop 两槽</text>
 
   <!-- 嵌套关系 -->
   <path d="M400,205 L411,205" class="arb"/>
@@ -168,7 +168,7 @@
   <text x="166" y="474" class="bt" style="fill:#0f172a">运行期环境 RunContext（待建 0.10）</text>
   <text x="166" y="494" class="st" style="fill:#334155">预算（tokens/cost/time）· 事件（EventSink）· 追踪（TraceView）· 取消（CancelScope）· 快照（从事件 fold）</text>
   <text x="700" y="474" class="st" style="fill:#334155">今天三套并行：</text>
-  <text x="700" y="494" class="sm" style="fill:#64748b">emit 24/23/7 · trace 4/28/56 · 取消 CancelledError/ControlToken/无 · 预算 chat 侧缺失</text>
+  <text x="700" y="494" class="sm" style="fill:#64748b">emit 24/23/7 · trace 4/28/56 · 取消 3 套 · 预算 chat 侧缺失</text>
   <line x1="413" y1="452" x2="413" y2="440" stroke="#64748b" stroke-width="1.2" stroke-dasharray="4 3"/>
   <line x1="275" y1="452" x2="275" y2="440" stroke="#64748b" stroke-width="1.2" stroke-dasharray="4 3"/>
   <text x="160" y="522" class="sm">↕ 三个编排器共用同一份环境实例（先只接线、不改行为）</text>
@@ -207,10 +207,8 @@
 
   <!-- 引擎 → AgentLoop 反向依赖（本轮新发现 ⑦） -->
   <path d="M538,528 L538,436" class="arup"/>
-  <text x="548" y="470" class="lblr">⑦ 引擎层反向依赖编排层 AgentLoop</text>
-  <text x="548" y="488" class="lblr">（轮内 agent 节点调用它）→ 层归属待澄清</text>
+  <text x="548" y="444" class="lblr">⑦ 引擎层反向依赖编排层 AgentLoop（轮内 agent 节点调用它）→ 层归属待澄清</text>
   <path d="M801,528 L801,436" class="arup"/>
-  <text x="811" y="470" class="lblr">⑦ 同上</text>
 
   <line x1="275" y1="670" x2="275" y2="700" class="ar"/>
   <line x1="538" y1="670" x2="538" y2="700" class="ar"/>
@@ -352,7 +350,6 @@
     <circle cx="1176" cy="364" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1176" y="369" fill="#991b1b">④</text>
     <circle cx="1176" cy="644" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1176" y="649" fill="#991b1b">⑤</text>
     <circle cx="651" cy="256" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="651" y="261" fill="#991b1b">⑥</text>
-    <circle cx="640" cy="452" r="12" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/><text x="640" y="457" fill="#991b1b">⑦</text>
   </g>
 </svg>
 </div>
