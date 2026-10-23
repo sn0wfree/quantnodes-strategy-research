@@ -17,7 +17,7 @@ Why a wrapper instead of rewriting ``db.py``:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import pandas as pd
 
@@ -97,12 +97,7 @@ class DuckDBDataStore:
         factor_name: str,
         values: pd.DataFrame,
     ) -> bool:
-        return _db.save_factor_data(
-            workspace,
-            strategy_name=strategy_name,
-            factor_name=factor_name,
-            values=values,
-        )
+        return _db.save_factor_data(workspace, strategy_name, factor_name, values)
 
     def load_factor_data(
         self,
@@ -198,11 +193,26 @@ class DuckDBDataStore:
         strategy_name: str,
         result: dict,
     ) -> bool:
+        r = result or {}
         return _db.save_backtest_result(
             workspace,
-            run_id=run_id,
-            strategy_name=strategy_name,
-            result=result,
+            strategy_name,
+            run_id,
+            commit_hash=str(r.get("commit_hash", "")),
+            action=str(r.get("action", "")),
+            goal_metric=float(r.get("goal_metric", 0.0) or 0.0),
+            calmar=float(r.get("calmar", 0.0) or 0.0),
+            sharpe=float(r.get("sharpe", 0.0) or 0.0),
+            max_dd=float(r.get("max_dd", 0.0) or 0.0),
+            ann_return=float(r.get("ann_return", 0.0) or 0.0),
+            ann_vol=float(r.get("ann_vol", 0.0) or 0.0),
+            sortino=float(r.get("sortino", 0.0) or 0.0),
+            turnover=float(r.get("turnover", 0.0) or 0.0),
+            factors_added=int(r.get("factors_added", 0) or 0),
+            factors_removed=int(r.get("factors_removed", 0) or 0),
+            params_changed=int(r.get("params_changed", 0) or 0),
+            status=str(r.get("status", "pending") or "pending"),
+            description=str(r.get("description", "") or ""),
         )
 
     def list_backtest_results(
@@ -213,9 +223,11 @@ class DuckDBDataStore:
         status: str | None = None,
         limit: int | None = None,
     ) -> list[dict]:
-        results = _db.get_backtest_results(workspace, strategy_name, status)
-        if limit is not None:
-            results = results[:limit]
+        results = _db.get_backtest_results(
+            workspace, strategy_name or "", limit if limit is not None else 100
+        )
+        if status is not None:
+            results = [r for r in results if r.get("status") == status]
         return results
 
     def get_backtest_result(
@@ -238,16 +250,29 @@ class DuckDBDataStore:
         workspace: Path,
         *,
         run_id: str,
-        weights: pd.DataFrame,
+        weights: "pd.DataFrame | list",
+        strategy_name: str = "",
     ) -> bool:
-        return _db.save_weight_history(workspace, run_id=run_id, weights=weights)
+        # Accept both the Protocol's DataFrame and db.py's
+        # list[tuple[Timestamp, dict[str, float]]].
+        if isinstance(weights, pd.DataFrame):
+            history = [
+                (cast(pd.Timestamp, pd.Timestamp(str(ts))),
+                 {str(k): float(v) for k, v in row.items() if pd.notna(v)})
+                for ts, row in weights.iterrows()
+            ]
+        else:
+            history = list(weights)
+        return _db.save_weight_history(workspace, strategy_name, run_id, history)
 
     def load_weight_history(
         self,
         workspace: Path,
         run_id: str,
+        *,
+        strategy_name: str = "",
     ) -> pd.DataFrame:
-        return _db.load_weight_history(workspace, run_id)
+        return _db.load_weight_history(workspace, strategy_name, run_id)
 
     def save_nav_history(
         self,
@@ -255,15 +280,18 @@ class DuckDBDataStore:
         *,
         run_id: str,
         nav: pd.Series,
+        strategy_name: str = "",
     ) -> bool:
-        return _db.save_nav_history(workspace, run_id=run_id, nav=nav)
+        return _db.save_nav_history(workspace, strategy_name, run_id, nav)
 
     def load_nav_history(
         self,
         workspace: Path,
         run_id: str,
+        *,
+        strategy_name: str = "",
     ) -> pd.Series:
-        return _db.load_nav_history(workspace, run_id)
+        return _db.load_nav_history(workspace, strategy_name, run_id)
 
     # Validation cache
     def cache_validation(
@@ -273,14 +301,28 @@ class DuckDBDataStore:
         strategy_name: str,
         factor_name: str,
         metrics: dict,
-        ttl_seconds: int = 7 * 24 * 3600,
+        ttl_seconds: int = 7 * 24 * 3600,  # noqa: ARG002 — legacy schema has no TTL
     ) -> bool:
+        m = metrics or {}
+        scores = m.get("scores") if isinstance(m.get("scores"), dict) else {}
         return _db.cache_validation(
             workspace,
-            strategy_name=strategy_name,
-            factor_name=factor_name,
-            metrics=metrics,
-            ttl_seconds=ttl_seconds,
+            strategy_name,
+            factor_name,
+            factor_code=str(m.get("factor_code", factor_name)),
+            ic_mean=float(m.get("ic_mean", 0.0) or 0.0),
+            ic_std=float(m.get("ic_std", 0.0) or 0.0),
+            ir=float(m.get("ir", 0.0) or 0.0),
+            rank_ic_mean=float(m.get("rank_ic_mean", 0.0) or 0.0),
+            ic_decay_1d=float(m.get("ic_decay_1d", 0.0) or 0.0),
+            ic_decay_5d=float(m.get("ic_decay_5d", 0.0) or 0.0),
+            ic_decay_20d=float(m.get("ic_decay_20d", 0.0) or 0.0),
+            scores=scores,
+            overall_score=float(m.get("overall_score", 0.0) or 0.0),
+            is_valid=bool(m.get("is_valid", False)),
+            fail_reasons=str(m.get("fail_reasons", "") or ""),
+            source=str(m.get("source", "") or ""),
+            data_fingerprint=str(m.get("data_fingerprint", "") or ""),
         )
 
     def list_validation_cache(
@@ -292,7 +334,10 @@ class DuckDBDataStore:
     ) -> list[dict]:
         if strategy_name is None:
             return []
-        return _db.get_validation_cache(workspace, strategy_name, factor_name)
+        results = _db.get_validation_cache(workspace, strategy_name)
+        if factor_name is not None:
+            results = [r for r in results if r.get("factor_name") == factor_name]
+        return results
 
     # Import metadata + fingerprint
     def get_last_import_date(
@@ -300,8 +345,17 @@ class DuckDBDataStore:
         workspace: Path,
         *,
         codes: list[str] | None = None,
+        strategy_name: str = "",
     ) -> Optional[float]:
-        return _db.get_last_import_date(workspace, codes=codes)
+        if not codes:
+            return None
+        # Legacy API is per-asset; take the earliest last_date across codes.
+        dates = []
+        for code in codes:
+            d = _db.get_last_import_date(workspace, strategy_name, code)
+            if d is not None:
+                dates.append(d)
+        return min(dates) if dates else None
 
     def update_import_meta(
         self,
@@ -310,15 +364,16 @@ class DuckDBDataStore:
         codes: list[str],
         import_date: float,
         source: str = "",
-        row_count: int = 0,
+        row_count: int = 0,  # noqa: ARG002 — legacy schema has no row_count
+        strategy_name: str = "",
     ) -> bool:
-        return _db.update_import_meta(
-            workspace,
-            codes=codes,
-            import_date=import_date,
-            source=source,
-            row_count=row_count,
-        )
+        ok = True
+        last_date = str(import_date)
+        for code in codes or []:
+            ok = _db.update_import_meta(
+                workspace, strategy_name, code, last_date, source
+            ) and ok
+        return ok
 
     def update_data_fingerprint(
         self,
@@ -326,11 +381,16 @@ class DuckDBDataStore:
         *,
         strategy_name: str,
         fingerprint: dict,
+        table_name: str = "ohlcv",
+        row_count: int = 0,
     ) -> bool:
+        import json as _json
+
+        fp = fingerprint or {}
+        # db.py stores fingerprint as a string column.
+        fp_str = fp if isinstance(fp, str) else _json.dumps(fp, sort_keys=True, default=str)
         return _db.update_data_fingerprint(
-            workspace,
-            strategy_name=strategy_name,
-            fingerprint=fingerprint,
+            workspace, strategy_name, table_name, fp_str, row_count
         )
 
     def get_data_fingerprint(

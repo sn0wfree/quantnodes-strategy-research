@@ -29,6 +29,9 @@
 
 ## 3. 验收
 
-- [ ] pyright `duckdb_store.py` `reportCallIssue` → 0
-- [ ] 单测：每个修正方法 mock `_db.*` 断言收到正确 kwargs
-- [ ] 既有 `test_data_store_protocol` / `test_duckdb_store_factors` 不回归
+- [x] pyright `duckdb_store.py` `reportCallIssue` → 0（另修 `list_backtest_results` status/limit 错位）
+- [x] 单测 `test_duckdb_store_adapter.py` ×6 mock `_db.*` 断言 kwargs
+- [x] 既有 protocol/factors/db_persistence 30 passed
+- [x] 同批：`runner.py` AcceptanceDecision stub、`slash_goal` AuditRow 列表 + criterion_id
+
+**落地**（2026-10-08）：facade 按 `db.py` 真参解包 dict / 补 `strategy_name`；DataFrame→legacy list；import_meta 循环 codes。

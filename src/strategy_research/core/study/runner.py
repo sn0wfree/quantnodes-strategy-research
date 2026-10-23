@@ -924,7 +924,11 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         try:
             decision_obj = decide(metrics=metrics, llm_verdict=None)
         except Exception:  # noqa: BLE001
-            decision_obj = AcceptanceDecision(verdict=verdict, reason="")
+            decision_obj = AcceptanceDecision(
+                accept=verdict != "discard",
+                reason=verdict,
+                hard_passed=verdict != "discard",
+            )
 
         return {
             "researcher_output": researcher_output,

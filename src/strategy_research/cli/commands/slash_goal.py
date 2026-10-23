@@ -321,12 +321,22 @@ def cmd_complete(recap: str = "", *, console: Optional[Console] = None,
                 console.print("[red]Cannot complete:[/red] not all criteria have evidence.")
                 return 1
             evidence_ids = [e.get("evidence_id", "") for e in snapshot.get("evidence", [])]
+            audit_rows = [
+                AuditRow(
+                    criterion_id=str(c.get("criterion_id", "")),
+                    result="satisfied",
+                    evidence_ids=evidence_ids,
+                    notes=recap or "",
+                )
+                for c in criteria
+            ]
             store.update_status(
                 session_id=session_id,
                 goal_id=goal_id,
                 expected_goal_id=goal_id,
                 status=GoalStatus.COMPLETE,
-                audit=AuditRow(result="satisfied", evidence_ids=evidence_ids, notes=recap or ""),
+                audit=audit_rows,
+                recap=recap or None,
             )
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]/goal complete failed:[/red] {exc}")
