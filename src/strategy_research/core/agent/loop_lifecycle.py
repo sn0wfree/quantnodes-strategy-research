@@ -1,6 +1,8 @@
 """W-split: run endings + claim validation (from AgentLoop)."""
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -14,6 +16,17 @@ if TYPE_CHECKING:
     from .loop import LoopResult
 
 class LoopLifecycleMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _budget_cost_usd: Any
+    _budget_tokens: Any
+    _emit: Any
+    _enable_claim_validation: Any
+    _iteration_timeout_s: Any
+    _strict_claim_validation: Any
+    _trace: Any
+    _trace_and_emit: Any
+    max_iterations: Any
+
     def _handle_iteration_timeout(self, result: LoopResult, iteration: int) -> None:
         """Finalize the result for a per-iteration timeout."""
         result.finished_reason = "timeout"

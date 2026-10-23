@@ -10,6 +10,12 @@ from . import aegis as _aegis
 
 
 class RunnerAegisMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _emit: Any
+    _get_study: Any
+    _goal_store: Any
+    _scoreboard: Any
+
     def _novelty_gate(
         self, round_num: int, hypothesis: str, predicted_affected: list
     ) -> bool:

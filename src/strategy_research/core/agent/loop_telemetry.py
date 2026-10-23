@@ -1,6 +1,8 @@
 """W-split: hooks + emit/trace (from AgentLoop)."""
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
@@ -13,6 +15,11 @@ from .runtime.sync_bridge import _get_hook_loop
 logger = logging.getLogger(__name__)
 
 class LoopTelemetryMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _hooks: Any
+    _on_event: Any
+    _trace: Any
+
     def _fire_hooks(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         """Sync adapter for async CompositeHook methods.
 

@@ -1,6 +1,8 @@
 """W-split: LLM streaming and tool-call accumulation (from AgentLoop)."""
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import logging
 import uuid
@@ -12,6 +14,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 class LoopStreamMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _effective_tools: Any
+    _emit: Any
+    client: Any
+
     def _stream_chat(self, messages: list[dict[str, Any]], iteration: int) -> Any:
         """Stream chat completion and emit text_delta events.
 

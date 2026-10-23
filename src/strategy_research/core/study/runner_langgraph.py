@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .graph import StudyGraph
@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 class RunnerLangGraphMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _get_study: Any
+    control: Any
+    study_store: Any
+
     def _load_graph(self, path: Path, sid: str) -> "StudyGraph":
         """Load the study's persisted execution graph.
 

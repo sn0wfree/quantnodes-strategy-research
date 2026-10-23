@@ -1,6 +1,8 @@
 """W-split: llm error + no-progress/approval (from AgentLoop)."""
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -20,6 +22,22 @@ def _tool_call_hash(tc):
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 class LoopProgressMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _approval_event: Any
+    _approval_on_timeout: Any
+    _approval_response: Any
+    _approval_timeout: Any
+    _circuit_breaker: Any
+    _detect_no_progress: Any
+    _emit: Any
+    _recent_hashes: Any
+    _response_to_assistant_msg: Any
+    _role: Any
+    _trace: Any
+    _trace_and_emit: Any
+    no_progress_window: Any
+    session_id: Any
+
     def _handle_llm_error(
         self, exc: LLMError, iteration: int, result: LoopResult,
     ) -> None:

@@ -14,6 +14,8 @@ without touching AgentLoop.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..loop_context import LoopContext
 
 
@@ -21,9 +23,9 @@ class DefaultProgressStep:
     """Hash-window no-progress detection backed by AgentLoop state."""
 
     def __init__(self) -> None:
-        self._loop: object | None = None
+        self._loop: Any = None
 
-    def bind_agent_loop(self, agent_loop: object) -> None:
+    def bind_agent_loop(self, agent_loop: Any) -> None:
         self._loop = agent_loop
 
     @property

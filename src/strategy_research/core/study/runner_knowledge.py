@@ -1,6 +1,8 @@
 """W-split: Knowledge collection and keep-evidence for AutoresearchRunner."""
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import logging
 from pathlib import Path
@@ -8,6 +10,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class RunnerKnowledgeMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _emit: Any
+    _get_study: Any
+    _goal_store: Any
+    _loop_strategy: Any
+
     def _collect_knowledge(self, topics: list[str]) -> int:
         """v2: run the collector agent and append to knowledge.md.
 

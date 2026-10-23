@@ -12,6 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
+
+def _as_dt(value: Any) -> Any:
+    """Format an index label as date-like string when possible."""
+    return value.date() if hasattr(value, "date") else value
+
 import numpy as np
 import pandas as pd
 
@@ -75,8 +80,8 @@ def walk_forward_analysis(
         windows.append(
             {
                 "window": i + 1,
-                "start": str(win_start.date()) if hasattr(win_start, "date") else str(win_start),
-                "end": str(win_end.date()) if hasattr(win_end, "date") else str(win_end),
+                "start": str(_as_dt(win_start)),
+                "end": str(_as_dt(win_end)),
                 "return": round(ret, 6),
                 "sharpe": round(sharpe, 4),
                 "max_dd": round(max_dd, 6),

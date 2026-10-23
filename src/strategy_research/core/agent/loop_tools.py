@@ -1,6 +1,8 @@
 """W-split: tool kwargs + batch/heartbeat execution (from AgentLoop)."""
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import json
 import logging
@@ -24,6 +26,30 @@ if TYPE_CHECKING:
     from .loop import LoopResult
 
 class LoopToolsMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _build_data_store: Any
+    _build_sandbox: Any
+    _circuit_breaker: Any
+    _current_iter: Any
+    _current_message_id: Any
+    _emit: Any
+    _permission_evaluator: Any
+    _permission_gateway: Any
+    _recent_hashes: Any
+    _subagent_count: Any
+    _trace: Any
+    _trace_and_emit: Any
+    heartbeat_interval: Any
+    no_progress_window: Any
+    read_roots: Any
+    registry: Any
+    results_tsv: Any
+    runs_dir: Any
+    session_id: Any
+    strategy_dir: Any
+    workspace: Any
+    write_roots: Any
+
     def _build_tool_kwargs(self, tc: ToolCall) -> dict[str, Any]:
         """W5: assemble ToolContext + injected kwargs for one tool call."""
         def _progress_callback(steps: list[str]) -> None:

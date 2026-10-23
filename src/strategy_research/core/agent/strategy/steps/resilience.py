@@ -9,6 +9,8 @@ updates.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..loop_context import LoopContext
 
 
@@ -16,9 +18,9 @@ class DefaultResilienceStep:
     """Circuit-breaker gate backed by AgentLoop._circuit_breaker."""
 
     def __init__(self) -> None:
-        self._loop: object | None = None
+        self._loop: Any = None
 
-    def bind_agent_loop(self, agent_loop: object) -> None:
+    def bind_agent_loop(self, agent_loop: Any) -> None:
         self._loop = agent_loop
 
     @property

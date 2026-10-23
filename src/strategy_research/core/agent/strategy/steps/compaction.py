@@ -11,6 +11,8 @@ handled by the ``ContextInjector`` chain in ``AgentLoop._injectors``.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..loop_context import LoopContext
 
 
@@ -18,9 +20,9 @@ class DefaultCompactionStep:
     """Context compression + per-iteration observability."""
 
     def __init__(self) -> None:
-        self._loop: object | None = None
+        self._loop: Any = None
 
-    def bind_agent_loop(self, agent_loop: object) -> None:
+    def bind_agent_loop(self, agent_loop: Any) -> None:
         self._loop = agent_loop
 
     @property

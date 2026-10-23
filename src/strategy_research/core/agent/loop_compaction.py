@@ -1,6 +1,8 @@
 """W-split: context compaction (from AgentLoop)."""
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Callable
@@ -15,6 +17,15 @@ if TYPE_CHECKING:
     pass
 
 class LoopCompactionMixin:
+# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──
+    _event_bus: Any
+    _previous_summary: Any
+    cc: Any
+    client: Any
+    config: Any
+    session_id: Any
+    threshold_tokens: Any
+
     def _maybe_compact(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
         """Apply context compression if over threshold (sync path).
 

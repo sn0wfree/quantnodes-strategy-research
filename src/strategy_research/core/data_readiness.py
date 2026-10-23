@@ -94,12 +94,12 @@ def _asset_stats(workspace_path: Path, strategy_name: str) -> dict[str, dict] | 
     if df is None or df.empty:
         return {}
     return {
-        row.asset_code: {
-            "count": int(row.n),
-            "min_date": row.min_date,
-            "max_date": row.max_date,
+        str(rec["asset_code"]): {
+            "count": int(rec["n"]),
+            "min_date": rec["min_date"],
+            "max_date": rec["max_date"],
         }
-        for row in df.itertuples()
+        for rec in df.to_dict("records")
     }
 
 
