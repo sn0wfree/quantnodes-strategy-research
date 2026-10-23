@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>目标架构 v2 · 汇总（2026-10）</title>
+<style>
+  :root{
+    --ink:#0f172a; --ink2:#334155; --muted:#64748b; --line:#e2e8f0;
+    --bg:#f8fafc; --card:#ffffff;
+    --blue-bg:#e0f2fe; --blue-br:#7dd3fc; --blue-ink:#0c4a6e; --blue-ink2:#0369a1;
+    --amber-bg:#fef3c7; --amber-br:#fcd34d; --amber-ink:#92400e; --amber-ink2:#b45309;
+    --slate-bg:#f1f5f9; --slate-br:#cbd5e1;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 24px 56px}
+  header h1{font-size:24px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+  header p{margin:0 0 4px;color:var(--muted);font-size:13px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;
+        padding:4px 12px;font-size:12px;color:var(--ink2)}
+  .chip b{font-weight:600;color:var(--ink)}
+  h2{font-size:15px;font-weight:600;margin:36px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line);
+     display:flex;align-items:center;gap:10px}
+  h2 span.n{font-size:12px;color:var(--muted);font-weight:400}
+  .grid{display:grid;gap:14px}
+  .g-2{grid-template-columns:1.25fr .95fr}
+  .g-3{grid-template-columns:repeat(3,1fr)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card.blue{background:var(--blue-bg);border-color:var(--blue-br)}
+  .card.amber{background:var(--amber-bg);border-color:var(--amber-br)}
+  .card.slate{background:var(--slate-bg);border-color:var(--slate-br)}
+  .card.solid{border:1.5px solid var(--ink2);border-style:dashed}
+  .card h3{margin:0 0 8px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .card h3 .tag{font-size:11px;font-weight:500;color:var(--muted)}
+  .card.blue h3{color:var(--blue-ink)} .card.amber h3{color:var(--amber-ink)}
+  .card ul{margin:0;padding-left:16px;color:var(--ink2);font-size:12.5px}
+  .card li{margin:2px 0}
+  .card p{margin:4px 0 0;font-size:12.5px;color:var(--ink2)}
+  .card .note{color:var(--muted);font-size:11.5px}
+  .card.blue p,.card.blue li{color:var(--blue-ink2)}
+  .card.amber p,.card.amber li{color:var(--amber-ink2)}
+  .layers{display:flex;flex-direction:column;gap:0}
+  .layer{display:grid;grid-template-columns:86px 1fr;gap:14px;align-items:start;
+         background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+  .layer.hl{background:var(--blue-bg);border-color:var(--blue-br)}
+  .layer .t{font-size:12.5px;font-weight:600;color:var(--ink2);padding-top:1px}
+  .layer.hl .t{color:var(--blue-ink)}
+  .layer .d{font-size:13px;color:var(--ink)}
+  .layer .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .layer.hl .s{color:var(--blue-ink2)}
+  .arrow{height:14px;margin-left:100px;border-left:1.5px solid #cbd5e1}
+  .arrow::after{content:"";display:block;width:0;height:0;margin-left:-4px;
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #cbd5e1}
+  .band{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;
+        display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:start}
+  .band .t{font-size:12.5px;font-weight:600;color:var(--blue-ink)}
+  .band .d{font-size:12.5px;color:var(--ink2)}
+  .band .d b{color:var(--ink);font-weight:600}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);
+        border-radius:10px;overflow:hidden;font-size:12.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--slate-bg);font-weight:600;font-size:12px;color:var(--ink2)}
+  tr:last-child td{border-bottom:none}
+  td.k{font-weight:600;white-space:nowrap;color:var(--ink)}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px}
+  .step{background:var(--slate-bg);border:1px solid var(--slate-br);border-radius:7px;padding:5px 10px;color:var(--ink2)}
+  .step.b{background:var(--blue-bg);border-color:var(--blue-br);color:var(--blue-ink)}
+  .sep{color:#94a3b8;font-size:13px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:10px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  @media (max-width:900px){.g-2,.g-3{grid-template-columns:1fr}.layer,.band{grid-template-columns:1fr}}
+  @media print{body{background:#fff}.wrap{max-width:none;padding:0}.card,.layer,.band,table{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>目标架构 v2 · 汇总</h1>
+  <p>六层 + 四中枢 + 三层接缝 + 三层基因组（RSI）—— 2026-10 · 五遍架构评审的收敛结果</p>
+  <div class="meta">
+    <span class="chip"><b>四中枢</b> 上下文 / 供给 / 事实 / 不变量</span>
+    <span class="chip"><b>接缝</b> 29 协议复用 + 补 3 + 统一注册 + 一致性套件</span>
+    <span class="chip"><b>中枢成员规则</b> 改变模型输入的才接</span>
+    <span class="chip"><b>RSI</b> Tier0 冻结 / Tier1 提案 / Tier2 可自改</span>
+    <span class="chip"><b>落地</b> W0 → W1 → W2，R 线最后</span>
+  </div>
+</header>
+
+<h2>1 · 分层与中枢 <span class="n">左：六层（自上而下）｜右：四中枢（每次调用的必经之路）</span></h2>
+<div class="grid g-2">
+
+  <div class="layers">
+    <div class="layer">
+      <div class="t">接入</div>
+      <div><div class="d">CLI / TUI · FastAPI 20 routers · WebUI · MCP</div>
+      <div class="s">契约：入参 → Service / Runner</div></div>
+    </div>
+    <div class="arrow"></div>
+    <div class="layer hl">
+      <div class="t">编排</div>
+      <div><div class="d">SessionService · StudyRunner · AgentLoop（9 steps）</div>
+      <div class="s">对称契约：BranchContext 入 → RoundOutcome 出</div>
+      <div class="s">自主性缺口：导演层（propose_next / 假设工具 / 记忆回路）</div>
+      <div class="s">Swarm · Workflow · Goal（三套编排，边界待成文）</div></div>
+    </div>
+    <div class="arrow"></div>
+    <div class="layer">
+      <div class="t">引擎</div>
+      <div><div class="d">phases / langgraph（查表分派）· 9 类 ShutdownReason</div>
+      <div class="s">AEGIS：新颖性门 · 回归门 · 停滞/丢弃门</div></div>
+    </div>
+    <div class="arrow"></div>
+    <div class="layer">
+      <div class="t">能力</div>
+      <div><div class="d">LLM adapters · 44 tools / 16 toolsets · hooks · skills</div>
+      <div class="s">扩展面分工：STEP 改控制流 · hook 只读 · injector 加数据 · toolset 出能力</div>
+      <div class="s">DSH 借鉴 8 成；剩「不变量层」未借</div></div>
+    </div>
+    <div class="arrow"></div>
+    <div class="layer">
+      <div class="t">数据</div>
+      <div><div class="d">DuckDB · workspace FS · event_store · goal/hypothesis</div>
+      <div class="s">红线：event_store 真源 · journal 两阶段 · checkpoint 仅 langgraph</div></div>
+    </div>
+    <div class="arrow"></div>
+    <div class="layer">
+      <div class="t">横切</div>
+      <div><div class="d">evals 70 · nightly 跟幅 · conformance · CI gates</div>
+      <div class="s">缺口：holdout 集（RSI 前置）· 护栏散落 → 不变量层</div></div>
+    </div>
+  </div>
+
+  <div class="grid" style="gap:12px;align-content:start">
+    <div class="card blue">
+      <h3>ContextHub <span class="tag">工作集</span></h3>
+      <p><b>模型看到什么</b> —— 收集 · 仲裁 · 渲染 · 归因</p>
+      <p class="note">成员规则：改变模型输入的才接（仅 4 类）</p>
+    </div>
+    <div class="card blue">
+      <h3>CapabilityRegistry <span class="tag">供给</span></h3>
+      <p><b>有什么可用</b></p>
+      <p class="note">扩展 core/registry.py（不新建平行注册表）</p>
+    </div>
+    <div class="card blue">
+      <h3>EventStore <span class="tag">事实</span></h3>
+      <p><b>发生了什么</b></p>
+      <p class="note">统一快照从此派生（不建独立存储）</p>
+    </div>
+    <div class="card solid">
+      <h3>InvariantLayer <span class="tag">底线</span></h3>
+      <p><b>什么不能破</b> —— 独立于插件 · 不可被覆盖</p>
+      <p class="note">DSH §9.7 模式（待建，主线 0.9）</p>
+    </div>
+    <div class="card">
+      <h3>统一快照 <span class="tag">可观测</span></h3>
+      <ul>
+        <li>items（带来源·时间·置信）</li>
+        <li>dropped（丢了什么 · 为何）</li>
+        <li>providers_used / capabilities_available</li>
+        <li>events_ref</li>
+      </ul>
+      <p class="note">未接入中枢的部件也在快照里可见 → 可观测达成，依赖不倒置</p>
+    </div>
+    <div class="card slate">
+      <h3>中枢之间的关系</h3>
+      <p>Registry 供件 → ContextHub 收集组装 → LLM 调用 → EventStore 记录 → InvariantLayer 守护全过程</p>
+    </div>
+  </div>
+</div>
+
+<h2>2 · 两条主流程 <span class="n">架构图的可执行对照</span></h2>
+<div class="grid">
+  <div class="card">
+    <h3>Study 轮 <span class="tag">编排层</span></h3>
+    <div class="flow" style="margin-top:6px">
+      <span class="step b">_run_loop</span><span class="sep">→</span>
+      <span class="step">控制检查</span><span class="sep">→</span>
+      <span class="step">preamble → BranchContext</span><span class="sep">→</span>
+      <span class="step b">查表分派 phases / langgraph</span><span class="sep">→</span>
+      <span class="step">RoundOutcome</span><span class="sep">→</span>
+      <span class="step">共享收尾</span><span class="sep">→</span>
+      <span class="step b">budget / SSE / stop</span><span class="sep">→</span>
+      <span class="step">cooldown 循环</span>
+    </div>
+    <p class="note">分支：HITL pause（红线 M2/M1/H2/H1）· novelty 拒绝 · 未知引擎 fallback</p>
+  </div>
+  <div class="card">
+    <h3>Agent ReAct 轮 <span class="tag">能力层 + 上下文中枢</span></h3>
+    <div class="flow" style="margin-top:6px">
+      <span class="step b">ContextHub.build<br><span style="font-size:11px">收集→仲裁→渲染</span></span><span class="sep">→</span>
+      <span class="step">_prepare_run</span><span class="sep">→</span>
+      <span class="step">injector order=0</span><span class="sep">→</span>
+      <span class="step b">llm_call</span><span class="sep">→</span>
+      <span class="step">三维预算门</span><span class="sep">→</span>
+      <span class="step">tools / continuation / stop</span><span class="sep">→</span>
+      <span class="step">claim validation</span>
+    </div>
+    <p class="note">ContextHub 是每次 LLM 调用的必经之路 → 预算 / 溯源 / 快照三个能力统一落地于此</p>
+  </div>
+</div>
+
+<h2>3 · 三层接缝规范 <span class="n">统一的是「合格标准」，不是协议数量</span></h2>
+<div class="grid">
+  <div class="band">
+    <div class="t">L1 窄协议</div>
+    <div class="d"><b>已有 29 个复用 + 只补 3 个</b><br>
+      EventSource · ToolsetProvider · PersistenceContract<br>
+      <span class="note">规则：3–5 方法 · Protocol 不用 ABC · 无状态优先 · 结构化数据进出 · 协议间不互相依赖</span></div>
+  </div>
+  <div class="band">
+    <div class="t">L2 统一注册</div>
+    <div class="d"><b>扩展 core/registry.py</b>：能力标签 / 依赖闭包 / validate / describe<br>
+      <span class="note">5 套注册表 → 1 主 + N 薄适配；对外 API 不变；不新建平行注册表</span></div>
+  </div>
+  <div class="band">
+    <div class="t">L3 一致性套件</div>
+    <div class="d"><b>每协议一套可运行 pytest</b>：实现 = 写类 + 跑套件<br>
+      <span class="note">接入成本目标：1 文件 + 1 行 + 1 套件（当前：store 类部件需「读源码模仿约定」）</span></div>
+  </div>
+</div>
+
+<h2>4 · 三层基因组（RSI） <span class="n">只改行为工件，不改不变量</span></h2>
+<div class="grid">
+  <div class="card solid">
+    <h3>Tier 0 · 冻结 <span class="tag">agent 无权触碰</span></h3>
+    <p><b>预算 · 停止条件 · 状态机 · scope 隔离</b></p>
+    <p class="note">由 InvariantLayer 守护 —— 「错了就错」的东西不做成插件（DSH 自己也放独立不变量层）</p>
+  </div>
+  <div class="card amber">
+    <h3>Tier 1 · 提案制 <span class="tag">真正的 RSI</span></h3>
+    <p><b>角色提示 .prompts · 技能 .skills · 工具集组合</b></p>
+    <p>agent 只提案 → <b>golden + holdout + 不变量</b> 三重门禁 → CI/人审晋级 → git 秒级回滚</p>
+    <p class="note">现状：这些在包内，agent 写不到（workspace_setup 明确排除）→ 需提案通道</p>
+  </div>
+  <div class="card amber">
+    <h3>Tier 2 · 可自改 <span class="tag">今天已在发生</span></h3>
+    <p><b>strategy.py · config · notes · 因子代码</b></p>
+    <p class="note">但这是「研究产出」，不是「自我进化」—— 区别在于 Tier 1 改的是系统自己的行为定义</p>
+  </div>
+</div>
+<div class="card slate" style="margin-top:12px">
+  <h3>突变 → 晋级 → 回滚</h3>
+  <div class="flow" style="margin-top:6px">
+    <span class="step">① 突变：agent 提案 Tier1 改动</span><span class="sep">→</span>
+    <span class="step b">② 评审：单测 + conformance + golden + holdout + 不变量</span><span class="sep">→</span>
+    <span class="step">③ 晋级：CI/人审合并</span><span class="sep">→</span>
+    <span class="step">④ 观察期 nightly + AEGIS</span><span class="sep">→</span>
+    <span class="step b">⑤ 退化则 git revert（秒级）</span>
+  </div>
+  <p class="note">硬规则：只能提案不能自批 · 违反不变量 = 直接判负 · Tier 0 永不入 genome · 晋级记入 event log</p>
+</div>
+
+<h2>5 · 结论与落地 <span class="n">行动项以 refactor-master-plan-20261008.md 为准</span></h2>
+<table>
+  <thead><tr><th style="width:130px">维度</th><th>结论</th></tr></thead>
+  <tbody>
+    <tr><td class="k">分层</td><td>六层保留；问题从「层」转到「层内巨文件（25 个 &gt;800 行，占 21%）」与「层间 3 条反向依赖」</td></tr>
+    <tr><td class="k">中枢</td><td>四中枢（工作集 / 供给 / 事实 / 底线）；成员规则 = <b>改变模型输入的才接</b>（仅 4 类直接接入）</td></tr>
+    <tr><td class="k">接缝</td><td>29 协议复用 + 补 3 + 统一注册 + 一致性套件；<b>不写统一大协议</b></td></tr>
+    <tr><td class="k">RSI</td><td>三层基因组；<b>先决条件是先有 holdout 集与不变量层</b>，否则 = 自己给自己发奖状</td></tr>
+    <tr><td class="k">落地顺序</td><td>W0 结构可信（5 刀 + 不变量层）→ W1 自主达成（7 刀）→ W2 体量与上下文（6 刀）；R 线（RSI）排在最后</td></tr>
+    <tr><td class="k">明确不做</td><td>不写统一大协议 · 不合并 29 协议 · 不插件化预算/停止/状态机 · 不拆 alpha_zoo · 不为 pyright 清零重写 mixin</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  配套文档：<b>architecture-v2-and-rsi-20261008.md</b>（分块可编辑版 + 两条流程 + RSI 规格）·
+  <b>refactor-master-plan-20261008.md</b>（唯一起手顺序与护栏）·
+  <b>context-hub-membership-rule.md</b>（中枢成员边界）· <b>dsh-plugin-reeval-20261008.md</b>（DSH 借鉴与保留）
+</footer>
+
+</div>
+</body>
+</html>
