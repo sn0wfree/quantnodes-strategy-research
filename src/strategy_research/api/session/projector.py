@@ -49,6 +49,9 @@ class Projector:
         """Read-only view of the store connection (tests assert laziness)."""
         return self._store._conn
 
+    def _ensure_snapshots_table(self, conn) -> None:
+        self._store._ensure_snapshots_table(conn)
+
     def close(self) -> None:
         """Close the underlying sqlite connection (idempotent)."""
         self._store.close()

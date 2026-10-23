@@ -105,6 +105,10 @@ class TestDeltaFlushMetadata(unittest.TestCase):
             )
             # Delta flush: touched set (not full)
             proj.flush(state, touched={"m1"})
+            # Release the sqlite handle before TemporaryDirectory
+            # cleanup — Windows keeps the file locked otherwise
+            # (WinError-32 flake family).
+            proj.close()
 
             check = sqlite3.connect(str(db_path))
             row = check.execute(
