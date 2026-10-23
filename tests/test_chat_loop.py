@@ -332,21 +332,24 @@ class TestChatLoopShellGating:
         assert "shell" in loop.registry._tools
 
     def test_disabled_hides_run_command_from_tool_list(self, fake_config):
-        """The LLM's system prompt must not advertise run_command when off.
+        """The LLM's system prompt must not advertise the shell tool when off.
 
-        Asserts on the ``- run_command`` tool-list bullet: chat.md mentions
-        the tool name in prose (constraints section), so a bare substring
-        check would be a false positive.
+        chat.md prose mentions ``- shell 命令…`` in both modes, so a bare
+        substring check is a false positive; compare the rendered
+        ``{tool_list}`` contribution via bullet count (the registry tool
+        is named ``shell``, matching the tool-list bullet format).
         """
-        loop = self._loop(False, fake_config)
-        sp = self._system_prompt(loop)
-        assert "- run_command" not in sp
+        sp_off = self._system_prompt(self._loop(False, fake_config))
+        sp_on = self._system_prompt(self._loop(True, fake_config))
+        # disabled must have strictly fewer "- shell" bullets than enabled
+        # (the delta is exactly the tool_list entry)
+        assert sp_off.count("- shell") < sp_on.count("- shell")
 
     def test_enabled_shows_run_command_in_tool_list(self, fake_config):
-        """The LLM's system prompt must list run_command when on."""
-        loop = self._loop(True, fake_config)
-        sp = self._system_prompt(loop)
-        assert "- run_command" in sp
+        """The LLM's system prompt must list the shell tool when on."""
+        sp_off = self._system_prompt(self._loop(False, fake_config))
+        sp_on = self._system_prompt(self._loop(True, fake_config))
+        assert sp_on.count("- shell") > sp_off.count("- shell")
 
     def test_explicit_registry_is_gated_too(self, fake_config):
         """allow_shell_tools=False pops run_command from caller-provided
