@@ -8,6 +8,8 @@ The read path is unchanged in this commit. Commit 5 will switch it.
 """
 from __future__ import annotations
 
+import strategy_research.api.session.web_session_db as _wsdb
+
 import json
 import sqlite3
 import sys
@@ -27,6 +29,7 @@ def temp_db(monkeypatch, tmp_path):
     monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
     # Patch _get_db_path to return our temp db
     import strategy_research.api.routers.web_session as ws
+    monkeypatch.setattr(_wsdb, "_get_db_path", lambda: db_path)
     monkeypatch.setattr(ws, "_get_db_path", lambda: db_path)
     # Re-import the module so it picks up the patch
     yield db_path
@@ -40,15 +43,10 @@ def temp_db(monkeypatch, tmp_path):
 
 
 def _ensure_schema(db_path: Path) -> None:
-    """Run _ensure_schema on the test DB."""
+    """Run _ensure_schema on the test DB; fixture owns the path patch."""
     import strategy_research.api.routers.web_session as ws
-    orig = ws._get_db_path
-    ws._get_db_path = lambda: db_path
-    try:
-        with ws._get_db() as conn:
-            ws._ensure_schema(conn)
-    finally:
-        ws._get_db_path = orig
+    with ws._get_db() as conn:
+        ws._ensure_schema(conn)
 
 
 def _create_session(db_path: Path, sid: str) -> None:

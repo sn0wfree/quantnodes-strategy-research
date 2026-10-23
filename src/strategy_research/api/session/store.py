@@ -50,10 +50,28 @@ class SessionStore:
 
     # ── Connection helper ──────────────────────────────────────────────
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _conn(self):
+        """Per-use connection context: yields, commits, and ALWAYS closes.
+
+        Historically this returned a raw ``sqlite3.connect`` handle that
+        callers wrapped in ``with`` — which commits the transaction but
+        never closes the connection, so every CRUD op leaked one handle
+        (the WinError-32 flake family). Now the commit still happens on
+        clean exit and the close happens in ``finally``.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _open():
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
+
+        return _open()
 
     # ── Message CRUD (delegates to existing persist_message) ───────────
 

@@ -335,24 +335,21 @@ class TestSessionStoreConn(unittest.TestCase):
         os.unlink(self.db_path)
 
     def test_conn_returns_row_factory(self) -> None:
-        conn = self.store._conn()
-        self.assertIsNotNone(conn)
-        self.assertIs(conn.row_factory, sqlite3.Row)
-        conn.close()
+        with self.store._conn() as conn:
+            self.assertIsNotNone(conn)
+            self.assertIs(conn.row_factory, sqlite3.Row)
 
     def test_conn_queriable(self) -> None:
-        conn = self.store._conn()
-        row = conn.execute("SELECT 1 AS x").fetchone()
-        self.assertEqual(row["x"], 1)
-        conn.close()
+        with self.store._conn() as conn:
+            row = conn.execute("SELECT 1 AS x").fetchone()
+            self.assertEqual(row["x"], 1)
 
     def test_conn_creates_parent_dir(self) -> None:
         tmpdir = tempfile.mkdtemp()
         nested = Path(tmpdir) / "subdir" / "test.db"
         store = SessionStore(nested)
-        conn = store._conn()
-        self.assertTrue(nested.parent.exists())
-        conn.close()
+        with store._conn() as conn:
+            self.assertTrue(nested.parent.exists())
         import shutil
         shutil.rmtree(tmpdir)
 

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from strategy_research.api.app import create_app
 from strategy_research.api.auth_tokens import create_token
+import strategy_research.api.session.web_session_db as _wsdb
 
 
 @pytest.fixture
@@ -20,6 +21,7 @@ def auth_headers():
 def client(tmp_path, monkeypatch):
     """Session DB under tmp_path via web_session._get_db_path patch."""
     import strategy_research.api.routers.web_session as ws
+    monkeypatch.setattr(_wsdb, "_get_db_path", lambda: str(tmp_path / "sr.db"))
     monkeypatch.setattr(ws, "_get_db_path", lambda: str(tmp_path / "sr.db"))
     return TestClient(create_app())
 

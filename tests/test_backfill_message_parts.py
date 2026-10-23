@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+import strategy_research.api.session.web_session_db as _wsdb
 
 ROOT_PATH = Path(__file__).resolve().parents[1]
 SRC_PATH = ROOT_PATH / "src"
@@ -20,7 +21,7 @@ def temp_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
     import strategy_research.api.routers.web_session as ws
-    monkeypatch.setattr(ws, "_get_db_path", lambda: db_path)
+    monkeypatch.setattr(_wsdb, "_get_db_path", lambda: db_path)
     yield db_path
 
 

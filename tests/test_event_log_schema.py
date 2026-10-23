@@ -22,6 +22,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+import strategy_research.api.session.web_session_db as _wsdb
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -227,18 +229,28 @@ class TestEventLogIntegrationWithEnsureSchema(unittest.TestCase):
         # session DB to this temp dir (shared-lock failures downstream).
         self._orig_workspace_env = os.environ.get("SR_WORKSPACE_PATH")
         os.environ["SR_WORKSPACE_PATH"] = str(Path(self.db_path).parent)
-        # Patch the path lookup
+        # Patch the path lookup (facade binding too — value-bound re-exports
+        # don't follow the impl-module patch).
         import strategy_research.api.routers.web_session as ws
-        self._orig_get_db_path = ws._get_db_path
+        self._orig_get_db_path = _wsdb._get_db_path
+        _wsdb._get_db_path = lambda: Path(self.db_path)
         ws._get_db_path = lambda: Path(self.db_path)
-        # Reset module-level cache if any
-        import importlib
-        importlib.reload(ws)
 
     def tearDown(self) -> None:
         import os
 
         import strategy_research.api.routers.web_session as ws
+        # Release the per-thread cached connection before unlink
+        # (WinError-32 family).
+        try:
+            conn = ws._get_db()
+            conn.close()
+            cache = getattr(_wsdb._db_thread_local, "conns", None)
+            if cache is not None:
+                cache.clear()
+        except Exception:
+            pass
+        _wsdb._get_db_path = self._orig_get_db_path
         ws._get_db_path = self._orig_get_db_path
         if self._orig_workspace_env is None:
             os.environ.pop("SR_WORKSPACE_PATH", None)
