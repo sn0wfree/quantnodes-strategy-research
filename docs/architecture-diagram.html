@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>架构图（对照讨论版 v3）</title>
+<title>目标架构 v4（OpenClaw 借鉴）</title>
 <style>
   body{margin:0;background:#f8fafc;color:#0f172a;
     font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
@@ -11,35 +11,34 @@
   .wrap{max-width:1660px;margin:0 auto;padding:28px 24px 64px}
   h1{font-size:22px;font-weight:600;margin:0 0 4px}
   .sub{color:#64748b;font-size:13px;margin:0 0 16px}
+  h2{font-size:15px;font-weight:600;margin:30px 0 10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
   .scroll{overflow-x:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px}
   .legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:#64748b;margin:14px 2px 0}
   .legend span{display:inline-flex;align-items:center;gap:6px}
   .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
-  h2{font-size:15px;font-weight:600;margin:30px 0 10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
   table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;font-size:12.5px}
   th,td{text-align:left;padding:8px 11px;border-bottom:1px solid #e2e8f0;vertical-align:top}
   th{background:#f1f5f9;font-weight:600;color:#334155}
   td.k{font-weight:600;white-space:nowrap}
   tr:last-child td{border-bottom:none}
   .ok{color:#0369a1;font-weight:600}
-  .warn{color:#b91c1c}
   footer{margin-top:28px;padding-top:12px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>架构图 · 对照讨论版 v3</h1>
-  <p class="sub">已按「编排层成员」3 条决策重画：<b>AgentLoop 移入能力层</b>（⑦ 已决）· 编排层 ＝ <b>3 个驱动循环 + Director</b> · SwarmDAG 标注为「DAG 驱动」· 六层依赖方向首次自洽（编排 → 引擎 → 能力 → 数据）</p>
+  <h1>目标架构 v4 · 借鉴 OpenClaw</h1>
+  <p class="sub">核心转变：<b>1 个控制面</b>（SessionController 唯一拥有「谁下一个能跑」）+ <b>N 个可换执行面</b>（AgentRuntime 协议）+ <b>上下文平台独占</b>（ContextHub 装配与预算）+ <b>不变量层</b>（Tier 0 冻结）｜研究方法论层原样保留</p>
 
 <div class="scroll">
-<svg viewBox="0 0 1600 1380" width="1600" height="1380" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+<svg viewBox="0 0 1600 1280" width="1600" height="1280" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
   <style>
     .lyr{font-size:14px;font-weight:600;fill:#334155}
     .bt{font-size:15px;font-weight:600;fill:#0f172a}
     .st{font-size:12.5px;fill:#475569}
     .sm{font-size:11.5px;fill:#94a3b8}
-    .hub{font-size:15px;font-weight:600;fill:#0c4a6e}
-    .hubq{font-size:12.5px;fill:#0369a1}
+    .hub{font-size:14.5px;font-weight:600;fill:#0c4a6e}
+    .hq{font-size:12.5px;fill:#0369a1}
     .mono{font-size:12px;fill:#334155;font-family:ui-monospace,Menlo,Consolas,monospace}
     .box{fill:#fff;stroke:#cbd5e1;stroke-width:1}
     .boxb{fill:#e0f2fe;stroke:#7dd3fc;stroke-width:1.2}
@@ -48,9 +47,7 @@
     .boxg{fill:#f1f5f9;stroke:#cbd5e1;stroke-width:1}
     .ar{stroke:#94a3b8;stroke-width:1.4;fill:none;marker-end:url(#a1)}
     .arb{stroke:#0ea5e9;stroke-width:1.4;fill:none;marker-end:url(#a2)}
-    .ard{stroke:#64748b;stroke-width:1.3;fill:none;stroke-dasharray:5 4;marker-end:url(#a1)}
     .lbl{font-size:11.5px;fill:#64748b}
-    .okc{stroke:#0ea5e9;stroke-width:1.4;fill:none;stroke-dasharray:4 3;marker-end:url(#a2)}
   </style>
   <defs>
     <marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
@@ -60,7 +57,7 @@
   </defs>
 
   <!-- ══════ 接入层 ══════ -->
-  <text x="60" y="74" class="lyr">接入</text>
+  <text x="40" y="74" class="lyr">接入</text>
   <rect x="150" y="30" width="250" height="76" rx="9" class="box"/>
   <text x="166" y="56" class="bt">CLI / TUI</text>
   <text x="166" y="76" class="st">命令 · 终端 · 交互 REPL</text>
@@ -77,325 +74,238 @@
   <text x="955" y="56" class="bt">MCP</text>
   <text x="955" y="76" class="st">对外工具协议</text>
   <text x="955" y="94" class="sm">工具经 plugin 接入</text>
+
   <line x1="275" y1="106" x2="275" y2="140" class="ar"/>
   <line x1="538" y1="106" x2="538" y2="140" class="ar"/>
   <line x1="801" y1="106" x2="801" y2="140" class="ar"/>
   <line x1="1064" y1="106" x2="1064" y2="140" class="ar"/>
 
-  <!-- ══════ 编排层：3 驱动循环 + Director ══════ -->
-  <text x="60" y="230" class="lyr">编排</text>
-  <text x="60" y="250" class="sm">驱动循环</text>
-  <text x="60" y="266" class="sm">+ 调度策略</text>
+  <!-- ══════ 编排层：1 个控制面 ══════ -->
+  <text x="40" y="240" class="lyr">编排</text>
+  <text x="40" y="258" class="sm">1 个控制面</text>
+  <text x="40" y="274" class="sm">+ 策略 + 环境</text>
 
-  <rect x="150" y="140" width="250" height="200" rx="9" class="boxb"/>
-  <text x="166" y="166" class="bt">SessionLoop</text>
-  <text x="166" y="186" class="st">会话驱动 · 单位＝消息</text>
-  <text x="166" y="204" class="st">驱动＝用户请求（被动）</text>
-  <text x="166" y="222" class="st">1450 行 / 24 方法</text>
-  <text x="166" y="240" class="sm">切 2.4 · 拆 3 协作者</text>
-  <text x="166" y="258" class="sm warn">⚠ chat 路径无预算门</text>
-  <text x="166" y="284" class="sm">接驱动源 → 循环调能力</text>
-  <text x="166" y="300" class="sm">→ 判停/续 → 收尾持久化</text>
+  <rect x="150" y="140" width="560" height="250" rx="10" class="boxb"/>
+  <text x="166" y="166" class="hub">SessionController（唯一 owner）</text>
+  <text x="166" y="188" class="hq">回答：谁下一个可以跑（turn 准入）—— chat 与 study 共用</text>
+  <line x1="166" y1="200" x2="694" y2="200" stroke="#bae6fd"/>
+  <text x="166" y="222" class="st">7 阶段：idle / admitting / preparing / running / finishing / settling / mutating</text>
+  <text x="166" y="244" class="st">队列模式：steer / followup / collect / interrupt</text>
+  <text x="166" y="264" class="hq">　→ directive = steer · HITL pause = 准入闸 · 停因 = 终态 + 续轮决策</text>
+  <text x="166" y="288" class="st">6 个正交真值：owned / admissible / active / injectable / abortable / settled</text>
+  <text x="166" y="310" class="st">write fence：activeRunId 认领 + 提交校验（取代的 run 不得提交陈旧数据）</text>
+  <text x="166" y="330" class="st">身份分离：logical key ≠ incarnation ≠ operation ≠ attempt</text>
+  <text x="166" y="362" class="sm">切 A2（骨架 · 等价迁移 · 分两 PR）· A3（fence）· B4（身份分离）</text>
 
-  <rect x="413" y="140" width="250" height="200" rx="9" class="boxb"/>
-  <text x="429" y="166" class="bt">StudyLoop</text>
-  <text x="429" y="186" class="st">自主驱动 · 单位＝研究轮</text>
-  <text x="429" y="204" class="st">驱动＝停因（9 类）</text>
-  <text x="429" y="222" class="st">1175 行</text>
-  <text x="429" y="240" class="sm">缺：导演层 → Director 格</text>
-  <text x="429" y="258" class="sm">类名与位置脱节（并入 E）</text>
-  <text x="429" y="284" class="sm">接驱动源 → 循环调能力</text>
-  <text x="429" y="300" class="sm">→ 判停/续 → 收尾持久化</text>
+  <rect x="730" y="140" width="220" height="250" rx="10" class="boxd"/>
+  <text x="746" y="166" class="hub" style="fill:#0f172a">Director（策略）</text>
+  <text x="746" y="188" class="hq" style="fill:#334155">下一步做什么</text>
+  <text x="746" y="212" class="st">停因 → 动作映射</text>
+  <text x="746" y="232" class="st">propose_next</text>
+  <text x="746" y="252" class="st">派生 / 矛盾 假设</text>
+  <text x="746" y="278" class="sm">切 C2</text>
+  <text x="746" y="298" class="sm">（等控制面 OK 后）</text>
 
-  <rect x="676" y="140" width="250" height="200" rx="9" class="boxb"/>
-  <text x="692" y="166" class="bt">SwarmDAG</text>
-  <text x="692" y="186" class="st">DAG 驱动 · 单位＝DAG 层</text>
-  <text x="692" y="204" class="st">分层并行 ThreadPool</text>
-  <text x="692" y="222" class="st">35 套 preset</text>
-  <text x="692" y="240" class="sm">决策 2：编排层内一格</text>
-  <text x="692" y="258" class="sm">（DAG 调度形态，非轮驱动）</text>
-  <text x="692" y="284" class="sm">接驱动源 → 循环调能力</text>
-  <text x="692" y="300" class="sm">→ 判停/续 → 收尾持久化</text>
+  <rect x="970" y="140" width="220" height="250" rx="10" class="boxd"/>
+  <text x="986" y="166" class="hub" style="fill:#0f172a">RunContext（运行期环境）</text>
+  <text x="986" y="188" class="hq" style="fill:#334155">预算 · 事件 · 追踪</text>
+  <text x="986" y="208" class="hq" style="fill:#334155">取消 · 快照</text>
+  <text x="986" y="232" class="st">唯一实现</text>
+  <text x="986" y="252" class="st">三处共用</text>
+  <text x="986" y="278" class="sm">切 A4</text>
+  <text x="986" y="298" class="sm">（编排层只注入，不实现）</text>
 
-  <rect x="939" y="140" width="250" height="200" rx="9" class="boxd"/>
-  <text x="955" y="166" class="bt">Director（待建）</text>
-  <text x="955" y="186" class="st">导演策略 · 单位＝下一步</text>
-  <text x="955" y="204" class="st">停因 → 动作映射</text>
-  <text x="955" y="222" class="st">propose_next</text>
-  <text x="955" y="240" class="st">derive / contradict 假设</text>
-  <text x="955" y="258" class="sm">决策 3：编排层内一格</text>
-  <text x="955" y="276" class="sm">切 1.1 / 1.4</text>
-  <text x="955" y="300" class="sm">产出＝下一个驱动指令</text>
+  <!-- ══════ 能力层：N 个执行面 ══════ -->
+  <text x="40" y="500" class="lyr">能力</text>
+  <text x="40" y="518" class="sm">N 个执行面</text>
+  <text x="40" y="534" class="sm">（可换）</text>
 
-  <!-- 编排 → RunContext -->
-  <line x1="275" y1="340" x2="275" y2="356" class="ard"/>
-  <line x1="538" y1="340" x2="538" y2="356" class="ard"/>
-  <line x1="801" y1="340" x2="801" y2="356" class="ard"/>
-  <line x1="1064" y1="340" x2="1064" y2="356" class="ard"/>
+  <rect x="150" y="420" width="1039" height="54" rx="9" class="boxa"/>
+  <text x="166" y="444" class="bt">AgentRuntime 协议 —— prepare / run / settle</text>
+  <text x="166" y="464" class="st">选择序：model-scoped 策略 &gt; provider-scoped &gt; auto 认领 &gt; 内置回退　｜　不支持则拒绝，不静默降级　｜　一旦开始执行，其失败不经另一 runtime 重放</text>
 
-  <!-- ══════ 运行期环境带 ══════ -->
-  <rect x="150" y="356" width="1039" height="56" rx="9" class="boxd"/>
-  <text x="166" y="380" class="bt" style="fill:#0f172a">运行期环境 RunContext（待建 0.10）</text>
-  <text x="166" y="400" class="st" style="fill:#334155">预算（tokens/cost/time）· 事件（EventSink）· 追踪（TraceView）· 取消（CancelScope）· 快照（从事件 fold）</text>
-  <text x="700" y="380" class="st" style="fill:#334155">今天三套并行：</text>
-  <text x="700" y="400" class="sm" style="fill:#64748b">emit 24/23/7 · trace 4/28/56 · 取消 3 套 · 预算 chat 侧缺失</text>
-  <text x="160" y="432" class="sm">↕ 三个编排器共用同一份环境实例（先只接线、不改行为）· 编排层是持有者/注入方，不实现它</text>
+  <rect x="150" y="494" width="330" height="140" rx="9" class="box"/>
+  <text x="166" y="520" class="bt">ReActRuntime</text>
+  <text x="166" y="542" class="st">由 core/agent/loop.py 迁入</text>
+  <text x="166" y="562" class="st">（AgentLoop + 7 mixin + 9 step）</text>
+  <text x="166" y="586" class="st">一次 ReAct 迭代</text>
+  <text x="166" y="614" class="sm">切 A1</text>
 
-  <!-- ══════ 引擎层 ══════ -->
-  <text x="60" y="510" class="lyr">引擎</text>
-  <rect x="150" y="440" width="250" height="140" rx="9" class="boxa"/>
-  <text x="166" y="466" class="bt">契约（现居实现文件）</text>
-  <text x="166" y="488" class="st">RoundOutcome · BranchContext</text>
-  <text x="166" y="508" class="st">全库只在 phase_engine.py</text>
-  <text x="166" y="526" class="st">（13 处）＝文件内契约</text>
-  <text x="166" y="548" class="sm">切 0.x：提为 contracts.py</text>
-  <text x="166" y="566" class="sm">（唯一「现在做不亏」）</text>
+  <rect x="500" y="494" width="330" height="140" rx="9" class="box"/>
+  <text x="516" y="520" class="bt">ResearchRuntime</text>
+  <text x="516" y="542" class="st">由 core/study/phase_engine.py 迁入</text>
+  <text x="516" y="562" class="st">phases / langgraph 两分支</text>
+  <text x="516" y="586" class="st">跑一轮研究</text>
+  <text x="516" y="614" class="sm">切 B1</text>
 
-  <rect x="413" y="440" width="250" height="140" rx="9" class="box"/>
-  <text x="429" y="466" class="bt">phases 分支</text>
-  <text x="429" y="488" class="st">顺序阶段</text>
-  <text x="429" y="506" class="st">researcher/execution/evaluation</text>
-  <text x="429" y="528" class="st">无 resume 能力</text>
-  <text x="429" y="550" class="sm">1013 行 · 同居 phase_engine</text>
+  <rect x="850" y="494" width="339" height="140" rx="9" class="box"/>
+  <text x="866" y="520" class="bt">DagRuntime</text>
+  <text x="866" y="542" class="st">由 core/swarm/runtime.py 迁入</text>
+  <text x="866" y="562" class="st">DAG 分层并行</text>
+  <text x="866" y="586" class="st">多 agent 批次</text>
+  <text x="866" y="614" class="sm">切 B1</text>
 
-  <rect x="676" y="440" width="250" height="140" rx="9" class="box"/>
-  <text x="692" y="466" class="bt">langgraph 分支</text>
-  <text x="692" y="488" class="st">DAG + checkpoint 51</text>
-  <text x="692" y="506" class="st">interrupt 43 · HITL 20</text>
-  <text x="692" y="528" class="st">独占能力＝HITL resume</text>
-  <text x="692" y="550" class="sm">810 行 · 仅 2 文件引用</text>
-  <text x="692" y="566" class="sm">切 1.6 EventSource 协议</text>
+  <!-- ══════ 上下文：平台唯一所有者 ══════ -->
+  <text x="40" y="710" class="lyr">上下文</text>
+  <text x="40" y="728" class="sm">平台独占</text>
 
-  <rect x="939" y="440" width="250" height="140" rx="9" class="boxb"/>
-  <text x="955" y="466" class="bt">ENGINE_BRANCHES 查表</text>
-  <text x="955" y="488" class="st">未知值 → fallback phases</text>
-  <text x="955" y="506" class="st">+ warning</text>
-  <text x="955" y="528" class="st">契约已定</text>
-  <text x="955" y="550" class="sm">切 2.4：method/ 与 engine/ 拆目录</text>
+  <rect x="150" y="660" width="520" height="140" rx="9" class="boxb"/>
+  <text x="166" y="686" class="hub">ContextHub（模型看到什么 · 唯一所有者）</text>
+  <text x="166" y="708" class="hq">collect → arbitrate（唯一 token 账本）→ render → explain</text>
+  <text x="166" y="730" class="st">缓存边界：稳定段在上 / 目录在下（刷新不改前缀字节）</text>
+  <text x="166" y="750" class="st">预算归属：谁产出谁拥有（分层：attempt/provider/idle/总）</text>
+  <text x="166" y="776" class="sm">validate() 复活为强制门禁　｜　切 A4 · B2 · 2.3</text>
 
-  <!-- 引擎 → 能力 AgentLoop（方向已正确，向下） -->
-  <line x1="538" y1="580" x2="538" y2="610" class="ar"/>
-  <line x1="801" y1="580" x2="801" y2="610" class="ar"/>
-  <text x="810" y="598" class="lbl">轮内 agent 节点调用（编排→引擎→能力，方向正确）</text>
+  <rect x="690" y="660" width="499" height="140" rx="9" class="boxb"/>
+  <text x="706" y="686" class="hub">ContextProvider 协议</text>
+  <text x="706" y="708" class="hq">goal / todo / memory / hypothesis / knowledge</text>
+  <text x="706" y="730" class="st">只取数 + 标注（kind·source·created_at·confidence·scope）</text>
+  <text x="706" y="750" class="st">不做业务；不做渲染；不改控制流</text>
+  <text x="706" y="776" class="sm">切 1.7（injector→provider）· B5（记忆三改）</text>
 
-  <!-- 编排 → 能力 AgentLoop 直接驱动（左通道） -->
-  <path d="M150,240 L128,240 L128,750 L148,750" class="okc"/>
-  <text x="134" y="640" class="lbl" transform="rotate(-90 134 640)">SessionLoop / SwarmDAG 直接驱动</text>
+  <line x1="430" y1="390" x2="430" y2="420" class="ar"/>
+  <line x1="840" y1="390" x2="840" y2="420" class="ar"/>
+  <line x1="1080" y1="390" x2="1080" y2="420" class="ar"/>
+  <line x1="315" y1="634" x2="315" y2="660" class="ar"/>
+  <line x1="665" y1="634" x2="665" y2="660" class="ar"/>
+  <line x1="1020" y1="634" x2="1020" y2="660" class="ar"/>
 
-  <!-- ══════ 能力层 ══════ -->
-  <text x="60" y="760" class="lyr">能力</text>
-  <text x="60" y="778" class="sm">执行体 + 供给</text>
+  <!-- ══════ 研究域（IP） ══════ -->
+  <text x="40" y="880" class="lyr">研究域</text>
+  <text x="40" y="898" class="sm">我们的 IP</text>
+  <rect x="150" y="830" width="520" height="120" rx="9" class="boxa"/>
+  <text x="166" y="856" class="bt">研究方法论 core/study/method/（不动）</text>
+  <text x="166" y="878" class="st">假设 → 派生 → 证伪(claims) → AEGIS 新颖性/回归门</text>
+  <text x="166" y="898" class="st">→ 两阶段 journal（capture → backfill）</text>
+  <text x="166" y="926" class="sm">切 C1（归位）——等控制面 OK 后再动</text>
+  <rect x="690" y="830" width="499" height="120" rx="9" class="box"/>
+  <text x="706" y="856" class="bt">账本</text>
+  <text x="706" y="878" class="st">goal / hypothesis / study —— 四类存储契约</text>
+  <text x="706" y="898" class="st">真源 · 写入者 · 生命周期 · 幂等</text>
+  <text x="706" y="926" class="sm">切 0.4（契约）· B4（身份分离）</text>
 
-  <rect x="150" y="610" width="1039" height="280" rx="9" class="boxb"/>
-  <text x="166" y="636" class="bt">AgentLoop（ReAct 迭代 · 执行体）</text>
-  <text x="440" y="636" class="sm">决策 1：已从编排层移入能力层 —— 它是「怎么执行一步」，不是「怎么驱动工作」</text>
-  <text x="440" y="652" class="sm">1307 行 / 40 方法 · 9 steps + 7 mixin · 被编排层与引擎层共同调用</text>
-  <text x="166" y="676" class="st">内部两条正交拆解轴，6 组职责一一重叠（step 是薄壳：execute 里就一行调用 loop._xxx）</text>
-  <text x="166" y="700" class="sm">mixin（实现层 · W5 拆 loop.py）</text>
-  <text x="800" y="700" class="sm">step（策略槽位 · L7 装配方）</text>
-  <line x1="166" y1="708" x2="690" y2="708" stroke="#e2e8f0"/>
-  <line x1="800" y1="708" x2="1170" y2="708" stroke="#e2e8f0"/>
+  <line x1="665" y1="950" x2="665" y2="980" class="ar"/>
+  <text x="675" y="968" class="lbl">产物落账本</text>
 
-  <text x="166" y="730" class="mono">loop_stream 261</text><text x="800" y="730" class="mono">llm_call</text>
-  <line x1="700" y1="726" x2="790" y2="726" stroke="#0ea5e9" stroke-width="1.4"/><text x="738" y="721" class="lbl">≡</text>
-  <text x="166" y="754" class="mono">loop_tools 389</text><text x="800" y="754" class="mono">tool_execution</text>
-  <line x1="700" y1="750" x2="790" y2="750" stroke="#0ea5e9" stroke-width="1.4"/><text x="738" y="745" class="lbl">≡</text>
-  <text x="166" y="778" class="mono">loop_compaction 272</text><text x="800" y="778" class="mono">compaction</text>
-  <line x1="700" y1="774" x2="790" y2="774" stroke="#0ea5e9" stroke-width="1.4"/><text x="738" y="769" class="lbl">≡</text>
-  <text x="166" y="802" class="mono">loop_progress 270</text><text x="800" y="802" class="mono">progress + resilience</text>
-  <line x1="700" y1="798" x2="790" y2="798" stroke="#0ea5e9" stroke-width="1.4"/><text x="738" y="793" class="lbl">≡</text>
-  <text x="166" y="826" class="mono">loop_lifecycle 123</text><text x="800" y="826" class="mono">finalization</text>
-  <line x1="700" y1="822" x2="790" y2="822" stroke="#0ea5e9" stroke-width="1.4"/><text x="738" y="817" class="lbl">≡</text>
-  <text x="166" y="850" class="mono">loop_assembly 82</text><text x="800" y="850" class="mono">pre_run</text>
-  <line x1="700" y1="846" x2="790" y2="846" stroke="#0ea5e9" stroke-width="1.4"/><text x="738" y="841" class="lbl">≡</text>
-  <text x="166" y="874" class="mono">loop_telemetry 93</text><text x="800" y="874" class="sm">（无对应 step · hooks/trace 基础设施）</text>
-  <line x1="700" y1="870" x2="790" y2="870" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 3"/>
-
-  <rect x="150" y="920" width="250" height="140" rx="9" class="box"/>
-  <text x="166" y="946" class="bt">LLM adapters（7+1）</text>
-  <text x="166" y="968" class="st">provider 注册表</text>
-  <text x="166" y="988" class="st">thinking 抽取 · 错误映射</text>
-  <text x="166" y="1012" class="st">接缝：已是协议</text>
-  <text x="166" y="1034" class="sm">切 0.6（注册收口）</text>
-  <rect x="413" y="920" width="250" height="140" rx="9" class="box"/>
-  <text x="429" y="946" class="bt">toolsets（16）· tools（44）</text>
-  <text x="429" y="968" class="st">按角色白名单</text>
-  <text x="429" y="988" class="st">guard 单调拒绝</text>
-  <text x="429" y="1012" class="st">scoped tools 管道</text>
-  <text x="429" y="1034" class="sm">切 2.5（ToolsetProvider）</text>
-  <rect x="676" y="920" width="250" height="140" rx="9" class="box"/>
-  <text x="692" y="946" class="bt">数据源 loader</text>
-  <text x="692" y="968" class="st">DataLoader + fallback 链</text>
-  <text x="692" y="988" class="st">akshare · fred · local</text>
-  <text x="692" y="1012" class="st">接缝：已是协议</text>
-  <text x="692" y="1034" class="sm">切 1.5（降级阶梯）</text>
-  <rect x="939" y="920" width="250" height="140" rx="9" class="box"/>
-  <text x="955" y="946" class="bt">skills · injectors</text>
-  <text x="955" y="968" class="st">skills 在包内</text>
-  <text x="955" y="988" class="st">injector 5 个 · 3 种语义</text>
-  <text x="955" y="1012" class="st">记忆：只 pre-run · 位置错</text>
-  <text x="955" y="1034" class="sm">切 1.7 · 问题 ⑤</text>
-
-  <line x1="275" y1="1060" x2="275" y2="1090" class="ar"/>
-  <line x1="538" y1="1060" x2="538" y2="1090" class="ar"/>
-  <line x1="801" y1="1060" x2="801" y2="1090" class="ar"/>
-  <line x1="1064" y1="1060" x2="1064" y2="1090" class="ar"/>
-
-  <!-- ══════ 数据层 + 账本 ══════ -->
-  <text x="60" y="1150" class="lyr">数据</text>
-  <text x="60" y="1168" class="sm">+ 账本</text>
-  <rect x="150" y="1090" width="250" height="110" rx="9" class="box"/>
-  <text x="166" y="1116" class="bt">DuckDB</text>
-  <text x="166" y="1138" class="st">回测结果 · 价格 · 因子</text>
-  <text x="166" y="1158" class="st">db.py 1248 行</text>
-  <text x="166" y="1182" class="sm">切 2.4（读写分仓）</text>
-  <rect x="413" y="1090" width="250" height="110" rx="9" class="box"/>
-  <text x="429" y="1116" class="bt">workspace FS</text>
-  <text x="429" y="1138" class="st">strategy.py · results.tsv</text>
-  <text x="429" y="1158" class="st">round 目录 · 可 git 面</text>
-  <text x="429" y="1182" class="sm">研究产出（Tier 2）</text>
-  <rect x="676" y="1090" width="250" height="110" rx="9" class="boxa"/>
-  <text x="692" y="1116" class="bt">goal 账本（不是编排器）</text>
-  <text x="692" y="1138" class="st">目标 · 证据 · 矛盾</text>
-  <text x="692" y="1158" class="st">goal store 1773 行</text>
-  <text x="692" y="1182" class="sm">切 0.4 契约 + 2.4 拆分</text>
-  <rect x="939" y="1090" width="250" height="110" rx="9" class="box"/>
-  <text x="955" y="1116" class="bt">memory（PersistentMemory）</text>
-  <text x="955" y="1138" class="st">FTS5 · find_relevant</text>
-  <text x="955" y="1158" class="st">agent 不写 → 问题 ⑤</text>
-  <text x="955" y="1182" class="sm">切 1.3（写回）</text>
+  <!-- ══════ 数据层 ══════ -->
+  <text x="40" y="1030" class="lyr">数据</text>
+  <rect x="150" y="980" width="250" height="110" rx="9" class="box"/>
+  <text x="166" y="1006" class="bt">event_store（事实流）</text>
+  <text x="166" y="1028" class="st">emit 三助手 · subscribe</text>
+  <text x="166" y="1048" class="st">LLM_REQUEST 已记 system+tools</text>
+  <text x="166" y="1072" class="sm">切 0.2 SSE 双轨 · 1.6 协议化</text>
+  <rect x="413" y="980" width="250" height="110" rx="9" class="box"/>
+  <text x="429" y="1006" class="bt">DuckDB</text>
+  <text x="429" y="1028" class="st">回测结果 · 价格 · 因子</text>
+  <text x="429" y="1048" class="st">db.py 1248 行</text>
+  <text x="429" y="1072" class="sm">切 2.4 读写分仓</text>
+  <rect x="676" y="980" width="250" height="110" rx="9" class="box"/>
+  <text x="692" y="1006" class="bt">sqlite 三库</text>
+  <text x="692" y="1028" class="st">session · study · goal</text>
+  <text x="692" y="1048" class="st">user_version 迁移</text>
+  <text x="692" y="1072" class="sm">切 2.4 拆分</text>
+  <rect x="939" y="980" width="250" height="110" rx="9" class="box"/>
+  <text x="955" y="1006" class="bt">workspace FS</text>
+  <text x="955" y="1028" class="st">strategy.py · results.tsv</text>
+  <text x="955" y="1048" class="st">round 目录 · 可 git 面</text>
+  <text x="955" y="1072" class="sm">研究产出（Tier 2）</text>
 
   <!-- ══════ 底带 ══════ -->
-  <rect x="150" y="1230" width="520" height="120" rx="10" class="boxg"/>
-  <text x="166" y="1256" class="bt">接缝规范</text>
-  <text x="166" y="1280" class="st">L1 窄协议：29 复用 + 补 3（EventSource / ToolsetProvider / PersistenceContract）</text>
-  <text x="166" y="1300" class="st">L2 统一注册：扩展 core/registry.py（不新建平行注册表）</text>
-  <text x="166" y="1320" class="st">L3 一致性套件：每协议一套可运行 pytest</text>
-  <text x="166" y="1340" class="sm">接入成本目标：1 文件 + 1 行 + 1 套件</text>
-  <rect x="690" y="1230" width="499" height="120" rx="10" class="boxa"/>
-  <text x="706" y="1256" class="bt">基因组（RSI）· 只改行为工件</text>
-  <text x="706" y="1280" class="st">Tier 0 冻结：预算/停止/状态机/scope —— agent 无权触碰</text>
-  <text x="706" y="1300" class="st">Tier 1 提案制：.prompts / .skills / 工具集组合 → 三重门禁 → git 回滚</text>
-  <text x="706" y="1320" class="st">Tier 2 可自改：strategy.py / config / 因子（研究产出，非进化）</text>
-  <text x="706" y="1340" class="sm">先决条件：holdout 集（现缺）+ 不变量层上线</text>
+  <rect x="150" y="1120" width="520" height="130" rx="10" class="boxg"/>
+  <text x="166" y="1146" class="bt">接缝规范</text>
+  <text x="166" y="1170" class="st">L1 窄协议：29 复用 + 补 3（EventSource/ToolsetProvider/PersistenceContract）</text>
+  <text x="166" y="1190" class="st">L2 统一注册：扩展 core/registry.py（不新建平行注册表）</text>
+  <text x="166" y="1210" class="st">L3 一致性套件：每协议一套可运行 pytest</text>
+  <text x="166" y="1236" class="sm">+ 协议版本化：PROTOCOL_VERSION，不匹配即拒绝（切 B3）</text>
+  <rect x="690" y="1120" width="499" height="130" rx="10" class="boxa"/>
+  <text x="706" y="1146" class="bt">基因组（RSI）· 只改行为工件</text>
+  <text x="706" y="1170" class="st">Tier 0 冻结：预算/停止/状态机/scope —— agent 无权触碰</text>
+  <text x="706" y="1190" class="st">Tier 1 提案制：.prompts / .skills / 工具集组合 → 三重门禁 → git 回滚</text>
+  <text x="706" y="1210" class="st">Tier 2 可自改：strategy.py / config / 因子（研究产出，非进化）</text>
+  <text x="706" y="1236" class="sm">先决条件：holdout 集（现缺）+ 不变量层上线</text>
 
   <!-- ══════ 右脊 ══════ -->
-  <text x="1260" y="128" class="lyr">中枢（每次调用的必经之路）</text>
-  <rect x="1260" y="140" width="300" height="230" rx="10" class="boxb"/>
-  <text x="1276" y="168" class="hub">ContextHub · 工作集</text>
-  <text x="1276" y="192" class="hubq">① 收集 provider.contribute()</text>
-  <text x="1276" y="212" class="hubq">② 仲裁 = ContextPlan（唯一 token 账本）</text>
-  <text x="1276" y="232" class="hubq">③ 渲染 → messages</text>
-  <text x="1276" y="252" class="hubq">④ explain / snapshot</text>
-  <line x1="1276" y1="266" x2="1544" y2="266" stroke="#bae6fd" stroke-width="1"/>
-  <text x="1276" y="288" class="sm">成员规则：改变模型输入的才接</text>
-  <text x="1276" y="308" class="sm">直接接入仅 4 类：贡献/渲染/工具区/历史区</text>
-  <text x="1276" y="334" class="sm">切 0.8（试点）· 2.3（裁剪）</text>
-  <text x="1276" y="356" class="sm">问题 ④ 上下文无仲裁 → 落在此处</text>
+  <text x="1260" y="128" class="lyr">中枢与护栏</text>
+  <rect x="1260" y="140" width="300" height="120" rx="10" class="boxb"/>
+  <text x="1276" y="166" class="hub">CapabilityRegistry · 供给</text>
+  <text x="1276" y="190" class="hq">resolve(kind, **criteria)</text>
+  <text x="1276" y="210" class="hq">扩展 core/registry.py（不新建）</text>
+  <text x="1276" y="236" class="sm">切 0.6 · 0.7</text>
 
-  <rect x="1260" y="400" width="300" height="110" rx="10" class="boxb"/>
-  <text x="1276" y="428" class="hub">CapabilityRegistry · 供给</text>
-  <text x="1276" y="452" class="hubq">resolve(kind, **criteria)</text>
-  <text x="1276" y="472" class="hubq">扩展 core/registry.py（不新建）</text>
-  <text x="1276" y="496" class="sm">切 0.6 · 0.7</text>
+  <rect x="1260" y="290" width="300" height="110" rx="10" class="boxb"/>
+  <text x="1276" y="316" class="hub">EventStore · 事实</text>
+  <text x="1276" y="340" class="hq">emit / subscribe / replay</text>
+  <text x="1276" y="360" class="hq">LLM_REQUEST 已记 system+tools</text>
+  <text x="1276" y="384" class="sm">切 0.2 · 1.6</text>
 
-  <rect x="1260" y="540" width="300" height="110" rx="10" class="boxb"/>
-  <text x="1276" y="568" class="hub">EventStore · 事实</text>
-  <text x="1276" y="592" class="hubq">emit / subscribe / replay</text>
-  <text x="1276" y="612" class="hubq">LLM_REQUEST 已记 system+tools</text>
-  <text x="1276" y="636" class="sm">切 0.2（SSE 双轨）· 1.6（协议化）</text>
+  <rect x="1260" y="430" width="300" height="120" rx="10" class="boxd"/>
+  <text x="1276" y="456" class="hub" style="fill:#0f172a">InvariantLayer · 底线</text>
+  <text x="1276" y="480" class="hq" style="fill:#334155">独立于插件 · 不可被覆盖</text>
+  <text x="1276" y="500" class="hq" style="fill:#334155">预算 · 停止 · 状态机 · scope</text>
+  <text x="1276" y="526" class="sm">切 A5（DSH §9.7 模式）</text>
 
-  <rect x="1260" y="680" width="300" height="110" rx="10" class="boxd"/>
-  <text x="1276" y="708" class="hub" style="fill:#0f172a">InvariantLayer · 底线</text>
-  <text x="1276" y="732" class="hubq" style="fill:#334155">独立于插件 · 不可被覆盖</text>
-  <text x="1276" y="752" class="hubq" style="fill:#334155">预算 · 停止 · 状态机 · scope</text>
-  <text x="1276" y="774" class="sm">切 0.9（DSH §9.7 模式）</text>
+  <rect x="1260" y="580" width="300" height="120" rx="10" class="boxg"/>
+  <text x="1276" y="606" class="hub">统一快照</text>
+  <text x="1276" y="630" class="hq">items / dropped / providers_used</text>
+  <text x="1276" y="650" class="hq">capabilities / events_ref</text>
+  <text x="1276" y="676" class="sm">切 2.6（从事件 fold）</text>
 
-  <rect x="1260" y="820" width="300" height="110" rx="10" class="boxg"/>
-  <text x="1276" y="848" class="hub">统一快照</text>
-  <text x="1276" y="872" class="hubq">items / dropped / providers_used</text>
-  <text x="1276" y="892" class="hubq">capabilities / events_ref</text>
-  <text x="1276" y="916" class="sm">切 2.6（从事件 fold，不建存储）</text>
+  <rect x="1260" y="730" width="300" height="210" rx="10" class="boxg"/>
+  <text x="1276" y="756" class="hub">落刀索引</text>
+  <text x="1276" y="782" class="st">P0 脊柱：A1–A5</text>
+  <text x="1276" y="802" class="st">P1 收敛：B1–B5</text>
+  <text x="1276" y="822" class="st">P2 研究域：C1–C5（等控制面 OK）</text>
+  <text x="1276" y="842" class="st">P3 RSI：D1–D4（最后）</text>
+  <line x1="1276" y1="856" x2="1544" y2="856" stroke="#e2e8f0"/>
+  <text x="1276" y="878" class="sm">A1 runtime · A2 控制器 · A3 fence</text>
+  <text x="1276" y="898" class="sm">A4 上下文 · A5 不变量</text>
+  <text x="1276" y="922" class="sm">B1 编排收敛 · B2 缓存边界</text>
+  <text x="1276" y="942" class="sm">B3 协议版本 · B4 身份 · B5 记忆</text>
 
-  <rect x="1260" y="960" width="300" height="140" rx="10" class="boxg"/>
-  <text x="1276" y="986" class="hub">落刀索引</text>
-  <text x="1276" y="1010" class="st">W0 结构可信：0.1–0.11</text>
-  <text x="1276" y="1030" class="st">W1 自主达成：1.1–1.8</text>
-  <text x="1276" y="1050" class="st">W2 体量上下文：2.1–2.7</text>
-  <text x="1276" y="1076" class="st">R 线 RSI：R0–R3（最后）</text>
+  <rect x="1260" y="970" width="300" height="160" rx="10" class="boxg"/>
+  <text x="1276" y="996" class="hub">决策记录</text>
+  <text x="1276" y="1022" class="st" style="fill:#0369a1">✓ 控制面统一为一个</text>
+  <text x="1276" y="1042" class="st" style="fill:#0369a1">✓ P2 等控制面 OK 后再动</text>
+  <text x="1276" y="1062" class="st">⏸ P0 是否两人并行（讨论中）</text>
+  <line x1="1276" y1="1076" x2="1544" y2="1076" stroke="#e2e8f0"/>
+  <text x="1276" y="1100" class="sm">总纲：architecture-v3-openclaw-inspired.md</text>
+  <text x="1276" y="1120" class="sm">主线：refactor-master-plan-20261008.md</text>
 
-  <rect x="1260" y="1130" width="300" height="220" rx="10" class="boxg"/>
-  <text x="1276" y="1156" class="hub">决策记录</text>
-  <text x="1276" y="1182" class="st" style="fill:#0369a1">✓ 1. AgentLoop → 能力层（0.11）</text>
-  <text x="1276" y="1202" class="st" style="fill:#0369a1">✓ 2. SwarmDAG = 编排层一格</text>
-  <text x="1276" y="1222" class="st" style="fill:#0369a1">✓ 3. Director = 编排层一格</text>
-  <line x1="1276" y1="1238" x2="1544" y2="1238" stroke="#e2e8f0"/>
-  <text x="1276" y="1260" class="sm">未决：D 契约独立</text>
-  <text x="1276" y="1280" class="sm">　　　E 目录拆分</text>
-  <text x="1276" y="1300" class="sm">　　　R1 RunContext 非编排协议</text>
-  <text x="1276" y="1320" class="sm">　　　R2 RunContext 位置</text>
-  <text x="1276" y="1340" class="sm">　　　R3 chat 预算门</text>
-
-  <!-- 中枢连线 -->
-  <path d="M1189,700 L1256,700" class="arb"/>
-  <text x="1194" y="692" class="lbl">每次 LLM 调用</text>
-  <path d="M1256,450 L1193,450" class="arb"/>
-  <text x="1196" y="440" class="lbl">解析供给</text>
-  <path d="M1260,730 L1193,730" class="ard"/>
-  <text x="1196" y="720" class="lbl">守护</text>
-
-  <!-- ══════ 问题编号（⑦ 已决） ══════ -->
+  <!-- 问题编号 -->
   <g font-size="14" font-weight="600" text-anchor="middle">
-    <circle cx="1196" cy="404" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1196" y="409" fill="#991b1b">①</text>
-    <circle cx="1196" cy="596" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1196" y="601" fill="#991b1b">②</text>
-    <circle cx="692" cy="1150" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="692" y="1155" fill="#991b1b">③</text>
-    <circle cx="1176" cy="364" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1176" y="369" fill="#991b1b">④</text>
-    <circle cx="1176" cy="1012" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1176" y="1017" fill="#991b1b">⑤</text>
-    <circle cx="651" cy="258" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="651" y="263" fill="#991b1b">⑥</text>
-  </g>
-  <g font-size="13" font-weight="600" text-anchor="middle">
-    <circle cx="1160" cy="630" r="13" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.6"/><text x="1160" y="635" fill="#0369a1">✓</text>
-    <text x="1160" y="652" font-size="11" font-weight="400" fill="#0369a1">⑦ 已决</text>
+    <circle cx="1140" cy="560" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1140" y="565" fill="#991b1b">②</text>
+    <circle cx="1140" cy="900" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1140" y="905" fill="#991b1b">③</text>
+    <circle cx="636" cy="686" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="636" y="691" fill="#991b1b">④</text>
+    <circle cx="1152" cy="708" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="1152" y="713" fill="#991b1b">⑤</text>
+    <circle cx="900" cy="368" r="12" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/><text x="900" y="373" fill="#991b1b">⑥</text>
   </g>
 </svg>
 </div>
 
 <div class="legend">
-  <span><i class="dot" style="background:#e0f2fe;border:1px solid #7dd3fc"></i>目标态（中枢 / 编排核心）</span>
-  <span><i class="dot" style="background:#fef3c7;border:1px solid #fcd34d"></i>契约 / RSI 相关</span>
+  <span><i class="dot" style="background:#e0f2fe;border:1px solid #7dd3fc"></i>目标态（控制面 / 上下文 / 执行面）</span>
+  <span><i class="dot" style="background:#fef3c7;border:1px solid #fcd34d"></i>协议 / 契约 / 研究域</span>
   <span><i class="dot" style="background:#f1f5f9;border:1.5px dashed #334155"></i>待建（Director / RunContext / InvariantLayer）</span>
-  <span><i class="dot" style="background:#fee2e2;border:1.5px solid #ef4444"></i>①–⑥ 待解决问题</span>
-  <span><i class="dot" style="background:#e0f2fe;border:1.5px solid #0ea5e9"></i>✓ ⑦ 已决（AgentLoop 移入能力层）</span>
+  <span><i class="dot" style="background:#fee2e2;border:1.5px solid #ef4444"></i>②–⑥ 待解决问题</span>
 </div>
 
-<h2>v2 → v3 的修正（对应 3 条决策）</h2>
+<h2>与现状的差别（对照 v3 → v4）</h2>
 <table>
-<thead><tr><th style="width:170px">修正点</th><th style="width:300px">v2 画法</th><th>v3 画法（依据）</th></tr></thead>
+<thead><tr><th style="width:150px">面</th><th style="width:320px">现状（v3）</th><th>目标（v4）</th></tr></thead>
 <tbody>
-<tr><td class="k">AgentLoop 归属</td><td>编排层大框（与 SessionService 并列）</td><td><b>移入能力层</b>（决策 1）——它是「怎么执行一步」；移出后六层依赖方向首次自洽：<b>编排 → 引擎 → 能力 → 数据</b></td></tr>
-<tr><td class="k">编排层成员</td><td>三编排嵌套画</td><td><b>3 驱动循环 + Director</b>：SessionLoop（消息）· StudyLoop（轮）· SwarmDAG（DAG，决策 2）· Director（待建，决策 3）</td></tr>
-<tr><td class="k">⑦ 反向依赖</td><td>红色虚线「层归属待澄清」</td><td><span class="ok">✓ 已决</span>：AgentLoop 移入能力层后，引擎→能力的箭头变成**向下**（方向正确）；新切 <b>0.11</b></td></tr>
-<tr><td class="k">Director</td><td>问题 ⑥ 标在 StudyLoop 上</td><td>独立成格（虚线，待建 1.4），产出＝「下一个驱动指令」</td></tr>
-<tr><td class="k">右脊</td><td>落刀索引</td><td>新增<b>决策记录</b>框：3 条已决 + 5 条未决</td></tr>
-</tbody>
-</table>
-
-<h2>仍待拍板（5 条，图中以「未决」标注）</h2>
-<table>
-<thead><tr><th style="width:60px">#</th><th style="width:270px">问题</th><th>我的倾向</th></tr></thead>
-<tbody>
-<tr><td class="k">D</td><td>契约（RoundOutcome/BranchContext）提到 <code>core/study/contracts.py</code>？</td><td>该做——零风险，唯一「现在付出、未来解锁 langgraph 独立」的动作</td></tr>
-<tr><td class="k">E</td><td><code>core/study/</code> 拆 <code>method/</code>（假设—证伪—AEGIS—journal）+ <code>engine/</code>？</td><td>现在做——研究方法论是本项目 IP，藏在 <code>phase_engine.py</code> 是位置错误</td></tr>
-<tr><td class="k">R1</td><td>统一「运行期环境 RunContext」而非「统一编排协议」？</td><td>同意</td></tr>
-<tr><td class="k">R2</td><td>RunContext 放 <code>core/orchestration/</code>（中立层）？</td><td>是</td></tr>
-<tr><td class="k">R3</td><td>chat 路径无预算门，立刻补（0.5d）？</td><td>立刻补——运行时风险，不是结构债</td></tr>
+<tr><td class="k">控制面</td><td>3–4 套并存：SessionService / StudyRunner / SwarmRuntime / Workflow</td><td><b>1 套</b>：SessionController 唯一拥有 turn 准入；StudyLoop 降为 research runtime</td></tr>
+<tr><td class="k">执行面</td><td>AgentLoop / phase_engine 硬编码在编排层，无契约</td><td><b>AgentRuntime 协议</b> + 选择器 + 声明式回退；3 个实现（ReAct/Research/Dag）</td></tr>
+<tr><td class="k">上下文</td><td>4 PromptBuilder + 5 injector 各自拼；validate() 死契约</td><td><b>ContextHub 独占</b>装配与预算；provider 只取数+标注；缓存边界 + 分层预算 + 归属</td></tr>
+<tr><td class="k">运行期环境</td><td>预算/事件/追踪/取消三套并行</td><td><b>RunContext 唯一实现</b>，三处共用</td></tr>
+<tr><td class="k">并发正确性</td><td><b>无 write fence</b>（取代的 run 可提交陈旧数据）</td><td>SessionController 内置 activeRunId 认领 + 提交校验</td></tr>
+<tr><td class="k">不变量</td><td>散落在各模块的约定</td><td><b>不变量层</b>（Tier 0 冻结，插件无权覆盖）</td></tr>
+<tr><td class="k">研究方法论</td><td>藏在 phase_engine.py</td><td><b>core/study/method/</b> 独立成域——<b>不动其内容</b></td></tr>
 </tbody>
 </table>
 
 <footer>
-  源文件：<b>docs/architecture-diagram.html</b>（v3）· 依据：<b>orchestration-layer-membership.md</b>（3 条决策）·
-  <b>layer-review-orchestration-engine.md</b> · <b>layer-review-orchestration-unify.md</b> ·
-  <b>refactor-master-plan-20261008.md</b>（已加 0.11）
+  总纲：<b>docs/architecture-v3-openclaw-inspired.md</b>（决策记录 §8）· 对标：<b>docs/openclaw-architecture.html</b> ·
+  主线：<b>docs/refactor-master-plan-20261008.md</b>
 </footer>
 </div>
 </body>

@@ -235,8 +235,19 @@ src/strategy_research/
 
 ---
 
-## 8. 决策请求
+## 8. 决策记录
 
-1. **控制面统一为一个**是否接受？（chat 与 study 共用 SessionController；这是最大的一刀，也是最大简化）
-2. **P0 是否 2 人并行**（A1 runtime 线 / A2-A5 控制面+上下文线）？
-3. **P2 的研究域强化**是否与 P1 并行，还是等控制面稳了再动（避免同时改 phase_engine 与运行时）？
+| # | 问题 | 决定 |
+|---|---|---|
+| 1 | **控制面统一为一个**是否接受？ | ✅ **接受**（chat 与 study 共用 SessionController）——最大一刀，也是最大简化 |
+| 2 | **P0 是否 2 人并行**（A1 runtime 线 / A2–A5 控制面+上下文线） | ⏸ **讨论中**，未定 |
+| 3 | **P2 研究域强化**与 P1 并行，还是等控制面稳了再动？ | ⏳ **等控制面 OK 后再动**（避免同时改 phase_engine 与运行时） |
+
+**已生效的约束**：
+- P0/P1 **不引入任何新功能**；新功能一律排在 P2/P3
+- P2 的研究域改动与控制面改造**不重叠**，避免双线改同一文件（`phase_engine.py` / `runner.py`）
+- 控制面迁移（A2）**分两个 PR**：先新旧并行跑，等价后切流
+
+## 9. 架构图
+
+`docs/architecture-diagram.html`（v4 · 目标架构）· `docs/openclaw-architecture.html`（对标图）
