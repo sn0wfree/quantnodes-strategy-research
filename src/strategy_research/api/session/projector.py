@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 # change_type → UI/LLM-facing label for goal messages
 # ── Projected state (from projection_models) ─────────────────────────────────
-from .projection_models import (
+from .projection_models import (  # noqa: F401  (re-exports)
     ProjectedMessage,
+    ProjectedPart,
     ProjectedSession,
 )
 
