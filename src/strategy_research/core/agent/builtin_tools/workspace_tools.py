@@ -401,7 +401,7 @@ class LoadSkillTool(BaseTool):
                 available = [s.name for s in registry.list_all()][:20]
                 return err_actionable(
                     f"skill '{name}' not found",
-                    available=available,
+                    extra={"available": available},
                 )
 
             return tool_ok({

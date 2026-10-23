@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ..storage.sqlite import (
     connect,
@@ -1671,10 +1671,10 @@ class GoalStore:
             label=row["label"],
             levers=list(json_loads(row["levers_json"], [])),
             predicted_affected=list(json_loads(row["predicted_affected_json"], [])),
-            predictions=dict(json_loads(row["predictions_json"], {})),
-            prediction_outcome=dict(json_loads(row["prediction_outcome_json"], {})),
+            predictions=cast(dict, json_loads(row["predictions_json"], {})),
+            prediction_outcome=cast(dict, json_loads(row["prediction_outcome_json"], {})),
             gating_outcome=row["gating_outcome"],
-            gating_attribution=dict(json_loads(row["gating_attribution_json"], {})),
+            gating_attribution=cast(dict, json_loads(row["gating_attribution_json"], {})),
             changeset=json_loads(row["changeset_json"], None),
             retry_rationale=row["retry_rationale"],
             archived_reason=row["archived_reason"],
@@ -1757,7 +1757,7 @@ class GoalStore:
             benchmark=list(json_loads(row["benchmark_json"], [])),
             timeframe=row["timeframe"],
             method=row["method"],
-            assumptions=dict(json_loads(row["assumptions_json"], {})),
+            assumptions=cast(dict, json_loads(row["assumptions_json"], {})),
             artifact_path=row["artifact_path"],
             artifact_hash=row["artifact_hash"],
             retrieved_at=row["retrieved_at"],

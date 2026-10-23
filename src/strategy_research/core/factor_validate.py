@@ -17,7 +17,7 @@ _compute_factor_scores`` 是模板内历史公式副本（豁免待迁移）。
 from __future__ import annotations
 
 import hashlib
-from typing import Optional
+from typing import Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -83,12 +83,18 @@ def compute_ic(
     # 如果是 MultiIndex (date, asset)，按 date 分组计算 IC
     if isinstance(df.index, pd.MultiIndex):
         ic_series = df.groupby(level=0).apply(
-            lambda g: g["factor"].corr(g["return"], method=method)
+            lambda g: cast(pd.Series, g["factor"]).corr(
+                cast(pd.Series, g["return"]), method=method
+            )
             if len(g) >= 10 else np.nan
         )
     else:
         # 单日截面
-        ic_series = pd.Series([df["factor"].corr(df["return"], method=method)])
+        ic_series = pd.Series([
+            cast(pd.Series, df["factor"]).corr(
+                cast(pd.Series, df["return"]), method=method
+            )
+        ])
 
     ic_series = ic_series.dropna()
     if ic_series.empty:

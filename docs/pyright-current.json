@@ -1,6 +1,6 @@
 {
     "version": "1.1.414",
-    "time": "1792733803506",
+    "time": "1792741047726",
     "generalDiagnostics": [
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\admin_users.py",
@@ -81,134 +81,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"config\", \"equity_curve\"",
-            "range": {
-                "start": {
-                    "line": 49,
-                    "character": 17
-                },
-                "end": {
-                    "line": 58,
-                    "character": 9
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"run_dir\"",
-            "range": {
-                "start": {
-                    "line": 50,
-                    "character": 12
-                },
-                "end": {
-                    "line": 50,
-                    "character": 19
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"run_monte_carlo\"",
-            "range": {
-                "start": {
-                    "line": 52,
-                    "character": 12
-                },
-                "end": {
-                    "line": 52,
-                    "character": 27
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"n_simulations\"",
-            "range": {
-                "start": {
-                    "line": 53,
-                    "character": 12
-                },
-                "end": {
-                    "line": 53,
-                    "character": 25
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"run_bootstrap\"",
-            "range": {
-                "start": {
-                    "line": 54,
-                    "character": 12
-                },
-                "end": {
-                    "line": 54,
-                    "character": 25
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"n_bootstrap\"",
-            "range": {
-                "start": {
-                    "line": 55,
-                    "character": 12
-                },
-                "end": {
-                    "line": 55,
-                    "character": 23
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"run_walk_forward\"",
-            "range": {
-                "start": {
-                    "line": 56,
-                    "character": 12
-                },
-                "end": {
-                    "line": 56,
-                    "character": 28
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\routers\\validation.py",
-            "severity": "error",
-            "message": "No parameter named \"n_windows\"",
-            "range": {
-                "start": {
-                    "line": 57,
-                    "character": 12
-                },
-                "end": {
-                    "line": 57,
-                    "character": 21
-                }
-            },
-            "rule": "reportCallIssue"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\api\\session\\projection_models.py",
@@ -1141,46 +1013,14 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
             "severity": "error",
-            "message": "Argument missing for parameter \"criterion_id\"",
-            "range": {
-                "start": {
-                    "line": 328,
-                    "character": 22
-                },
-                "end": {
-                    "line": 328,
-                    "character": 96
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
-            "severity": "error",
-            "message": "Argument of type \"AuditRow\" cannot be assigned to parameter \"audit\" of type \"list[AuditRow] | None\" in function \"update_status\"\n  Type \"AuditRow\" is not assignable to type \"list[AuditRow] | None\"\n    \"AuditRow\" is not assignable to \"list[AuditRow]\"\n    \"AuditRow\" is not assignable to \"None\"",
-            "range": {
-                "start": {
-                    "line": 328,
-                    "character": 22
-                },
-                "end": {
-                    "line": 328,
-                    "character": 96
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
-            "severity": "error",
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 331,
+                    "line": 341,
                     "character": 16
                 },
                 "end": {
-                    "line": 331,
+                    "line": 341,
                     "character": 21
                 }
             },
@@ -1192,11 +1032,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 334,
+                    "line": 344,
                     "character": 12
                 },
                 "end": {
-                    "line": 334,
+                    "line": 344,
                     "character": 17
                 }
             },
@@ -1208,11 +1048,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 348,
+                    "line": 358,
                     "character": 20
                 },
                 "end": {
-                    "line": 348,
+                    "line": 358,
                     "character": 25
                 }
             },
@@ -1224,11 +1064,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 359,
+                    "line": 369,
                     "character": 16
                 },
                 "end": {
-                    "line": 359,
+                    "line": 369,
                     "character": 21
                 }
             },
@@ -1240,27 +1080,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 361,
+                    "line": 371,
                     "character": 12
                 },
                 "end": {
-                    "line": 361,
-                    "character": 17
-                }
-            },
-            "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
-            "severity": "error",
-            "message": "\"print\" is not a known attribute of \"None\"",
-            "range": {
-                "start": {
-                    "line": 378,
-                    "character": 12
-                },
-                "end": {
-                    "line": 378,
+                    "line": 371,
                     "character": 17
                 }
             },
@@ -1273,42 +1097,10 @@
             "range": {
                 "start": {
                     "line": 388,
-                    "character": 16
-                },
-                "end": {
-                    "line": 388,
-                    "character": 21
-                }
-            },
-            "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
-            "severity": "error",
-            "message": "\"print\" is not a known attribute of \"None\"",
-            "range": {
-                "start": {
-                    "line": 397,
-                    "character": 16
-                },
-                "end": {
-                    "line": 397,
-                    "character": 21
-                }
-            },
-            "rule": "reportOptionalMemberAccess"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
-            "severity": "error",
-            "message": "\"print\" is not a known attribute of \"None\"",
-            "range": {
-                "start": {
-                    "line": 400,
                     "character": 12
                 },
                 "end": {
-                    "line": 400,
+                    "line": 388,
                     "character": 17
                 }
             },
@@ -1320,11 +1112,59 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 404,
+                    "line": 398,
+                    "character": 16
+                },
+                "end": {
+                    "line": 398,
+                    "character": 21
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
+            "severity": "error",
+            "message": "\"print\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 407,
+                    "character": 16
+                },
+                "end": {
+                    "line": 407,
+                    "character": 21
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
+            "severity": "error",
+            "message": "\"print\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 12
+                },
+                "end": {
+                    "line": 410,
+                    "character": 17
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\cli\\commands\\slash_goal.py",
+            "severity": "error",
+            "message": "\"print\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 414,
                     "character": 20
                 },
                 "end": {
-                    "line": 404,
+                    "line": 414,
                     "character": 25
                 }
             },
@@ -1336,11 +1176,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 408,
+                    "line": 418,
                     "character": 16
                 },
                 "end": {
-                    "line": 408,
+                    "line": 418,
                     "character": 21
                 }
             },
@@ -1352,11 +1192,11 @@
             "message": "Index 0 is out of range for type tuple[()]",
             "range": {
                 "start": {
-                    "line": 465,
+                    "line": 475,
                     "character": 7
                 },
                 "end": {
-                    "line": 465,
+                    "line": 475,
                     "character": 14
                 }
             },
@@ -1368,11 +1208,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 468,
+                    "line": 478,
                     "character": 12
                 },
                 "end": {
-                    "line": 468,
+                    "line": 478,
                     "character": 17
                 }
             },
@@ -1384,11 +1224,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 557,
+                    "line": 567,
                     "character": 16
                 },
                 "end": {
-                    "line": 557,
+                    "line": 567,
                     "character": 21
                 }
             },
@@ -1400,11 +1240,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 576,
+                    "line": 586,
                     "character": 20
                 },
                 "end": {
-                    "line": 576,
+                    "line": 586,
                     "character": 25
                 }
             },
@@ -1416,11 +1256,11 @@
             "message": "\"print\" is not a known attribute of \"None\"",
             "range": {
                 "start": {
-                    "line": 580,
+                    "line": 590,
                     "character": 12
                 },
                 "end": {
-                    "line": 580,
+                    "line": 590,
                     "character": 17
                 }
             },
@@ -2593,22 +2433,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\builtin_tools\\workspace_tools.py",
-            "severity": "error",
-            "message": "No parameter named \"available\"",
-            "range": {
-                "start": {
-                    "line": 403,
-                    "character": 20
-                },
-                "end": {
-                    "line": 403,
-                    "character": 29
-                }
-            },
-            "rule": "reportCallIssue"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\agent\\cache.py",
@@ -6469,15 +6293,15 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\factor_validate.py",
             "severity": "error",
-            "message": "Argument of type \"Series | Unknown | Self@DataFrame\" cannot be assigned to parameter \"other\" of type \"Series\" in function \"corr\"\n  Type \"Series | Unknown | DataFrame*\" is not assignable to type \"Series\"\n    \"DataFrame*\" is not assignable to \"Series\"",
+            "message": "Argument of type \"str\" cannot be assigned to parameter \"method\" of type \"CorrelationMethod\" in function \"corr\"\n  Type \"str\" is not assignable to type \"CorrelationMethod\"\n    Type \"str\" is not assignable to type \"(ndarray[_AnyShape, dtype[Any]], ndarray[_AnyShape, dtype[Any]]) -> float\"\n    \"str\" is not assignable to type \"Literal['pearson']\"\n    \"str\" is not assignable to type \"Literal['kendall']\"\n    \"str\" is not assignable to type \"Literal['spearman']\"",
             "range": {
                 "start": {
-                    "line": 90,
-                    "character": 49
+                    "line": 86,
+                    "character": 53
                 },
                 "end": {
-                    "line": 90,
-                    "character": 61
+                    "line": 86,
+                    "character": 59
                 }
             },
             "rule": "reportArgumentType"
@@ -6485,31 +6309,15 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\factor_validate.py",
             "severity": "error",
-            "message": "Parameter \"method\" is already assigned",
-            "range": {
-                "start": {
-                    "line": 90,
-                    "character": 63
-                },
-                "end": {
-                    "line": 90,
-                    "character": 69
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\factor_validate.py",
-            "severity": "error",
             "message": "Argument of type \"str\" cannot be assigned to parameter \"method\" of type \"CorrelationMethod\" in function \"corr\"\n  Type \"str\" is not assignable to type \"CorrelationMethod\"\n    Type \"str\" is not assignable to type \"(ndarray[_AnyShape, dtype[Any]], ndarray[_AnyShape, dtype[Any]]) -> float\"\n    \"str\" is not assignable to type \"Literal['pearson']\"\n    \"str\" is not assignable to type \"Literal['kendall']\"\n    \"str\" is not assignable to type \"Literal['spearman']\"",
             "range": {
                 "start": {
-                    "line": 90,
-                    "character": 70
+                    "line": 94,
+                    "character": 54
                 },
                 "end": {
-                    "line": 90,
-                    "character": 76
+                    "line": 94,
+                    "character": 60
                 }
             },
             "rule": "reportArgumentType"
@@ -6520,11 +6328,11 @@
             "message": "Argument of type \"Series | Any\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | Any\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 96,
+                    "line": 102,
                     "character": 20
                 },
                 "end": {
-                    "line": 96,
+                    "line": 102,
                     "character": 36
                 }
             },
@@ -6536,11 +6344,11 @@
             "message": "Argument of type \"Series | Any\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | Any\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 96,
+                    "line": 102,
                     "character": 20
                 },
                 "end": {
-                    "line": 96,
+                    "line": 102,
                     "character": 36
                 }
             },
@@ -6552,11 +6360,11 @@
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 97,
+                    "line": 103,
                     "character": 19
                 },
                 "end": {
-                    "line": 97,
+                    "line": 103,
                     "character": 34
                 }
             },
@@ -6568,11 +6376,11 @@
             "message": "Argument of type \"Series | float\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series | float\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n      \"Series\" is not assignable to \"str\"\n      \"Series\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"Series\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 97,
+                    "line": 103,
                     "character": 19
                 },
                 "end": {
-                    "line": 97,
+                    "line": 103,
                     "character": 34
                 }
             },
@@ -6584,11 +6392,11 @@
             "message": "Cannot access attribute \"rank\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 199,
+                    "line": 205,
                     "character": 45
                 },
                 "end": {
-                    "line": 199,
+                    "line": 205,
                     "character": 49
                 }
             },
@@ -6600,11 +6408,11 @@
             "message": "Cannot access attribute \"rank\" for class \"ndarray[_AnyShape, dtype[Any]]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 199,
+                    "line": 205,
                     "character": 75
                 },
                 "end": {
-                    "line": 199,
+                    "line": 205,
                     "character": 79
                 }
             },
@@ -6616,11 +6424,11 @@
             "message": "Argument of type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" cannot be assigned to parameter \"obj\" of type \"Sized\" in function \"len\"\n  Type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" is not assignable to type \"Sized\"\n    \"complex\" is incompatible with protocol \"Sized\"\n      \"__len__\" is not present",
             "range": {
                 "start": {
-                    "line": 239,
+                    "line": 245,
                     "character": 11
                 },
                 "end": {
-                    "line": 239,
+                    "line": 245,
                     "character": 24
                 }
             },
@@ -6632,11 +6440,11 @@
             "message": "Argument of type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" cannot be assigned to parameter \"obj\" of type \"Sized\" in function \"len\"\n  Type \"Scalar | Series | DataFrame | Any | Unknown | Series*\" is not assignable to type \"Sized\"\n    \"complex\" is incompatible with protocol \"Sized\"\n      \"__len__\" is not present",
             "range": {
                 "start": {
-                    "line": 243,
+                    "line": 249,
                     "character": 26
                 },
                 "end": {
-                    "line": 243,
+                    "line": 249,
                     "character": 39
                 }
             },
@@ -6648,11 +6456,11 @@
             "message": "Cannot access attribute \"rank\" for class \"str\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6664,11 +6472,11 @@
             "message": "Cannot access attribute \"rank\" for class \"bytes\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6680,11 +6488,11 @@
             "message": "Cannot access attribute \"rank\" for class \"date\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6696,11 +6504,11 @@
             "message": "Cannot access attribute \"rank\" for class \"datetime\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6712,11 +6520,11 @@
             "message": "Cannot access attribute \"rank\" for class \"timedelta\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6728,11 +6536,11 @@
             "message": "Cannot access attribute \"rank\" for class \"datetime64[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6744,11 +6552,11 @@
             "message": "Cannot access attribute \"rank\" for class \"timedelta64[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6760,11 +6568,11 @@
             "message": "Cannot access attribute \"rank\" for class \"bool\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6776,11 +6584,11 @@
             "message": "Cannot access attribute \"rank\" for class \"int\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6792,11 +6600,11 @@
             "message": "Cannot access attribute \"rank\" for class \"float\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6808,11 +6616,11 @@
             "message": "Cannot access attribute \"rank\" for class \"Timestamp\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6824,11 +6632,11 @@
             "message": "Cannot access attribute \"rank\" for class \"Timedelta\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6840,11 +6648,11 @@
             "message": "Cannot access attribute \"rank\" for class \"Interval[Unknown]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6856,11 +6664,11 @@
             "message": "Cannot access attribute \"rank\" for class \"complex\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6872,11 +6680,11 @@
             "message": "Cannot access attribute \"rank\" for class \"integer[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6888,11 +6696,11 @@
             "message": "Cannot access attribute \"rank\" for class \"floating[Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6904,11 +6712,11 @@
             "message": "Cannot access attribute \"rank\" for class \"complexfloating[Any, Any]\"\n  Attribute \"rank\" is unknown",
             "range": {
                 "start": {
-                    "line": 244,
+                    "line": 250,
                     "character": 32
                 },
                 "end": {
-                    "line": 244,
+                    "line": 250,
                     "character": 36
                 }
             },
@@ -6920,11 +6728,11 @@
             "message": "No overloads for \"corrcoef\" match the provided arguments",
             "range": {
                 "start": {
-                    "line": 249,
+                    "line": 255,
                     "character": 19
                 },
                 "end": {
-                    "line": 249,
+                    "line": 255,
                     "character": 50
                 }
             },
@@ -6936,11 +6744,11 @@
             "message": "Argument of type \"ArrayLike | Any | Unknown\" cannot be assigned to parameter \"y\" of type \"_ArrayLikeComplex_co | None\" in function \"corrcoef\"\n  Type \"ArrayLike | Any | Unknown\" is not assignable to type \"_ArrayLikeComplex_co | None\"\n    Type \"ExtensionArray\" is not assignable to type \"_ArrayLikeComplex_co | None\"\n      \"ExtensionArray\" is incompatible with protocol \"_SupportsArray[dtype[numpy.bool[builtins.bool] | number[Any, Any]]]\"\n        \"__array__\" is not present\n      \"ExtensionArray\" is incompatible with protocol \"_NestedSequence[_SupportsArray[dtype[numpy.bool[builtins.bool] | number[Any, Any]]]]\"\n        \"__reversed__\" is not present\n        \"count\" is not present\n        \"index\" is not present\n  ...",
             "range": {
                 "start": {
-                    "line": 249,
+                    "line": 255,
                     "character": 38
                 },
                 "end": {
-                    "line": 249,
+                    "line": 255,
                     "character": 49
                 }
             },
@@ -6952,11 +6760,11 @@
             "message": "Argument of type \"Series\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"Series\" is not assignable to type \"ConvertibleToFloat\"\n    \"Series\" is not assignable to \"str\"\n    \"Series\" is incompatible with protocol \"Buffer\"\n      \"__buffer__\" is not present\n    \"Series\" is incompatible with protocol \"SupportsFloat\"\n      \"__float__\" is not present\n    \"Series\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present",
             "range": {
                 "start": {
-                    "line": 358,
+                    "line": 364,
                     "character": 21
                 },
                 "end": {
-                    "line": 358,
+                    "line": 364,
                     "character": 33
                 }
             },
@@ -6968,11 +6776,11 @@
             "message": "Argument of type \"Self@DataFrame | Series | Unknown\" cannot be assigned to parameter \"method\" of type \"CorrelationMethod\" in function \"corr\"\n  Type \"Self@DataFrame | Series | Unknown\" is not assignable to type \"CorrelationMethod\"\n    Type \"Self@DataFrame\" is not assignable to type \"CorrelationMethod\"\n      Type \"Self@DataFrame\" is not assignable to type \"(ndarray[_AnyShape, dtype[Any]], ndarray[_AnyShape, dtype[Any]]) -> float\"\n      \"DataFrame*\" is not assignable to \"Literal['pearson']\"\n      \"DataFrame*\" is not assignable to \"Literal['kendall']\"\n      \"DataFrame*\" is not assignable to \"Literal['spearman']\"",
             "range": {
                 "start": {
-                    "line": 360,
+                    "line": 366,
                     "character": 37
                 },
                 "end": {
-                    "line": 360,
+                    "line": 366,
                     "character": 57
                 }
             },
@@ -6984,11 +6792,11 @@
             "message": "Argument of type \"Self@DataFrame | Series | Unknown\" cannot be assigned to parameter \"other\" of type \"Series\" in function \"corr\"\n  Type \"DataFrame* | Series | Unknown\" is not assignable to type \"Series\"\n    \"DataFrame*\" is not assignable to \"Series\"",
             "range": {
                 "start": {
-                    "line": 360,
+                    "line": 366,
                     "character": 37
                 },
                 "end": {
-                    "line": 360,
+                    "line": 366,
                     "character": 57
                 }
             },
@@ -7000,11 +6808,11 @@
             "message": "Argument of type \"DataFrame | float | Unknown\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"DataFrame | float | Unknown\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"DataFrame\" is not assignable to type \"ConvertibleToFloat\"\n      \"DataFrame\" is not assignable to \"str\"\n      \"DataFrame\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsIndex\"\n  ...",
             "range": {
                 "start": {
-                    "line": 361,
+                    "line": 367,
                     "character": 17
                 },
                 "end": {
-                    "line": 361,
+                    "line": 367,
                     "character": 21
                 }
             },
@@ -7016,11 +6824,11 @@
             "message": "Argument of type \"DataFrame | float | Unknown\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"\n  Type \"DataFrame | float | Unknown\" is not assignable to type \"ConvertibleToFloat\"\n    Type \"DataFrame\" is not assignable to type \"ConvertibleToFloat\"\n      \"DataFrame\" is not assignable to \"str\"\n      \"DataFrame\" is incompatible with protocol \"Buffer\"\n        \"__buffer__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsFloat\"\n        \"__float__\" is not present\n      \"DataFrame\" is incompatible with protocol \"SupportsIndex\"",
             "range": {
                 "start": {
-                    "line": 361,
+                    "line": 367,
                     "character": 17
                 },
                 "end": {
-                    "line": 361,
+                    "line": 367,
                     "character": 21
                 }
             },
@@ -8357,102 +8165,6 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
             "severity": "error",
-            "message": "No overloads for \"__init__\" match the provided arguments",
-            "range": {
-                "start": {
-                    "line": 1673,
-                    "character": 24
-                },
-                "end": {
-                    "line": 1673,
-                    "character": 69
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1673,
-                    "character": 29
-                },
-                "end": {
-                    "line": 1673,
-                    "character": 68
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "No overloads for \"__init__\" match the provided arguments",
-            "range": {
-                "start": {
-                    "line": 1674,
-                    "character": 31
-                },
-                "end": {
-                    "line": 1674,
-                    "character": 83
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1674,
-                    "character": 36
-                },
-                "end": {
-                    "line": 1674,
-                    "character": 82
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "No overloads for \"__init__\" match the provided arguments",
-            "range": {
-                "start": {
-                    "line": 1676,
-                    "character": 31
-                },
-                "end": {
-                    "line": 1676,
-                    "character": 83
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1676,
-                    "character": 36
-                },
-                "end": {
-                    "line": 1676,
-                    "character": 82
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
             "message": "Argument of type \"object\" cannot be assigned to parameter \"changeset\" of type \"dict[Unknown, Unknown] | None\" in function \"__init__\"\n  Type \"object\" is not assignable to type \"dict[Unknown, Unknown] | None\"\n    \"object\" is not assignable to \"dict[Unknown, Unknown]\"\n    \"object\" is not assignable to \"None\"",
             "range": {
                 "start": {
@@ -8501,54 +8213,6 @@
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
             "severity": "error",
-            "message": "No overloads for \"__init__\" match the provided arguments",
-            "range": {
-                "start": {
-                    "line": 1759,
-                    "character": 24
-                },
-                "end": {
-                    "line": 1759,
-                    "character": 69
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"dict[bytes, bytes]\" cannot be assigned to parameter \"assumptions\" of type \"dict[str, Any]\" in function \"__init__\"\n  \"dict[bytes, bytes]\" is not assignable to \"dict[str, Any]\"\n    Type parameter \"_KT@dict\" is invariant, but \"bytes\" is not the same as \"str\"",
-            "range": {
-                "start": {
-                    "line": 1759,
-                    "character": 24
-                },
-                "end": {
-                    "line": 1759,
-                    "character": 69
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n    \"__iter__\" is not present",
-            "range": {
-                "start": {
-                    "line": 1759,
-                    "character": 29
-                },
-                "end": {
-                    "line": 1759,
-                    "character": 68
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\store.py",
-            "severity": "error",
             "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
             "range": {
                 "start": {
@@ -8577,22 +8241,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\goal\\workflow.py",
-            "severity": "error",
-            "message": "Expected 1 positional argument",
-            "range": {
-                "start": {
-                    "line": 385,
-                    "character": 68
-                },
-                "end": {
-                    "line": 388,
-                    "character": 21
-                }
-            },
-            "rule": "reportCallIssue"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\memory\\persistent.py",
@@ -8883,406 +8531,6 @@
             "rule": "reportArgumentType"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument missing for parameter \"factor_values\"",
-            "range": {
-                "start": {
-                    "line": 99,
-                    "character": 15
-                },
-                "end": {
-                    "line": 104,
-                    "character": 9
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"values\"",
-            "range": {
-                "start": {
-                    "line": 103,
-                    "character": 12
-                },
-                "end": {
-                    "line": 103,
-                    "character": 18
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument missing for parameter \"run\"",
-            "range": {
-                "start": {
-                    "line": 200,
-                    "character": 15
-                },
-                "end": {
-                    "line": 205,
-                    "character": 9
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"run_id\"",
-            "range": {
-                "start": {
-                    "line": 202,
-                    "character": 12
-                },
-                "end": {
-                    "line": 202,
-                    "character": 18
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"result\"",
-            "range": {
-                "start": {
-                    "line": 204,
-                    "character": 12
-                },
-                "end": {
-                    "line": 204,
-                    "character": 18
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument of type \"str | None\" cannot be assigned to parameter \"strategy_name\" of type \"str\" in function \"get_backtest_results\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
-            "range": {
-                "start": {
-                    "line": 215,
-                    "character": 54
-                },
-                "end": {
-                    "line": 215,
-                    "character": 67
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument of type \"str | None\" cannot be assigned to parameter \"limit\" of type \"int\" in function \"get_backtest_results\"\n  Type \"str | None\" is not assignable to type \"int\"\n    \"str\" is not assignable to \"int\"",
-            "range": {
-                "start": {
-                    "line": 215,
-                    "character": 69
-                },
-                "end": {
-                    "line": 215,
-                    "character": 75
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"strategy_name\", \"run\", \"weights_history\"",
-            "range": {
-                "start": {
-                    "line": 242,
-                    "character": 15
-                },
-                "end": {
-                    "line": 242,
-                    "character": 81
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"run_id\"",
-            "range": {
-                "start": {
-                    "line": 242,
-                    "character": 50
-                },
-                "end": {
-                    "line": 242,
-                    "character": 56
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"weights\"",
-            "range": {
-                "start": {
-                    "line": 242,
-                    "character": 65
-                },
-                "end": {
-                    "line": 242,
-                    "character": 72
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument missing for parameter \"run\"",
-            "range": {
-                "start": {
-                    "line": 249,
-                    "character": 15
-                },
-                "end": {
-                    "line": 249,
-                    "character": 57
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"strategy_name\", \"run\"",
-            "range": {
-                "start": {
-                    "line": 258,
-                    "character": 15
-                },
-                "end": {
-                    "line": 258,
-                    "character": 70
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"run_id\"",
-            "range": {
-                "start": {
-                    "line": 258,
-                    "character": 47
-                },
-                "end": {
-                    "line": 258,
-                    "character": 53
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument missing for parameter \"run\"",
-            "range": {
-                "start": {
-                    "line": 265,
-                    "character": 15
-                },
-                "end": {
-                    "line": 265,
-                    "character": 54
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"factor_code\", \"ic_mean\", \"ic_std\", \"ir\"",
-            "range": {
-                "start": {
-                    "line": 277,
-                    "character": 15
-                },
-                "end": {
-                    "line": 283,
-                    "character": 9
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"metrics\"",
-            "range": {
-                "start": {
-                    "line": 281,
-                    "character": 12
-                },
-                "end": {
-                    "line": 281,
-                    "character": 19
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"ttl_seconds\"",
-            "range": {
-                "start": {
-                    "line": 282,
-                    "character": 12
-                },
-                "end": {
-                    "line": 282,
-                    "character": 23
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Expected 2 positional arguments",
-            "range": {
-                "start": {
-                    "line": 294,
-                    "character": 66
-                },
-                "end": {
-                    "line": 294,
-                    "character": 77
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"strategy_name\", \"asset_code\"",
-            "range": {
-                "start": {
-                    "line": 303,
-                    "character": 15
-                },
-                "end": {
-                    "line": 303,
-                    "character": 63
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"codes\"",
-            "range": {
-                "start": {
-                    "line": 303,
-                    "character": 51
-                },
-                "end": {
-                    "line": 303,
-                    "character": 56
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"strategy_name\", \"asset_code\", \"last_date\"",
-            "range": {
-                "start": {
-                    "line": 314,
-                    "character": 15
-                },
-                "end": {
-                    "line": 320,
-                    "character": 9
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"codes\"",
-            "range": {
-                "start": {
-                    "line": 316,
-                    "character": 12
-                },
-                "end": {
-                    "line": 316,
-                    "character": 17
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"import_date\"",
-            "range": {
-                "start": {
-                    "line": 317,
-                    "character": 12
-                },
-                "end": {
-                    "line": 317,
-                    "character": 23
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "No parameter named \"row_count\"",
-            "range": {
-                "start": {
-                    "line": 319,
-                    "character": 12
-                },
-                "end": {
-                    "line": 319,
-                    "character": 21
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\storage\\duckdb_store.py",
-            "severity": "error",
-            "message": "Argument missing for parameter \"table_name\"",
-            "range": {
-                "start": {
-                    "line": 329,
-                    "character": 15
-                },
-                "end": {
-                    "line": 333,
-                    "character": 9
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\bootstrap.py",
             "severity": "error",
             "message": "\"StudyGraph\" is unknown import symbol",
@@ -9537,38 +8785,6 @@
                 }
             },
             "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
-            "message": "Arguments missing for parameters \"accept\", \"hard_passed\"",
-            "range": {
-                "start": {
-                    "line": 926,
-                    "character": 27
-                },
-                "end": {
-                    "line": 926,
-                    "character": 73
-                }
-            },
-            "rule": "reportCallIssue"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner.py",
-            "severity": "error",
-            "message": "No parameter named \"verdict\"",
-            "range": {
-                "start": {
-                    "line": 926,
-                    "character": 46
-                },
-                "end": {
-                    "line": 926,
-                    "character": 53
-                }
-            },
-            "rule": "reportCallIssue"
         },
         {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\study\\runner_aegis.py",
@@ -13107,38 +12323,6 @@
             "rule": "reportArgumentType"
         },
         {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\cli.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"obj\" of type \"Sized\" in function \"len\"\n  \"object\" is incompatible with protocol \"Sized\"\n    \"__len__\" is not present",
-            "range": {
-                "start": {
-                    "line": 149,
-                    "character": 35
-                },
-                "end": {
-                    "line": 149,
-                    "character": 47
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
-            "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\cli.py",
-            "severity": "error",
-            "message": "Argument of type \"object\" cannot be assigned to parameter \"equity_curve\" of type \"Series\" in function \"run_validation\"\n  \"object\" is not assignable to \"Series\"",
-            "range": {
-                "start": {
-                    "line": 187,
-                    "character": 25
-                },
-                "end": {
-                    "line": 187,
-                    "character": 37
-                }
-            },
-            "rule": "reportArgumentType"
-        },
-        {
             "file": "d:\\Github\\quantnodes-strategy-research\\src\\strategy_research\\core\\validation\\walk_forward.py",
             "severity": "error",
             "message": "Argument of type \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" cannot be assigned to parameter \"ts_input\" of type \"integer[Any] | float | str | date | datetime | datetime64[Any]\" in function \"__new__\"\n  Type \"Unknown | tuple[Unknown, ...] | MultiIndex | Self@RangeIndex | int | Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n    Type \"Index\" is not assignable to type \"integer[Any] | float | str | date | datetime | datetime64[Any]\"\n      \"Index\" is not assignable to \"integer[Any]\"\n      \"Index\" is not assignable to \"float\"\n      \"Index\" is not assignable to \"str\"\n      \"Index\" is not assignable to \"date\"\n      \"Index\" is not assignable to \"datetime\"\n      \"Index\" is not assignable to \"datetime64[Any]\"",
@@ -13429,10 +12613,10 @@
     ],
     "summary": {
         "filesAnalyzed": 457,
-        "errorCount": 839,
+        "errorCount": 788,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 28.54
+        "timeInSec": 39.821
     }
 }
 

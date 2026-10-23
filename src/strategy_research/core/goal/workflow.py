@@ -383,10 +383,11 @@ class GoalWorkflowRunner:
                 if metrics and not meets_metric_targets(metrics, metric_targets):
                     logger.info("Monitor drift detected for workflow %s", self._goal_id)
                     self._state.status = "needs_refresh"
-                    self._event_bus.emit("workflow_drift_detected", {
-                        "goal_id": self._goal_id,
-                        "metrics": metrics,
-                    })
+                    self._event_bus.emit(
+                        "workflow_drift_detected",
+                        goal_id=self._goal_id,
+                        metrics=metrics,
+                    )
                     return
             except asyncio.CancelledError:
                 return
