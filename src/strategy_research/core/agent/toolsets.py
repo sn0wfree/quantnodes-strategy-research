@@ -19,13 +19,13 @@ TOOLSETS: dict[str, list[str]] = {
     # Absolute minimum: look around + ask for docs.
     "minimal": [
         "read",
-        "list_files",
+        "list",
         "tool_help",
     ],
     # Generic chat assistant.
     "chat": [
         "read",
-        "list_files",
+        "list",
         "write",
         "compute_factor",
         "factor_analysis",

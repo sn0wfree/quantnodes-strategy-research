@@ -42,3 +42,41 @@
 
 - 描述改动影响 LLM 行为（prompt 面）——**轨迹 diff 是主检测器**（Phase 0 安全网）
 - 参数默认值变化——**必须复验调用方**（`rg "tool_name("`）；默认值收紧=行为变化
+
+## 6. 审计执行记录（2026-10-08）
+
+### 6.1 覆盖率（44 工具）
+
+| 档位 | 数量 | 备注 |
+|---|---|---|
+| **SPEC 模板**（工具说明书 7 段） | **40** | 用途/参数/示例/边界/错误范式/相关工具/版本——Anthropic 标准已实践 |
+| DESC only | 1 | `engine_run`（backtest 管道子工具） |
+| bare（无 description） | 3 | `config_load` / `data_prepare` / `data_gate`（backtest 管道子工具，run_backtest 内部步骤） |
+
+**判定**：主产品面 40/44 已达 Poka-yoke 说明书标准；4 个残缺集中在 **backtest 管道子工具**（内部步骤，agent 不直接调用），价值有限。
+
+### 6.2 发现并修复：toolset 白名单缺口（真 bug）
+
+`minimal` / `chat` 两组配置 `list_files`，但 registry 里的实现叫 `list`（file_tools）——
+**minimal 模式下 agent 缺目录列表能力**（白名单指向不存在的工具名）。
+
+修复：toolsets.py 两处 `list_files` → `list`（匹配 registry 真名，零签名变更）。
+A/B 实证：修前 minimal 解析 MISSING `list_files`；修后 MISSING 清零，68 toolset/gateway/role 测试绿。
+
+### 6.3 清单：孤儿工具 14 个（任何 toolset 组都不引用）
+
+| 工具 | 归属文件 | 判定 |
+|---|---|---|
+| `list`（修复后归 minimal/chat） | file_tools | ✅ 已归位 |
+| `create_goal` / `add_evidence` / `complete_goal` / `get_goal_status` / `list_goals` | goal_tools | **决策**：应进研究流 toolset？（planner 已有 `list_goals`，其余 4 个未归组——可能是有意「goal 由系统调用非 agent」） |
+| `read_document` | web_tools | **决策**：应进 chat/researcher？ |
+| `import_data` / `pattern_recognition` / `options_pricing` | data/factor/options | **决策**：按角色能力归组？ |
+| `shell` / `task` / `todowrite` / `skill` / `list_skills` | 能力面工具 | **保留**：opt-in 语义（chat_loop `allow_shell_tools` 门；skill 系统按需载入） |
+
+**结论**：孤儿不是 bug 是**有意裁剪**（capability 面待 opt-in）。归组是产品决策（触发条件：某个角色第一次需要该能力时）。
+
+### 6.4 待办（ACI 审计后续）
+
+- 4 个 backtest 子工具补说明书（半天，优先级低——agent 不直接调）
+- `list` vs `list_files` 命名统一（**签名变更**，需 LLM prompt 兼容评估）——留 Phase 5-crash 或专项
+- goal_tools 5 个归组决策（产品面）
