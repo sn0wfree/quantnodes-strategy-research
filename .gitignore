@@ -89,3 +89,6 @@ evals/_ws/
 # templates live in src/strategy_research/templates/ as package data.
 # Local pytest invocations can re-create this dir; keep it untracked.
 /templates/
+
+scorecard.json
+

@@ -27,8 +27,14 @@ def load(path: Path) -> dict | None:
         return None
     try:
         # utf-8-sig: tolerate a BOM (Windows editors / PowerShell writes);
-        # reads plain UTF-8 fine too.
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        # reads plain UTF-8 fine too. Then skip any non-JSON preamble
+        # (e.g. library deprecation warnings leaked to stdout by an
+        # imported dependency — seen from fitz/pymupdf).
+        text = path.read_text(encoding="utf-8-sig")
+        brace = text.find("{")
+        if brace > 0:
+            text = text[brace:]
+        data = json.loads(text)
     except (OSError, ValueError) as exc:
         print(f"error: cannot read {path}: {exc}", file=sys.stderr)
         sys.exit(2)

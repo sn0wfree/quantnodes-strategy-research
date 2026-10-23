@@ -127,17 +127,17 @@ def main(argv: list[str] | None = None) -> int:
 
     runs: list[RunRecord] = []
     for task in tasks:
-        print(f"→ {task.id} …", flush=True)
+        print(f"→ {task.id} …", flush=True, file=sys.stderr)
         rec = _run_one(task, workspace=ws, max_iterations=args.max_iterations)
         runs.append(rec)
         tools = ",".join(rec.tools_used) or "-"
         print(
             f"  reason={rec.finished_reason} tokens={rec.tokens_used} "
             f"tools={tools} ok={rec.success}",
-            flush=True,
+            flush=True, file=sys.stderr,
         )
         if rec.error:
-            print(f"  error={rec.error}", flush=True)
+            print(f"  error={rec.error}", flush=True, file=sys.stderr)
 
     card = build_scorecard(tasks, runs)
     payload = card.to_dict()
