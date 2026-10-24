@@ -9,7 +9,8 @@
 |---|---|
 | 想 10 分钟了解项目 | `code-map.md` · `architecture-framework.svg` |
 | **想看重构后的架构细节** | **`architecture-current-20261008.md`**（契约/连接/与旧架构差异） |
-| **想看目标架构（汇总终版）** | **`architecture-v3-openclaw-inspired.md`**（★ 总纲：1 控制面 + N 执行面 + 上下文独占 · 借鉴 OpenClaw）· `architecture-v2-and-rsi-20261008.md`（上一版）· `architecture-v2-summary.svg` |
+| **想看架构讨论全貌（讨论纪要）** | **`architecture-discussion-record-20261008.md`**（★ 讨论线索 / 发现 / 决策 / 落地顺序 / 文档索引） |
+| **想看目标架构（汇总终版）** | **`architecture-v3-openclaw-inspired.md`**（★ 总纲：1 控制面 + N 执行面 + 上下文独占 · 借鉴 OpenClaw）· `architecture-diagram.html`（v5 管线图）· `architecture-v2-and-rsi-20261008.md`（上一版） |
 | 想看 OpenClaw 原生架构与对标 | `openclaw-architecture.html`（原生图 + 同构对照）· `industry-benchmark-openclaw-20261008.md`（逐维度） |
 | **想知道接下来做什么（总计划）** | **`refactor-master-plan-20261008.md`**（三波九刀 · 唯一主线 · 护栏 · 度量） |
 | 想看架构评估（4 遍论证依据） | `architecture-reeval-20261008.md`（依赖方向）· `architecture-reeval2-20261008.md`（SSE 双轨）· `agent-design-reeval-20261008.md`（上下文仲裁）· `goal-alignment-review-20261008.md`（自主性） |
