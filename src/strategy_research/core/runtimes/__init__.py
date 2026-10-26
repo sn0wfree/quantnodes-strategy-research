@@ -8,5 +8,6 @@ from __future__ import annotations
 
 from .graph_engine import GraphEngine
 from .nodes.llm import make_llm_node
+from .nodes.react import ReactConfig, make_react_node
 
-__all__ = ["GraphEngine", "make_llm_node"]
+__all__ = ["GraphEngine", "make_llm_node", "make_react_node", "ReactConfig"]

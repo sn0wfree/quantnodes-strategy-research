@@ -4,6 +4,9 @@ Extracted from duplicated ``_reset_halt`` definitions across 5 test files.
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from strategy_research.cli.halt import clear_halt
@@ -229,6 +232,57 @@ def _close_session_services():
 collect_ignore_glob = ["attic/*"]
 
 
+# ── Live LLM fixtures（opt-in：QNODES_LIVE_LLM=1 时才可用） ──────────────
+# 供 test_llm_live.py / test_react_live.py 使用。这两个文件标记 llm 且
+# 自带「未显式开启即 skip」的门，所以这里的绕过逻辑不会影响普通单测。
+# bypass 手法与上面的 autouse 隔离相反：恢复真实 llm.json 路径、回填
+# ~/.quantnodes/.env 中的 key。
+
+def _host_key_env() -> dict[str, str]:
+    env: dict[str, str] = {}
+    dotenv = Path.home() / ".quantnodes" / ".env"
+    if dotenv.exists():
+        for line in dotenv.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            if value.strip():
+                env[name.strip()] = value.strip()
+    return env
+
+
+@pytest.fixture(scope="session")
+def real_llm_config():
+    """真实 LLMConfig（bypass 隔离）。key 不在 → skip。"""
+    if os.environ.get("QNODES_LIVE_LLM") != "1":
+        pytest.skip("live LLM is opt-in: set QNODES_LIVE_LLM=1")
+    real_json = Path.home() / ".quantnodes" / "llm.json"
+    if not real_json.exists():
+        pytest.skip(f"no {real_json}")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("STRATEGY_RESEARCH_LLM_CONFIG", str(real_json))
+    for name, value in _host_key_env().items():
+        monkeypatch.setenv(name, value)
+
+    from strategy_research.core.llm import LLMConfig
+
+    cfg = LLMConfig.load()
+    if not cfg.api_key:
+        monkeypatch.undo()
+        pytest.skip("host llm.json/.env 未解析出 api_key")
+    yield cfg
+    monkeypatch.undo()
+
+
+@pytest.fixture(scope="session")
+def live_client(real_llm_config):
+    from strategy_research.core.llm import OpenAICompatClient
+
+    return OpenAICompatClient(real_llm_config)
+
+
 # ── Lane markers (docs/test-marker-lanes-design.md) ──────────────
 # Centralized file-name whitelist: every test NOT listed here stays in
 # the PR gate (default-safe — missing an entry only makes PRs slower;
@@ -239,6 +293,8 @@ _LANE_LLM_FILES = frozenset({
     # real LLM / real network (see doc §3)
     "test_chat_real_llm.py",
     "test_web_search.py",           # live DDGS queries (skipif HAS_NETWORK)
+    "test_llm_live.py",             # opt-in live LLM (QNODES_LIVE_LLM=1)
+    "test_react_live.py",           # opt-in live react tool-loop
 })
 
 _LANE_E2E_FILES = frozenset({
