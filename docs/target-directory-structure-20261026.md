@@ -98,3 +98,43 @@ docs/                              # 架构与决策文档（不随代码结构�
 2. 业务域目录（goals/hypothesis/study/backtest…）**只做内部重组，不搬位置**
 3. 删除现有文件必须同时删除对应测试（或迁移测试），不留孤儿测试
 4. 每刀合入前跑全量 E1 契约测试（88 条）确保边界不破
+
+## 5. 可复用代码清点（2026-10-26）
+
+### 5.1 各层复用度与来源
+
+| 目标层 | 复用度 | 可复用的现有代码 |
+|---|---|---|
+| `orchestration/`（E1） | 0%（已新建） | 无（入口层缺失的证明） |
+| `gateway/session_controller` | 60% | `api/session/service.py` turn 生命周期 · `web_session_state.py` · `study/runner.py` 状态字段 |
+| `gateway/capacity` | 60% | `core/study/scheduler.py` Semaphore · `service.py` 并发限制 → 反转成闸语义 |
+| `gateway/fencing` | **0%（全新）** | 无现成实现（问题⑧）；参照 event_store 的 UNIQUE 约束思想 |
+| `gateway/scheduler` | 60% | `core/study/scheduler.py` + `api/routers/study.py` + `core/scheduled_research/` 三合一 |
+| `engine/nodes/react` | **90%** | `core/agent/loop.py`（~2000 行）+ `loop_stream.py`（262 行）+ `loop_telemetry.py` + `loop_compaction.py` |
+| `engine/graph_engine` | 30% | 无包裹层；`core/study/langgraph_engine.py` 是 langgraph 用法最佳参考 |
+| `engine/nodes/cpu` + `executor/` | 70% | `core/backtest_engine/` 执行入口（不重写回测）；`core/agent/executor.py` 概念参照 |
+| `engine/presets/research` | **85%** | `core/study/phase_engine.py`（1200+ 行阶段函数体）+ `langgraph_engine.py` 两分支合并 |
+| `engine/presets/chat` | 80% | `core/agent/strategy/loop_strategy.py` + 3 presets 直接映射 |
+| `engine/presets/fanout` | 50% | `core/swarm/` 只用 DAG 调度逻辑，控制面丢弃 |
+| `context/hub` | **85%** | `context_builder.py` + `context_injector.py` + `prompt_builder.py`（4 builder 合一）+ `token_utils.py` |
+| `context/providers/*` | **95%** | `core/goal/context.py` · `loop_context.py`(todo) · `core/memory/` · `core/hypothesis/` 只读接口 |
+| `storage/platform_store` | **80%** | `core/agent/event_store.py`（600+ 行，emit/subscribe/replay 接口全保留）+ `projector.py` 沿用 |
+| `storage/session_db` | 70% | `api/session/store.py` + `web_session_db.py` + `core/session/db.py` 三合一 |
+| `storage/registry`（P-3） | 40% | `study_store.py` 索引设计借鉴，登记表新写 |
+| `storage/migration` | **90%** | `core/storage/event_schema.py`（user_version + ensure/migrate 模式）直接扩展 |
+| 业务域（backtest/alpha_zoo/hypothesis/journal/goal/memory/permission/hooks/skills/validation/portfolio/data_source/db/observability/utils） | **~99%** | 几乎零改动（memory 95% 待 B5、llm 95% 待 A1 限流层） |
+
+### 5.2 总账
+
+| 类别 | 占比 | 内容 |
+|---|---|---|
+| **真正的新代码** | **~20–25%** | E1（已交付一半）· Gateway/fence/GraphEngine 包裹/executor 池/P-3 登记 |
+| **搬位置 + 去耦合 + 合并重复** | **~75–80%** | loop→react 节点 · phase_engine→preset · 4 builder→hub · 3 队列→mailbox · 3 调度→1 |
+
+**结论**：17d 估算可行——不是重写 28k 行，而是**重组它们**。
+
+### 5.3 三个「合并即收益」的热点（优先做）
+
+1. **4 个 prompt builder → ContextHub**（85% 复用，消除 3 套 token 估算）
+2. **3 处调度 → gateway/scheduler**（60% 复用，消除「各做各的」）
+3. **loop.py → react 节点**（90% 复用，纯搬运 + 少量上交，最大单笔代码移动）
