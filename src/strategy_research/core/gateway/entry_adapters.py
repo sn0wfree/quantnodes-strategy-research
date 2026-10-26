@@ -24,8 +24,26 @@ from strategy_research.core.orchestration import (
 
 
 def new_entry_enabled() -> bool:
-    """feature flag：新入口是否启用（灰度开关）。"""
-    return os.environ.get("QNODES_NEW_ENTRY", "").strip().lower() in ("1", "true", "yes", "on")
+    """feature flag：chat/CLI 入口是否走新架构（阶段 3b 起默认开启）。
+
+    设 QNODES_NEW_ENTRY=0 可回退旧路径（灰度期保留）。
+    """
+    value = os.environ.get("QNODES_NEW_ENTRY", "").strip().lower()
+    if value in ("0", "false", "no", "off"):
+        return False
+    return True
+
+
+def study_entry_enabled() -> bool:
+    """scheduler/study 入口的独立门（**默认关闭**）。
+
+    与 new_entry_enabled 分开的原因：study 执行需要 research preset
+    （GraphEngine 跑阶段图），该能力属 B1。在 B1 之前切过去会让 study
+    无法真正执行——所以 scheduler 保持旧路径，直到 preset 就位。
+    启用方式：QNODES_NEW_ENTRY_STUDY=1（B1 完成后默认打开）。
+    """
+    value = os.environ.get("QNODES_NEW_ENTRY_STUDY", "").strip().lower()
+    return value in ("1", "true", "yes", "on")
 
 
 def api_chat_request(session_id: str, content: str) -> WorkRequest:

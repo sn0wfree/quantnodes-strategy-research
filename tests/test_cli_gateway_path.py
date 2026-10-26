@@ -11,7 +11,8 @@ import pytest
 
 
 def test_cli_flag_off_keeps_legacy_path(monkeypatch):
-    monkeypatch.delenv("QNODES_NEW_ENTRY", raising=False)
+    # 阶段 3b：默认开启，故显式设为 0 才能测回退路径
+    monkeypatch.setenv("QNODES_NEW_ENTRY", "0")
     from strategy_research.cli.tui.session import ChatSession
 
     src = ChatSession._run_agent_loop.__doc__ or ""

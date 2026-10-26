@@ -160,8 +160,13 @@ class StudyScheduler:
         # 阶段 3a 灰度：flag 打开时改走统一入口（WorkRequest → mailbox）。
         # 上方防重检查（active / queued / terminal）保持不变——它们与
         # 传输通道无关，属调度语义。
-        from strategy_research.core.gateway import new_entry_enabled
-        if new_entry_enabled():
+        #
+        # 注意（阶段 3b）：scheduler 使用**独立的**门，不是全局 new_entry_enabled()。
+        # 原因：study 执行需要 research preset（GraphEngine 跑阶段图），
+        # 而该能力属 B1；在 B1 之前切到新路径会让 study 无法真正执行。
+        # study 入口迁移的时机 = B1 完成后。
+        from strategy_research.core.gateway import study_entry_enabled
+        if study_entry_enabled():
             from strategy_research.core.gateway import scheduler_request, submit_via_entry
 
             gw = _get_gateway_singleton()

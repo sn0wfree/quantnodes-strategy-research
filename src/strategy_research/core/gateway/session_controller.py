@@ -38,11 +38,13 @@ class SessionController:
         client: Any,
         system: str | None = None,
         sink: EventSink | None = None,
+        engine_factory: Callable[[], GraphEngine] | None = None,
     ) -> None:
         self._ep = entry_point
         self._client = client
         self._system = system
         self._sink = sink or (lambda kind, data: None)
+        self._engine_factory = engine_factory  # None = 默认单 llm 节点图
         self._turn_counters: dict[str, int] = {}  # session_id -> 已发 turn 数
 
     # ── 驱动 ─────────────────────────────────────────────
@@ -91,6 +93,9 @@ class SessionController:
         return RunResult(turn_id, run_id, ok=True, answer=answer)
 
     def _build_engine(self) -> GraphEngine:
+        """正式构造路径（不再 monkey-patch）。engine_factory 优先。"""
+        if self._engine_factory is not None:
+            return self._engine_factory()
         from strategy_research.core.runtimes.nodes.llm import make_llm_node
 
         engine = GraphEngine(sink=self._sink)

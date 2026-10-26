@@ -21,8 +21,9 @@ def _isolate(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
     monkeypatch.setenv("SR_STUDY_MAX_CONCURRENT", "1")
-    # 默认关闭灰度：每个测试显式设定，避免跨测试环境残留
+    # 默认关闭两个灰度门：每个测试显式设定，避免跨测试环境残留
     monkeypatch.delenv("QNODES_NEW_ENTRY", raising=False)
+    monkeypatch.delenv("QNODES_NEW_ENTRY_STUDY", raising=False)
     # 清 Gateway 单例：模块级缓存的 mailbox 会跨测试残留队列
     from strategy_research.core.gateway import reset_gateway
 
@@ -50,7 +51,6 @@ def _record(study_id: str, session_id: str = "sess-1") -> StudyRecord:
 
 
 def test_flag_off_uses_legacy_queue(store, monkeypatch, capsys):
-    monkeypatch.delenv("QNODES_NEW_ENTRY", raising=False)
     sched = StudyScheduler(store=store)
 
     async def run():
@@ -64,7 +64,7 @@ def test_flag_off_uses_legacy_queue(store, monkeypatch, capsys):
 
 
 def test_flag_on_routes_to_gateway(store, monkeypatch):
-    monkeypatch.setenv("QNODES_NEW_ENTRY", "1")
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "1")
     sched = StudyScheduler(store=store)
 
     async def run():
@@ -86,7 +86,7 @@ def test_flag_on_routes_to_gateway(store, monkeypatch):
 
 def test_flag_on_duplicate_submit_rejected(store, monkeypatch):
     """防重语义在两种通道下都必须成立。"""
-    monkeypatch.setenv("QNODES_NEW_ENTRY", "1")
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "1")
     sched = StudyScheduler(store=store)
     rec = _record("dup-1")
 
@@ -106,7 +106,7 @@ def test_flag_on_duplicate_submit_rejected(store, monkeypatch):
 
 
 def test_flag_on_terminal_study_rejected(store, monkeypatch):
-    monkeypatch.setenv("QNODES_NEW_ENTRY", "1")
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "1")
     sched = StudyScheduler(store=store)
     created = store.create_study(
         owner_session_id="sess-1",

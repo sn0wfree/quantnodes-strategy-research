@@ -10,6 +10,7 @@ from .entry_adapters import (
     mcp_request,
     new_entry_enabled,
     scheduler_request,
+    study_entry_enabled,
     submit_via_entry,
 )
 from .fencing import FenceToken, FenceVerdict, SessionFence
@@ -23,6 +24,7 @@ __all__ = [
     "cli_request",
     "mcp_request",
     "new_entry_enabled",
+    "study_entry_enabled",
     "scheduler_request",
     "submit_via_entry",
     "FenceToken",
