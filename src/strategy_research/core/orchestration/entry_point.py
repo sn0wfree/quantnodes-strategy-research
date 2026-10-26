@@ -7,7 +7,7 @@ session 解析由注入的 resolver 完成（E1 用内存表，全局登记索�
 from __future__ import annotations
 
 import uuid
-from typing import Callable
+from typing import Callable, Iterable
 
 from .contracts import Receipt, RejectReason, WorkRequest, validate_work_request
 from .mailbox import DEFAULT_CAP, EventSink, Mailbox
@@ -62,6 +62,10 @@ class EntryPoint:
 
     def mailbox_for(self, session_key: str) -> Mailbox | None:
         return self._mailboxes.get(session_key)
+
+    def iter_mailboxes(self) -> Iterable[tuple[str, Mailbox]]:
+        """遍历所有已建 mailbox（消费者清空队列用；快照语义）。"""
+        return tuple(self._mailboxes.items())
 
     def session_id_for(self, session_key: str) -> str | None:
         return self._sessions.get(session_key)
