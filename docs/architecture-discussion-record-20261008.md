@@ -39,6 +39,7 @@
 | 27 | E1 前最终评估 · 2026-10-26 | 全层扫荡+一致性检查：**无结构性遗漏，可以开工**。三发现：①存量数据迁移策略（建议旧库只读兼容+惰性迁移，⏸ 待点头）②entry-controller-contract 重写（E1 第一步还账）③两个归位（compaction 沿用现状归 ContextHub/A1·LLM 限流器归 ProviderHub client 层）。E1 第一刀顺序已列 | `pre-e1-final-review-20261026.md` |
 | 28 | E1 落地 + 目录结构 · 2026-10-26 ✅ | E1 完成：contracts/mailbox/entry_point/ConfigHub/预算门/中立契约，**88 测试全绿**，纯增量零删除。可替换性勘查：3 对「同一概念两套实现」归一（session 队列 A2 / steering inbox A4 / seq 生成器 0.4，净删 ~210 行），预算分层不替换（有 cost_usd），写入限流不同层。**目标目录结构定稿**（engine 与 orchestration 平级 · context 独立 · storage 合并现有）+ 复用账（新代码 20–25%，其余搬运/合并）| `e1-replaceability-assessment-20261026.md` · `target-directory-structure-20261026.md` |
 | 29 | E1 后重排 · 2026-10-26 ✅（四轮讨论修订） | **横向分层 → 纵向切片**：原计划前 6 天无产物。修订版 6 子阶段 ~22d：**1a** 纯 LLM 对话切片（2d，不碰 AgentLoop 依赖树）→ **1b** react 节点+工具树（2d）→ **2** 正确性+fence+executor+**A5 不变量层**+**审计门①**（4d）→ **3a** 入口迁移（4d，轻量复查）→ **3b** 数据面（3d）→ **4** 清理+**测试隔离修复**+**审计门②**（7d）。验收=「新增+受影响测试绿」（全量绿在隔离修复后才成立）；显式推迟清单（steer 真注入→阶段 4·B5 记忆→P1·ExecutionProfile→B1）；里程碑 M1 提前到第 2 天 | `replan-after-e1-20261026.md`（修订版） |
+| 30 | 规划 v2：能力依赖 · 2026-10-26 ✅ | **失败驱动的重排**：flag 默认开导致 12 个 scheduler 测试失败——根因是 study 执行依赖 research preset（B1），当前引擎只有 llm 节点。**能力依赖矩阵**（chat/CLI 需 llm 节点 ✅ / scheduler 需 research preset ❌）；**双门灰度**（chat 默认开 · study 默认关）；B1 拆 B1-a（GraphEngine 阶段图）+ B1-b（research preset）并前移到 scheduler 迁移之前；**迁移测试方法论：投递成功 ≠ 功能等价**；工期 22d→24d | `replan-v2-capability-dependencies-20261026.md` |
 
 ---
 
