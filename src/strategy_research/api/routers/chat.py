@@ -703,24 +703,12 @@ async def queue_resume(body: QueueResumeRequest, request: Request):
 
 # ── 阶段 3a：新入口路径（灰度） ──────────────────────────────
 
-_gateway_singleton: dict[str, Any] = {}
-
 
 def _get_gateway():
-    """进程内 Gateway 单例（真实 LLM client + 不变量自检）。
+    """进程内唯一 Gateway（见 core/gateway/singleton.py 的串行域说明）。"""
+    from strategy_research.core.gateway import get_gateway
 
-    阶段 3a 的宿主仍是 FastAPI app（挂载式单进程的过渡形态）；
-    workers=1 由 INV-1 保证（多 worker 会在 verify_invariants 时暴露）。
-    """
-    gw = _gateway_singleton.get("gw")
-    if gw is None:
-        from strategy_research.core.gateway import Gateway
-        from strategy_research.core.llm import LLMConfig, OpenAICompatClient
-
-        gw = Gateway(client=OpenAICompatClient(LLMConfig.load()))
-        gw.verify_invariants()
-        _gateway_singleton["gw"] = gw
-    return gw
+    return get_gateway()
 
 
 async def _send_via_gateway(session_id: str, content: str) -> dict:

@@ -22,14 +22,22 @@ from typing import Any, Mapping
 class GatewayConfig:
     """Gateway 宿主段。workers 恒为 1（多 worker=多 Gateway，mailbox 分裂）。
 
-    workers 字段刻意保留在 schema 中但**不可配置**——试图覆盖即 fail-fast，
-    把「workers=1 钉死」从约定升级为结构。
+    workers 在 `__post_init__` 中强制校验——**结构性钉死**，不是约定：
+    任何构造路径（直接构造、文件层、env 层、replace()）传入非 1 值都会
+    立即失败。ConfigHub 的文件/env 层另有前置检查给出更友好的错误信息。
     """
 
     workers: int = 1
     auto_resume: bool = False
     grace_seconds: float = 300.0
     no_http: bool = False
+
+    def __post_init__(self) -> None:
+        if self.workers != 1:
+            raise ValueError(
+                f"gateway.workers 必须为 1（得到 {self.workers}）——"
+                "多 worker = 多 Gateway = mailbox/状态机分裂"
+            )
 
 
 @dataclass(frozen=True)

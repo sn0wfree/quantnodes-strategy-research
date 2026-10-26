@@ -24,11 +24,11 @@ def _isolate(tmp_path: Path, monkeypatch):
     # 默认关闭灰度：每个测试显式设定，避免跨测试环境残留
     monkeypatch.delenv("QNODES_NEW_ENTRY", raising=False)
     # 清 Gateway 单例：模块级缓存的 mailbox 会跨测试残留队列
-    from strategy_research.core.study import scheduler as sched_mod
+    from strategy_research.core.gateway import reset_gateway
 
-    sched_mod._gateway_singleton.clear()
+    reset_gateway()
     yield
-    sched_mod._gateway_singleton.clear()
+    reset_gateway()
 
 
 @pytest.fixture

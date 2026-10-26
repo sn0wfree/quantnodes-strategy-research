@@ -48,10 +48,9 @@ def test_cli_flag_on_dispatches_to_gateway(tmp_path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "g.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "h.json"))
 
-    # 清 CLI gateway 单例，避免跨测试残留
-    from strategy_research.cli.tui import session as sess_mod
+    from strategy_research.core.gateway import reset_gateway
 
-    sess_mod._cli_gateway.clear()
+    reset_gateway()
 
     from strategy_research.cli.tui.session import ChatSession
 
@@ -71,18 +70,20 @@ def test_cli_flag_on_dispatches_to_gateway(tmp_path, monkeypatch):
     asyncio.run(run())
     assert called["gateway"] is True
     assert called["task"] == "你好"
-    sess_mod._cli_gateway.clear()
+    reset_gateway()
 
 
 def test_cli_gateway_singleton_reused(tmp_path, monkeypatch):
-    from strategy_research.cli.tui import session as sess_mod
+    from strategy_research.core.gateway import reset_gateway
 
-    sess_mod._cli_gateway.clear()
+    reset_gateway()
     monkeypatch.setenv("STRATEGY_RESEARCH_LLM_CONFIG", str(tmp_path / "cfg.json"))
     (tmp_path / "cfg.json").write_text('{"llm": {"enabled": false}}', encoding="utf-8")
     monkeypatch.setenv("LLM_API_KEY", "dummy")
 
-    a = sess_mod._get_cli_gateway()
-    b = sess_mod._get_cli_gateway()
+    from strategy_research.cli.tui.session import _get_cli_gateway
+
+    a = _get_cli_gateway()
+    b = _get_cli_gateway()
     assert a is b
-    sess_mod._cli_gateway.clear()
+    reset_gateway()

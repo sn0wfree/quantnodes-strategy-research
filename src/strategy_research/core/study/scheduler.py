@@ -1078,19 +1078,11 @@ class _EventBusEmitter:
 
 
 
-# ── 阶段 3a：Gateway 单例（scheduler 侧复用同一内核） ──────────
-
-_gateway_singleton: dict[str, Any] = {}
+# ── 阶段 3a：Gateway 访问（共享唯一实例，保证 session 串行域） ──────
 
 
 def _get_gateway_singleton() -> Any:
-    """进程内 Gateway 单例（A2 收敛为唯一构造点）。"""
-    gw = _gateway_singleton.get("gw")
-    if gw is None:
-        from strategy_research.core.gateway import Gateway
-        from strategy_research.core.llm import LLMConfig, OpenAICompatClient
+    """进程内唯一 Gateway（与 API/CLI 共享 mailbox）。"""
+    from strategy_research.core.gateway import get_gateway
 
-        gw = Gateway(client=OpenAICompatClient(LLMConfig.load()))
-        gw.verify_invariants()
-        _gateway_singleton["gw"] = gw
-    return gw
+    return get_gateway()

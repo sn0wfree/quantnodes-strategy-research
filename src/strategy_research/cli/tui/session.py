@@ -55,22 +55,15 @@ QUIT_RC: int = 2
 
 
 
-# ── 阶段 3a：CLI 侧 Gateway 单例（与路由/scheduler 共用同一内核语义） ──
-
-_cli_gateway: dict[str, object] = {}
+# ── 阶段 3a：CLI 侧 Gateway（与 API/scheduler 共享唯一实例） ──
 
 
 def _get_cli_gateway():
-    """进程内 Gateway（A2 收敛为唯一构造点）。"""
-    gw = _cli_gateway.get("gw")
-    if gw is None:
-        from strategy_research.core.gateway import Gateway
-        from strategy_research.core.llm import LLMConfig, OpenAICompatClient
+    """进程内唯一 Gateway（共享 mailbox，保证 session 串行域）。"""
+    from strategy_research.core.gateway import get_gateway
 
-        gw = Gateway(client=OpenAICompatClient(LLMConfig.load()))
-        gw.verify_invariants()
-        _cli_gateway["gw"] = gw
-    return gw
+    return get_gateway()
+
 
 class ChatSession:
     """Single-turn dispatcher that wraps ``process_turn``.

@@ -16,6 +16,7 @@ from .fencing import FenceToken, FenceVerdict, SessionFence
 from .gateway import Gateway
 from .invariants import Invariant, InvariantViolation, invariants, verify_all
 from .session_controller import RunResult, SessionController
+from .singleton import get_gateway, reset_gateway
 
 __all__ = [
     "api_chat_request",
@@ -32,6 +33,8 @@ __all__ = [
     "InvariantViolation",
     "invariants",
     "verify_all",
+    "get_gateway",
+    "reset_gateway",
     "RunResult",
     "SessionController",
 ]
