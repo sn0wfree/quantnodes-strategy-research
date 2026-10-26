@@ -52,6 +52,26 @@ from strategy_research.cli.tui.messages import SynthesizeInput, WriteTranscript
 QUIT_RC: int = 2
 
 
+
+
+
+# ── 阶段 3a：CLI 侧 Gateway 单例（与路由/scheduler 共用同一内核语义） ──
+
+_cli_gateway: dict[str, object] = {}
+
+
+def _get_cli_gateway():
+    """进程内 Gateway（A2 收敛为唯一构造点）。"""
+    gw = _cli_gateway.get("gw")
+    if gw is None:
+        from strategy_research.core.gateway import Gateway
+        from strategy_research.core.llm import LLMConfig, OpenAICompatClient
+
+        gw = Gateway(client=OpenAICompatClient(LLMConfig.load()))
+        gw.verify_invariants()
+        _cli_gateway["gw"] = gw
+    return gw
+
 class ChatSession:
     """Single-turn dispatcher that wraps ``process_turn``.
 
@@ -215,7 +235,16 @@ class ChatSession:
         Falls back to a thin streaming wrapper if AgentLoop construction
         fails (e.g. missing role prompt). This unifies the event-driven
         flow for plain-text chat with the role-based autoresearch path.
+
+        阶段 3a 灰度（QNODES_NEW_ENTRY=1）：改走 Gateway（WorkRequest →
+        mailbox → 准入 → 引擎 → 事件流）。历史仍用 MemoryManager，
+        事件经 app.route_agent_event 呈现，用户可见行为一致。
         """
+        from strategy_research.core.gateway import new_entry_enabled
+
+        if new_entry_enabled():
+            await self._run_via_gateway(task)
+            return
 
         cfg = None
         try:
@@ -292,6 +321,56 @@ class ChatSession:
         # Done. marker is emitted by ``iter_end`` route handler — no
         # redundant append_done() here (which previously caused the
         # "• Done." ×2 bug).
+
+    async def _run_via_gateway(self, task: str) -> None:
+        """阶段 3a：CLI 走新架构（Gateway 引擎 + MemoryManager 历史）。"""
+        import asyncio
+
+        session_id = getattr(self.ctx, "session_id", "cli")
+        mm = None
+        history: list[dict] | None = None
+        try:
+            from strategy_research.core.agent.memory_manager import (
+                get_default_memory_manager,
+            )
+
+            mm = get_default_memory_manager()
+            full = await mm.get(session_id)
+            history = full[:-1] if len(full) > 1 else None
+        except Exception:  # noqa: BLE001 —— 无 MemoryManager 时退化为内存历史
+            history = list(self.ctx.history[:-1]) if len(self.ctx.history) > 1 else None
+
+        gw = _get_cli_gateway()
+        messages = list(history or []) + [{"role": "user", "content": task}]
+
+        receipt = gw.entry.submit(
+            __import__(
+                "strategy_research.core.gateway", fromlist=["cli_request"]
+            ).cli_request(session_id, task)
+        )
+        if not receipt.accepted:
+            self.app.write_transcript(f"[入口拒绝: {receipt.reason}]")
+            return
+
+        # 同步驱动（A2 的后台消费者会替换）；用 executor 避免阻塞 TUI loop
+        runs = await asyncio.get_running_loop().run_in_executor(None, gw.run_once)
+        run = runs[-1] if runs else None
+        if run is None or not run.ok:
+            self.app.write_transcript(
+                f"[运行失败: {run.error if run else 'no run'}]"
+            )
+            return
+
+        self.app.write_transcript(run.answer)
+        # 持久化历史（与旧路径同一 MemoryManager）
+        if mm is not None and run.answer:
+            try:
+                await mm.append(session_id, "user", task)
+                await mm.append(session_id, "assistant", run.answer)
+            except Exception:  # noqa: BLE001
+                self.ctx.history.append({"role": "assistant", "content": run.answer})
+        else:
+            self.ctx.history.append({"role": "assistant", "content": run.answer})
 
     def _sync_interactive_mode(self) -> None:
         """Sync ``ctx.interactive_mode`` with GoalStore.
