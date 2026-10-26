@@ -37,6 +37,7 @@
 | 25 | 数据面收尾三件 · 2026-10-26 ✅ | **P-4 定案**：四层派生 id（session uuid→`{sid}#{n}` turn→`{turn}:r{m}` run→子 run/artifact）；**turn:run=1:N 不合并**（用户修订：一轮可多次运行，fence 需要 run 层做同 turn 新旧超越；Temporal WorkflowId:RunId 同构；新增不变量 8=同 turn 至多一活跃 run）；session_key/session_id 分离（文件名=uuid 永不复用）；血统三件套。**P-5 定案**：`{uri,sha256,bytes,schema_v}` 四件套，根=workspace。**D-4 定案**：方案 A 按研究组织 `studies/{study_id}/rounds/R-n/`（账本解耦同构；strategy.py 进 git 面、parquet 排除）。**P-3 收口**：登记行定稿（含 P-4/P-5 字段），kind v1=backtest_result 实装+upload/export/log_bundle 预留 | `p3-p5-data-plane-design.md`（全部 ✅） |
 | 26 | 遗留全清 · 2026-10-26 ✅ | **10 项批量拍板，未决台账清零**：session 粒度 2（home_session 定死·发起不问占本会话+toast）+ 执行面 3（executor 单池+闸·T3 两段式·heartbeat A1 定）+ 旧五条（P0 单人顺序·契约独立随 E1·study 拆分 C1·RunContext 放 core/orchestration/·chat 预算门随 E1）。各项附重开条件 | 两调研文档开放点段已改定案 |
 | 27 | E1 前最终评估 · 2026-10-26 | 全层扫荡+一致性检查：**无结构性遗漏，可以开工**。三发现：①存量数据迁移策略（建议旧库只读兼容+惰性迁移，⏸ 待点头）②entry-controller-contract 重写（E1 第一步还账）③两个归位（compaction 沿用现状归 ContextHub/A1·LLM 限流器归 ProviderHub client 层）。E1 第一刀顺序已列 | `pre-e1-final-review-20261026.md` |
+| 28 | E1 落地 + 目录结构 · 2026-10-26 ✅ | E1 完成：contracts/mailbox/entry_point/ConfigHub/预算门/中立契约，**88 测试全绿**，纯增量零删除。可替换性勘查：3 对「同一概念两套实现」归一（session 队列 A2 / steering inbox A4 / seq 生成器 0.4，净删 ~210 行），预算分层不替换（有 cost_usd），写入限流不同层。**目标目录结构定稿**（engine 与 orchestration 平级 · context 独立 · storage 合并现有）| `e1-replaceability-assessment-20261026.md` · `target-directory-structure-20261026.md` |
 
 ---
 
@@ -166,6 +167,8 @@
 | `platform-data-plane-industry-research-20261026.md` | 数据面业界调研：六路证据 + 五悬点校准 + pending_writes 等额外收获 |
 | `p3-p5-data-plane-design.md` | 数据面收尾三件：P-4 身份定案（turn:run=1:N）+ P-3 登记 + P-5 指针 |
 | `pre-e1-final-review-20261026.md` | E1 前最终评估：一致性检查 + 三发现 + 开工清单 |
+| `e1-replaceability-assessment-20261026.md` | E1 可替换性评估：3 对重复概念 + 替换刀号 + 净删 ~210 行 |
+| `target-directory-structure-20261026.md` | ★ 目标代码目录结构 + 现有文件迁移映射（每刀落位检查单） |
 | `orchestration-triad-design.md` | 控制面 / 策略 / 环境 三件套边界 |
 | `orchestration-layer-membership.md` | 编排层成员（含 3 条决策） |
 | `industry-benchmark-openclaw-20261008.md` | OpenClaw 逐维度对标 |
