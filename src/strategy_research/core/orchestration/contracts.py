@@ -136,8 +136,10 @@ def validate_work_request(req: WorkRequest) -> RejectReason | None:
     """
     if not req.session_key or not req.session_key.strip():
         return RejectReason.MALFORMED
-    if ":" not in req.session_key:
-        # 逻辑会话名约定 <domain>:<name>（chat:main · study:momentum）
+    # 逻辑会话名约定 <domain>:<name>，且两侧都必须非空
+    #（"chat:" / ":main" / "a:b:c" 之外的空段都视为 malformed）
+    domain, sep, name = req.session_key.partition(":")
+    if not sep or not domain.strip() or not name.strip():
         return RejectReason.MALFORMED
     if req.queue_mode is QueueMode.COLLECT:
         # 枚举位保留，v1 拒绝（启用条件见 queue-mode 调研 §4）
