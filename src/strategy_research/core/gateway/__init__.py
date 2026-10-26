@@ -4,14 +4,30 @@
 """
 from __future__ import annotations
 
+from .entry_adapters import (
+    api_chat_request,
+    cli_request,
+    mcp_request,
+    new_entry_enabled,
+    scheduler_request,
+    submit_via_entry,
+)
 from .fencing import FenceToken, FenceVerdict, SessionFence
+from .gateway import Gateway
 from .invariants import Invariant, InvariantViolation, invariants, verify_all
 from .session_controller import RunResult, SessionController
 
 __all__ = [
+    "api_chat_request",
+    "cli_request",
+    "mcp_request",
+    "new_entry_enabled",
+    "scheduler_request",
+    "submit_via_entry",
     "FenceToken",
     "FenceVerdict",
     "SessionFence",
+    "Gateway",
     "Invariant",
     "InvariantViolation",
     "invariants",

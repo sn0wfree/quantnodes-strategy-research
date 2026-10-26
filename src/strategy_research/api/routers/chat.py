@@ -701,21 +701,79 @@ async def queue_resume(body: QueueResumeRequest, request: Request):
     return {"ok": ok, "session_id": body.session_id}
 
 
+# ── 阶段 3a：新入口路径（灰度） ──────────────────────────────
+
+_gateway_singleton: dict[str, Any] = {}
+
+
+def _get_gateway():
+    """进程内 Gateway 单例（真实 LLM client + 不变量自检）。
+
+    阶段 3a 的宿主仍是 FastAPI app（挂载式单进程的过渡形态）；
+    workers=1 由 INV-1 保证（多 worker 会在 verify_invariants 时暴露）。
+    """
+    gw = _gateway_singleton.get("gw")
+    if gw is None:
+        from strategy_research.core.gateway import Gateway
+        from strategy_research.core.llm import LLMConfig, OpenAICompatClient
+
+        gw = Gateway(client=OpenAICompatClient(LLMConfig.load()))
+        gw.verify_invariants()
+        _gateway_singleton["gw"] = gw
+    return gw
+
+
+async def _send_via_gateway(session_id: str, content: str) -> dict:
+    """新路径：WorkRequest → EntryPoint → 准入 → 引擎 → 事件流。"""
+    from strategy_research.core.gateway import api_chat_request
+
+    gw = _get_gateway()
+    receipt = gw.entry.submit(api_chat_request(session_id, content))
+    if not receipt.accepted:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "entry_rejected", "reason": str(receipt.reason)},
+        )
+
+    # 同步驱动队列（A2 的后台消费者会替换这段）
+    runs = await asyncio.get_running_loop().run_in_executor(None, gw.run_once)
+    if not runs:
+        raise HTTPException(status_code=504, detail="no run executed")
+    run = runs[-1]
+    if not run.ok:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "run_failed", "reason": run.error or ""},
+        )
+    return {
+        "message_id": None,
+        "attempt_id": run.run_id,
+        "reply": run.answer,
+        "status": "completed",
+    }
+
+
 @router.post("/send")
 async def send_sync(body: ChatMessage, request: Request):
     """Send a message synchronously (non-streaming).
 
-    Waits for the full response. Use /send_async for streaming.
+    Two paths (阶段 3a 灰度):
+    - legacy (default): unified SessionService (event-log persistence, FIFO
+      queue, conversation-history context).
+    - new (QNODES_NEW_ENTRY=1): WorkRequest -> EntryPoint -> mailbox ->
+      SessionController -> GraphEngine, events collected in-process.
 
-    Aligned with send_async: ownership check + unified SessionService
-    (event-log persistence, FIFO queue, conversation-history context).
-    The reply is collected by waiting on the attempt instead of
-    streaming events over SSE.
+    The ownership check is shared by both paths.
     """
     # Ownership check: only the session owner may post messages
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
     _fetch_session_owned(_get_db(), body.session_id, user_id)
+
+    # ── 阶段 3a 灰度分支（QNODES_NEW_ENTRY=1 时走新架构） ──────────
+    from strategy_research.core.gateway import new_entry_enabled
+    if new_entry_enabled():
+        return await _send_via_gateway(body.session_id, body.content)
 
     service = _get_session_service()
     result = await service.send_message(
