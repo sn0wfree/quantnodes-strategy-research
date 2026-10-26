@@ -39,10 +39,9 @@ class GraphEngine:
         for name, fn in self._nodes:
             graph.add_node(name, self._wrap(name, fn))
         graph.set_entry_point(self._nodes[0][0])
-        for (_, name_a), (name_b, _) in zip(self._nodes, self._nodes[1:]):
-            graph.add_edge(name_a, name_b)
-        if len(self._nodes) > 1 or True:
-            graph.add_edge(self._nodes[-1][0], END)
+        for i in range(len(self._nodes) - 1):
+            graph.add_edge(self._nodes[i][0], self._nodes[i + 1][0])
+        graph.add_edge(self._nodes[-1][0], END)
         app = graph.compile()
 
         result = app.invoke(dict(state), config={"recursion_limit": 50})
