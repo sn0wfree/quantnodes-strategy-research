@@ -32,14 +32,22 @@ class Gateway:
         engine_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._events: list[tuple[str, dict]] = []
-        self.entry = EntryPoint(sink=sink or self._default_sink)
+        self._external_sink = sink
+        # 内部缓冲与外部 sink 同时工作：drain_events() 永远可用，
+        # 外部 sink 收到同样的事件（审计门② 的性能基线也依赖这条）。
+        combined = self._combined_sink
+        self.entry = EntryPoint(sink=combined)
         self.fence = SessionFence()
         self.controller = SessionController(
-            self.entry, client=client, system=system, sink=sink or self._default_sink,
+            self.entry, client=client, system=system, sink=combined,
         )
         if engine_factory is not None:
             self.controller._build_engine = engine_factory  # A1 前的最小注入点
-        self._external_sink = sink
+
+    def _combined_sink(self, kind: str, data: dict) -> None:
+        self._default_sink(kind, data)
+        if self._external_sink is not None:
+            self._external_sink(kind, data)
 
     def _default_sink(self, kind: str, data: dict) -> None:
         self._events.append((kind, data))
