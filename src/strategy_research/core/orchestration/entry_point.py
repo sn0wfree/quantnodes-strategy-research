@@ -1,0 +1,89 @@
+"""EntryPoint —— per-session 分桶门面（协议端点的 E1 形态）。
+
+契约文档 §1/§3：协议端点做 契约校验 + 幂等去重 + 惰性建会话 + 转发 mailbox，
+全部快同步。E1 的幂等去重是进程内存实现（E5 换持久化存储，接口不变）；
+session 解析由注入的 resolver 完成（E1 用内存表，全局登记索引属 0.4/0.5）。
+"""
+from __future__ import annotations
+
+import uuid
+from typing import Callable
+
+from .contracts import Receipt, RejectReason, WorkRequest, validate_work_request
+from .mailbox import DEFAULT_CAP, EventSink, Mailbox
+
+
+class EntryPoint:
+    """门面：session_key → Mailbox 分桶 + 幂等索引 + 惰性会话注册。"""
+
+    def __init__(
+        self,
+        *,
+        cap: int = DEFAULT_CAP,
+        clock: Callable[[], float] | None = None,
+        sink: EventSink | None = None,
+    ) -> None:
+        import time
+
+        self._clock = clock or time.time
+        self._sink = sink
+        self._cap = cap
+        self._mailboxes: dict[str, Mailbox] = {}
+        self._sessions: dict[str, str] = {}  # session_key -> session_id
+        self._idempotency: dict[str, tuple[str, Receipt]] = {}  # key -> (digest, receipt)
+
+    # ── 提交（快同步，契约 §5 不变量 8） ─────────────────
+
+    def submit(self, request: WorkRequest) -> Receipt:
+        reason = validate_work_request(request)
+        if reason is not None:
+            return Receipt.reject(reason)
+
+        if request.idempotency_key:
+            digest = request.payload_digest()
+            prior = self._idempotency.get(request.idempotency_key)
+            if prior is not None:
+                prior_digest, prior_receipt = prior
+                if prior_digest != digest:
+                    return Receipt.reject(RejectReason.IDEMPOTENCY_CONFLICT)
+                return prior_receipt  # 等价重试：原回执原样返回
+
+        mailbox = self._mailbox_for(request.session_key)
+        receipt = mailbox.submit(request, resolve_session=self._resolve_session)
+
+        if request.idempotency_key and receipt.accepted:
+            self._idempotency[request.idempotency_key] = (
+                request.payload_digest(),
+                receipt,
+            )
+        return receipt
+
+    # ── 观测/消费（A2/E5 接线） ─────────────────────────
+
+    def mailbox_for(self, session_key: str) -> Mailbox | None:
+        return self._mailboxes.get(session_key)
+
+    def session_id_for(self, session_key: str) -> str | None:
+        return self._sessions.get(session_key)
+
+    # ── 内部 ─────────────────────────────────────────────
+
+    def _mailbox_for(self, session_key: str) -> Mailbox:
+        mailbox = self._mailboxes.get(session_key)
+        if mailbox is None:
+            mailbox = Mailbox(
+                session_key,
+                cap=self._cap,
+                clock=self._clock,
+                sink=self._sink,
+            )
+            self._mailboxes[session_key] = mailbox
+        return mailbox
+
+    def _resolve_session(self, session_key: str) -> str:
+        """惰性创建：首次出现分配 uuid 物理会话 id（永不复用，P-4）。"""
+        session_id = self._sessions.get(session_key)
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            self._sessions[session_key] = session_id
+        return session_id
