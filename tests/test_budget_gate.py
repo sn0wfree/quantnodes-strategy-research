@@ -66,8 +66,8 @@ def test_all_none_spec_falls_back_to_session_default(gate: BudgetGate):
     spec = BudgetSpec(max_tokens=None, max_llm_calls=None, wallclock_seconds=None)
     usage = BudgetUsage(tokens_used=10**9, llm_calls=10**6, started_at=time.time() - 10**7)
     decision = gate.evaluate(spec, usage, now=time.time())
-    assert not decision.allowed  # 缺省 200 calls 仍然拦住
-    assert "llm_calls" in (decision.reason or "")
+    assert not decision.allowed  # 缺省 200k tokens 仍然拦住
+    assert "tokens" in (decision.reason or "")
 
 
 def test_exactly_at_limit_allowed(gate: BudgetGate):

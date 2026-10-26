@@ -77,13 +77,16 @@ class BudgetGate:
     ) -> BudgetDecision:
         effective = effective_budget(spec)
 
-        if effective.max_llm_calls is not None and usage.llm_calls > effective.max_llm_calls:
-            return BudgetDecision.deny(
-                f"llm_calls {usage.llm_calls} > max {effective.max_llm_calls}"
-            )
+        # 检查顺序固定为 tokens → llm_calls → wallclock（与既有
+        # core/agent/strategy/budget.py 的 tokens→cost→time 一致）：
+        # 顺序稳定才能让日志与告警可比。
         if effective.max_tokens is not None and usage.tokens_used > effective.max_tokens:
             return BudgetDecision.deny(
                 f"tokens {usage.tokens_used} > max {effective.max_tokens}"
+            )
+        if effective.max_llm_calls is not None and usage.llm_calls > effective.max_llm_calls:
+            return BudgetDecision.deny(
+                f"llm_calls {usage.llm_calls} > max {effective.max_llm_calls}"
             )
         if effective.wallclock_seconds is not None and usage.started_at > 0:
             now_ts = now if now is not None else time.time()

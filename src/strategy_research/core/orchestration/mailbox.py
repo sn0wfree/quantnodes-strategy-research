@@ -47,9 +47,14 @@ class QueueItem:
 
     @property
     def label(self) -> str:
+        """审计标签：摘要项给合并数；普通项 = kind + 幂等键/载荷摘要短码。
+
+        载荷摘要短码保证同 kind 的不同工单在事件流里可区分（审计需要）。
+        """
         if self.is_summary:
             return f"summary({len(self.summarized_ids)})"
-        return f"{self.request.kind.value}:{self.request.idempotency_key or id(self.request)}"
+        ident = self.request.idempotency_key or self.request.payload_digest()[:8]
+        return f"{self.request.kind.value}:{ident}"
 
 
 DEFAULT_CAP = 20
