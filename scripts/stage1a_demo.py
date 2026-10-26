@@ -24,9 +24,10 @@ def main() -> None:
     interactive = not args
 
     client = OpenAICompatClient(LLMConfig.load())
-    ep = EntryPoint(sink=lambda kind, data: print(f"  [event] {kind}: {data}"))
+    sink = lambda kind, data: print(f"  [event] {kind}: {data}")  # noqa: E731
+    ep = EntryPoint(sink=sink)
     controller = SessionController(
-        ep, client=client, system="你是量化研究助手，用中文简洁回答。"
+        ep, client=client, system="你是量化研究助手，用中文简洁回答。", sink=sink
     )
 
     def send(text: str) -> None:
