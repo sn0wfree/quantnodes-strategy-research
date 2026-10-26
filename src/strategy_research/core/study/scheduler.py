@@ -157,6 +157,33 @@ class StudyScheduler:
             "objective": study.objective,
         })
 
+        # 阶段 3a 灰度：flag 打开时改走统一入口（WorkRequest → mailbox）。
+        # 上方防重检查（active / queued / terminal）保持不变——它们与
+        # 传输通道无关，属调度语义。
+        from strategy_research.core.gateway import new_entry_enabled
+        if new_entry_enabled():
+            from strategy_research.core.gateway import scheduler_request, submit_via_entry
+
+            gw = _get_gateway_singleton()
+            receipt = submit_via_entry(
+                gw.entry,
+                scheduler_request(
+                    study.session_id,
+                    {
+                        "study_id": study.study_id,
+                        "objective": study.objective,
+                        "session_id": study.session_id,
+                    },
+                ),
+            )
+            if not receipt.accepted:
+                _dlog("sched", "gateway rejected study=%s reason=%s",
+                      sid, receipt.reason)
+                return False
+            self._queued_study_ids.add(sid)
+            _dlog("sched", "study=%s queued via Gateway (new entry)", sid)
+            return True
+
         # Ensure per-session queue + consumer are alive
         q = self._session_queues.setdefault(study.session_id, asyncio.Queue())
         self._queued_study_ids.add(sid)
@@ -1048,3 +1075,22 @@ class _EventBusEmitter:
         # Use the session the listener subscribed to, not the executor's
         # session: they match in practice for Phase 1.
         self.event_bus.emit(session_id, event, data)
+
+
+
+# ── 阶段 3a：Gateway 单例（scheduler 侧复用同一内核） ──────────
+
+_gateway_singleton: dict[str, Any] = {}
+
+
+def _get_gateway_singleton() -> Any:
+    """进程内 Gateway 单例（A2 收敛为唯一构造点）。"""
+    gw = _gateway_singleton.get("gw")
+    if gw is None:
+        from strategy_research.core.gateway import Gateway
+        from strategy_research.core.llm import LLMConfig, OpenAICompatClient
+
+        gw = Gateway(client=OpenAICompatClient(LLMConfig.load()))
+        gw.verify_invariants()
+        _gateway_singleton["gw"] = gw
+    return gw
