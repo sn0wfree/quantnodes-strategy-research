@@ -91,11 +91,31 @@ def _inv_entry_reject_no_side_effects() -> bool:
     return not receipt.accepted and ep.session_id_for("chat:inv") is None
 
 
+def _inv_llm_calls_budgeted() -> bool:
+    """INV-9：所有 LLM 调用必须经 RunBudget.plan_call（预算不可绕过）。
+
+    结构验证：runtimes 目录下凡出现 `client.chat(` 的文件必须同时引用
+    plan_call（同一模块内预算入口）。审计门① 正是靠这条发现 llm 节点绕过。
+    """
+    import inspect
+
+    from ..runtimes.nodes import llm as llm_mod
+    from ..runtimes.nodes import react as react_mod
+
+    for module in (llm_mod, react_mod):
+        source = inspect.getsource(module)
+        if "client.chat(" in source or "client.astream(" in source:
+            if "plan_call()" not in source:
+                return False
+    return True
+
+
 _REGISTRY: tuple[Invariant, ...] = (
     Invariant("INV-1", "workers 恒为 1（多 worker = 多 Gateway）", _inv_workers_pinned, "E1"),
     Invariant("INV-3", "唯一开 turn 路径 = admission；入口拒绝无副作用", _inv_entry_reject_no_side_effects, "E1"),
     Invariant("INV-5", "fence 认领即超越：同 turn 至多一活跃 run", _inv_fence_supersedes, "A3"),
     Invariant("INV-8", "配置 fail-fast：非法配置拒启", _inv_config_fail_fast, "E1"),
+    Invariant("INV-9", "所有 LLM 调用必经 RunBudget.plan_call", _inv_llm_calls_budgeted, "A1"),
 )
 
 

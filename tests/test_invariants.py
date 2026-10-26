@@ -26,7 +26,7 @@ def test_verify_all_raises_on_violation():
 
 def test_invariant_registry_has_expected_members():
     ids = {inv.id for inv in invariants()}
-    assert {"INV-1", "INV-3", "INV-5", "INV-8"} <= ids
+    assert {"INV-1", "INV-3", "INV-5", "INV-8", "INV-9"} <= ids
 
 
 def test_every_invariant_has_metadata():

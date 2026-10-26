@@ -19,12 +19,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from strategy_research.core.agent.strategy.budget import (
-    BudgetLimits,
-    BudgetUsage,
-    evaluate_budget,
-    record_usage,
-)
+from strategy_research.core.agent.strategy.budget import BudgetLimits
+from strategy_research.core.runtimes.run_budget import RunBudget
 
 EventSink = Callable[[str, dict], None]
 
@@ -52,21 +48,21 @@ def make_react_node(
         if cfg.system and not any(m.get("role") == "system" for m in messages):
             messages = [{"role": "system", "content": cfg.system}] + messages
 
-        usage = BudgetUsage(started_at=time.perf_counter())
+        usage = RunBudget(limits=cfg.budget_limits or BudgetLimits())
         run_id = state.get("run_id", "")
         answer = ""
         stop_reason = "completed"
         iteration = 0
 
         for iteration in range(1, cfg.max_iterations + 1):
-            exceeded, reason = evaluate_budget(usage, cfg.budget_limits or BudgetLimits())
-            if exceeded:
+            allowed, reason = usage.plan_call()  # A5 INV-9：唯一预算入口
+            if not allowed:
                 emit("budget.exhausted", {"run_id": run_id, "reason": reason})
                 stop_reason = f"budget:{reason}"
                 break
 
             response = client.chat(messages, tools=registry.get_definitions())
-            usage = record_usage(usage, cfg.budget_limits or BudgetLimits(), response.usage)
+            usage.record(getattr(response, "usage", None))
 
             if not response.has_tool_calls():
                 answer = response.content
@@ -100,8 +96,7 @@ def make_react_node(
         updated["messages"] = messages
         updated["answer"] = answer
         updated["usage"] = {
-            "total_tokens": usage.tokens,
-            "cost_usd": round(usage.cost_usd, 6),
+            **usage.snapshot(),
             "iterations": iteration,
         }
         updated["stop_reason"] = stop_reason
