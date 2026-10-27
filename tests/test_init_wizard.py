@@ -450,7 +450,12 @@ class TestCmdRunOnboarding:
         llm_path.parent.mkdir(parents=True, exist_ok=True)
         _finalize_llm_json({"provider": "openai"}, llm_json_path=llm_path)
 
-        with patch("rich.prompt.Confirm.ask", return_value=False):
+        with patch("rich.prompt.Confirm.ask", return_value=False), patch(
+            "strategy_research.cli.onboard._QUANTNODES_LLM_JSON_PATH", llm_path
+        ), patch(
+            "strategy_research.cli.onboard._QUANTNODES_DOTENV_PATH",
+            llm_path.parent / ".env",
+        ):
             from strategy_research.cli import cmd_run_onboarding
             args = argparse.Namespace(force=False)
             rc = cmd_run_onboarding(args)

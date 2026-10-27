@@ -137,3 +137,36 @@ def test_chat_kind_filter_never_drops_chat_work():
     assert mail.poll_due({WorkKind.AUTOMATION}) is None
     assert mail.peek_depth() == 1
     assert mail.poll_due({WorkKind.CHAT}) is not None
+
+
+# ── 用户主目录沙箱（阶段 4 测试隔离）───────────────────
+
+
+def test_user_home_is_sandboxed_during_tests():
+    """整个测试进程的 home 解析必须落在沙箱。
+
+    背景：曾有测试经 Windows Path.home()（读 USERPROFILE 而非 HOME）长期
+    覆写宿主 ~/.quantnodes/jwt_secret。conftest 顶部重定向后，任何测试里
+    的 Path.home()/expanduser("~") 都不得再指向真实主目录。
+    """
+    import os
+    from pathlib import Path
+
+    import _home_sandbox
+
+    assert _home_sandbox.sandboxed(), "conftest 未重定向 USERPROFILE"
+    assert Path.home() == _home_sandbox.SANDBOX_HOME
+    assert os.path.expanduser("~") == str(_home_sandbox.SANDBOX_HOME)
+    # 模块级常量（import 时求值）也在沙箱里
+    from strategy_research.core.llm import quantnodes_bridge
+
+    assert str(_home_sandbox.SANDBOX_HOME) in str(quantnodes_bridge.CONFIG_PATH)
+
+
+def test_sandbox_home_is_outside_real_home():
+    """沙箱必须与真实主目录物理隔离（不能是它的子目录）。"""
+    import _home_sandbox
+
+    sandbox = _home_sandbox.SANDBOX_HOME.resolve()
+    real = _home_sandbox.REAL_HOME.resolve()
+    assert real not in sandbox.parents

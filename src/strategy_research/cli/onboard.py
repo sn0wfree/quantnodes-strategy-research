@@ -40,10 +40,59 @@ BACK = object()
 CANCEL = object()
 
 
-_QUANTNODES_DIR: Final[Path] = Path.home() / ".quantnodes"
-_QUANTNODES_LLM_JSON_PATH: Final[Path] = _QUANTNODES_DIR / "llm.json"
-_QUANTNODES_LLM_JSON_PARTIAL: Final[Path] = _QUANTNODES_DIR / "llm.json.partial"
-_QUANTNODES_DOTENV_PATH: Final[Path] = _QUANTNODES_DIR / ".env"
+# 配置路径改为 PEP 562 模块级 __getattr__ 动态求值（阶段 4）：
+# 旧写法 `_QUANTNODES_DIR: Final[Path] = Path.home() / ".quantnodes"` 在
+# import 时固化——进程内 HOME/USERPROFILE 之后的任何变化（测试沙箱重定向、
+# init 向导自身改 env）都不再生效，测试夹具与运行时行为错位。
+# __getattr__ 保证每次访问都重新解析；monkeypatch.setattr 补丁创建真实
+# 模块属性、优先于 __getattr__，测试替换仍然有效。
+
+
+def _patched(name: str) -> Path | None:
+    """被 monkeypatch.setattr 替换过的模块属性（存在即优先）。"""
+    value = globals().get(name)
+    return Path(value) if value is not None else None
+
+
+def _quantnodes_dir() -> Path:
+    patched = _patched("_QUANTNODES_DIR")
+    return patched if patched is not None else Path.home() / ".quantnodes"
+
+
+def _quantnodes_llm_json_path() -> Path:
+    patched = _patched("_QUANTNODES_LLM_JSON_PATH")
+    return patched if patched is not None else _quantnodes_dir() / "llm.json"
+
+
+def _quantnodes_llm_json_partial() -> Path:
+    patched = _patched("_QUANTNODES_LLM_JSON_PARTIAL")
+    if patched is not None:
+        return patched
+    return _quantnodes_dir() / "llm.json.partial"
+
+
+def _quantnodes_dotenv_path() -> Path:
+    patched = _patched("_QUANTNODES_DOTENV_PATH")
+    return patched if patched is not None else _quantnodes_dir() / ".env"
+
+
+def __getattr__(name: str):
+    """PEP 562：外部 ``module._QUANTNODES_*`` 访问调用时动态解析。
+
+    monkeypatch.setattr 创建真实模块属性、优先于 __getattr__，
+    测试替换路径仍然有效；模块内部代码请用上面的访问函数。
+    """
+    mapping = {
+        "_QUANTNODES_DIR": _quantnodes_dir,
+        "_QUANTNODES_LLM_JSON_PATH": _quantnodes_llm_json_path,
+        "_QUANTNODES_LLM_JSON_PARTIAL": _quantnodes_llm_json_partial,
+        "_QUANTNODES_DOTENV_PATH": _quantnodes_dotenv_path,
+    }
+    fn = mapping.get(name)
+    if fn is not None:
+        return fn()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Field written into llm.json["llm"]["api_key"] so the bridge resolves it
 # via the dotenv file. Real key is stored in ~/.quantnodes/.env as
@@ -153,7 +202,7 @@ def _save_partial(
     The partial mirrors the would-be-committed ``"llm"`` top-level
     section (NOT the full file), so on recovery we can resume cleanly.
     """
-    path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    path = llm_json_path or _quantnodes_llm_json_path()
     partial = path.parent / f"{path.name}.partial"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +230,7 @@ def _finalize_llm_json(
 
     Returns the final llm.json path.
     """
-    path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    path = llm_json_path or _quantnodes_llm_json_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     existing = _read_llm_json(path)
@@ -225,7 +274,7 @@ def _save_tokens_to_dotenv(
     Existing keys with non-empty values are preserved; new keys are
     appended. Atomic write via mkstemp + os.replace.
     """
-    path = dotenv_path or _QUANTNODES_DOTENV_PATH
+    path = dotenv_path or _quantnodes_dotenv_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     existing: dict[str, str] = {}
@@ -266,7 +315,7 @@ def _save_tokens_to_dotenv(
 
 def is_onboarded(*, llm_json_path: Path | None = None) -> bool:
     """True iff ``llm.json`` exists and has a non-empty ``"llm"`` section."""
-    p = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    p = llm_json_path or _quantnodes_llm_json_path()
     if not p.exists():
         return False
     data = _read_llm_json(p)
@@ -283,7 +332,7 @@ def _detect_plaintext_api_key(
     """Return the plaintext api_key in llm.json["llm"] if present and not
     an ``env:VAR`` reference. Returns None otherwise.
     """
-    p = llm_json_path or _QUANTNODES_LLM_JSON_PATH
+    p = llm_json_path or _quantnodes_llm_json_path()
     data = _read_llm_json(p)
     section = data.get("llm")
     if not isinstance(section, dict):
@@ -736,8 +785,8 @@ def run_onboarding(
     Returns:
         Path of the final ``llm.json`` file, or ``None`` on cancel.
     """
-    llm_path = llm_json_path or _QUANTNODES_LLM_JSON_PATH
-    env_path = dotenv_path or _QUANTNODES_DOTENV_PATH
+    llm_path = llm_json_path or _quantnodes_llm_json_path()
+    env_path = dotenv_path or _quantnodes_dotenv_path()
 
     if inputs is not None:
         return _run_onboarding_test_mode(

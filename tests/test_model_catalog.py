@@ -325,9 +325,10 @@ def test_refresh_async_merges_user_overrides_on_top_of_fetched(tmp_path):
     info = asyncio.run(run())
     # User override wins
     assert info.context_tokens == 500_000
-    # Other fields come from fetched (gpt-4o-mini supports vision)
-    assert info.supports_vision is True
-    assert info.supports_tools is True
+    # Other fields come from fetched — but do NOT assert specific capability
+    # flags: models.dev data has drifted before (gpt-4o-mini supports_vision
+    # flipped), and this test must not depend on external data contents.
+    assert info.source == "fetched"
 
 
 def test_refresh_async_failure_serves_real_data_not_synthesized_override():

@@ -117,12 +117,40 @@ S5  全量分道跑 + 审计门②                                              
 
 ## 9. 全量分道跑发现的预存问题（非本次改动引入）
 
+### 9.1 用户主目录沙箱（阶段 4 追加，系统性解决「测试写真实配置」）
+
+**问题定性**：不是单个测试的 bug，是结构性缺陷——28+ 个模块解析 `Path.home()`，
+其中 13 个是 import 时求值的模块级常量；只重定向 `HOME` 的 fixture 在 Windows
+上拦不住 `Path.home()`（读 `USERPROFILE`）。此前至少两类测试在写/读真实配置：
+auth_tokens 覆写 jwt_secret；init wizard 依赖真实 llm.json 才能通过。
+
+**三层防线**（`tests/_home_sandbox.py` + conftest 顶部）：
+
+| 层 | 机制 | 防什么 |
+|---|---|---|
+| 进程级重定向 | conftest **顶部**（任何 strategy_research import 前）把 `USERPROFILE`/`HOME` 指向 `tests/_user_home_sandbox` | import 时常量、运行时解析、env 直读三条路全部落沙箱 |
+| 金丝雀对账 | session 级 `_guard_real_config`：会话前后对真实 `~/.quantnodes`、`~/.quantnodes-research` 做全量文件指纹比对，有变化即报错并列出文件 | 兜底抓绕过 home 解析的写入（win32 直读、绝对路径拼接） |
+| 显式豁免 | live 套件夹具显式把 home 指回 `_home_sandbox.REAL_HOME` | 豁免是显式动作而非默认，宿主配置只在 live 测试可触碰 |
+
+**元测试**（`test_architecture_gates.py`）：home 落沙箱、`expanduser("~")` 落沙箱、
+模块级常量（quantnodes_bridge.CONFIG_PATH）落沙箱、沙箱不是真实主目录子目录。
+
+**沙箱暴露并修复的宿主依赖**（都是测试一直在依赖真实配置才能通过的实证）：
+
+| 项 | 修法 |
+|---|---|
+| `cli/onboard.py` 四个路径常量 import 时固化 | 改 PEP 562 `__getattr__` + 访问函数（内部调用动态解析；`monkeypatch.setattr` 的补丁值经 `_patched()` 优先——两头兼容） |
+| `test_init_wizard`/`test_init_e2e` 两个用例依赖真实 llm.json 才走 Overwrite 分支 | 补显式路径 patch（与其余用例一致） |
+| `test_model_catalog` 断言 models.dev 外部数据字段（supports_vision 曾漂移） | 放宽为只断言 override/source，不断言外部数据内容 |
+| `test_llm_profiles` chmod 0o600 ×2（Windows 无 POSIX 位） | `_posix_only` skip |
+
+**验收**：home 常量相关 23 个套件 **496 通过 / 9 跳过**；live（真 LLM）5/5 通过证明豁免可用。
+
+### 9.2 其余预存问题（待阶段 5）
+
 | 问题 | 证据 | 性质 |
 |---|---|---|
-| `test_alpha_zoo_adapter` ×2 失败 | 单独跑也失败（9/21 已记录）；`compute_as_series` 返回 180 行而 wide.notna 只有 120 | **预存实现缺陷**（`compute_as_series` 未按约定 dropna） |
-| `test_e2e_full_flow.py::TestNoProgress::test_no_progress_termination` 挂起 | 单跑也挂；栈显示 `_approval_event.wait(timeout=1800)`——`make_loop()` 未传 `approval_timeout`，no_progress 触发审批后无人应答，默认等 30 分钟 | **预存测试缺陷**（应传 `approval_timeout=0.1` + `approval_policy="reject"`） |
-
-两者都不属阶段 4 的删除/隔离问题，也不由本轮改动引入。处理建议：
-- alpha_zoo：修 `compute_as_series`（`wide.dropna(how="any")` 后再 stack），属独立 bugfix；
-- e2e no_progress：测试补 `approval_timeout` 参数，属测试修复。
-两者都列进阶段 5（P5-6/P5-7），本轮不夹带。
+| `test_alpha_zoo_adapter` ×2 失败 | 单独跑也失败（9/21 已记录） | `compute_as_series` 未按约定 dropna |
+| `test_e2e_full_flow no_progress` 挂起 | 单跑也挂；`_approval_event.wait(timeout=1800)` | 测试缺 `approval_timeout` 参数 |
+| PR 道 ~137 个失败 | 合跑挂单跑过（order-dependence 存量） | 逐个隔离是多日任务，阶段 5 主项 |
+| `test_disk_cache_written_after_refresh` | 单跑绿合跑挂 | 孤立顺序依赖，随全量再核 |

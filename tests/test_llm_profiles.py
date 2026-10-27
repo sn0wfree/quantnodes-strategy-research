@@ -19,6 +19,12 @@ from pathlib import Path
 
 import pytest
 
+# Windows has no POSIX permission bits; chmod 0o600 is not observable
+# (pre-existing platform gap).
+_posix_only = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX permission semantics unavailable on Windows"
+)
+
 from strategy_research.cli.commands import llm as llm_cmd
 from strategy_research.core.llm import LLMConfig
 from strategy_research.core.llm.config import (
@@ -512,6 +518,7 @@ class TestCliUseEdge:
         llm_json.write_text("{ not json !!!", encoding="utf-8")
         assert llm_cmd._load_profiles() == {}
 
+    @_posix_only
     def test_atomic_write_llm_json_chmod_600(self, clear_env, cli_paths):
         llm_json, _ = cli_paths
         llm_json.write_text(json.dumps({"llm": {}}))
@@ -529,6 +536,7 @@ class TestCliUseEdge:
         assert content.count("QWEN_API_KEY=") == 1
         assert "QWEN_API_KEY=sk-new-key" in content
 
+    @_posix_only
     def test_write_dotenv_chmod_600(self, clear_env, cli_paths):
         llm_json, dotenv = cli_paths
         llm_cmd._write_dotenv({"SOME_KEY": "v"})

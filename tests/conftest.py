@@ -5,11 +5,20 @@ Extracted from duplicated ``_reset_halt`` definitions across 5 test files.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
-import pytest
+# ── 用户主目录沙箱（必须在任何 strategy_research import 之前）──────────
+# 28+ 模块解析 Path.home()，13 个是 import 时求值的模块级常量。conftest 是
+# pytest 最早加载的测试模块，这里重定向后整个进程的 home 解析都落沙箱。
+sys.path.insert(0, os.path.dirname(__file__))
+import _home_sandbox  # noqa: E402
 
-from strategy_research.cli.halt import clear_halt
+_home_sandbox.apply()
+
+import pytest  # noqa: E402
+
+from strategy_research.cli.halt import clear_halt  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +27,55 @@ def _reset_halt():
     clear_halt()
     yield
     clear_halt()
+
+
+# ── 真实配置金丝雀（阶段 4）───────────────────────────────────────────
+
+_CANARY_DIRS = (
+    _home_sandbox.REAL_HOME / ".quantnodes",
+    _home_sandbox.REAL_HOME / ".quantnodes-research",
+)
+
+
+def _snapshot_real_config() -> dict[str, tuple[int, float]]:
+    """记录真实配置目录的 文件名→(大小, mtime) 指纹（递归，跳过沙箱自身）。"""
+    snapshot: dict[str, tuple[int, float]] = {}
+    for root in _CANARY_DIRS:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file():
+                try:
+                    stat = path.stat()
+                    snapshot[str(path)] = (stat.st_size, stat.st_mtime)
+                except OSError:
+                    continue
+    return snapshot
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_real_config():
+    """测试会话不得触碰真实用户配置（金丝雀对账）。
+
+    沙箱重定向（conftest 顶部）是主防线；这是兜底——捕获绕过 home 解析
+    的写入（win32 API 直读、绝对路径拼接、时序竞态）。会话结束时目录
+    指纹有变化 → 列出被改文件并让会话报错。测试自身产生的临时数据库等
+    都在 tmp_path / 沙箱里，不该出现在这里。
+    """
+    before = _snapshot_real_config()
+    yield
+    after = _snapshot_real_config()
+    changed = sorted(
+        str(p) for p, sig in after.items() if before.get(p) != sig
+    )
+    created = sorted(p for p in after if p not in before)
+    if changed or created:
+        lines = ["测试会话修改了真实用户配置（home 沙箱被绕过）："]
+        if created:
+            lines.append(f"  新建: {len(created)} 个文件，如 {created[:3]}")
+        if changed:
+            lines.append(f"  修改: {len(changed)} 个文件，如 {changed[:3]}")
+        raise AssertionError("\n".join(lines))
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -295,10 +353,14 @@ def _host_key_env() -> dict[str, str]:
 
 @pytest.fixture(scope="session")
 def real_llm_config():
-    """真实 LLMConfig（bypass 隔离）。key 不在 → skip。"""
+    """真实 LLMConfig（bypass 隔离）。key 不在 → skip。
+
+    豁免主目录沙箱：显式读**真实** ~/.quantnodes/llm.json——live 测试是
+    唯一合法触碰宿主配置的场景（``_home_sandbox.restore_real``）。
+    """
     if os.environ.get("QNODES_LIVE_LLM") != "1":
         pytest.skip("live LLM is opt-in: set QNODES_LIVE_LLM=1")
-    real_json = Path.home() / ".quantnodes" / "llm.json"
+    real_json = _home_sandbox.REAL_HOME / ".quantnodes" / "llm.json"
     if not real_json.exists():
         pytest.skip(f"no {real_json}")
 
@@ -306,6 +368,9 @@ def real_llm_config():
     monkeypatch.setenv("STRATEGY_RESEARCH_LLM_CONFIG", str(real_json))
     for name, value in _host_key_env().items():
         monkeypatch.setenv(name, value)
+    # key 在 ~/.quantnodes/.env：dotenv 解析走 Path.home()，指回真实目录
+    for var in ("USERPROFILE", "HOME"):
+        monkeypatch.setenv(var, str(_home_sandbox.REAL_HOME))
 
     from strategy_research.core.llm import LLMConfig
 
