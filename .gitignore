@@ -100,3 +100,6 @@ pyright-report.json
 
 # test-generated strategy workspaces (not source)
 /strategies/
+
+# per-session user-home sandbox for tests (runtime artifact)
+tests/_user_home_sandbox/
