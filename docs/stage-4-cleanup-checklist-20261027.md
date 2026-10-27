@@ -106,7 +106,7 @@ S5  全量分道跑 + 审计门②                                              
 | P5-1 | ✅ **已完成**（`af4cb235`）：Gateway chat 补历史注入 + 事件持久化 + message_id | — | 已交付 |
 | P5-1b | ✅ **已完成**（`0d25b702` + `3d03ed65`）：流式 + 工具链 + MiniMax `<think>` 跨 chunk 修复 | — | 已交付 |
 | **P5-1c** | ⏸ **已标记待做**：删除旧 chat 分支 + `new_entry_enabled` 门（清单见 `todo-remove-legacy-chat-branch-20261027.md`） | 无（前置已就位） | 入口真正只剩一条路；删除前需确认 `/send_async` 与 study/goal 的依赖面 |
-| P5-2 | 删除 `study/langgraph_engine.py` 全家 + `_run_langgraph_branch` | 先查 `study.engine='langgraph'` 真实使用面 | 约 1000+ 行 + 6 个测试文件；错误删除 = 研究执行无路可退。**10/27 进展：HITL 审批门已吸收进图路径暂停段**（`docs/stage-hitl-gate-graph-design-20261027.md`，study.hitl flag + novelty 门 + interrupt 落库/事件契约照抄）——langgraph 分支最后一块独有能力的落地前置已就绪，resume 机制（重建+start= vs SqliteSaver）待讨论 |
+| P5-2 | 删除 `study/langgraph_engine.py` 全家 + `_run_langgraph_branch` | 先查 `study.engine='langgraph'` 真实使用面 | 约 1000+ 行 + 6 个测试文件；错误删除 = 研究执行无路可退。**10/27：HITL 前置已全部落地**——审批门暂停段（`71d5cf34`）+ resume（`8623d42d`，重建+start=，决策记录 `hitl-resume-industry-research-20261027.md`），langgraph 分支独有能力吸收完毕，可启动删除调查 |
 | P5-3 | SSE 单轨（删 `api/sse_buffer.py` + `api/session/bridge_v2.py`） | 3b-2 一直延后 | 8 个生产文件 + 7 个测试文件，属独立工程 |
 | P5-4 | `ContextBuilder`（4 builder）并入 ContextHub | AgentLoop 迁移 | 合并不是删文件，要迁调用方 |
 | P5-5 | 安全债 ×4（9/5 评估记录） | 无 | 与本次架构重构正交，需独立排查 |

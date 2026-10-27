@@ -1,7 +1,10 @@
 # HITL resume 机制：方案对比与业界调研 — 2026-10-27
 
-> 状态：**决策倾向方案 A（持久化重建 + `run(state, start=)`），待最终确认开工**。
-> 本文自包含，供后续讨论/评审使用。
+> 状态：**已按方案 A 落地（`8623d42d`，2026-10-27）**——payload 增强 /
+> `resume_round_via_graph`（重建 + `start=claims`）/ runner 按 engine 分流
+> 全部完成；§5 清单逐项兑现，顺带修复 `get_interrupt_for_round` 平局排序
+> 缺陷（Windows 时钟粒度下返回首个 interrupt 而非最新）。
+> 本文保留为决策记录。
 > 前置：HITL 审批门暂停段已落地（`71d5cf34` + 自查修复 `44c4a355`/`f639ee2d`），
 > 设计见 `stage-hitl-gate-graph-design-20261027.md`；resume 是最后一块，
 > 也是 P5-2（删 langgraph 分支）的收尾前置。
