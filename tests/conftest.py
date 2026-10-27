@@ -295,6 +295,7 @@ _LANE_LLM_FILES = frozenset({
     "test_web_search.py",           # live DDGS queries (skipif HAS_NETWORK)
     "test_llm_live.py",             # opt-in live LLM (QNODES_LIVE_LLM=1)
     "test_react_live.py",           # opt-in live react tool-loop
+    "test_fanout_live.py",          # opt-in live fanout multi-subagent
     "test_entry_migration_live.py", # opt-in live gateway/entry migration
 })
 

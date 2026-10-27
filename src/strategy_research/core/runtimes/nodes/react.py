@@ -30,6 +30,9 @@ class ReactConfig:
     max_iterations: int = 10
     budget_limits: BudgetLimits | None = None
     system: str | None = None
+    # F3：注入式预算（fanout 分支切片优先）；给对象=同一实例直接记账，
+    # 传限额只复制上限、消耗回不到父账本（settle 会失真）。
+    budget: RunBudget | None = None
 
 
 def make_react_node(
@@ -42,13 +45,15 @@ def make_react_node(
     """构造 react 节点。state 约定同 llm 节点（messages 进出，answer/usage 写回）。"""
     cfg = config or ReactConfig()
     emit = sink or (lambda kind, data: None)
+    # 注入预算优先（F3）；每次 run 复用同一实例以保证外部可见消耗。
+    injected_budget = cfg.budget
 
     def react_node(state: dict) -> dict:
         messages = list(state.get("messages") or [])
         if cfg.system and not any(m.get("role") == "system" for m in messages):
             messages = [{"role": "system", "content": cfg.system}] + messages
 
-        usage = RunBudget(limits=cfg.budget_limits or BudgetLimits())
+        usage = injected_budget or RunBudget(limits=cfg.budget_limits or BudgetLimits())
         run_id = state.get("run_id", "")
         answer = ""
         stop_reason = "completed"
