@@ -103,3 +103,7 @@ pyright-report.json
 
 # per-session user-home sandbox for tests (runtime artifact)
 tests/_user_home_sandbox/
+
+# graphify code graph (regenerable)
+graphify-out/
+
