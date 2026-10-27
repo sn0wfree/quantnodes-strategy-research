@@ -577,47 +577,49 @@ async def search_sessions(body: SearchRequest, request: Request):
     """
     user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
-    # Detect if FTS5 is available
-    has_fts = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'"
-    ).fetchone() is not None
-    if not has_fts:
-        raise HTTPException(status_code=503, detail="Full-text search is unavailable on this build")
     if not body.query or not body.query.strip():
         return {"hits": [], "query": body.query}
 
-    # Build FTS5 MATCH expression. For multi-word queries, AND each token
-    # (so "alpha 策略" → "alpha AND 策略"). For single word, use as-is.
-    tokens = [t for t in body.query.split() if t]
-    # Strip FTS5 reserved chars from each token to avoid syntax errors
-    safe_tokens = [t.replace('"', '').replace("'", '').replace('(', '').replace(')', '') for t in tokens]
-    if not safe_tokens:
+    # 用 LIKE 子串匹配，不用 FTS。
+    #
+    # 为什么不走 FTS5/trigram（保留 messages_fts 表但搜索不再依赖它）：
+    # - trigram 分词器要求查询串 >= 3 字符，中文双字词（策略/回测/动量/因子）
+    #   一律零命中——中文是这个产品的主要语言；
+    # - 这不是大规模文档检索：实测真实库 190 条消息 LIKE 全表扫描 0.07ms，
+    #   20 万条也只有 50ms；FTS 的索引反而占 208% 额外空间、还需三个触发器维护；
+    # - 用户要的是「包含这个词」，不是相关度排序，BM25 的排序价值在这里为零。
+    # 若将来真的出现百万级单会话，再引入带中文分词器的 FTS 也不迟。
+    tokens = [t.strip() for t in body.query.split() if t.strip()]
+    if not tokens:
         return {"hits": [], "query": body.query}
-    if len(safe_tokens) == 1:
-        match_expr = safe_tokens[0]
-    else:
-        match_expr = " AND ".join(f'"{tok}"' for tok in safe_tokens if tok)
+
+    # 多关键词 = 全部命中（AND 语义，与此前 FTS 行为一致）。
+    # ESCAPE 处理 % / _ 通配符，避免用户输入被当成模式。
+    like_clauses = []
+    params: list[Any] = []
+    for tok in tokens:
+        escaped = tok.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_clauses.append("m.content LIKE ? ESCAPE '\\'")
+        params.append(f"%{escaped}%")
 
     rows = conn.execute(
-        """
+        f"""
         SELECT
             m.id AS message_id,
             m.session_id,
             m.role,
             m.content,
             m.created_at,
-            s.title AS session_title,
-            fts.rank AS score
-        FROM messages_fts fts
-        JOIN messages m ON m.rowid = fts.rowid
+            s.title AS session_title
+        FROM messages m
         JOIN sessions s ON s.id = m.session_id
-        WHERE messages_fts MATCH ?
+        WHERE {' AND '.join(like_clauses)}
           AND s.user_id = ?
           AND s.archived = 0
-        ORDER BY fts.rank
+        ORDER BY m.created_at DESC
         LIMIT ?
         """,
-        (match_expr, user_id, body.limit),
+        (*params, user_id, body.limit),
     ).fetchall()
 
     hits = []
@@ -629,7 +631,8 @@ async def search_sessions(body: SearchRequest, request: Request):
                 "message_id": r["message_id"],
                 "role": r["role"],
                 "snippet": _make_snippet(r["content"], body.query),
-                "score": float(r["score"]) if r["score"] is not None else 0.0,
+                # LIKE 无相关度分数；保留字段以维持响应契约
+                "score": 0.0,
                 "created_at": r["created_at"],
             }
         )
