@@ -377,26 +377,23 @@ def _resolve_branch_fn(engine: str) -> Any:
     Fallback: unknown values (dirty DB row, future removal of 'dag') run
     phases instead of raising mid-round — the historical semantics.
 
-    B1-b greyscale: when ``research_graph_enabled()`` is on, the phases
-    branch is served by the GraphEngine stage graph (``graph_preset``)
-    instead of the legacy function sequence. Output contract is identical
-    (see docs/stage-b1b-research-preset-design-20261027.md §4).
+    Stage 4: the ``QNODES_RESEARCH_GRAPH`` greyscale gate is gone — the
+    phases branch is ALWAYS served by the GraphEngine stage graph
+    (``graph_preset``). B1-b proved execution equivalence field by field
+    (RoundOutcome asdict equality), so there is no second implementation to
+    fall back to.
     """
     branch_fn = _ENGINE_BRANCHES.get(engine)
     if branch_fn is None:
         logger.warning(
-            "phase_engine: unknown engine %r (study.engine=%r); "
-            "falling back to phases",
-            engine, engine,
+            "phase_engine: unknown engine %r; falling back to phases",
+            engine,
         )
         branch_fn = _ENGINE_BRANCHES["phases"]
     if branch_fn is _run_phases_branch:
-        from strategy_research.core.gateway import research_graph_enabled
+        from .graph_preset import run_phases_via_graph
 
-        if research_graph_enabled():
-            from .graph_preset import run_phases_via_graph
-
-            return run_phases_via_graph
+        return run_phases_via_graph
     return branch_fn
 
 

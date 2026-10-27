@@ -11,7 +11,6 @@ from .entry_adapters import (
     new_entry_enabled,
     research_graph_enabled,
     scheduler_request,
-    study_entry_enabled,
     submit_via_entry,
 )
 from .fencing import FenceToken, FenceVerdict, SessionFence
@@ -26,7 +25,6 @@ __all__ = [
     "mcp_request",
     "new_entry_enabled",
     "research_graph_enabled",
-    "study_entry_enabled",
     "scheduler_request",
     "submit_via_entry",
     "FenceToken",

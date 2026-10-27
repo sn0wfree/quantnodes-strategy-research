@@ -14,7 +14,6 @@ from strategy_research.core.gateway import (
     api_chat_request,
     research_graph_enabled,
     scheduler_request,
-    study_entry_enabled,
 )
 from strategy_research.core.orchestration import EntryPoint, WorkKind
 from strategy_research.core.study import StudyScheduler, StudyStatus, StudyStore
@@ -26,8 +25,6 @@ def _isolate(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
     monkeypatch.setenv("SR_STUDY_MAX_CONCURRENT", "1")
-    monkeypatch.delenv("QNODES_NEW_ENTRY_STUDY", raising=False)
-    monkeypatch.delenv("QNODES_RESEARCH_GRAPH", raising=False)
     from strategy_research.core.gateway import reset_gateway
 
     reset_gateway()
@@ -43,32 +40,18 @@ def _record(study_id: str, session_id: str = "sess-1") -> StudyRecord:
     )
 
 
-# ── 门默认值（3c 翻默认）─────────────────────────────────
+# ── 门退役契约（阶段 4）───────────────────────────────
 
 
-def test_study_entry_defaults_on():
-    assert study_entry_enabled() is True
+def test_study_gate_removed():
+    """study 门已删除：旧 asyncio.Queue 通道同时消失。"""
+    import strategy_research.core.gateway as gw
+
+    assert not hasattr(gw, "study_entry_enabled")
 
 
-def test_research_graph_defaults_on():
-    assert research_graph_enabled() is True
-
-
-@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
-def test_study_entry_can_rollback(monkeypatch, value):
-    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", value)
-    assert study_entry_enabled() is False
-
-
-@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
-def test_research_graph_can_rollback(monkeypatch, value):
-    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", value)
-    assert research_graph_enabled() is False
-
-
-def test_doors_remain_independent(monkeypatch):
-    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "0")
-    assert study_entry_enabled() is False
+def test_research_graph_gate_retired():
+    """阶段 4：门已退役，恒返回 True（保留函数仅向后兼容）。"""
     assert research_graph_enabled() is True
 
 
@@ -143,7 +126,6 @@ def test_default_run_once_still_handles_all_kinds():
 
 
 def test_interrupt_priority_respects_kind_filter():
-    from datetime import datetime, timedelta, timezone
 
     from strategy_research.core.orchestration import (
         QueueMode,
@@ -217,17 +199,20 @@ def test_submit_routes_to_mailbox_and_consumer_executes(monkeypatch, tmp_path):
     assert _FakeRunner.instances[0].executed is True
 
 
-def test_flag_off_keeps_legacy_queue(monkeypatch, tmp_path):
+def test_legacy_queue_channel_is_gone(monkeypatch, tmp_path):
+    """阶段 4：旧 asyncio.Queue 通道删除——即使设旧门变量也恒走 mailbox。"""
     monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "0")
     store = StudyStore(db_path=tmp_path / "study.db")
     sched = StudyScheduler(store=store)
 
     async def run():
         ok = await sched.submit(_record("s-legacy"))
-        queues = dict(sched._session_queues)
         await sched.shutdown()
-        return ok, queues
+        return ok
 
-    ok, queues = asyncio.run(run())
-    assert ok is True
-    assert "sess-1" in queues  # 旧路径
+    try:
+        assert asyncio.run(run()) is True
+        assert not hasattr(sched, "_session_queues")
+        assert not hasattr(sched, "_session_loop")
+    finally:
+        store.close()

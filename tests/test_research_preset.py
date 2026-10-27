@@ -10,16 +10,14 @@ from __future__ import annotations
 import dataclasses
 from types import SimpleNamespace
 
-import pytest
-
 from strategy_research.core.study.graph_preset import (
     build_research_engine,
     run_phases_via_graph,
 )
 from strategy_research.core.study.phase_engine import (
     BranchContext,
-    _run_phases_branch,
     _resolve_branch_fn,
+    _run_phases_branch,
 )
 
 RESEARCHER_RESULT = {
@@ -257,22 +255,23 @@ def test_novelty_dup_routes_to_end_before_claims(tmp_path, monkeypatch):
 # ── 灰度门 ───────────────────────────────────────────────
 
 
-def test_branch_flag_default_on_after_3c(monkeypatch):
+def test_branch_resolves_to_graph_always(monkeypatch):
+    """阶段 4：research_graph 门已退役——phases 分支恒走图实现。"""
     monkeypatch.delenv("QNODES_RESEARCH_GRAPH", raising=False)
     assert _resolve_branch_fn("phases") is run_phases_via_graph
 
 
-def test_branch_flag_can_rollback(monkeypatch):
-    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "0")
-    assert _resolve_branch_fn("phases") is _run_phases_branch
+def test_branch_flag_env_has_no_effect(monkeypatch):
+    """退役后环境变量不再改变解析结果（记录删除契约）。"""
+    for value in ("0", "1", "false"):
+        monkeypatch.setenv("QNODES_RESEARCH_GRAPH", value)
+        assert _resolve_branch_fn("phases") is run_phases_via_graph
 
 
-def test_branch_flag_unknown_engine_fallback(monkeypatch):
-    """脏 engine 值回退 phases；门开时回退到的是图形态（同一 phases 语义）。"""
-    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "1")
+def test_branch_unknown_engine_fallback(monkeypatch):
+    """脏 engine 值回退 phases（=图形态，同一语义）。"""
+    monkeypatch.delenv("QNODES_RESEARCH_GRAPH", raising=False)
     assert _resolve_branch_fn("not_a_real_engine") is run_phases_via_graph
-    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "0")
-    assert _resolve_branch_fn("not_a_real_engine") is _run_phases_branch
 
 
 def test_langgraph_branch_unaffected_by_flag(monkeypatch):

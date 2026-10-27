@@ -87,9 +87,7 @@ class StudyScheduler:
         self._active_executors: dict[str, AutoresearchRunner] = {}
         self._control_tokens: dict[str, ControlToken] = {}
         self._active_tasks: dict[str, asyncio.Task] = {}
-        # Per-session queue + consumer
-        self._session_queues: dict[str, asyncio.Queue] = {}
-        self._session_consumers: dict[str, asyncio.Task] = {}
+        # 阶段 4：旧 asyncio.Queue 通道已删除；准入唯一走 mailbox。
         # 3c: per-session mailbox consumers (AUTOMATION kind only)
         self._mailbox_consumers: dict[str, asyncio.Task] = {}
         # v2: fire-and-forget dispatch tasks (session_loop → _run_one_study)
@@ -159,42 +157,30 @@ class StudyScheduler:
             "objective": study.objective,
         })
 
-        # 阶段 3c：scheduler/study 入口迁移（默认开，QNODES_NEW_ENTRY_STUDY=0 回退）。
-        # 统一的是**准入通道**（唯一开 turn 路径 = admission）：工单进
-        # automation:{session} mailbox；执行体仍是 study runner（多轮长时异步，
-        # 与「一次 turn 一张图」的控制器模型不同构，见
-        # docs/stage-3c-scheduler-migration-design-20261027.md §2）。
-        from strategy_research.core.gateway import study_entry_enabled
-        if study_entry_enabled():
-            from strategy_research.core.gateway import scheduler_request, submit_via_entry
+        # 阶段 4：旧 asyncio.Queue 路径已删除——准入通道唯一。
+        # 工单进 automation:{session} mailbox，由 mailbox 消费者取走执行。
+        from strategy_research.core.gateway import scheduler_request, submit_via_entry
 
-            gw = _get_gateway_singleton()
-            receipt = submit_via_entry(
-                gw.entry,
-                scheduler_request(
-                    study.session_id,
-                    {
-                        "study_id": study.study_id,
-                        "objective": study.objective,
-                        "session_id": study.session_id,
-                    },
-                ),
-            )
-            if not receipt.accepted:
-                _dlog("sched", "gateway rejected study=%s reason=%s",
-                      sid, receipt.reason)
-                return False
-            self._queued_study_ids.add(sid)
-            self._ensure_mailbox_consumer(study.session_id)
-            _dlog("sched", "study=%s queued via Gateway (new entry)", sid)
-            return True
-
-        # Ensure per-session queue + consumer are alive
-        q = self._session_queues.setdefault(study.session_id, asyncio.Queue())
+        gw = _get_gateway_singleton()
+        receipt = submit_via_entry(
+            gw.entry,
+            scheduler_request(
+                study.session_id,
+                {
+                    "study_id": study.study_id,
+                    "objective": study.objective,
+                    "session_id": study.session_id,
+                },
+            ),
+        )
+        if not receipt.accepted:
+            _dlog("sched", "gateway rejected study=%s reason=%s",
+                  sid, receipt.reason)
+            return False
         self._queued_study_ids.add(sid)
-        await q.put(study.study_id)
-        self._ensure_consumer(study.session_id)
+        self._ensure_mailbox_consumer(study.session_id)
         self._ensure_watchdog()
+        _dlog("sched", "study=%s queued via Gateway", sid)
         return True
 
     # ── public: control ────────────────────────────────────────────
@@ -721,8 +707,6 @@ class StudyScheduler:
             task.cancel()
         for _sid, task in list(self._dispatch_tasks.items()):
             task.cancel()
-        for _sid, task in list(self._session_consumers.items()):
-            task.cancel()
         for _sid, task in list(self._mailbox_consumers.items()):
             task.cancel()
         if self._watchdog_task is not None:
@@ -732,20 +716,10 @@ class StudyScheduler:
         await asyncio.sleep(0)
         self._active_tasks.clear()
         self._dispatch_tasks.clear()
-        self._session_consumers.clear()
         self._mailbox_consumers.clear()
         self._queued_study_ids.clear()
 
     # ── internals ──────────────────────────────────────────────────
-
-    def _ensure_consumer(self, session_id: str) -> None:
-        if session_id in self._session_consumers:
-            return
-        task = asyncio.create_task(self._session_loop(session_id))
-        self._session_consumers[session_id] = task
-        task.add_done_callback(
-            lambda t: self._session_consumers.pop(session_id, None)
-        )
 
     # ── 阶段 3c：AUTOMATION mailbox 消费者 ─────────────────────────
 
@@ -789,30 +763,6 @@ class StudyScheduler:
                 lambda t, sid=study_id: self._dispatch_tasks.pop(sid, None)
             )
         logger.info("study mailbox consumer exit session=%s", session_id)
-
-    async def _session_loop(self, session_id: str) -> None:
-        """Drain the session's study queue, dispatching studies in parallel."""
-        q = self._session_queues.get(session_id)
-        logger.info("study session_loop start session=%s", session_id)
-        while not self._shutdown and q is not None:
-            try:
-                study_id = await q.get()
-            except asyncio.CancelledError:
-                break
-            if study_id is None:
-                break
-            logger.info("study session_loop got study=%s", study_id)
-            self._queued_study_ids.discard(study_id)
-            # v2: true parallelism — do NOT await the study to completion;
-            # the global semaphore inside _run_one_study caps concurrency.
-            task = asyncio.create_task(self._run_one_study(study_id))
-            self._dispatch_tasks[study_id] = task
-            task.add_done_callback(
-                lambda t, sid=study_id: self._dispatch_tasks.pop(sid, None)
-            )
-        # queue drained — drop it (next submit recreates)
-        self._session_queues.pop(session_id, None)
-        logger.info("study session_loop exit session=%s", session_id)
 
     def _resolve_session_user_id(self, session_id: str) -> str:
         """Resolve a session's owner user_id (fallback to the session id).
@@ -1092,15 +1042,20 @@ class StudyScheduler:
         }
 
     def dump_session_queues(self) -> dict[str, dict[str, Any]]:
-        """Per-session queue depth + consumer health.
+        """Per-session mailbox depth + consumer health.
 
-        Cheap: pure dict inspection. Used by ``/api/study/_internal/dump``.
+        阶段 4：旧 asyncio.Queue 通道删除后，这里改报 mailbox 状态
+        （键 = automation:{session}）。仍用于 ``/api/study/_internal/dump``。
         """
         out: dict[str, dict[str, Any]] = {}
-        for sid, q in self._session_queues.items():
-            consumer = self._session_consumers.get(sid)
-            out[sid] = {
-                "queued_depth": q.qsize(),
+        gw = _get_gateway_singleton()
+        for session_key, mailbox in gw.entry.iter_mailboxes():
+            if not session_key.startswith("automation:"):
+                continue
+            session_id = session_key.split(":", 1)[1]
+            consumer = self._mailbox_consumers.get(session_id)
+            out[session_id] = {
+                "queued_depth": mailbox.peek_depth(),
                 "consumer_alive": (consumer is not None
                                    and not consumer.done()),
             }

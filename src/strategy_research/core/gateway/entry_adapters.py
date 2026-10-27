@@ -5,14 +5,10 @@
 - **不做**任何裁决（准入/排队/预算都在 Gateway 内）。
 - **不认识** SessionController（消费由 Gateway 侧驱动）。
 
-feature flag（`QNODES_NEW_ENTRY`，缺省 off）：
-- off：现有路径照旧（可回退）
-- on：走新架构（WorkRequest → EntryPoint → mailbox）
-灰度期结束（阶段 3 收尾）后移除 flag，删除旧路径。
+阶段 4：灰度门已删除——所有入口恒走统一通道（WorkRequest → EntryPoint →
+mailbox）。旧路径（asyncio.Queue / 直接调 service）不再存在。
 """
 from __future__ import annotations
-
-import os
 
 from strategy_research.core.orchestration import (
     EntryPoint,
@@ -24,38 +20,27 @@ from strategy_research.core.orchestration import (
 
 
 def new_entry_enabled() -> bool:
-    """feature flag：chat/CLI 入口是否走新架构（阶段 3b 起默认开启）。
+    """chat/CLI 入口是否走 Gateway（**恒 True，阶段 4 只保留回退开关**）。
 
-    设 QNODES_NEW_ENTRY=0 可回退旧路径（灰度期保留）。
+    删除条件：Gateway chat 路径补齐历史注入 + 事件持久化 + message_id 签发
+    后，旧 SessionService 分支删除（阶段 5，见
+    docs/stage-4-cleanup-checklist-20261027.md §1.1）。
+    在此之前设 QNODES_NEW_ENTRY=0 仍可回退旧路径。
     """
+    import os
+
     value = os.environ.get("QNODES_NEW_ENTRY", "").strip().lower()
     if value in ("0", "false", "no", "off"):
         return False
     return True
 
 
-def study_entry_enabled() -> bool:
-    """scheduler/study 入口是否走统一入口（**阶段 3c 起默认开启**）。
-
-    B1-a/B1-b 交付后 study 已有阶段图执行能力，3c 完成提交级接线，
-    故翻默认为开。回退方式：QNODES_NEW_ENTRY_STUDY=0（旧 asyncio.Queue
-    路径保留到阶段 4 删除）。
-    """
-    value = os.environ.get("QNODES_NEW_ENTRY_STUDY", "").strip().lower()
-    if value in ("0", "false", "no", "off"):
-        return False
-    return True
-
-
 def research_graph_enabled() -> bool:
-    """phases 引擎分支是否走 GraphEngine 阶段图（**阶段 3c 起默认开启**）。
+    """[阶段 4 已退役] phases 分支恒走 GraphEngine 阶段图。
 
-    这是「引擎路径」门，与两个入口门正交。B1-b 已用等价性测试钉死
-    （RoundOutcome 逐字段相等）；回退方式：QNODES_RESEARCH_GRAPH=0。
+    保留函数仅为兼容既有 import 与门禁测试；恒返回 True，
+    环境变量不再生效。删除条件：确认无外部调用方（阶段 5）。
     """
-    value = os.environ.get("QNODES_RESEARCH_GRAPH", "").strip().lower()
-    if value in ("0", "false", "no", "off"):
-        return False
     return True
 
 

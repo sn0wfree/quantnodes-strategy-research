@@ -90,6 +90,36 @@ def _purge_hypothesis_sqlite_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_gate_flags():
+    """Snapshot/restore every ``QNODES_*`` and ``SR_*`` env var per test.
+
+    Stage 4: gate flags (``QNODES_NEW_ENTRY``, ``QNODES_NEW_ENTRY_STUDY``,
+    ``QNODES_RESEARCH_GRAPH``) and tunables (``SR_STUDY_MAX_CONCURRENT``,
+    ``SR_STUDY_HEARTBEAT_TIMEOUT``, ...) are read at call time by many
+    modules. Tests that set them via ``os.environ`` directly and forget to
+    restore leak into later tests — one of the documented order-dependent
+    failure sources. ``monkeypatch`` handles tests that use it; this fixture
+    closes the hole for raw ``os.environ`` writes.
+
+    Session defaults (``SR_WORKSPACE_PATH`` etc.) are set by other autouse
+    fixtures; this snapshot runs after them so their values are preserved
+    and restored, not clobbered.
+    """
+    import os
+
+    saved = {
+        k: v for k, v in os.environ.items()
+        if k.startswith(("QNODES_", "SR_"))
+    }
+    yield
+    for k in [k for k in os.environ if k.startswith(("QNODES_", "SR_"))]:
+        if k not in saved:
+            os.environ.pop(k, None)
+    for k, v in saved.items():
+        os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
 def _isolate_workspace_env(tmp_path):
     """Snapshot/restore workspace env vars around every test.
 
@@ -98,7 +128,7 @@ def _isolate_workspace_env(tmp_path):
     a leaked value redirects every later test's session DB to one shared
     file, producing cascade ``database is locked`` failures (the suite is
     order-sensitive otherwise).
-    
+
     Also sets ``QUANTNODES_RESEARCH_GOAL_DB_PATH`` to a temporary path
     to prevent tests from writing to the production database.
     """
@@ -111,13 +141,13 @@ def _isolate_workspace_env(tmp_path):
             "STATIC_DIR", "QUANTNODES_RESEARCH_GOAL_DB_PATH",
         )
     }
-    
+
     # Set goal DB to a temporary path to isolate tests from production
     test_goal_db = tmp_path / "test_goals.db"
     os.environ["QUANTNODES_RESEARCH_GOAL_DB_PATH"] = str(test_goal_db)
-    
+
     yield
-    
+
     for k, v in saved.items():
         if v is None:
             os.environ.pop(k, None)
@@ -208,6 +238,17 @@ def _close_session_services():
 
     try:
         MemoryManagerFactory.reset()
+    except Exception:
+        pass
+
+    # Stage 4: the Gateway module-level singleton caches mailboxes and the
+    # session_key → session_id map. Left in place it carries queued work
+    # (and AUTOMATION jobs picked up by scheduler consumers) into later
+    # tests — a source of order-dependent failures.
+    try:
+        from strategy_research.core.gateway import reset_gateway
+
+        reset_gateway()
     except Exception:
         pass
 
