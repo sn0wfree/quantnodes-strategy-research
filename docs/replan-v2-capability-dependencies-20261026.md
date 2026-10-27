@@ -61,6 +61,10 @@ study 门在 **B1 完成后**翻默认开。
 | **3b-2** | SSE 单轨（延后） | 3b-1 | 1d | test_sse_* 全绿 |
 | ✅ B1-a | **GraphEngine 支持阶段图**（多节点 + 条件边 + 中断） | 1b | 2d | 两阶段图（gen→judge 环）跑通；设计见 `stage-b1a-graph-engine-design-20261027.md` |
 | ✅ B1-b | **research preset**（phase_engine → 阶段图，第三面门 `QNODES_RESEARCH_GRAPH` 默认关） | B1-a | 3d | 旧/图两路径 RoundOutcome 逐字段等价；设计见 `stage-b1b-research-preset-design-20261027.md` |
+| ✅ F1 | **fanout 复合节点**（多 subagent 并行，两档失败 + 连坐取消；D1-D5 已拍板） | B1-a | 2d | 15 测试：并行/隔离/中断连坐/并发上限；设计见 `stage-f1-fanout-design-20261027.md` |
+| **F2** | 预算预留树（reserve/consume/settle）+ PlatformStore 写线程锁 | F1 | 1d | 并行分支不超父预留、settle 归还正确 |
+| **F3** | fanout preset v1（react 子代理 + steer 挂起接线 + abort_turn 策略） | F2 | 1.5d | 真 LLM：3 子问题并行研究、结果汇合 |
+| **F4** | fanout mode="t2"：executor 池分支 + 取消 5s 硬杀 | F1 | 1.5d | 10 回测并行、取消硬杀生效 |
 | **3c** | **scheduler / automation 入口迁移** | B1-b | 1d | study 门 + research_graph 门翻默认开 |
 | **4** | 清理（ContextHub + 调度归一 + 反向依赖 + 测试隔离 + 门禁） | 3c | 7d | 净删 2000+ 行；审计门② |
 
@@ -92,7 +96,11 @@ study 门在 **B1 完成后**翻默认开。
 2. [ ] 3b-2：SSE 单轨
 3. [x] B1-a：GraphEngine 多节点 + 条件边 + 协作中断（`stage-b1a-graph-engine-design-20261027.md`）
 4. [x] B1-b：research preset（`stage-b1b-research-preset-design-20261027.md`；轮次级等价已证明，提交级接线属 3c）
-5. [ ] 3c：scheduler 迁移（study 门 + research_graph 门翻默认开）
+5. [x] F1：fanout 复合节点（`stage-f1-fanout-design-20261027.md`；D1-D5 已拍板）
+6. [ ] F2：预算预留树 + Store 写锁
+7. [ ] F3：fanout preset v1
+8. [ ] F4：fanout t2（executor 池）
+9. [ ] 3c：scheduler 迁移（study 门 + research_graph 门翻默认开）
 
 ## 8. 附：本次失败的可复用教训
 

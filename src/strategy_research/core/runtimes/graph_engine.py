@@ -21,7 +21,10 @@ langgraph StateGraph 承载（原生支持环）；事件经注入 sink 发出�
 """
 from __future__ import annotations
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from langgraph.graph import END as _LG_END
@@ -30,11 +33,22 @@ from langgraph.graph import StateGraph
 EventSink = Callable[[str, dict], None]
 NodeFn = Callable[[dict], dict]
 RouterFn = Callable[[dict], str]
+WorkerFn = Callable[[Any, dict], dict]
 
 # langgraph 的 END 是 "__end__" 字符串常量；re-export 给 router/mapping 用。
 END: str = _LG_END
 INTERRUPT_KEY = "__interrupt__"
 _MAX_HOPS_BACKSTOP = 5
+
+
+@dataclass(frozen=True)
+class _FanoutSpec:
+    """fanout 复合节点声明（挂在拆分节点上）。详见 stage-f1-fanout-design。"""
+
+    worker: WorkerFn
+    join: str
+    mode: str
+    max_parallel: int
 
 
 class GraphInterrupt(Exception):
@@ -61,6 +75,8 @@ class GraphEngine:
         self._fns: dict[str, NodeFn] = {}
         # 出边覆盖表：节点名 -> ("edge", target) | ("cond", router, mapping|None)
         self._out: dict[str, tuple] = {}
+        # fanout 复合节点声明表：拆分节点名 -> spec
+        self._fanouts: dict[str, _FanoutSpec] = {}
         self._entry: str | None = None
 
     # ── 构图 ─────────────────────────────────────────────
@@ -103,6 +119,46 @@ class GraphEngine:
                 if target != END:
                     self._require_node(target, f"add_conditional_edge mapping[{key!r}]")
         self._out[source] = ("cond", router, mapping)
+        return self
+
+    def add_fanout(
+        self,
+        source: str,
+        worker: WorkerFn,
+        join: str,
+        *,
+        mode: str = "t1",
+        max_parallel: int = 8,
+    ) -> "GraphEngine":
+        """fanout 复合节点（多 subagent 并行，F1）。
+
+        拆分节点 fn 返回 {"branches": [载荷, ...]}；每条分支在
+        ``{**父state快照, "branch": {id, ordinal, payload}}`` 上跑 worker，
+        返回值不并入父 state（账本隔离）。join 节点从
+        ``state["fanout_results"]`` 读全貌并负责合并。
+
+        失败两档：分支普通异常 → 记 error、其余照跑、汇合照常；
+        分支抛 GraphInterrupt → 连坐（未起跑分支记 cancelled）、汇合不执行、
+        state 带 ``__interrupt__``。T1 分支跑在线程里，取消协作粒度 =
+        整个 worker（Python 无法硬杀线程），如实见 stage-f1-fanout-design §3。
+        """
+        self._require_node(source, "add_fanout source")
+        self._require_node(join, "add_fanout join")
+        if join == source:
+            raise ValueError("add_fanout: join 不能与 source 是同一节点")
+        if source in self._fanouts:
+            raise ValueError(f"add_fanout: 节点 {source!r} 已声明 fanout")
+        if mode != "t1":
+            raise ValueError("add_fanout: mode='t2' 属 F4（executor 池接线），尚未支持")
+        if max_parallel < 1:
+            raise ValueError("add_fanout: max_parallel 至少为 1")
+        if not callable(worker):
+            raise TypeError("add_fanout: worker 必须可调用")
+        self._fanouts[source] = _FanoutSpec(
+            worker=worker, join=join, mode=mode, max_parallel=max_parallel,
+        )
+        # 声明即覆盖：拆分节点的出边强制指向汇合节点。
+        self._out[source] = ("edge", join)
         return self
 
     # ── 执行 ─────────────────────────────────────────────
@@ -170,6 +226,8 @@ class GraphEngine:
         return route
 
     def _wrap(self, name: str, fn: NodeFn, hops: dict) -> NodeFn:
+        spec = self._fanouts.get(name)
+
         def wrapped(state: dict) -> dict:
             hops["n"] += 1
             if hops["n"] > self._max_hops:
@@ -180,6 +238,8 @@ class GraphEngine:
             self._sink("node.started", {"node": name})
             try:
                 updated = fn(dict(state))
+                if spec is not None and INTERRUPT_KEY not in updated:
+                    updated = self._run_fanout(name, spec, updated)
             except GraphInterrupt as gi:
                 data: dict[str, Any] = {"node": name, "reason": gi.reason}
                 if gi.data is not None:
@@ -193,3 +253,92 @@ class GraphEngine:
             return updated
 
         return wrapped
+
+    def _run_fanout(self, node_name: str, spec: _FanoutSpec, state: dict) -> dict:
+        """并行执行分支（父线程统一发事件，sink 不跨线程）。
+
+        业务失败不连坐（error 条目进 fanout_results，汇合照常）；
+        GraphInterrupt 连坐（取消旗拦未起跑分支，state 带中断标记，
+        路由守卫把图送到 END——join 不执行）。
+        """
+        branches = state.get("branches")
+        if not isinstance(branches, list):
+            raise ValueError(
+                f"fanout 拆分节点 {node_name!r} 的 fn 必须返回 {{'branches': list}}"
+            )
+        parent_run = state.get("run_id")
+        self._sink("graph.fanout", {
+            "node": node_name,
+            "branches": len(branches),
+            "max_parallel": spec.max_parallel,
+        })
+        cancel = threading.Event()
+
+        def run_one(ordinal: int, payload: Any) -> dict:
+            branch_id = f"{parent_run}:{ordinal}" if parent_run else f"{node_name}:b{ordinal}"
+            entry: dict[str, Any] = {
+                "ordinal": ordinal,
+                "branch_id": branch_id,
+                "payload": payload,
+                "result": None,
+                "error": None,
+                "seconds": 0.0,
+            }
+            if cancel.is_set():
+                entry["status"] = "cancelled"
+                return entry
+            branch_started = time.perf_counter()
+            branch_state = {
+                **state,
+                "branch": {"id": branch_id, "ordinal": ordinal, "payload": payload},
+            }
+            try:
+                result = spec.worker(payload, branch_state)
+            except GraphInterrupt as gi:
+                cancel.set()
+                entry["status"] = "interrupted"
+                entry["error"] = gi.reason
+                entry["seconds"] = round(time.perf_counter() - branch_started, 4)
+                return entry
+            except Exception as exc:  # noqa: BLE001 —— 业务失败不连坐
+                entry["status"] = "error"
+                entry["error"] = str(exc)
+                entry["seconds"] = round(time.perf_counter() - branch_started, 4)
+                return entry
+            entry["seconds"] = round(time.perf_counter() - branch_started, 4)
+            if isinstance(result, dict) and INTERRUPT_KEY in result:
+                # 防御：worker 用返回值夹带中断标记，按中断处理
+                cancel.set()
+                entry["status"] = "interrupted"
+                entry["error"] = str(result.get(INTERRUPT_KEY))
+                return entry
+            entry["status"] = "ok"
+            entry["result"] = result
+            return entry
+
+        with ThreadPoolExecutor(max_workers=spec.max_parallel) as pool:
+            futures = [pool.submit(run_one, i + 1, p) for i, p in enumerate(branches)]
+            by_ordinal: dict[int, dict] = {}
+            for fut in as_completed(futures):
+                entry = fut.result()
+                by_ordinal[entry["ordinal"]] = entry
+                self._sink("branch.settled", {
+                    "node": node_name,
+                    "branch_id": entry["branch_id"],
+                    "ordinal": entry["ordinal"],
+                    "status": entry["status"],
+                    "seconds": entry["seconds"],
+                })
+
+        results = [by_ordinal[i + 1] for i in range(len(branches))]
+        out = {**state, "fanout_results": results}
+        interrupted = next((e for e in results if e["status"] == "interrupted"), None)
+        if interrupted is not None:
+            data: dict[str, Any] = {
+                "node": node_name,
+                "reason": interrupted["error"] or "branch_interrupt",
+                "data": {"branch_id": interrupted["branch_id"]},
+            }
+            self._sink("graph.interrupted", data)
+            out[INTERRUPT_KEY] = data
+        return out
